@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@ class MockLeScanner : public LeScannerImpl {
   MOCK_METHOD1(SetDelegate, void(LeScanner::Delegate* delegate));
   MOCK_METHOD0(StartScan, bool());
   MOCK_METHOD0(StopScan, bool());
+  MOCK_METHOD2(SetScanParameters, bool(int, int));
 };
 
 inline MockLeScanner::MockLeScanner() = default;

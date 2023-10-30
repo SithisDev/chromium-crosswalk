@@ -1,34 +1,40 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chromecast.shell;
 
 import android.app.Activity;
+import android.app.ActivityManager;
+import android.app.PictureInPictureParams;
+import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
-import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
-import android.widget.Toast;
 
+import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+
+import org.chromium.base.BuildInfo;
 import org.chromium.base.Log;
-import org.chromium.base.annotations.RemovableInRelease;
 import org.chromium.chromecast.base.Both;
 import org.chromium.chromecast.base.CastSwitches;
 import org.chromium.chromecast.base.Controller;
 import org.chromium.chromecast.base.Observable;
 import org.chromium.chromecast.base.Observers;
 import org.chromium.chromecast.base.Unit;
+import org.chromium.content_public.browser.WebContents;
 
 /**
  * Activity for displaying a WebContents in CastShell.
@@ -40,23 +46,45 @@ import org.chromium.chromecast.base.Unit;
  * activity is destroyed, CastContentWindowAndroid should be notified by intent.
  */
 public class CastWebContentsActivity extends Activity {
-    private static final String TAG = "cr_CastWebActivity";
+    private static final String TAG = "CastWebActivity";
     private static final boolean DEBUG = true;
+
+    // JavaScript to execute on WebContents when the back key is pressed.
+    // This will return a value that indicates whether or not the default
+    // Android behavior for the back key should be disabled or not.
+    private static final String BACK_PRESSED_JAVASCRIPT = "{"
+            + "  let getActiveElement = function() {"
+            + "    let activeElement = document.activeElement;"
+            + "    while (activeElement && activeElement.shadowRoot && activeElement.shadowRoot.activeElement) {"
+            + "      activeElement = activeElement.shadowRoot.activeElement;"
+            + "    }"
+            + "    return activeElement;"
+            + "  };"
+            + "  let backPressEvent = new KeyboardEvent("
+            + "     \"keydown\", {"
+            + "      bubbles: true,"
+            + "      key: \"BrowserBack\","
+            + "      cancelable: true,"
+            + "      composed: true"
+            + "     }"
+            + "  );"
+            + "  let activeElement = getActiveElement();"
+            + "  if (activeElement) {"
+            + "    activeElement.dispatchEvent(backPressEvent);"
+            + "  } else {"
+            + "    document.dispatchEvent(backPressEvent);"
+            + "  }"
+            + "  backPressEvent.defaultPrevented;"
+            + "};";
 
     // Tracks whether this Activity is between onCreate() and onDestroy().
     private final Controller<Unit> mCreatedState = new Controller<>();
-    // Tracks whether this Activity is between onResume() and onPause().
-    private final Controller<Unit> mResumedState = new Controller<>();
     // Tracks whether this Activity is between onStart() and onStop().
     private final Controller<Unit> mStartedState = new Controller<>();
-    // Tracks whether the user has left according to onUserLeaveHint().
-    private final Controller<Unit> mUserLeftState = new Controller<>();
     // Tracks the most recent Intent for the Activity.
     private final Controller<Intent> mGotIntentState = new Controller<>();
     // Set this to cause the Activity to finish.
     private final Controller<String> mIsFinishingState = new Controller<>();
-    // Set this to provide the Activity with a CastAudioManager.
-    private final Controller<CastAudioManager> mAudioManagerState = new Controller<>();
     // Set in unittests to skip some behavior.
     private final Controller<Unit> mIsTestingState = new Controller<>();
     // Set at creation. Handles destroying SurfaceHelper.
@@ -64,6 +92,8 @@ public class CastWebContentsActivity extends Activity {
 
     @Nullable
     private CastWebContentsSurfaceHelper mSurfaceHelper;
+
+    private boolean mIsInPictureInPictureMode;
 
     {
         Observable<Intent> gotIntentAfterFinishingState =
@@ -80,12 +110,7 @@ public class CastWebContentsActivity extends Activity {
         });
         createdAndNotTestingState.subscribe(Observers.onEnter(x -> {
             // Do this in onCreate() only if not testing.
-            if (!CastBrowserHelper.initializeBrowser(getApplicationContext())) {
-                Toast.makeText(this, R.string.browser_process_initialization_failed,
-                             Toast.LENGTH_SHORT)
-                        .show();
-                mIsFinishingState.set("Failed to initialize browser");
-            }
+            CastBrowserHelper.initializeBrowser(getApplicationContext());
 
             setContentView(R.layout.cast_web_contents_activity);
 
@@ -107,26 +132,18 @@ public class CastWebContentsActivity extends Activity {
 
         mCreatedState.subscribe(Observers.onExit(x -> mSurfaceHelperState.reset()));
 
-        mCreatedState.map(x -> getWindow())
-                .and(mGotIntentState)
-                .subscribe(Observers.onEnter(Both.adapt((Window window, Intent intent) -> {
-                    // Set flags to both exit sleep mode when this activity starts and
-                    // avoid entering sleep mode while playing media. If an app that shouldn't turn
-                    // on the screen is launching, we don't add TURN_SCREEN_ON.
-                    if (CastWebContentsIntentUtils.shouldTurnOnScreen(intent)) turnScreenOn();
-                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                })));
+        // Set a flag to exit sleep mode when this activity starts.
+        mCreatedState.and(mGotIntentState)
+                .map(Both::getSecond)
+                // Turn the screen on only if the launching Intent asks to.
+                .filter(CastWebContentsIntentUtils::shouldTurnOnScreen)
+                .subscribe(Observers.onEnter(x -> turnScreenOn()));
 
-        // Initialize the audio manager in onCreate() if tests haven't already.
-        mCreatedState.and(Observable.not(mAudioManagerState)).subscribe(Observers.onEnter(x -> {
-            mAudioManagerState.set(CastAudioManager.getAudioManager(this));
-        }));
-
-        // Clean up stream mute state on pause events.
-        mAudioManagerState.andThen(Observable.not(mResumedState))
-                .map(Both::getFirst)
-                .subscribe(Observers.onEnter((CastAudioManager audioManager) -> {
-                    audioManager.releaseStreamMuteIfNecessary(AudioManager.STREAM_MUSIC);
+        mCreatedState.and(mGotIntentState)
+                .map(Both::getSecond)
+                .filter(CastWebContentsIntentUtils::shouldKeepScreenOn)
+                .subscribe(Observers.onEnter(x -> {
+                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 }));
 
         // Handle each new Intent.
@@ -144,8 +161,22 @@ public class CastWebContentsActivity extends Activity {
         mIsFinishingState.subscribe(Observers.onEnter((String reason) -> {
             if (DEBUG) Log.d(TAG, "Finishing activity: " + reason);
             mSurfaceHelperState.reset();
-            finish();
+            finishAndRemoveTask();
         }));
+
+        mStartedState.subscribe(x -> {
+            Context ctx = getApplicationContext();
+            Intent intent = getIntent();
+            String instanceId = CastWebContentsIntentUtils.getSessionId(intent.getExtras());
+            Intent visible = CastWebContentsIntentUtils.onVisibilityChange(
+                    instanceId, CastWebContentsIntentUtils.VISIBITY_TYPE_FULL_SCREEN);
+            LocalBroadcastManager.getInstance(ctx).sendBroadcastSync(visible);
+            return () -> {
+                Intent hidden = CastWebContentsIntentUtils.onVisibilityChange(
+                        instanceId, CastWebContentsIntentUtils.VISIBITY_TYPE_HIDDEN);
+                LocalBroadcastManager.getInstance(ctx).sendBroadcastSync(hidden);
+            };
+        });
 
         // If a new Intent arrives after finishing, start a new Activity instead of recycling this.
         gotIntentAfterFinishingState.subscribe(Observers.onEnter((Intent intent) -> {
@@ -155,13 +186,9 @@ public class CastWebContentsActivity extends Activity {
             intent.setFlags(flags);
             startActivity(intent);
         }));
-
-        Observable<?> stoppingBecauseUserLeftState =
-                Observable.not(mStartedState).and(mUserLeftState);
-        stoppingBecauseUserLeftState.subscribe(
-                Observers.onEnter(x -> mIsFinishingState.set("User left and activity stopped.")));
     }
 
+    @RequiresApi(Build.VERSION_CODES.S)
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
         if (DEBUG) Log.d(TAG, "onCreate");
@@ -173,6 +200,11 @@ public class CastWebContentsActivity extends Activity {
         // For more information read:
         // http://developer.android.com/training/managing-audio/volume-playback.html
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
+
+        if (canAutoEnterPictureInPicture()) {
+            setPictureInPictureParams(
+                    new PictureInPictureParams.Builder().setAutoEnterEnabled(true).build());
+        }
     }
 
     @Override
@@ -189,37 +221,44 @@ public class CastWebContentsActivity extends Activity {
     }
 
     @Override
-    protected void onPause() {
-        if (DEBUG) Log.d(TAG, "onPause");
-        super.onPause();
-        mResumedState.reset();
-    }
-
-    @Override
-    protected void onResume() {
-        if (DEBUG) Log.d(TAG, "onResume");
-        super.onResume();
-        mResumedState.set(Unit.unit());
-    }
-
-    @Override
     protected void onStop() {
         if (DEBUG) Log.d(TAG, "onStop");
         mStartedState.reset();
+        // If this device is in "lock task mode," then leaving the Activity will not return to the
+        // Home screen and there will be no affordance for the user to return to this Activity.
+        // When in this mode, leaving the Activity should tear down the Cast app.
+        if (isInLockTaskMode(this)) {
+            CastWebContentsComponent.onComponentClosed(
+                    CastWebContentsIntentUtils.getSessionId(getIntent()));
+            mIsFinishingState.set("User exit while in lock task mode");
+        } else if (mIsInPictureInPictureMode) {
+            CastWebContentsComponent.onComponentClosed(
+                    CastWebContentsIntentUtils.getSessionId(getIntent()));
+            mIsFinishingState.set("User exit while in picture-in-picture mode");
+        }
         super.onStop();
     }
 
     @Override
     protected void onDestroy() {
         if (DEBUG) Log.d(TAG, "onDestroy");
+
         mCreatedState.reset();
         super.onDestroy();
     }
 
     @Override
-    protected void onUserLeaveHint() {
-        mUserLeftState.set(Unit.unit());
-        super.onUserLeaveHint();
+    public void onBackPressed() {
+        WebContents webContents = CastWebContentsIntentUtils.getWebContents(getIntent());
+        if (webContents == null) {
+            super.onBackPressed();
+            return;
+        }
+        webContents.evaluateJavaScript(BACK_PRESSED_JAVASCRIPT, defaultPrevented -> {
+            if (!"true".equals(defaultPrevented)) {
+                super.onBackPressed();
+            }
+        });
     }
 
     @Override
@@ -235,85 +274,64 @@ public class CastWebContentsActivity extends Activity {
         }
     }
 
+    private static boolean isInLockTaskMode(Context context) {
+        ActivityManager activityManager = context.getSystemService(ActivityManager.class);
+        return activityManager.getLockTaskModeState() != ActivityManager.LOCK_TASK_MODE_NONE;
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
     @Override
-    public boolean dispatchKeyEvent(KeyEvent event) {
-        if (DEBUG) Log.d(TAG, "dispatchKeyEvent");
-        int keyCode = event.getKeyCode();
-        int action = event.getAction();
-
-        // Similar condition for all single-click events.
-        if (action == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
-            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_DPAD_LEFT
-                    || keyCode == KeyEvent.KEYCODE_MEDIA_REWIND
-                    || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
-                    || keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
-                    || keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
-                    || keyCode == KeyEvent.KEYCODE_MEDIA_PLAY
-                    || keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE
-                    || keyCode == KeyEvent.KEYCODE_MEDIA_STOP
-                    || keyCode == KeyEvent.KEYCODE_MEDIA_NEXT
-                    || keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS) {
-                if (mSurfaceHelper != null) {
-                    CastWebContentsComponent.onKeyDown(mSurfaceHelper.getSessionId(), keyCode);
-                }
-                return true;
-            }
+    public void onUserLeaveHint() {
+        if (DEBUG) Log.d(TAG, "onUserLeaveHint");
+        if (canUsePictureInPicture() && !canAutoEnterPictureInPicture()) {
+            enterPictureInPictureMode(new PictureInPictureParams.Builder().build());
         }
-
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            return super.dispatchKeyEvent(event);
-        }
-        return false;
     }
 
     @Override
-    public boolean dispatchGenericMotionEvent(MotionEvent ev) {
-        return false;
-    }
-
-    @Override
-    public boolean dispatchKeyShortcutEvent(KeyEvent event) {
-        return false;
+    public void onPictureInPictureModeChanged(
+            boolean isInPictureInPictureMode, Configuration newConfig) {
+        mIsInPictureInPictureMode = isInPictureInPictureMode;
     }
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (mSurfaceHelper != null && mSurfaceHelper.isTouchInputEnabled()) {
-            return super.dispatchTouchEvent(ev);
-        } else {
+        if (mIsInPictureInPictureMode || mSurfaceHelper == null
+                || !mSurfaceHelper.isTouchInputEnabled()) {
             return false;
         }
-    }
-
-    @Override
-    public boolean dispatchTrackballEvent(MotionEvent ev) {
-        return false;
+        return super.dispatchTouchEvent(ev);
     }
 
     private void turnScreenOn() {
+        Log.i(TAG, "Setting flag to turn screen on");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setTurnScreenOn(true);
+            // Allow Activities that turn on the screen to show in the lock screen.
+            setShowWhenLocked(true);
         } else {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         }
     }
 
-    @RemovableInRelease
+    private boolean canUsePictureInPicture() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && getPackageManager().hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+                && !BuildInfo.getInstance().isTV;
+    }
+
+    private boolean canAutoEnterPictureInPicture() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && canUsePictureInPicture();
+    }
+
     public void finishForTesting() {
         mIsFinishingState.set("Finish for testing");
     }
 
-    @RemovableInRelease
     public void testingModeForTesting() {
         mIsTestingState.set(Unit.unit());
     }
 
-    @RemovableInRelease
-    public void setAudioManagerForTesting(CastAudioManager audioManager) {
-        mAudioManagerState.set(audioManager);
-    }
-
-    @RemovableInRelease
     public void setSurfaceHelperForTesting(CastWebContentsSurfaceHelper surfaceHelper) {
         mSurfaceHelperState.set(surfaceHelper);
     }

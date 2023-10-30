@@ -1,15 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/core/common/autofill_clock.h"
 
+#include "base/check.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
 
 namespace autofill {
 namespace {
-base::Clock* g_autofill_clock = nullptr;
+const base::Clock* g_autofill_clock = nullptr;
 }  // namespace
 
 // static
@@ -25,7 +26,7 @@ void AutofillClock::SetClock() {
 }
 
 // static
-void AutofillClock::SetTestClock(base::Clock* clock) {
+void AutofillClock::SetTestClock(const base::Clock* clock) {
   DCHECK(clock);
   g_autofill_clock = clock;
 }

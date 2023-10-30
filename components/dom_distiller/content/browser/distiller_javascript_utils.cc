@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,12 +16,12 @@ namespace dom_distiller {
 
 namespace {
 // An invalid world ID to check against.
-const int invalid_world_id = -1;
+const int32_t invalid_world_id = -1;
 // The ID of the world javascript should execute in; init to invalid ID.
-int distiller_javascript_world_id = invalid_world_id;
+int32_t distiller_javascript_world_id = invalid_world_id;
 }  // namespace
 
-void SetDistillerJavaScriptWorldId(const int id) {
+void SetDistillerJavaScriptWorldId(const int32_t id) {
   // Never allow running in main world (0).
   DCHECK(id > content::ISOLATED_WORLD_ID_GLOBAL);
   // Only allow ID to be set once.

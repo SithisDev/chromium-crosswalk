@@ -1,24 +1,35 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/test/test_content_browser_client.h"
 
+#include "base/check.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
+#include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
-#include "storage/browser/quota/quota_settings.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "content/shell/android/shell_descriptors.h"
 #endif
 
 namespace content {
 
+// static
+TestContentBrowserClient* TestContentBrowserClient::instance_ = nullptr;
+
 TestContentBrowserClient::TestContentBrowserClient() {
+  instance_ = this;
 }
 
 TestContentBrowserClient::~TestContentBrowserClient() {
+  if (instance_ == this)
+    instance_ = nullptr;
+}
+
+// static
+TestContentBrowserClient* TestContentBrowserClient::GetInstance() {
+  return instance_;
 }
 
 base::FilePath TestContentBrowserClient::GetDefaultDownloadDirectory() {
@@ -38,18 +49,17 @@ TestContentBrowserClient::GetGeneratedCodeCacheSettings(
   return GeneratedCodeCacheSettings(true, 0, context->GetPath());
 }
 
-void TestContentBrowserClient::GetQuotaSettings(
-    BrowserContext* context,
-    StoragePartition* partition,
-    storage::OptionalQuotaSettingsCallback callback) {
-  std::move(callback).Run(storage::GetHardCodedSettings(100 * 1024 * 1024));
-}
-
 std::string TestContentBrowserClient::GetUserAgent() {
   return std::string("TestContentClient");
 }
 
-#if defined(OS_ANDROID)
+std::string TestContentBrowserClient::GetApplicationLocale() {
+  return application_locale_.empty()
+             ? ContentBrowserClient::GetApplicationLocale()
+             : application_locale_;
+}
+
+#if BUILDFLAG(IS_ANDROID)
 void TestContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const base::CommandLine& command_line,
     int child_process_id,

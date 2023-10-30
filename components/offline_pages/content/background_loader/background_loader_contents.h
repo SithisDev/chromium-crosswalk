@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include "base/memory/raw_ptr.h"
+#include "build/build_config.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "url/gurl.h"
 
@@ -34,6 +36,10 @@ class BackgroundLoaderContents : public content::WebContentsDelegate {
   // Creates BackgroundLoaderContents with specified |browser_context|. Uses
   // default session storage space.
   explicit BackgroundLoaderContents(content::BrowserContext* browser_context);
+
+  BackgroundLoaderContents(const BackgroundLoaderContents&) = delete;
+  BackgroundLoaderContents& operator=(const BackgroundLoaderContents&) = delete;
+
   ~BackgroundLoaderContents() override;
 
   // Loads the URL in a WebContents. Will call observe on all current observers
@@ -48,7 +54,7 @@ class BackgroundLoaderContents : public content::WebContentsDelegate {
   content::WebContents* web_contents() { return web_contents_.get(); }
 
   // content::WebContentsDelegate implementation:
-  bool IsNeverVisible(content::WebContents* web_contents) override;
+  bool IsNeverComposited(content::WebContents* web_contents) override;
   void CloseContents(content::WebContents* source) override;
   bool ShouldSuppressDialogs(content::WebContents* source) override;
   bool ShouldFocusPageAfterCrash() override;
@@ -56,28 +62,22 @@ class BackgroundLoaderContents : public content::WebContentsDelegate {
                    const std::string& request_method,
                    base::OnceCallback<void(bool)> callback) override;
 
-  bool ShouldCreateWebContents(
-      content::WebContents* web_contents,
-      content::RenderFrameHost* opener,
+  bool IsWebContentsCreationOverridden(
       content::SiteInstance* source_site_instance,
-      int32_t route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
       content::mojom::WindowContainerType window_container_type,
       const GURL& opener_url,
       const std::string& frame_name,
-      const GURL& target_url,
-      const std::string& partition_id,
-      content::SessionStorageNamespace* session_storage_namespace) override;
+      const GURL& target_url) override;
 
   void AddNewContents(content::WebContents* source,
                       std::unique_ptr<content::WebContents> new_contents,
+                      const GURL& target_url,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_rect,
+                      const blink::mojom::WindowFeatures& window_features,
                       bool user_gesture,
                       bool* was_blocked) override;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   bool ShouldBlockMediaRequest(const GURL& url) override;
 #endif
 
@@ -88,9 +88,6 @@ class BackgroundLoaderContents : public content::WebContentsDelegate {
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
                                   blink::mojom::MediaStreamType type) override;
-  void AdjustPreviewsStateForNavigation(
-      content::WebContents* web_contents,
-      content::PreviewsState* previews_state) override;
   bool ShouldAllowLazyLoad() override;
 
  private:
@@ -100,10 +97,8 @@ class BackgroundLoaderContents : public content::WebContentsDelegate {
   BackgroundLoaderContents();
 
   std::unique_ptr<content::WebContents> web_contents_;
-  content::BrowserContext* browser_context_;
-  Delegate* delegate_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(BackgroundLoaderContents);
+  raw_ptr<content::BrowserContext> browser_context_;
+  raw_ptr<Delegate> delegate_ = nullptr;
 };
 
 }  // namespace background_loader

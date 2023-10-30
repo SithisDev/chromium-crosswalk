@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,23 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/component_export.h"
 #include "base/sequence_checker.h"
+#include "base/types/strong_alias.h"
 #include "components/leveldb_proto/internal/leveldb_database.h"
 #include "components/leveldb_proto/internal/proto/shared_db_metadata.pb.h"
 #include "components/leveldb_proto/internal/unique_proto_database.h"
 #include "components/leveldb_proto/public/shared_proto_database_client_list.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace leveldb_proto {
+
+// Key prefix not visible to the client.
+using KeyPrefix = base::StrongAlias<class KeyPrefixTag, std::string>;
+// Logical key visible to the client.
+using LogicalKey = base::StrongAlias<class LogicalKeyTag, std::string>;
+// Physical key used in the underlying db.
+using PhysicalKey = base::StrongAlias<class PhysicalKeyTag, std::string>;
 
 class SharedProtoDatabase;
 
@@ -25,44 +35,63 @@ using SharedClientInitCallback =
     base::OnceCallback<void(Enums::InitStatus,
                             SharedDBMetadataProto::MigrationStatus)>;
 
-std::string StripPrefix(const std::string& key, const std::string& prefix);
-
-std::unique_ptr<KeyVector> PrefixStrings(std::unique_ptr<KeyVector> strings,
-                                         const std::string& prefix);
-
-bool KeyFilterStripPrefix(const KeyFilter& key_filter,
-                          const std::string& prefix,
-                          const std::string& key);
-
-void GetSharedDatabaseInitStatusAsync(
-    const std::string& client_db_id,
-    const scoped_refptr<SharedProtoDatabase>& db,
-    Callbacks::InitStatusCallback callback);
-
-void UpdateClientMetadataAsync(
-    const scoped_refptr<SharedProtoDatabase>& db,
-    const std::string& client_db_id,
-    SharedDBMetadataProto::MigrationStatus migration_status,
-    ClientCorruptCallback callback);
-
-// Destroys all the data from obsolete clients, for the given |db_wrapper|
-// instance. |callback| is called once all the obsolete clients data are
-// removed, with failure status if one or more of the update fails.
-void DestroyObsoleteSharedProtoDatabaseClients(
-    std::unique_ptr<ProtoLevelDBWrapper> db_wrapper,
-    Callbacks::UpdateCallback callback);
-
-// Sets list of client names that are obsolete and will be cleared by next call
-// to DestroyObsoleteSharedProtoDatabaseClients(). |list| is list of dbs
-// with a |LAST| to mark the end of list.
-void SetObsoleteClientListForTesting(const ProtoDbType* list);
-
 // An implementation of ProtoDatabase<T> that uses a shared LevelDB and task
 // runner.
 // Should be created, destroyed, and used on the same sequenced task runner.
-class SharedProtoDatabaseClient : public UniqueProtoDatabase {
+class COMPONENT_EXPORT(LEVELDB_PROTO) SharedProtoDatabaseClient
+    : public UniqueProtoDatabase {
  public:
-  static std::string PrefixForDatabase(ProtoDbType db_type);
+  static KeyPrefix PrefixForDatabase(ProtoDbType db_type);
+
+  static bool HasPrefix(const PhysicalKey& key, const KeyPrefix& prefix);
+  static absl::optional<LogicalKey> StripPrefix(const PhysicalKey& key,
+                                                const KeyPrefix& prefix);
+
+  static std::unique_ptr<KeyVector> PrefixStrings(
+      std::unique_ptr<KeyVector> strings,
+      const KeyPrefix& prefix);
+
+  static bool KeyFilterStripPrefix(const KeyFilter& key_filter,
+                                   const KeyPrefix& prefix,
+                                   const PhysicalKey& key);
+  static bool KeyStringFilterStripPrefix(const KeyFilter& key_filter,
+                                         const KeyPrefix& prefix,
+                                         const std::string& key);
+  static Enums::KeyIteratorAction KeyIteratorControllerStripPrefix(
+      const KeyIteratorController& controller,
+      const KeyPrefix& prefix,
+      const PhysicalKey& key);
+  static Enums::KeyIteratorAction KeyStringIteratorControllerStripPrefix(
+      const KeyIteratorController& controller,
+      const KeyPrefix& prefix,
+      const std::string& key);
+
+  static void GetSharedDatabaseInitStatusAsync(
+      const std::string& client_db_id,
+      const scoped_refptr<SharedProtoDatabase>& db,
+      Callbacks::InitStatusCallback callback);
+
+  static void UpdateClientMetadataAsync(
+      const scoped_refptr<SharedProtoDatabase>& db,
+      const std::string& client_db_id,
+      SharedDBMetadataProto::MigrationStatus migration_status,
+      ClientCorruptCallback callback);
+
+  // Destroys all the data from obsolete clients, for the given |db_wrapper|
+  // instance. |callback| is called once all the obsolete clients data are
+  // removed, with failure status if one or more of the update fails.
+  static void DestroyObsoleteSharedProtoDatabaseClients(
+      std::unique_ptr<ProtoLevelDBWrapper> db_wrapper,
+      Callbacks::UpdateCallback callback);
+
+  // Sets list of client names that are obsolete and will be cleared by next
+  // call to DestroyObsoleteSharedProtoDatabaseClients(). |list| is list of dbs
+  // with a |LAST| to mark the end of list.
+  static void SetObsoleteClientListForTesting(const ProtoDbType* list);
+
+  SharedProtoDatabaseClient(const SharedProtoDatabaseClient&) = delete;
+  SharedProtoDatabaseClient& operator=(const SharedProtoDatabaseClient&) =
+      delete;
 
   ~SharedProtoDatabaseClient() override;
 
@@ -116,6 +145,10 @@ class SharedProtoDatabaseClient : public UniqueProtoDatabase {
       const std::string& start,
       const std::string& end,
       Callbacks::LoadKeysAndEntriesCallback callback) override;
+  void LoadKeysAndEntriesWhile(
+      const std::string& start,
+      const leveldb_proto::KeyIteratorController& controller,
+      typename Callbacks::LoadKeysAndEntriesCallback callback) override;
 
   void GetEntry(const std::string& key,
                 Callbacks::GetCallback callback) override;
@@ -124,7 +157,7 @@ class SharedProtoDatabaseClient : public UniqueProtoDatabase {
 
   Callbacks::InitCallback GetInitCallback() const;
 
-  const std::string& client_db_id() const { return prefix_; }
+  const std::string& client_db_id() const { return prefix_.value(); }
 
   void set_migration_status(
       SharedDBMetadataProto::MigrationStatus migration_status) {
@@ -151,18 +184,18 @@ class SharedProtoDatabaseClient : public UniqueProtoDatabase {
 
   static void StripPrefixLoadKeysCallback(
       Callbacks::LoadKeysCallback callback,
-      const std::string& prefix,
+      const KeyPrefix& prefix,
       bool success,
       std::unique_ptr<leveldb_proto::KeyVector> keys);
   static void StripPrefixLoadKeysAndEntriesCallback(
       Callbacks::LoadKeysAndEntriesCallback callback,
-      const std::string& prefix,
+      const KeyPrefix& prefix,
       bool success,
       std::unique_ptr<KeyValueMap> keys_entries);
 
   static std::unique_ptr<KeyValueVector> PrefixKeyEntryVector(
       std::unique_ptr<KeyValueVector> kev,
-      const std::string& prefix);
+      const KeyPrefix& prefix);
 
   SEQUENCE_CHECKER(sequence_checker_);
 
@@ -173,13 +206,11 @@ class SharedProtoDatabaseClient : public UniqueProtoDatabase {
   SharedDBMetadataProto::MigrationStatus migration_status_ =
       SharedDBMetadataProto::MIGRATION_NOT_ATTEMPTED;
 
-  const std::string prefix_;
+  const KeyPrefix prefix_;
 
   scoped_refptr<SharedProtoDatabase> parent_db_;
 
   base::WeakPtrFactory<SharedProtoDatabaseClient> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SharedProtoDatabaseClient);
 };
 
 }  // namespace leveldb_proto

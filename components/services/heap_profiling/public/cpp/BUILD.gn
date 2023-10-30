@@ -1,6 +1,8 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+import("//base/allocator/allocator.gni")
 
 static_library("cpp") {
   sources = [
@@ -15,23 +17,35 @@ static_library("cpp") {
   ]
 
   public_deps = [
-    "//components/services/heap_profiling/public/mojom",
-  ]
-  deps = [
     "//base",
+    "//components/services/heap_profiling/public/mojom",
+    "//mojo/public/cpp/bindings",
+  ]
+
+  deps = [
     "//base:debugging_buildflags",
     "//base/allocator:buildflags",
-    "//services/resource_coordinator/public/mojom:",
-    "//services/service_manager/public/cpp",
-    "//services/service_manager/sandbox",
   ]
+
+  if (!is_ios || use_allocator_shim) {
+    sources += [
+      "merge_samples.cc",
+      "merge_samples.h",
+    ]
+  }
+
+  if (!is_ios) {
+    sources += [
+      "heap_profiling_trace_source.cc",
+      "heap_profiling_trace_source.h",
+    ]
+    deps += [ "//services/tracing/public/cpp:cpp" ]
+  }
 }
 
 source_set("unit_tests") {
   testonly = true
-  sources = [
-    "switches_unittest.cc",
-  ]
+  sources = [ "switches_unittest.cc" ]
   deps = [
     ":cpp",
     "//base",
@@ -39,18 +53,18 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//testing/gtest",
   ]
-}
 
-source_set("manifest") {
-  sources = [
-    "manifest.cc",
-    "manifest.h",
-  ]
+  if (!is_ios || use_allocator_shim) {
+    sources += [ "merge_samples_unittests.cc" ]
+  }
 
-  deps = [
-    "//base",
-    "//components/services/heap_profiling/public/mojom",
-    "//services/resource_coordinator/public/mojom",
-    "//services/service_manager/public/cpp",
-  ]
+  if (!is_ios) {
+    sources += [ "heap_profiling_trace_source_unittest.cc" ]
+    deps += [
+      "//services/tracing:test_utils",
+      "//services/tracing/public/cpp:cpp",
+      "//third_party/perfetto/protos/perfetto/trace:lite",
+      "//third_party/perfetto/protos/perfetto/trace/profiling:lite",
+    ]
+  }
 }

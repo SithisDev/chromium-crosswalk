@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,9 @@ namespace syncer {
 
 // Contains everything needed to talk to and identify a user account.
 struct SyncCredentials {
-  SyncCredentials();
-  SyncCredentials(const SyncCredentials& other);
-  ~SyncCredentials();
-
-  // Account_id of signed in account.
-  std::string account_id;
+  SyncCredentials() = default;
+  SyncCredentials(const SyncCredentials& other) = default;
+  ~SyncCredentials() = default;
 
   // The email associated with this account.
   std::string email;

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "components/autofill_assistant/browser/client_status.h"
 
 namespace autofill_assistant {
 
@@ -24,6 +24,10 @@ class RetryTimer {
  public:
   // A RetryTimer with the given retry period
   explicit RetryTimer(base::TimeDelta period);
+
+  RetryTimer(const RetryTimer&) = delete;
+  RetryTimer& operator=(const RetryTimer&) = delete;
+
   ~RetryTimer();
 
   // Tries to run |task| once immediately and then periodically until it
@@ -39,8 +43,9 @@ class RetryTimer {
   // If |max_wait_time| is 0 or lower than the retry period, the task is
   // executed exactly once.
   void Start(base::TimeDelta max_wait_time,
-             base::RepeatingCallback<void(base::OnceCallback<void(bool)>)> task,
-             base::OnceCallback<void(bool)> on_done);
+             base::RepeatingCallback<
+                 void(base::OnceCallback<void(const ClientStatus&)>)> task,
+             base::OnceCallback<void(const ClientStatus&)> on_done);
 
   // Cancels any pending tasks or timer. Any |on_done| callbacks passed to Start
   // is released without being called.
@@ -49,22 +54,23 @@ class RetryTimer {
   void Cancel();
 
   // Returns true if the timer was started but did not report any results yet.
-  bool running() { return on_done_ ? true : false; }
+  bool running() const { return on_done_ ? true : false; }
+  base::TimeDelta period() const { return period_; }
 
  private:
   void Reset();
   void RunTask();
-  void OnTaskDone(int64_t task_id_, bool success);
+  void OnTaskDone(int64_t task_id_, const ClientStatus& status);
 
   const base::TimeDelta period_;
   int64_t remaining_attempts_ = 1;
   int64_t task_id_ = 0;
-  base::RepeatingCallback<void(base::OnceCallback<void(bool)>)> task_;
-  base::OnceCallback<void(bool)> on_done_;
+  base::RepeatingCallback<void(base::OnceCallback<void(const ClientStatus&)>)>
+      task_;
+  base::OnceCallback<void(const ClientStatus&)> on_done_;
   std::unique_ptr<base::OneShotTimer> timer_;
 
-  base::WeakPtrFactory<RetryTimer> weak_ptr_factory_;
-  DISALLOW_COPY_AND_ASSIGN(RetryTimer);
+  base::WeakPtrFactory<RetryTimer> weak_ptr_factory_{this};
 };
 
 }  // namespace autofill_assistant

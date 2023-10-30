@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,27 @@
 #define COMPONENTS_VIZ_TEST_TEST_GPU_SERVICE_HOLDER_H_
 
 #include <memory>
+#include <string>
 
-#include "base/macros.h"
+#include "base/feature_list.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/threading/thread.h"
+#include "build/build_config.h"
+#include "gpu/ipc/gpu_in_process_thread_service.h"
 #include "gpu/vulkan/buildflags.h"
+
+#if defined(USE_OZONE) && !BUILDFLAG(IS_FUCHSIA)
+#include "mojo/public/cpp/bindings/binder_map.h"
+#endif
+
+// START forward declarations for ScopedAllowRacyFeatureListOverrides.
+namespace ash {
+class AshScopedAllowRacyFeatureListOverrides;
+}  // namespace ash
+
+class ChromeShelfControllerTest;
+class ShelfContextMenuTest;
+// END forward declarations for ScopedAllowRacyFeatureListOverrides.
 
 namespace gpu {
 class CommandBufferTaskExecutor;
@@ -21,42 +37,67 @@ class VulkanImplementation;
 struct GpuPreferences;
 }  // namespace gpu
 
-namespace base {
-template <typename T>
-struct DefaultSingletonTraits;
-}
-
 namespace viz {
 class GpuServiceImpl;
 
 // Starts GPU Main and IO threads, and creates a GpuServiceImpl that can be used
 // to create a SkiaOutputSurfaceImpl. This isn't a full GPU service
 // implementation and should only be used in tests.
-class TestGpuServiceHolder {
+class TestGpuServiceHolder : public gpu::GpuInProcessThreadServiceDelegate {
  public:
+  class ScopedResetter {
+   public:
+    ~ScopedResetter() { TestGpuServiceHolder::ResetInstance(); }
+  };
+
+  // Don't instantiate FeatureList::ScopedDisallowOverrides when the GPU thread
+  // is started. This shouldn't be required but there are existing tests that
+  // initialize ScopedFeatureList after TestGpuServiceHolder.
+  // TODO(crbug.com/1241161): Fix racy tests and remove this.
+  class ScopedAllowRacyFeatureListOverrides {
+   public:
+    ~ScopedAllowRacyFeatureListOverrides();
+
+   private:
+    // Existing allowlisted failures. DO NOT ADD ANYTHING TO THIS LIST! Instead,
+    // the test should change so the initialization of ScopedFeatureList happens
+    // before TestGpuServiceHolder is created.
+    friend class ::ChromeShelfControllerTest;
+    friend class ::ShelfContextMenuTest;
+    friend class ash::AshScopedAllowRacyFeatureListOverrides;
+
+    ScopedAllowRacyFeatureListOverrides();
+  };
+
   // Exposes a singleton to allow easy sharing of the GpuServiceImpl by
   // different clients (e.g. to share SharedImages via a common
   // SharedImageManager).
   //
   // The instance will parse GpuPreferences from the command line when it is
-  // first created (e.g. to allow entire test suite with --enable-vulkan).
+  // first created (e.g. to allow entire test suite with --use-vulkan).
   //
   // If specific feature flags or GpuPreferences are needed for a specific test,
   // a separate instance of this class can be created.
+  //
+  // By default the instance created by GetInstance() is destroyed after each
+  // gtest completes -- it only applies to gtest because it uses gtest hooks. If
+  // this isn't desired call DoNotResetOnTestExit() before first use.
   static TestGpuServiceHolder* GetInstance();
 
   // Resets the singleton instance, joining the GL thread. This is useful for
   // tests that individually initialize and tear down GL.
   static void ResetInstance();
 
-  // Calling this method ensures that GetInstance() is destroyed after each
-  // gtest completes -- it only applies to gtest because it uses gtest hooks. A
-  // subsequent call to GetInstance() will create a new instance. Safe to call
-  // more than once.
-  static void DestroyInstanceAfterEachTest();
+  // Don't reset global instance on gtest exit. Must be called before
+  // GetInstance().
+  static void DoNotResetOnTestExit();
 
   explicit TestGpuServiceHolder(const gpu::GpuPreferences& preferences);
-  ~TestGpuServiceHolder();
+
+  TestGpuServiceHolder(const TestGpuServiceHolder&) = delete;
+  TestGpuServiceHolder& operator=(const TestGpuServiceHolder&) = delete;
+
+  ~TestGpuServiceHolder() override;
 
   scoped_refptr<base::SingleThreadTaskRunner> gpu_thread_task_runner() {
     return gpu_thread_.task_runner();
@@ -80,12 +121,25 @@ class TestGpuServiceHolder {
 #endif
   }
 
- private:
-  friend struct base::DefaultSingletonTraits<TestGpuServiceHolder>;
+  // gpu::GpuInProcessThreadServiceDelegate implementation:
+  scoped_refptr<gpu::SharedContextState> GetSharedContextState() override;
+  scoped_refptr<gl::GLShareGroup> GetShareGroup() override;
 
+ private:
   void InitializeOnGpuThread(const gpu::GpuPreferences& preferences,
                              base::WaitableEvent* completion);
   void DeleteOnGpuThread();
+
+// TODO(crbug.com/1267788): Fuchsia crashes. See details in the crbug.
+#if defined(USE_OZONE) && !BUILDFLAG(IS_FUCHSIA)
+  void BindInterface(const std::string& interface_name,
+                     mojo::ScopedMessagePipeHandle interface_pipe);
+  void BindInterfaceOnGpuThread(const std::string& interface_name,
+                                mojo::ScopedMessagePipeHandle interface_pipe);
+#endif
+
+  absl::optional<base::FeatureList::ScopedDisallowOverrides>
+      disallow_feature_overrides_;
 
   base::Thread gpu_thread_;
   base::Thread io_thread_;
@@ -99,7 +153,10 @@ class TestGpuServiceHolder {
   std::unique_ptr<gpu::VulkanImplementation> vulkan_implementation_;
 #endif
 
-  DISALLOW_COPY_AND_ASSIGN(TestGpuServiceHolder);
+#if defined(USE_OZONE) && !BUILDFLAG(IS_FUCHSIA)
+  // Bound interfaces.
+  mojo::BinderMap binders_;
+#endif
 };
 
 }  // namespace viz

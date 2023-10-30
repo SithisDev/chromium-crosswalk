@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,64 +6,61 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/debug/stack_trace.h"
+#include "components/mirroring/service/mirroring_features.h"
+#include "components/mirroring/service/openscreen_session_host.h"
 #include "components/mirroring/service/session.h"
+#include "media/base/media_switches.h"
 #include "services/viz/public/cpp/gpu/gpu.h"
 
 namespace mirroring {
 
 MirroringService::MirroringService(
-    service_manager::mojom::ServiceRequest request,
+    mojo::PendingReceiver<mojom::MirroringService> receiver,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner)
-    : service_binding_(this, std::move(request)),
-      service_keepalive_(&service_binding_, base::TimeDelta()),
+    : receiver_(this, std::move(receiver)),
       io_task_runner_(std::move(io_task_runner)) {
-  registry_.AddInterface<mojom::MirroringService>(
-      base::BindRepeating(&MirroringService::Create, base::Unretained(this)));
+  receiver_.set_disconnect_handler(
+      base::BindOnce(&MirroringService::OnDisconnect, base::Unretained(this)));
 }
 
-MirroringService::~MirroringService() {
+MirroringService::~MirroringService() = default;
+
+void MirroringService::Start(
+    mojom::SessionParametersPtr params,
+    const gfx::Size& max_resolution,
+    mojo::PendingRemote<mojom::SessionObserver> observer,
+    mojo::PendingRemote<mojom::ResourceProvider> resource_provider,
+    mojo::PendingRemote<mojom::CastMessageChannel> outbound_channel,
+    mojo::PendingReceiver<mojom::CastMessageChannel> inbound_channel) {
   session_.reset();
-  registry_.RemoveInterface<mojom::MirroringService>();
-}
+  session_host_.reset();
 
-void MirroringService::OnBindInterface(
-    const service_manager::BindSourceInfo& source_info,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle interface_pipe) {
-  registry_.BindInterface(interface_name, std::move(interface_pipe));
-}
+  if (base::FeatureList::IsEnabled(media::kOpenscreenCastStreamingSession)) {
+    session_host_ = std::make_unique<OpenscreenSessionHost>(
+        std::move(params), max_resolution, std::move(observer),
+        std::move(resource_provider), std::move(outbound_channel),
+        std::move(inbound_channel), io_task_runner_);
 
-bool MirroringService::OnServiceManagerConnectionLost() {
-  bindings_.CloseAllBindings();
-  return true;
-}
+    session_host_->AsyncInitialize();
+  } else {
+    session_ = std::make_unique<Session>(
+        std::move(params), max_resolution, std::move(observer),
+        std::move(resource_provider), std::move(outbound_channel),
+        std::move(inbound_channel), io_task_runner_);
 
-void MirroringService::Create(mojom::MirroringServiceRequest request) {
-  bindings_.AddBinding(this, std::move(request));
-  bindings_.set_connection_error_handler(base::BindRepeating(
-      [](MirroringService* service) {
-        service->session_.reset();
-        service->bindings_.CloseAllBindings();
-      },
-      this));
-}
-
-void MirroringService::Start(mojom::SessionParametersPtr params,
-                             const gfx::Size& max_resolution,
-                             mojom::SessionObserverPtr observer,
-                             mojom::ResourceProviderPtr resource_provider,
-                             mojom::CastMessageChannelPtr outbound_channel,
-                             mojom::CastMessageChannelRequest inbound_channel) {
-  session_.reset();  // Stops the current session if active.
-  std::unique_ptr<viz::Gpu> gpu;
-  if (params->type != mojom::SessionType::AUDIO_ONLY) {
-    gpu = viz::Gpu::Create(service_binding_.GetConnector(), "content_system",
-                           io_task_runner_);
+    // We could put a waitable event here and wait till initialization completed
+    // before exiting Start(). But that would actually be just waste of effort,
+    // because Session will not send anything over the channels until
+    // initialization is completed, hence no outer calls to the session
+    // will be made.
+    session_->AsyncInitialize(Session::AsyncInitializeDoneCB());
   }
-  session_ = std::make_unique<Session>(
-      std::move(params), max_resolution, std::move(observer),
-      std::move(resource_provider), std::move(outbound_channel),
-      std::move(inbound_channel), std::move(gpu));
+}
+
+void MirroringService::OnDisconnect() {
+  session_.reset();
+  session_host_.reset();
 }
 
 }  // namespace mirroring

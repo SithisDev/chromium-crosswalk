@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,8 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/containers/circular_deque.h"
-#include "base/location.h"
-#include "chromecast/media/cma/backend/buffering_mixer_source.h"
-#include "chromecast/media/cma/decoder/cast_audio_decoder.h"
+#include "chromecast/media/api/cast_audio_decoder.h"
+#include "chromecast/media/audio/mixer_service/output_stream_connection.h"
 #include "chromecast/public/media/decoder_config.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "chromecast/public/media/media_pipeline_device_params.h"
@@ -22,27 +20,29 @@ namespace base {
 class SingleThreadTaskRunner;
 }  // namespace base
 
-namespace media {
-class AudioBus;
-class AudioRendererAlgorithm;
-}  // namespace media
-
 namespace chromecast {
+class IOBufferPool;
+
 namespace media {
 class DecoderBufferBase;
 class MediaPipelineBackendForMixer;
 
 // AudioDecoder implementation that streams decoded stream to the StreamMixer.
-class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
-                             public BufferingMixerSource::Delegate {
+class AudioDecoderForMixer
+    : public MediaPipelineBackend::AudioDecoder,
+      public mixer_service::OutputStreamConnection::Delegate {
  public:
   using BufferStatus = MediaPipelineBackend::BufferStatus;
 
   explicit AudioDecoderForMixer(MediaPipelineBackendForMixer* backend);
+
+  AudioDecoderForMixer(const AudioDecoderForMixer&) = delete;
+  AudioDecoderForMixer& operator=(const AudioDecoderForMixer&) = delete;
+
   ~AudioDecoderForMixer() override;
 
   virtual void Initialize();
-  virtual bool Start(int64_t pts, bool start_playback_asap);
+  virtual bool Start(int64_t pts, bool av_sync_enabled);
   void StartPlaybackAt(int64_t timestamp);
   virtual void Stop();
   virtual bool Pause();
@@ -58,10 +58,12 @@ class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
   bool SetConfig(const AudioConfig& config) override;
   bool SetVolume(float multiplier) override;
   RenderingDelay GetRenderingDelay() override;
+  AudioTrackTimestamp GetAudioTrackTimestamp() override;
+  int GetStartThresholdInFrames() override;
 
   // This allows for very small changes in the rate of audio playback that are
   // (supposedly) imperceptible.
-  float SetAvSyncPlaybackRate(float rate);
+  double SetAvSyncPlaybackRate(double rate);
   void RestartPlaybackAt(int64_t pts, int64_t timestamp);
 
   RenderingDelay GetMixerRenderingDelay();
@@ -70,39 +72,29 @@ class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
   friend class MockAudioDecoderForMixer;
   friend class AvSyncTest;
 
-  struct RateShifterInfo {
-    explicit RateShifterInfo(float playback_rate);
+  // mixer_service::OutputStreamConnection::Delegate implementation:
+  void FillNextBuffer(void* buffer,
+                      int frames,
+                      int64_t delay_timestamp,
+                      int64_t delay) override;
+  void OnAudioReadyForPlayback(int64_t mixer_delay) override;
+  void OnEosPlayed() override;
+  void OnMixerError() override;
 
-    const double rate;
-    double input_frames = 0;
-    int64_t output_frames = 0;
-    // Tracks the PTS of the end of data pushed at this rate.
-    int64_t end_pts = INT64_MIN;
-  };
-
-  // BufferingMixerSource::Delegate implementation:
-  void OnWritePcmCompletion(RenderingDelay delay) override;
-  void OnMixerError(MixerError error) override;
-  void OnEos() override;
-  void OnAudioReadyForPlayback() override;
-
+  void CreateBufferPool(const AudioConfig& config, int frame_count);
+  void CreateMixerInput(const AudioConfig& config, bool av_sync_enabled);
   void CleanUpPcm();
-  void ResetMixerInputForNewSampleRate(int sample_rate);
+  void ResetMixerInputForNewConfig(const AudioConfig& config);
   void CreateDecoder();
-  void CreateRateShifter(int samples_per_second);
 
-  void OnDecoderInitialized(bool success);
   void OnBufferDecoded(uint64_t input_bytes,
                        bool has_config,
                        CastAudioDecoder::Status status,
                        const AudioConfig& config,
                        scoped_refptr<DecoderBufferBase> decoded);
   void CheckBufferComplete();
-  void PushRateShifted();
-  void PushMorePcm();
-  void RunEos();
+  void WritePcm(scoped_refptr<DecoderBufferBase> buffer);
   bool BypassDecoder() const;
-  bool ShouldStartClock() const;
   void UpdateStatistics(Statistics delta);
 
   MediaPipelineBackendForMixer* const backend_;
@@ -111,22 +103,23 @@ class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
 
   Statistics stats_;
 
+  int buffer_pool_frames_ = 0;
   bool pending_buffer_complete_ = false;
-  bool got_eos_ = false;
-  bool pushed_eos_ = false;
   bool mixer_error_ = false;
   bool paused_ = false;
+  float playback_rate_ = 1.0f;
+  bool reported_ready_for_playback_ = false;
+  RenderingDelay mixer_delay_;
 
-  AudioConfig config_;
+  AudioConfig input_config_;
+  AudioConfig decoded_config_;
   std::unique_ptr<CastAudioDecoder> decoder_;
 
-  std::unique_ptr<::media::AudioRendererAlgorithm> rate_shifter_;
-  base::circular_deque<RateShifterInfo> rate_shifter_info_;
-  std::unique_ptr<::media::AudioBus> rate_shifter_output_;
+  double av_sync_clock_rate_ = 1.0;
 
-  std::unique_ptr<BufferingMixerSource, BufferingMixerSource::Deleter>
-      mixer_input_;
-  RenderingDelay last_mixer_delay_;
+  std::unique_ptr<mixer_service::OutputStreamConnection> mixer_input_;
+
+  RenderingDelay next_buffer_delay_;
   int64_t pending_output_frames_ = -1;
   float volume_multiplier_ = 1.0f;
 
@@ -134,13 +127,12 @@ class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
   int64_t last_push_playout_timestamp_ = INT64_MIN;
 
   scoped_refptr<::media::AudioBufferMemoryPool> pool_;
+  scoped_refptr<IOBufferPool> buffer_pool_;
 
   int64_t playback_start_pts_ = 0;
-  bool start_playback_asap_ = false;
+  bool av_sync_enabled_ = false;
 
   base::WeakPtrFactory<AudioDecoderForMixer> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioDecoderForMixer);
 };
 
 }  // namespace media

@@ -1,20 +1,21 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chromecast/browser/cast_content_gesture_handler.h"
 
+#include "base/callback_helpers.h"
+#include "base/logging.h"
 #include "chromecast/base/chromecast_switches.h"
 
 namespace chromecast {
-namespace shell {
 
 namespace {
 constexpr int kDefaultBackGestureHorizontalThreshold = 80;
 }  // namespace
 
 CastContentGestureHandler::CastContentGestureHandler(
-    CastContentWindow::Delegate* delegate,
+    GestureRouter* delegate,
     bool enable_top_drag_gesture)
     : priority_(Priority::NONE),
       enable_top_drag_gesture_(enable_top_drag_gesture),
@@ -25,11 +26,12 @@ CastContentGestureHandler::CastContentGestureHandler(
   DCHECK(delegate_);
 }
 
-CastContentGestureHandler::CastContentGestureHandler(
-    CastContentWindow::Delegate* delegate)
+CastContentGestureHandler::CastContentGestureHandler(GestureRouter* delegate)
     : CastContentGestureHandler(
           delegate,
           GetSwitchValueBoolean(switches::kEnableTopDragGesture, false)) {}
+
+CastContentGestureHandler::~CastContentGestureHandler() = default;
 
 void CastContentGestureHandler::SetPriority(
     CastGestureHandler::Priority priority) {
@@ -42,6 +44,8 @@ CastGestureHandler::Priority CastContentGestureHandler::GetPriority() {
 
 bool CastContentGestureHandler::CanHandleSwipe(
     CastSideSwipeOrigin swipe_origin) {
+  if (!delegate_)
+    return false;
   return delegate_->CanHandleGesture(GestureForSwipeOrigin(swipe_origin));
 }
 
@@ -67,7 +71,6 @@ void CastContentGestureHandler::HandleSideSwipe(
   if (!CanHandleSwipe(swipe_origin)) {
     return;
   }
-
   GestureType gesture_type = GestureForSwipeOrigin(swipe_origin);
 
   switch (event) {
@@ -91,10 +94,10 @@ void CastContentGestureHandler::HandleSideSwipe(
       if (gesture_type == GestureType::GO_BACK &&
           touch_location.x() < back_horizontal_threshold_) {
         DVLOG(1) << "swipe gesture cancelled";
-        delegate_->CancelGesture(GestureType::GO_BACK, touch_location);
+        delegate_->CancelGesture(GestureType::GO_BACK);
         return;
       }
-      delegate_->ConsumeGesture(gesture_type);
+      delegate_->ConsumeGesture(gesture_type, base::DoNothing());
       DVLOG(1) << "gesture complete, elapsed time: "
                << current_swipe_time_.Elapsed().InMilliseconds() << "ms";
       break;
@@ -103,19 +106,18 @@ void CastContentGestureHandler::HandleSideSwipe(
 
 void CastContentGestureHandler::HandleTapDownGesture(
     const gfx::Point& touch_location) {
-  if (!delegate_->CanHandleGesture(GestureType::TAP_DOWN)) {
+  if (!delegate_ || !delegate_->CanHandleGesture(GestureType::TAP_DOWN)) {
     return;
   }
-  delegate_->ConsumeGesture(GestureType::TAP_DOWN);
+  delegate_->ConsumeGesture(GestureType::TAP_DOWN, base::DoNothing());
 }
 
 void CastContentGestureHandler::HandleTapGesture(
     const gfx::Point& touch_location) {
-  if (!delegate_->CanHandleGesture(GestureType::TAP)) {
+  if (!delegate_ || !delegate_->CanHandleGesture(GestureType::TAP)) {
     return;
   }
-  delegate_->ConsumeGesture(GestureType::TAP);
+  delegate_->ConsumeGesture(GestureType::TAP, base::DoNothing());
 }
 
-}  // namespace shell
 }  // namespace chromecast

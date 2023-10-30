@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,20 +57,6 @@ PaymentShippingOption ConvertPaymentShippingOption(
 
 }  // namespace
 
-autofill::CreditCard::CardType GetBasicCardType(
-    const mojom::BasicCardType& type) {
-  switch (type) {
-    case mojom::BasicCardType::CREDIT:
-      return autofill::CreditCard::CARD_TYPE_CREDIT;
-    case mojom::BasicCardType::DEBIT:
-      return autofill::CreditCard::CARD_TYPE_DEBIT;
-    case mojom::BasicCardType::PREPAID:
-      return autofill::CreditCard::CARD_TYPE_PREPAID;
-  }
-  NOTREACHED();
-  return autofill::CreditCard::CARD_TYPE_UNKNOWN;
-}
-
 std::string GetBasicCardNetworkName(const mojom::BasicCardNetwork& network) {
   switch (network) {
     case mojom::BasicCardNetwork::AMEX:
@@ -104,10 +90,6 @@ PaymentMethodData ConvertPaymentMethodData(
   for (const mojom::BasicCardNetwork& network :
        method_data_entry->supported_networks) {
     method_data.supported_networks.push_back(GetBasicCardNetworkName(network));
-  }
-  for (const mojom::BasicCardType& type : method_data_entry->supported_types) {
-    autofill::CreditCard::CardType card_type = GetBasicCardType(type);
-    method_data.supported_types.insert(card_type);
   }
   return method_data;
 }

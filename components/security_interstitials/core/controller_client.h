@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "url/gurl.h"
 
 class PrefService;
@@ -20,7 +19,9 @@ class MetricsHelper;
 // Constants used to communicate with the JavaScript.
 extern const char kBoxChecked[];
 extern const char kDisplayCheckBox[];
+extern const char kDisplayEnhancedProtectionMessage[];
 extern const char kOptInLink[];
+extern const char kEnhancedProtectionMessage[];
 extern const char kPrivacyLinkHtml[];
 
 // These represent the commands sent from the interstitial JavaScript.
@@ -49,6 +50,8 @@ enum SecurityInterstitialCommand {
   CMD_OPEN_WHITEPAPER = 11,
   // Report a phishing error
   CMD_REPORT_PHISHING_ERROR = 12,
+  // Open enhanced protection settings.
+  CMD_OPEN_ENHANCED_PROTECTION_SETTINGS = 13,
 };
 
 // Provides methods for handling commands from the user, which requires some
@@ -57,6 +60,10 @@ enum SecurityInterstitialCommand {
 class ControllerClient {
  public:
   explicit ControllerClient(std::unique_ptr<MetricsHelper> metrics_helper);
+
+  ControllerClient(const ControllerClient&) = delete;
+  ControllerClient& operator=(const ControllerClient&) = delete;
+
   virtual ~ControllerClient();
 
   // Handle the user's reporting preferences.
@@ -79,6 +86,9 @@ class ControllerClient {
   virtual void GoBack() = 0;
   // Whether it is possible to go 'Back to safety'.
   virtual bool CanGoBack() = 0;
+  // Alternate method to check if the user can go "back to safety", meant to
+  // be called before navigating to the interstitial.
+  virtual bool CanGoBackBeforeNavigation() = 0;
 
   // If the offending entry has committed, go back or to a safe page without
   // closing the error page. This error page will be closed when the new page
@@ -96,6 +106,8 @@ class ControllerClient {
   virtual void OpenUrlInCurrentTab(const GURL& url) = 0;
 
   virtual void OpenUrlInNewForegroundTab(const GURL& url) = 0;
+
+  virtual void OpenEnhancedProtectionSettings() = 0;
 
   virtual PrefService* GetPrefService() = 0;
 
@@ -116,8 +128,6 @@ class ControllerClient {
   std::unique_ptr<MetricsHelper> metrics_helper_;
   // Link to the help center.
   GURL help_center_url_;
-
-  DISALLOW_COPY_AND_ASSIGN(ControllerClient);
 };
 
 }  // namespace security_interstitials

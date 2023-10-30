@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,25 +10,24 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/values.h"
-#include "components/prefs/pref_service.h"
-#include "components/prefs/scoped_user_pref_update.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
 #include "components/signin/public/base/signin_client.h"
-#include "components/signin/public/base/signin_pref_names.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/ios/device_accounts_provider.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher.h"
-#include "net/url_request/url_request_status.h"
+#include "net/base/net_errors.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace {
+
+using TokenResponseBuilder = OAuth2AccessTokenConsumer::TokenResponse::Builder;
 
 // Match the way Chromium handles authentication errors in
 // google_apis/gaia/oauth2_access_token_fetcher.cc:
@@ -59,8 +58,7 @@ GoogleServiceAuthError GetGoogleServiceAuthErrorFromNSError(
           GoogleServiceAuthError::SERVICE_UNAVAILABLE);
     case kAuthenticationErrorCategoryNetworkServerErrors:
       // Just set the connection error state to FAILED.
-      return GoogleServiceAuthError::FromConnectionError(
-          net::URLRequestStatus::FAILED);
+      return GoogleServiceAuthError::FromConnectionError(net::ERR_FAILED);
     case kAuthenticationErrorCategoryUserCancellationErrors:
       return GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED);
     case kAuthenticationErrorCategoryUnknownIdentityErrors:
@@ -83,6 +81,10 @@ class SSOAccessTokenFetcher : public OAuth2AccessTokenFetcher {
   SSOAccessTokenFetcher(OAuth2AccessTokenConsumer* consumer,
                         DeviceAccountsProvider* provider,
                         const AccountInfo& account);
+
+  SSOAccessTokenFetcher(const SSOAccessTokenFetcher&) = delete;
+  SSOAccessTokenFetcher& operator=(const SSOAccessTokenFetcher&) = delete;
+
   ~SSOAccessTokenFetcher() override;
 
   void Start(const std::string& client_id,
@@ -101,8 +103,6 @@ class SSOAccessTokenFetcher : public OAuth2AccessTokenFetcher {
   AccountInfo account_;
   bool request_was_cancelled_;
   base::WeakPtrFactory<SSOAccessTokenFetcher> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(SSOAccessTokenFetcher);
 };
 
 SSOAccessTokenFetcher::SSOAccessTokenFetcher(
@@ -145,8 +145,10 @@ void SSOAccessTokenFetcher::OnAccessTokenResponse(NSString* token,
   if (auth_error.state() == GoogleServiceAuthError::NONE) {
     base::Time expiration_date =
         base::Time::FromDoubleT([expiration timeIntervalSince1970]);
-    FireOnGetTokenSuccess(OAuth2AccessTokenConsumer::TokenResponse(
-        base::SysNSStringToUTF8(token), expiration_date, std::string()));
+    FireOnGetTokenSuccess(TokenResponseBuilder()
+                              .WithAccessToken(base::SysNSStringToUTF8(token))
+                              .WithExpirationTime(expiration_date)
+                              .build());
   } else {
     FireOnGetTokenFailure(auth_error);
   }
@@ -158,7 +160,8 @@ ProfileOAuth2TokenServiceIOSDelegate::ProfileOAuth2TokenServiceIOSDelegate(
     SigninClient* client,
     std::unique_ptr<DeviceAccountsProvider> provider,
     AccountTrackerService* account_tracker_service)
-    : client_(client),
+    : ProfileOAuth2TokenServiceDelegate(/*use_backoff=*/false),
+      client_(client),
       provider_(std::move(provider)),
       account_tracker_service_(account_tracker_service) {
   DCHECK(client_);
@@ -173,19 +176,18 @@ ProfileOAuth2TokenServiceIOSDelegate::~ProfileOAuth2TokenServiceIOSDelegate() {
 void ProfileOAuth2TokenServiceIOSDelegate::Shutdown() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   accounts_.clear();
+  ClearAuthError(absl::nullopt);
 }
 
 void ProfileOAuth2TokenServiceIOSDelegate::LoadCredentials(
-    const CoreAccountId& primary_account_id) {
+    const CoreAccountId& primary_account_id,
+    bool is_syncing) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   DCHECK_EQ(signin::LoadCredentialsState::LOAD_CREDENTIALS_NOT_STARTED,
             load_credentials_state());
   set_load_credentials_state(
       signin::LoadCredentialsState::LOAD_CREDENTIALS_IN_PROGRESS);
-
-  // Clean-up stale data from prefs.
-  ClearExcludedSecondaryAccounts();
 
   if (primary_account_id.empty()) {
     // On startup, always fire refresh token loaded even if there is nothing
@@ -196,18 +198,38 @@ void ProfileOAuth2TokenServiceIOSDelegate::LoadCredentials(
     return;
   }
 
-  ReloadCredentials();
+  ReloadCredentials(primary_account_id);
+  if (RefreshTokenIsAvailable(primary_account_id)) {
+    set_load_credentials_state(
+        signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
+  } else {
+    // Account must have been seeded before (when the primary account was set).
+    DCHECK(!account_tracker_service_->GetAccountInfo(primary_account_id)
+                .gaia.empty());
+    DCHECK(!account_tracker_service_->GetAccountInfo(primary_account_id)
+                .email.empty());
 
-  set_load_credentials_state(
-      signin::LoadCredentialsState::LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
+    // For whatever reason, we failed to load the device account for the primary
+    // account. There must always be an account for the primary account
+    accounts_.insert(primary_account_id);
+    UpdateAuthError(primary_account_id,
+                    GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
+                        GoogleServiceAuthError::InvalidGaiaCredentialsReason::
+                            CREDENTIALS_MISSING));
+    FireRefreshTokenAvailable(primary_account_id);
+    set_load_credentials_state(
+        signin::LoadCredentialsState::
+            LOAD_CREDENTIALS_FINISHED_WITH_NO_TOKEN_FOR_PRIMARY_ACCOUNT);
+  }
   FireRefreshTokensLoaded();
 }
 
-void ProfileOAuth2TokenServiceIOSDelegate::ReloadCredentials() {
+void ProfileOAuth2TokenServiceIOSDelegate::ReloadCredentials(
+    const CoreAccountId& primary_account_id) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   // Get the list of new account ids.
-  std::set<std::string> new_account_ids;
+  std::set<CoreAccountId> new_account_ids;
   for (const auto& new_account : provider_->GetAllAccounts()) {
     DCHECK(!new_account.gaia.empty());
     DCHECK(!new_account.email.empty());
@@ -216,7 +238,7 @@ void ProfileOAuth2TokenServiceIOSDelegate::ReloadCredentials() {
     // the GAIA ID is available if any client of this token service starts
     // a fetch access token operation when it receives a
     // |OnRefreshTokenAvailable| notification.
-    std::string account_id = account_tracker_service_->SeedAccountInfo(
+    CoreAccountId account_id = account_tracker_service_->SeedAccountInfo(
         AccountInfoFromDeviceAccount(new_account));
     new_account_ids.insert(account_id);
   }
@@ -238,7 +260,14 @@ void ProfileOAuth2TokenServiceIOSDelegate::ReloadCredentials() {
   // load |new_accounts|.
   ScopedBatchChange batch(this);
   for (const auto& account_to_remove : accounts_to_remove) {
-    RemoveAccount(account_to_remove);
+    if (account_to_remove == primary_account_id) {
+      UpdateAuthError(account_to_remove,
+                      GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
+                          GoogleServiceAuthError::InvalidGaiaCredentialsReason::
+                              CREDENTIALS_MISSING));
+    } else {
+      RemoveAccount(account_to_remove);
+    }
   }
 
   // Load all new_accounts.
@@ -259,16 +288,17 @@ void ProfileOAuth2TokenServiceIOSDelegate::RevokeAllCredentials() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   ScopedBatchChange batch(this);
-  AccountStatusMap toRemove = accounts_;
-  for (auto& accountStatus : toRemove)
-    RemoveAccount(accountStatus.first);
+  std::set<CoreAccountId> toRemove = accounts_;
+  for (auto& account_id : toRemove)
+    RemoveAccount(account_id);
 
   DCHECK_EQ(0u, accounts_.size());
-  ClearExcludedSecondaryAccounts();
 }
 
-void ProfileOAuth2TokenServiceIOSDelegate::ReloadAllAccountsFromSystem() {
-  ReloadCredentials();
+void ProfileOAuth2TokenServiceIOSDelegate::
+    ReloadAllAccountsFromSystemWithPrimaryAccount(
+        const absl::optional<CoreAccountId>& primary_account_id) {
+  ReloadCredentials(primary_account_id.value_or(CoreAccountId()));
 }
 
 void ProfileOAuth2TokenServiceIOSDelegate::ReloadAccountFromSystem(
@@ -290,10 +320,7 @@ ProfileOAuth2TokenServiceIOSDelegate::CreateAccessTokenFetcher(
 std::vector<CoreAccountId> ProfileOAuth2TokenServiceIOSDelegate::GetAccounts()
     const {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  std::vector<CoreAccountId> account_ids;
-  for (const auto& account : accounts_)
-    account_ids.push_back(account.first);
-  return account_ids;
+  return std::vector<CoreAccountId>(accounts_.begin(), accounts_.end());
 }
 
 bool ProfileOAuth2TokenServiceIOSDelegate::RefreshTokenIsAvailable(
@@ -301,36 +328,6 @@ bool ProfileOAuth2TokenServiceIOSDelegate::RefreshTokenIsAvailable(
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   return accounts_.count(account_id) > 0;
-}
-
-GoogleServiceAuthError ProfileOAuth2TokenServiceIOSDelegate::GetAuthError(
-    const CoreAccountId& account_id) const {
-  auto it = accounts_.find(account_id);
-  return (it == accounts_.end()) ? GoogleServiceAuthError::AuthErrorNone()
-                                 : it->second.last_auth_error;
-}
-
-void ProfileOAuth2TokenServiceIOSDelegate::UpdateAuthError(
-    const CoreAccountId& account_id,
-    const GoogleServiceAuthError& error) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-
-  // Do not report connection errors as these are not actually auth errors.
-  // We also want to avoid masking a "real" auth error just because we
-  // subsequently get a transient network error.
-  if (error.IsTransientError())
-    return;
-
-  if (accounts_.count(account_id) == 0) {
-    // Nothing to update as the account has already been removed.
-    return;
-  }
-
-  AccountStatus* status = &accounts_[account_id];
-  if (error.state() != status->last_auth_error.state()) {
-    status->last_auth_error = error;
-    FireAuthErrorChanged(account_id, error);
-  }
 }
 
 // Clear the authentication error state and notify all observers that a new
@@ -344,15 +341,16 @@ void ProfileOAuth2TokenServiceIOSDelegate::AddOrUpdateAccount(
   DCHECK(!account_tracker_service_->GetAccountInfo(account_id).email.empty());
 
   bool account_present = accounts_.count(account_id) > 0;
-  if (account_present && accounts_[account_id].last_auth_error.state() ==
-                             GoogleServiceAuthError::NONE) {
+  if (account_present &&
+      GetAuthError(account_id) == GoogleServiceAuthError::AuthErrorNone()) {
     // No need to update the account if it is already a known account and if
     // there is no auth error.
     return;
   }
 
-  accounts_[account_id].last_auth_error =
-      GoogleServiceAuthError::AuthErrorNone();
+  accounts_.insert(account_id);
+  UpdateAuthError(account_id, GoogleServiceAuthError::AuthErrorNone(),
+                  /*fire_auth_error_changed=*/false);
   FireAuthErrorChanged(account_id, GoogleServiceAuthError::AuthErrorNone());
   FireRefreshTokenAvailable(account_id);
 }
@@ -364,12 +362,7 @@ void ProfileOAuth2TokenServiceIOSDelegate::RemoveAccount(
 
   if (accounts_.count(account_id) > 0) {
     accounts_.erase(account_id);
+    ClearAuthError(account_id);
     FireRefreshTokenRevoked(account_id);
   }
-}
-
-void ProfileOAuth2TokenServiceIOSDelegate::ClearExcludedSecondaryAccounts() {
-  client_->GetPrefs()->ClearPref(
-      prefs::kTokenServiceExcludeAllSecondaryAccounts);
-  client_->GetPrefs()->ClearPref(prefs::kTokenServiceExcludedSecondaryAccounts);
 }

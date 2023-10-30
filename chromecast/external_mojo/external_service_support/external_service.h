@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,11 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/sequence_checker.h"
 #include "chromecast/external_mojo/public/mojom/connector.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "chromecast/mojo/interface_bundle.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 
 namespace chromecast {
@@ -25,10 +25,14 @@ namespace external_service_support {
 class ExternalService : public external_mojo::mojom::ExternalService {
  public:
   ExternalService();
+
+  ExternalService(const ExternalService&) = delete;
+  ExternalService& operator=(const ExternalService&) = delete;
+
   ~ExternalService() override;
 
-  // Returns the Mojo binding for this service.
-  external_mojo::mojom::ExternalServicePtr GetBinding();
+  // Returns the Mojo receiver for this service.
+  mojo::PendingRemote<external_mojo::mojom::ExternalService> GetReceiver();
 
   // Adds an interface that users of this service may bind to. To avoid races
   // where the service is registered but interfaces cannot be bound by other
@@ -37,68 +41,39 @@ class ExternalService : public external_mojo::mojom::ExternalService {
   // will not be called after this ExternalService instance is destroyed.
   template <typename Interface>
   void AddInterface(
-      base::RepeatingCallback<void(mojo::InterfaceRequest<Interface>)>
+      base::RepeatingCallback<void(mojo::PendingReceiver<Interface>)>
           bind_callback) {
     RemoveInterface<Interface>();
-    AddInterface(Interface::Name_, std::make_unique<CallbackBinder<Interface>>(
-                                       std::move(bind_callback)));
+    bundle_.AddBinder(std::move(bind_callback));
+  }
+
+  // Convenience method for exposing an interface. The implementation must
+  // outlive the service or be explicitly removed before the implementation is
+  // destroyed.
+  template <typename Interface>
+  void AddInterface(Interface* interface) {
+    RemoveInterface<Interface>();
+    bundle_.AddInterface<Interface>(interface);
   }
 
   // Removes an interface, preventing new bindings from being created. Does not
   // affect existing bindings.
   template <typename Interface>
   void RemoveInterface() {
-    RemoveInterface(Interface::Name_);
+    bundle_.RemoveInterface<Interface>();
   }
 
+  InterfaceBundle* bundle() { return &bundle_; }
+
  private:
-  class Binder {
-   public:
-    virtual ~Binder() = default;
-
-    // Provides an abstract interface to the templated callback-based binder
-    // below.
-    virtual void BindInterface(
-        const std::string& interface_name,
-        mojo::ScopedMessagePipeHandle interface_pipe) = 0;
-  };
-
-  template <typename Interface>
-  class CallbackBinder : public Binder {
-   public:
-    CallbackBinder(
-        base::RepeatingCallback<void(mojo::InterfaceRequest<Interface>)>
-            bind_callback)
-        : bind_callback_(bind_callback) {}
-
-   private:
-    // Binder implementation:
-    void BindInterface(const std::string& interface_name,
-                       mojo::ScopedMessagePipeHandle interface_pipe) override {
-      mojo::InterfaceRequest<Interface> request(std::move(interface_pipe));
-      bind_callback_.Run(std::move(request));
-    }
-
-    base::RepeatingCallback<void(mojo::InterfaceRequest<Interface>)>
-        bind_callback_;
-
-    DISALLOW_COPY_AND_ASSIGN(CallbackBinder);
-  };
-
-  void AddInterface(const std::string& interface_name,
-                    std::unique_ptr<Binder> binder);
-  void RemoveInterface(const std::string& interface_name);
-
   // external_mojo::mojom::ExternalService implementation:
   void OnBindInterface(const std::string& interface_name,
                        mojo::ScopedMessagePipeHandle interface_pipe) override;
 
-  std::map<std::string, std::unique_ptr<Binder>> binders_;
-  mojo::Binding<external_mojo::mojom::ExternalService> service_binding_;
+  InterfaceBundle bundle_;
+  mojo::Receiver<external_mojo::mojom::ExternalService> service_receiver_{this};
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(ExternalService);
 };
 
 }  // namespace external_service_support

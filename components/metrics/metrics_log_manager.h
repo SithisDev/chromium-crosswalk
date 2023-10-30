@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,7 @@
 #include <stddef.h>
 
 #include <memory>
-#include <string>
-#include <vector>
 
-#include "base/macros.h"
 #include "components/metrics/metrics_log.h"
 
 namespace metrics {
@@ -23,6 +20,10 @@ class MetricsLogStore;
 class MetricsLogManager {
  public:
   MetricsLogManager();
+
+  MetricsLogManager(const MetricsLogManager&) = delete;
+  MetricsLogManager& operator=(const MetricsLogManager&) = delete;
+
   ~MetricsLogManager();
 
   // Makes |log| the current_log. This should only be called if there is not a
@@ -33,13 +34,13 @@ class MetricsLogManager {
   MetricsLog* current_log() { return current_log_.get(); }
 
   // Closes |current_log_|, compresses it, and stores it in the |log_store| for
-  // later, leaving |current_log_| NULL.
+  // later, leaving |current_log_| nullptr.
   void FinishCurrentLog(MetricsLogStore* log_store);
 
   // Closes and discards |current_log|.
   void DiscardCurrentLog();
 
-  // Sets current_log to NULL, but saves the current log for future use with
+  // Sets current_log to nullptr, but saves the current log for future use with
   // ResumePausedLog(). Only one log may be paused at a time.
   // TODO(stuartmorgan): Pause/resume support is really a workaround for a
   // design issue in initial log writing; that should be fixed, and pause/resume
@@ -56,8 +57,6 @@ class MetricsLogManager {
 
   // A paused, previously-current log.
   std::unique_ptr<MetricsLog> paused_log_;
-
-  DISALLOW_COPY_AND_ASSIGN(MetricsLogManager);
 };
 
 }  // namespace metrics

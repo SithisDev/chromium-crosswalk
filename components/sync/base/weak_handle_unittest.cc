@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -19,21 +19,19 @@ using ::testing::StrictMock;
 
 class Base {
  public:
-  Base() {}
+  Base() = default;
 
   WeakHandle<Base> AsWeakHandle() {
     return MakeWeakHandle(weak_ptr_factory_.GetWeakPtr());
   }
 
   void Kill() { weak_ptr_factory_.InvalidateWeakPtrs(); }
-
-  MOCK_METHOD0(Test, void());
-  MOCK_METHOD1(Test1, void(const int&));
-  MOCK_METHOD2(Test2, void(const int&, Base*));
-  MOCK_METHOD3(Test3, void(const int&, Base*, float));
-  MOCK_METHOD4(Test4, void(const int&, Base*, float, const char*));
-
-  MOCK_METHOD1(TestWithSelf, void(const WeakHandle<Base>&));
+  MOCK_METHOD(void, Test, (), ());
+  MOCK_METHOD(void, Test1, (const int&), ());
+  MOCK_METHOD(void, Test2, (const int&, Base*), ());
+  MOCK_METHOD(void, Test3, (const int&, Base*, float), ());
+  MOCK_METHOD(void, Test4, (const int&, Base*, float, const char*), ());
+  MOCK_METHOD(void, TestWithSelf, (const WeakHandle<Base>&), ());
 
  private:
   base::WeakPtrFactory<Base> weak_ptr_factory_{this};
@@ -63,7 +61,7 @@ class WeakHandleTest : public ::testing::Test {
     h.Call(from_here, &Base::Test);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 TEST_F(WeakHandleTest, Uninitialized) {
@@ -207,7 +205,7 @@ void CallTestWithSelf(const WeakHandle<Base>& b1) {
 TEST_F(WeakHandleTest, WithDestroyedThread) {
   StrictMock<Base> b1;
   WeakHandle<Base> b2;
-  EXPECT_CALL(b1, TestWithSelf(_)).WillOnce(SaveArg<0>(&b2));
+  EXPECT_CALL(b1, TestWithSelf).WillOnce(SaveArg<0>(&b2));
 
   {
     base::Thread t("Test thread");

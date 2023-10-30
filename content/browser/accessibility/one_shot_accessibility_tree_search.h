@@ -1,16 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_BROWSER_ACCESSIBILITY_ACCESSIBILITY_TREE_SEARCH_H_
-#define CONTENT_BROWSER_ACCESSIBILITY_ACCESSIBILITY_TREE_SEARCH_H_
+#ifndef CONTENT_BROWSER_ACCESSIBILITY_ONE_SHOT_ACCESSIBILITY_TREE_SEARCH_H_
+#define CONTENT_BROWSER_ACCESSIBILITY_ONE_SHOT_ACCESSIBILITY_TREE_SEARCH_H_
 
 #include <stddef.h>
 
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "content/common/content_export.h"
 
 namespace content {
@@ -23,9 +23,9 @@ class BrowserAccessibilityManager;
 typedef bool (*AccessibilityMatchPredicate)(BrowserAccessibility* start_element,
                                             BrowserAccessibility* this_element);
 
-#define DECLARE_ACCESSIBILITY_PREDICATE(PredicateName)    \
-  bool PredicateName(BrowserAccessibility* start_element, \
-                     BrowserAccessibility* this_element)
+#define DECLARE_ACCESSIBILITY_PREDICATE(PredicateName)                   \
+  CONTENT_EXPORT bool PredicateName(BrowserAccessibility* start_element, \
+                                    BrowserAccessibility* this_element)
 
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityArticlePredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityBlockquotePredicate);
@@ -34,16 +34,16 @@ DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityCheckboxPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityComboboxPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityControlPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityFocusablePredicate);
+DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityFramePredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityGraphicPredicate);
-DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityHeadingPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityH1Predicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityH2Predicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityH3Predicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityH4Predicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityH5Predicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityH6Predicate);
+DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityHeadingPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityHeadingSameLevelPredicate);
-DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityFramePredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityLandmarkPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityLinkPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityListPredicate);
@@ -53,6 +53,7 @@ DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityMainPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityMediaPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityRadioButtonPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityRadioGroupPredicate);
+DECLARE_ACCESSIBILITY_PREDICATE(AccessibilitySectionPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityTablePredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityTextfieldPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityTextStyleBoldPredicate);
@@ -61,7 +62,6 @@ DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityTextStyleUnderlinePredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityTreePredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityUnvisitedLinkPredicate);
 DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityVisitedLinkPredicate);
-DECLARE_ACCESSIBILITY_PREDICATE(AccessibilityTextStyleBoldPredicate);
 
 #undef DECLARE_ACCESSIBILITY_PREDICATE
 
@@ -84,6 +84,12 @@ class CONTENT_EXPORT OneShotAccessibilityTreeSearch {
   // they will all be within the subtree of the *parent* of |scope| - in other
   // words, siblings of |scope| and their descendants.
   explicit OneShotAccessibilityTreeSearch(BrowserAccessibility* scope);
+
+  OneShotAccessibilityTreeSearch(const OneShotAccessibilityTreeSearch&) =
+      delete;
+  OneShotAccessibilityTreeSearch& operator=(
+      const OneShotAccessibilityTreeSearch&) = delete;
+
   virtual ~OneShotAccessibilityTreeSearch();
 
   //
@@ -111,15 +117,17 @@ class CONTENT_EXPORT OneShotAccessibilityTreeSearch {
   // If true, wraps to the last element.
   void SetCanWrapToLastElement(bool can_wrap_to_last_element);
 
-  // If true, only considers nodes that aren't invisible or offscreen.
-  void SetVisibleOnly(bool visible_only);
+  // If true, only considers nodes that aren't offscreen.
+  // Programmatically hidden elements are always skipped.
+  void SetOnscreenOnly(bool onscreen_only);
 
   // Restricts the matches to only nodes where |text| is found as a
   // substring of any of that node's accessible text, including its
   // name, description, or value. Case-insensitive.
   void SetSearchText(const std::string& text);
 
-  // Restricts the matches to only those that satisfy all predicates.
+  // Restricts the matches to only those that satisfy at least one of the
+  // predicates.
   void AddPredicate(AccessibilityMatchPredicate predicate);
 
   //
@@ -135,24 +143,22 @@ class CONTENT_EXPORT OneShotAccessibilityTreeSearch {
   void SearchByIteratingOverChildren();
   bool Matches(BrowserAccessibility* node);
 
-  BrowserAccessibilityManager* tree_;
-  BrowserAccessibility* scope_node_;
-  BrowserAccessibility* start_node_;
+  raw_ptr<BrowserAccessibilityManager> tree_;
+  raw_ptr<BrowserAccessibility> scope_node_;
+  raw_ptr<BrowserAccessibility> start_node_;
   Direction direction_;
   int result_limit_;
   bool immediate_descendants_only_;
   bool can_wrap_to_last_element_;
-  bool visible_only_;
+  bool onscreen_only_;
   std::string search_text_;
 
   std::vector<AccessibilityMatchPredicate> predicates_;
   std::vector<BrowserAccessibility*> matches_;
 
   bool did_search_;
-
-  DISALLOW_COPY_AND_ASSIGN(OneShotAccessibilityTreeSearch);
 };
 
 }  // namespace content
 
-#endif  // CONTENT_BROWSER_ACCESSIBILITY_ACCESSIBILITY_TREE_SEARCH_H_
+#endif  // CONTENT_BROWSER_ACCESSIBILITY_ONE_SHOT_ACCESSIBILITY_TREE_SEARCH_H_

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,17 @@
 
 #include <memory>
 
+#include "components/ui_devtools/connector_delegate.h"
 #include "components/ui_devtools/devtools_server.h"
 
 namespace ui_devtools {
 
 // A factory helper to construct a UiDevToolsServer for Views.
+// The connector is used in TracingAgent to hook up with the tracing service.
 std::unique_ptr<UiDevToolsServer> CreateUiDevToolsServerForViews(
-    network::mojom::NetworkContext* network_context);
+    network::mojom::NetworkContext* network_context,
+    std::unique_ptr<ConnectorDelegate> connector,
+    const base::FilePath& active_port_output_directory);
 
 }  // namespace ui_devtools
 

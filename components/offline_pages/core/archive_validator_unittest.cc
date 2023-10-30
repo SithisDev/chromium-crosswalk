@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,13 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/logging.h"
 #include "base/path_service.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/test/test_file_util.h"
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 namespace offline_pages {
 
@@ -26,9 +25,9 @@ const char kTestData2[] = "Hello World!";
 
 const int kSmallFileSize = 2 * 1024;
 const int kBigFileSize = 3 * 1024 * 1024;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 const int kSizeForTestContentUri = 173;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 // Digest for kTestData1 + kTestData2.
 const std::string kExpectedDigestForTestData(
@@ -62,7 +61,7 @@ std::string MakeContentOfSize(int size) {
   return result;
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 base::FilePath GetContentUriPathForTest() {
   base::FilePath test_dir;
   base::PathService::Get(base::DIR_SOURCE_ROOT, &test_dir);
@@ -80,7 +79,7 @@ base::FilePath GetContentUriPathForTest() {
 
   return path;
 }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace
 
@@ -142,15 +141,16 @@ TEST_F(ArchiveValidatorTest, GetSizeAndComputeDigestOnBigFile) {
   EXPECT_EQ(kExpectedDigestForBigFile, actual_size_and_digest.second);
 }
 
-#if defined(OS_ANDROID)
-TEST_F(ArchiveValidatorTest, GetSizeAndComputeDigestOnContentUri) {
+#if BUILDFLAG(IS_ANDROID)
+// Flaky. https://crbug.com/1022323
+TEST_F(ArchiveValidatorTest, DISABLED_GetSizeAndComputeDigestOnContentUri) {
   base::FilePath content_uri_path = GetContentUriPathForTest();
   std::pair<int64_t, std::string> actual_size_and_digest =
       ArchiveValidator::GetSizeAndComputeDigest(content_uri_path);
   EXPECT_EQ(kSizeForTestContentUri, actual_size_and_digest.first);
   EXPECT_EQ(kExpectedDigestForContentUri, actual_size_and_digest.second);
 }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 TEST_F(ArchiveValidatorTest, ValidateSmallFile) {
   std::string expected_data(MakeContentOfSize(kSmallFileSize));
@@ -166,12 +166,13 @@ TEST_F(ArchiveValidatorTest, ValidateBigFile) {
                                              kExpectedDigestForBigFile));
 }
 
-#if defined(OS_ANDROID)
-TEST_F(ArchiveValidatorTest, ValidateContentUri) {
+#if BUILDFLAG(IS_ANDROID)
+// Flaky. https://crbug.com/1022322
+TEST_F(ArchiveValidatorTest, DISABLED_ValidateContentUri) {
   base::FilePath content_uri_path = GetContentUriPathForTest();
   EXPECT_TRUE(ArchiveValidator::ValidateFile(
       content_uri_path, kSizeForTestContentUri, kExpectedDigestForContentUri));
 }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace offline_pages

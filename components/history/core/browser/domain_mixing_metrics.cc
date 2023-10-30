@@ -1,13 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/history/core/browser/domain_mixing_metrics.h"
 
+#include "base/check_op.h"
 #include "base/containers/flat_map.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "ui/gfx/geometry/safe_integer_conversions.h"
+#include "base/notreached.h"
+#include "base/numerics/safe_conversions.h"
 
 namespace history {
 namespace {
@@ -21,7 +22,7 @@ using DomainVisitsPerDay = base::flat_map<Day, DomainVisits>;
 // The time intervals in days to compute domain mixing metrics for, sorted
 // in ascending order.
 std::vector<int> NumDaysForMetrics() {
-  return {1, 7, 14, 30};
+  return {kOneDay, kOneWeek, kTwoWeeks, kOneMonth};
 }
 
 // Maps a time to the start of a day using ref_start_of_day as the reference
@@ -36,7 +37,7 @@ std::vector<int> NumDaysForMetrics() {
 // result = 2018-01-05 04:00:00 UTC
 Day ToStartOfDay(base::Time time, Day ref_start_of_day) {
   return ref_start_of_day +
-         base::TimeDelta::FromDays((time - ref_start_of_day).InDaysFloored());
+         base::Days((time - ref_start_of_day).InDaysFloored());
 }
 
 // Counts the number of visits per day and per domain as a nested map
@@ -85,18 +86,18 @@ double ComputeDomainMixingRatio(const DomainVisits& domain_visits) {
 
 void EmitDomainMixingMetric(const DomainVisits& domain_visits, int num_days) {
   double domain_mixing_ratio = ComputeDomainMixingRatio(domain_visits);
-  int percentage = gfx::ToRoundedInt(100 * domain_mixing_ratio);
+  int percentage = base::ClampRound(100 * domain_mixing_ratio);
   switch (num_days) {
-    case 1:
+    case kOneDay:
       UMA_HISTOGRAM_PERCENTAGE("DomainMixing.OneDay", percentage);
       break;
-    case 7:
+    case kOneWeek:
       UMA_HISTOGRAM_PERCENTAGE("DomainMixing.OneWeek", percentage);
       break;
-    case 14:
+    case kTwoWeeks:
       UMA_HISTOGRAM_PERCENTAGE("DomainMixing.TwoWeeks", percentage);
       break;
-    case 30:
+    case kOneMonth:
       UMA_HISTOGRAM_PERCENTAGE("DomainMixing.OneMonth", percentage);
       break;
     default:
@@ -117,8 +118,7 @@ void EmitDomainMixingMetricsForDay(
   // Reverse iterator, starting at the day before active_day.
   auto it = std::make_reverse_iterator(active_day);
   for (const int num_days : NumDaysForMetrics()) {
-    const Day first_day =
-        active_day->first - base::TimeDelta::FromDays(num_days - 1);
+    const Day first_day = active_day->first - base::Days(num_days - 1);
     for (; it != domain_visits_per_day.rend() && it->first >= first_day; ++it) {
       for (const auto& domain_num_visits : it->second) {
         domain_visits[domain_num_visits.first] += domain_num_visits.second;

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ class AffiliationFetchThrottlerDelegate {
   virtual bool OnCanSendNetworkRequest() = 0;
 
  protected:
-  virtual ~AffiliationFetchThrottlerDelegate() {}
+  virtual ~AffiliationFetchThrottlerDelegate() = default;
 };
 
 }  // namespace password_manager

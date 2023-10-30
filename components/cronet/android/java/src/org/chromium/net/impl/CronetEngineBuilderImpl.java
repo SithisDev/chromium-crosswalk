@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 package org.chromium.net.impl;
@@ -6,11 +6,12 @@ package org.chromium.net.impl;
 import static android.os.Process.THREAD_PRIORITY_LOWEST;
 
 import android.content.Context;
-import android.support.annotation.IntDef;
-import android.support.annotation.VisibleForTesting;
+import android.util.Base64;
+
+import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.net.CronetEngine;
-import org.chromium.net.CronetEngine.Builder;
 import org.chromium.net.ICronetEngineBuilder;
 
 import java.io.File;
@@ -18,9 +19,10 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.net.IDN;
 import java.util.Date;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -67,6 +69,65 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
         }
     }
 
+    /**
+     * Mapping between public builder view of HttpCacheMode and internal builder one.
+     */
+    @VisibleForTesting
+    static enum HttpCacheMode {
+        DISABLED(HttpCacheType.DISABLED, false),
+        DISK(HttpCacheType.DISK, true),
+        DISK_NO_HTTP(HttpCacheType.DISK, false),
+        MEMORY(HttpCacheType.MEMORY, true);
+
+        private final int mType;
+        private final boolean mContentCacheEnabled;
+
+        private HttpCacheMode(int type, boolean contentCacheEnabled) {
+            mContentCacheEnabled = contentCacheEnabled;
+            mType = type;
+        }
+
+        int getType() {
+            return mType;
+        }
+
+        boolean isContentCacheEnabled() {
+            return mContentCacheEnabled;
+        }
+
+        @HttpCacheSetting
+        int toPublicBuilderCacheMode() {
+            switch (this) {
+                case DISABLED:
+                    return CronetEngine.Builder.HTTP_CACHE_DISABLED;
+                case DISK_NO_HTTP:
+                    return CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP;
+                case DISK:
+                    return CronetEngine.Builder.HTTP_CACHE_DISK;
+                case MEMORY:
+                    return CronetEngine.Builder.HTTP_CACHE_IN_MEMORY;
+                default:
+                    throw new IllegalArgumentException("Unknown internal builder cache mode");
+            }
+        }
+
+        @VisibleForTesting
+        static HttpCacheMode fromPublicBuilderCacheMode(@HttpCacheSetting int cacheMode) {
+            switch (cacheMode) {
+                case CronetEngine.Builder.HTTP_CACHE_DISABLED:
+                    return DISABLED;
+                case CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP:
+                    return DISK_NO_HTTP;
+                case CronetEngine.Builder.HTTP_CACHE_DISK:
+                    return DISK;
+                case CronetEngine.Builder.HTTP_CACHE_IN_MEMORY:
+                    return MEMORY;
+                default:
+                    throw new IllegalArgumentException("Unknown public builder cache mode");
+            }
+        }
+    }
+
     private static final Pattern INVALID_PKP_HOST_NAME = Pattern.compile("^[0-9\\.]*$");
 
     private static final int INVALID_THREAD_PRIORITY = THREAD_PRIORITY_LOWEST + 1;
@@ -83,7 +144,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
     private boolean mHttp2Enabled;
     private boolean mBrotiEnabled;
     private boolean mDisableCache;
-    private int mHttpCacheMode;
+    private HttpCacheMode mHttpCacheMode;
     private long mHttpCacheMaxSize;
     private String mExperimentalOptions;
     protected long mMockCertVerifier;
@@ -91,15 +152,15 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
     private int mThreadPriority = INVALID_THREAD_PRIORITY;
 
     /**
-     * Default config enables SPDY, disables QUIC, SDCH and HTTP cache.
+     * Default config enables SPDY and QUIC, disables SDCH and HTTP cache.
      * @param context Android {@link Context} for engine to use.
      */
     public CronetEngineBuilderImpl(Context context) {
         mApplicationContext = context.getApplicationContext();
-        enableQuic(false);
+        enableQuic(true);
         enableHttp2(true);
         enableBrotli(false);
-        enableHttpCache(Builder.HTTP_CACHE_DISABLED, 0);
+        enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISABLED, 0);
         enableNetworkQualityEstimator(false);
         enablePublicKeyPinningBypassForLocalTrustAnchors(true);
     }
@@ -115,6 +176,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
         return this;
     }
 
+    @VisibleForTesting
     String getUserAgent() {
         return mUserAgent;
     }
@@ -128,6 +190,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
         return this;
     }
 
+    @VisibleForTesting
     String storagePath() {
         return mStoragePath;
     }
@@ -156,6 +219,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
         return this;
     }
 
+    @VisibleForTesting
     boolean quicEnabled() {
         return mQuicEnabled;
     }
@@ -176,6 +240,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
         return this;
     }
 
+    @VisibleForTesting
     boolean http2Enabled() {
         return mHttp2Enabled;
     }
@@ -191,57 +256,46 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
         return this;
     }
 
+    @VisibleForTesting
     boolean brotliEnabled() {
         return mBrotiEnabled;
     }
 
-    @IntDef({Builder.HTTP_CACHE_DISABLED, Builder.HTTP_CACHE_IN_MEMORY,
-            Builder.HTTP_CACHE_DISK_NO_HTTP, Builder.HTTP_CACHE_DISK})
+    @IntDef({CronetEngine.Builder.HTTP_CACHE_DISABLED, CronetEngine.Builder.HTTP_CACHE_IN_MEMORY,
+            CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, CronetEngine.Builder.HTTP_CACHE_DISK})
     @Retention(RetentionPolicy.SOURCE)
     public @interface HttpCacheSetting {}
 
     @Override
     public CronetEngineBuilderImpl enableHttpCache(@HttpCacheSetting int cacheMode, long maxSize) {
-        if (cacheMode == Builder.HTTP_CACHE_DISK || cacheMode == Builder.HTTP_CACHE_DISK_NO_HTTP) {
-            if (storagePath() == null) {
-                throw new IllegalArgumentException("Storage path must be set");
-            }
-        } else {
-            if (storagePath() != null) {
-                throw new IllegalArgumentException("Storage path must not be set");
-            }
+        HttpCacheMode cacheModeEnum = HttpCacheMode.fromPublicBuilderCacheMode(cacheMode);
+
+        if (cacheModeEnum.getType() == HttpCacheType.DISK && storagePath() == null) {
+            throw new IllegalArgumentException("Storage path must be set");
         }
-        mDisableCache = (cacheMode == Builder.HTTP_CACHE_DISABLED
-                || cacheMode == Builder.HTTP_CACHE_DISK_NO_HTTP);
+
+        mHttpCacheMode = cacheModeEnum;
         mHttpCacheMaxSize = maxSize;
 
-        switch (cacheMode) {
-            case Builder.HTTP_CACHE_DISABLED:
-                mHttpCacheMode = HttpCacheType.DISABLED;
-                break;
-            case Builder.HTTP_CACHE_DISK_NO_HTTP:
-            case Builder.HTTP_CACHE_DISK:
-                mHttpCacheMode = HttpCacheType.DISK;
-                break;
-            case Builder.HTTP_CACHE_IN_MEMORY:
-                mHttpCacheMode = HttpCacheType.MEMORY;
-                break;
-            default:
-                throw new IllegalArgumentException("Unknown cache mode");
-        }
         return this;
     }
 
     boolean cacheDisabled() {
-        return mDisableCache;
+        return !mHttpCacheMode.isContentCacheEnabled();
     }
 
     long httpCacheMaxSize() {
         return mHttpCacheMaxSize;
     }
 
+    @VisibleForTesting
     int httpCacheMode() {
-        return mHttpCacheMode;
+        return mHttpCacheMode.getType();
+    }
+
+    @HttpCacheSetting
+    int publicBuilderHttpCacheMode() {
+        return mHttpCacheMode.toPublicBuilderCacheMode();
     }
 
     @Override
@@ -270,17 +324,17 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
             throw new NullPointerException("The pin expiration date cannot be null");
         }
         String idnHostName = validateHostNameForPinningAndConvert(hostName);
-        // Convert the pin to BASE64 encoding. The hash set will eliminate duplications.
-        Set<byte[]> hashes = new HashSet<>(pinsSha256.size());
+        // Convert the pin to BASE64 encoding to remove duplicates.
+        Map<String, byte[]> hashes = new HashMap<>();
         for (byte[] pinSha256 : pinsSha256) {
             if (pinSha256 == null || pinSha256.length != 32) {
                 throw new IllegalArgumentException("Public key pin is invalid");
             }
-            hashes.add(pinSha256);
+            hashes.put(Base64.encodeToString(pinSha256, 0), pinSha256);
         }
         // Add new element to PKP list.
-        mPkps.add(new Pkp(idnHostName, hashes.toArray(new byte[hashes.size()][]), includeSubdomains,
-                expirationDate));
+        mPkps.add(new Pkp(idnHostName, hashes.values().toArray(new byte[hashes.size()][]),
+                includeSubdomains, expirationDate));
         return this;
     }
 
@@ -298,6 +352,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
         return this;
     }
 
+    @VisibleForTesting
     boolean publicKeyPinningBypassForLocalTrustAnchorsEnabled() {
         return mPublicKeyPinningBypassForLocalTrustAnchorsEnabled;
     }
@@ -367,6 +422,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
      * @return true if the network quality estimator has been enabled for
      * this builder.
      */
+    @VisibleForTesting
     boolean networkQualityEstimatorEnabled() {
         return mNetworkQualityEstimatorEnabled;
     }
@@ -389,6 +445,7 @@ public abstract class CronetEngineBuilderImpl extends ICronetEngineBuilder {
     /**
      * @return thread priority provided by user, or {@code defaultThreadPriority} if none provided.
      */
+    @VisibleForTesting
     int threadPriority(int defaultThreadPriority) {
         return mThreadPriority == INVALID_THREAD_PRIORITY ? defaultThreadPriority : mThreadPriority;
     }

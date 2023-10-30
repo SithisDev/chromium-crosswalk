@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define CONTENT_BROWSER_ACCESSIBILITY_ACCESSIBILITY_CONTENT_BROWSERTEST_H_
 
 #include "content/public/test/content_browser_test.h"
-#include "ui/accessibility/ax_enums.mojom.h"
+#include "ui/accessibility/ax_enums.mojom-forward.h"
 #include "ui/accessibility/ax_mode.h"
 
 namespace content {

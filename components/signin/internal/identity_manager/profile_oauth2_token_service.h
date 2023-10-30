@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,16 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "build/buildflag.h"
+#include "components/signin/internal/identity_manager/profile_oauth2_token_service_observer.h"
 #include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "google_apis/gaia/core_account_id.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_access_token_manager.h"
-#include "google_apis/gaia/oauth2_token_service_observer.h"
 #include "net/base/backoff_entry.h"
 
 namespace signin {
@@ -60,7 +61,7 @@ class ProfileOAuth2TokenServiceDelegate;
 //
 // Note: requests should be started from the UI thread.
 class ProfileOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
-                                  public OAuth2TokenServiceObserver {
+                                  public ProfileOAuth2TokenServiceObserver {
  public:
   typedef base::RepeatingCallback<void(const CoreAccountId& /* account_id */,
                                        bool /* is_refresh_token_valid */,
@@ -73,6 +74,11 @@ class ProfileOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
   ProfileOAuth2TokenService(
       PrefService* user_prefs,
       std::unique_ptr<ProfileOAuth2TokenServiceDelegate> delegate);
+
+  ProfileOAuth2TokenService(const ProfileOAuth2TokenService&) = delete;
+  ProfileOAuth2TokenService& operator=(const ProfileOAuth2TokenService&) =
+      delete;
+
   ~ProfileOAuth2TokenService() override;
 
   // Overridden from OAuth2AccessTokenManager::Delegate.
@@ -84,10 +90,11 @@ class ProfileOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
   bool FixRequestErrorIfPossible() override;
   scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory()
       const override;
-  void OnAccessTokenInvalidated(const CoreAccountId& account_id,
-                                const std::string& client_id,
-                                const std::set<std::string>& scopes,
-                                const std::string& access_token) override;
+  void OnAccessTokenInvalidated(
+      const CoreAccountId& account_id,
+      const std::string& client_id,
+      const OAuth2AccessTokenManager::ScopeSet& scopes,
+      const std::string& access_token) override;
   void OnAccessTokenFetched(const CoreAccountId& account_id,
                             const GoogleServiceAuthError& error) override;
 
@@ -98,8 +105,8 @@ class ProfileOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
   const ProfileOAuth2TokenServiceDelegate* GetDelegate() const;
 
   // Add or remove observers of this token service.
-  void AddObserver(OAuth2TokenServiceObserver* observer);
-  void RemoveObserver(OAuth2TokenServiceObserver* observer);
+  void AddObserver(ProfileOAuth2TokenServiceObserver* observer);
+  void RemoveObserver(ProfileOAuth2TokenServiceObserver* observer);
 
   // Add or remove observers of access token manager.
   void AddAccessTokenDiagnosticsObserver(
@@ -173,8 +180,6 @@ class ProfileOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
   void SetRefreshTokenRevokedFromSourceCallback(
       RefreshTokenRevokedFromSourceCallback callback);
 
-  void Shutdown();
-
   // Loads credentials from a backing persistent store to make them available
   // after service is used between profile restarts.
   //
@@ -182,7 +187,9 @@ class ProfileOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
   // For a regular profile, the primary account id comes from
   // PrimaryAccountManager.
   // For a supervised user, the id comes from SupervisedUserService.
-  void LoadCredentials(const CoreAccountId& primary_account_id);
+  // |is_syncing| whether the primary account has sync consent.
+  void LoadCredentials(const CoreAccountId& primary_account_id,
+                       bool is_syncing);
 
   // Returns true if LoadCredentials finished with no errors.
   bool HasLoadCredentialsFinishedWithNoErrors();
@@ -250,19 +257,13 @@ class ProfileOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
   void UpdateAuthErrorForTesting(const CoreAccountId& account_id,
                                  const GoogleServiceAuthError& error);
 
-  int GetTokenCacheCountForTesting();
-
   void set_max_authorization_token_fetch_retries_for_testing(int max_retries);
-
-  // Returns the current number of pending fetchers matching given params.
-  size_t GetNumPendingRequestsForTesting(
-      const std::string& client_id,
-      const CoreAccountId& account_id,
-      const OAuth2AccessTokenManager::ScopeSet& scopes) const;
 
   // Override |token_manager_| for testing.
   void OverrideAccessTokenManagerForTesting(
       std::unique_ptr<OAuth2AccessTokenManager> token_manager);
+
+  virtual bool IsFakeProfileOAuth2TokenServiceForTesting() const;
 
  protected:
   OAuth2AccessTokenManager* GetAccessTokenManager();
@@ -270,30 +271,16 @@ class ProfileOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
  private:
   friend class signin::IdentityManager;
 
-  // OAuth2TokenServiceObserver implementation.
+  // ProfileOAuth2TokenServiceObserver implementation.
   void OnRefreshTokenAvailable(const CoreAccountId& account_id) override;
   void OnRefreshTokenRevoked(const CoreAccountId& account_id) override;
   void OnRefreshTokensLoaded() override;
-
-  // Clears the internal token cache.
-  void ClearCache();
-
-  // Clears all of the tokens belonging to |account_id| from the internal token
-  // cache. It does not matter what other parameters, like |client_id| were
-  // used to request the tokens.
-  void ClearCacheForAccount(const CoreAccountId& account_id);
-
-  // Cancels all requests that are currently in progress.
-  void CancelAllRequests();
-
-  // Cancels all requests related to a given |account_id|.
-  void CancelRequestsForAccount(const CoreAccountId& account_id);
 
   // Creates a new device ID if there are no accounts, or if the current device
   // ID is empty.
   void RecreateDeviceIdIfNeeded();
 
-  PrefService* user_prefs_;
+  raw_ptr<PrefService> user_prefs_;
 
   std::unique_ptr<ProfileOAuth2TokenServiceDelegate> delegate_;
 
@@ -309,12 +296,8 @@ class ProfileOAuth2TokenService : public OAuth2AccessTokenManager::Delegate,
   signin_metrics::SourceForRefreshTokenOperation update_refresh_token_source_ =
       signin_metrics::SourceForRefreshTokenOperation::kUnknown;
 
-  FRIEND_TEST_ALL_PREFIXES(ProfileOAuth2TokenServiceTest, UpdateClearsCache);
-  FRIEND_TEST_ALL_PREFIXES(ProfileOAuth2TokenServiceTest, CancelAllRequests);
   FRIEND_TEST_ALL_PREFIXES(ProfileOAuth2TokenServiceTest,
-                           CancelRequestsForAccount);
-
-  DISALLOW_COPY_AND_ASSIGN(ProfileOAuth2TokenService);
+                           SameScopesRequestedForDifferentClients);
 };
 
 #endif  // COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_PROFILE_OAUTH2_TOKEN_SERVICE_H_

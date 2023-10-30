@@ -1,10 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chromecast/base/scoped_temp_file.h"
+#include "base/check.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 
 namespace chromecast {
 
@@ -14,8 +14,7 @@ ScopedTempFile::ScopedTempFile() {
 
 ScopedTempFile::~ScopedTempFile() {
   if (FileExists()) {
-    // Since this is a file, set the -rf flag to false.
-    CHECK(base::DeleteFile(path_, false));
+    CHECK(base::DeleteFile(path_));
   }
 }
 

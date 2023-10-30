@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,11 @@
 #define CONTENT_BROWSER_RENDERER_HOST_INPUT_WEB_INPUT_EVENT_BUILDERS_MAC_H_
 
 #include "content/common/content_export.h"
-#include "third_party/blink/public/platform/web_gesture_event.h"
-#include "third_party/blink/public/platform/web_input_event.h"
-#include "third_party/blink/public/platform/web_keyboard_event.h"
-#include "third_party/blink/public/platform/web_mouse_wheel_event.h"
-#include "third_party/blink/public/platform/web_touch_event.h"
+#include "third_party/blink/public/common/input/web_gesture_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/common/input/web_keyboard_event.h"
+#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+#include "third_party/blink/public/common/input/web_touch_event.h"
 
 @class NSEvent;
 @class NSView;
@@ -28,7 +28,8 @@ class CONTENT_EXPORT WebMouseEventBuilder {
       NSEvent* event,
       NSView* view,
       blink::WebPointerProperties::PointerType pointerType =
-          blink::WebPointerProperties::PointerType::kMouse);
+          blink::WebPointerProperties::PointerType::kMouse,
+      bool unacceleratedMovement = false);
 };
 
 class CONTENT_EXPORT WebMouseWheelEventBuilder {

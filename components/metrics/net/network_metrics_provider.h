@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_base.h"
 #include "base/sequence_checker.h"
-#include "base/sequenced_task_runner.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/metrics/metrics_provider.h"
-#include "components/metrics/net/wifi_access_point_info_provider.h"
 #include "net/base/network_interfaces.h"
 #include "net/nqe/effective_connection_type.h"
 #include "services/network/public/cpp/network_connection_tracker.h"
@@ -36,6 +36,11 @@ class NetworkMetricsProvider
   // Class that provides |this| with the network quality estimator.
   class NetworkQualityEstimatorProvider {
    public:
+    NetworkQualityEstimatorProvider(const NetworkQualityEstimatorProvider&) =
+        delete;
+    NetworkQualityEstimatorProvider& operator=(
+        const NetworkQualityEstimatorProvider&) = delete;
+
     virtual ~NetworkQualityEstimatorProvider() {}
 
     // Provides |this| with |callback| that would be invoked by |this| every
@@ -46,9 +51,6 @@ class NetworkMetricsProvider
 
    protected:
     NetworkQualityEstimatorProvider() {}
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(NetworkQualityEstimatorProvider);
   };
 
   // Creates a NetworkMetricsProvider, where
@@ -58,6 +60,10 @@ class NetworkMetricsProvider
                              network_connection_tracker_async_getter,
                          std::unique_ptr<NetworkQualityEstimatorProvider>
                              network_quality_estimator_provider = nullptr);
+
+  NetworkMetricsProvider(const NetworkMetricsProvider&) = delete;
+  NetworkMetricsProvider& operator=(const NetworkMetricsProvider&) = delete;
+
   ~NetworkMetricsProvider() override;
 
  private:
@@ -87,12 +93,6 @@ class NetworkMetricsProvider
   // net::GetWifiPHYLayerProtocol.
   void OnWifiPHYLayerProtocolResult(net::WifiPHYLayerProtocol mode);
 
-  // Writes info about the wireless access points that this system is
-  // connected to.
-  void WriteWifiAccessPointProto(
-      const WifiAccessPointInfoProvider::WifiAccessPointInfo& info,
-      SystemProfileProto::Network* network_proto);
-
   // Logs metrics that are functions of other metrics being uploaded.
   void LogAggregatedMetrics();
 
@@ -113,7 +113,7 @@ class NetworkMetricsProvider
   // It is obtained from the global |g_network_connection_tracker| pointer in
   // //content/public/browser/network_service_instance.cc and points to the same
   // object.
-  network::NetworkConnectionTracker* network_connection_tracker_;
+  raw_ptr<network::NetworkConnectionTracker> network_connection_tracker_;
 
   // True if |connection_type_| changed during the lifetime of the log.
   bool connection_type_is_ambiguous_;
@@ -127,9 +127,6 @@ class NetworkMetricsProvider
   // The PHY mode of the currently associated access point obtained via
   // net::GetWifiPHYLayerProtocol.
   net::WifiPHYLayerProtocol wifi_phy_layer_protocol_;
-
-  // Helper object for retrieving connected wifi access point information.
-  std::unique_ptr<WifiAccessPointInfoProvider> wifi_access_point_info_provider_;
 
   // These metrics track histogram totals for the Net.ErrorCodesForMainFrame4
   // histogram. They are used to compute deltas at upload time.
@@ -151,8 +148,6 @@ class NetworkMetricsProvider
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<NetworkMetricsProvider> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(NetworkMetricsProvider);
 };
 
 }  // namespace metrics

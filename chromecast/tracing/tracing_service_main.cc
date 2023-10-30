@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,14 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/message_loop/message_pump_for_io.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/unix_domain_socket.h"
+#include "base/run_loop.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/task/current_thread.h"
 #include "base/task/single_thread_task_executor.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -98,7 +100,7 @@ class TraceCopyTask : public base::MessagePumpLibevent::FdWatcher {
   ~TraceCopyTask() override {}
 
   void Start() {
-    base::MessageLoopCurrentForIO::Get()->WatchFileDescriptor(
+    base::CurrentIOThread::Get()->WatchFileDescriptor(
         out_fd_.get(), true /* persistent */,
         base::MessagePumpForIO::WATCH_WRITE, &out_watcher_, this);
   }
@@ -183,7 +185,7 @@ class TraceConnection : public base::MessagePumpLibevent::FdWatcher {
   ~TraceConnection() override {}
 
   void Init() {
-    base::MessageLoopCurrentForIO::Get()->WatchFileDescriptor(
+    base::CurrentIOThread::Get()->WatchFileDescriptor(
         connection_fd_.get(), true /* persistent */,
         base::MessagePumpForIO::WATCH_READ, &connection_watcher_, this);
   }
@@ -308,8 +310,8 @@ class TraceConnection : public base::MessagePumpLibevent::FdWatcher {
     connection_fd_.reset();
     StopFtrace();
     ClearFtrace();
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(std::move(callback_)));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  std::move(callback_));
   }
 
   // Tracing state.
@@ -345,7 +347,7 @@ class TracingService : public base::MessagePumpLibevent::FdWatcher {
     if (!server_socket_.is_valid())
       return false;
 
-    base::MessageLoopCurrentForIO::Get()->WatchFileDescriptor(
+    base::CurrentIOThread::Get()->WatchFileDescriptor(
         server_socket_.get(), true /* persistent */,
         base::MessagePumpForIO::WATCH_READ, &server_socket_watcher_, this);
 
@@ -401,7 +403,7 @@ int main(int argc, char** argv) {
 
   LOG(INFO) << "Starting system tracing service...";
 
-  base::SingleThreadTaskExecutor io_task_executor(base::MessagePump::Type::IO);
+  base::SingleThreadTaskExecutor io_task_executor(base::MessagePumpType::IO);
   chromecast::tracing::TracingService service;
 
   if (!service.Init())

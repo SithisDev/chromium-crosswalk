@@ -1,12 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/test/did_commit_navigation_interceptor.h"
 
-#include "content/browser/frame_host/render_frame_host_impl.h"
+#include "base/memory/raw_ptr.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/common/frame.mojom-test-utils.h"
-#include "content/common/frame_messages.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 
@@ -23,13 +23,16 @@ class DidCommitNavigationInterceptor::FrameAgent
     rfhi_->SetCommitCallbackInterceptorForTesting(this);
   }
 
+  FrameAgent(const FrameAgent&) = delete;
+  FrameAgent& operator=(const FrameAgent&) = delete;
+
   ~FrameAgent() override {
     rfhi_->SetCommitCallbackInterceptorForTesting(nullptr);
   }
 
   bool WillProcessDidCommitNavigation(
       NavigationRequest* navigation_request,
-      ::FrameHostMsg_DidCommitProvisionalLoad_Params* params,
+      mojom::DidCommitProvisionalLoadParamsPtr* params,
       mojom::DidCommitProvisionalLoadInterfaceParamsPtr* interface_params)
       override {
     return interceptor_->WillProcessDidCommitNavigation(
@@ -37,20 +40,19 @@ class DidCommitNavigationInterceptor::FrameAgent
   }
 
  private:
-  DidCommitNavigationInterceptor* interceptor_;
+  raw_ptr<DidCommitNavigationInterceptor> interceptor_;
 
-  RenderFrameHostImpl* rfhi_;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameAgent);
+  raw_ptr<RenderFrameHostImpl> rfhi_;
 };
 
 DidCommitNavigationInterceptor::DidCommitNavigationInterceptor(
     WebContents* web_contents)
     : WebContentsObserver(web_contents) {
-  for (auto* rfh : web_contents->GetAllFrames()) {
-    if (rfh->IsRenderFrameLive())
-      RenderFrameCreated(rfh);
-  }
+  web_contents->ForEachRenderFrameHost(
+      [this](RenderFrameHost* render_frame_host) {
+        if (render_frame_host->IsRenderFrameLive())
+          RenderFrameCreated(render_frame_host);
+      });
 }
 
 DidCommitNavigationInterceptor::~DidCommitNavigationInterceptor() = default;

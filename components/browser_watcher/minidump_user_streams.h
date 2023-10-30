@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@ namespace browser_watcher {
 // stability report.
 // Note: the value was obtained by adding 1 to the stream type used for holding
 // the SyzyAsan proto.
-constexpr uint32_t kStabilityReportStreamType = 0x4B6B0002;
+constexpr uint32_t kActivityReportStreamType = 0x4B6B0002;
 
 }  // namespace browser_watcher
 

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 #include <cfloat>
 #include <string>
 
+#include "base/cxx17_backports.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/clock.h"
 #include "components/ntp_snippets/features.h"
@@ -83,15 +84,15 @@ const char* kInitialHoursBetweenEventsParams[] = {
     "user_classifier_default_interval_suggestions_shown",
     "user_classifier_default_interval_suggestions_used"};
 
-static_assert(base::size(kMetrics) ==
+static_assert(std::size(kMetrics) ==
                       static_cast<int>(UserClassifier::Metric::COUNT) &&
-                  base::size(kMetricKeys) ==
+                  std::size(kMetricKeys) ==
                       static_cast<int>(UserClassifier::Metric::COUNT) &&
-                  base::size(kLastTimeKeys) ==
+                  std::size(kLastTimeKeys) ==
                       static_cast<int>(UserClassifier::Metric::COUNT) &&
-                  base::size(kInitialHoursBetweenEvents) ==
+                  std::size(kInitialHoursBetweenEvents) ==
                       static_cast<int>(UserClassifier::Metric::COUNT) &&
-                  base::size(kInitialHoursBetweenEventsParams) ==
+                  std::size(kInitialHoursBetweenEventsParams) ==
                       static_cast<int>(UserClassifier::Metric::COUNT),
               "Fill in info for all metrics.");
 
@@ -163,7 +164,7 @@ double GetEstimateHoursBetweenEvents(double metric_value,
   //   estimate_hours = log(metric_value / (metric_value - 1)) / discount_rate.
   double estimate_hours =
       std::log(metric_value / (metric_value - 1)) / discount_rate_per_hour;
-  return std::max(min_hours, std::min(max_hours, estimate_hours));
+  return base::clamp(estimate_hours, min_hours, max_hours);
 }
 
 // The inverse of GetEstimateHoursBetweenEvents().
@@ -172,8 +173,7 @@ double GetMetricValueForEstimateHoursBetweenEvents(
     double discount_rate_per_hour,
     double min_hours,
     double max_hours) {
-  // Keep the input value within [min_hours, max_hours].
-  estimate_hours = std::max(min_hours, std::min(max_hours, estimate_hours));
+  estimate_hours = base::clamp(estimate_hours, min_hours, max_hours);
   // Return |metric_value| such that GetEstimateHoursBetweenEvents for
   // |metric_value| returns |estimate_hours|. Thus, solve |metric_value| in
   //   metric_value = 1 + e^{-discount_rate * estimate_hours} * metric_value,
@@ -357,10 +357,10 @@ double UserClassifier::GetHoursSinceLastTime(Metric metric) const {
     return 0;
   }
 
-  base::TimeDelta since_last_time =
+  const base::TimeDelta since_last_time =
       clock_->Now() - DeserializeTime(pref_service_->GetInt64(
                           kLastTimeKeys[static_cast<int>(metric)]));
-  return since_last_time.InSecondsF() / 3600;
+  return since_last_time / base::Hours(1);
 }
 
 bool UserClassifier::HasLastTime(Metric metric) const {

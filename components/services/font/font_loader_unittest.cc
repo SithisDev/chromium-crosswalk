@@ -1,39 +1,38 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <utility>
 
-#include "base/macros.h"
+#include "base/files/file_path.h"
+#include "base/no_destructor.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/thread_pool.h"
+#include "base/test/task_environment.h"
+#include "components/services/font/font_service_app.h"
 #include "components/services/font/public/cpp/font_loader.h"
-#include "components/services/font/public/cpp/manifest.h"
-#include "components/services/font/public/mojom/constants.mojom.h"
 #include "components/services/font/public/mojom/font_service.mojom.h"
-#include "ppapi/buildflags/buildflags.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/manifest_builder.h"
-#include "services/service_manager/public/cpp/test/test_service.h"
-#include "services/service_manager/public/cpp/test/test_service_manager.h"
+#include "pdf/buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkFontStyle.h"
 
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PDF)
 #include <ft2build.h>
+
 #include <freetype/freetype.h>
-#include "ppapi/c/private/pp_private_font_charset.h"  // nogncheck
-#endif
+#include "third_party/pdfium/public/fpdf_sysfontinfo.h"
+#endif  // BUILDFLAG(ENABLE_PDF)
 
 namespace font_service {
 namespace {
 
-bool IsInTestFontDirectory(const char* path) {
-  const char kTestFontsDir[] = "test_fonts";
-  return std::string(path).find(kTestFontsDir) != std::string::npos;
+bool IsInTestFontDirectory(const base::FilePath& path) {
+  const base::FilePath kTestFontsDir(
+      FILE_PATH_LITERAL("./third_party/test_fonts"));
+  return kTestFontsDir.IsParent(path);
 }
 
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PDF)
 std::string GetPostscriptNameFromFile(base::File& font_file) {
   int64_t file_size = font_file.GetLength();
   if (!file_size)
@@ -48,41 +47,45 @@ std::string GetPostscriptNameFromFile(base::File& font_file) {
   FT_Face font_face;
   FT_Open_Args open_args = {FT_OPEN_MEMORY,
                             reinterpret_cast<FT_Byte*>(file_contents.data()),
-                            file_size};
+                            static_cast<FT_Long>(file_size)};
   CHECK_EQ(FT_Err_Ok, FT_Open_Face(library, &open_args, 0, &font_face));
   font_family_name = FT_Get_Postscript_Name(font_face);
   FT_Done_Face(font_face);
   FT_Done_FreeType(library);
   return font_family_name;
 }
-#endif
+#endif  // BUILDFLAG(ENABLE_PDF)
 
-const char kTestServiceName[] = "font_service_unittests";
+mojo::PendingRemote<mojom::FontService> ConnectToBackgroundFontService() {
+  mojo::PendingRemote<mojom::FontService> remote;
+  base::ThreadPool::CreateSequencedTaskRunner(
+      {base::MayBlock(), base::WithBaseSyncPrimitives(),
+       base::TaskPriority::USER_BLOCKING})
+      ->PostTask(FROM_HERE,
+                 base::BindOnce(
+                     [](mojo::PendingReceiver<mojom::FontService> receiver) {
+                       static base::NoDestructor<FontServiceApp> service;
+                       service->BindReceiver(std::move(receiver));
+                     },
+                     remote.InitWithNewPipeAndPassReceiver()));
+  return remote;
+}
 
 class FontLoaderTest : public testing::Test {
  public:
-  FontLoaderTest()
-      : test_service_manager_(
-            {GetManifest(),
-             service_manager::ManifestBuilder()
-                 .WithServiceName(kTestServiceName)
-                 .RequireCapability(mojom::kServiceName, "font_service")
-                 .Build()}),
-        test_service_(
-            test_service_manager_.RegisterTestInstance(kTestServiceName)),
-        font_loader_(test_service_.connector()) {}
+  FontLoaderTest() = default;
+
+  FontLoaderTest(const FontLoaderTest&) = delete;
+  FontLoaderTest& operator=(const FontLoaderTest&) = delete;
+
   ~FontLoaderTest() override = default;
 
  protected:
   FontLoader* font_loader() { return &font_loader_; }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
-  service_manager::TestServiceManager test_service_manager_;
-  service_manager::TestService test_service_;
-  FontLoader font_loader_;
-
-  DISALLOW_COPY_AND_ASSIGN(FontLoaderTest);
+  base::test::TaskEnvironment task_environment_;
+  FontLoader font_loader_{ConnectToBackgroundFontService()};
 };
 
 }  // namespace
@@ -114,7 +117,8 @@ TEST_F(FontLoaderTest, BasicMatchingTest) {
                                      &result_family_name, &result_style);
       EXPECT_EQ(request_family_name[1],
                 std::string(result_family_name.c_str()));
-      EXPECT_TRUE(IsInTestFontDirectory(font_identity.fString.c_str()));
+      EXPECT_TRUE(
+          IsInTestFontDirectory(base::FilePath(font_identity.fString.c_str())));
       EXPECT_EQ(result_style, request_style);
     }
   }
@@ -143,7 +147,8 @@ TEST_F(FontLoaderTest, EmptyFontName) {
                                  &font_identity, &result_family_name,
                                  &result_style);
   EXPECT_EQ(kDefaultFontName, std::string(result_family_name.c_str()));
-  EXPECT_TRUE(IsInTestFontDirectory(font_identity.fString.c_str()));
+  EXPECT_TRUE(
+      IsInTestFontDirectory(base::FilePath(font_identity.fString.c_str())));
 }
 
 TEST_F(FontLoaderTest, CharacterFallback) {
@@ -171,10 +176,9 @@ TEST_F(FontLoaderTest, CharacterFallback) {
     EXPECT_FALSE(is_bold);
     EXPECT_FALSE(is_italic);
     if (character_family.second.size()) {
-      EXPECT_TRUE(
-          IsInTestFontDirectory(font_identity->str_representation.c_str()));
+      EXPECT_TRUE(IsInTestFontDirectory(font_identity->filepath));
     } else {
-      EXPECT_EQ(font_identity->str_representation.size(), 0u);
+      EXPECT_TRUE(font_identity->filepath.empty());
       EXPECT_EQ(result_family_name, "");
     }
   }
@@ -233,17 +237,17 @@ TEST_F(FontLoaderTest, RenderStyleForStrike) {
   }
 }
 
-TEST_F(FontLoaderTest, PPAPIFallback) {
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PDF)
+TEST_F(FontLoaderTest, PdfFallback) {
   std::tuple<std::string, uint32_t, std::string> family_charset_expectations[] =
       {
-          {"", PP_PRIVATEFONTCHARSET_SHIFTJIS, "DejaVuSans"},
-          {"", PP_PRIVATEFONTCHARSET_THAI, "Garuda"},
-          {"", PP_PRIVATEFONTCHARSET_GB2312, "DejaVuSans"},
-          {"", PP_PRIVATEFONTCHARSET_GREEK, "DejaVuSans"},
-          {"Arial", PP_PRIVATEFONTCHARSET_DEFAULT, "Arimo-Regular"},
-          {"Times New Roman", PP_PRIVATEFONTCHARSET_DEFAULT, "Tinos-Regular"},
-          {"Courier New", PP_PRIVATEFONTCHARSET_DEFAULT, "Cousine-Regular"},
+          {"", FXFONT_SHIFTJIS_CHARSET, "DejaVuSans"},
+          {"", FXFONT_THAI_CHARSET, "Garuda"},
+          {"", FXFONT_GB2312_CHARSET, "DejaVuSans"},
+          {"", FXFONT_GREEK_CHARSET, "DejaVuSans"},
+          {"Arial", FXFONT_DEFAULT_CHARSET, "Arimo-Regular"},
+          {"Times New Roman", FXFONT_DEFAULT_CHARSET, "Tinos-Regular"},
+          {"Courier New", FXFONT_DEFAULT_CHARSET, "Cousine-Regular"},
       };
   for (auto& family_charset_expectation : family_charset_expectations) {
     base::File result_file;
@@ -254,8 +258,8 @@ TEST_F(FontLoaderTest, PPAPIFallback) {
     EXPECT_EQ(GetPostscriptNameFromFile(result_file),
               std::get<2>(family_charset_expectation));
   }
-#endif
 }
+#endif  // BUILDFLAG(ENABLE_PDF)
 
 TEST_F(FontLoaderTest, LocalMatching) {
   // The following fonts are ensured to be available by the test harnesses
@@ -322,8 +326,7 @@ TEST_F(FontLoaderTest, LocalMatching) {
       EXPECT_TRUE(font_loader()->MatchFontByPostscriptNameOrFullFontName(
           unique_font_name, &font_identity));
       EXPECT_FALSE(font_identity.is_null());
-      EXPECT_TRUE(
-          IsInTestFontDirectory(font_identity->str_representation.c_str()));
+      EXPECT_TRUE(IsInTestFontDirectory(font_identity->filepath));
     }
   };
   match_unique_names(full_font_names_test_fonts);

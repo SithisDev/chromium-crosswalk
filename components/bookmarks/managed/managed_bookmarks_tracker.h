@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,15 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include "base/memory/raw_ptr.h"
+#include "base/values.h"
 #include "components/prefs/pref_change_registrar.h"
 
 class GURL;
 class PrefService;
-
-namespace base {
-class ListValue;
-}
 
 namespace bookmarks {
 
@@ -32,7 +29,7 @@ class BookmarkPermanentNode;
 // managed_node() in the BookmarkModel follow the policy-defined bookmark tree.
 class ManagedBookmarksTracker {
  public:
-  typedef base::Callback<std::string()> GetManagementDomainCallback;
+  using GetManagementDomainCallback = base::RepeatingCallback<std::string()>;
 
   // Shared constants used in the policy configuration.
   static const char kName[];
@@ -42,18 +39,22 @@ class ManagedBookmarksTracker {
 
   ManagedBookmarksTracker(BookmarkModel* model,
                           PrefService* prefs,
-                          const GetManagementDomainCallback& callback);
+                          GetManagementDomainCallback callback);
+
+  ManagedBookmarksTracker(const ManagedBookmarksTracker&) = delete;
+  ManagedBookmarksTracker& operator=(const ManagedBookmarksTracker&) = delete;
+
   ~ManagedBookmarksTracker();
 
   // Returns the initial list of managed bookmarks, which can be passed to
   // LoadInitial() to do the initial load.
-  std::unique_ptr<base::ListValue> GetInitialManagedBookmarks();
+  base::Value::List GetInitialManagedBookmarks();
 
   // Loads the initial managed bookmarks in |list| into |folder|.
   // New nodes will be assigned IDs starting at |next_node_id|.
   // Returns the next node ID to use.
   static int64_t LoadInitial(BookmarkNode* folder,
-                             const base::ListValue* list,
+                             const base::Value::List& list,
                              int64_t next_node_id);
 
   // Starts tracking the pref for updates to the managed bookmarks.
@@ -61,27 +62,25 @@ class ManagedBookmarksTracker {
   void Init(BookmarkPermanentNode* managed_node);
 
  private:
-  base::string16 GetBookmarksFolderTitle() const;
+  std::u16string GetBookmarksFolderTitle() const;
 
   void ReloadManagedBookmarks();
 
-  void UpdateBookmarks(const BookmarkNode* folder, const base::ListValue* list);
-  static bool LoadBookmark(const base::ListValue* list,
+  void UpdateBookmarks(const BookmarkNode* folder,
+                       const base::Value::List& list);
+  static bool LoadBookmark(const base::Value::List& list,
                            size_t index,
-                           base::string16* title,
+                           std::u16string* title,
                            GURL* url,
-                           const base::ListValue** children);
+                           const base::Value::List** children);
 
-  BookmarkModel* model_;
-  BookmarkPermanentNode* managed_node_;
-  PrefService* prefs_;
+  raw_ptr<BookmarkModel> model_;
+  raw_ptr<BookmarkPermanentNode> managed_node_;
+  raw_ptr<PrefService> prefs_;
   PrefChangeRegistrar registrar_;
   GetManagementDomainCallback get_management_domain_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(ManagedBookmarksTracker);
 };
 
 }  // namespace bookmarks
 
 #endif  // COMPONENTS_BOOKMARKS_MANAGED_MANAGED_BOOKMARKS_TRACKER_H_
-

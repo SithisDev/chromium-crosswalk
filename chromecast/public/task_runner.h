@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,23 @@ class TaskRunner {
    public:
     virtual ~Task() {}
     virtual void Run() = 0;
+  };
+
+  // This class is intended for use with base callback type. A template has been
+  // used to avoid introducing a hard dependency on Chromium base. It is used to
+  // convert a chromium-style callback to a Task as defined above.
+  template <typename T>
+  class CallbackTask : public Task {
+   public:
+    CallbackTask(T callback) : callback_(std::move(callback)) {}
+
+    ~CallbackTask() override = default;
+
+   private:
+    // TaskRunner::Task overrides:
+    void Run() override { std::move(callback_).Run(); }
+
+    T callback_;
   };
 
   // Posts a task to the thread's task queue.  Delay of 0 could mean task

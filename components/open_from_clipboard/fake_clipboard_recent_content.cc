@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,27 +9,87 @@ FakeClipboardRecentContent::FakeClipboardRecentContent()
 
 FakeClipboardRecentContent::~FakeClipboardRecentContent() {}
 
-base::Optional<GURL> FakeClipboardRecentContent::GetRecentURLFromClipboard() {
+absl::optional<GURL> FakeClipboardRecentContent::GetRecentURLFromClipboard() {
   if (suppress_content_)
-    return base::nullopt;
+    return absl::nullopt;
 
   return clipboard_url_content_;
 }
 
-base::Optional<base::string16>
+absl::optional<std::u16string>
 FakeClipboardRecentContent::GetRecentTextFromClipboard() {
   if (suppress_content_)
-    return base::nullopt;
+    return absl::nullopt;
 
   return clipboard_text_content_;
 }
 
-base::Optional<gfx::Image>
-FakeClipboardRecentContent::GetRecentImageFromClipboard() {
-  if (suppress_content_)
-    return base::nullopt;
+void FakeClipboardRecentContent::GetRecentImageFromClipboard(
+    GetRecentImageCallback callback) {
+  if (suppress_content_) {
+    std::move(callback).Run(absl::nullopt);
+    return;
+  }
 
-  return clipboard_image_content_;
+  std::move(callback).Run(clipboard_image_content_);
+}
+
+bool FakeClipboardRecentContent::HasRecentImageFromClipboard() {
+  if (suppress_content_)
+    return false;
+  return clipboard_image_content_.has_value();
+}
+
+void FakeClipboardRecentContent::HasRecentContentFromClipboard(
+    std::set<ClipboardContentType> types,
+    HasDataCallback callback) {
+  std::set<ClipboardContentType> matching_types;
+  for (ClipboardContentType type : types) {
+    switch (type) {
+      case ClipboardContentType::URL:
+        if (GetRecentURLFromClipboard()) {
+          matching_types.insert(ClipboardContentType::URL);
+        }
+        break;
+      case ClipboardContentType::Text:
+        if (GetRecentTextFromClipboard()) {
+          matching_types.insert(ClipboardContentType::Text);
+        }
+        break;
+      case ClipboardContentType::Image:
+        if (HasRecentImageFromClipboard()) {
+          matching_types.insert(ClipboardContentType::Image);
+        }
+        break;
+    }
+  }
+  std::move(callback).Run(matching_types);
+}
+
+absl::optional<std::set<ClipboardContentType>>
+FakeClipboardRecentContent::GetCachedClipboardContentTypes() {
+  std::set<ClipboardContentType> clipboard_content_types;
+
+  if (clipboard_image_content_)
+    clipboard_content_types.insert(ClipboardContentType::Image);
+
+  if (clipboard_text_content_)
+    clipboard_content_types.insert(ClipboardContentType::Text);
+
+  if (clipboard_url_content_)
+    clipboard_content_types.insert(ClipboardContentType::URL);
+
+  return clipboard_content_types;
+}
+
+void FakeClipboardRecentContent::GetRecentURLFromClipboard(
+    GetRecentURLCallback callback) {
+  std::move(callback).Run(GetRecentURLFromClipboard());
+}
+
+void FakeClipboardRecentContent::GetRecentTextFromClipboard(
+    GetRecentTextCallback callback) {
+  std::move(callback).Run(GetRecentTextFromClipboard());
 }
 
 base::TimeDelta FakeClipboardRecentContent::GetClipboardContentAge() const {
@@ -40,21 +100,29 @@ void FakeClipboardRecentContent::SuppressClipboardContent() {
   suppress_content_ = true;
 }
 
+void FakeClipboardRecentContent::ClearClipboardContent() {
+  clipboard_url_content_ = absl::nullopt;
+  clipboard_text_content_ = absl::nullopt;
+  clipboard_image_content_ = absl::nullopt;
+  content_age_ = base::TimeDelta::Max();
+  suppress_content_ = false;
+}
+
 void FakeClipboardRecentContent::SetClipboardURL(const GURL& url,
                                                  base::TimeDelta content_age) {
   DCHECK(url.is_valid());
   clipboard_url_content_ = url;
-  clipboard_text_content_ = base::nullopt;
-  clipboard_image_content_ = base::nullopt;
+  clipboard_text_content_ = absl::nullopt;
+  clipboard_image_content_ = absl::nullopt;
   content_age_ = content_age;
   suppress_content_ = false;
 }
 
-void FakeClipboardRecentContent::SetClipboardText(const base::string16& text,
+void FakeClipboardRecentContent::SetClipboardText(const std::u16string& text,
                                                   base::TimeDelta content_age) {
-  clipboard_url_content_ = base::nullopt;
+  clipboard_url_content_ = absl::nullopt;
   clipboard_text_content_ = text;
-  clipboard_image_content_ = base::nullopt;
+  clipboard_image_content_ = absl::nullopt;
   content_age_ = content_age;
   suppress_content_ = false;
 }
@@ -62,8 +130,8 @@ void FakeClipboardRecentContent::SetClipboardText(const base::string16& text,
 void FakeClipboardRecentContent::SetClipboardImage(
     const gfx::Image& image,
     base::TimeDelta content_age) {
-  clipboard_url_content_ = base::nullopt;
-  clipboard_text_content_ = base::nullopt;
+  clipboard_url_content_ = absl::nullopt;
+  clipboard_text_content_ = absl::nullopt;
   clipboard_image_content_ = image;
   content_age_ = content_age;
   suppress_content_ = false;

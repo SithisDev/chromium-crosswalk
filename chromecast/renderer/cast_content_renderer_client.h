@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,75 +8,72 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "chromecast/chromecast_buildflags.h"
 #include "chromecast/common/mojom/application_media_capabilities.mojom.h"
+#include "chromecast/renderer/cast_activity_url_filter_manager.h"
+#include "chromecast/renderer/cast_url_rewrite_rules_store.h"
+#include "chromecast/renderer/feature_manager_on_associated_interface.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "media/base/audio_codecs.h"
 #include "media/base/audio_parameters.h"
-#include "mojo/public/cpp/bindings/binding.h"
-
-namespace extensions {
-class ExtensionsClient;
-class ExtensionsGuestViewContainerDispatcher;
-class CastExtensionsRendererClient;
-}  // namespace extensions
-
-namespace network_hints {
-class PrescientNetworkingDispatcher;
-}  // namespace network_hints
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace chromecast {
 class MemoryPressureObserverImpl;
+class UrlRewriteRulesProvider;
 namespace media {
 class MediaCapsObserverImpl;
 class SupportedCodecProfileLevelsMemo;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 class CastAudioDeviceFactory;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 }
 
 namespace shell {
 
 class CastContentRendererClient
     : public content::ContentRendererClient,
-      public mojom::ApplicationMediaCapabilitiesObserver {
+      public mojom::ApplicationMediaCapabilitiesObserver,
+      public CastURLRewriteRulesStore {
  public:
   // Creates an implementation of CastContentRendererClient. Platform should
   // link in an implementation as needed.
   static std::unique_ptr<CastContentRendererClient> Create();
 
+  CastContentRendererClient(const CastContentRendererClient&) = delete;
+  CastContentRendererClient& operator=(const CastContentRendererClient&) =
+      delete;
+
   ~CastContentRendererClient() override;
 
   // ContentRendererClient implementation:
   void RenderThreadStarted() override;
-  void RenderViewCreated(content::RenderView* render_view) override;
   void RenderFrameCreated(content::RenderFrame* render_frame) override;
-  content::BrowserPluginDelegate* CreateBrowserPluginDelegate(
-      content::RenderFrame* render_frame,
-      const content::WebPluginInfo& info,
-      const std::string& mime_type,
-      const GURL& original_url) override;
   void RunScriptsAtDocumentStart(content::RenderFrame* render_frame) override;
   void RunScriptsAtDocumentEnd(content::RenderFrame* render_frame) override;
-  void AddSupportedKeySystems(
-      std::vector<std::unique_ptr<::media::KeySystemProperties>>*
-          key_systems_properties) override;
+  void GetSupportedKeySystems(::media::GetSupportedKeySystemsCB cb) override;
   bool IsSupportedAudioType(const ::media::AudioType& type) override;
   bool IsSupportedVideoType(const ::media::VideoType& type) override;
   bool IsSupportedBitstreamAudioCodec(::media::AudioCodec codec) override;
-  blink::WebPrescientNetworking* GetPrescientNetworking() override;
+  std::unique_ptr<blink::WebPrescientNetworking> CreatePrescientNetworking(
+      content::RenderFrame* render_frame) override;
   bool DeferMediaLoad(content::RenderFrame* render_frame,
                       bool render_frame_has_played_media_before,
                       base::OnceClosure closure) override;
+  std::unique_ptr<::media::Demuxer> OverrideDemuxerForUrl(
+      content::RenderFrame* render_frame,
+      const GURL& url,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) override;
   bool IsIdleMediaSuspendEnabled() override;
   void SetRuntimeFeaturesDefaultsBeforeBlinkInitialization() override;
-  std::unique_ptr<content::URLLoaderThrottleProvider>
+  std::unique_ptr<blink::WebSocketHandshakeThrottleProvider>
+  CreateWebSocketHandshakeThrottleProvider() override;
+  std::unique_ptr<blink::URLLoaderThrottleProvider>
   CreateURLLoaderThrottleProvider(
-      content::URLLoaderThrottleProviderType type) override;
-  base::Optional<::media::AudioRendererAlgorithmParameters>
+      blink::URLLoaderThrottleProviderType type) override;
+  absl::optional<::media::AudioRendererAlgorithmParameters>
   GetAudioRendererAlgorithmParameters(
       ::media::AudioParameters audio_parameters) override;
 
@@ -88,35 +85,48 @@ class CastContentRendererClient
   virtual bool RunWhenInForeground(content::RenderFrame* render_frame,
                                    base::OnceClosure closure);
 
+  CastActivityUrlFilterManager* activity_url_filter_manager() {
+    return activity_url_filter_manager_.get();
+  }
+
+  // TODO(guohuideng): Move |feature_manager_on_associated_interface_| to
+  // private when we can.
+  FeatureManagerOnAssociatedInterface*
+      main_frame_feature_manager_on_associated_interface_{nullptr};
+
  private:
   // mojom::ApplicationMediaCapabilitiesObserver implementation:
-  void OnSupportedBitstreamAudioCodecsChanged(int codecs) override;
+  void OnSupportedBitstreamAudioCodecsChanged(
+      const BitstreamAudioCodecsInfo& info) override;
 
-  std::unique_ptr<network_hints::PrescientNetworkingDispatcher>
-      prescient_networking_dispatcher_;
+  // CastURLRewriteRulesStore implementation:
+  scoped_refptr<url_rewrite::UrlRequestRewriteRules> GetUrlRequestRewriteRules(
+      int render_frame_id) const override;
+
+  bool CheckSupportedBitstreamAudioCodec(::media::AudioCodec codec,
+                                         bool check_spatial_rendering);
+
+  // Called when a render frame is removed.
+  void OnRenderFrameRemoved(int render_frame_id);
+
   std::unique_ptr<media::MediaCapsObserverImpl> media_caps_observer_;
   std::unique_ptr<media::SupportedCodecProfileLevelsMemo> supported_profiles_;
-  mojo::Binding<mojom::ApplicationMediaCapabilitiesObserver>
-      app_media_capabilities_observer_binding_;
-#if !defined(OS_ANDROID)
+  mojo::Receiver<mojom::ApplicationMediaCapabilitiesObserver>
+      app_media_capabilities_observer_receiver_{this};
+#if !BUILDFLAG(IS_ANDROID)
   std::unique_ptr<MemoryPressureObserverImpl> memory_pressure_observer_;
 #endif
 
-#if BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
-  std::unique_ptr<extensions::ExtensionsClient> extensions_client_;
-  std::unique_ptr<extensions::CastExtensionsRendererClient>
-      extensions_renderer_client_;
-  std::unique_ptr<extensions::ExtensionsGuestViewContainerDispatcher>
-      guest_view_container_dispatcher_;
-#endif
-
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   std::unique_ptr<media::CastAudioDeviceFactory> cast_audio_device_factory_;
 #endif
 
-  int supported_bitstream_audio_codecs_;
+  BitstreamAudioCodecsInfo supported_bitstream_audio_codecs_info_;
 
-  DISALLOW_COPY_AND_ASSIGN(CastContentRendererClient);
+  base::flat_map<int /* render_frame_id */,
+                 std::unique_ptr<UrlRewriteRulesProvider>>
+      url_rewrite_rules_providers_;
+  std::unique_ptr<CastActivityUrlFilterManager> activity_url_filter_manager_;
 };
 
 }  // namespace shell

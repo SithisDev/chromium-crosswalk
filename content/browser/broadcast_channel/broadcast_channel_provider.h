@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,48 +7,36 @@
 
 #include <map>
 
-#include "base/memory/ref_counted.h"
-#include "content/common/content_export.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/broadcastchannel/broadcast_channel.mojom.h"
-#include "url/origin.h"
 
 namespace content {
 
-class CONTENT_EXPORT BroadcastChannelProvider
-    : public base::RefCountedThreadSafe<BroadcastChannelProvider>,
-      public blink::mojom::BroadcastChannelProvider {
+class BroadcastChannelService;
+
+class BroadcastChannelProvider : public blink::mojom::BroadcastChannelProvider {
  public:
-  BroadcastChannelProvider();
+  BroadcastChannelProvider(BroadcastChannelService* broadcast_channel_service,
+                           const blink::StorageKey& storage_key);
 
-  using RenderProcessHostId = int;
-  mojo::BindingId Connect(
-      RenderProcessHostId render_process_host_id,
-      blink::mojom::BroadcastChannelProviderRequest request);
-
-  void ConnectToChannel(
-      const url::Origin& origin,
-      const std::string& name,
-      blink::mojom::BroadcastChannelClientAssociatedPtrInfo client,
-      blink::mojom::BroadcastChannelClientAssociatedRequest connection)
-      override;
-
-  auto& bindings_for_testing() { return bindings_; }
-
- private:
-  friend class base::RefCountedThreadSafe<BroadcastChannelProvider>;
-  class Connection;
-
+  BroadcastChannelProvider() = delete;
   ~BroadcastChannelProvider() override;
 
-  void UnregisterConnection(Connection*);
-  void ReceivedMessageOnConnection(Connection*,
-                                   const blink::CloneableMessage& message);
+  void ConnectToChannel(
+      const std::string& name,
+      mojo::PendingAssociatedRemote<blink::mojom::BroadcastChannelClient>
+          client,
+      mojo::PendingAssociatedReceiver<blink::mojom::BroadcastChannelClient>
+          connection) override;
 
-  mojo::BindingSet<blink::mojom::BroadcastChannelProvider, RenderProcessHostId>
-      bindings_;
-  std::map<url::Origin, std::multimap<std::string, std::unique_ptr<Connection>>>
-      connections_;
+ private:
+  const blink::StorageKey storage_key_;
+  // Note: We use a raw pointer here because each BroadcastChannelProvider is
+  // owned by BroadcastChannelService, so the lifetime of the former should not
+  // exceed the lifetime of the latter.
+  raw_ptr<BroadcastChannelService> broadcast_channel_service_;
 };
 
 }  // namespace content

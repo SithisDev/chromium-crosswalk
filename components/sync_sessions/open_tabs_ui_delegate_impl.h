@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,12 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "components/sync_sessions/open_tabs_ui_delegate.h"
 
 namespace sync_sessions {
 
-class FaviconCache;
 class SyncSessionsClient;
 class SyncedSessionTracker;
 
@@ -21,19 +22,20 @@ class OpenTabsUIDelegateImpl : public OpenTabsUIDelegate {
   using DeleteForeignSessionCallback =
       base::RepeatingCallback<void(const std::string&)>;
 
-  // |sessions_client|, |session_tracker| and |favicon_cache| must not be null
-  // and must outlive this object. |delete_foreign_session_cb| allows to
-  // forward calls to DeleteForeignSession() which this class doesn't implement.
+  // |sessions_client| and |session_tracker| must not be null and must outlive
+  // this object. |delete_foreign_session_cb| allows to forward calls to
+  // DeleteForeignSession() which this class doesn't implement.
   OpenTabsUIDelegateImpl(
       const SyncSessionsClient* sessions_client,
       const SyncedSessionTracker* session_tracker,
-      const FaviconCache* favicon_cache,
       const DeleteForeignSessionCallback& delete_foreign_session_cb);
+
+  OpenTabsUIDelegateImpl(const OpenTabsUIDelegateImpl&) = delete;
+  OpenTabsUIDelegateImpl& operator=(const OpenTabsUIDelegateImpl&) = delete;
+
   ~OpenTabsUIDelegateImpl() override;
 
   // OpenTabsUIDelegate implementation.
-  favicon_base::FaviconRawBitmapResult GetSyncedFaviconForPageURL(
-      const GURL& page_url) const override;
   bool GetAllForeignSessions(
       std::vector<const SyncedSession*>* sessions) override;
   bool GetForeignSession(
@@ -47,15 +49,11 @@ class OpenTabsUIDelegateImpl : public OpenTabsUIDelegate {
       std::vector<const sessions::SessionTab*>* tabs) override;
   void DeleteForeignSession(const std::string& tag) override;
   bool GetLocalSession(const SyncedSession** local_session) override;
-  GURL GetIconUrlForPageUrl(const GURL& page_url) override;
 
  private:
-  const SyncSessionsClient* const sessions_client_;
-  const SyncedSessionTracker* session_tracker_;
-  const FaviconCache* favicon_cache_;
+  const raw_ptr<const SyncSessionsClient> sessions_client_;
+  raw_ptr<const SyncedSessionTracker> session_tracker_;
   DeleteForeignSessionCallback delete_foreign_session_cb_;
-
-  DISALLOW_COPY_AND_ASSIGN(OpenTabsUIDelegateImpl);
 };
 
 }  // namespace sync_sessions

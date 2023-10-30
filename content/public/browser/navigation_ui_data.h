@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 namespace content {
 
-// PlzNavigate
 // Copyable interface for embedders to pass opaque data to content/. It is
 // expected to be created on the UI thread at the start of the navigation, and
 // content/ will transfer it to the IO thread as a clone.

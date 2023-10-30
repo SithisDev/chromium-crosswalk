@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,38 +10,49 @@
 #include <set>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
+#include "base/containers/contains.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/json/json_reader.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "build/buildflag.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
 #include "components/signin/internal/identity_manager/oauth_multilogin_helper.h"
 #include "components/signin/internal/identity_manager/ubertoken_fetcher_impl.h"
+#include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_metrics.h"
+#include "components/signin/public/base/signin_pref_names.h"
 #include "components/signin/public/identity_manager/set_accounts_in_cookie_result.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/cookies/cookie_change_dispatcher.h"
+#include "net/cookies/cookie_constants.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
+#include "url/url_util.h"
 
 namespace {
 
 // The maximum number of retries for a fetcher used in this class.
 constexpr int kMaxFetcherRetries = 8;
+
+// Timeout for the ExternalCCResult fetch. See https://crbug.com/750316#c37 for
+// details on the exact duration.
+constexpr int kExternalCCResultTimeoutSeconds = 7;
 
 // In case of an error while fetching using the GaiaAuthFetcher or
 // SimpleURLLoader, retry with exponential backoff. Try up to 7 times within 15
@@ -72,10 +83,6 @@ const net::BackoffEntry::Policy kBackoffPolicy = {
     false,
 };
 
-// Name of the GAIA cookie that is being observed to detect when available
-// accounts have changed in the content-area.
-const char* const kGaiaCookieName = "APISID";
-
 // State of requests to Gaia logout endpoint. Used as entry for histogram
 // |Signin.GaiaCookieManager.Logout|.
 enum LogoutRequestState {
@@ -95,56 +102,19 @@ void RecordLogoutRequestState(LogoutRequestState logout_state) {
   UMA_HISTOGRAM_ENUMERATION("Signin.GaiaCookieManager.Logout", logout_state);
 }
 
-// Record ListAccounts errors for individual retries.
-void RecordListAccountsRetryResult(GoogleServiceAuthError error,
-                                   int retry_attempt_number) {
-  int net_error = net::OK;
-  switch (error.state()) {
-    case GoogleServiceAuthError::NONE:
-      net_error = net::OK;
-      break;
-    case GoogleServiceAuthError::CONNECTION_FAILED:
-      net_error = error.network_error();
-      break;
-    case GoogleServiceAuthError::REQUEST_CANCELED:
-      net_error = net::ERR_ABORTED;
-      break;
-    default:
-      return;  // There is an error not related to network.
-  }
-
-  std::string histogram_name =
-      base::StringPrintf("Gaia.AuthFetcher.ListAccounts.NetErrorCodes.Retry_%i",
-                         retry_attempt_number);
-  base::UmaHistogramSparse(histogram_name, -net_error);
-}
-
 }  // namespace
+
+GaiaCookieManagerService::GaiaCookieRequest::SetAccountsParams::
+    SetAccountsParams() = default;
+GaiaCookieManagerService::GaiaCookieRequest::SetAccountsParams::
+    SetAccountsParams(const SetAccountsParams& other) = default;
+GaiaCookieManagerService::GaiaCookieRequest::SetAccountsParams::
+    ~SetAccountsParams() = default;
 
 GaiaCookieManagerService::GaiaCookieRequest::GaiaCookieRequest(
     GaiaCookieRequestType request_type,
     gaia::GaiaSource source)
     : request_type_(request_type), source_(source) {}
-
-GaiaCookieManagerService::GaiaCookieRequest::GaiaCookieRequest(
-    GaiaCookieRequestType request_type,
-    const std::vector<AccountIdGaiaIdPair>& accounts,
-    gaia::GaiaSource source,
-    SetAccountsInCookieCompletedCallback callback)
-    : request_type_(request_type),
-      accounts_(accounts),
-      source_(source),
-      set_accounts_in_cookie_completed_callback_(std::move(callback)) {}
-
-GaiaCookieManagerService::GaiaCookieRequest::GaiaCookieRequest(
-    GaiaCookieRequestType request_type,
-    const CoreAccountId& account_id,
-    gaia::GaiaSource source,
-    AddAccountToCookieCompletedCallback callback)
-    : request_type_(request_type),
-      account_id_(account_id),
-      source_(source),
-      add_account_to_cookie_completed_callback_(std::move(callback)) {}
 
 GaiaCookieManagerService::GaiaCookieRequest::~GaiaCookieRequest() {}
 
@@ -155,10 +125,24 @@ GaiaCookieManagerService::GaiaCookieRequest&
 GaiaCookieManagerService::GaiaCookieRequest::operator=(GaiaCookieRequest&&) =
     default;
 
+const std::vector<GaiaCookieManagerService::AccountIdGaiaIdPair>&
+GaiaCookieManagerService::GaiaCookieRequest::GetAccounts() const {
+  DCHECK_EQ(request_type_, GaiaCookieRequestType::SET_ACCOUNTS);
+  DCHECK(account_id_.empty());
+  return set_accounts_params_.accounts;
+}
+
+gaia::MultiloginMode
+GaiaCookieManagerService::GaiaCookieRequest::GetMultiloginMode() const {
+  DCHECK_EQ(request_type_, GaiaCookieRequestType::SET_ACCOUNTS);
+  DCHECK(account_id_.empty());
+  return set_accounts_params_.mode;
+}
+
 const CoreAccountId
 GaiaCookieManagerService::GaiaCookieRequest::GetAccountID() {
   DCHECK_EQ(request_type_, GaiaCookieRequestType::ADD_ACCOUNT);
-  DCHECK_EQ(0u, accounts_.size());
+  DCHECK_EQ(0u, set_accounts_params_.accounts.size());
   return account_id_;
 }
 
@@ -182,34 +166,49 @@ void GaiaCookieManagerService::GaiaCookieRequest::
     std::move(add_account_to_cookie_completed_callback_).Run(account_id, error);
 }
 
+void GaiaCookieManagerService::GaiaCookieRequest::
+    RunLogOutFromCookieCompletedCallback(const GoogleServiceAuthError& error) {
+  if (log_out_from_cookie_completed_callback_)
+    std::move(log_out_from_cookie_completed_callback_).Run(error);
+}
+
 // static
 GaiaCookieManagerService::GaiaCookieRequest
 GaiaCookieManagerService::GaiaCookieRequest::CreateAddAccountRequest(
     const CoreAccountId& account_id,
     gaia::GaiaSource source,
     AddAccountToCookieCompletedCallback callback) {
-  return GaiaCookieManagerService::GaiaCookieRequest(
-      GaiaCookieRequestType::ADD_ACCOUNT, account_id, source,
-      std::move(callback));
+  GaiaCookieManagerService::GaiaCookieRequest request(
+      GaiaCookieRequestType::ADD_ACCOUNT, source);
+  request.account_id_ = account_id;
+  request.add_account_to_cookie_completed_callback_ = std::move(callback);
+  return request;
 }
 
 // static
 GaiaCookieManagerService::GaiaCookieRequest
 GaiaCookieManagerService::GaiaCookieRequest::CreateSetAccountsRequest(
+    gaia::MultiloginMode mode,
     const std::vector<AccountIdGaiaIdPair>& accounts,
     gaia::GaiaSource source,
     SetAccountsInCookieCompletedCallback callback) {
-  return GaiaCookieManagerService::GaiaCookieRequest(
-      GaiaCookieRequestType::SET_ACCOUNTS, accounts, source,
-      std::move(callback));
+  GaiaCookieManagerService::GaiaCookieRequest request(
+      GaiaCookieRequestType::SET_ACCOUNTS, source);
+  request.set_accounts_params_.mode = mode;
+  request.set_accounts_params_.accounts = accounts;
+  request.set_accounts_in_cookie_completed_callback_ = std::move(callback);
+  return request;
 }
 
 // static
 GaiaCookieManagerService::GaiaCookieRequest
 GaiaCookieManagerService::GaiaCookieRequest::CreateLogOutRequest(
-    gaia::GaiaSource source) {
-  return GaiaCookieManagerService::GaiaCookieRequest(
+    gaia::GaiaSource source,
+    LogOutFromCookieCompletedCallback callback) {
+  GaiaCookieManagerService::GaiaCookieRequest request(
       GaiaCookieRequestType::LOG_OUT, source);
+  request.log_out_from_cookie_completed_callback_ = std::move(callback);
+  return request;
 }
 
 // static
@@ -252,9 +251,8 @@ void GaiaCookieManagerService::ExternalCcResultFetcher::Start(
   helper_->gaia_auth_fetcher_->StartGetCheckConnectionInfo();
 
   // Some fetches may timeout.  Start a timer to decide when the result fetcher
-  // has waited long enough. See https://crbug.com/750316#c36 for details on
-  // exact timeout duration.
-  timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(7), this,
+  // has waited long enough.
+  timer_.Start(FROM_HERE, base::Seconds(kExternalCCResultTimeoutSeconds), this,
                &GaiaCookieManagerService::ExternalCcResultFetcher::Timeout);
 }
 
@@ -270,33 +268,31 @@ void GaiaCookieManagerService::ExternalCcResultFetcher::TimeoutForTests() {
 void GaiaCookieManagerService::ExternalCcResultFetcher::
     OnGetCheckConnectionInfoSuccess(const std::string& data) {
   std::unique_ptr<base::Value> value = base::JSONReader::ReadDeprecated(data);
-  const base::ListValue* list;
-  if (!value || !value->GetAsList(&list)) {
+  if (!value || !value->is_list()) {
     CleanupTransientState();
     GetCheckConnectionInfoCompleted(false);
     return;
   }
 
   // If there is nothing to check, terminate immediately.
-  if (list->GetSize() == 0) {
+  if (value->GetListDeprecated().size() == 0) {
     CleanupTransientState();
     GetCheckConnectionInfoCompleted(true);
     return;
   }
 
   // Start a fetcher for each connection URL that needs to be checked.
-  for (size_t i = 0; i < list->GetSize(); ++i) {
-    const base::DictionaryValue* dict;
-    if (list->GetDictionary(i, &dict)) {
-      std::string token;
-      std::string url;
-      if (dict->GetString("carryBackToken", &token) &&
-          dict->GetString("url", &url)) {
-        results_[token] = "null";
-        network::SimpleURLLoader* loader =
-            CreateAndStartLoader(GURL(url)).release();
-        loaders_[loader] = token;
-      }
+  for (const base::Value& elem : value->GetListDeprecated()) {
+    if (!elem.is_dict())
+      continue;
+
+    const std::string* token = elem.FindStringPath("carryBackToken");
+    const std::string* url = elem.FindStringPath("url");
+    if (token && url) {
+      results_[*token] = "null";
+      network::SimpleURLLoader* loader =
+          CreateAndStartLoader(GURL(*url)).release();
+      loaders_[loader] = *token;
     }
   }
 }
@@ -351,7 +347,7 @@ GaiaCookieManagerService::ExternalCcResultFetcher::CreateAndStartLoader(
 
   auto request = std::make_unique<network::ResourceRequest>();
   request->url = url;
-  request->allow_credentials = false;
+  request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   std::unique_ptr<network::SimpleURLLoader> loader =
       network::SimpleURLLoader::Create(std::move(request), traffic_annotation);
@@ -387,9 +383,20 @@ void GaiaCookieManagerService::ExternalCcResultFetcher::OnURLLoadComplete(
 
   // Only up to the first 16 characters of the response are important to GAIA.
   // Truncate if needed to keep amount data sent back to GAIA down.
-  if (data.size() > 16)
-    data.resize(16);
-  results_[it->second] = data;
+  constexpr int kTruncatedLength = 16;
+  if (data.size() > kTruncatedLength)
+    data.resize(kTruncatedLength);
+
+  // Encode the response to avoid cases where a proxy could pass a
+  // comma-separated string which would break the server-side parsing
+  // (see crbug.com/1086916#c4).
+
+  // A character may be encoded into a maximum of 4 characters.
+  constexpr int kEncodedLength = kTruncatedLength * 4;
+  url::RawCanonOutputT<char, kEncodedLength> encoded_data;
+  url::EncodeURIComponent(data.c_str(), data.size(), &encoded_data);
+  results_[it->second] =
+      std::string(encoded_data.data(), encoded_data.length());
 
   // Clean up tracking of this fetcher.  The rest will be cleaned up after
   // the timer expires in CleanupTransientState().
@@ -434,59 +441,80 @@ void GaiaCookieManagerService::ExternalCcResultFetcher::
 }
 
 GaiaCookieManagerService::GaiaCookieManagerService(
+    AccountTrackerService* account_tracker_service,
     ProfileOAuth2TokenService* token_service,
     SigninClient* signin_client)
-    : token_service_(token_service),
+    : account_tracker_service_(account_tracker_service),
+      token_service_(token_service),
       signin_client_(signin_client),
       external_cc_result_fetcher_(this),
       fetcher_backoff_(&kBackoffPolicy),
       fetcher_retries_(0),
       listAccountsUnexpectedServerResponseRetried_(false),
-      cookie_listener_binding_(this),
       external_cc_result_fetched_(false),
-      list_accounts_stale_(true) {}
+      list_accounts_stale_(true) {
+  std::string gaia_cookie_last_list_accounts_data =
+      signin_client_->GetPrefs()->GetString(
+          prefs::kGaiaCookieLastListAccountsData);
+
+  if (!gaia_cookie_last_list_accounts_data.empty()) {
+    if (!gaia::ParseListAccountsData(gaia_cookie_last_list_accounts_data,
+                                     &listed_accounts_,
+                                     &signed_out_accounts_)) {
+      DLOG(WARNING) << "GaiaCookieManagerService::ListAccounts: Failed to "
+                       "parse list accounts data from pref.";
+      listed_accounts_.clear();
+      signed_out_accounts_.clear();
+      return;
+    }
+    InitializeListedAccountsIds();
+  }
+}
 
 GaiaCookieManagerService::~GaiaCookieManagerService() {
+  cookie_listener_receiver_.reset();
   CancelAll();
   DCHECK(requests_.empty());
 }
 
+// static
+void GaiaCookieManagerService::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterStringPref(prefs::kGaiaCookieLastListAccountsData,
+                               std::string());
+}
+
 void GaiaCookieManagerService::InitCookieListener() {
-  DCHECK(!cookie_listener_binding_);
+  DCHECK(!cookie_listener_receiver_.is_bound());
   network::mojom::CookieManager* cookie_manager =
       signin_client_->GetCookieManager();
 
   // NOTE: |cookie_manager| can be nullptr when TestSigninClient is used in
   // testing contexts.
   if (cookie_manager) {
-    network::mojom::CookieChangeListenerPtr listener_ptr;
-    cookie_listener_binding_.Bind(mojo::MakeRequest(&listener_ptr));
-    cookie_listener_binding_.set_connection_error_handler(base::BindOnce(
+    cookie_manager->AddCookieChangeListener(
+        GaiaUrls::GetInstance()->secure_google_url(),
+        GaiaConstants::kGaiaSigninCookieName,
+        cookie_listener_receiver_.BindNewPipeAndPassRemote());
+    cookie_listener_receiver_.set_disconnect_handler(base::BindOnce(
         &GaiaCookieManagerService::OnCookieListenerConnectionError,
         base::Unretained(this)));
-
-    cookie_manager->AddCookieChangeListener(
-        GaiaUrls::GetInstance()->google_url(), kGaiaCookieName,
-        std::move(listener_ptr));
   }
 }
 
-void GaiaCookieManagerService::Shutdown() {
-  cookie_listener_binding_.Close();
-}
-
 void GaiaCookieManagerService::SetAccountsInCookie(
+    gaia::MultiloginMode mode,
     const std::vector<AccountIdGaiaIdPair>& accounts,
     gaia::GaiaSource source,
     SetAccountsInCookieCompletedCallback
         set_accounts_in_cookies_completed_callback) {
   std::vector<std::string> account_ids;
   for (const auto& id : accounts)
-    account_ids.push_back(id.first.id);
+    account_ids.push_back(id.first.ToString());
   VLOG(1) << "GaiaCookieManagerService::SetAccountsInCookie: "
           << base::JoinString(account_ids, " ");
   requests_.push_back(GaiaCookieRequest::CreateSetAccountsRequest(
-      accounts, source, std::move(set_accounts_in_cookies_completed_callback)));
+      mode, accounts, source,
+      std::move(set_accounts_in_cookies_completed_callback)));
   if (!signin_client_->AreSigninCookiesAllowed()) {
     OnSetAccountsFinished(signin::SetAccountsInCookieResult::kPersistentError);
     return;
@@ -569,26 +597,31 @@ void GaiaCookieManagerService::TriggerListAccounts() {
     signin_client_->DelayNetworkCall(
         base::BindOnce(&GaiaCookieManagerService::StartFetchingListAccounts,
                        weak_ptr_factory_.GetWeakPtr()));
-  } else if (std::find_if(requests_.begin(), requests_.end(),
-                          [](const GaiaCookieRequest& request) {
-                            return request.request_type() == LIST_ACCOUNTS;
-                          }) == requests_.end()) {
+  } else if (!base::Contains(requests_, LIST_ACCOUNTS,
+                             &GaiaCookieRequest::request_type)) {
     requests_.push_back(GaiaCookieRequest::CreateListAccountsRequest());
   }
 }
 
 void GaiaCookieManagerService::ForceOnCookieChangeProcessing() {
-  GURL google_url = GaiaUrls::GetInstance()->google_url();
-  std::unique_ptr<net::CanonicalCookie> cookie(
-      std::make_unique<net::CanonicalCookie>(
-          kGaiaCookieName, std::string(), "." + google_url.host(), "/",
-          base::Time(), base::Time(), base::Time(), false, false,
-          net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT));
-  OnCookieChange(*cookie, network::mojom::CookieChangeCause::UNKNOWN_DELETION);
+  GURL google_url = GaiaUrls::GetInstance()->secure_google_url();
+  std::unique_ptr<net::CanonicalCookie> cookie =
+      net::CanonicalCookie::CreateSanitizedCookie(
+          google_url, GaiaConstants::kGaiaSigninCookieName, std::string(),
+          "." + google_url.host(), "/", base::Time(), base::Time(),
+          base::Time(), true /* secure */, false /* httponly */,
+          net::CookieSameSite::NO_RESTRICTION, net::COOKIE_PRIORITY_DEFAULT,
+          false /* same_party */, absl::nullopt /* cookie_partition_key */);
+  OnCookieChange(
+      net::CookieChangeInfo(*cookie, net::CookieAccessResult(),
+                            net::CookieChangeCause::UNKNOWN_DELETION));
 }
 
-void GaiaCookieManagerService::LogOutAllAccounts(gaia::GaiaSource source) {
+void GaiaCookieManagerService::LogOutAllAccounts(
+    gaia::GaiaSource source,
+    LogOutFromCookieCompletedCallback completion_callback) {
   VLOG(1) << "GaiaCookieManagerService::LogOutAllAccounts";
+  DCHECK(completion_callback);
 
   bool log_out_queued = false;
   if (!requests_.empty()) {
@@ -627,13 +660,42 @@ void GaiaCookieManagerService::LogOutAllAccounts(gaia::GaiaSource source) {
   }
 
   if (!log_out_queued) {
-    requests_.push_back(GaiaCookieRequest::CreateLogOutRequest(source));
+    requests_.push_back(GaiaCookieRequest::CreateLogOutRequest(
+        source, std::move(completion_callback)));
     if (requests_.size() == 1) {
       fetcher_retries_ = 0;
       signin_client_->DelayNetworkCall(
           base::BindOnce(&GaiaCookieManagerService::StartGaiaLogOut,
                          weak_ptr_factory_.GetWeakPtr()));
     }
+  } else {
+    std::move(completion_callback)
+        .Run(GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED));
+  }
+}
+
+void GaiaCookieManagerService::RemoveLoggedOutAccountByGaiaId(
+    const std::string& gaia_id) {
+  VLOG(1) << "GaiaCookieManagerService::RemoveLoggedOutAccountByGaiaId";
+
+  if (list_accounts_stale_) {
+    return;
+  }
+
+  const bool accounts_updated =
+      base::EraseIf(signed_out_accounts_,
+                    [&gaia_id](const gaia::ListedAccount& account) {
+                      return account.gaia_id == gaia_id;
+                    }) != 0;
+
+  if (!accounts_updated) {
+    return;
+  }
+
+  if (gaia_accounts_updated_in_cookie_callback_) {
+    gaia_accounts_updated_in_cookie_callback_.Run(
+        listed_accounts_, signed_out_accounts_,
+        GoogleServiceAuthError(GoogleServiceAuthError::NONE));
   }
 }
 
@@ -653,33 +715,28 @@ GaiaCookieManagerService::GetURLLoaderFactory() {
 
 void GaiaCookieManagerService::MarkListAccountsStale() {
   list_accounts_stale_ = true;
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::BindOnce(&GaiaCookieManagerService::ForceOnCookieChangeProcessing,
                      weak_ptr_factory_.GetWeakPtr()));
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 }
 
 void GaiaCookieManagerService::OnCookieChange(
-    const net::CanonicalCookie& cookie,
-    network::mojom::CookieChangeCause cause) {
-  DCHECK_EQ(kGaiaCookieName, cookie.Name());
-  DCHECK(cookie.IsDomainMatch(GaiaUrls::GetInstance()->google_url().host()));
+    const net::CookieChangeInfo& change) {
+  DCHECK_EQ(GaiaConstants::kGaiaSigninCookieName, change.cookie.Name());
+  DCHECK(change.cookie.IsDomainMatch(
+      GaiaUrls::GetInstance()->google_url().host()));
   list_accounts_stale_ = true;
 
-  if (cause == network::mojom::CookieChangeCause::EXPLICIT) {
+  if (change.cause == net::CookieChangeCause::EXPLICIT) {
     DCHECK(net::CookieChangeCauseIsDeletion(net::CookieChangeCause::EXPLICIT));
     if (gaia_cookie_deleted_by_user_action_callback_) {
       gaia_cookie_deleted_by_user_action_callback_.Run();
     }
   }
 
-  // Ignore changes to the cookie while requests are pending.  These changes
-  // are caused by the service itself as it adds accounts.  A side effects is
-  // that any changes to the gaia cookie outside of this class, while requests
-  // are pending, will be lost.  However, trying to process these changes could
-  // cause an endless loop (see crbug.com/516070).
   if (requests_.empty()) {
     requests_.push_back(GaiaCookieRequest::CreateListAccountsRequest());
     fetcher_retries_ = 0;
@@ -687,13 +744,28 @@ void GaiaCookieManagerService::OnCookieChange(
     signin_client_->DelayNetworkCall(
         base::BindOnce(&GaiaCookieManagerService::StartFetchingListAccounts,
                        weak_ptr_factory_.GetWeakPtr()));
+  } else {
+// TODO(https://crbug.com/1051864): Re-enable this codepath for Dice, once the
+// reconcilor has a loop-prevention mechanism.
+#if !BUILDFLAG(ENABLE_DICE_SUPPORT)
+    // Remove all /ListAccounts requests except the very first request because
+    // it is currently executing.
+    requests_.erase(std::remove_if(requests_.begin() + 1, requests_.end(),
+                                   [](const GaiaCookieRequest& request) {
+                                     return request.request_type() ==
+                                            LIST_ACCOUNTS;
+                                   }),
+                    requests_.end());
+    // Add a new /ListAccounts request at the end.
+    requests_.push_back(GaiaCookieRequest::CreateListAccountsRequest());
+#endif  // !BUILDFLAG(ENABLE_DICE_SUPPORT)
   }
 }
 
 void GaiaCookieManagerService::OnCookieListenerConnectionError() {
   // A connection error from the CookieManager likely means that the network
   // service process has crashed. Try again to set up a listener.
-  cookie_listener_binding_.Close();
+  cookie_listener_receiver_.reset();
   InitCookieListener();
 }
 
@@ -718,6 +790,12 @@ void GaiaCookieManagerService::SignalSetAccountsComplete(
   DCHECK(requests_.front().request_type() ==
          GaiaCookieRequestType::SET_ACCOUNTS);
   requests_.front().RunSetAccountsInCookieCompletedCallback(result);
+}
+
+void GaiaCookieManagerService::SignalLogOutComplete(
+    const GoogleServiceAuthError& error) {
+  DCHECK(requests_.front().request_type() == GaiaCookieRequestType::LOG_OUT);
+  requests_.front().RunLogOutFromCookieCompletedCallback(error);
 }
 
 void GaiaCookieManagerService::SetGaiaAccountsInCookieUpdatedCallback(
@@ -818,21 +896,19 @@ void GaiaCookieManagerService::OnListAccountsSuccess(const std::string& data) {
                                    &signed_out_accounts_)) {
     listed_accounts_.clear();
     signed_out_accounts_.clear();
+    signin_client_->GetPrefs()->ClearPref(
+        prefs::kGaiaCookieLastListAccountsData);
     GoogleServiceAuthError error(
         GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE);
     OnListAccountsFailure(error);
     return;
   }
 
+  signin_client_->GetPrefs()->SetString(prefs::kGaiaCookieLastListAccountsData,
+                                        data);
   RecordListAccountsFailure(GoogleServiceAuthError::NONE);
-  RecordListAccountsRetryResult(GoogleServiceAuthError::AuthErrorNone(),
-                                fetcher_retries_);
 
-  for (gaia::ListedAccount& account : listed_accounts_) {
-    DCHECK(account.id.empty());
-    account.id = AccountTrackerService::PickAccountIdForAccount(
-        signin_client_->GetPrefs(), account.gaia_id, account.email);
-  }
+  InitializeListedAccountsIds();
 
   list_accounts_stale_ = false;
   HandleNextRequest();
@@ -852,7 +928,6 @@ void GaiaCookieManagerService::OnListAccountsFailure(
   VLOG(1) << "ListAccounts failed";
   DCHECK(requests_.front().request_type() ==
          GaiaCookieRequestType::LIST_ACCOUNTS);
-  RecordListAccountsRetryResult(error, fetcher_retries_);
 
   bool should_retry =
       (++fetcher_retries_ < kMaxFetcherRetries && error.IsTransientError()) ||
@@ -892,6 +967,7 @@ void GaiaCookieManagerService::OnLogOutSuccess() {
   RecordLogoutRequestState(LogoutRequestState::kSuccess);
 
   MarkListAccountsStale();
+  SignalLogOutComplete(GoogleServiceAuthError::AuthErrorNone());
   fetcher_backoff_.InformOfRequest(true);
   HandleNextRequest();
 }
@@ -913,7 +989,28 @@ void GaiaCookieManagerService::OnLogOutFailure(
     return;
   }
 
+  SignalLogOutComplete(error);
   HandleNextRequest();
+}
+
+std::unique_ptr<GaiaAuthFetcher>
+GaiaCookieManagerService::CreateGaiaAuthFetcherForPartition(
+    GaiaAuthConsumer* consumer,
+    const gaia::GaiaSource& source) {
+  return signin_client_->CreateGaiaAuthFetcher(consumer, source);
+}
+
+network::mojom::CookieManager*
+GaiaCookieManagerService::GetCookieManagerForPartition() {
+  return signin_client_->GetCookieManager();
+}
+
+void GaiaCookieManagerService::InitializeListedAccountsIds() {
+  for (gaia::ListedAccount& account : listed_accounts_) {
+    DCHECK(account.id.empty());
+    account.id = account_tracker_service_->PickAccountIdForAccount(
+        account.gaia_id, account.email);
+  }
 }
 
 void GaiaCookieManagerService::StartFetchingUbertoken() {
@@ -945,13 +1042,6 @@ void GaiaCookieManagerService::StartFetchingMergeSession() {
 void GaiaCookieManagerService::StartGaiaLogOut() {
   DCHECK(requests_.front().request_type() == GaiaCookieRequestType::LOG_OUT);
   VLOG(1) << "GaiaCookieManagerService::StartGaiaLogOut";
-
-  signin_client_->PreGaiaLogout(
-      base::BindOnce(&GaiaCookieManagerService::StartFetchingLogOut,
-                     weak_ptr_factory_.GetWeakPtr()));
-}
-
-void GaiaCookieManagerService::StartFetchingLogOut() {
   RecordLogoutRequestState(LogoutRequestState::kStarted);
   gaia_auth_fetcher_ =
       signin_client_->CreateGaiaAuthFetcher(this, requests_.front().source());
@@ -967,9 +1057,9 @@ void GaiaCookieManagerService::StartFetchingListAccounts() {
 
 void GaiaCookieManagerService::StartSetAccounts() {
   DCHECK(!requests_.empty());
-  DCHECK_EQ(GaiaCookieRequestType::SET_ACCOUNTS,
-            requests_.front().request_type());
-  DCHECK(!requests_.front().accounts().empty());
+  const GaiaCookieRequest& request = requests_.front();
+  DCHECK_EQ(GaiaCookieRequestType::SET_ACCOUNTS, request.request_type());
+  DCHECK(!request.GetAccounts().empty());
 
   if (!external_cc_result_fetched_ &&
       !external_cc_result_fetcher_.IsRunning()) {
@@ -980,8 +1070,9 @@ void GaiaCookieManagerService::StartSetAccounts() {
   }
 
   oauth_multilogin_helper_ = std::make_unique<signin::OAuthMultiloginHelper>(
-      signin_client_, token_service_, requests_.front().accounts(),
-      external_cc_result_fetcher_.GetExternalCcResult(),
+      signin_client_, this, token_service_, request.GetMultiloginMode(),
+      request.GetAccounts(), external_cc_result_fetcher_.GetExternalCcResult(),
+      request.source(),
       base::BindOnce(&GaiaCookieManagerService::OnSetAccountsFinished,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -1016,7 +1107,6 @@ void GaiaCookieManagerService::HandleNextRequest() {
   } else {
     switch (requests_.front().request_type()) {
       case GaiaCookieRequestType::ADD_ACCOUNT:
-        DCHECK_EQ(0u, requests_.front().accounts().size());
         signin_client_->DelayNetworkCall(
             base::BindOnce(&GaiaCookieManagerService::StartFetchingUbertoken,
                            weak_ptr_factory_.GetWeakPtr()));
@@ -1026,14 +1116,12 @@ void GaiaCookieManagerService::HandleNextRequest() {
         break;
       }
       case GaiaCookieRequestType::LOG_OUT:
-        DCHECK(requests_.front().accounts().empty());
         signin_client_->DelayNetworkCall(
             base::BindOnce(&GaiaCookieManagerService::StartGaiaLogOut,
                            weak_ptr_factory_.GetWeakPtr()));
         break;
       case GaiaCookieRequestType::LIST_ACCOUNTS:
         listAccountsUnexpectedServerResponseRetried_ = false;
-        DCHECK(requests_.front().accounts().empty());
         uber_token_fetcher_.reset();
         signin_client_->DelayNetworkCall(
             base::BindOnce(&GaiaCookieManagerService::StartFetchingListAccounts,

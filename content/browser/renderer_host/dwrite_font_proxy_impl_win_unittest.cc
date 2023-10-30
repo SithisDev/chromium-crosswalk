@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,15 +14,17 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/win/windows_version.h"
 #include "content/public/common/content_features.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "content/public/test/browser_task_environment.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/bind_source_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/dwrite_rasterizer_support/dwrite_rasterizer_support.h"
@@ -35,14 +37,14 @@ namespace content {
 namespace {
 
 struct FontExpectation {
-  const char font_name[64];
+  const char* font_name;
   uint16_t ttc_index;
 };
 
-constexpr FontExpectation kExpectedTestFonts[] = {{u8"CambriaMath", 1},
-                                                  {u8"Ming-Lt-HKSCS-ExtB", 2},
-                                                  {u8"NSimSun", 1},
-                                                  {u8"calibri-bolditalic", 0}};
+constexpr FontExpectation kExpectedTestFonts[] = {{"CambriaMath", 1},
+                                                  {"Ming-Lt-HKSCS-ExtB", 2},
+                                                  {"NSimSun", 1},
+                                                  {"calibri-bolditalic", 0}};
 
 // DirectWrite on Windows supports IDWriteFontSet API which allows for querying
 // by PostScript name and full font name directly. In the implementation of
@@ -57,7 +59,7 @@ constexpr int kDWriteMajorVersionSupportingSingleLookups = 10;
 class DWriteFontProxyImplUnitTest : public testing::Test {
  public:
   DWriteFontProxyImplUnitTest()
-      : binding_(&impl_, mojo::MakeRequest(&dwrite_font_proxy_)) {}
+      : receiver_(&impl_, dwrite_font_proxy_.BindNewPipeAndPassReceiver()) {}
 
   blink::mojom::DWriteFontProxy& dwrite_font_proxy() {
     return *dwrite_font_proxy_;
@@ -69,10 +71,10 @@ class DWriteFontProxyImplUnitTest : public testing::Test {
     return lookup_mode == blink::mojom::UniqueFontLookupMode::kSingleLookups;
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  blink::mojom::DWriteFontProxyPtr dwrite_font_proxy_;
+  base::test::TaskEnvironment task_environment_;
+  mojo::Remote<blink::mojom::DWriteFontProxy> dwrite_font_proxy_;
   DWriteFontProxyImpl impl_;
-  mojo::Binding<blink::mojom::DWriteFontProxy> binding_;
+  mojo::Receiver<blink::mojom::DWriteFontProxy> receiver_;
 };
 
 // Derived class for tests that exercise font unique local matching mojo methods
@@ -95,15 +97,22 @@ class DWriteFontProxyLocalMatchingTest : public DWriteFontProxyImplUnitTest {
 class DWriteFontProxyTableMatchingTest
     : public DWriteFontProxyLocalMatchingTest {
  public:
-  DWriteFontProxyTableMatchingTest() {
+  void SetUp() override {
     DWriteFontLookupTableBuilder* table_builder_instance =
         DWriteFontLookupTableBuilder::GetInstance();
-    DCHECK(scoped_temp_dir_.CreateUniqueTempDir());
+    bool temp_dir_success = scoped_temp_dir_.CreateUniqueTempDir();
+    ASSERT_TRUE(temp_dir_success);
     table_builder_instance->OverrideDWriteVersionChecksForTesting();
     table_builder_instance->SetCacheDirectoryForTesting(
         scoped_temp_dir_.GetPath());
     table_builder_instance->ResetLookupTableForTesting();
     table_builder_instance->SchedulePrepareFontUniqueNameTableIfNeeded();
+  }
+
+  void TearDown() override {
+    DWriteFontLookupTableBuilder* table_builder_instance =
+        DWriteFontLookupTableBuilder::GetInstance();
+    table_builder_instance->ResetStateForTesting();
   }
 
  private:
@@ -118,22 +127,22 @@ TEST_F(DWriteFontProxyImplUnitTest, GetFamilyCount) {
 
 TEST_F(DWriteFontProxyImplUnitTest, FindFamily) {
   UINT32 arial_index = 0;
-  dwrite_font_proxy().FindFamily(L"Arial", &arial_index);
+  dwrite_font_proxy().FindFamily(u"Arial", &arial_index);
   EXPECT_NE(UINT_MAX, arial_index);
 
   UINT32 times_index = 0;
-  dwrite_font_proxy().FindFamily(L"Times New Roman", &times_index);
+  dwrite_font_proxy().FindFamily(u"Times New Roman", &times_index);
   EXPECT_NE(UINT_MAX, times_index);
   EXPECT_NE(arial_index, times_index);
 
   UINT32 unknown_index = 0;
-  dwrite_font_proxy().FindFamily(L"Not a font family", &unknown_index);
+  dwrite_font_proxy().FindFamily(u"Not a font family", &unknown_index);
   EXPECT_EQ(UINT_MAX, unknown_index);
 }
 
 TEST_F(DWriteFontProxyImplUnitTest, GetFamilyNames) {
   UINT32 arial_index = 0;
-  dwrite_font_proxy().FindFamily(L"Arial", &arial_index);
+  dwrite_font_proxy().FindFamily(u"Arial", &arial_index);
 
   std::vector<blink::mojom::DWriteStringPairPtr> names;
   dwrite_font_proxy().GetFamilyNames(arial_index, &names);
@@ -155,7 +164,7 @@ TEST_F(DWriteFontProxyImplUnitTest, GetFamilyNamesIndexOutOfBounds) {
 
 TEST_F(DWriteFontProxyImplUnitTest, GetFontFiles) {
   UINT32 arial_index = 0;
-  dwrite_font_proxy().FindFamily(L"Arial", &arial_index);
+  dwrite_font_proxy().FindFamily(u"Arial", &arial_index);
 
   std::vector<base::FilePath> files;
   std::vector<base::File> handles;
@@ -182,14 +191,15 @@ TEST_F(DWriteFontProxyImplUnitTest, MapCharacter) {
 
   blink::mojom::MapCharactersResultPtr result;
   dwrite_font_proxy().MapCharacters(
-      L"abc",
+      u"abc",
       blink::mojom::DWriteFontStyle::New(DWRITE_FONT_WEIGHT_NORMAL,
                                          DWRITE_FONT_STYLE_NORMAL,
                                          DWRITE_FONT_STRETCH_NORMAL),
-      L"", DWRITE_READING_DIRECTION_LEFT_TO_RIGHT, L"", &result);
+      std::u16string(), DWRITE_READING_DIRECTION_LEFT_TO_RIGHT,
+      std::u16string(), &result);
 
   EXPECT_NE(UINT32_MAX, result->family_index);
-  EXPECT_STRNE(L"", result->family_name.c_str());
+  EXPECT_NE(std::u16string(), result->family_name);
   EXPECT_EQ(3u, result->mapped_length);
   EXPECT_NE(0.0, result->scale);
   EXPECT_NE(0, result->font_style->font_weight);
@@ -203,14 +213,15 @@ TEST_F(DWriteFontProxyImplUnitTest, MapCharacterInvalidCharacter) {
 
   blink::mojom::MapCharactersResultPtr result;
   dwrite_font_proxy().MapCharacters(
-      L"\ufffe\uffffabc",
+      u"\ufffe\uffffabc",
       blink::mojom::DWriteFontStyle::New(DWRITE_FONT_WEIGHT_NORMAL,
                                          DWRITE_FONT_STYLE_NORMAL,
                                          DWRITE_FONT_STRETCH_NORMAL),
-      L"en-us", DWRITE_READING_DIRECTION_LEFT_TO_RIGHT, L"", &result);
+      u"en-us", DWRITE_READING_DIRECTION_LEFT_TO_RIGHT, std::u16string(),
+      &result);
 
   EXPECT_EQ(UINT32_MAX, result->family_index);
-  EXPECT_STREQ(L"", result->family_name.c_str());
+  EXPECT_EQ(std::u16string(), result->family_name);
   EXPECT_EQ(2u, result->mapped_length);
 }
 
@@ -220,14 +231,15 @@ TEST_F(DWriteFontProxyImplUnitTest, MapCharacterInvalidAfterValid) {
 
   blink::mojom::MapCharactersResultPtr result;
   dwrite_font_proxy().MapCharacters(
-      L"abc\ufffe\uffff",
+      u"abc\ufffe\uffff",
       blink::mojom::DWriteFontStyle::New(DWRITE_FONT_WEIGHT_NORMAL,
                                          DWRITE_FONT_STYLE_NORMAL,
                                          DWRITE_FONT_STRETCH_NORMAL),
-      L"en-us", DWRITE_READING_DIRECTION_LEFT_TO_RIGHT, L"", &result);
+      u"en-us", DWRITE_READING_DIRECTION_LEFT_TO_RIGHT, std::u16string(),
+      &result);
 
   EXPECT_NE(UINT32_MAX, result->family_index);
-  EXPECT_STRNE(L"", result->family_name.c_str());
+  EXPECT_NE(std::u16string(), result->family_name);
   EXPECT_EQ(3u, result->mapped_length);
   EXPECT_NE(0.0, result->scale);
   EXPECT_NE(0, result->font_style->font_weight);
@@ -237,10 +249,10 @@ TEST_F(DWriteFontProxyImplUnitTest, MapCharacterInvalidAfterValid) {
 
 TEST_F(DWriteFontProxyImplUnitTest, TestCustomFontFiles) {
   // Override windows fonts path to force the custom font file codepath.
-  impl_.SetWindowsFontsPathForTesting(L"X:\\NotWindowsFonts");
+  impl_.SetWindowsFontsPathForTesting(u"X:\\NotWindowsFonts");
 
   UINT32 arial_index = 0;
-  dwrite_font_proxy().FindFamily(L"Arial", &arial_index);
+  dwrite_font_proxy().FindFamily(u"Arial", &arial_index);
 
   std::vector<base::FilePath> files;
   std::vector<base::File> handles;
@@ -261,24 +273,31 @@ TEST_F(DWriteFontProxyImplUnitTest, FallbackFamily) {
     if (fallback_request.is_win10 && !on_win10)
       continue;
 
-    std::string family_name;
+    blink::mojom::FallbackFamilyAndStylePtr fallback_family_and_style;
     UChar32 codepoint;
     U16_GET(fallback_request.text.c_str(), 0, 0, fallback_request.text.size(),
             codepoint);
-    dwrite_font_proxy().FallbackFamilyNameForCodepoint(
+    dwrite_font_proxy().FallbackFamilyAndStyleForCodepoint(
         "Times New Roman", fallback_request.language_tag, codepoint,
-        &family_name);
+        &fallback_family_and_style);
 
     auto find_result_it =
         std::find(fallback_request.fallback_fonts.begin(),
-                  fallback_request.fallback_fonts.end(), family_name);
+                  fallback_request.fallback_fonts.end(),
+                  fallback_family_and_style->fallback_family_name);
 
     EXPECT_TRUE(find_result_it != fallback_request.fallback_fonts.end())
         << "Did not find expected fallback font for language: "
         << fallback_request.language_tag << ", codepoint U+" << std::hex
-        << codepoint << " DWrite returned font name: \"" << family_name << "\""
+        << codepoint << " DWrite returned font name: \""
+        << fallback_family_and_style->fallback_family_name << "\""
         << ", expected: "
         << base::JoinString(fallback_request.fallback_fonts, ", ");
+    EXPECT_EQ(fallback_family_and_style->weight, 400u);
+    EXPECT_EQ(fallback_family_and_style->width,
+              5u);  // SkFontStyle::Width::kNormal_Width
+    EXPECT_EQ(fallback_family_and_style->slant,
+              0u);  // SkFontStyle::Slant::kUpright_Slant
   }
 }
 
@@ -288,7 +307,7 @@ void TestWhenLookupTableReady(
     base::ReadOnlySharedMemoryRegion font_table_memory) {
   blink::FontTableMatcher font_table_matcher(font_table_memory.Map());
   for (auto& test_font_name_index : kExpectedTestFonts) {
-    base::Optional<blink::FontTableMatcher::MatchResult> match_result =
+    absl::optional<blink::FontTableMatcher::MatchResult> match_result =
         font_table_matcher.MatchName(test_font_name_index.font_name);
     ASSERT_TRUE(match_result)
         << "No font matched for font name: " << test_font_name_index.font_name;
@@ -307,7 +326,7 @@ TEST_F(DWriteFontProxyTableMatchingTest, TestFindUniqueFont) {
   bool lookup_table_results_were_tested = false;
   dwrite_font_proxy().GetUniqueNameLookupTable(base::BindOnce(
       &TestWhenLookupTableReady, &lookup_table_results_were_tested));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ASSERT_TRUE(lookup_table_results_were_tested);
 }
 
@@ -336,10 +355,10 @@ TEST_F(DWriteFontProxyLocalMatchingTest, TestSingleLookupUnavailable) {
     return;
   base::FilePath result_path;
   uint32_t ttc_index;
-  std::string unavailable_font_name =
-      "Unavailable_Font_Name_56E7EA7E-2C69-4E23-99DC-750BC19B250E";
-  dwrite_font_proxy().MatchUniqueFont(base::UTF8ToUTF16(unavailable_font_name),
-                                      &result_path, &ttc_index);
+  std::u16string unavailable_font_name =
+      u"Unavailable_Font_Name_56E7EA7E-2C69-4E23-99DC-750BC19B250E";
+  dwrite_font_proxy().MatchUniqueFont(unavailable_font_name, &result_path,
+                                      &ttc_index);
   ASSERT_EQ(result_path.value().size(), 0u);
   ASSERT_EQ(ttc_index, 0u);
 }
@@ -350,10 +369,12 @@ TEST_F(DWriteFontProxyLocalMatchingTest, TestLookupMode) {
           base::FilePath(FILE_PATH_LITERAL("DWrite.dll")));
 
   std::string dwrite_version =
-      base::WideToUTF8(dwrite_version_info->product_version());
+      base::UTF16ToUTF8(dwrite_version_info->product_version());
 
-  int dwrite_major_version_number =
-      std::stoi(dwrite_version.substr(0, dwrite_version.find(".")));
+  int dwrite_major_version_number = 0;
+  ASSERT_TRUE(
+      base::StringToInt(dwrite_version.substr(0, dwrite_version.find(".")),
+                        &dwrite_major_version_number));
 
   blink::mojom::UniqueFontLookupMode expected_lookup_mode;
   if (dwrite_major_version_number >=

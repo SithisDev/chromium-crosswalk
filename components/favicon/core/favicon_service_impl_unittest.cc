@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/files/scoped_temp_dir.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/favicon/core/favicon_client.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/test/history_service_test_util.h"
@@ -17,8 +17,8 @@ namespace favicon {
 namespace {
 
 TEST(FaviconServiceImplTest, ShouldCacheUnableToDownloadFavicons) {
-  base::test::ScopedTaskEnvironment task_environment;
   base::ScopedTempDir history_dir;
+  base::test::TaskEnvironment task_environment;
   CHECK(history_dir.CreateUniqueTempDir());
   std::unique_ptr<history::HistoryService> history_service =
       history::CreateHistoryService(history_dir.GetPath(), /*create_db=*/false);

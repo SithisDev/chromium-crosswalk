@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/dom_distiller/core/distiller_page.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -27,7 +27,7 @@ class SourcePageHandleWebContents : public SourcePageHandle {
 
  private:
   // The WebContents this class holds.
-  content::WebContents* web_contents_;
+  raw_ptr<content::WebContents> web_contents_;
   // Whether this owns |web_contents_|.
   bool owned_;
 };
@@ -36,8 +36,8 @@ class DistillerPageWebContentsFactory : public DistillerPageFactory {
  public:
   explicit DistillerPageWebContentsFactory(
       content::BrowserContext* browser_context)
-      : DistillerPageFactory(), browser_context_(browser_context) {}
-  ~DistillerPageWebContentsFactory() override {}
+      : browser_context_(browser_context) {}
+  ~DistillerPageWebContentsFactory() override = default;
 
   std::unique_ptr<DistillerPage> CreateDistillerPage(
       const gfx::Size& render_view_size) const override;
@@ -45,7 +45,7 @@ class DistillerPageWebContentsFactory : public DistillerPageFactory {
       std::unique_ptr<SourcePageHandle> handle) const override;
 
  private:
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
 };
 
 class DistillerPageWebContents : public DistillerPage,
@@ -63,13 +63,14 @@ class DistillerPageWebContents : public DistillerPage,
       content::WebContents* web_contents) override;
 
   // content::WebContentsObserver implementation.
-  void DocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) override;
+  void DOMContentLoaded(content::RenderFrameHost* render_frame_host) override;
 
   void DidFailLoad(content::RenderFrameHost* render_frame_host,
                    const GURL& validated_url,
-                   int error_code,
-                   const base::string16& error_description) override;
+                   int error_code) override;
+
+  DistillerPageWebContents(const DistillerPageWebContents&) = delete;
+  DistillerPageWebContents& operator=(const DistillerPageWebContents&) = delete;
 
  protected:
   bool StringifyOutput() override;
@@ -103,6 +104,8 @@ class DistillerPageWebContents : public DistillerPage,
                                      const base::TimeTicks& javascript_start,
                                      base::Value value);
 
+  content::RenderFrameHost& TargetRenderFrameHost();
+
   // The current state of the |DistillerPage|, initially |IDLE|.
   State state_;
 
@@ -111,10 +114,9 @@ class DistillerPageWebContents : public DistillerPage,
 
   std::unique_ptr<SourcePageHandleWebContents> source_page_handle_;
 
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
   gfx::Size render_view_size_;
   base::WeakPtrFactory<DistillerPageWebContents> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(DistillerPageWebContents);
 };
 
 }  // namespace dom_distiller

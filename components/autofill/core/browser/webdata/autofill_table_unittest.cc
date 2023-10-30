@@ -1,19 +1,19 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 
 #include <map>
+#include <memory>
 #include <set>
-#include <tuple>
+#include <string>
 #include <utility>
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/guid.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -23,8 +23,10 @@
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_model/autofill_metadata.h"
+#include "components/autofill/core/browser/data_model/autofill_offer_data.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
+#include "components/autofill/core/browser/data_model/credit_card_cloud_token_data.h"
 #include "components/autofill/core/browser/payments/payments_customer_data.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
@@ -35,6 +37,7 @@
 #include "components/autofill/core/common/autofill_util.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/os_crypt/os_crypt_mocker.h"
+#include "components/sync/model/metadata_batch.h"
 #include "components/sync/protocol/entity_metadata.pb.h"
 #include "components/sync/protocol/model_type_state.pb.h"
 #include "components/webdata/common/web_database.h"
@@ -42,16 +45,17 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::ASCIIToUTF16;
 using base::Time;
-using base::TimeDelta;
 using sync_pb::EntityMetadata;
 using sync_pb::ModelTypeState;
 using syncer::EntityMetadataMap;
 using syncer::MetadataBatch;
 using testing::ElementsAre;
+using testing::UnorderedElementsAre;
 
 namespace autofill {
+
+using structured_address::VerificationStatus;
 
 // So we can compare AutofillKeys with EXPECT_EQ().
 std::ostream& operator<<(std::ostream& os, const AutofillKey& key) {
@@ -85,24 +89,24 @@ std::ostream& operator<<(std::ostream& os, const AutofillChange& change) {
 namespace {
 
 typedef std::set<AutofillEntry,
-    bool (*)(const AutofillEntry&, const AutofillEntry&)> AutofillEntrySet;
+                 bool (*)(const AutofillEntry&, const AutofillEntry&)>
+    AutofillEntrySet;
 typedef AutofillEntrySet::iterator AutofillEntrySetIterator;
 
 bool CompareAutofillEntries(const AutofillEntry& a, const AutofillEntry& b) {
-  return std::tie(a.key().name(), a.key().value(),
-                  a.date_created(), a.date_last_used()) <
-         std::tie(b.key().name(), b.key().value(),
-                  b.date_created(), b.date_last_used());
+  return std::tie(a.key().name(), a.key().value(), a.date_created(),
+                  a.date_last_used()) <
+         std::tie(b.key().name(), b.key().value(), b.date_created(),
+                  b.date_last_used());
 }
 
-AutofillEntry MakeAutofillEntry(const std::string& name,
-                                const std::string& value,
+AutofillEntry MakeAutofillEntry(const std::u16string& name,
+                                const std::u16string& value,
                                 time_t date_created,
                                 time_t date_last_used) {
   if (date_last_used < 0)
     date_last_used = date_created;
-  return AutofillEntry(AutofillKey(ASCIIToUTF16(name), ASCIIToUTF16(value)),
-                       Time::FromTimeT(date_created),
+  return AutofillEntry(AutofillKey(name, value), Time::FromTimeT(date_created),
                        Time::FromTimeT(date_last_used));
 }
 
@@ -117,14 +121,15 @@ void CompareAutofillEntrySets(const AutofillEntrySet& actual,
   EXPECT_EQ(actual.size(), count);
 }
 
-int GetAutofillEntryCount(const base::string16& name,
-                          const base::string16& value,
+int GetAutofillEntryCount(const std::u16string& name,
+                          const std::u16string& value,
                           WebDatabase* db) {
   sql::Statement s(db->GetSQLConnection()->GetUniqueStatement(
       "SELECT count FROM autofill WHERE name = ? AND value = ?"));
   s.BindString16(0, name);
   s.BindString16(1, value);
-  s.Step();
+  if (!s.Step())
+    return 0;
   return s.ColumnInt(0);
 }
 
@@ -132,8 +137,10 @@ int GetAutofillEntryCount(const base::string16& name,
 
 class AutofillTableTest : public testing::Test {
  public:
-  AutofillTableTest() {}
-  ~AutofillTableTest() override {}
+  AutofillTableTest() = default;
+  AutofillTableTest(const AutofillTableTest&) = delete;
+  AutofillTableTest& operator=(const AutofillTableTest&) = delete;
+  ~AutofillTableTest() override = default;
 
  protected:
   void SetUp() override {
@@ -141,8 +148,8 @@ class AutofillTableTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     file_ = temp_dir_.GetPath().AppendASCII("TestWebDatabase");
 
-    table_.reset(new AutofillTable);
-    db_.reset(new WebDatabase);
+    table_ = std::make_unique<AutofillTable>();
+    db_ = std::make_unique<WebDatabase>();
     db_->AddTable(table_.get());
     ASSERT_EQ(sql::INIT_OK, db_->Init(file_));
   }
@@ -154,83 +161,76 @@ class AutofillTableTest : public testing::Test {
   std::unique_ptr<AutofillTable> table_;
   std::unique_ptr<WebDatabase> db_;
   base::test::ScopedFeatureList scoped_feature_list_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AutofillTableTest);
 };
 
 TEST_F(AutofillTableTest, Autofill) {
-  Time t1 = Time::Now();
+  Time t1 = AutofillClock::Now();
 
   // Simulate the submission of a handful of entries in a field called "Name",
   // some more often than others.
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
-  base::Time now = base::Time::Now();
-  base::TimeDelta two_seconds = base::TimeDelta::FromSeconds(2);
+  field.name = u"Name";
+  field.value = u"Superman";
+  base::Time now = AutofillClock::Now();
+  base::TimeDelta two_seconds = base::Seconds(2);
   EXPECT_TRUE(table_->AddFormFieldValue(field, &changes));
   std::vector<AutofillEntry> v;
   for (int i = 0; i < 5; ++i) {
-    field.value = ASCIIToUTF16("Clark Kent");
-    EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
-                                              now + i * two_seconds));
+    field.value = u"Clark Kent";
+    EXPECT_TRUE(
+        table_->AddFormFieldValueTime(field, &changes, now + i * two_seconds));
   }
   for (int i = 0; i < 3; ++i) {
-    field.value = ASCIIToUTF16("Clark Sutter");
-    EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
-                                              now + i * two_seconds));
+    field.value = u"Clark Sutter";
+    EXPECT_TRUE(
+        table_->AddFormFieldValueTime(field, &changes, now + i * two_seconds));
   }
   for (int i = 0; i < 2; ++i) {
-    field.name = ASCIIToUTF16("Favorite Color");
-    field.value = ASCIIToUTF16("Green");
-    EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
-                                              now + i * two_seconds));
+    field.name = u"Favorite Color";
+    field.value = u"Green";
+    EXPECT_TRUE(
+        table_->AddFormFieldValueTime(field, &changes, now + i * two_seconds));
   }
 
   // We have added the name Clark Kent 5 times, so count should be 5.
-  EXPECT_EQ(5, GetAutofillEntryCount(ASCIIToUTF16("Name"),
-                                     ASCIIToUTF16("Clark Kent"), db_.get()));
+  EXPECT_EQ(5, GetAutofillEntryCount(u"Name", u"Clark Kent", db_.get()));
 
   // Storing in the data base should be case sensitive, so there should be no
   // database entry for clark kent lowercase.
-  EXPECT_EQ(0, GetAutofillEntryCount(ASCIIToUTF16("Name"),
-                                     ASCIIToUTF16("clark kent"), db_.get()));
+  EXPECT_EQ(0, GetAutofillEntryCount(u"Name", u"clark kent", db_.get()));
 
-  EXPECT_EQ(2, GetAutofillEntryCount(ASCIIToUTF16("Favorite Color"),
-                                     ASCIIToUTF16("Green"), db_.get()));
+  EXPECT_EQ(2, GetAutofillEntryCount(u"Favorite Color", u"Green", db_.get()));
 
   // This is meant to get a list of suggestions for Name.  The empty prefix
   // in the second argument means it should return all suggestions for a name
   // no matter what they start with.  The order that the names occur in the list
   // should be decreasing order by count.
-  EXPECT_TRUE(table_->GetFormValuesForElementName(
-      ASCIIToUTF16("Name"), base::string16(), &v, 6));
+  EXPECT_TRUE(
+      table_->GetFormValuesForElementName(u"Name", std::u16string(), &v, 6));
   EXPECT_EQ(3U, v.size());
   if (v.size() == 3) {
-    EXPECT_EQ(ASCIIToUTF16("Clark Kent"), v[0].key().value());
-    EXPECT_EQ(ASCIIToUTF16("Clark Sutter"), v[1].key().value());
-    EXPECT_EQ(ASCIIToUTF16("Superman"), v[2].key().value());
+    EXPECT_EQ(u"Clark Kent", v[0].key().value());
+    EXPECT_EQ(u"Clark Sutter", v[1].key().value());
+    EXPECT_EQ(u"Superman", v[2].key().value());
   }
 
   // If we query again limiting the list size to 1, we should only get the most
   // frequent entry.
-  EXPECT_TRUE(table_->GetFormValuesForElementName(
-      ASCIIToUTF16("Name"), base::string16(), &v, 1));
+  EXPECT_TRUE(
+      table_->GetFormValuesForElementName(u"Name", std::u16string(), &v, 1));
   EXPECT_EQ(1U, v.size());
   if (v.size() == 1) {
-    EXPECT_EQ(ASCIIToUTF16("Clark Kent"), v[0].key().value());
+    EXPECT_EQ(u"Clark Kent", v[0].key().value());
   }
 
   // Querying for suggestions given a prefix is case-insensitive, so the prefix
   // "cLa" shoud get suggestions for both Clarks.
-  EXPECT_TRUE(table_->GetFormValuesForElementName(
-      ASCIIToUTF16("Name"), ASCIIToUTF16("cLa"), &v, 6));
+  EXPECT_TRUE(table_->GetFormValuesForElementName(u"Name", u"cLa", &v, 6));
   EXPECT_EQ(2U, v.size());
   if (v.size() == 2) {
-    EXPECT_EQ(ASCIIToUTF16("Clark Kent"), v[0].key().value());
-    EXPECT_EQ(ASCIIToUTF16("Clark Sutter"), v[1].key().value());
+    EXPECT_EQ(u"Clark Kent", v[0].key().value());
+    EXPECT_EQ(u"Clark Sutter", v[1].key().value());
   }
 
   // Removing all elements since the beginning of this function should remove
@@ -239,70 +239,64 @@ TEST_F(AutofillTableTest, Autofill) {
   EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(t1, Time(), &changes));
 
   const AutofillChange kExpectedChanges[] = {
-    AutofillChange(AutofillChange::REMOVE,
-                   AutofillKey(ASCIIToUTF16("Name"),
-                               ASCIIToUTF16("Superman"))),
-    AutofillChange(AutofillChange::REMOVE,
-                   AutofillKey(ASCIIToUTF16("Name"),
-                               ASCIIToUTF16("Clark Kent"))),
-    AutofillChange(AutofillChange::REMOVE,
-                   AutofillKey(ASCIIToUTF16("Name"),
-                               ASCIIToUTF16("Clark Sutter"))),
-    AutofillChange(AutofillChange::REMOVE,
-                   AutofillKey(ASCIIToUTF16("Favorite Color"),
-                               ASCIIToUTF16("Green"))),
+      AutofillChange(AutofillChange::REMOVE, AutofillKey(u"Name", u"Superman")),
+      AutofillChange(AutofillChange::REMOVE,
+                     AutofillKey(u"Name", u"Clark Kent")),
+      AutofillChange(AutofillChange::REMOVE,
+                     AutofillKey(u"Name", u"Clark Sutter")),
+      AutofillChange(AutofillChange::REMOVE,
+                     AutofillKey(u"Favorite Color", u"Green")),
   };
-  EXPECT_EQ(base::size(kExpectedChanges), changes.size());
-  for (size_t i = 0; i < base::size(kExpectedChanges); ++i) {
+  EXPECT_EQ(std::size(kExpectedChanges), changes.size());
+  for (size_t i = 0; i < std::size(kExpectedChanges); ++i) {
     EXPECT_EQ(kExpectedChanges[i], changes[i]);
   }
 
-  EXPECT_EQ(0, GetAutofillEntryCount(ASCIIToUTF16("Name"),
-                                     ASCIIToUTF16("Clark Kent"), db_.get()));
+  EXPECT_EQ(0, GetAutofillEntryCount(u"Name", u"Clark Kent", db_.get()));
 
-  EXPECT_TRUE(table_->GetFormValuesForElementName(
-      ASCIIToUTF16("Name"), base::string16(), &v, 6));
+  EXPECT_TRUE(
+      table_->GetFormValuesForElementName(u"Name", std::u16string(), &v, 6));
   EXPECT_EQ(0U, v.size());
 
   // Now add some values with empty strings.
-  const base::string16 kValue = ASCIIToUTF16("  toto   ");
-  field.name = ASCIIToUTF16("blank");
-  field.value = base::string16();
+  const std::u16string kValue = u"  toto   ";
+  field.name = u"blank";
+  field.value = std::u16string();
   EXPECT_TRUE(table_->AddFormFieldValue(field, &changes));
-  field.name = ASCIIToUTF16("blank");
-  field.value = ASCIIToUTF16(" ");
+  field.name = u"blank";
+  field.value = u" ";
   EXPECT_TRUE(table_->AddFormFieldValue(field, &changes));
-  field.name = ASCIIToUTF16("blank");
-  field.value = ASCIIToUTF16("      ");
+  field.name = u"blank";
+  field.value = u"      ";
   EXPECT_TRUE(table_->AddFormFieldValue(field, &changes));
-  field.name = ASCIIToUTF16("blank");
+  field.name = u"blank";
   field.value = kValue;
   EXPECT_TRUE(table_->AddFormFieldValue(field, &changes));
 
   // They should be stored normally as the DB layer does not check for empty
   // values.
   v.clear();
-  EXPECT_TRUE(table_->GetFormValuesForElementName(
-      ASCIIToUTF16("blank"), base::string16(), &v, 10));
+  EXPECT_TRUE(
+      table_->GetFormValuesForElementName(u"blank", std::u16string(), &v, 10));
   EXPECT_EQ(4U, v.size());
 }
 
 TEST_F(AutofillTableTest, Autofill_GetEntry_Populated) {
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   base::Time now = base::Time::FromDoubleT(1546889367);
 
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, now));
 
   std::vector<AutofillEntry> prefix_v;
-  EXPECT_TRUE(table_->GetFormValuesForElementName(
-      field.name, ASCIIToUTF16("Super"), &prefix_v, 10));
+  EXPECT_TRUE(
+      table_->GetFormValuesForElementName(field.name, u"Super", &prefix_v, 10));
 
   std::vector<AutofillEntry> no_prefix_v;
-  EXPECT_TRUE(table_->GetFormValuesForElementName(field.name, ASCIIToUTF16(""),
-                                                  &no_prefix_v, 10));
+  EXPECT_TRUE(
+      table_->GetFormValuesForElementName(field.name, u"", &no_prefix_v, 10));
 
   AutofillEntry expected_entry(AutofillKey(field.name, field.value), now, now);
 
@@ -310,12 +304,12 @@ TEST_F(AutofillTableTest, Autofill_GetEntry_Populated) {
   EXPECT_THAT(no_prefix_v, ElementsAre(expected_entry));
 
   // Update date_last_used.
-  base::Time new_time = now + base::TimeDelta::FromSeconds(1000);
+  base::Time new_time = now + base::Seconds(1000);
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, new_time));
-  EXPECT_TRUE(table_->GetFormValuesForElementName(
-      field.name, ASCIIToUTF16("Super"), &prefix_v, 10));
-  EXPECT_TRUE(table_->GetFormValuesForElementName(field.name, ASCIIToUTF16(""),
-                                                  &no_prefix_v, 10));
+  EXPECT_TRUE(
+      table_->GetFormValuesForElementName(field.name, u"Super", &prefix_v, 10));
+  EXPECT_TRUE(
+      table_->GetFormValuesForElementName(field.name, u"", &no_prefix_v, 10));
 
   expected_entry =
       AutofillEntry(AutofillKey(field.name, field.value), now, new_time);
@@ -329,26 +323,21 @@ TEST_F(AutofillTableTest, Autofill_GetCountOfValuesContainedBetween) {
   // This test makes time comparisons that are precise to a microsecond, but the
   // database uses the time_t format which is only precise to a second.
   // Make sure we use timestamps rounded to a second.
-  Time begin = Time::FromTimeT(Time::Now().ToTimeT());
+  Time begin = Time::FromTimeT(AutofillClock::Now().ToTimeT());
   Time now = begin;
-  TimeDelta second = TimeDelta::FromSeconds(1);
+  base::TimeDelta second = base::Seconds(1);
 
   struct Entry {
-    const char* name;
-    const char* value;
-  } entries[] = {
-      { "Alter ego", "Superman" },
-      { "Name", "Superman" },
-      { "Name", "Clark Kent" },
-      { "Name", "Superman" },
-      { "Name", "Clark Sutter" },
-      { "Nomen", "Clark Kent" }
-  };
+    const char16_t* name;
+    const char16_t* value;
+  } entries[] = {{u"Alter ego", u"Superman"}, {u"Name", u"Superman"},
+                 {u"Name", u"Clark Kent"},    {u"Name", u"Superman"},
+                 {u"Name", u"Clark Sutter"},  {u"Nomen", u"Clark Kent"}};
 
   for (Entry entry : entries) {
     FormFieldData field;
-    field.name = ASCIIToUTF16(entry.name);
-    field.value = ASCIIToUTF16(entry.value);
+    field.name = entry.name;
+    field.value = entry.value;
     ASSERT_TRUE(table_->AddFormFieldValueTime(field, &changes, now));
     now += second;
   }
@@ -356,30 +345,29 @@ TEST_F(AutofillTableTest, Autofill_GetCountOfValuesContainedBetween) {
   // While the entry "Alter ego" : "Superman" is entirely contained within
   // the first second, the value "Superman" itself appears in another entry,
   // so it is not contained.
-  EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(
-      begin, begin + second));
+  EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(begin, begin + second));
 
   // No values are entirely contained within the first three seconds either
   // (note that the second time constraint is exclusive).
-  EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(
-      begin, begin + 3 * second));
+  EXPECT_EQ(
+      0, table_->GetCountOfValuesContainedBetween(begin, begin + 3 * second));
 
   // Only "Superman" is entirely contained within the first four seconds.
-  EXPECT_EQ(1, table_->GetCountOfValuesContainedBetween(
-      begin, begin + 4 * second));
+  EXPECT_EQ(
+      1, table_->GetCountOfValuesContainedBetween(begin, begin + 4 * second));
 
   // "Clark Kent" and "Clark Sutter" are contained between the first
   // and seventh second.
-  EXPECT_EQ(2, table_->GetCountOfValuesContainedBetween(
-      begin + second, begin + 7 * second));
+  EXPECT_EQ(2, table_->GetCountOfValuesContainedBetween(begin + second,
+                                                        begin + 7 * second));
 
   // Beginning from the third second, "Clark Kent" is not contained.
-  EXPECT_EQ(1, table_->GetCountOfValuesContainedBetween(
-      begin + 3 * second, begin + 7 * second));
+  EXPECT_EQ(1, table_->GetCountOfValuesContainedBetween(begin + 3 * second,
+                                                        begin + 7 * second));
 
   // We have three distinct values total.
-  EXPECT_EQ(3, table_->GetCountOfValuesContainedBetween(
-      begin, begin + 7 * second));
+  EXPECT_EQ(
+      3, table_->GetCountOfValuesContainedBetween(begin, begin + 7 * second));
 
   // And we should get the same result for unlimited time interval.
   EXPECT_EQ(3, table_->GetCountOfValuesContainedBetween(Time(), Time::Max()));
@@ -388,77 +376,71 @@ TEST_F(AutofillTableTest, Autofill_GetCountOfValuesContainedBetween) {
   EXPECT_EQ(3, table_->GetCountOfValuesContainedBetween(Time(), Time()));
 
   // An interval that does not fully contain any entries returns zero.
-  EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(
-      begin + second, begin + 2 * second));
+  EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(begin + second,
+                                                        begin + 2 * second));
 
   // So does an interval which has no intersection with any entry.
   EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(Time(), begin));
 }
 
 TEST_F(AutofillTableTest, Autofill_RemoveBetweenChanges) {
-  TimeDelta one_day(TimeDelta::FromDays(1));
-  Time t1 = Time::Now();
+  base::TimeDelta one_day(base::Days(1));
+  Time t1 = AutofillClock::Now();
   Time t2 = t1 + one_day;
 
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, t1));
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, t2));
 
   changes.clear();
   EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(t1, t2, &changes));
   ASSERT_EQ(1U, changes.size());
-  EXPECT_EQ(AutofillChange(AutofillChange::UPDATE,
-                           AutofillKey(ASCIIToUTF16("Name"),
-                                       ASCIIToUTF16("Superman"))),
-            changes[0]);
+  EXPECT_EQ(
+      AutofillChange(AutofillChange::UPDATE, AutofillKey(u"Name", u"Superman")),
+      changes[0]);
   changes.clear();
 
   EXPECT_TRUE(
       table_->RemoveFormElementsAddedBetween(t2, t2 + one_day, &changes));
   ASSERT_EQ(1U, changes.size());
-  EXPECT_EQ(AutofillChange(AutofillChange::REMOVE,
-                           AutofillKey(ASCIIToUTF16("Name"),
-                                       ASCIIToUTF16("Superman"))),
-            changes[0]);
+  EXPECT_EQ(
+      AutofillChange(AutofillChange::REMOVE, AutofillKey(u"Name", u"Superman")),
+      changes[0]);
 }
 
 TEST_F(AutofillTableTest, Autofill_AddChanges) {
-  TimeDelta one_day(TimeDelta::FromDays(1));
-  Time t1 = Time::Now();
+  base::TimeDelta one_day(base::Days(1));
+  Time t1 = AutofillClock::Now();
   Time t2 = t1 + one_day;
 
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, t1));
   ASSERT_EQ(1U, changes.size());
-  EXPECT_EQ(AutofillChange(AutofillChange::ADD,
-                           AutofillKey(ASCIIToUTF16("Name"),
-                                       ASCIIToUTF16("Superman"))),
-            changes[0]);
+  EXPECT_EQ(
+      AutofillChange(AutofillChange::ADD, AutofillKey(u"Name", u"Superman")),
+      changes[0]);
 
   changes.clear();
-  EXPECT_TRUE(
-      table_->AddFormFieldValueTime(field, &changes, t2));
+  EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, t2));
   ASSERT_EQ(1U, changes.size());
-  EXPECT_EQ(AutofillChange(AutofillChange::UPDATE,
-                           AutofillKey(ASCIIToUTF16("Name"),
-                                       ASCIIToUTF16("Superman"))),
-            changes[0]);
+  EXPECT_EQ(
+      AutofillChange(AutofillChange::UPDATE, AutofillKey(u"Name", u"Superman")),
+      changes[0]);
 }
 
 TEST_F(AutofillTableTest, Autofill_UpdateOneWithOneTimestamp) {
-  AutofillEntry entry(MakeAutofillEntry("foo", "bar", 1, -1));
+  AutofillEntry entry(MakeAutofillEntry(u"foo", u"bar", 1, -1));
   std::vector<AutofillEntry> entries;
   entries.push_back(entry);
   ASSERT_TRUE(table_->UpdateAutofillEntries(entries));
 
-  EXPECT_EQ(1, GetAutofillEntryCount(ASCIIToUTF16("foo"), ASCIIToUTF16("bar"),
-                                     db_.get()));
+  EXPECT_EQ(1, GetAutofillEntryCount(u"foo", u"bar", db_.get()));
 
   std::vector<AutofillEntry> all_entries;
   ASSERT_TRUE(table_->GetAllAutofillEntries(&all_entries));
@@ -467,13 +449,12 @@ TEST_F(AutofillTableTest, Autofill_UpdateOneWithOneTimestamp) {
 }
 
 TEST_F(AutofillTableTest, Autofill_UpdateOneWithTwoTimestamps) {
-  AutofillEntry entry(MakeAutofillEntry("foo", "bar", 1, 2));
+  AutofillEntry entry(MakeAutofillEntry(u"foo", u"bar", 1, 2));
   std::vector<AutofillEntry> entries;
   entries.push_back(entry);
   ASSERT_TRUE(table_->UpdateAutofillEntries(entries));
 
-  EXPECT_EQ(2, GetAutofillEntryCount(ASCIIToUTF16("foo"), ASCIIToUTF16("bar"),
-                                     db_.get()));
+  EXPECT_EQ(2, GetAutofillEntryCount(u"foo", u"bar", db_.get()));
 
   std::vector<AutofillEntry> all_entries;
   ASSERT_TRUE(table_->GetAllAutofillEntries(&all_entries));
@@ -482,39 +463,35 @@ TEST_F(AutofillTableTest, Autofill_UpdateOneWithTwoTimestamps) {
 }
 
 TEST_F(AutofillTableTest, Autofill_GetAutofillTimestamps) {
-  AutofillEntry entry(MakeAutofillEntry("foo", "bar", 1, 2));
+  AutofillEntry entry(MakeAutofillEntry(u"foo", u"bar", 1, 2));
   std::vector<AutofillEntry> entries;
   entries.push_back(entry);
   ASSERT_TRUE(table_->UpdateAutofillEntries(entries));
 
   Time date_created, date_last_used;
-  ASSERT_TRUE(table_->GetAutofillTimestamps(ASCIIToUTF16("foo"),
-                                            ASCIIToUTF16("bar"),
-                                            &date_created,
+  ASSERT_TRUE(table_->GetAutofillTimestamps(u"foo", u"bar", &date_created,
                                             &date_last_used));
   EXPECT_EQ(Time::FromTimeT(1), date_created);
   EXPECT_EQ(Time::FromTimeT(2), date_last_used);
 }
 
 TEST_F(AutofillTableTest, Autofill_UpdateTwo) {
-  AutofillEntry entry0(MakeAutofillEntry("foo", "bar0", 1, -1));
-  AutofillEntry entry1(MakeAutofillEntry("foo", "bar1", 2, 3));
+  AutofillEntry entry0(MakeAutofillEntry(u"foo", u"bar0", 1, -1));
+  AutofillEntry entry1(MakeAutofillEntry(u"foo", u"bar1", 2, 3));
   std::vector<AutofillEntry> entries;
   entries.push_back(entry0);
   entries.push_back(entry1);
   ASSERT_TRUE(table_->UpdateAutofillEntries(entries));
 
-  EXPECT_EQ(1, GetAutofillEntryCount(ASCIIToUTF16("foo"), ASCIIToUTF16("bar0"),
-                                     db_.get()));
-  EXPECT_EQ(2, GetAutofillEntryCount(ASCIIToUTF16("foo"), ASCIIToUTF16("bar1"),
-                                     db_.get()));
+  EXPECT_EQ(1, GetAutofillEntryCount(u"foo", u"bar0", db_.get()));
+  EXPECT_EQ(2, GetAutofillEntryCount(u"foo", u"bar1", db_.get()));
 }
 
 TEST_F(AutofillTableTest, Autofill_UpdateNullTerminated) {
-  const char kName[] = "foo";
-  const char kValue[] = "bar";
+  const char16_t kName[] = u"foo";
+  const char16_t kValue[] = u"bar";
   // A value which contains terminating character.
-  std::string value(kValue, base::size(kValue));
+  std::u16string value(kValue, std::size(kValue));
 
   AutofillEntry entry0(MakeAutofillEntry(kName, kValue, 1, -1));
   AutofillEntry entry1(MakeAutofillEntry(kName, value, 2, 3));
@@ -523,10 +500,8 @@ TEST_F(AutofillTableTest, Autofill_UpdateNullTerminated) {
   entries.push_back(entry1);
   ASSERT_TRUE(table_->UpdateAutofillEntries(entries));
 
-  EXPECT_EQ(1, GetAutofillEntryCount(ASCIIToUTF16(kName), ASCIIToUTF16(kValue),
-                                     db_.get()));
-  EXPECT_EQ(2, GetAutofillEntryCount(ASCIIToUTF16(kName), ASCIIToUTF16(value),
-                                     db_.get()));
+  EXPECT_EQ(1, GetAutofillEntryCount(kName, kValue, db_.get()));
+  EXPECT_EQ(2, GetAutofillEntryCount(kName, value, db_.get()));
 
   std::vector<AutofillEntry> all_entries;
   ASSERT_TRUE(table_->GetAllAutofillEntries(&all_entries));
@@ -539,11 +514,11 @@ TEST_F(AutofillTableTest, Autofill_UpdateReplace) {
   AutofillChangeList changes;
   // Add a form field.  This will be replaced.
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValue(field, &changes));
 
-  AutofillEntry entry(MakeAutofillEntry("Name", "Superman", 1, 2));
+  AutofillEntry entry(MakeAutofillEntry(u"Name", u"Superman", 1, 2));
   std::vector<AutofillEntry> entries;
   entries.push_back(entry);
   ASSERT_TRUE(table_->UpdateAutofillEntries(entries));
@@ -555,9 +530,9 @@ TEST_F(AutofillTableTest, Autofill_UpdateReplace) {
 }
 
 TEST_F(AutofillTableTest, Autofill_UpdateDontReplace) {
-  Time t = Time::Now();
+  Time t = AutofillClock::Now();
   AutofillEntry existing(
-      MakeAutofillEntry("Name", "Superman", t.ToTimeT(), -1));
+      MakeAutofillEntry(u"Name", u"Superman", t.ToTimeT(), -1));
 
   AutofillChangeList changes;
   // Add a form field.  This will NOT be replaced.
@@ -565,7 +540,7 @@ TEST_F(AutofillTableTest, Autofill_UpdateDontReplace) {
   field.name = existing.key().name();
   field.value = existing.key().value();
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, t));
-  AutofillEntry entry(MakeAutofillEntry("Name", "Clark Kent", 1, 2));
+  AutofillEntry entry(MakeAutofillEntry(u"Name", u"Clark Kent", 1, 2));
   std::vector<AutofillEntry> entries;
   entries.push_back(entry);
   ASSERT_TRUE(table_->UpdateAutofillEntries(entries));
@@ -573,35 +548,34 @@ TEST_F(AutofillTableTest, Autofill_UpdateDontReplace) {
   std::vector<AutofillEntry> all_entries;
   ASSERT_TRUE(table_->GetAllAutofillEntries(&all_entries));
   ASSERT_EQ(2U, all_entries.size());
-  AutofillEntrySet expected_entries(all_entries.begin(),
-                                    all_entries.end(),
+  AutofillEntrySet expected_entries(all_entries.begin(), all_entries.end(),
                                     CompareAutofillEntries);
   EXPECT_EQ(1U, expected_entries.count(existing));
   EXPECT_EQ(1U, expected_entries.count(entry));
 }
 
 TEST_F(AutofillTableTest, Autofill_AddFormFieldValues) {
-  Time t = Time::Now();
+  Time t = AutofillClock::Now();
 
   // Add multiple values for "firstname" and "lastname" names.  Test that only
   // first value of each gets added. Related to security issue:
   // http://crbug.com/51727.
   std::vector<FormFieldData> elements;
   FormFieldData field;
-  field.name = ASCIIToUTF16("firstname");
-  field.value = ASCIIToUTF16("Joe");
+  field.name = u"firstname";
+  field.value = u"Joe";
   elements.push_back(field);
 
-  field.name = ASCIIToUTF16("firstname");
-  field.value = ASCIIToUTF16("Jane");
+  field.name = u"firstname";
+  field.value = u"Jane";
   elements.push_back(field);
 
-  field.name = ASCIIToUTF16("lastname");
-  field.value = ASCIIToUTF16("Smith");
+  field.name = u"lastname";
+  field.value = u"Smith";
   elements.push_back(field);
 
-  field.name = ASCIIToUTF16("lastname");
-  field.value = ASCIIToUTF16("Jones");
+  field.name = u"lastname";
+  field.value = u"Jones";
   elements.push_back(field);
 
   std::vector<AutofillChange> changes;
@@ -609,11 +583,9 @@ TEST_F(AutofillTableTest, Autofill_AddFormFieldValues) {
 
   ASSERT_EQ(2U, changes.size());
   EXPECT_EQ(changes[0], AutofillChange(AutofillChange::ADD,
-                                       AutofillKey(ASCIIToUTF16("firstname"),
-                                       ASCIIToUTF16("Joe"))));
+                                       AutofillKey(u"firstname", u"Joe")));
   EXPECT_EQ(changes[1], AutofillChange(AutofillChange::ADD,
-                                       AutofillKey(ASCIIToUTF16("lastname"),
-                                       ASCIIToUTF16("Smith"))));
+                                       AutofillKey(u"lastname", u"Smith")));
 
   std::vector<AutofillEntry> all_entries;
   ASSERT_TRUE(table_->GetAllAutofillEntries(&all_entries));
@@ -625,8 +597,8 @@ TEST_F(AutofillTableTest,
   // Add an entry used only before the targetted range.
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
                                             base::Time::FromTimeT(10)));
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
@@ -641,9 +613,8 @@ TEST_F(AutofillTableTest,
   EXPECT_EQ(5, GetAutofillEntryCount(field.name, field.value, db_.get()));
 
   changes.clear();
-  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(base::Time::FromTimeT(51),
-                                                     base::Time::FromTimeT(60),
-                                                     &changes));
+  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(
+      base::Time::FromTimeT(51), base::Time::FromTimeT(60), &changes));
   EXPECT_TRUE(changes.empty());
   EXPECT_EQ(5, GetAutofillEntryCount(field.name, field.value, db_.get()));
 }
@@ -653,8 +624,8 @@ TEST_F(AutofillTableTest,
   // Add an entry used only after the targetted range.
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
                                             base::Time::FromTimeT(50)));
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
@@ -669,9 +640,8 @@ TEST_F(AutofillTableTest,
   EXPECT_EQ(5, GetAutofillEntryCount(field.name, field.value, db_.get()));
 
   changes.clear();
-  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(base::Time::FromTimeT(40),
-                                                     base::Time::FromTimeT(50),
-                                                     &changes));
+  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(
+      base::Time::FromTimeT(40), base::Time::FromTimeT(50), &changes));
   EXPECT_TRUE(changes.empty());
   EXPECT_EQ(5, GetAutofillEntryCount(field.name, field.value, db_.get()));
 }
@@ -681,8 +651,8 @@ TEST_F(AutofillTableTest,
   // Add an entry used entirely during the targetted range.
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
                                             base::Time::FromTimeT(10)));
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
@@ -697,9 +667,8 @@ TEST_F(AutofillTableTest,
   EXPECT_EQ(5, GetAutofillEntryCount(field.name, field.value, db_.get()));
 
   changes.clear();
-  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(base::Time::FromTimeT(10),
-                                                     base::Time::FromTimeT(51),
-                                                     &changes));
+  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(
+      base::Time::FromTimeT(10), base::Time::FromTimeT(51), &changes));
   ASSERT_EQ(1U, changes.size());
   EXPECT_EQ(AutofillChange(AutofillChange::REMOVE,
                            AutofillKey(field.name, field.value)),
@@ -712,8 +681,8 @@ TEST_F(AutofillTableTest,
   // Add an entry used both before and during the targetted range.
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
                                             base::Time::FromTimeT(10)));
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
@@ -728,18 +697,16 @@ TEST_F(AutofillTableTest,
   EXPECT_EQ(5, GetAutofillEntryCount(field.name, field.value, db_.get()));
 
   changes.clear();
-  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(base::Time::FromTimeT(40),
-                                                     base::Time::FromTimeT(60),
-                                                     &changes));
+  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(
+      base::Time::FromTimeT(40), base::Time::FromTimeT(60), &changes));
   ASSERT_EQ(1U, changes.size());
   EXPECT_EQ(AutofillChange(AutofillChange::UPDATE,
                            AutofillKey(field.name, field.value)),
             changes[0]);
   EXPECT_EQ(4, GetAutofillEntryCount(field.name, field.value, db_.get()));
   base::Time date_created, date_last_used;
-  EXPECT_TRUE(
-      table_->GetAutofillTimestamps(field.name, field.value,
-                                    &date_created, &date_last_used));
+  EXPECT_TRUE(table_->GetAutofillTimestamps(field.name, field.value,
+                                            &date_created, &date_last_used));
   EXPECT_EQ(base::Time::FromTimeT(10), date_created);
   EXPECT_EQ(base::Time::FromTimeT(39), date_last_used);
 }
@@ -749,8 +716,8 @@ TEST_F(AutofillTableTest,
   // Add an entry used both during and after the targetted range.
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
                                             base::Time::FromTimeT(50)));
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
@@ -765,38 +732,36 @@ TEST_F(AutofillTableTest,
   EXPECT_EQ(5, GetAutofillEntryCount(field.name, field.value, db_.get()));
 
   changes.clear();
-  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(base::Time::FromTimeT(40),
-                                                     base::Time::FromTimeT(80),
-                                                     &changes));
+  EXPECT_TRUE(table_->RemoveFormElementsAddedBetween(
+      base::Time::FromTimeT(40), base::Time::FromTimeT(80), &changes));
   ASSERT_EQ(1U, changes.size());
   EXPECT_EQ(AutofillChange(AutofillChange::UPDATE,
                            AutofillKey(field.name, field.value)),
             changes[0]);
   EXPECT_EQ(2, GetAutofillEntryCount(field.name, field.value, db_.get()));
   base::Time date_created, date_last_used;
-  EXPECT_TRUE(
-      table_->GetAutofillTimestamps(field.name, field.value,
-                                    &date_created, &date_last_used));
+  EXPECT_TRUE(table_->GetAutofillTimestamps(field.name, field.value,
+                                            &date_created, &date_last_used));
   EXPECT_EQ(base::Time::FromTimeT(80), date_created);
   EXPECT_EQ(base::Time::FromTimeT(90), date_last_used);
 }
 
 TEST_F(AutofillTableTest,
        Autofill_RemoveFormElementsAddedBetween_OlderThan30Days) {
-  const base::Time kNow = base::Time::Now();
-  const base::Time k29DaysOld = kNow - base::TimeDelta::FromDays(29);
-  const base::Time k30DaysOld = kNow - base::TimeDelta::FromDays(30);
-  const base::Time k31DaysOld = kNow - base::TimeDelta::FromDays(31);
+  const base::Time kNow = AutofillClock::Now();
+  const base::Time k29DaysOld = kNow - base::Days(29);
+  const base::Time k30DaysOld = kNow - base::Days(30);
+  const base::Time k31DaysOld = kNow - base::Days(31);
 
   // Add some form field entries.
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, kNow));
-  field.value = ASCIIToUTF16("Clark Kent");
+  field.value = u"Clark Kent";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, k29DaysOld));
-  field.value = ASCIIToUTF16("Clark Sutter");
+  field.value = u"Clark Sutter";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, k31DaysOld));
   EXPECT_EQ(3U, changes.size());
 
@@ -806,15 +771,11 @@ TEST_F(AutofillTableTest,
                                                      &changes));
   ASSERT_EQ(1U, changes.size());
   EXPECT_EQ(AutofillChange(AutofillChange::REMOVE,
-                           AutofillKey(ASCIIToUTF16("Name"),
-                                       ASCIIToUTF16("Clark Sutter"))),
+                           AutofillKey(u"Name", u"Clark Sutter")),
             changes[0]);
-  EXPECT_EQ(0, GetAutofillEntryCount(ASCIIToUTF16("Name"),
-                                     ASCIIToUTF16("Clark Sutter"), db_.get()));
-  EXPECT_EQ(1, GetAutofillEntryCount(ASCIIToUTF16("Name"),
-                                     ASCIIToUTF16("Superman"), db_.get()));
-  EXPECT_EQ(1, GetAutofillEntryCount(ASCIIToUTF16("Name"),
-                                     ASCIIToUTF16("Clark Kent"), db_.get()));
+  EXPECT_EQ(0, GetAutofillEntryCount(u"Name", u"Clark Sutter", db_.get()));
+  EXPECT_EQ(1, GetAutofillEntryCount(u"Name", u"Superman", db_.get()));
+  EXPECT_EQ(1, GetAutofillEntryCount(u"Name", u"Clark Kent", db_.get()));
   changes.clear();
 }
 
@@ -822,13 +783,12 @@ TEST_F(AutofillTableTest,
 // delete an old entry.
 TEST_F(AutofillTableTest, RemoveExpiredFormElements_Expires_DeleteEntry) {
   auto kNow = AutofillClock::Now();
-  auto k2YearsOld = kNow - base::TimeDelta::FromDays(
-                               2 * kAutocompleteRetentionPolicyPeriodInDays);
+  auto k2YearsOld = kNow - 2 * kAutocompleteRetentionPolicyPeriod;
 
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, k2YearsOld));
   changes.clear();
 
@@ -843,12 +803,12 @@ TEST_F(AutofillTableTest, RemoveExpiredFormElements_Expires_DeleteEntry) {
 // delete non-expired entries' data from the SQLite table.
 TEST_F(AutofillTableTest, RemoveExpiredFormElements_NotOldEnough) {
   auto kNow = AutofillClock::Now();
-  auto k2DaysOld = kNow - base::TimeDelta::FromDays(2);
+  auto k2DaysOld = kNow - base::Days(2);
 
   AutofillChangeList changes;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
+  field.name = u"Name";
+  field.value = u"Superman";
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, k2DaysOld));
   changes.clear();
 
@@ -856,39 +816,489 @@ TEST_F(AutofillTableTest, RemoveExpiredFormElements_NotOldEnough) {
   EXPECT_TRUE(changes.empty());
 }
 
-TEST_F(AutofillTableTest, AutofillProfile) {
-  // Add a 'Home' profile with non-default data. The specific values are not
-  // important.
+TEST_F(AutofillTableTest,
+       AutofillProfile_StructuredNames_BackAndForthMigration) {
+  // Enable the structured names.
+  scoped_feature_list_.InitWithFeatures(
+      {features::kAutofillEnableSupportForMoreStructureInNames},
+      {features::kAutofillEnableSupportForMoreStructureInAddresses});
+
+  AutofillProfile structured_name_profile;
+  structured_name_profile.set_origin(std::string());
+
+  // TODO(crbug.com/1113617): Honorifics are temporally disabled.
+  // structured_name_profile.SetRawInfoWithVerificationStatus(
+  //     NAME_HONORIFIC_PREFIX, u"Dr.",
+  //     VerificationStatus::kObserved);
+
+  structured_name_profile.SetRawInfoWithVerificationStatus(
+      NAME_FIRST, u"John", VerificationStatus::kObserved);
+
+  structured_name_profile.SetRawInfoWithVerificationStatus(
+      NAME_MIDDLE, u"Q.", VerificationStatus::kObserved);
+
+  structured_name_profile.SetRawInfoWithVerificationStatus(
+      NAME_LAST_FIRST, u"Agent", VerificationStatus::kParsed);
+
+  structured_name_profile.SetRawInfoWithVerificationStatus(
+      NAME_LAST_CONJUNCTION, u"007", VerificationStatus::kParsed);
+
+  structured_name_profile.SetRawInfoWithVerificationStatus(
+      NAME_LAST_SECOND, u"Smith", VerificationStatus::kParsed);
+
+  structured_name_profile.SetRawInfoWithVerificationStatus(
+      NAME_LAST, u"Agent 007 Smith", VerificationStatus::kParsed);
+
+  structured_name_profile.SetRawInfoWithVerificationStatus(
+      NAME_FULL, u"John Q. Agent 007 Smith", VerificationStatus::kObserved);
+
+  structured_name_profile.SetRawInfo(EMAIL_ADDRESS, u"js@smith.xyz");
+
+  structured_name_profile.SetRawInfo(COMPANY_NAME, u"Google");
+
+  structured_name_profile.SetRawInfo(ADDRESS_HOME_LINE1, u"1234 Apple Way");
+
+  structured_name_profile.SetRawInfo(ADDRESS_HOME_LINE2, u"unit 5");
+
+  structured_name_profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY,
+                                     u"Beverly Hills");
+
+  structured_name_profile.SetRawInfo(ADDRESS_HOME_CITY, u"Los Angeles");
+
+  structured_name_profile.SetRawInfo(ADDRESS_HOME_STATE, u"CA");
+
+  structured_name_profile.SetRawInfo(ADDRESS_HOME_ZIP, u"90025");
+
+  structured_name_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"MAGIC ###");
+
+  structured_name_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
+
+  structured_name_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181234567");
+
+  structured_name_profile.set_language_code("en");
+
+  // Add the profile to the table.
+  EXPECT_TRUE(table_->AddAutofillProfile(structured_name_profile));
+
+  // Get the structured-name profile from the table.
+  std::unique_ptr<AutofillProfile> db_profile =
+      table_->GetAutofillProfile(structured_name_profile.guid());
+  ASSERT_TRUE(db_profile);
+
+  // Verify that it is correct.
+  EXPECT_EQ(structured_name_profile, *db_profile);
+
+  // Now the feature for new structured names is disabled and the profile
+  // retrieved again.
+  scoped_feature_list_.Reset();
+  scoped_feature_list_.InitAndDisableFeature(
+      features::kAutofillEnableSupportForMoreStructureInNames);
+
+  // Get the legacy profile from the table.
+  std::unique_ptr<AutofillProfile> db_legacy_profile =
+      table_->GetAutofillProfile(structured_name_profile.guid());
+  ASSERT_TRUE(db_profile);
+
+  // And verify that state of the retrieved profile since it should only contain
+  // the legacy structure.
+  // TODO(crbug.com/1113617): Honorifics are temporally disabled.
+  EXPECT_EQ(db_legacy_profile->GetRawInfo(NAME_FULL),
+            u"John Q. Agent 007 Smith");
+  EXPECT_EQ(db_legacy_profile->GetRawInfo(NAME_FIRST), u"John");
+  EXPECT_EQ(db_legacy_profile->GetRawInfo(NAME_MIDDLE), u"Q.");
+  EXPECT_EQ(db_legacy_profile->GetRawInfo(NAME_LAST), u"Agent 007 Smith");
+  EXPECT_TRUE(db_legacy_profile->GetRawInfo(NAME_HONORIFIC_PREFIX).empty());
+  EXPECT_TRUE(db_legacy_profile->GetRawInfo(NAME_LAST_FIRST).empty());
+  EXPECT_TRUE(db_legacy_profile->GetRawInfo(NAME_LAST_CONJUNCTION).empty());
+  EXPECT_TRUE(db_legacy_profile->GetRawInfo(NAME_LAST_SECOND).empty());
+
+  // Now the profile is updated (although it is technically the same).
+  EXPECT_TRUE(table_->UpdateAutofillProfile(*db_legacy_profile));
+
+  // Manually query the data base to verify that all tokens have been reset.
+  sql::Statement s(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT "
+      "guid, "
+      "honorific_prefix, honorific_prefix_status, "
+      "first_name, first_name_status, "
+      "middle_name, middle_name_status, "
+      "first_last_name, first_last_name_status, "
+      "conjunction_last_name, conjunction_last_name_status, "
+      "second_last_name, second_last_name_status, "
+      "last_name, last_name_status, "
+      "full_name, full_name_status "
+      "FROM autofill_profile_names "
+      "WHERE guid=? "
+      "LIMIT 1"));
+  s.BindString(0, structured_name_profile.guid());
+  ASSERT_TRUE(s.is_valid());
+  ASSERT_TRUE(s.Step());
+
+  // Verify that the columns containing the additional structure were reset.
+  // NAME_HONORIFIC_PREFIX
+  EXPECT_TRUE(s.ColumnString16(1).empty());
+  EXPECT_EQ(s.ColumnInt(2), 0);
+  // NAME_LAST_FIRST
+  EXPECT_TRUE(s.ColumnString16(7).empty());
+  EXPECT_EQ(s.ColumnInt(8), 0);
+  // NAME_LAST_CONJUNCTION
+  EXPECT_TRUE(s.ColumnString16(9).empty());
+  EXPECT_EQ(s.ColumnInt(10), 0);
+  // NAME_LAST_SECOND
+  EXPECT_TRUE(s.ColumnString16(11).empty());
+  EXPECT_EQ(s.ColumnInt(12), 0);
+
+  // Now the feature for new structured names is enabled again and the profile
+  // is retrieved once more.
+  scoped_feature_list_.Reset();
+  scoped_feature_list_.InitAndEnableFeature(
+      features::kAutofillEnableSupportForMoreStructureInNames);
+
+  std::unique_ptr<AutofillProfile> db_migrated_profile =
+      table_->GetAutofillProfile(structured_name_profile.guid());
+  ASSERT_TRUE(db_migrated_profile);
+
+  // Verify that the legacy tokens are written correctly to the profile and
+  // the profile is migrated correctly.
+  // TODO(crbug.com/1113617): Honorifics are temporally disabled.
+  EXPECT_EQ(db_migrated_profile->GetRawInfo(NAME_FULL),
+            u"John Q. Agent 007 Smith");
+  EXPECT_TRUE(db_migrated_profile->GetRawInfo(NAME_HONORIFIC_PREFIX).empty());
+  EXPECT_EQ(db_migrated_profile->GetRawInfo(NAME_FIRST), u"John");
+  EXPECT_EQ(db_migrated_profile->GetRawInfo(NAME_MIDDLE), u"Q.");
+  EXPECT_EQ(db_migrated_profile->GetRawInfo(NAME_LAST), u"Agent 007 Smith");
+  EXPECT_TRUE(db_migrated_profile->GetRawInfo(NAME_LAST_FIRST).empty());
+  EXPECT_TRUE(db_migrated_profile->GetRawInfo(NAME_LAST_CONJUNCTION).empty());
+  EXPECT_EQ(db_migrated_profile->GetRawInfo(NAME_LAST_SECOND),
+            u"Agent 007 Smith");
+
+  EXPECT_EQ(db_migrated_profile->GetVerificationStatus(NAME_FULL),
+            VerificationStatus::kObserved);
+  // TODO(crbug.com/1113617): Honorifics are temporally disabled.
+  EXPECT_EQ(db_migrated_profile->GetVerificationStatus(NAME_HONORIFIC_PREFIX),
+            VerificationStatus::kNoStatus);
+  EXPECT_EQ(db_migrated_profile->GetVerificationStatus(NAME_FIRST),
+            VerificationStatus::kParsed);
+  EXPECT_EQ(db_migrated_profile->GetVerificationStatus(NAME_MIDDLE),
+            VerificationStatus::kParsed);
+  EXPECT_EQ(db_migrated_profile->GetVerificationStatus(NAME_LAST),
+            VerificationStatus::kParsed);
+  EXPECT_EQ(db_migrated_profile->GetVerificationStatus(NAME_LAST_FIRST),
+            VerificationStatus::kParsed);
+  EXPECT_EQ(db_migrated_profile->GetVerificationStatus(NAME_LAST_CONJUNCTION),
+            VerificationStatus::kParsed);
+  EXPECT_EQ(db_migrated_profile->GetVerificationStatus(NAME_LAST_SECOND),
+            VerificationStatus::kParsed);
+}
+
+TEST_F(AutofillTableTest, AutofillProfile_StructuredAddresses) {
+  // Enable the structured addresses features.
+  scoped_feature_list_.InitWithFeatures(
+      {features::kAutofillEnableSupportForMoreStructureInAddresses}, {});
+
+  AutofillProfile profile;
+  profile.set_origin(std::string());
+
+  profile.SetRawInfoWithVerificationStatus(
+      ADDRESS_HOME_STREET_ADDRESS,
+      u"Street Name House Number Premise APT 10 Floor 2",
+      VerificationStatus::kUserVerified);
+  profile.SetRawInfoWithVerificationStatus(
+      ADDRESS_HOME_STREET_NAME, u"Street Name", VerificationStatus::kFormatted);
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_DEPENDENT_LOCALITY,
+                                           u"Dependent Locality",
+                                           VerificationStatus::kObserved);
+
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_CITY, u"City",
+                                           VerificationStatus::kObserved);
+
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_STATE, u"State",
+                                           VerificationStatus::kObserved);
+
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_SORTING_CODE,
+                                           u"Sorting Code",
+                                           VerificationStatus::kObserved);
+
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_ZIP, u"ZIP",
+                                           VerificationStatus::kObserved);
+
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_COUNTRY, u"DE",
+                                           VerificationStatus::kObserved);
+
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_DEPENDENT_STREET_NAME,
+                                           u"", VerificationStatus::kObserved);
+
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_HOUSE_NUMBER,
+                                           u"House Number",
+                                           VerificationStatus::kUserVerified);
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_SUBPREMISE,
+                                           u"APT 10 Floor 2",
+                                           VerificationStatus::kUserVerified);
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_APT_NUM, u"10",
+                                           VerificationStatus::kParsed);
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_FLOOR, u"2",
+                                           VerificationStatus::kParsed);
+  profile.SetRawInfoWithVerificationStatus(
+      ADDRESS_HOME_PREMISE_NAME, u"Premise", VerificationStatus::kUserVerified);
+  ASSERT_EQ(profile.GetRawInfo(ADDRESS_HOME_STREET_NAME), u"Street Name");
+
+  // Add the profile to the table.
+  EXPECT_TRUE(table_->AddAutofillProfile(profile));
+
+  // Read the profile from the table and verify the correct values.
+  std::unique_ptr<AutofillProfile> db_profile =
+      table_->GetAutofillProfile(profile.guid());
+  ASSERT_TRUE(db_profile);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_STREET_NAME),
+            VerificationStatus::kFormatted);
+
+  EXPECT_EQ(
+      db_profile->GetVerificationStatus(ADDRESS_HOME_DEPENDENT_STREET_NAME),
+      VerificationStatus::kObserved);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_HOUSE_NUMBER),
+            VerificationStatus::kUserVerified);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_SUBPREMISE),
+            VerificationStatus::kUserVerified);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_APT_NUM),
+            VerificationStatus::kParsed);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_FLOOR),
+            VerificationStatus::kParsed);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_PREMISE_NAME),
+            VerificationStatus::kUserVerified);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_DEPENDENT_LOCALITY),
+            VerificationStatus::kObserved);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_CITY),
+            VerificationStatus::kObserved);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_STATE),
+            VerificationStatus::kObserved);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_SORTING_CODE),
+            VerificationStatus::kObserved);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_ZIP),
+            VerificationStatus::kObserved);
+
+  EXPECT_EQ(db_profile->GetVerificationStatus(ADDRESS_HOME_COUNTRY),
+            VerificationStatus::kObserved);
+
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_STREET_NAME), u"Street Name");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_DEPENDENT_STREET_NAME), u"");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_HOUSE_NUMBER), u"House Number");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_SUBPREMISE), u"APT 10 Floor 2");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_APT_NUM), u"10");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_FLOOR), u"2");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_PREMISE_NAME), u"Premise");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY),
+            u"Dependent Locality");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_CITY), u"City");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_STATE), u"State");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_SORTING_CODE), u"Sorting Code");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_ZIP), u"ZIP");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_COUNTRY), u"DE");
+
+  EXPECT_EQ(profile, *db_profile);
+}
+
+TEST_F(AutofillTableTest,
+       AutofillProfile_StructuredAddresses_Eventual_Deletion) {
+  // Enable the structured addresses.
+  scoped_feature_list_.InitWithFeatures(
+      {features::kAutofillEnableSupportForMoreStructureInAddresses}, {});
+
+  AutofillProfile profile;
+  profile.set_origin(std::string());
+
+  profile.SetRawInfoWithVerificationStatus(
+      ADDRESS_HOME_STREET_ADDRESS,
+      u"Street Name House Number Premise Subpremise",
+      VerificationStatus::kUserVerified);
+  profile.SetRawInfoWithVerificationStatus(
+      ADDRESS_HOME_STREET_NAME, u"Street Name", VerificationStatus::kFormatted);
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_DEPENDENT_STREET_NAME,
+                                           u"", VerificationStatus::kObserved);
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_HOUSE_NUMBER,
+                                           u"House Number",
+                                           VerificationStatus::kUserVerified);
+  profile.SetRawInfoWithVerificationStatus(ADDRESS_HOME_SUBPREMISE,
+                                           u"Subpremise",
+                                           VerificationStatus::kUserVerified);
+  profile.SetRawInfoWithVerificationStatus(
+      ADDRESS_HOME_PREMISE_NAME, u"Premise", VerificationStatus::kUserVerified);
+  ASSERT_EQ(profile.GetRawInfo(ADDRESS_HOME_STREET_NAME), u"Street Name");
+  // Add the profile to the table.
+  EXPECT_TRUE(table_->AddAutofillProfile(profile));
+
+  AutofillClock::Now();
+  std::unique_ptr<AutofillProfile> db_profile =
+      table_->GetAutofillProfile(profile.guid());
+  ASSERT_TRUE(db_profile);
+
+  // Verify that it is correct.
+  EXPECT_EQ(profile, *db_profile);
+
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_STREET_NAME), u"Street Name");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_DEPENDENT_STREET_NAME), u"");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_HOUSE_NUMBER), u"House Number");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_SUBPREMISE), u"Subpremise");
+  EXPECT_EQ(db_profile->GetRawInfo(ADDRESS_HOME_PREMISE_NAME), u"Premise");
+
+  // Deactivate the features.
+  scoped_feature_list_.Reset();
+  scoped_feature_list_.InitWithFeatures(
+      {}, {features::kAutofillEnableSupportForMoreStructureInAddresses});
+
+  // Retrieve the address and verify that the structured tokens are not written.
+  std::unique_ptr<AutofillProfile> legacy_db_profile =
+      table_->GetAutofillProfile(profile.guid());
+  ASSERT_TRUE(legacy_db_profile);
+
+  EXPECT_EQ(legacy_db_profile->GetRawInfo(ADDRESS_HOME_STREET_NAME),
+            std::u16string());
+  EXPECT_EQ(legacy_db_profile->GetRawInfo(ADDRESS_HOME_DEPENDENT_STREET_NAME),
+            std::u16string());
+  EXPECT_EQ(legacy_db_profile->GetRawInfo(ADDRESS_HOME_HOUSE_NUMBER),
+            std::u16string());
+  EXPECT_EQ(legacy_db_profile->GetRawInfo(ADDRESS_HOME_SUBPREMISE),
+            std::u16string());
+  EXPECT_EQ(legacy_db_profile->GetRawInfo(ADDRESS_HOME_PREMISE_NAME),
+            std::u16string());
+
+  // Change the street address and update the profile.
+  legacy_db_profile->SetRawInfoWithVerificationStatus(
+      ADDRESS_HOME_STREET_ADDRESS, u"Other Street Address",
+      VerificationStatus::kUserVerified);
+  table_->UpdateAutofillProfile(*legacy_db_profile);
+  std::unique_ptr<AutofillProfile> changed_db_profile =
+      table_->GetAutofillProfile(profile.guid());
+  EXPECT_EQ(changed_db_profile->GetRawInfo(ADDRESS_HOME_STREET_ADDRESS),
+            u"Other Street Address");
+
+  // Note, this step already removes the structured address entry from the
+  // table. To simulate the behavior of legacy clients, we manually insert it
+  // again.
+  sql::Statement s(db_->GetSQLConnection()->GetUniqueStatement(
+      "INSERT INTO autofill_profile_addresses "
+      "(guid, street_address) VALUES (?,?)"));
+  s.BindString(0, profile.guid());
+  s.BindString16(1, u"Street Address");
+  ASSERT_TRUE(s.is_valid());
+  ASSERT_TRUE(s.Run());
+
+  // And verify that it is written.
+  sql::Statement s1(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT count(*) "
+      "FROM autofill_profile_addresses "
+      "WHERE guid=?"));
+  s1.BindString(0, profile.guid());
+  ASSERT_TRUE(s1.is_valid());
+  ASSERT_TRUE(s1.Step());
+  EXPECT_EQ(1, s1.ColumnInt(0));
+
+  // Enable the feature again and load the profile.
+  scoped_feature_list_.Reset();
+  scoped_feature_list_.InitAndEnableFeature(
+      features::kAutofillEnableSupportForMoreStructureInAddresses);
+
+  // Retrieve the address and manually query the data base to verify that the
+  // structured address was deleted.
+  std::unique_ptr<AutofillProfile> migrated_db_profile =
+      table_->GetAutofillProfile(profile.guid());
+  ASSERT_TRUE(migrated_db_profile);
+  sql::Statement s2(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT count(*) "
+      "FROM autofill_profile_addresses "
+      "WHERE guid=?"));
+  s2.BindString(0, profile.guid());
+  ASSERT_TRUE(s2.is_valid());
+  ASSERT_TRUE(s2.Step());
+
+  EXPECT_EQ(0, s2.ColumnInt(0));
+}
+
+// This test is an adaption of |AutofillTableTest.AutofillProfile| to structured
+// names. Like |AutofillTableTest.AutofillProfile|, it tests reading/writing
+// name, email, company, address, phone number and birthdate information.
+TEST_F(AutofillTableTest, AutofillProfile_StructuredNames) {
+  // Enable the structured names and birthdates.
+  scoped_feature_list_.InitWithFeatures(
+      {features::kAutofillEnableSupportForMoreStructureInNames},
+      {features::kAutofillEnableSupportForMoreStructureInAddresses});
+
   AutofillProfile home_profile;
   home_profile.set_origin(std::string());
-  home_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
-  home_profile.SetRawInfo(NAME_MIDDLE, ASCIIToUTF16("Q."));
-  home_profile.SetRawInfo(NAME_LAST, ASCIIToUTF16("Smith"));
-  home_profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("js@smith.xyz"));
-  home_profile.SetRawInfo(COMPANY_NAME, ASCIIToUTF16("Google"));
-  home_profile.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("1234 Apple Way"));
-  home_profile.SetRawInfo(ADDRESS_HOME_LINE2, ASCIIToUTF16("unit 5"));
-  home_profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY,
-                          ASCIIToUTF16("Beverly Hills"));
-  home_profile.SetRawInfo(ADDRESS_HOME_CITY, ASCIIToUTF16("Los Angeles"));
-  home_profile.SetRawInfo(ADDRESS_HOME_STATE, ASCIIToUTF16("CA"));
-  home_profile.SetRawInfo(ADDRESS_HOME_ZIP, ASCIIToUTF16("90025"));
-  home_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, ASCIIToUTF16("MAGIC ###"));
-  home_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("US"));
-  home_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("18181234567"));
+
+  // TODO(crbug.com/1113617): Honorifics are temporally disabled.
+  // home_profile.SetRawInfoWithVerificationStatus(
+  // NAME_HONORIFIC_PREFIX, u"Dr.",
+  // VerificationStatus::kObserved);
+
+  home_profile.SetRawInfoWithVerificationStatus(NAME_HONORIFIC_PREFIX, u"Dr.",
+                                                VerificationStatus::kObserved);
+
+  home_profile.SetRawInfoWithVerificationStatus(NAME_FIRST, u"John",
+                                                VerificationStatus::kObserved);
+
+  home_profile.SetRawInfoWithVerificationStatus(NAME_MIDDLE, u"Q.",
+                                                VerificationStatus::kObserved);
+
+  home_profile.SetRawInfoWithVerificationStatus(NAME_LAST_FIRST, u"Agent",
+                                                VerificationStatus::kParsed);
+
+  home_profile.SetRawInfoWithVerificationStatus(NAME_LAST_CONJUNCTION, u"007",
+                                                VerificationStatus::kParsed);
+
+  home_profile.SetRawInfoWithVerificationStatus(NAME_LAST_SECOND, u"Smith",
+                                                VerificationStatus::kParsed);
+
+  home_profile.SetRawInfoWithVerificationStatus(NAME_LAST, u"Agent 007 Smith",
+                                                VerificationStatus::kParsed);
+
+  home_profile.SetRawInfoWithVerificationStatus(
+      NAME_FULL, u"John Q. Agent 007 Smith", VerificationStatus::kObserved);
+
+  home_profile.SetRawInfoWithVerificationStatus(NAME_FULL_WITH_HONORIFIC_PREFIX,
+                                                u"Dr. John Q. Agent 007 Smith",
+                                                VerificationStatus::kObserved);
+
+  home_profile.SetRawInfo(EMAIL_ADDRESS, u"js@smith.xyz");
+  home_profile.SetRawInfo(COMPANY_NAME, u"Google");
+  home_profile.SetRawInfo(ADDRESS_HOME_LINE1, u"1234 Apple Way");
+  home_profile.SetRawInfo(ADDRESS_HOME_LINE2, u"unit 5");
+  home_profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY, u"Beverly Hills");
+  home_profile.SetRawInfo(ADDRESS_HOME_CITY, u"Los Angeles");
+  home_profile.SetRawInfo(ADDRESS_HOME_STATE, u"CA");
+  home_profile.SetRawInfo(ADDRESS_HOME_ZIP, u"90025");
+  home_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"MAGIC ###");
+  home_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
+  home_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181234567");
+  home_profile.SetRawInfoAsInt(BIRTHDATE_DAY, 14);
+  home_profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 3);
+  home_profile.SetRawInfoAsInt(BIRTHDATE_4_DIGIT_YEAR, 1997);
+  home_profile.set_disallow_settings_visible_updates(true);
   home_profile.set_language_code("en");
-  home_profile.SetClientValidityFromBitfieldValue(6);
-  home_profile.set_is_client_validity_states_updated(true);
+  Time pre_creation_time = AutofillClock::Now();
 
-  Time pre_creation_time = Time::Now();
+  // Add the profile to the table.
   EXPECT_TRUE(table_->AddAutofillProfile(home_profile));
-  Time post_creation_time = Time::Now();
+  Time post_creation_time = AutofillClock::Now();
 
-  // Get the 'Home' profile.
+  // Get the 'Home' profile from the table.
   std::unique_ptr<AutofillProfile> db_profile =
       table_->GetAutofillProfile(home_profile.guid());
   ASSERT_TRUE(db_profile);
+
+  // Verify that it is correct.
   EXPECT_EQ(home_profile, *db_profile);
+
   sql::Statement s_home(db_->GetSQLConnection()->GetUniqueStatement(
       "SELECT date_modified "
       "FROM autofill_profiles WHERE guid=?"));
@@ -903,13 +1313,12 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   AutofillProfile billing_profile = home_profile;
   billing_profile.set_guid(base::GenerateGUID());
   billing_profile.set_origin("https://www.example.com/");
-  billing_profile.SetRawInfo(ADDRESS_HOME_LINE1,
-                             ASCIIToUTF16("5678 Bottom Street"));
-  billing_profile.SetRawInfo(ADDRESS_HOME_LINE2, ASCIIToUTF16("suite 3"));
+  billing_profile.SetRawInfo(ADDRESS_HOME_LINE1, u"5678 Bottom Street");
+  billing_profile.SetRawInfo(ADDRESS_HOME_LINE2, u"suite 3");
 
-  pre_creation_time = Time::Now();
+  pre_creation_time = AutofillClock::Now();
   EXPECT_TRUE(table_->AddAutofillProfile(billing_profile));
-  post_creation_time = Time::Now();
+  post_creation_time = AutofillClock::Now();
 
   // Get the 'Billing' profile.
   db_profile = table_->GetAutofillProfile(billing_profile.guid());
@@ -925,10 +1334,11 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   EXPECT_FALSE(s_billing.Step());
 
   // Update the 'Billing' profile, name only.
-  billing_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Jane"));
-  Time pre_modification_time = Time::Now();
+  billing_profile.SetRawInfoWithVerificationStatus(
+      NAME_FIRST, u"Jane", VerificationStatus::kObserved);
+  Time pre_modification_time = AutofillClock::Now();
   EXPECT_TRUE(table_->UpdateAutofillProfile(billing_profile));
-  Time post_modification_time = Time::Now();
+  Time post_modification_time = AutofillClock::Now();
   db_profile = table_->GetAutofillProfile(billing_profile.guid());
   ASSERT_TRUE(db_profile);
   EXPECT_EQ(billing_profile, *db_profile);
@@ -937,37 +1347,43 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   s_billing_updated.BindString(0, billing_profile.guid());
   ASSERT_TRUE(s_billing_updated.is_valid());
   ASSERT_TRUE(s_billing_updated.Step());
-  EXPECT_GE(s_billing_updated.ColumnInt64(0),
-            pre_modification_time.ToTimeT());
-  EXPECT_LE(s_billing_updated.ColumnInt64(0),
-            post_modification_time.ToTimeT());
+  EXPECT_GE(s_billing_updated.ColumnInt64(0), pre_modification_time.ToTimeT());
+  EXPECT_LE(s_billing_updated.ColumnInt64(0), post_modification_time.ToTimeT());
   EXPECT_FALSE(s_billing_updated.Step());
 
   // Update the 'Billing' profile with non-default data. The specific values are
   // not important.
   billing_profile.set_origin(kSettingsOrigin);
-  billing_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Janice"));
-  billing_profile.SetRawInfo(NAME_MIDDLE, ASCIIToUTF16("C."));
-  billing_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Joplin"));
-  billing_profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("jane@singer.com"));
-  billing_profile.SetRawInfo(COMPANY_NAME, ASCIIToUTF16("Indy"));
-  billing_profile.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("Open Road"));
-  billing_profile.SetRawInfo(ADDRESS_HOME_LINE2, ASCIIToUTF16("Route 66"));
-  billing_profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY,
-                             ASCIIToUTF16("District 9"));
-  billing_profile.SetRawInfo(ADDRESS_HOME_CITY, ASCIIToUTF16("NFA"));
-  billing_profile.SetRawInfo(ADDRESS_HOME_STATE, ASCIIToUTF16("NY"));
-  billing_profile.SetRawInfo(ADDRESS_HOME_ZIP, ASCIIToUTF16("10011"));
-  billing_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, ASCIIToUTF16("123456"));
-  billing_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("US"));
-  billing_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER,
-                             ASCIIToUTF16("18181230000"));
-  billing_profile.SetClientValidityFromBitfieldValue(54);
-  billing_profile.set_is_client_validity_states_updated(true);
+  billing_profile.SetRawInfoWithVerificationStatus(
+      NAME_FIRST, u"Pablo", VerificationStatus::kObserved);
+  billing_profile.SetRawInfoWithVerificationStatus(
+      NAME_MIDDLE, u"Diege", VerificationStatus::kObserved);
+  billing_profile.SetRawInfoWithVerificationStatus(NAME_LAST_FIRST, u"Ruiz",
+                                                   VerificationStatus::kParsed);
+  billing_profile.SetRawInfoWithVerificationStatus(NAME_LAST_CONJUNCTION, u"y",
+                                                   VerificationStatus::kParsed);
+  billing_profile.SetRawInfoWithVerificationStatus(NAME_LAST, u"Ruiz y Picasoo",
+                                                   VerificationStatus::kParsed);
+  billing_profile.SetRawInfoWithVerificationStatus(NAME_LAST_SECOND, u"Picasoo",
+                                                   VerificationStatus::kParsed);
+  billing_profile.SetRawInfo(EMAIL_ADDRESS, u"jane@singer.com");
+  billing_profile.SetRawInfo(COMPANY_NAME, u"Indy");
+  billing_profile.SetRawInfo(ADDRESS_HOME_LINE1, u"Open Road");
+  billing_profile.SetRawInfo(ADDRESS_HOME_LINE2, u"Route 66");
+  billing_profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY, u"District 9");
+  billing_profile.SetRawInfo(ADDRESS_HOME_CITY, u"NFA");
+  billing_profile.SetRawInfo(ADDRESS_HOME_STATE, u"NY");
+  billing_profile.SetRawInfo(ADDRESS_HOME_ZIP, u"10011");
+  billing_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"123456");
+  billing_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
+  billing_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181230000");
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_DAY, 4);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 5);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_4_DIGIT_YEAR, 1977);
 
-  Time pre_modification_time_2 = Time::Now();
+  Time pre_modification_time_2 = AutofillClock::Now();
   EXPECT_TRUE(table_->UpdateAutofillProfile(billing_profile));
-  Time post_modification_time_2 = Time::Now();
+  Time post_modification_time_2 = AutofillClock::Now();
   db_profile = table_->GetAutofillProfile(billing_profile.guid());
   ASSERT_TRUE(db_profile);
   EXPECT_EQ(billing_profile, *db_profile);
@@ -989,102 +1405,221 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   EXPECT_FALSE(db_profile);
 }
 
-TEST_F(AutofillTableTest, AutofillProfileTrash) {
-  std::vector<std::string> guids;
-  table_->GetAutofillProfilesInTrash(&guids);
-  EXPECT_TRUE(guids.empty());
+// TODO(crbug.com/1103421): Clean legacy implementation once structured names
+// are fully launched.
+TEST_F(AutofillTableTest, AutofillProfile) {
+  // Disable the structured names since this test is only applicable if
+  // structured names are not used.
+  scoped_feature_list_.InitWithFeatures(
+      {}, {features::kAutofillEnableSupportForMoreStructureInAddresses,
+           features::kAutofillEnableSupportForMoreStructureInNames});
 
-  ASSERT_TRUE(table_->AddAutofillGUIDToTrash(
-      "00000000-0000-0000-0000-000000000000"));
-  ASSERT_TRUE(table_->AddAutofillGUIDToTrash(
-      "00000000-0000-0000-0000-000000000001"));
-  ASSERT_TRUE(table_->GetAutofillProfilesInTrash(&guids));
-  EXPECT_EQ(2UL, guids.size());
-  EXPECT_EQ("00000000-0000-0000-0000-000000000000", guids[0]);
-  EXPECT_EQ("00000000-0000-0000-0000-000000000001", guids[1]);
+  // Add a 'Home' profile with non-default data. The specific values are not
+  // important.
+  AutofillProfile home_profile;
+  home_profile.set_origin(std::string());
+  home_profile.SetRawInfo(NAME_FIRST, u"John");
+  home_profile.SetRawInfo(NAME_MIDDLE, u"Q.");
+  home_profile.SetRawInfo(NAME_LAST, u"Smith");
+  home_profile.SetRawInfo(EMAIL_ADDRESS, u"js@smith.xyz");
+  home_profile.SetRawInfo(COMPANY_NAME, u"Google");
+  home_profile.SetRawInfo(ADDRESS_HOME_LINE1, u"1234 Apple Way");
+  home_profile.SetRawInfo(ADDRESS_HOME_LINE2, u"unit 5");
+  home_profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY, u"Beverly Hills");
+  home_profile.SetRawInfo(ADDRESS_HOME_CITY, u"Los Angeles");
+  home_profile.SetRawInfo(ADDRESS_HOME_STATE, u"CA");
+  home_profile.SetRawInfo(ADDRESS_HOME_ZIP, u"90025");
+  home_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"MAGIC ###");
+  home_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
+  home_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181234567");
+  home_profile.SetRawInfoAsInt(BIRTHDATE_DAY, 14);
+  home_profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 3);
+  home_profile.SetRawInfoAsInt(BIRTHDATE_4_DIGIT_YEAR, 1997);
+  home_profile.set_language_code("en");
 
-  ASSERT_TRUE(table_->EmptyAutofillProfilesTrash());
-  ASSERT_TRUE(table_->GetAutofillProfilesInTrash(&guids));
-  EXPECT_TRUE(guids.empty());
+  Time pre_creation_time = AutofillClock::Now();
+  EXPECT_TRUE(table_->AddAutofillProfile(home_profile));
+  Time post_creation_time = AutofillClock::Now();
+
+  // Get the 'Home' profile.
+  std::unique_ptr<AutofillProfile> db_profile =
+      table_->GetAutofillProfile(home_profile.guid());
+  ASSERT_TRUE(db_profile);
+  EXPECT_EQ(home_profile, *db_profile);
+  sql::Statement s_home(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT date_modified "
+      "FROM autofill_profiles WHERE guid=?"));
+  s_home.BindString(0, home_profile.guid());
+  ASSERT_TRUE(s_home.is_valid());
+  ASSERT_TRUE(s_home.Step());
+  EXPECT_GE(s_home.ColumnInt64(0), pre_creation_time.ToTimeT());
+  EXPECT_LE(s_home.ColumnInt64(0), post_creation_time.ToTimeT());
+  EXPECT_FALSE(s_home.Step());
+
+  // Add a 'Billing' profile.
+  AutofillProfile billing_profile = home_profile;
+  billing_profile.set_guid(base::GenerateGUID());
+  billing_profile.set_origin("https://www.example.com/");
+  billing_profile.SetRawInfo(ADDRESS_HOME_LINE1, u"5678 Bottom Street");
+  billing_profile.SetRawInfo(ADDRESS_HOME_LINE2, u"suite 3");
+
+  pre_creation_time = AutofillClock::Now();
+  EXPECT_TRUE(table_->AddAutofillProfile(billing_profile));
+  post_creation_time = AutofillClock::Now();
+
+  // Get the 'Billing' profile.
+  db_profile = table_->GetAutofillProfile(billing_profile.guid());
+  ASSERT_TRUE(db_profile);
+  EXPECT_EQ(billing_profile, *db_profile);
+  sql::Statement s_billing(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT date_modified FROM autofill_profiles WHERE guid=?"));
+  s_billing.BindString(0, billing_profile.guid());
+  ASSERT_TRUE(s_billing.is_valid());
+  ASSERT_TRUE(s_billing.Step());
+  EXPECT_GE(s_billing.ColumnInt64(0), pre_creation_time.ToTimeT());
+  EXPECT_LE(s_billing.ColumnInt64(0), post_creation_time.ToTimeT());
+  EXPECT_FALSE(s_billing.Step());
+
+  // Update the 'Billing' profile, name only.
+  billing_profile.SetRawInfo(NAME_FIRST, u"Jane");
+  Time pre_modification_time = AutofillClock::Now();
+  EXPECT_TRUE(table_->UpdateAutofillProfile(billing_profile));
+  Time post_modification_time = AutofillClock::Now();
+  db_profile = table_->GetAutofillProfile(billing_profile.guid());
+  ASSERT_TRUE(db_profile);
+  EXPECT_EQ(billing_profile, *db_profile);
+  sql::Statement s_billing_updated(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT date_modified FROM autofill_profiles WHERE guid=?"));
+  s_billing_updated.BindString(0, billing_profile.guid());
+  ASSERT_TRUE(s_billing_updated.is_valid());
+  ASSERT_TRUE(s_billing_updated.Step());
+  EXPECT_GE(s_billing_updated.ColumnInt64(0), pre_modification_time.ToTimeT());
+  EXPECT_LE(s_billing_updated.ColumnInt64(0), post_modification_time.ToTimeT());
+  EXPECT_FALSE(s_billing_updated.Step());
+
+  // Update the 'Billing' profile with non-default data. The specific values are
+  // not important.
+  billing_profile.set_origin(kSettingsOrigin);
+  billing_profile.SetRawInfo(NAME_FIRST, u"Janice");
+  billing_profile.SetRawInfo(NAME_MIDDLE, u"C.");
+  billing_profile.SetRawInfo(NAME_FIRST, u"Joplin");
+  billing_profile.SetRawInfo(EMAIL_ADDRESS, u"jane@singer.com");
+  billing_profile.SetRawInfo(COMPANY_NAME, u"Indy");
+  billing_profile.SetRawInfo(ADDRESS_HOME_LINE1, u"Open Road");
+  billing_profile.SetRawInfo(ADDRESS_HOME_LINE2, u"Route 66");
+  billing_profile.SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY, u"District 9");
+  billing_profile.SetRawInfo(ADDRESS_HOME_CITY, u"NFA");
+  billing_profile.SetRawInfo(ADDRESS_HOME_STATE, u"NY");
+  billing_profile.SetRawInfo(ADDRESS_HOME_ZIP, u"10011");
+  billing_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"123456");
+  billing_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
+  billing_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181230000");
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_DAY, 4);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 5);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_4_DIGIT_YEAR, 1977);
+
+  Time pre_modification_time_2 = AutofillClock::Now();
+  EXPECT_TRUE(table_->UpdateAutofillProfile(billing_profile));
+  Time post_modification_time_2 = AutofillClock::Now();
+  db_profile = table_->GetAutofillProfile(billing_profile.guid());
+  ASSERT_TRUE(db_profile);
+  EXPECT_EQ(billing_profile, *db_profile);
+  sql::Statement s_billing_updated_2(
+      db_->GetSQLConnection()->GetUniqueStatement(
+          "SELECT date_modified FROM autofill_profiles WHERE guid=?"));
+  s_billing_updated_2.BindString(0, billing_profile.guid());
+  ASSERT_TRUE(s_billing_updated_2.is_valid());
+  ASSERT_TRUE(s_billing_updated_2.Step());
+  EXPECT_GE(s_billing_updated_2.ColumnInt64(0),
+            pre_modification_time_2.ToTimeT());
+  EXPECT_LE(s_billing_updated_2.ColumnInt64(0),
+            post_modification_time_2.ToTimeT());
+  EXPECT_FALSE(s_billing_updated_2.Step());
+
+  // Remove the 'Billing' profile.
+  EXPECT_TRUE(table_->RemoveAutofillProfile(billing_profile.guid()));
+  db_profile = table_->GetAutofillProfile(billing_profile.guid());
+  EXPECT_FALSE(db_profile);
 }
 
-TEST_F(AutofillTableTest, AutofillProfileTrashInteraction) {
-  std::vector<std::string> guids;
-  table_->GetAutofillProfilesInTrash(&guids);
-  EXPECT_TRUE(guids.empty());
+TEST_F(AutofillTableTest, IBAN) {
+  // Add a valid IBAN.
+  IBAN iban;
+  std::string guid = base::GenerateGUID();
+  iban.set_guid(guid);
+  iban.SetRawInfo(IBAN_VALUE, u"IE12 BOFI 9000 0112 3456 78");
+  iban.set_nickname(u"My doctor's IBAN");
 
-  AutofillProfile profile;
-  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
-  profile.SetRawInfo(NAME_MIDDLE, ASCIIToUTF16("Q."));
-  profile.SetRawInfo(NAME_LAST, ASCIIToUTF16("Smith"));
-  profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("js@smith.xyz"));
-  profile.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("1 Main St"));
-  profile.SetRawInfo(ADDRESS_HOME_CITY, ASCIIToUTF16("Los Angeles"));
-  profile.SetRawInfo(ADDRESS_HOME_STATE, ASCIIToUTF16("CA"));
-  profile.SetRawInfo(ADDRESS_HOME_ZIP, ASCIIToUTF16("90025"));
-  profile.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("US"));
+  EXPECT_TRUE(table_->AddIBAN(iban));
 
-  // Mark this profile as in the trash.  This stops |AddAutofillProfile| from
-  // adding it.
-  EXPECT_TRUE(table_->AddAutofillGUIDToTrash(profile.guid()));
-  EXPECT_TRUE(table_->AddAutofillProfile(profile));
-  std::unique_ptr<AutofillProfile> added_profile =
-      table_->GetAutofillProfile(profile.guid());
-  EXPECT_FALSE(added_profile);
+  // Get the inserted Iban.
+  std::unique_ptr<IBAN> db_iban = table_->GetIBAN(iban.guid());
+  ASSERT_TRUE(db_iban);
+  EXPECT_EQ(guid, db_iban->guid());
+  sql::Statement s_work(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT guid, use_count, use_date, "
+      "value, nickname FROM ibans WHERE guid = ?"));
+  s_work.BindString(0, iban.guid());
+  ASSERT_TRUE(s_work.is_valid());
+  ASSERT_TRUE(s_work.Step());
+  EXPECT_FALSE(s_work.Step());
 
-  // Add the profile for real this time.
-  EXPECT_TRUE(table_->EmptyAutofillProfilesTrash());
-  EXPECT_TRUE(table_->GetAutofillProfilesInTrash(&guids));
-  EXPECT_TRUE(guids.empty());
-  EXPECT_TRUE(table_->AddAutofillProfile(profile));
-  added_profile = table_->GetAutofillProfile(profile.guid());
-  EXPECT_TRUE(added_profile);
+  // Add another valid IBAN.
+  IBAN another_iban;
+  std::string another_guid = base::GenerateGUID();
+  another_iban.set_guid(another_guid);
+  another_iban.SetRawInfo(IBAN_VALUE, u"DE91 1000 0000 0123 4567 89");
+  another_iban.set_nickname(u"My brother's IBAN");
 
-  // Mark this profile as in the trash.  This stops |UpdateAutofillProfileMulti|
-  // from updating it.  In normal operation a profile should not be both in the
-  // trash and in the profiles table simultaneously.
-  EXPECT_TRUE(table_->AddAutofillGUIDToTrash(profile.guid()));
-  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Jane"));
-  EXPECT_TRUE(table_->UpdateAutofillProfile(profile));
-  std::unique_ptr<AutofillProfile> updated_profile =
-      table_->GetAutofillProfile(profile.guid());
-  EXPECT_TRUE(updated_profile);
-  EXPECT_EQ(ASCIIToUTF16("John"), updated_profile->GetRawInfo(NAME_FIRST));
+  EXPECT_TRUE(table_->AddIBAN(another_iban));
 
-  // Try to delete the trashed profile.  This stops |RemoveAutofillProfile| from
-  // deleting it.  In normal operation deletion is done by migration step, and
-  // removal from trash is done by |WebDataService|.  |RemoveAutofillProfile|
-  // does remove the item from the trash if it is found however, so that if
-  // other clients remove it (via Sync say) then it is gone and doesn't need to
-  // be processed further by |WebDataService|.
-  EXPECT_TRUE(table_->RemoveAutofillProfile(profile.guid()));
-  std::unique_ptr<AutofillProfile> removed_profile =
-      table_->GetAutofillProfile(profile.guid());
-  EXPECT_TRUE(removed_profile);
-  EXPECT_FALSE(table_->IsAutofillGUIDInTrash(profile.guid()));
+  db_iban = table_->GetIBAN(another_iban.guid());
+  ASSERT_TRUE(db_iban);
 
-  // Check that emptying the trash now allows removal to occur.
-  EXPECT_TRUE(table_->EmptyAutofillProfilesTrash());
-  EXPECT_TRUE(table_->RemoveAutofillProfile(profile.guid()));
-  removed_profile = table_->GetAutofillProfile(profile.guid());
-  EXPECT_FALSE(removed_profile);
+  EXPECT_EQ(another_guid, db_iban->guid());
+  sql::Statement s_target(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT guid, use_count, use_date, "
+      "value, nickname FROM ibans WHERE guid = ?"));
+  s_target.BindString(0, another_iban.guid());
+  ASSERT_TRUE(s_target.is_valid());
+  ASSERT_TRUE(s_target.Step());
+  EXPECT_FALSE(s_target.Step());
+
+  // Update the another_iban.
+  another_iban.set_origin("Interactive Autofill dialog");
+  another_iban.SetRawInfo(IBAN_VALUE, u"GB98 MIDL 0700 9312 3456 78");
+  another_iban.set_nickname(u"My teacher's IBAN");
+  EXPECT_TRUE(table_->UpdateIBAN(another_iban));
+  db_iban = table_->GetIBAN(another_iban.guid());
+  ASSERT_TRUE(db_iban);
+  EXPECT_EQ(another_guid, db_iban->guid());
+  sql::Statement s_target_updated(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT guid, use_count, use_date, "
+      "value, nickname FROM ibans WHERE guid = ?"));
+  s_target_updated.BindString(0, another_iban.guid());
+  ASSERT_TRUE(s_target_updated.is_valid());
+  ASSERT_TRUE(s_target_updated.Step());
+  EXPECT_FALSE(s_target_updated.Step());
+
+  // Remove the 'Target' IBAN.
+  EXPECT_TRUE(table_->RemoveIBAN(another_iban.guid()));
+  db_iban = table_->GetIBAN(another_iban.guid());
+  EXPECT_FALSE(db_iban);
 }
 
 TEST_F(AutofillTableTest, CreditCard) {
   // Add a 'Work' credit card.
   CreditCard work_creditcard;
   work_creditcard.set_origin("https://www.example.com/");
-  work_creditcard.SetRawInfo(CREDIT_CARD_NAME_FULL,
-                             ASCIIToUTF16("Jack Torrance"));
-  work_creditcard.SetRawInfo(CREDIT_CARD_NUMBER,
-                             ASCIIToUTF16("1234567890123456"));
-  work_creditcard.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("04"));
-  work_creditcard.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR,
-                             ASCIIToUTF16("2013"));
+  work_creditcard.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Jack Torrance");
+  work_creditcard.SetRawInfo(CREDIT_CARD_NUMBER, u"1234567890123456");
+  work_creditcard.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"04");
+  work_creditcard.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2013");
+  work_creditcard.SetNickname(u"Corporate card");
 
-  Time pre_creation_time = Time::Now();
+  Time pre_creation_time = AutofillClock::Now();
   EXPECT_TRUE(table_->AddCreditCard(work_creditcard));
-  Time post_creation_time = Time::Now();
+  Time post_creation_time = AutofillClock::Now();
 
   // Get the 'Work' credit card.
   std::unique_ptr<CreditCard> db_creditcard =
@@ -1093,7 +1628,7 @@ TEST_F(AutofillTableTest, CreditCard) {
   EXPECT_EQ(work_creditcard, *db_creditcard);
   sql::Statement s_work(db_->GetSQLConnection()->GetUniqueStatement(
       "SELECT guid, name_on_card, expiration_month, expiration_year, "
-      "card_number_encrypted, date_modified "
+      "card_number_encrypted, date_modified, nickname "
       "FROM credit_cards WHERE guid=?"));
   s_work.BindString(0, work_creditcard.guid());
   ASSERT_TRUE(s_work.is_valid());
@@ -1105,23 +1640,21 @@ TEST_F(AutofillTableTest, CreditCard) {
   // Add a 'Target' credit card.
   CreditCard target_creditcard;
   target_creditcard.set_origin(std::string());
-  target_creditcard.SetRawInfo(CREDIT_CARD_NAME_FULL,
-                               ASCIIToUTF16("Jack Torrance"));
-  target_creditcard.SetRawInfo(CREDIT_CARD_NUMBER,
-                               ASCIIToUTF16("1111222233334444"));
-  target_creditcard.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("06"));
-  target_creditcard.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR,
-                               ASCIIToUTF16("2012"));
+  target_creditcard.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Jack Torrance");
+  target_creditcard.SetRawInfo(CREDIT_CARD_NUMBER, u"1111222233334444");
+  target_creditcard.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"06");
+  target_creditcard.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2012");
+  target_creditcard.SetNickname(u"Grocery card");
 
-  pre_creation_time = Time::Now();
+  pre_creation_time = AutofillClock::Now();
   EXPECT_TRUE(table_->AddCreditCard(target_creditcard));
-  post_creation_time = Time::Now();
+  post_creation_time = AutofillClock::Now();
   db_creditcard = table_->GetCreditCard(target_creditcard.guid());
   ASSERT_TRUE(db_creditcard);
   EXPECT_EQ(target_creditcard, *db_creditcard);
   sql::Statement s_target(db_->GetSQLConnection()->GetUniqueStatement(
       "SELECT guid, name_on_card, expiration_month, expiration_year, "
-      "card_number_encrypted, date_modified "
+      "card_number_encrypted, date_modified, nickname "
       "FROM credit_cards WHERE guid=?"));
   s_target.BindString(0, target_creditcard.guid());
   ASSERT_TRUE(s_target.is_valid());
@@ -1132,17 +1665,17 @@ TEST_F(AutofillTableTest, CreditCard) {
 
   // Update the 'Target' credit card.
   target_creditcard.set_origin("Interactive Autofill dialog");
-  target_creditcard.SetRawInfo(CREDIT_CARD_NAME_FULL,
-                               ASCIIToUTF16("Charles Grady"));
-  Time pre_modification_time = Time::Now();
+  target_creditcard.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Charles Grady");
+  target_creditcard.SetNickname(u"Supermarket");
+  Time pre_modification_time = AutofillClock::Now();
   EXPECT_TRUE(table_->UpdateCreditCard(target_creditcard));
-  Time post_modification_time = Time::Now();
+  Time post_modification_time = AutofillClock::Now();
   db_creditcard = table_->GetCreditCard(target_creditcard.guid());
   ASSERT_TRUE(db_creditcard);
   EXPECT_EQ(target_creditcard, *db_creditcard);
   sql::Statement s_target_updated(db_->GetSQLConnection()->GetUniqueStatement(
       "SELECT guid, name_on_card, expiration_month, expiration_year, "
-      "card_number_encrypted, date_modified "
+      "card_number_encrypted, date_modified, nickname "
       "FROM credit_cards WHERE guid=?"));
   s_target_updated.BindString(0, target_creditcard.guid());
   ASSERT_TRUE(s_target_updated.is_valid());
@@ -1162,10 +1695,10 @@ TEST_F(AutofillTableTest, AddFullServerCreditCard) {
   credit_card.set_record_type(CreditCard::FULL_SERVER_CARD);
   credit_card.set_server_id("server_id");
   credit_card.set_origin("https://www.example.com/");
-  credit_card.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Jack Torrance"));
-  credit_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1234567890123456"));
-  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("04"));
-  credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2013"));
+  credit_card.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Jack Torrance");
+  credit_card.SetRawInfo(CREDIT_CARD_NUMBER, u"1234567890123456");
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"04");
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2013");
 
   EXPECT_TRUE(table_->AddFullServerCreditCard(credit_card));
 
@@ -1178,23 +1711,27 @@ TEST_F(AutofillTableTest, AddFullServerCreditCard) {
 TEST_F(AutofillTableTest, UpdateAutofillProfile) {
   // Add a profile to the db.
   AutofillProfile profile;
-  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
-  profile.SetRawInfo(NAME_MIDDLE, ASCIIToUTF16("Q."));
-  profile.SetRawInfo(NAME_LAST, ASCIIToUTF16("Smith"));
-  profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("js@example.com"));
-  profile.SetRawInfo(COMPANY_NAME, ASCIIToUTF16("Google"));
-  profile.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("1234 Apple Way"));
-  profile.SetRawInfo(ADDRESS_HOME_LINE2, ASCIIToUTF16("unit 5"));
-  profile.SetRawInfo(ADDRESS_HOME_CITY, ASCIIToUTF16("Los Angeles"));
-  profile.SetRawInfo(ADDRESS_HOME_STATE, ASCIIToUTF16("CA"));
-  profile.SetRawInfo(ADDRESS_HOME_ZIP, ASCIIToUTF16("90025"));
-  profile.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("US"));
-  profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("18181234567"));
+  profile.SetRawInfo(NAME_FIRST, u"John");
+  profile.SetRawInfo(NAME_MIDDLE, u"Q.");
+  profile.SetRawInfo(NAME_LAST, u"Smith");
+  profile.SetRawInfo(EMAIL_ADDRESS, u"js@example.com");
+  profile.SetRawInfo(COMPANY_NAME, u"Google");
+  profile.SetRawInfo(ADDRESS_HOME_LINE1, u"1234 Apple Way");
+  profile.SetRawInfo(ADDRESS_HOME_LINE2, u"unit 5");
+  profile.SetRawInfo(ADDRESS_HOME_CITY, u"Los Angeles");
+  profile.SetRawInfo(ADDRESS_HOME_STATE, u"CA");
+  profile.SetRawInfo(ADDRESS_HOME_ZIP, u"90025");
+  profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
+  profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181234567");
+  profile.SetRawInfoAsInt(BIRTHDATE_DAY, 14);
+  profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 3);
+  profile.SetRawInfoAsInt(BIRTHDATE_4_DIGIT_YEAR, 1997);
   profile.set_language_code("en");
+  profile.FinalizeAfterImport();
   table_->AddAutofillProfile(profile);
 
   // Set a mocked value for the profile's creation time.
-  const time_t kMockCreationDate = Time::Now().ToTimeT() - 13;
+  const time_t kMockCreationDate = AutofillClock::Now().ToTimeT() - 13;
   sql::Statement s_mock_creation_date(
       db_->GetSQLConnection()->GetUniqueStatement(
           "UPDATE autofill_profiles SET date_modified = ?"));
@@ -1216,7 +1753,7 @@ TEST_F(AutofillTableTest, UpdateAutofillProfile) {
 
   // Now, update the profile and save the update to the database.
   // The modification date should change to reflect the update.
-  profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("js@smith.xyz"));
+  profile.SetRawInfo(EMAIL_ADDRESS, u"js@smith.xyz");
   table_->UpdateAutofillProfile(profile);
 
   // Get the profile.
@@ -1231,7 +1768,7 @@ TEST_F(AutofillTableTest, UpdateAutofillProfile) {
   EXPECT_FALSE(s_updated.Step());
 
   // Set a mocked value for the profile's modification time.
-  const time_t mock_modification_date = Time::Now().ToTimeT() - 7;
+  const time_t mock_modification_date = AutofillClock::Now().ToTimeT() - 7;
   sql::Statement s_mock_modification_date(
       db_->GetSQLConnection()->GetUniqueStatement(
           "UPDATE autofill_profiles SET date_modified = ?"));
@@ -1258,14 +1795,14 @@ TEST_F(AutofillTableTest, UpdateAutofillProfile) {
 TEST_F(AutofillTableTest, UpdateCreditCard) {
   // Add a credit card to the db.
   CreditCard credit_card;
-  credit_card.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Jack Torrance"));
-  credit_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1234567890123456"));
-  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("04"));
-  credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2013"));
+  credit_card.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Jack Torrance");
+  credit_card.SetRawInfo(CREDIT_CARD_NUMBER, u"1234567890123456");
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"04");
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2013");
   table_->AddCreditCard(credit_card);
 
   // Set a mocked value for the credit card's creation time.
-  const time_t kMockCreationDate = Time::Now().ToTimeT() - 13;
+  const time_t kMockCreationDate = AutofillClock::Now().ToTimeT() - 13;
   sql::Statement s_mock_creation_date(
       db_->GetSQLConnection()->GetUniqueStatement(
           "UPDATE credit_cards SET date_modified = ?"));
@@ -1287,7 +1824,7 @@ TEST_F(AutofillTableTest, UpdateCreditCard) {
 
   // Now, update the credit card and save the update to the database.
   // The modification date should change to reflect the update.
-  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("01"));
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"01");
   table_->UpdateCreditCard(credit_card);
 
   // Get the credit card.
@@ -1302,7 +1839,7 @@ TEST_F(AutofillTableTest, UpdateCreditCard) {
   EXPECT_FALSE(s_updated.Step());
 
   // Set a mocked value for the credit card's modification time.
-  const time_t mock_modification_date = Time::Now().ToTimeT() - 7;
+  const time_t mock_modification_date = AutofillClock::Now().ToTimeT() - 7;
   sql::Statement s_mock_modification_date(
       db_->GetSQLConnection()->GetUniqueStatement(
           "UPDATE credit_cards SET date_modified = ?"));
@@ -1329,22 +1866,23 @@ TEST_F(AutofillTableTest, UpdateCreditCard) {
 TEST_F(AutofillTableTest, UpdateProfileOriginOnly) {
   // Add a profile to the db.
   AutofillProfile profile;
-  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
-  profile.SetRawInfo(NAME_MIDDLE, ASCIIToUTF16("Q."));
-  profile.SetRawInfo(NAME_LAST, ASCIIToUTF16("Smith"));
-  profile.SetRawInfo(EMAIL_ADDRESS, ASCIIToUTF16("js@example.com"));
-  profile.SetRawInfo(COMPANY_NAME, ASCIIToUTF16("Google"));
-  profile.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("1234 Apple Way"));
-  profile.SetRawInfo(ADDRESS_HOME_LINE2, ASCIIToUTF16("unit 5"));
-  profile.SetRawInfo(ADDRESS_HOME_CITY, ASCIIToUTF16("Los Angeles"));
-  profile.SetRawInfo(ADDRESS_HOME_STATE, ASCIIToUTF16("CA"));
-  profile.SetRawInfo(ADDRESS_HOME_ZIP, ASCIIToUTF16("90025"));
-  profile.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("US"));
-  profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("18181234567"));
+  profile.SetRawInfo(NAME_FIRST, u"John");
+  profile.SetRawInfo(NAME_MIDDLE, u"Q.");
+  profile.SetRawInfo(NAME_LAST, u"Smith");
+  profile.SetRawInfo(EMAIL_ADDRESS, u"js@example.com");
+  profile.SetRawInfo(COMPANY_NAME, u"Google");
+  profile.SetRawInfo(ADDRESS_HOME_LINE1, u"1234 Apple Way");
+  profile.SetRawInfo(ADDRESS_HOME_LINE2, u"unit 5");
+  profile.SetRawInfo(ADDRESS_HOME_CITY, u"Los Angeles");
+  profile.SetRawInfo(ADDRESS_HOME_STATE, u"CA");
+  profile.SetRawInfo(ADDRESS_HOME_ZIP, u"90025");
+  profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
+  profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181234567");
+  profile.FinalizeAfterImport();
   table_->AddAutofillProfile(profile);
 
   // Set a mocked value for the profile's creation time.
-  const time_t kMockCreationDate = Time::Now().ToTimeT() - 13;
+  const time_t kMockCreationDate = AutofillClock::Now().ToTimeT() - 13;
   sql::Statement s_mock_creation_date(
       db_->GetSQLConnection()->GetUniqueStatement(
           "UPDATE autofill_profiles SET date_modified = ?"));
@@ -1384,14 +1922,14 @@ TEST_F(AutofillTableTest, UpdateProfileOriginOnly) {
 TEST_F(AutofillTableTest, UpdateCreditCardOriginOnly) {
   // Add a credit card to the db.
   CreditCard credit_card;
-  credit_card.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Jack Torrance"));
-  credit_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1234567890123456"));
-  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("04"));
-  credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2013"));
+  credit_card.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Jack Torrance");
+  credit_card.SetRawInfo(CREDIT_CARD_NUMBER, u"1234567890123456");
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"04");
+  credit_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2013");
   table_->AddCreditCard(credit_card);
 
   // Set a mocked value for the credit card's creation time.
-  const time_t kMockCreationDate = Time::Now().ToTimeT() - 13;
+  const time_t kMockCreationDate = AutofillClock::Now().ToTimeT() - 13;
   sql::Statement s_mock_creation_date(
       db_->GetSQLConnection()->GetUniqueStatement(
           "UPDATE credit_cards SET date_modified = ?"));
@@ -1725,8 +2263,8 @@ TEST_F(AutofillTableTest, RemoveOriginURLsModifiedBetween) {
 
   // Remove all origin URLs set in the bounded time range [21,27).
   std::vector<std::unique_ptr<AutofillProfile>> profiles;
-  table_->RemoveOriginURLsModifiedBetween(
-      Time::FromTimeT(21), Time::FromTimeT(27), &profiles);
+  table_->RemoveOriginURLsModifiedBetween(Time::FromTimeT(21),
+                                          Time::FromTimeT(27), &profiles);
   ASSERT_EQ(1UL, profiles.size());
   EXPECT_EQ("00000000-0000-0000-0000-000000000001", profiles[0]->guid());
   sql::Statement s_autofill_profiles_bounded(
@@ -1751,8 +2289,7 @@ TEST_F(AutofillTableTest, RemoveOriginURLsModifiedBetween) {
   EXPECT_EQ(std::string(), s_credit_cards_bounded.ColumnString(1));
   ASSERT_TRUE(s_credit_cards_bounded.Step());
   EXPECT_EQ(27, s_credit_cards_bounded.ColumnInt64(0));
-  EXPECT_EQ("https://www.example.com/",
-            s_credit_cards_bounded.ColumnString(1));
+  EXPECT_EQ("https://www.example.com/", s_credit_cards_bounded.ColumnString(1));
   ASSERT_TRUE(s_credit_cards_bounded.Step());
   EXPECT_EQ(37, s_credit_cards_bounded.ColumnInt64(0));
   EXPECT_EQ(kSettingsOrigin, s_credit_cards_bounded.ColumnString(1));
@@ -1774,9 +2311,8 @@ TEST_F(AutofillTableTest, RemoveOriginURLsModifiedBetween) {
   ASSERT_TRUE(s_autofill_profiles_all.Step());
   EXPECT_EQ(31, s_autofill_profiles_all.ColumnInt64(0));
   EXPECT_EQ(kSettingsOrigin, s_autofill_profiles_all.ColumnString(1));
-  sql::Statement s_credit_cards_all(
-      db_->GetSQLConnection()->GetUniqueStatement(
-          "SELECT date_modified, origin FROM credit_cards"));
+  sql::Statement s_credit_cards_all(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT date_modified, origin FROM credit_cards"));
   ASSERT_TRUE(s_credit_cards_all.is_valid());
   ASSERT_TRUE(s_credit_cards_all.Step());
   EXPECT_EQ(17, s_credit_cards_all.ColumnInt64(0));
@@ -1798,22 +2334,22 @@ TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_NoResults) {
 
 TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_OneResult) {
   AutofillChangeList changes;
-  std::map<std::string, std::vector<Time> > name_value_times_map;
+  std::map<std::string, std::vector<Time>> name_value_times_map;
 
   time_t start = 0;
   std::vector<Time> timestamps1;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
-  EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
-                                            Time::FromTimeT(start)));
+  field.name = u"Name";
+  field.value = u"Superman";
+  EXPECT_TRUE(
+      table_->AddFormFieldValueTime(field, &changes, Time::FromTimeT(start)));
   timestamps1.push_back(Time::FromTimeT(start));
   std::string key1("NameSuperman");
   name_value_times_map.insert(
-      std::pair<std::string, std::vector<Time> >(key1, timestamps1));
+      std::pair<std::string, std::vector<Time>>(key1, timestamps1));
 
   AutofillEntrySet expected_entries(CompareAutofillEntries);
-  AutofillKey ak1(ASCIIToUTF16("Name"), ASCIIToUTF16("Superman"));
+  AutofillKey ak1(u"Name", u"Superman");
   AutofillEntry ae1(ak1, timestamps1.front(), timestamps1.back());
 
   expected_entries.insert(ae1);
@@ -1828,34 +2364,34 @@ TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_OneResult) {
 
 TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_TwoDistinct) {
   AutofillChangeList changes;
-  std::map<std::string, std::vector<Time> > name_value_times_map;
+  std::map<std::string, std::vector<Time>> name_value_times_map;
   time_t start = 0;
 
   std::vector<Time> timestamps1;
   FormFieldData field;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Superman");
-  EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
-                                            Time::FromTimeT(start)));
+  field.name = u"Name";
+  field.value = u"Superman";
+  EXPECT_TRUE(
+      table_->AddFormFieldValueTime(field, &changes, Time::FromTimeT(start)));
   timestamps1.push_back(Time::FromTimeT(start));
   std::string key1("NameSuperman");
   name_value_times_map.insert(
-      std::pair<std::string, std::vector<Time> >(key1, timestamps1));
+      std::pair<std::string, std::vector<Time>>(key1, timestamps1));
 
   ++start;
   std::vector<Time> timestamps2;
-  field.name = ASCIIToUTF16("Name");
-  field.value = ASCIIToUTF16("Clark Kent");
-  EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
-                                            Time::FromTimeT(start)));
+  field.name = u"Name";
+  field.value = u"Clark Kent";
+  EXPECT_TRUE(
+      table_->AddFormFieldValueTime(field, &changes, Time::FromTimeT(start)));
   timestamps2.push_back(Time::FromTimeT(start));
   std::string key2("NameClark Kent");
   name_value_times_map.insert(
-      std::pair<std::string, std::vector<Time> >(key2, timestamps2));
+      std::pair<std::string, std::vector<Time>>(key2, timestamps2));
 
   AutofillEntrySet expected_entries(CompareAutofillEntries);
-  AutofillKey ak1(ASCIIToUTF16("Name"), ASCIIToUTF16("Superman"));
-  AutofillKey ak2(ASCIIToUTF16("Name"), ASCIIToUTF16("Clark Kent"));
+  AutofillKey ak1(u"Name", u"Superman");
+  AutofillKey ak2(u"Name", u"Clark Kent");
   AutofillEntry ae1(ak1, timestamps1.front(), timestamps1.back());
   AutofillEntry ae2(ak2, timestamps2.front(), timestamps2.back());
 
@@ -1872,25 +2408,25 @@ TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_TwoDistinct) {
 
 TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_TwoSame) {
   AutofillChangeList changes;
-  std::map<std::string, std::vector<Time> > name_value_times_map;
+  std::map<std::string, std::vector<Time>> name_value_times_map;
 
   std::vector<Time> timestamps;
   time_t start = 0;
   for (int i = 0; i < 2; ++i, ++start) {
     FormFieldData field;
-    field.name = ASCIIToUTF16("Name");
-    field.value = ASCIIToUTF16("Superman");
-    EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes,
-                                              Time::FromTimeT(start)));
+    field.name = u"Name";
+    field.value = u"Superman";
+    EXPECT_TRUE(
+        table_->AddFormFieldValueTime(field, &changes, Time::FromTimeT(start)));
     timestamps.push_back(Time::FromTimeT(start));
   }
 
   std::string key("NameSuperman");
   name_value_times_map.insert(
-      std::pair<std::string, std::vector<Time> >(key, timestamps));
+      std::pair<std::string, std::vector<Time>>(key, timestamps));
 
   AutofillEntrySet expected_entries(CompareAutofillEntries);
-  AutofillKey ak1(ASCIIToUTF16("Name"), ASCIIToUTF16("Superman"));
+  AutofillKey ak1(u"Name", u"Superman");
   AutofillEntry ae1(ak1, timestamps.front(), timestamps.back());
 
   expected_entries.insert(ae1);
@@ -1903,91 +2439,31 @@ TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_TwoSame) {
   CompareAutofillEntrySets(entry_set, expected_entries);
 }
 
-TEST_F(AutofillTableTest, AutofillProfileValidityBitfield) {
-  // Add an autofill profile with a non default validity state. The value itself
-  // is insignificant for this test since only the serialization and
-  // deserialization are tested.
-  const int kValidityBitfieldValue = 1984;
-  AutofillProfile profile;
-  profile.set_origin(std::string());
-  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
-  profile.SetRawInfo(NAME_LAST, ASCIIToUTF16("Smith"));
-  profile.SetClientValidityFromBitfieldValue(kValidityBitfieldValue);
-
-  // Add the profile to the table.
-  EXPECT_TRUE(table_->AddAutofillProfile(profile));
-
-  // Get the profile from the table and make sure the validity was set.
-  std::unique_ptr<AutofillProfile> db_profile =
-      table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_EQ(kValidityBitfieldValue,
-            db_profile->GetClientValidityBitfieldValue());
-
-  // Modify the validity of the profile.
-  const int kOtherValidityBitfieldValue = 1999;
-  profile.SetClientValidityFromBitfieldValue(kOtherValidityBitfieldValue);
-
-  // Update the profile in the table.
-  EXPECT_TRUE(table_->UpdateAutofillProfile(profile));
-
-  // Get the profile from the table and make sure the validity was updated.
-  db_profile = table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_EQ(kOtherValidityBitfieldValue,
-            db_profile->GetClientValidityBitfieldValue());
-}
-
-TEST_F(AutofillTableTest, AutofillProfileIsClientValidityStatesUpdatedFlag) {
-  AutofillProfile profile;
-  profile.set_origin(std::string());
-  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
-  profile.SetRawInfo(NAME_LAST, ASCIIToUTF16("Smith"));
-  profile.set_is_client_validity_states_updated(true);
-
-  // Add the profile to the table.
-  EXPECT_TRUE(table_->AddAutofillProfile(profile));
-  // Get the profile from the table and make sure the validity was set.
-  std::unique_ptr<AutofillProfile> db_profile =
-      table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_TRUE(db_profile->is_client_validity_states_updated());
-
-  // Test if turning off the validity updated flag works.
-  profile.set_is_client_validity_states_updated(false);
-  // Update the profile in the table.
-  EXPECT_TRUE(table_->UpdateAutofillProfile(profile));
-  // Get the profile from the table and make sure the validity was updated.
-  db_profile = table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_FALSE(db_profile->is_client_validity_states_updated());
-
-  // Test if turning on the validity updated flag works.
-  profile.set_is_client_validity_states_updated(true);
-  // Update the profile in the table.
-  EXPECT_TRUE(table_->UpdateAutofillProfile(profile));
-  // Get the profile from the table and make sure the validity was updated.
-  db_profile = table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_TRUE(db_profile->is_client_validity_states_updated());
-}
-
 TEST_F(AutofillTableTest, SetGetServerCards) {
   std::vector<CreditCard> inputs;
   inputs.push_back(CreditCard(CreditCard::FULL_SERVER_CARD, "a123"));
-  inputs[0].SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Paul F. Tompkins"));
-  inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
-  inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
-  inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
+  inputs[0].SetRawInfo(CREDIT_CARD_NAME_FULL, u"Paul F. Tompkins");
+  inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, u"1");
+  inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2020");
+  inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, u"4111111111111111");
+  inputs[0].set_instrument_id(321);
+  inputs[0].set_virtual_card_enrollment_state(
+      CreditCard::VirtualCardEnrollmentState::UNENROLLED);
+  inputs[0].set_product_description(u"Fake description");
 
-  inputs.push_back(
-      CreditCard(CreditCard::MASKED_SERVER_CARD, "b456"));
-  inputs[1].SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Rick Roman"));
-  inputs[1].SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
-  inputs[1].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("1997"));
-  inputs[1].SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
+  inputs.push_back(CreditCard(CreditCard::MASKED_SERVER_CARD, "b456"));
+  inputs[1].SetRawInfo(CREDIT_CARD_NAME_FULL, u"Rick Roman");
+  inputs[1].SetRawInfo(CREDIT_CARD_EXP_MONTH, u"12");
+  inputs[1].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"1997");
+  inputs[1].SetRawInfo(CREDIT_CARD_NUMBER, u"1111");
   inputs[1].SetNetworkForMaskedCard(kVisaCard);
-  inputs[1].SetServerStatus(CreditCard::EXPIRED);
+  std::u16string nickname = u"Grocery card";
+  inputs[1].SetNickname(nickname);
+  inputs[1].set_card_issuer(CreditCard::Issuer::GOOGLE);
+  inputs[1].set_instrument_id(123);
+  inputs[1].set_virtual_card_enrollment_state(
+      CreditCard::VirtualCardEnrollmentState::ENROLLED);
+  inputs[1].set_card_art_url(GURL("https://www.example.com"));
 
   test::SetServerCreditCards(table_.get(), inputs);
 
@@ -2010,8 +2486,24 @@ TEST_F(AutofillTableTest, SetGetServerCards) {
   EXPECT_EQ(inputs[0], *outputs[0]);
   EXPECT_EQ(inputs[1], *outputs[1]);
 
-  EXPECT_EQ(CreditCard::OK, outputs[0]->GetServerStatus());
-  EXPECT_EQ(CreditCard::EXPIRED, outputs[1]->GetServerStatus());
+  EXPECT_TRUE(outputs[0]->nickname().empty());
+  EXPECT_EQ(nickname, outputs[1]->nickname());
+
+  EXPECT_EQ(CreditCard::Issuer::ISSUER_UNKNOWN, outputs[0]->card_issuer());
+  EXPECT_EQ(CreditCard::Issuer::GOOGLE, outputs[1]->card_issuer());
+
+  EXPECT_EQ(321, outputs[0]->instrument_id());
+  EXPECT_EQ(123, outputs[1]->instrument_id());
+
+  EXPECT_EQ(CreditCard::VirtualCardEnrollmentState::UNENROLLED,
+            outputs[0]->virtual_card_enrollment_state());
+  EXPECT_EQ(CreditCard::VirtualCardEnrollmentState::ENROLLED,
+            outputs[1]->virtual_card_enrollment_state());
+
+  EXPECT_EQ(GURL(), outputs[0]->card_art_url());
+  EXPECT_EQ(GURL("https://www.example.com"), outputs[1]->card_art_url());
+
+  EXPECT_EQ(u"Fake description", outputs[0]->product_description());
 }
 
 TEST_F(AutofillTableTest, SetGetRemoveServerCardMetadata) {
@@ -2019,7 +2511,7 @@ TEST_F(AutofillTableTest, SetGetRemoveServerCardMetadata) {
   AutofillMetadata input;
   input.id = "server id";
   input.use_count = 50;
-  input.use_date = Time::Now();
+  input.use_date = AutofillClock::Now();
   input.billing_address_id = "billing id";
   EXPECT_TRUE(table_->AddServerCardMetadata(input));
 
@@ -2042,7 +2534,7 @@ TEST_F(AutofillTableTest, SetGetRemoveServerAddressMetadata) {
   AutofillMetadata input;
   input.id = "server id";
   input.use_count = 50;
-  input.use_date = Time::Now();
+  input.use_date = AutofillClock::Now();
   input.has_converted = true;
   table_->AddServerAddressMetadata(input);
 
@@ -2065,7 +2557,7 @@ TEST_F(AutofillTableTest, AddUpdateServerAddressMetadata) {
   AutofillMetadata input;
   input.id = "server id";
   input.use_count = 50;
-  input.use_date = Time::Now();
+  input.use_date = AutofillClock::Now();
   input.has_converted = true;
   ASSERT_TRUE(table_->AddServerAddressMetadata(input));
 
@@ -2096,7 +2588,7 @@ TEST_F(AutofillTableTest, AddUpdateServerCardMetadata) {
   AutofillMetadata input;
   input.id = "server id";
   input.use_count = 50;
-  input.use_date = Time::Now();
+  input.use_date = AutofillClock::Now();
   input.billing_address_id = "billing id";
   ASSERT_TRUE(table_->AddServerCardMetadata(input));
 
@@ -2156,10 +2648,10 @@ TEST_F(AutofillTableTest, UpdateServerAddressMetadataDoesNotChangeData) {
 TEST_F(AutofillTableTest, UpdateServerCardMetadataDoesNotChangeData) {
   std::vector<CreditCard> inputs;
   inputs.push_back(CreditCard(CreditCard::FULL_SERVER_CARD, "a123"));
-  inputs[0].SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Paul F. Tompkins"));
-  inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
-  inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
-  inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
+  inputs[0].SetRawInfo(CREDIT_CARD_NAME_FULL, u"Paul F. Tompkins");
+  inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, u"1");
+  inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2020");
+  inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, u"4111111111111111");
   test::SetServerCreditCards(table_.get(), inputs);
 
   std::vector<std::unique_ptr<CreditCard>> outputs;
@@ -2192,7 +2684,7 @@ TEST_F(AutofillTableTest, RemoveWrongServerCardMetadata) {
   AutofillMetadata input;
   input.id = "server id";
   input.use_count = 50;
-  input.use_date = Time::Now();
+  input.use_date = AutofillClock::Now();
   input.billing_address_id = "billing id";
   table_->AddServerCardMetadata(input);
 
@@ -2214,12 +2706,18 @@ TEST_F(AutofillTableTest, SetServerCardsData) {
   // Set a card data.
   std::vector<CreditCard> inputs;
   inputs.push_back(CreditCard(CreditCard::MASKED_SERVER_CARD, "card1"));
-  inputs[0].SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Rick Roman"));
-  inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
-  inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("1997"));
-  inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
+  inputs[0].SetRawInfo(CREDIT_CARD_NAME_FULL, u"Rick Roman");
+  inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, u"12");
+  inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"1997");
+  inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, u"1111");
   inputs[0].SetNetworkForMaskedCard(kVisaCard);
-  inputs[0].SetServerStatus(CreditCard::EXPIRED);
+  inputs[0].SetNickname(u"Grocery card");
+  inputs[0].set_instrument_id(1);
+  inputs[0].set_virtual_card_enrollment_state(
+      CreditCard::VirtualCardEnrollmentState::ENROLLED);
+  inputs[0].set_card_art_url(GURL("https://www.example.com"));
+  inputs[0].set_product_description(u"Fake description");
+
   table_->SetServerCardsData(inputs);
 
   // Make sure the card was added correctly.
@@ -2234,7 +2732,12 @@ TEST_F(AutofillTableTest, SetServerCardsData) {
   outputs[0]->set_guid(std::string());
 
   EXPECT_EQ(inputs[0], *outputs[0]);
-  EXPECT_EQ(CreditCard::EXPIRED, outputs[0]->GetServerStatus());
+
+  EXPECT_EQ(CreditCard::VirtualCardEnrollmentState::ENROLLED,
+            outputs[0]->virtual_card_enrollment_state());
+
+  EXPECT_EQ(GURL("https://www.example.com"), outputs[0]->card_art_url());
+  EXPECT_EQ(u"Fake description", outputs[0]->product_description());
 
   // Make sure no metadata was added.
   std::map<std::string, AutofillMetadata> metadata_map;
@@ -2261,7 +2764,7 @@ TEST_F(AutofillTableTest, SetServerCardsData_ExistingMetadata) {
   AutofillMetadata input;
   input.id = "server id";
   input.use_count = 50;
-  input.use_date = Time::Now();
+  input.use_date = AutofillClock::Now();
   input.billing_address_id = "billing id";
   table_->AddServerCardMetadata(input);
 
@@ -2318,7 +2821,7 @@ TEST_F(AutofillTableTest, SetServerAddressesData_ExistingMetadata) {
   AutofillMetadata input;
   input.id = "server id";
   input.use_count = 50;
-  input.use_date = Time::Now();
+  input.use_date = AutofillClock::Now();
   input.has_converted = true;
   table_->AddServerAddressMetadata(input);
 
@@ -2340,7 +2843,7 @@ TEST_F(AutofillTableTest, RemoveWrongServerAddressMetadata) {
   AutofillMetadata input;
   input.id = "server id";
   input.use_count = 50;
-  input.use_date = Time::Now();
+  input.use_date = AutofillClock::Now();
   input.has_converted = true;
   table_->AddServerAddressMetadata(input);
 
@@ -2359,20 +2862,19 @@ TEST_F(AutofillTableTest, RemoveWrongServerAddressMetadata) {
 }
 
 TEST_F(AutofillTableTest, MaskUnmaskServerCards) {
-  base::string16 masked_number(ASCIIToUTF16("1111"));
+  std::u16string masked_number(u"1111");
   std::vector<CreditCard> inputs;
   inputs.push_back(CreditCard(CreditCard::MASKED_SERVER_CARD, "a123"));
-  inputs[0].SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Jay Johnson"));
-  inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
-  inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
+  inputs[0].SetRawInfo(CREDIT_CARD_NAME_FULL, u"Jay Johnson");
+  inputs[0].SetRawInfo(CREDIT_CARD_EXP_MONTH, u"1");
+  inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2020");
   inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, masked_number);
   inputs[0].SetNetworkForMaskedCard(kVisaCard);
   test::SetServerCreditCards(table_.get(), inputs);
 
   // Unmask the number. The full number should be available.
-  base::string16 full_number(ASCIIToUTF16("4111111111111111"));
-  ASSERT_TRUE(table_->UnmaskServerCreditCard(inputs[0],
-                                             full_number));
+  std::u16string full_number(u"4111111111111111");
+  ASSERT_TRUE(table_->UnmaskServerCreditCard(inputs[0], full_number));
 
   std::vector<std::unique_ptr<CreditCard>> outputs;
   table_->GetServerCreditCards(&outputs);
@@ -2397,11 +2899,10 @@ TEST_F(AutofillTableTest, MaskUnmaskServerCards) {
 TEST_F(AutofillTableTest, SetServerCardModify) {
   // Add a masked card.
   CreditCard masked_card(CreditCard::MASKED_SERVER_CARD, "a123");
-  masked_card.SetRawInfo(CREDIT_CARD_NAME_FULL,
-                         ASCIIToUTF16("Paul F. Tompkins"));
-  masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
-  masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
-  masked_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
+  masked_card.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Paul F. Tompkins");
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"1");
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2020");
+  masked_card.SetRawInfo(CREDIT_CARD_NUMBER, u"1111");
   masked_card.SetNetworkForMaskedCard(kVisaCard);
 
   std::vector<CreditCard> inputs;
@@ -2409,7 +2910,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   test::SetServerCreditCards(table_.get(), inputs);
 
   // Now unmask it.
-  base::string16 full_number = ASCIIToUTF16("4111111111111111");
+  std::u16string full_number = u"4111111111111111";
   table_->UnmaskServerCreditCard(masked_card, full_number);
 
   // The card should now be unmasked.
@@ -2435,10 +2936,10 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
 
   // Set inputs that do not include our old card.
   CreditCard random_card(CreditCard::MASKED_SERVER_CARD, "b456");
-  random_card.SetRawInfo(CREDIT_CARD_NAME_FULL, ASCIIToUTF16("Rick Roman"));
-  random_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
-  random_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("1997"));
-  random_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("2222"));
+  random_card.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Rick Roman");
+  random_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"12");
+  random_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"1997");
+  random_card.SetRawInfo(CREDIT_CARD_NUMBER, u"2222");
   random_card.SetNetworkForMaskedCard(kVisaCard);
   inputs[0] = random_card;
   test::SetServerCreditCards(table_.get(), inputs);
@@ -2448,7 +2949,7 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   ASSERT_EQ(1u, outputs.size());
   EXPECT_TRUE(outputs[0]->record_type() == CreditCard::MASKED_SERVER_CARD);
   EXPECT_EQ(random_card.server_id(), outputs[0]->server_id());
-  EXPECT_EQ(ASCIIToUTF16("2222"), outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
+  EXPECT_EQ(u"2222", outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
 
   outputs.clear();
 
@@ -2460,41 +2961,18 @@ TEST_F(AutofillTableTest, SetServerCardModify) {
   ASSERT_EQ(1u, outputs.size());
   EXPECT_TRUE(outputs[0]->record_type() == CreditCard::MASKED_SERVER_CARD);
   EXPECT_EQ(masked_card.server_id(), outputs[0]->server_id());
-  EXPECT_EQ(ASCIIToUTF16("1111"), outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
+  EXPECT_EQ(u"1111", outputs[0]->GetRawInfo(CREDIT_CARD_NUMBER));
 
   outputs.clear();
-}
-
-TEST_F(AutofillTableTest, ServerCardBankName) {
-  // Add a masked card.
-  CreditCard masked_card(CreditCard::MASKED_SERVER_CARD, "a123");
-  masked_card.SetRawInfo(CREDIT_CARD_NAME_FULL,
-                         ASCIIToUTF16("Paul F. Tompkins"));
-  masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
-  masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
-  masked_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
-  masked_card.SetNetworkForMaskedCard(kVisaCard);
-  masked_card.set_bank_name("Chase");
-
-  // Set server credit cards
-  std::vector<CreditCard> inputs = {masked_card};
-  test::SetServerCreditCards(table_.get(), inputs);
-
-  // Get server credit cards and check bank names equal
-  std::vector<std::unique_ptr<CreditCard>> outputs;
-  table_->GetServerCreditCards(&outputs);
-  ASSERT_EQ(1u, outputs.size());
-  EXPECT_EQ("Chase", outputs[0]->bank_name());
 }
 
 TEST_F(AutofillTableTest, SetServerCardUpdateUsageStatsAndBillingAddress) {
   // Add a masked card.
   CreditCard masked_card(CreditCard::MASKED_SERVER_CARD, "a123");
-  masked_card.SetRawInfo(CREDIT_CARD_NAME_FULL,
-                         ASCIIToUTF16("Paul F. Tompkins"));
-  masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
-  masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
-  masked_card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("1111"));
+  masked_card.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Paul F. Tompkins");
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"1");
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2020");
+  masked_card.SetRawInfo(CREDIT_CARD_NUMBER, u"1111");
   masked_card.set_billing_address_id("1");
   masked_card.SetNetworkForMaskedCard(kVisaCard);
 
@@ -2601,7 +3079,7 @@ TEST_F(AutofillTableTest, SetServerProfileUpdateUsageStats) {
 
   // Update the usage stats; make sure they're reflected in GetServerProfiles.
   inputs.back().set_use_count(4U);
-  inputs.back().set_use_date(base::Time::Now());
+  inputs.back().set_use_date(AutofillClock::Now());
   table_->UpdateServerAddressMetadata(inputs.back());
   table_->GetServerProfiles(&outputs);
   ASSERT_EQ(1u, outputs.size());
@@ -2627,15 +3105,14 @@ TEST_F(AutofillTableTest, SetServerProfileUpdateUsageStats) {
 TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   // This isn't the exact unmasked time, since the database will use the
   // current time that it is called. The code below has to be approximate.
-  base::Time unmasked_time = base::Time::Now();
+  base::Time unmasked_time = AutofillClock::Now();
 
   // Add a masked card.
-  base::string16 masked_number = ASCIIToUTF16("1111");
+  std::u16string masked_number = u"1111";
   CreditCard masked_card(CreditCard::MASKED_SERVER_CARD, "a123");
-  masked_card.SetRawInfo(CREDIT_CARD_NAME_FULL,
-                         ASCIIToUTF16("Paul F. Tompkins"));
-  masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
-  masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2020"));
+  masked_card.SetRawInfo(CREDIT_CARD_NAME_FULL, u"Paul F. Tompkins");
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_MONTH, u"1");
+  masked_card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"2020");
   masked_card.SetRawInfo(CREDIT_CARD_NUMBER, masked_number);
   masked_card.SetNetworkForMaskedCard(kVisaCard);
 
@@ -2644,16 +3121,15 @@ TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   table_->SetServerCreditCards(inputs);
 
   // Unmask it.
-  base::string16 full_number = ASCIIToUTF16("4111111111111111");
+  std::u16string full_number = u"4111111111111111";
   table_->UnmaskServerCreditCard(masked_card, full_number);
 
   // Delete data in a range a year in the future.
   std::vector<std::unique_ptr<AutofillProfile>> profiles;
   std::vector<std::unique_ptr<CreditCard>> credit_cards;
   ASSERT_TRUE(table_->RemoveAutofillDataModifiedBetween(
-      unmasked_time + base::TimeDelta::FromDays(365),
-      unmasked_time + base::TimeDelta::FromDays(530), &profiles,
-      &credit_cards));
+      unmasked_time + base::Days(365), unmasked_time + base::Days(530),
+      &profiles, &credit_cards));
 
   // This should not affect the unmasked card (should be unmasked).
   std::vector<std::unique_ptr<CreditCard>> outputs;
@@ -2666,9 +3142,9 @@ TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   // Delete data in the range of the last 24 hours.
   // Fudge |now| to make sure it's strictly greater than the |now| that
   // the database uses.
-  base::Time now = base::Time::Now() + base::TimeDelta::FromSeconds(1);
+  base::Time now = AutofillClock::Now() + base::Seconds(1);
   ASSERT_TRUE(table_->RemoveAutofillDataModifiedBetween(
-      now - base::TimeDelta::FromDays(1), now, &profiles, &credit_cards));
+      now - base::Days(1), now, &profiles, &credit_cards));
 
   // This should re-mask.
   ASSERT_TRUE(table_->GetServerCreditCards(&outputs));
@@ -2730,18 +3206,56 @@ TEST_F(AutofillTableTest, SetGetPaymentsCustomerData_MultipleSet) {
   EXPECT_EQ(input3, *output);
 }
 
+TEST_F(AutofillTableTest, SetGetCreditCardCloudData_OneTimeSet) {
+  std::vector<CreditCardCloudTokenData> inputs;
+  inputs.push_back(test::GetCreditCardCloudTokenData1());
+  inputs.push_back(test::GetCreditCardCloudTokenData2());
+  table_->SetCreditCardCloudTokenData(inputs);
+
+  std::vector<std::unique_ptr<CreditCardCloudTokenData>> outputs;
+  ASSERT_TRUE(table_->GetCreditCardCloudTokenData(&outputs));
+  EXPECT_EQ(outputs.size(), inputs.size());
+  EXPECT_EQ(0, outputs[0]->Compare(test::GetCreditCardCloudTokenData1()));
+  EXPECT_EQ(0, outputs[1]->Compare(test::GetCreditCardCloudTokenData2()));
+}
+
+TEST_F(AutofillTableTest, SetGetCreditCardCloudData_MultipleSet) {
+  std::vector<CreditCardCloudTokenData> inputs;
+  CreditCardCloudTokenData input1 = test::GetCreditCardCloudTokenData1();
+  inputs.push_back(input1);
+  table_->SetCreditCardCloudTokenData(inputs);
+
+  inputs.clear();
+  CreditCardCloudTokenData input2 = test::GetCreditCardCloudTokenData2();
+  inputs.push_back(input2);
+  table_->SetCreditCardCloudTokenData(inputs);
+
+  std::vector<std::unique_ptr<CreditCardCloudTokenData>> outputs;
+  ASSERT_TRUE(table_->GetCreditCardCloudTokenData(&outputs));
+  EXPECT_EQ(1u, outputs.size());
+  EXPECT_EQ(0, outputs[0]->Compare(test::GetCreditCardCloudTokenData2()));
+}
+
+TEST_F(AutofillTableTest, GetCreditCardCloudData_NoData) {
+  std::vector<std::unique_ptr<CreditCardCloudTokenData>> output;
+  ASSERT_TRUE(table_->GetCreditCardCloudTokenData(&output));
+  EXPECT_TRUE(output.empty());
+}
+
 const size_t kMaxCount = 2;
 struct GetFormValuesTestCase {
-  const char* const field_suggestion[kMaxCount];
-  const char* const field_contents;
+  const char16_t* const field_suggestion[kMaxCount];
+  const char16_t* const field_contents;
   size_t expected_suggestion_count;
-  const char* const expected_suggestion[kMaxCount];
+  const char16_t* const expected_suggestion[kMaxCount];
 };
 
 class GetFormValuesTest : public testing::TestWithParam<GetFormValuesTestCase> {
  public:
-  GetFormValuesTest() {}
-  ~GetFormValuesTest() override {}
+  GetFormValuesTest() = default;
+  GetFormValuesTest(const GetFormValuesTest&) = delete;
+  GetFormValuesTest& operator=(const GetFormValuesTest&) = delete;
+  ~GetFormValuesTest() override = default;
 
  protected:
   void SetUp() override {
@@ -2749,8 +3263,8 @@ class GetFormValuesTest : public testing::TestWithParam<GetFormValuesTestCase> {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     file_ = temp_dir_.GetPath().AppendASCII("TestWebDatabase");
 
-    table_.reset(new AutofillTable);
-    db_.reset(new WebDatabase);
+    table_ = std::make_unique<AutofillTable>();
+    db_ = std::make_unique<WebDatabase>();
     db_->AddTable(table_.get());
     ASSERT_EQ(sql::INIT_OK, db_->Init(file_));
   }
@@ -2761,9 +3275,6 @@ class GetFormValuesTest : public testing::TestWithParam<GetFormValuesTestCase> {
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<AutofillTable> table_;
   std::unique_ptr<WebDatabase> db_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(GetFormValuesTest);
 };
 
 TEST_P(GetFormValuesTest, GetFormValuesForElementName_SubstringMatchEnabled) {
@@ -2775,25 +3286,23 @@ TEST_P(GetFormValuesTest, GetFormValuesForElementName_SubstringMatchEnabled) {
                << "suggestion = " << test_case.field_suggestion[0]
                << ", contents = " << test_case.field_contents);
 
-  Time t1 = Time::Now();
+  Time t1 = AutofillClock::Now();
 
   // Simulate the submission of a handful of entries in a field called "Name".
   AutofillChangeList changes;
   FormFieldData field;
   for (size_t k = 0; k < kMaxCount; ++k) {
-    field.name = ASCIIToUTF16("Name");
-    field.value = ASCIIToUTF16(test_case.field_suggestion[k]);
+    field.name = u"Name";
+    field.value = test_case.field_suggestion[k];
     table_->AddFormFieldValue(field, &changes);
   }
 
   std::vector<AutofillEntry> v;
-  table_->GetFormValuesForElementName(
-      ASCIIToUTF16("Name"), ASCIIToUTF16(test_case.field_contents), &v, 6);
+  table_->GetFormValuesForElementName(u"Name", test_case.field_contents, &v, 6);
 
   EXPECT_EQ(test_case.expected_suggestion_count, v.size());
   for (size_t j = 0; j < test_case.expected_suggestion_count; ++j) {
-    EXPECT_EQ(ASCIIToUTF16(test_case.expected_suggestion[j]),
-              v[j].key().value());
+    EXPECT_EQ(test_case.expected_suggestion[j], v[j].key().value());
   }
 
   changes.clear();
@@ -2803,36 +3312,36 @@ TEST_P(GetFormValuesTest, GetFormValuesForElementName_SubstringMatchEnabled) {
 INSTANTIATE_TEST_SUITE_P(
     AutofillTableTest,
     GetFormValuesTest,
-    testing::Values(GetFormValuesTestCase{{"user.test", "test_user"},
-                                          "TEST",
+    testing::Values(GetFormValuesTestCase{{u"user.test", u"test_user"},
+                                          u"TEST",
                                           2,
-                                          {"test_user", "user.test"}},
-                    GetFormValuesTestCase{{"user test", "test-user"},
-                                          "user",
+                                          {u"test_user", u"user.test"}},
+                    GetFormValuesTestCase{{u"user test", u"test-user"},
+                                          u"user",
                                           2,
-                                          {"user test", "test-user"}},
-                    GetFormValuesTestCase{{"user test", "test-rest"},
-                                          "user",
+                                          {u"user test", u"test-user"}},
+                    GetFormValuesTestCase{{u"user test", u"test-rest"},
+                                          u"user",
                                           1,
-                                          {"user test", nullptr}},
-                    GetFormValuesTestCase{{"user@test", "test_user"},
-                                          "user@t",
+                                          {u"user test", nullptr}},
+                    GetFormValuesTestCase{{u"user@test", u"test_user"},
+                                          u"user@t",
                                           1,
-                                          {"user@test", nullptr}},
-                    GetFormValuesTestCase{{"user.test", "test_user"},
-                                          "er.tes",
+                                          {u"user@test", nullptr}},
+                    GetFormValuesTestCase{{u"user.test", u"test_user"},
+                                          u"er.tes",
                                           0,
                                           {nullptr, nullptr}},
-                    GetFormValuesTestCase{{"user test", "test_user"},
-                                          "_ser",
+                    GetFormValuesTestCase{{u"user test", u"test_user"},
+                                          u"_ser",
                                           0,
                                           {nullptr, nullptr}},
-                    GetFormValuesTestCase{{"user.test", "test_user"},
-                                          "%ser",
+                    GetFormValuesTestCase{{u"user.test", u"test_user"},
+                                          u"%ser",
                                           0,
                                           {nullptr, nullptr}},
-                    GetFormValuesTestCase{{"user.test", "test_user"},
-                                          "; DROP TABLE autofill;",
+                    GetFormValuesTestCase{{u"user.test", u"test_user"},
+                                          u"; DROP TABLE autofill;",
                                           0,
                                           {nullptr, nullptr}}));
 
@@ -2840,11 +3349,11 @@ class AutofillTableTestPerModelType
     : public AutofillTableTest,
       public testing::WithParamInterface<syncer::ModelType> {
  public:
-  AutofillTableTestPerModelType() {}
-  ~AutofillTableTestPerModelType() override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AutofillTableTestPerModelType);
+  AutofillTableTestPerModelType() = default;
+  AutofillTableTestPerModelType(const AutofillTableTestPerModelType&) = delete;
+  AutofillTableTestPerModelType& operator=(
+      const AutofillTableTestPerModelType&) = delete;
+  ~AutofillTableTestPerModelType() override = default;
 };
 
 TEST_P(AutofillTableTestPerModelType, AutofillNoMetadata) {
@@ -3100,6 +3609,154 @@ TEST_F(AutofillTableTest, RemoveOrphanAutofillTableRows) {
   EXPECT_EQ("00000000-0000-0000-0000-000000000003",
             s_autofill_profile_phones.ColumnString(0));
   EXPECT_FALSE(s_autofill_profile_phones.Step());
+}
+
+TEST_F(AutofillTableTest, InsertUpiId) {
+  EXPECT_TRUE(table_->InsertUpiId("name@indianbank"));
+
+  sql::Statement s_inspect(db_->GetSQLConnection()->GetUniqueStatement(
+      "SELECT vpa FROM payments_upi_vpa"));
+
+  ASSERT_TRUE(s_inspect.is_valid());
+  ASSERT_TRUE(s_inspect.Step());
+  EXPECT_GE(s_inspect.ColumnString(0), "name@indianbank");
+  EXPECT_FALSE(s_inspect.Step());
+}
+
+TEST_F(AutofillTableTest, GetAllUpiIds) {
+  constexpr char upi_id1[] = "name@indianbank";
+  constexpr char upi_id2[] = "vpa@icici";
+  EXPECT_TRUE(table_->InsertUpiId(upi_id1));
+  EXPECT_TRUE(table_->InsertUpiId(upi_id2));
+
+  std::vector<std::string> upi_ids = table_->GetAllUpiIds();
+  ASSERT_THAT(upi_ids, UnorderedElementsAre(upi_id1, upi_id2));
+}
+
+TEST_F(AutofillTableTest, SetAndGetCreditCardOfferData) {
+  // Set Offer ID.
+  int64_t offer_id_1 = 1;
+  int64_t offer_id_2 = 2;
+  int64_t offer_id_3 = 3;
+
+  // Set reward amounts for card-linked offers on offer 1 and 2.
+  std::string offer_reward_amount_1 = "$5";
+  std::string offer_reward_amount_2 = "10%";
+
+  // Set promo code for offer 3.
+  std::string promo_code_3 = "5PCTOFFSHOES";
+
+  // Set expiry.
+  base::Time expiry_1 = base::Time::FromDoubleT(1000);
+  base::Time expiry_2 = base::Time::FromDoubleT(2000);
+  base::Time expiry_3 = base::Time::FromDoubleT(3000);
+
+  // Set details URL.
+  GURL offer_details_url_1 = GURL("https://www.offer_1_example.com/");
+  GURL offer_details_url_2 = GURL("https://www.offer_2_example.com/");
+  GURL offer_details_url_3 = GURL("https://www.offer_3_example.com/");
+
+  // Set merchant domains for offer 1.
+  std::vector<GURL> merchant_origins_1;
+  merchant_origins_1.emplace_back("http://www.merchant_domain_1_1.com/");
+  std::vector<GURL> merchant_origins_2;
+  merchant_origins_2.emplace_back("http://www.merchant_domain_1_2.com/");
+  std::vector<GURL> merchant_origins_3;
+  merchant_origins_3.emplace_back("http://www.merchant_domain_1_3.com/");
+  // Set merchant domains for offer 2.
+  merchant_origins_2.emplace_back("http://www.merchant_domain_2_1.com/");
+  // Set merchant domains for offer 3.
+  merchant_origins_3.emplace_back("http://www.merchant_domain_3_1.com/");
+  merchant_origins_3.emplace_back("http://www.merchant_domain_3_2.com/");
+
+  DisplayStrings display_strings_1;
+  DisplayStrings display_strings_2;
+  DisplayStrings display_strings_3;
+  // Set display strings for all 3 offers.
+  display_strings_1.value_prop_text = "$5 off your purchase";
+  display_strings_2.value_prop_text = "10% off your purchase";
+  display_strings_3.value_prop_text = "5% off shoes. Up to $50.";
+  display_strings_1.see_details_text = "Terms apply.";
+  display_strings_2.see_details_text = "Terms apply.";
+  display_strings_3.see_details_text = "See details.";
+  display_strings_1.usage_instructions_text =
+      "Check out with this card to activate.";
+  display_strings_2.usage_instructions_text =
+      "Check out with this card to activate.";
+  display_strings_3.usage_instructions_text =
+      "Click the promo code field at checkout to autofill it.";
+
+  std::vector<int64_t> eligible_instrument_id_1;
+  std::vector<int64_t> eligible_instrument_id_2;
+  std::vector<int64_t> eligible_instrument_id_3;
+
+  // Set eligible card-linked instrument ID for offer 1.
+  eligible_instrument_id_1.push_back(10);
+  eligible_instrument_id_1.push_back(11);
+  // Set eligible card-linked instrument ID for offer 2.
+  eligible_instrument_id_2.push_back(20);
+  eligible_instrument_id_2.push_back(21);
+  eligible_instrument_id_2.push_back(22);
+
+  // Create vector of offer data.
+  std::vector<AutofillOfferData> autofill_offer_data;
+  autofill_offer_data.push_back(AutofillOfferData::GPayCardLinkedOffer(
+      offer_id_1, expiry_1, merchant_origins_1, offer_details_url_1,
+      display_strings_2, eligible_instrument_id_1, offer_reward_amount_1));
+  autofill_offer_data.push_back(AutofillOfferData::GPayCardLinkedOffer(
+      offer_id_2, expiry_2, merchant_origins_2, offer_details_url_2,
+      display_strings_2, eligible_instrument_id_2, offer_reward_amount_2));
+  autofill_offer_data.push_back(AutofillOfferData::GPayPromoCodeOffer(
+      offer_id_3, expiry_3, merchant_origins_3, offer_details_url_3,
+      display_strings_3, promo_code_3));
+
+  table_->SetAutofillOffers(autofill_offer_data);
+
+  std::vector<std::unique_ptr<AutofillOfferData>> output_offer_data;
+
+  EXPECT_TRUE(table_->GetAutofillOffers(&output_offer_data));
+  EXPECT_EQ(autofill_offer_data.size(), output_offer_data.size());
+
+  for (const auto& data : autofill_offer_data) {
+    // Find output data with corresponding Offer ID.
+    size_t output_index = 0;
+    while (output_index < output_offer_data.size()) {
+      if (data.GetOfferId() == output_offer_data[output_index]->GetOfferId()) {
+        break;
+      }
+      output_index++;
+    }
+
+    // Expect to find matching Offer ID's.
+    EXPECT_NE(output_index, output_offer_data.size());
+
+    // All corresponding fields must be equal.
+    EXPECT_EQ(data.GetOfferId(), output_offer_data[output_index]->GetOfferId());
+    EXPECT_EQ(data.GetOfferRewardAmount(),
+              output_offer_data[output_index]->GetOfferRewardAmount());
+    EXPECT_EQ(data.GetPromoCode(),
+              output_offer_data[output_index]->GetPromoCode());
+    EXPECT_EQ(data.GetExpiry(), output_offer_data[output_index]->GetExpiry());
+    EXPECT_EQ(data.GetOfferDetailsUrl().spec(),
+              output_offer_data[output_index]->GetOfferDetailsUrl().spec());
+    EXPECT_EQ(
+        data.GetDisplayStrings().value_prop_text,
+        output_offer_data[output_index]->GetDisplayStrings().value_prop_text);
+    EXPECT_EQ(
+        data.GetDisplayStrings().see_details_text,
+        output_offer_data[output_index]->GetDisplayStrings().see_details_text);
+    EXPECT_EQ(data.GetDisplayStrings().usage_instructions_text,
+              output_offer_data[output_index]
+                  ->GetDisplayStrings()
+                  .usage_instructions_text);
+    ASSERT_THAT(data.GetMerchantOrigins(),
+                testing::UnorderedElementsAreArray(
+                    output_offer_data[output_index]->GetMerchantOrigins()));
+    ASSERT_THAT(
+        data.GetEligibleInstrumentIds(),
+        testing::UnorderedElementsAreArray(
+            output_offer_data[output_index]->GetEligibleInstrumentIds()));
+  }
 }
 
 }  // namespace autofill

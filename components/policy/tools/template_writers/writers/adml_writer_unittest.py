@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Unittests for writers.adml_writer."""
@@ -210,6 +210,7 @@ class AdmlWriterUnittest(xml_writer_base_unittest.XmlWriterBaseTest):
         'caption': 'String policy caption',
         'label': 'String policy label',
         'desc': 'This is a test description.',
+        'supported_on': [{'platform': 'win'}, {'platform': 'chrome_os'}],
         'example_value': '01:23:45:67:89:ab',
     }
     self._InitWriterForAddingPolicies(self.writer, string_policy)
@@ -429,7 +430,7 @@ class AdmlWriterUnittest(xml_writer_base_unittest.XmlWriterBaseTest):
         '<string id="DictionaryPolicyStub">Dictionary policy caption</string>\n'
         '<string id="DictionaryPolicyStub_Explain">'
         'This is a test description.\n'
-        'See https://www.chromium.org/administrators/policy-list-3#'
+        'See https://cloud.google.com/docs/chrome-enterprise/policies/?policy='
         'DictionaryPolicyStub\n</string>')
     self.AssertXMLEquals(output, expected_output)
     # Assert generated presentation elements.
@@ -449,17 +450,17 @@ class AdmlWriterUnittest(xml_writer_base_unittest.XmlWriterBaseTest):
     self.assertTrue(
         self.writer.IsPolicySupported({
             'supported_on': [{
-                'platforms': ['win', 'zzz']
+                'platform': 'win'
             }, {
-                'platforms': ['aaa']
+                'platform': 'aaa'
             }]
         }))
     self.assertFalse(
         self.writer.IsPolicySupported({
             'supported_on': [{
-                'platforms': ['mac', 'linux']
+                'platform': 'mac',
             }, {
-                'platforms': ['aaa']
+                'platform': 'aaa'
             }]
         }))
 

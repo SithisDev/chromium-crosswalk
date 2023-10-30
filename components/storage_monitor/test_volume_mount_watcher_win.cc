@@ -1,10 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
 // TestVolumeMountWatcherWin implementation.
 
 #include "components/storage_monitor/test_volume_mount_watcher_win.h"
+
+#include <memory>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
@@ -68,8 +70,7 @@ bool GetMassStorageDeviceDetails(const base::FilePath& device_path,
     return false;
 
   StorageInfo::Type type = StorageInfo::FIXED_MASS_STORAGE;
-  if (path.value() != base::ASCIIToUTF16("N:\\") &&
-      path.value() != base::ASCIIToUTF16("C:\\") &&
+  if (path.value() != L"N:\\" && path.value() != L"C:\\" &&
       path.value() != GetTempRoot().value()) {
     type = StorageInfo::REMOVABLE_MASS_STORAGE_WITH_DCIM;
   }
@@ -77,9 +78,9 @@ bool GetMassStorageDeviceDetails(const base::FilePath& device_path,
       "\\\\?\\Volume{00000000-0000-0000-0000-000000000000}\\";
   unique_id[11] = static_cast<char>(drive_letter);
   std::string device_id = StorageInfo::MakeDeviceId(type, unique_id);
-  base::string16 storage_label = path.Append(L" Drive").LossyDisplayName();
-  *info = StorageInfo(device_id, path.value(), storage_label, base::string16(),
-                      base::string16(), 1000000);
+  std::u16string storage_label = path.Append(L" Drive").LossyDisplayName();
+  *info = StorageInfo(device_id, path.value(), storage_label, std::u16string(),
+                      std::u16string(), 1000000);
 
   return true;
 }
@@ -97,10 +98,10 @@ TestVolumeMountWatcherWin::~TestVolumeMountWatcherWin() {
 void TestVolumeMountWatcherWin::AddDeviceForTesting(
     const base::FilePath& device_path,
     const std::string& device_id,
-    const base::string16& storage_label,
+    const std::u16string& storage_label,
     uint64_t total_size_in_bytes) {
   StorageInfo info(device_id, device_path.value(), storage_label,
-                   base::string16(), base::string16(), total_size_in_bytes);
+                   std::u16string(), std::u16string(), total_size_in_bytes);
   HandleDeviceAttachEventOnUIThread(device_path, info);
 }
 
@@ -117,9 +118,9 @@ void TestVolumeMountWatcherWin::DeviceCheckComplete(
 }
 
 void TestVolumeMountWatcherWin::BlockDeviceCheckForTesting() {
-  device_check_complete_event_.reset(
-      new base::WaitableEvent(base::WaitableEvent::ResetPolicy::AUTOMATIC,
-                              base::WaitableEvent::InitialState::NOT_SIGNALED));
+  device_check_complete_event_ = std::make_unique<base::WaitableEvent>(
+      base::WaitableEvent::ResetPolicy::AUTOMATIC,
+      base::WaitableEvent::InitialState::NOT_SIGNALED);
   devices_checked_.clear();
 }
 
@@ -139,14 +140,14 @@ bool TestVolumeMountWatcherWin::GetDeviceRemovable(
 
 VolumeMountWatcherWin::GetDeviceDetailsCallbackType
 TestVolumeMountWatcherWin::GetDeviceDetailsCallback() const {
-  return base::Bind(&GetMassStorageDeviceDetails);
+  return base::BindOnce(&GetMassStorageDeviceDetails);
 }
 
 VolumeMountWatcherWin::GetAttachedDevicesCallbackType
   TestVolumeMountWatcherWin::GetAttachedDevicesCallback() const {
   if (attached_devices_fake_)
-    return base::Bind(&FakeGetAttachedDevices);
-  return base::Bind(&FakeGetSingleAttachedDevice);
+    return base::BindOnce(&FakeGetAttachedDevices);
+  return base::BindOnce(&FakeGetSingleAttachedDevice);
 }
 
 }  // namespace storage_monitor

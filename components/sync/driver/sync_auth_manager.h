@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,9 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -51,6 +50,10 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
   SyncAuthManager(signin::IdentityManager* identity_manager,
                   const AccountStateChangedCallback& account_state_changed,
                   const CredentialsChangedCallback& credentials_changed);
+
+  SyncAuthManager(const SyncAuthManager&) = delete;
+  SyncAuthManager& operator=(const SyncAuthManager&) = delete;
+
   ~SyncAuthManager() override;
 
   // Tells the tracker to start listening for changes to the account/sign-in
@@ -59,6 +62,10 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
   // return an empty AccountInfo. Note that this will *not* trigger any
   // callbacks, even if there is an active account afterwards.
   void RegisterForAuthNotifications();
+
+  // Returns whether all relevant account information as returned by
+  // GetActiveAccountInfo() has been fully loaded.
+  bool IsActiveAccountInfoFullyLoaded() const;
 
   // Returns the account which should be used when communicating with the Sync
   // server. Note that this account may not be blessed for Sync-the-feature.
@@ -85,31 +92,27 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
   // internals UI.
   SyncTokenStatus GetSyncTokenStatus() const;
 
-  // Called by ProfileSyncService when Sync starts up and will try talking to
+  // Called by SyncServiceImpl when Sync starts up and will try talking to
   // the server soon. This initiates fetching an access token.
   void ConnectionOpened();
 
-  // Called by ProfileSyncService when the status of the connection to the Sync
+  // Called by SyncServiceImpl when the status of the connection to the Sync
   // server changed. Updates auth error state accordingly.
   void ConnectionStatusChanged(ConnectionStatus status);
 
-  // Called by ProfileSyncService when the connection to the Sync server is
+  // Called by SyncServiceImpl when the connection to the Sync server is
   // closed (due to Sync being shut down). Clears all related state (such as
   // cached access token, error from the server, etc).
   void ConnectionClosed();
 
   // signin::IdentityManager::Observer implementation.
-  void OnPrimaryAccountSet(
-      const CoreAccountInfo& primary_account_info) override;
-  void OnPrimaryAccountCleared(
-      const CoreAccountInfo& previous_primary_account_info) override;
+  void OnPrimaryAccountChanged(
+      const signin::PrimaryAccountChangeEvent& event) override;
   void OnRefreshTokenUpdatedForAccount(
       const CoreAccountInfo& account_info) override;
   void OnRefreshTokenRemovedForAccount(
       const CoreAccountId& account_id) override;
-  void OnAccountsInCookieUpdated(
-      const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
-      const GoogleServiceAuthError& error) override;
+  void OnRefreshTokensLoaded() override;
 
   // Test-only methods for inspecting/modifying internal state.
   bool IsRetryingAccessTokenFetchForTest() const;
@@ -122,6 +125,7 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
   // DetermineAccountToUse) if necessary, and notifies observers of any changes
   // (sign-in/sign-out/"primary" bit change). Note that changing from one
   // account to another is exposed to observers as a sign-out + sign-in.
+  // Returns whether the syncing account was updated.
   bool UpdateSyncAccountIfNecessary();
 
   // Invalidates any current access token, which means invalidating it with the
@@ -149,7 +153,7 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
 
   void SetLastAuthError(const GoogleServiceAuthError& error);
 
-  signin::IdentityManager* const identity_manager_;
+  const raw_ptr<signin::IdentityManager> identity_manager_;
 
   const AccountStateChangedCallback account_state_changed_callback_;
   const CredentialsChangedCallback credentials_changed_callback_;
@@ -193,9 +197,13 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
   // |has_token| and |next_token_request_time| get computed on demand.
   SyncTokenStatus partial_token_status_;
 
-  base::WeakPtrFactory<SyncAuthManager> weak_ptr_factory_{this};
+  // Whether there was a retry done to fetch the access token when the request
+  // was cancelled for the first time. This works around an issue that can only
+  // happen once during browser startup, so it's sufficient to have a single
+  // retry (i.e. not per request).
+  bool access_token_retried_ = false;
 
-  DISALLOW_COPY_AND_ASSIGN(SyncAuthManager);
+  base::WeakPtrFactory<SyncAuthManager> weak_ptr_factory_{this};
 };
 
 }  // namespace syncer

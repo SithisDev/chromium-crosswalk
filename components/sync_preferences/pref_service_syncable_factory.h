@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,14 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/prefs/pref_service_factory.h"
 #include "components/prefs/pref_value_store.h"
 
 namespace policy {
 class BrowserPolicyConnector;
 class PolicyService;
-}
+}  // namespace policy
 
 namespace user_prefs {
 class PrefRegistrySyncable;
@@ -31,6 +31,11 @@ class PrefServiceSyncable;
 class PrefServiceSyncableFactory : public PrefServiceFactory {
  public:
   PrefServiceSyncableFactory();
+
+  PrefServiceSyncableFactory(const PrefServiceSyncableFactory&) = delete;
+  PrefServiceSyncableFactory& operator=(const PrefServiceSyncableFactory&) =
+      delete;
+
   ~PrefServiceSyncableFactory() override;
 
   // Set up policy pref stores using the given policy service and connector.
@@ -43,16 +48,11 @@ class PrefServiceSyncableFactory : public PrefServiceFactory {
   void SetPrefModelAssociatorClient(
       PrefModelAssociatorClient* pref_model_associator_client);
 
-  // |delegate| might be null during test or if we're not using the Mojo pref
-  // service.
   std::unique_ptr<PrefServiceSyncable> CreateSyncable(
-      scoped_refptr<user_prefs::PrefRegistrySyncable> pref_registry,
-      std::unique_ptr<PrefValueStore::Delegate> delegate = nullptr);
+      scoped_refptr<user_prefs::PrefRegistrySyncable> pref_registry);
 
  private:
-  PrefModelAssociatorClient* pref_model_associator_client_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(PrefServiceSyncableFactory);
+  raw_ptr<PrefModelAssociatorClient> pref_model_associator_client_ = nullptr;
 };
 
 }  // namespace sync_preferences

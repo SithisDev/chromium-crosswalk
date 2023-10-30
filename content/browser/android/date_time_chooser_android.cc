@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "base/android/jni_string.h"
 #include "base/i18n/char_iterator.h"
 #include "base/i18n/unicodestring.h"
-#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/android/content_jni_headers/DateTimeChooserAndroid_jni.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -27,15 +26,14 @@ using base::android::ScopedJavaLocalRef;
 
 namespace {
 
-base::string16 SanitizeSuggestionString(const base::string16& string) {
-  base::string16 trimmed = string.substr(0, 255);
+std::u16string SanitizeSuggestionString(const std::u16string& string) {
+  std::u16string trimmed = string.substr(0, 255);
   icu::UnicodeString sanitized;
-  base::i18n::UTF16CharIterator sanitized_iterator(&trimmed);
-  while (!sanitized_iterator.end()) {
+  for (base::i18n::UTF16CharIterator sanitized_iterator(trimmed);
+       !sanitized_iterator.end(); sanitized_iterator.Advance()) {
     UChar c = sanitized_iterator.get();
     if (u_isprint(c))
       sanitized.append(c);
-    sanitized_iterator.Advance();
   }
   return base::i18n::UnicodeStringToString16(sanitized);
 }
@@ -45,23 +43,29 @@ base::string16 SanitizeSuggestionString(const base::string16& string) {
 namespace content {
 
 // DateTimeChooserAndroid implementation
-DateTimeChooserAndroid::DateTimeChooserAndroid(WebContentsImpl* web_contents)
-    : content::WebContentsObserver(web_contents),
-      date_time_chooser_binding_(this) {
-  registry_.AddInterface(
-      base::BindRepeating(&DateTimeChooserAndroid::OnDateTimeChooserRequest,
-                          base::Unretained(this)));
-}
+DateTimeChooserAndroid::DateTimeChooserAndroid(WebContents* web_contents)
+    : WebContentsUserData<DateTimeChooserAndroid>(*web_contents),
+      date_time_chooser_receiver_(this) {}
 
 DateTimeChooserAndroid::~DateTimeChooserAndroid() {
+  DismissAndDestroyJavaObject();
 }
 
-void DateTimeChooserAndroid::OnDateTimeChooserRequest(
-    blink::mojom::DateTimeChooserRequest request) {
+void DateTimeChooserAndroid::OnDateTimeChooserReceiver(
+    mojo::PendingReceiver<blink::mojom::DateTimeChooser> receiver) {
   // Disconnect the previous picker first.
-  date_time_chooser_binding_.Close();
+  date_time_chooser_receiver_.reset();
+  date_time_chooser_receiver_.Bind(std::move(receiver));
+  date_time_chooser_receiver_.set_disconnect_handler(base::BindOnce(
+      &DateTimeChooserAndroid::OnDateTimeChooserReceiverConnectionError,
+      base::Unretained(this)));
+}
 
-  date_time_chooser_binding_.Bind(std::move(request));
+void DateTimeChooserAndroid::OnDateTimeChooserReceiverConnectionError() {
+  // Close a dialog and reset the Mojo receiver and the callback.
+  CloseDateTimeDialog();
+  open_date_time_response_callback_.Reset();
+  date_time_chooser_receiver_.reset();
 }
 
 void DateTimeChooserAndroid::OpenDateTimeDialog(
@@ -70,7 +74,7 @@ void DateTimeChooserAndroid::OpenDateTimeDialog(
   JNIEnv* env = AttachCurrentThread();
 
   if (open_date_time_response_callback_) {
-    date_time_chooser_binding_.ReportBadMessage(
+    date_time_chooser_receiver_.ReportBadMessage(
         "DateTimeChooserAndroid: Previous picker's binding isn't closed.");
     return;
   }
@@ -92,7 +96,7 @@ void DateTimeChooserAndroid::OpenDateTimeDialog(
     }
   }
 
-  gfx::NativeWindow native_window = web_contents()->GetTopLevelNativeWindow();
+  gfx::NativeWindow native_window = GetWebContents().GetTopLevelNativeWindow();
 
   if (native_window && !(native_window->GetJavaObject()).is_null()) {
     j_date_time_chooser_.Reset(
@@ -106,6 +110,18 @@ void DateTimeChooserAndroid::OpenDateTimeDialog(
     std::move(open_date_time_response_callback_).Run(true, value->dialog_value);
 }
 
+void DateTimeChooserAndroid::CloseDateTimeDialog() {
+  DismissAndDestroyJavaObject();
+}
+
+void DateTimeChooserAndroid::DismissAndDestroyJavaObject() {
+  if (j_date_time_chooser_) {
+    JNIEnv* env = AttachCurrentThread();
+    Java_DateTimeChooserAndroid_dismissAndDestroy(env, j_date_time_chooser_);
+    j_date_time_chooser_.Reset();
+  }
+}
+
 void DateTimeChooserAndroid::ReplaceDateTime(JNIEnv* env,
                                              const JavaRef<jobject>&,
                                              jdouble value) {
@@ -117,11 +133,6 @@ void DateTimeChooserAndroid::CancelDialog(JNIEnv* env,
   std::move(open_date_time_response_callback_).Run(false, 0.0);
 }
 
-void DateTimeChooserAndroid::OnInterfaceRequestFromFrame(
-    content::RenderFrameHost* render_frame_host,
-    const std::string& interface_name,
-    mojo::ScopedMessagePipeHandle* interface_pipe) {
-  registry_.TryBindInterface(interface_name, interface_pipe);
-}
+WEB_CONTENTS_USER_DATA_KEY_IMPL(DateTimeChooserAndroid);
 
 }  // namespace content

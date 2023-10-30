@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -32,7 +32,6 @@ public class SandboxedProcessService{0} extends SandboxedProcessService {{
 def DoMain(argv):
   usage = 'usage: %prog [number] [output]'
   parser = optparse.OptionParser(usage=usage)
-  build_utils.AddDepfileOption(parser)
 
   options, args = parser.parse_args(argv)
 
@@ -44,13 +43,10 @@ def DoMain(argv):
   path_template = "org/chromium/content/app/SandboxedProcessService{0}.java"
   with build_utils.AtomicOutput(output) as f:
     with zipfile.ZipFile(f, 'w', zipfile.ZIP_STORED) as srcjar:
-      for i in xrange(number):
+      for i in range(number):
         build_utils.AddToZipHermetic(srcjar,
                                      path_template.format(i),
                                      data=GenerateService(i))
-
-  if options.depfile:
-    build_utils.WriteDepfile(options.depfile, output)
 
 if __name__ == '__main__':
   DoMain(sys.argv[1:])

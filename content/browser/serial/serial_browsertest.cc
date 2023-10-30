@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,15 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/memory/raw_ptr.h"
 #include "base/unguessable_token.h"
 #include "content/browser/serial/serial_test_utils.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/serial_chooser.h"
 #include "content/public/browser/serial_delegate.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -57,14 +60,14 @@ class SerialTest : public ContentBrowserTest {
 
  private:
   SerialTestContentBrowserClient test_client_;
-  ContentBrowserClient* original_client_ = nullptr;
+  raw_ptr<ContentBrowserClient> original_client_ = nullptr;
   device::FakeSerialPortManager port_manager_;
 };
 
 }  // namespace
 
 IN_PROC_BROWSER_TEST_F(SerialTest, GetPorts) {
-  NavigateToURL(shell(), GetTestUrl(nullptr, "simple_page.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), GetTestUrl(nullptr, "simple_page.html")));
 
   // Three ports are added but only two will have permission granted.
   for (size_t i = 0; i < 3; i++) {
@@ -84,7 +87,7 @@ IN_PROC_BROWSER_TEST_F(SerialTest, GetPorts) {
 }
 
 IN_PROC_BROWSER_TEST_F(SerialTest, RequestPort) {
-  NavigateToURL(shell(), GetTestUrl(nullptr, "simple_page.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), GetTestUrl(nullptr, "simple_page.html")));
 
   EXPECT_CALL(delegate(), CanRequestPortPermission).WillOnce(Return(true));
 
@@ -101,7 +104,7 @@ IN_PROC_BROWSER_TEST_F(SerialTest, RequestPort) {
 }
 
 IN_PROC_BROWSER_TEST_F(SerialTest, DisallowRequestPort) {
-  NavigateToURL(shell(), GetTestUrl(nullptr, "simple_page.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), GetTestUrl(nullptr, "simple_page.html")));
 
   EXPECT_CALL(delegate(), CanRequestPortPermission(_)).WillOnce(Return(false));
   EXPECT_CALL(delegate(), RunChooserInternal).Times(Exactly(0));

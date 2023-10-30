@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,13 +16,13 @@ import org.chromium.base.CommandLine;
 import org.chromium.base.MemoryPressureListener;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content_public.browser.BrowserStartupController;
 import org.chromium.content_public.browser.DeviceUtils;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_shell.Shell;
 import org.chromium.content_shell.ShellManager;
 import org.chromium.ui.base.ActivityWindowAndroid;
+import org.chromium.ui.base.IntentRequestTracker;
 
 /**
  * Activity for managing the Content Shell.
@@ -41,6 +41,7 @@ public class ContentShellActivity extends Activity {
     private ActivityWindowAndroid mWindowAndroid;
     private Intent mLastSentIntent;
     private String mStartupUrl;
+    private IntentRequestTracker mIntentRequestTracker;
 
     @Override
     protected void onCreate(final Bundle savedInstanceState) {
@@ -57,21 +58,15 @@ public class ContentShellActivity extends Activity {
 
         DeviceUtils.addDeviceSpecificUserAgentSwitch();
 
-        try {
-            LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
-        } catch (ProcessInitException e) {
-            Log.e(TAG, "ContentView initialization failed.", e);
-            // Since the library failed to initialize nothing in the application
-            // can work, so kill the whole application not just the activity
-            System.exit(-1);
-            return;
-        }
+        LibraryLoader.getInstance().ensureInitialized();
 
         setContentView(R.layout.content_shell_activity);
-        mShellManager = (ShellManager) findViewById(R.id.shell_container);
+        mShellManager = findViewById(R.id.shell_container);
         final boolean listenToActivityState = true;
-        mWindowAndroid = new ActivityWindowAndroid(this, listenToActivityState);
-        mWindowAndroid.restoreInstanceState(savedInstanceState);
+        mIntentRequestTracker = IntentRequestTracker.createFromActivity(this);
+        mWindowAndroid =
+                new ActivityWindowAndroid(this, listenToActivityState, mIntentRequestTracker);
+        mIntentRequestTracker.restoreInstanceState(savedInstanceState);
         mShellManager.setWindow(mWindowAndroid);
         // Set up the animation placeholder to be the SurfaceView. This disables the
         // SurfaceView's 'hole' clipping during animations that are notified to the window.
@@ -84,32 +79,22 @@ public class ContentShellActivity extends Activity {
         }
 
         if (CommandLine.getInstance().hasSwitch(RUN_WEB_TESTS_SWITCH)) {
-            try {
-                BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                        .startBrowserProcessesSync(false);
-            } catch (ProcessInitException e) {
-                Log.e(TAG, "Failed to load native library.", e);
-                System.exit(-1);
-            }
+            BrowserStartupController.getInstance().startBrowserProcessesSync(
+                    LibraryProcessType.PROCESS_BROWSER, false);
         } else {
-            try {
-                BrowserStartupController.get(LibraryProcessType.PROCESS_BROWSER)
-                        .startBrowserProcessesAsync(
-                                true, false, new BrowserStartupController.StartupCallback() {
-                                    @Override
-                                    public void onSuccess() {
-                                        finishInitialization(savedInstanceState);
-                                    }
+            BrowserStartupController.getInstance().startBrowserProcessesAsync(
+                    LibraryProcessType.PROCESS_BROWSER, true, false,
+                    new BrowserStartupController.StartupCallback() {
+                        @Override
+                        public void onSuccess() {
+                            finishInitialization(savedInstanceState);
+                        }
 
-                                    @Override
-                                    public void onFailure() {
-                                        initializationFailed();
-                                    }
-                                });
-            } catch (ProcessInitException e) {
-                Log.e(TAG, "Unable to load native library.", e);
-                System.exit(-1);
-            }
+                        @Override
+                        public void onFailure() {
+                            initializationFailed();
+                        }
+                    });
         }
     }
 
@@ -141,10 +126,11 @@ public class ContentShellActivity extends Activity {
         super.onSaveInstanceState(outState);
         WebContents webContents = getActiveWebContents();
         if (webContents != null) {
-            outState.putString(ACTIVE_SHELL_URL_KEY, webContents.getLastCommittedUrl());
+            // TODO(yfriedman): crbug/783819 - This should use GURL serialize/deserialize.
+            outState.putString(ACTIVE_SHELL_URL_KEY, webContents.getLastCommittedUrl().getSpec());
         }
 
-        mWindowAndroid.saveInstanceState(outState);
+        mIntentRequestTracker.saveInstanceState(outState);
     }
 
     @Override
@@ -188,7 +174,7 @@ public class ContentShellActivity extends Activity {
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        mWindowAndroid.onActivityResult(requestCode, resultCode, data);
+        mIntentRequestTracker.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override
@@ -200,6 +186,7 @@ public class ContentShellActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (mShellManager != null) mShellManager.destroy();
+        mWindowAndroid.destroy();
         super.onDestroy();
     }
 

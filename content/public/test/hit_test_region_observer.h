@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "components/viz/common/hit_test/aggregated_hit_test_region.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
@@ -18,13 +17,10 @@ namespace content {
 class RenderFrameHost;
 class WebContents;
 
-// TODO(jonross): Remove these once Viz Hit Testing is on by default and the
-// legacy content::browser_test_utils fallbacks are no longer needed.
-//
-// Waits until hit test data for |child_frame| has been submitted, see
-// WaitForHitTestData.
-void WaitForHitTestDataOrChildSurfaceReady(RenderFrameHost* child_frame);
-void WaitForHitTestDataOrGuestSurfaceReady(WebContents* guest_web_contents);
+// Waits until hit test data for |child_frame| or |guest_web_contents| has been
+// submitted, see HitTestRegionObserver::WaitForHitTestData().
+void WaitForHitTestData(RenderFrameHost* child_frame);
+void WaitForHitTestData(WebContents* guest_web_contents);
 
 // TODO(jonross): Move this to components/viz/host/hit_test/ as a standalone
 // HitTestDataWaiter (is-a HitTestRegionObserver) once Viz HitTesting is on by
@@ -38,6 +34,10 @@ void WaitForHitTestDataOrGuestSurfaceReady(WebContents* guest_web_contents);
 class HitTestRegionObserver : public viz::HitTestRegionObserver {
  public:
   explicit HitTestRegionObserver(const viz::FrameSinkId& frame_sink_id);
+
+  HitTestRegionObserver(const HitTestRegionObserver&) = delete;
+  HitTestRegionObserver& operator=(const HitTestRegionObserver&) = delete;
+
   ~HitTestRegionObserver() override;
 
   // The following functions need to be called in order to wait for the change
@@ -61,8 +61,6 @@ class HitTestRegionObserver : public viz::HitTestRegionObserver {
   std::unique_ptr<base::RunLoop> run_loop_;
   std::unique_ptr<base::RunLoop> hit_test_data_change_run_loop_;
   std::vector<viz::AggregatedHitTestRegion> cached_hit_test_data_;
-
-  DISALLOW_COPY_AND_ASSIGN(HitTestRegionObserver);
 };
 
 }  // namespace content

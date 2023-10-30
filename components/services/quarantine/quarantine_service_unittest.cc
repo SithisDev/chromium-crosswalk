@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/services/quarantine/public/mojom/quarantine.mojom.h"
-#include "components/services/quarantine/quarantine_service.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
+#include "components/services/quarantine/quarantine_impl.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,40 +26,28 @@ const char kInternetReferrerURL[] = "http://example.com/some-other-url";
 
 class QuarantineServiceTest : public testing::Test {
  public:
-  QuarantineServiceTest()
-      : connector_(test_connector_factory_.CreateConnector()),
-        service_(
-            test_connector_factory_.RegisterInstance(mojom::kServiceName)) {}
+  QuarantineServiceTest() = default;
+
+  QuarantineServiceTest(const QuarantineServiceTest&) = delete;
+  QuarantineServiceTest& operator=(const QuarantineServiceTest&) = delete;
 
   ~QuarantineServiceTest() override = default;
 
   void OnFileQuarantined(const base::FilePath& test_file,
                          base::OnceClosure quit_closure,
                          mojom::QuarantineFileResult result) {
-    base::DeleteFile(test_file, false);
+    base::DeleteFile(test_file);
     result_ = result;
     std::move(quit_closure).Run();
   }
 
  protected:
-  service_manager::Connector* connector() { return connector_.get(); }
-  void SetUp() override {
-    ASSERT_FALSE(quarantine_);
-    connector()->BindInterface(mojom::kServiceName, &quarantine_);
-    ASSERT_TRUE(quarantine_);
-  }
-
-  void TearDown() override { quarantine_.reset(); }
-
-  base::test::ScopedTaskEnvironment task_environment_;
-  mojom::QuarantinePtr quarantine_;
+  base::test::TaskEnvironment task_environment_;
+  mojo::Remote<mojom::Quarantine> quarantine_;
   mojom::QuarantineFileResult result_;
 
  private:
-  service_manager::TestConnectorFactory test_connector_factory_;
-  std::unique_ptr<service_manager::Connector> connector_;
-  QuarantineService service_;
-  DISALLOW_COPY_AND_ASSIGN(QuarantineServiceTest);
+  QuarantineImpl service_{quarantine_.BindNewPipeAndPassReceiver()};
 };
 
 TEST_F(QuarantineServiceTest, QuarantineFile) {
@@ -67,11 +55,10 @@ TEST_F(QuarantineServiceTest, QuarantineFile) {
   ASSERT_TRUE(test_dir.CreateUniqueTempDir());
 
   base::FilePath test_file = test_dir.GetPath().AppendASCII("foo.class");
-  ASSERT_EQ(static_cast<int>(base::size(kTestData)),
-            base::WriteFile(test_file, kTestData, base::size(kTestData)));
+  ASSERT_EQ(static_cast<int>(std::size(kTestData)),
+            base::WriteFile(test_file, kTestData, std::size(kTestData)));
 
   base::RunLoop run_loop;
-
   quarantine_->QuarantineFile(
       test_file, GURL(kInternetURL), GURL(kInternetReferrerURL), std::string(),
       base::BindOnce(&QuarantineServiceTest::OnFileQuarantined,

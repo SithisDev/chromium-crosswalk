@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,31 +6,11 @@
 
 namespace chromecast {
 
-std::unique_ptr<content::BluetoothChooser>
-CastWebView::Delegate::RunBluetoothChooser(
-    content::RenderFrameHost* frame,
-    const content::BluetoothChooser::EventHandler& event_handler) {
-  return nullptr;
+void CastWebView::BindReceivers(
+    mojo::PendingReceiver<mojom::CastWebContents> web_contents_receiver,
+    mojo::PendingReceiver<mojom::CastContentWindow> window_receiver) {
+  cast_web_contents()->BindOwnerReceiver(std::move(web_contents_receiver));
+  window()->BindReceiver(std::move(window_receiver));
 }
-
-CastWebView::CastWebView() {}
-
-CastWebView::~CastWebView() {
-  for (Observer& observer : observer_list_) {
-    observer.OnPageDestroyed(this);
-  }
-}
-
-void CastWebView::AddObserver(CastWebView::Observer* observer) {
-  observer_list_.AddObserver(observer);
-}
-
-void CastWebView::RemoveObserver(CastWebView::Observer* observer) {
-  observer_list_.RemoveObserver(observer);
-}
-
-CastWebView::CreateParams::CreateParams() {}
-
-CastWebView::CreateParams::CreateParams(const CreateParams& other) = default;
 
 }  // namespace chromecast

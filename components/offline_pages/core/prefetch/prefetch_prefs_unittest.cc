@@ -1,9 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/offline_pages/core/prefetch/prefetch_prefs.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/time/time.h"
 #include "components/offline_pages/buildflags/buildflags.h"
 #include "components/offline_pages/core/offline_clock.h"
 #include "components/offline_pages/core/offline_page_feature.h"
@@ -28,12 +29,7 @@ void PrefetchPrefsTest::SetUp() {
   prefetch_prefs::RegisterPrefs(prefs()->registry());
 }
 
-#if defined(DISABLE_OFFLINE_PAGES_TOUCHLESS)
-#define MAYBE_PrefetchingEnabled DISABLED_PrefetchingEnabled
-#else
-#define MAYBE_PrefetchingEnabled PrefetchingEnabled
-#endif
-TEST_F(PrefetchPrefsTest, MAYBE_PrefetchingEnabled) {
+TEST_F(PrefetchPrefsTest, PrefetchingEnabled) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(kPrefetchingOfflinePagesFeature);
   EXPECT_FALSE(prefetch_prefs::IsEnabled(prefs()));
@@ -66,11 +62,11 @@ TEST_F(PrefetchPrefsTest, LimitlessPrefetchingEnabled) {
   // expected.
   base::TimeDelta enabled_duration;
   if (version_info::IsOfficialBuild())
-    enabled_duration = base::TimeDelta::FromDays(1);
+    enabled_duration = base::Days(1);
   else
-    enabled_duration = base::TimeDelta::FromDays(365);
+    enabled_duration = base::Days(365);
 
-  base::TimeDelta advance_delta = base::TimeDelta::FromHours(2);
+  base::TimeDelta advance_delta = base::Hours(2);
   base::Time now = OfflineTimeNow();
 
   prefetch_prefs::SetLimitlessPrefetchingEnabled(prefs(), true);
@@ -110,12 +106,7 @@ TEST_F(PrefetchPrefsTest, EnabledByServer) {
   EXPECT_FALSE(prefetch_prefs::IsEnabledByServer(prefs()));
 }
 
-#if defined(DISABLE_OFFLINE_PAGES_TOUCHLESS)
-#define MAYBE_ForbiddenCheck DISABLED_ForbiddenCheck
-#else
-#define MAYBE_ForbiddenCheck ForbiddenCheck
-#endif
-TEST_F(PrefetchPrefsTest, MAYBE_ForbiddenCheck) {
+TEST_F(PrefetchPrefsTest, ForbiddenCheck) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(kPrefetchingOfflinePagesFeature);
 
@@ -124,7 +115,7 @@ TEST_F(PrefetchPrefsTest, MAYBE_ForbiddenCheck) {
   EXPECT_FALSE(prefetch_prefs::IsForbiddenCheckDue(prefs()));
 
   TestScopedOfflineClock test_clock;
-  base::Time later = OfflineTimeNow() + base::TimeDelta::FromDays(8);
+  base::Time later = OfflineTimeNow() + base::Days(8);
   test_clock.SetNow(later);
 
   prefetch_prefs::SetPrefetchingEnabledInSettings(prefs(), false);
@@ -146,12 +137,7 @@ TEST_F(PrefetchPrefsTest, MAYBE_ForbiddenCheck) {
   EXPECT_FALSE(prefetch_prefs::IsForbiddenCheckDue(prefs()));
 }
 
-#if defined(DISABLE_OFFLINE_PAGES_TOUCHLESS)
-#define MAYBE_FirstForbiddenCheck DISABLED_FirstForbiddenCheck
-#else
-#define MAYBE_FirstForbiddenCheck FirstForbiddenCheck
-#endif
-TEST_F(PrefetchPrefsTest, MAYBE_FirstForbiddenCheck) {
+TEST_F(PrefetchPrefsTest, FirstForbiddenCheck) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(kPrefetchingOfflinePagesFeature);
 
@@ -163,7 +149,7 @@ TEST_F(PrefetchPrefsTest, MAYBE_FirstForbiddenCheck) {
 
   // Jump ahead in time so that a check should be due.
   TestScopedOfflineClock test_clock;
-  test_clock.SetNow(OfflineTimeNow() + base::TimeDelta::FromDays(8));
+  test_clock.SetNow(OfflineTimeNow() + base::Days(8));
 
   EXPECT_TRUE(prefetch_prefs::IsForbiddenCheckDue(prefs()));
   EXPECT_FALSE(prefetch_prefs::IsEnabledByServerUnknown(prefs()));

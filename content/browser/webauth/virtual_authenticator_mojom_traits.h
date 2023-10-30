@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,22 @@
 
 namespace mojo {
 
-using blink::test::mojom::ClientToAuthenticatorProtocol;
+template <>
+struct BLINK_COMMON_EXPORT
+    EnumTraits<blink::test::mojom::ClientToAuthenticatorProtocol,
+               device::ProtocolVersion> {
+  static blink::test::mojom::ClientToAuthenticatorProtocol ToMojom(
+      device::ProtocolVersion input);
+  static bool FromMojom(blink::test::mojom::ClientToAuthenticatorProtocol input,
+                        device::ProtocolVersion* output);
+};
 
 template <>
 struct BLINK_COMMON_EXPORT
-    EnumTraits<ClientToAuthenticatorProtocol, device::ProtocolVersion> {
-  static ClientToAuthenticatorProtocol ToMojom(device::ProtocolVersion input);
-  static bool FromMojom(ClientToAuthenticatorProtocol input,
-                        device::ProtocolVersion* output);
+    EnumTraits<blink::test::mojom::Ctap2Version, device::Ctap2Version> {
+  static blink::test::mojom::Ctap2Version ToMojom(device::Ctap2Version input);
+  static bool FromMojom(blink::test::mojom::Ctap2Version input,
+                        device::Ctap2Version* output);
 };
 
 }  // namespace mojo

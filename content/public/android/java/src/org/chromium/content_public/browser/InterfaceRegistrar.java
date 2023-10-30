@@ -1,12 +1,9 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content_public.browser;
 
-import android.content.Context;
-
-import org.chromium.base.ContextUtils;
 import org.chromium.services.service_manager.InterfaceRegistry;
 
 import java.util.ArrayList;
@@ -24,19 +21,18 @@ public interface InterfaceRegistrar<ParamType> {
 
     /** A registry of InterfaceRegistrars. */
     public static class Registry<ParamType> {
-        private static Registry<Context> sContextRegistry;
+        private static Registry<Void> sSingletonRegistry;
         private static Registry<WebContents> sWebContentsRegistry;
         private static Registry<RenderFrameHost> sRenderFrameHostRegistry;
 
         private List<InterfaceRegistrar<ParamType>> mRegistrars =
                 new ArrayList<InterfaceRegistrar<ParamType>>();
 
-        public static void applyContextRegistrars(InterfaceRegistry interfaceRegistry) {
-            if (sContextRegistry == null) {
+        public static void applySingletonRegistrars(InterfaceRegistry interfaceRegistry) {
+            if (sSingletonRegistry == null) {
                 return;
             }
-            sContextRegistry.applyRegistrars(
-                    interfaceRegistry, ContextUtils.getApplicationContext());
+            sSingletonRegistry.applyRegistrars(interfaceRegistry, null);
         }
 
         public static void applyWebContentsRegistrars(
@@ -55,11 +51,11 @@ public interface InterfaceRegistrar<ParamType> {
             sRenderFrameHostRegistry.applyRegistrars(interfaceRegistry, renderFrameHost);
         }
 
-        public static void addContextRegistrar(InterfaceRegistrar<Context> registrar) {
-            if (sContextRegistry == null) {
-                sContextRegistry = new Registry<Context>();
+        public static void addSingletonRegistrar(InterfaceRegistrar<Void> registrar) {
+            if (sSingletonRegistry == null) {
+                sSingletonRegistry = new Registry<>();
             }
-            sContextRegistry.addRegistrar(registrar);
+            sSingletonRegistry.addRegistrar(registrar);
         }
 
         public static void addWebContentsRegistrar(InterfaceRegistrar<WebContents> registrar) {

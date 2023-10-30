@@ -1,16 +1,19 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/sync/driver/non_ui_syncable_service_based_model_type_controller.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/memory/weak_ptr.h"
-#include "components/sync/model_impl/client_tag_based_model_type_processor.h"
-#include "components/sync/model_impl/proxy_model_type_controller_delegate.h"
-#include "components/sync/model_impl/syncable_service_based_bridge.h"
+#include "components/sync/base/model_type.h"
+#include "components/sync/model/client_tag_based_model_type_processor.h"
+#include "components/sync/model/forwarding_model_type_controller_delegate.h"
+#include "components/sync/model/proxy_model_type_controller_delegate.h"
+#include "components/sync/model/syncable_service_based_bridge.h"
 
 namespace syncer {
 
@@ -42,8 +45,12 @@ class BridgeBuilder {
                        std::move(syncable_service_provider), dump_stack));
   }
 
+  BridgeBuilder(const BridgeBuilder&) = delete;
+  BridgeBuilder& operator=(const BridgeBuilder&) = delete;
+
   ~BridgeBuilder() { DCHECK(task_runner_->RunsTasksInCurrentSequence()); }
 
+  // Indirectly called for each operation by ProxyModelTypeControllerDelegate.
   base::WeakPtr<ModelTypeControllerDelegate> GetBridgeDelegate() {
     DCHECK(task_runner_->RunsTasksInCurrentSequence());
     DCHECK(bridge_);
@@ -73,8 +80,6 @@ class BridgeBuilder {
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   std::unique_ptr<ModelTypeSyncBridge> bridge_;
-
-  DISALLOW_COPY_AND_ASSIGN(BridgeBuilder);
 };
 
 // This is a slightly adapted version of base::OnTaskRunnerDeleter: The one
@@ -88,7 +93,6 @@ struct CustomOnTaskRunnerDeleter {
   ~CustomOnTaskRunnerDeleter() = default;
 
   CustomOnTaskRunnerDeleter(CustomOnTaskRunnerDeleter&&) = default;
-  CustomOnTaskRunnerDeleter& operator=(CustomOnTaskRunnerDeleter&&) = default;
 
   // For compatibility with std:: deleters.
   template <typename T>
@@ -120,6 +124,7 @@ ProxyModelTypeControllerDelegate::DelegateProvider BuildDelegateProvider(
                             std::move(syncable_service_provider), dump_stack,
                             task_runner),
           CustomOnTaskRunnerDeleter(task_runner));
+  // Note that the binding owns the BridgeBuilder instance.
   return base::BindRepeating(&BridgeBuilder::GetBridgeDelegate,
                              std::move(bridge_builder));
 }
@@ -132,18 +137,28 @@ NonUiSyncableServiceBasedModelTypeController::
         OnceModelTypeStoreFactory store_factory,
         SyncableServiceProvider syncable_service_provider,
         const base::RepeatingClosure& dump_stack,
-        scoped_refptr<base::SequencedTaskRunner> task_runner)
-    : ModelTypeController(
-          type,
-          std::make_unique<ProxyModelTypeControllerDelegate>(
-              task_runner,
-              BuildDelegateProvider(type,
-                                    std::move(store_factory),
-                                    std::move(syncable_service_provider),
-                                    dump_stack,
-                                    task_runner))) {}
+        scoped_refptr<base::SequencedTaskRunner> task_runner,
+        bool allow_transport_mode)
+    : ModelTypeController(type) {
+  auto full_sync_mode_delegate =
+      std::make_unique<ProxyModelTypeControllerDelegate>(
+          task_runner,
+          BuildDelegateProvider(type, std::move(store_factory),
+                                std::move(syncable_service_provider),
+                                dump_stack, task_runner));
+  // In transport mode we want the same behavior as full sync mode, so we use
+  // the same thread-proxying delegate, which shares the BridgeBuilder, which
+  // shares the underlying ModelTypeSyncBridge.
+  auto transport_mode_delegate =
+      allow_transport_mode
+          ? std::make_unique<ForwardingModelTypeControllerDelegate>(
+                full_sync_mode_delegate.get())
+          : nullptr;
+  InitModelTypeController(std::move(full_sync_mode_delegate),
+                          std::move(transport_mode_delegate));
+}
 
 NonUiSyncableServiceBasedModelTypeController::
-    ~NonUiSyncableServiceBasedModelTypeController() {}
+    ~NonUiSyncableServiceBasedModelTypeController() = default;
 
 }  // namespace syncer

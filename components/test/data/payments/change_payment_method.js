@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 The Chromium Authors. All rights reserved.
+ * Copyright 2019 The Chromium Authors
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -8,19 +8,19 @@ let methodName = window.location.origin + '/pay';
 let request = undefined;
 
 /** Switches to the basic-card method name. */
-function basicCardMethodName() {  // eslint-disable-line no-unused-vars
+function basicCardMethodName() { // eslint-disable-line no-unused-vars
   methodName = 'basic-card';
 }
 
 /** Installs the payment handler. */
-function install() {  // eslint-disable-line no-unused-vars
+function install() { // eslint-disable-line no-unused-vars
   navigator.serviceWorker
     .getRegistration('change_payment_method_app.js')
     .then((registration) => {
       if (registration) {
         output(
-          'serviceWorker.getRegistration()',
-          'The ServiceWorker is already installed.'
+            'serviceWorker.getRegistration()',
+            'The ServiceWorker is already installed.',
         );
         return;
       }
@@ -63,20 +63,19 @@ function install() {  // eslint-disable-line no-unused-vars
  *                                   payment sheet.
  */
 function outputChangePaymentMethodReturnValue(request) {
-  request
-    .show()
-    .then((response) => {
-      response.complete('success').then(() => {
-        output(
-          'PaymentRequest.show()',
-          'changePaymentMethod() returned: ' +
-            JSON.stringify(response.details.changePaymentMethodReturned)
-        );
+  request.show()
+      .then((response) => {
+        response.complete('success').then(() => {
+          output(
+              'PaymentRequest.show()',
+              'changePaymentMethod() returned: ' +
+                  JSON.stringify(response.details.changePaymentMethodReturned),
+          );
+        });
+      })
+      .catch((error) => {
+        output('PaymentRequest.show() rejected with', error);
       });
-    })
-    .catch((error) => {
-      output('PaymentRequest.show() rejected with', error);
-    });
 }
 
 /** @return {PaymentRequest} The Payment Request object for testNoHandler(). */
@@ -91,7 +90,7 @@ function initTestNoHandler() {
  * Verifies that PaymentRequestEvent.changePaymentMethod() returns null if there
  * is no handler for the "paymentmethodchange" event in PaymentRequest.
  */
-function testNoHandler() {  // eslint-disable-line no-unused-vars
+function testNoHandler() { // eslint-disable-line no-unused-vars
   // Intentionally do not respond to the 'paymentmethodchange' event.
   outputChangePaymentMethodReturnValue(initTestNoHandler());
 }
@@ -111,7 +110,7 @@ function initTestReject() {
  * Verifies that PaymentRequest.show() is rejected if the promise passed into
  * PaymentMethodChangeEvent.updateWith() is rejected.
  */
-function testReject() {  // eslint-disable-line no-unused-vars
+function testReject() { // eslint-disable-line no-unused-vars
   outputChangePaymentMethodReturnValue(initTestReject());
 }
 
@@ -122,9 +121,9 @@ function initTestThrow() {
   });
   request.addEventListener('paymentmethodchange', (event) => {
     event.updateWith(
-      new Promise(() => {
-        throw new Error('Error for test');
-      })
+        new Promise(() => {
+          throw new Error('Error for test');
+        }),
     );
   });
   return request;
@@ -134,7 +133,7 @@ function initTestThrow() {
  * Verifies that PaymentRequest.show() is rejected if there is an exception in
  * the promised passed into PaymentMethodChangeEvent.updateWith().
  */
-function testThrow() {  // eslint-disable-line no-unused-vars
+function testThrow() { // eslint-disable-line no-unused-vars
   outputChangePaymentMethodReturnValue(initTestThrow());
 }
 
@@ -200,6 +199,6 @@ function initTestDetails() {
  * Verifies that PaymentRequestEvent.changePaymentMethod() returns a subset of
  * details passed into PaymentMethodChangeEvent.updateWith() method.
  */
-function testDetails() {  // eslint-disable-line no-unused-vars
+function testDetails() { // eslint-disable-line no-unused-vars
   outputChangePaymentMethodReturnValue(initTestDetails());
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,21 +10,26 @@
 #include <list>
 #include <memory>
 
-#include "base/compiler_specific.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/memory/writable_shared_memory_region.h"
 #include "base/process/process.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event_watcher.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "content/browser/child_process_launcher.h"
+#include "content/browser/tracing/tracing_service_controller.h"
+#include "content/common/child_process.mojom.h"
+#include "content/common/child_process_host_impl.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/child_process_data.h"
+#include "content/public/common/child_process_host.h"
 #include "content/public/common/child_process_host_delegate.h"
 #include "mojo/public/cpp/system/invitation.h"
+#include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/object_watcher.h"
 #endif
 
@@ -32,37 +37,38 @@ namespace base {
 class CommandLine;
 }
 
+namespace tracing {
+class SystemTracingService;
+}
+
 namespace content {
 
 class BrowserChildProcessHostIterator;
 class BrowserChildProcessObserver;
 class BrowserMessageFilter;
-class ChildConnection;
 
 // Plugins/workers and other child processes that live on the IO thread use this
 // class. RenderProcessHostImpl is the main exception that doesn't use this
 /// class because it lives on the UI thread.
-class CONTENT_EXPORT BrowserChildProcessHostImpl
+class BrowserChildProcessHostImpl
     : public BrowserChildProcessHost,
       public ChildProcessHostDelegate,
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       public base::win::ObjectWatcher::Delegate,
 #endif
-      public ChildProcessLauncher::Client {
+      public ChildProcessLauncher::Client,
+      public memory_instrumentation::mojom::CoordinatorConnector {
  public:
+  // Constructs a process host with |ipc_mode| determining how IPC is done.
   BrowserChildProcessHostImpl(content::ProcessType process_type,
                               BrowserChildProcessHostDelegate* delegate,
-                              const std::string& service_name);
+                              ChildProcessHost::IpcMode ipc_mode);
+
   ~BrowserChildProcessHostImpl() override;
 
   // Terminates all child processes and deletes each BrowserChildProcessHost
   // instance.
   static void TerminateAll();
-
-  // Copies kEnableFeatures and kDisableFeatures to the command line. Generates
-  // them from the FeatureList override state, to take into account overrides
-  // from FieldTrials.
-  static void CopyFeatureAndFieldTrialFlags(base::CommandLine* cmd_line);
 
   // Appends kTraceStartup and kTraceRecordMode flags to the command line, if
   // needed.
@@ -78,17 +84,15 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   ChildProcessTerminationInfo GetTerminationInfo(bool known_dead) override;
   std::unique_ptr<base::PersistentMemoryAllocator> TakeMetricsAllocator()
       override;
-  void SetName(const base::string16& name) override;
+  void SetName(const std::u16string& name) override;
   void SetMetricsName(const std::string& metrics_name) override;
   void SetProcess(base::Process process) override;
-  service_manager::mojom::ServiceRequest TakeInProcessServiceRequest() override;
 
   // ChildProcessHostDelegate implementation:
   void OnChannelInitialized(IPC::Channel* channel) override;
   void OnChildDisconnected() override;
   const base::Process& GetProcess() override;
-  void BindInterface(const std::string& interface_name,
-                     mojo::ScopedMessagePipeHandle interface_pipe) override;
+  void BindHostReceiver(mojo::GenericPendingReceiver receiver) override;
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnChannelConnected(int32_t peer_pid) override;
   void OnChannelError() override;
@@ -104,6 +108,14 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   // Adds an IPC message filter.
   void AddFilter(BrowserMessageFilter* filter);
 
+  // Same as Launch(), but the process is launched with preloaded files and file
+  // descriptors containing in `file_data`.
+  void LaunchWithFileData(
+      std::unique_ptr<SandboxedProcessLauncherDelegate> delegate,
+      std::unique_ptr<base::CommandLine> cmd_line,
+      std::unique_ptr<ChildProcessLauncherFileData> file_data,
+      bool terminate_on_shutdown);
+
   // Unlike Launch(), AppendExtraCommandLineSwitches will not be called
   // in this function. If AppendExtraCommandLineSwitches has been called before
   // reaching launch, call this function instead so the command line switches
@@ -111,30 +123,34 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   void LaunchWithoutExtraCommandLineSwitches(
       std::unique_ptr<SandboxedProcessLauncherDelegate> delegate,
       std::unique_ptr<base::CommandLine> cmd_line,
+      std::unique_ptr<ChildProcessLauncherFileData> file_data,
       bool terminate_on_shutdown);
 
   static void HistogramBadMessageTerminated(ProcessType process_type);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void EnableWarmUpConnection();
+  void DumpProcessStack();
 #endif
 
   BrowserChildProcessHostDelegate* delegate() const { return delegate_; }
 
-  ChildConnection* child_connection() const {
-    return child_connection_.get();
-  }
-
   mojo::OutgoingInvitation* GetInProcessMojoInvitation() {
-    return &mojo_invitation_;
+    in_process_ = true;
+    return &child_process_host_->GetMojoInvitation().value();
   }
 
-  IPC::Channel* child_channel() const { return channel_; }
+  mojom::ChildProcess* child_process() const {
+    return static_cast<ChildProcessHostImpl*>(child_process_host_.get())
+        ->child_process();
+  }
 
   typedef std::list<BrowserChildProcessHostImpl*> BrowserChildProcessList;
  private:
   friend class BrowserChildProcessHostIterator;
   friend class BrowserChildProcessObserver;
+
+  void OnProcessConnected();
 
   static BrowserChildProcessList* GetIterator();
 
@@ -152,9 +168,16 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   // ChildProcessLauncher::Client implementation.
   void OnProcessLaunched() override;
   void OnProcessLaunchFailed(int error_code) override;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   bool CanUseWarmUpConnection() override;
 #endif
+
+  // memory_instrumentation::mojom::CoordinatorConnector implementation:
+  void RegisterCoordinatorClient(
+      mojo::PendingReceiver<memory_instrumentation::mojom::Coordinator>
+          receiver,
+      mojo::PendingRemote<memory_instrumentation::mojom::ClientProcess>
+          client_process) override;
 
   // Returns true if the process has successfully launched. Must only be called
   // on the IO thread.
@@ -164,23 +187,25 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
       base::WeakPtr<BrowserChildProcessHostImpl> process,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       const std::string& error);
+  static void TerminateProcessForBadMessage(
+      base::WeakPtr<BrowserChildProcessHostImpl> process,
+      const std::string& error);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // ObjectWatcher::Delegate implementation.
   void OnObjectSignaled(HANDLE object) override;
 #endif
 
   ChildProcessData data_;
   std::string metrics_name_;
-  BrowserChildProcessHostDelegate* delegate_;
+  raw_ptr<BrowserChildProcessHostDelegate> delegate_;
   std::unique_ptr<ChildProcessHost> child_process_host_;
-
-  mojo::OutgoingInvitation mojo_invitation_;
-  std::unique_ptr<ChildConnection> child_connection_;
+  mojo::Receiver<memory_instrumentation::mojom::CoordinatorConnector>
+      coordinator_connector_receiver_{this};
 
   std::unique_ptr<ChildProcessLauncher> child_process_;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Watches to see if the child process exits before the IPC channel has
   // been connected. Thereafter, its exit is determined by an error on the
   // IPC channel.
@@ -194,14 +219,37 @@ class CONTENT_EXPORT BrowserChildProcessHostImpl
   // transferred to the child process.
   base::WritableSharedMemoryRegion metrics_shared_region_;
 
-  IPC::Channel* channel_ = nullptr;
-  bool is_channel_connected_;
-  bool notify_child_disconnected_;
+  // Indicates if the main browser process is used instead of a dedicated child
+  // process.
+  bool in_process_ = false;
 
-#if defined(OS_ANDROID)
+  // Indicates if legacy IPC is used to communicate with the child process. In
+  // this mode, the BrowserChildProcessHost waits for OnChannelConnected() to be
+  // called before sending the BrowserChildProcessLaunchedAndConnected
+  // notification.
+  bool has_legacy_ipc_channel_ = false;
+
+  // Indicates if the IPC channel is connected. Always true when not using
+  // legacy IPC.
+  bool is_channel_connected_ = true;
+
+  // Indicates if the BrowserChildProcessLaunchedAndConnected notification was
+  // sent for this instance.
+  bool launched_and_connected_ = false;
+
+#if BUILDFLAG(IS_ANDROID)
   // whether the child process can use pre-warmed up connection for better
   // performance.
   bool can_use_warm_up_connection_ = false;
+#endif
+
+  // Keeps this process registered with the tracing subsystem.
+  std::unique_ptr<TracingServiceController::ClientRegistration>
+      tracing_registration_;
+
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_ANDROID)
+  // For child process to connect to the system tracing service.
+  std::unique_ptr<tracing::SystemTracingService> system_tracing_service_;
 #endif
 
   base::WeakPtrFactory<BrowserChildProcessHostImpl> weak_factory_{this};

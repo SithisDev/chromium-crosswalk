@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,47 +15,41 @@
 #include "base/command_line.h"
 #include "base/debug/leak_annotations.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/discardable_memory.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task/post_task.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
+#include "base/test/test_switches.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/app/mojo/mojo_init.h"
 #include "content/common/in_process_child_thread_params.h"
-#include "content/common/service_manager/child_connection.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/system_connector.h"
+#include "content/public/common/child_process_host.h"
+#include "content/public/common/child_process_host_delegate.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/service_names.mojom.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/public/test/browser_task_environment.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/content_test_suite_base.h"
 #include "content/public/test/test_content_client_initializer.h"
 #include "content/public/test/test_launcher.h"
-#include "content/public/test/test_service_manager_context.h"
 #include "content/renderer/render_process_impl.h"
-#include "content/test/mock_render_process.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "gpu/config/gpu_switches.h"
-#include "ipc/ipc.mojom.h"
-#include "ipc/ipc_channel_mojo.h"
-#include "mojo/core/embedder/embedder.h"
-#include "mojo/core/embedder/scoped_ipc_support.h"
-#include "mojo/public/cpp/system/invitation.h"
-#include "services/service_manager/public/cpp/constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/switches.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/platform/scheduler/test/web_mock_thread_scheduler.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
@@ -71,6 +65,7 @@
 #undef IPC_MESSAGE_EXTRA
 #define IPC_MESSAGE_IMPL
 #include "ipc/ipc_message_macros.h"
+#include "ipc/ipc_message_start.h"
 #include "ipc/ipc_message_templates_impl.h"
 
 #undef IPC_MESSAGE_START
@@ -151,42 +146,31 @@ class QuitOnTestMsgFilter : public IPC::MessageFilter {
   base::OnceClosure quit_closure_;
 };
 
-class RenderThreadImplBrowserTest : public testing::Test {
+class RenderThreadImplBrowserTest : public testing::Test,
+                                    public ChildProcessHostDelegate {
  public:
-  RenderThreadImplBrowserTest() : field_trial_list_(nullptr) {}
+  RenderThreadImplBrowserTest() {}
+
+  RenderThreadImplBrowserTest(const RenderThreadImplBrowserTest&) = delete;
+  RenderThreadImplBrowserTest& operator=(const RenderThreadImplBrowserTest&) =
+      delete;
 
   void SetUp() override {
-    content_renderer_client_.reset(new ContentRendererClient());
+    content_renderer_client_ = std::make_unique<ContentRendererClient>();
     SetRendererClientForTesting(content_renderer_client_.get());
 
-    browser_threads_.reset(
-        new TestBrowserThreadBundle(TestBrowserThreadBundle::REAL_IO_THREAD));
+    browser_threads_ = std::make_unique<BrowserTaskEnvironment>(
+        BrowserTaskEnvironment::REAL_IO_THREAD);
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner =
-        base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
+        GetIOThreadTaskRunner({});
 
     InitializeMojo();
-    mojo_ipc_support_.reset(new mojo::core::ScopedIPCSupport(
-        io_task_runner, mojo::core::ScopedIPCSupport::ShutdownPolicy::FAST));
-    shell_context_.reset(new TestServiceManagerContext);
-    mojo::OutgoingInvitation invitation;
-    child_connection_ = std::make_unique<ChildConnection>(
-        service_manager::Identity(mojom::kRendererServiceName,
-                                  service_manager::kSystemInstanceGroup,
-                                  base::Token{}, base::Token::CreateRandom()),
-        &invitation, GetSystemConnector(), io_task_runner);
+    process_host_ =
+        ChildProcessHost::Create(this, ChildProcessHost::IpcMode::kNormal);
+    process_host_->CreateChannelMojo();
 
-    mojo::MessagePipe pipe;
-    child_connection_->BindInterface(IPC::mojom::ChannelBootstrap::Name_,
-                                     std::move(pipe.handle1));
-
-    channel_ = IPC::ChannelProxy::Create(
-        IPC::ChannelMojo::CreateServerFactory(
-            std::move(pipe.handle0), io_task_runner,
-            blink::scheduler::GetSingleThreadTaskRunnerForTesting()),
-        nullptr, io_task_runner,
-        blink::scheduler::GetSingleThreadTaskRunnerForTesting());
-
-    mock_process_.reset(new MockRenderProcess);
+    CHECK(!process_.get());
+    process_ = std::make_unique<RenderProcess>();
     test_task_counter_ = base::MakeRefCounted<TestTaskCounter>();
 
     // RenderThreadImpl expects the browser to pass these flags.
@@ -195,24 +179,26 @@ class RenderThreadImplBrowserTest : public testing::Test {
 
     cmd->AppendSwitchASCII(switches::kLang, "en-US");
 
-    cmd->AppendSwitchASCII(switches::kNumRasterThreads, "1");
+    cmd->AppendSwitchASCII(blink::switches::kNumRasterThreads, "1");
 
     // To avoid creating a GPU channel to query if
-    // accelerated_video_decode is blacklisted on older Android system
+    // accelerated_video_decode is blocklisted on older Android system
     // in RenderThreadImpl::Init().
-    cmd->AppendSwitch(switches::kIgnoreGpuBlacklist);
+    cmd->AppendSwitch(switches::kIgnoreGpuBlocklist);
 
+    ContentTestSuiteBase::InitializeResourceBundle();
+
+    blink::Platform::InitializeBlink();
     auto main_thread_scheduler =
         blink::scheduler::CreateMockWebMainThreadSchedulerForTests();
     scoped_refptr<base::SingleThreadTaskRunner> test_task_counter(
         test_task_counter_.get());
 
-    base::FieldTrialList::CreateTrialsFromCommandLine(
-        *cmd, switches::kFieldTrialHandle, -1);
+    base::FieldTrialList::CreateTrialsFromCommandLine(*cmd, -1);
     thread_ = new RenderThreadImpl(
-        InProcessChildThreadParams(io_task_runner, &invitation,
-                                   child_connection_->service_token()),
-        std::move(main_thread_scheduler));
+        InProcessChildThreadParams(io_task_runner,
+                                   &process_host_->GetMojoInvitation().value()),
+        /*renderer_client_id=*/1, std::move(main_thread_scheduler));
     cmd->InitFromArgv(old_argv);
 
     run_loop_ = std::make_unique<base::RunLoop>();
@@ -226,22 +212,55 @@ class RenderThreadImplBrowserTest : public testing::Test {
   }
 
   void TearDown() override {
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            kSingleProcessTestsFlag)) {
-      // In a single-process mode, we need to avoid destructing mock_process_
-      // because it will call _exit(0) and kill the process before the browser
-      // side is ready to exit.
-      ANNOTATE_LEAKING_OBJECT_PTR(mock_process_.get());
-      mock_process_.release();
-    }
+    CHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kSingleProcessTests));
+    // In a single-process mode, we need to avoid destructing `process_`
+    // because it will call _exit(0) and kill the process before the browser
+    // side is ready to exit.
+    ANNOTATE_LEAKING_OBJECT_PTR(process_.get());
+    // TODO(crbug.com/1219038): `StopIOThreadForTesting()` is a stop-gap
+    // solution to fix flaky tests (see crbug.com/1126157). The underlying
+    // reason for this issue is that the `RenderThreadImpl` created in `SetUp()`
+    // above actually shares its main thread with the browser's, which is
+    // inconsistent with how in-process renderers work in production and other
+    // tests. Despite sharing its main thread with the browser, it still has its
+    // own IO thread (owned and created by `ChildProcess`). In these tests, the
+    // `BrowserTaskEnvironment` has no idea about this separate renderer IO
+    // thread, which can post tasks back to the browser's main thread. During
+    // `BrowserTaskEnvironment` shutdown, it CHECK()s that after the threads are
+    // stopped and flushed, no other tasks exist on its SequenceManager's task
+    // queues. However if we don't stop the IO thread here, then it may continue
+    // to post tasks to the `BrowserTaskEnvironment`'s main thread, causing the
+    // CHECK() to get hit. We should really fix the above tests to create a
+    // `RenderThreadImpl` on its own thread the traditional route, but this fix
+    // will work until we have the time to explore that option.
+    process_->StopIOThreadForTesting();
+    process_.release();
   }
 
- protected:
-  IPC::Sender* sender() { return channel_.get(); }
+  // ChildProcessHostDelegate implementation:
+  bool OnMessageReceived(const IPC::Message&) override { return true; }
+  const base::Process& GetProcess() override { return null_process_; }
 
-  void SetProcessState(mojom::RenderProcessState process_state) {
+ protected:
+  IPC::Sender* sender() { return process_host_.get(); }
+
+  void SetBackgroundState(
+      mojom::RenderProcessBackgroundState background_state) {
     mojom::Renderer* renderer_interface = thread_;
-    renderer_interface->SetProcessState(process_state);
+    const mojom::RenderProcessVisibleState visible_state =
+        RendererIsHidden() ? mojom::RenderProcessVisibleState::kHidden
+                           : mojom::RenderProcessVisibleState::kVisible;
+    renderer_interface->SetProcessState(background_state, visible_state);
+  }
+
+  void SetVisibleState(mojom::RenderProcessVisibleState visible_state) {
+    mojom::Renderer* renderer_interface = thread_;
+    const mojom::RenderProcessBackgroundState background_state =
+        RendererIsBackgrounded()
+            ? mojom::RenderProcessBackgroundState::kBackgrounded
+            : mojom::RenderProcessBackgroundState::kForegrounded;
+    renderer_interface->SetProcessState(background_state, visible_state);
   }
 
   bool RendererIsBackgrounded() { return thread_->RendererIsBackgrounded(); }
@@ -251,13 +270,11 @@ class RenderThreadImplBrowserTest : public testing::Test {
   TestContentClientInitializer content_client_initializer_;
   std::unique_ptr<ContentRendererClient> content_renderer_client_;
 
-  std::unique_ptr<TestBrowserThreadBundle> browser_threads_;
-  std::unique_ptr<TestServiceManagerContext> shell_context_;
-  std::unique_ptr<ChildConnection> child_connection_;
-  std::unique_ptr<IPC::ChannelProxy> channel_;
-  std::unique_ptr<mojo::core::ScopedIPCSupport> mojo_ipc_support_;
+  std::unique_ptr<BrowserTaskEnvironment> browser_threads_;
+  const base::Process null_process_;
+  std::unique_ptr<ChildProcessHost> process_host_;
 
-  std::unique_ptr<MockRenderProcess> mock_process_;
+  std::unique_ptr<RenderProcess> process_;
   scoped_refptr<QuitOnTestMsgFilter> test_msg_filter_;
 
   blink::scheduler::WebMockThreadScheduler* main_thread_scheduler_;
@@ -267,25 +284,8 @@ class RenderThreadImplBrowserTest : public testing::Test {
   // get killed by the OS. Memory leaks aren't nice but it's test-only.
   RenderThreadImpl* thread_;
 
-  base::FieldTrialList field_trial_list_;
-
   std::unique_ptr<base::RunLoop> run_loop_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RenderThreadImplBrowserTest);
 };
-
-// Check that InputHandlerManager outlives compositor thread because it uses
-// raw pointers to post tasks.
-// Disabled under LeakSanitizer due to memory leaks. http://crbug.com/348994
-// Disabled on Windows due to flakiness: http://crbug.com/728034.
-#if defined(OS_WIN)
-#define MAYBE_InputHandlerManagerDestroyedAfterCompositorThread \
-  DISABLED_InputHandlerManagerDestroyedAfterCompositorThread
-#else
-#define MAYBE_InputHandlerManagerDestroyedAfterCompositorThread \
-  InputHandlerManagerDestroyedAfterCompositorThread
-#endif
 
 // Disabled under LeakSanitizer due to memory leaks.
 TEST_F(RenderThreadImplBrowserTest,
@@ -303,24 +303,18 @@ TEST_F(RenderThreadImplBrowserTest,
 }
 
 TEST_F(RenderThreadImplBrowserTest, RendererIsBackgrounded) {
-  SetProcessState(mojom::RenderProcessState::kBackgrounded);
+  SetBackgroundState(mojom::RenderProcessBackgroundState::kBackgrounded);
   EXPECT_TRUE(RendererIsBackgrounded());
 
-  SetProcessState(mojom::RenderProcessState::kHidden);
-  EXPECT_FALSE(RendererIsBackgrounded());
-
-  SetProcessState(mojom::RenderProcessState::kVisible);
+  SetBackgroundState(mojom::RenderProcessBackgroundState::kForegrounded);
   EXPECT_FALSE(RendererIsBackgrounded());
 }
 
 TEST_F(RenderThreadImplBrowserTest, RendererIsHidden) {
-  SetProcessState(mojom::RenderProcessState::kBackgrounded);
+  SetVisibleState(mojom::RenderProcessVisibleState::kHidden);
   EXPECT_TRUE(RendererIsHidden());
 
-  SetProcessState(mojom::RenderProcessState::kHidden);
-  EXPECT_TRUE(RendererIsHidden());
-
-  SetProcessState(mojom::RenderProcessState::kVisible);
+  SetVisibleState(mojom::RenderProcessVisibleState::kVisible);
   EXPECT_FALSE(RendererIsHidden());
 }
 
@@ -331,27 +325,24 @@ TEST_F(RenderThreadImplBrowserTest, RendererStateTransitionVisible) {
   EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false));
   EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true)).Times(0);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true)).Times(0);
-  SetProcessState(mojom::RenderProcessState::kVisible);
+  SetVisibleState(mojom::RenderProcessVisibleState::kVisible);
   testing::Mock::VerifyAndClear(main_thread_scheduler_);
 
   // Going from a hidden to a visible state should mark the renderer as visible.
-  // A hidden renderer is already foregrounded.
-  SetProcessState(mojom::RenderProcessState::kHidden);
+  SetVisibleState(mojom::RenderProcessVisibleState::kHidden);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false));
   EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false)).Times(0);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true)).Times(0);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true)).Times(0);
-  SetProcessState(mojom::RenderProcessState::kVisible);
+  SetVisibleState(mojom::RenderProcessVisibleState::kVisible);
   testing::Mock::VerifyAndClear(main_thread_scheduler_);
 
-  // Going from a backgrounded to a visible state should mark the renderer as
-  // foregrounded and visible.
-  SetProcessState(mojom::RenderProcessState::kBackgrounded);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false));
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false));
+  // Going from a visible to a hidden state should mark the renderer as hidden.
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false)).Times(0);
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false)).Times(0);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true)).Times(0);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true)).Times(0);
-  SetProcessState(mojom::RenderProcessState::kVisible);
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true));
+  SetVisibleState(mojom::RenderProcessVisibleState::kHidden);
   testing::Mock::VerifyAndClear(main_thread_scheduler_);
 
   testing::Mock::AllowLeak(main_thread_scheduler_);
@@ -364,27 +355,7 @@ TEST_F(RenderThreadImplBrowserTest, RendererStateTransitionHidden) {
   EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true));
   EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true)).Times(0);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false)).Times(0);
-  SetProcessState(mojom::RenderProcessState::kHidden);
-  testing::Mock::VerifyAndClear(main_thread_scheduler_);
-
-  // Going from a visible to a hidden state should mark the renderer as hidden.
-  // A visible renderer is already foregrounded.
-  SetProcessState(mojom::RenderProcessState::kVisible);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true));
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false)).Times(0);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false)).Times(0);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true)).Times(0);
-  SetProcessState(mojom::RenderProcessState::kHidden);
-  testing::Mock::VerifyAndClear(main_thread_scheduler_);
-
-  // Going from a backgrounded to a hidden state should mark the renderer as
-  // foregrounded and hidden.
-  SetProcessState(mojom::RenderProcessState::kBackgrounded);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false));
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true)).Times(0);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true)).Times(0);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false)).Times(0);
-  SetProcessState(mojom::RenderProcessState::kHidden);
+  SetVisibleState(mojom::RenderProcessVisibleState::kHidden);
   testing::Mock::VerifyAndClear(main_thread_scheduler_);
 
   testing::Mock::AllowLeak(main_thread_scheduler_);
@@ -392,32 +363,43 @@ TEST_F(RenderThreadImplBrowserTest, RendererStateTransitionHidden) {
 
 TEST_F(RenderThreadImplBrowserTest, RendererStateTransitionBackgrounded) {
   // Going from an unknown to a backgrounded state should mark the renderer as
-  // hidden and backgrounded.
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true));
+  // backgrounded but not hidden.
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true)).Times(0);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true));
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false)).Times(0);
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false));
   EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false)).Times(0);
-  SetProcessState(mojom::RenderProcessState::kBackgrounded);
+  SetBackgroundState(mojom::RenderProcessBackgroundState::kBackgrounded);
   testing::Mock::VerifyAndClear(main_thread_scheduler_);
 
-  // Going from a visible to a backgrounded state should mark the renderer as
-  // hidden and backgrounded.
-  SetProcessState(mojom::RenderProcessState::kVisible);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true));
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true));
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false)).Times(0);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false)).Times(0);
-  SetProcessState(mojom::RenderProcessState::kBackgrounded);
-  testing::Mock::VerifyAndClear(main_thread_scheduler_);
-
-  // Going from a hidden state to a backgrounded state should mark the renderer
-  // backgrounded. A hidden renderer is already marked as hidden.
-  SetProcessState(mojom::RenderProcessState::kHidden);
-  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true));
+  // Going from a backgrounded to a foregrounded state should mark the renderer
+  // as foregrounded.
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true)).Times(0);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true)).Times(0);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false)).Times(0);
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false));
+  SetBackgroundState(mojom::RenderProcessBackgroundState::kForegrounded);
+  testing::Mock::VerifyAndClear(main_thread_scheduler_);
+
+  // Going from a foregrounded to a backgrounded state should mark the renderer
+  // as backgrounded.
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true)).Times(0);
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true));
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false)).Times(0);
   EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false)).Times(0);
-  SetProcessState(mojom::RenderProcessState::kBackgrounded);
+  SetBackgroundState(mojom::RenderProcessBackgroundState::kBackgrounded);
+  testing::Mock::VerifyAndClear(main_thread_scheduler_);
+
+  testing::Mock::AllowLeak(main_thread_scheduler_);
+}
+
+TEST_F(RenderThreadImplBrowserTest, RendererStateTransitionForegrounded) {
+  // Going from an unknown to a foregrounded state should mark the renderer as
+  // foregrounded and visible.
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(false));
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(true)).Times(0);
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererBackgrounded(true)).Times(0);
+  EXPECT_CALL(*main_thread_scheduler_, SetRendererHidden(false));
+  SetBackgroundState(mojom::RenderProcessBackgroundState::kForegrounded);
   testing::Mock::VerifyAndClear(main_thread_scheduler_);
 
   testing::Mock::AllowLeak(main_thread_scheduler_);
@@ -431,6 +413,12 @@ class RenderThreadImplGpuMemoryBufferBrowserTest
           ::testing::tuple<NativeBufferFlag, gfx::BufferFormat>> {
  public:
   RenderThreadImplGpuMemoryBufferBrowserTest() {}
+
+  RenderThreadImplGpuMemoryBufferBrowserTest(
+      const RenderThreadImplGpuMemoryBufferBrowserTest&) = delete;
+  RenderThreadImplGpuMemoryBufferBrowserTest& operator=(
+      const RenderThreadImplGpuMemoryBufferBrowserTest&) = delete;
+
   ~RenderThreadImplGpuMemoryBufferBrowserTest() override {}
 
   gpu::GpuMemoryBufferManager* memory_buffer_manager() {
@@ -453,15 +441,13 @@ class RenderThreadImplGpuMemoryBufferBrowserTest
   }
 
   void SetUpOnMainThread() override {
-    NavigateToURL(shell(), GURL(url::kAboutBlankURL));
+    EXPECT_TRUE(NavigateToURL(shell(), GURL(url::kAboutBlankURL)));
     PostTaskToInProcessRendererAndWait(base::BindOnce(
         &RenderThreadImplGpuMemoryBufferBrowserTest::SetUpOnRenderThread,
         base::Unretained(this)));
   }
 
   gpu::GpuMemoryBufferManager* memory_buffer_manager_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderThreadImplGpuMemoryBufferBrowserTest);
 };
 
 // https://crbug.com/652531
@@ -473,7 +459,7 @@ IN_PROC_BROWSER_TEST_P(RenderThreadImplGpuMemoryBufferBrowserTest,
   std::unique_ptr<gfx::GpuMemoryBuffer> buffer =
       memory_buffer_manager()->CreateGpuMemoryBuffer(
           buffer_size, format, gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
-          gpu::kNullSurfaceHandle);
+          gpu::kNullSurfaceHandle, nullptr);
   ASSERT_TRUE(buffer);
   EXPECT_EQ(format, buffer->GetFormat());
 

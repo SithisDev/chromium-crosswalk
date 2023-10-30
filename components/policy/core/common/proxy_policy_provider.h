@@ -1,11 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_POLICY_CORE_COMMON_PROXY_POLICY_PROVIDER_H_
 #define COMPONENTS_POLICY_CORE_COMMON_PROXY_POLICY_PROVIDER_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/policy/core/common/configuration_policy_provider.h"
 #include "components/policy/policy_export.h"
 
@@ -41,6 +41,8 @@ class POLICY_EXPORT ProxyPolicyProvider
       public ConfigurationPolicyProvider::Observer {
  public:
   ProxyPolicyProvider();
+  ProxyPolicyProvider(const ProxyPolicyProvider&) = delete;
+  ProxyPolicyProvider& operator=(const ProxyPolicyProvider&) = delete;
   ~ProxyPolicyProvider() override;
 
   // Updates the provider this proxy delegates to.
@@ -49,14 +51,20 @@ class POLICY_EXPORT ProxyPolicyProvider
   // ConfigurationPolicyProvider:
   void Shutdown() override;
   void RefreshPolicies() override;
+  bool IsFirstPolicyLoadComplete(PolicyDomain domain) const override;
 
   // ConfigurationPolicyProvider::Observer:
   void OnUpdatePolicy(ConfigurationPolicyProvider* provider) override;
 
- private:
-  ConfigurationPolicyProvider* delegate_;
+  // When set to true, this ProxyPolicyProvider will ignore subsequent policy
+  // updates.
+  void SetBlockPolicyUpdatesForTesting(bool block_policy_updates_for_testing) {
+    block_policy_updates_for_testing_ = block_policy_updates_for_testing;
+  }
 
-  DISALLOW_COPY_AND_ASSIGN(ProxyPolicyProvider);
+ private:
+  raw_ptr<ConfigurationPolicyProvider> delegate_;
+  bool block_policy_updates_for_testing_ = false;
 };
 
 }  // namespace policy

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,14 @@
 #include <string>
 #include <vector>
 
-#include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "components/download/public/common/download_item.h"
 #include "content/browser/background_fetch/background_fetch_constants.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/background_fetch_response.h"
+#include "content/public/browser/browser_thread.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom.h"
 #include "url/gurl.h"
 
@@ -40,6 +38,10 @@ class CONTENT_EXPORT BackgroundFetchRequestInfo
   BackgroundFetchRequestInfo(int request_index,
                              blink::mojom::FetchAPIRequestPtr fetch_request,
                              uint64_t request_body_size);
+
+  BackgroundFetchRequestInfo(const BackgroundFetchRequestInfo&) = delete;
+  BackgroundFetchRequestInfo& operator=(const BackgroundFetchRequestInfo&) =
+      delete;
 
   // Sets the download GUID to a newly generated value. Can only be used if no
   // GUID is already set.
@@ -103,15 +105,13 @@ class CONTENT_EXPORT BackgroundFetchRequestInfo
 
   // Creates a blob data handle for the response.
   void CreateResponseBlobDataHandle(
-      ChromeBlobStorageContext* blob_storage_context);
+      scoped_refptr<ChromeBlobStorageContext> blob_storage_context);
 
-  // Returns the blob data handle for the response.
-  // `CreateResponseBlobDataHandle` must have been called before this.
-  storage::BlobDataHandle* GetResponseBlobDataHandle();
-
-  // Hands over ownership of the blob data handle.
-  // `CreateResponseBlobDataHandle` must have been called before this.
-  std::unique_ptr<storage::BlobDataHandle> TakeResponseBlobDataHandle();
+  // Hands over ownership of the blob data handle. Called on the IO thread.
+  //
+  // This must be called after `CreateResponseBlobDataHandle` has been called
+  // and a task that it posted to the IO thread has run.
+  std::unique_ptr<storage::BlobDataHandle> TakeResponseBlobDataHandleOnIO();
 
   // Returns the size of the response.
   uint64_t GetResponseSize() const;
@@ -123,6 +123,7 @@ class CONTENT_EXPORT BackgroundFetchRequestInfo
   bool IsResultSuccess() const;
 
  private:
+  class BlobDataOnIO;
   friend class base::RefCountedDeleteOnSequence<BackgroundFetchRequestInfo>;
   friend class base::DeleteHelper<BackgroundFetchRequestInfo>;
   friend class BackgroundFetchCrossOriginFilterTest;
@@ -147,12 +148,11 @@ class CONTENT_EXPORT BackgroundFetchRequestInfo
 
   // ---- Data associated with the response ------------------------------------
   std::unique_ptr<BackgroundFetchResult> result_;
-  std::unique_ptr<storage::BlobDataHandle> blob_data_handle_;
+  // Created on this class's sequence, then accessed on the IO thread only.
+  std::unique_ptr<BlobDataOnIO, BrowserThread::DeleteOnIOThread> io_blob_data_;
   uint64_t response_size_ = 0u;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(BackgroundFetchRequestInfo);
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,13 @@ import java.nio.ByteBuffer;
 public final class Preconditions {
     private Preconditions() {}
 
-    static void checkDirect(ByteBuffer buffer) {
+    public static void checkDirect(ByteBuffer buffer) {
         if (!buffer.isDirect()) {
             throw new IllegalArgumentException("byteBuffer must be a direct ByteBuffer.");
         }
     }
 
-    static void checkHasRemaining(ByteBuffer buffer) {
+    public static void checkHasRemaining(ByteBuffer buffer) {
         if (!buffer.hasRemaining()) {
             throw new IllegalArgumentException("ByteBuffer is already full.");
         }

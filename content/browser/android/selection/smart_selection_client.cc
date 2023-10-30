@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,12 +25,15 @@ const void* const kSmartSelectionClientUDKey = &kSmartSelectionClientUDKey;
 // This class deletes SmartSelectionClient when WebContents is destroyed.
 class UserData : public base::SupportsUserData::Data {
  public:
+  UserData() = delete;
+
   explicit UserData(SmartSelectionClient* client) : client_(client) {}
+
+  UserData(const UserData&) = delete;
+  UserData& operator=(const UserData&) = delete;
 
  private:
   std::unique_ptr<SmartSelectionClient> client_;
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(UserData);
 };
 }
 
@@ -42,6 +45,10 @@ jlong JNI_SmartSelectionClient_Init(
   CHECK(web_contents)
       << "A SmartSelectionClient should be created with a valid WebContents.";
 
+  if (web_contents->GetUserData(kSmartSelectionClientUDKey))
+    return reinterpret_cast<intptr_t>(
+        web_contents->GetUserData(kSmartSelectionClientUDKey));
+
   return reinterpret_cast<intptr_t>(
       new SmartSelectionClient(env, obj, web_contents));
 }
@@ -50,9 +57,7 @@ SmartSelectionClient::SmartSelectionClient(
     JNIEnv* env,
     const base::android::JavaRef<jobject>& obj,
     WebContents* web_contents)
-    : java_ref_(env, obj),
-      web_contents_(web_contents),
-      weak_ptr_factory_(this) {
+    : java_ref_(env, obj), web_contents_(web_contents) {
   DCHECK(!web_contents_->GetUserData(kSmartSelectionClientUDKey));
   web_contents_->SetUserData(kSmartSelectionClientUDKey,
                              std::make_unique<UserData>(this));
@@ -74,7 +79,7 @@ void SmartSelectionClient::RequestSurroundingText(
     int callback_data) {
   RenderFrameHost* focused_frame = web_contents_->GetFocusedFrame();
   if (!focused_frame) {
-    OnSurroundingTextReceived(callback_data, base::string16(), 0, 0);
+    OnSurroundingTextReceived(callback_data, std::u16string(), 0, 0);
     return;
   }
 
@@ -91,7 +96,7 @@ void SmartSelectionClient::CancelAllRequests(
 }
 
 void SmartSelectionClient::OnSurroundingTextReceived(int callback_data,
-                                                     const base::string16& text,
+                                                     const std::u16string& text,
                                                      uint32_t start,
                                                      uint32_t end) {
   JNIEnv* env = AttachCurrentThread();

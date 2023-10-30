@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,15 @@ MockMediaSessionClient::MockMediaSessionClient() = default;
 
 MockMediaSessionClient::~MockMediaSessionClient() = default;
 
-blink::mojom::MediaSessionClientPtr
-MockMediaSessionClient::CreateInterfacePtrAndBind() {
-  blink::mojom::MediaSessionClientPtr client;
-  binding_.Bind(mojo::MakeRequest(&client));
-  return client;
+mojo::PendingRemote<blink::mojom::MediaSessionClient>
+MockMediaSessionClient::CreateInterfaceRemoteAndBind() {
+  return receiver_.BindNewPipeAndPassRemote();
 }
 
 MockMediaSessionServiceImpl::MockMediaSessionServiceImpl(
     content::RenderFrameHost* rfh)
     : MediaSessionServiceImpl(rfh) {
-  SetClient(mock_client_.CreateInterfacePtrAndBind());
+  SetClient(mock_client_.CreateInterfaceRemoteAndBind());
 }
 
 MockMediaSessionServiceImpl::~MockMediaSessionServiceImpl() = default;

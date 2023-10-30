@@ -1,11 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/common/surfaces/surface_range.h"
 #include "components/viz/common/surfaces/surface_id.h"
 
-#include "base/logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // Verifies that SurfaceId::IsInRangeExclusive and SurfaceId::IsInRangeInclusive
@@ -22,7 +21,7 @@ TEST(SurfaceRangeTest, InRangeTest) {
                                   viz::LocalSurfaceId(2, 2, token2));
 
   const viz::SurfaceRange surface_range1(start, end);
-  const viz::SurfaceRange surface_range2(base::nullopt, end);
+  const viz::SurfaceRange surface_range2(absl::nullopt, end);
   const viz::SurfaceRange surface_range1_token2(start, end_token2);
 
   const viz::SurfaceId surface_id1(FrameSink1,
@@ -39,7 +38,7 @@ TEST(SurfaceRangeTest, InRangeTest) {
   EXPECT_TRUE(surface_range1.IsInRangeExclusive(surface_id1));
 
   // |surface_id1| has the right embed token and inside the range
-  // (base::nullopt,end).
+  // (absl::nullopt,end).
   EXPECT_TRUE(surface_range2.IsInRangeExclusive(surface_id1));
 
   // |surface_id2| has an unmatching token.

@@ -1,10 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser;
 
-import android.support.test.filters.MediumTest;
+import androidx.test.filters.MediumTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -65,7 +65,7 @@ public class NavigationTest {
     @Test
     @MediumTest
     @Feature({"Navigation"})
-    @FlakyTest
+    @FlakyTest(message = "https://crbug.com/1316064")
     public void testDirectedNavigationHistory() throws Throwable {
         ContentShellActivity activity = mActivityTestRule.launchContentShellWithUrl(URL_1);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
@@ -89,9 +89,9 @@ public class NavigationTest {
 
         NavigationHistory history = navigationController.getDirectedNavigationHistory(false, 3);
         Assert.assertEquals(3, history.getEntryCount());
-        Assert.assertEquals(URL_6, history.getEntryAtIndex(0).getUrl());
-        Assert.assertEquals(URL_5, history.getEntryAtIndex(1).getUrl());
-        Assert.assertEquals(URL_4, history.getEntryAtIndex(2).getUrl());
+        Assert.assertEquals(URL_6, history.getEntryAtIndex(0).getUrl().getSpec());
+        Assert.assertEquals(URL_5, history.getEntryAtIndex(1).getUrl().getSpec());
+        Assert.assertEquals(URL_4, history.getEntryAtIndex(2).getUrl().getSpec());
 
         history = navigationController.getDirectedNavigationHistory(true, 3);
         Assert.assertEquals(history.getEntryCount(), 0);
@@ -102,15 +102,15 @@ public class NavigationTest {
 
         history = navigationController.getDirectedNavigationHistory(false, 4);
         Assert.assertEquals(3, history.getEntryCount());
-        Assert.assertEquals(URL_3, history.getEntryAtIndex(0).getUrl());
-        Assert.assertEquals(URL_2, history.getEntryAtIndex(1).getUrl());
-        Assert.assertEquals(URL_1, history.getEntryAtIndex(2).getUrl());
+        Assert.assertEquals(URL_3, history.getEntryAtIndex(0).getUrl().getSpec());
+        Assert.assertEquals(URL_2, history.getEntryAtIndex(1).getUrl().getSpec());
+        Assert.assertEquals(URL_1, history.getEntryAtIndex(2).getUrl().getSpec());
 
         history = navigationController.getDirectedNavigationHistory(true, 4);
         Assert.assertEquals(3, history.getEntryCount());
-        Assert.assertEquals(URL_5, history.getEntryAtIndex(0).getUrl());
-        Assert.assertEquals(URL_6, history.getEntryAtIndex(1).getUrl());
-        Assert.assertEquals(URL_7, history.getEntryAtIndex(2).getUrl());
+        Assert.assertEquals(URL_5, history.getEntryAtIndex(0).getUrl().getSpec());
+        Assert.assertEquals(URL_6, history.getEntryAtIndex(1).getUrl().getSpec());
+        Assert.assertEquals(URL_7, history.getEntryAtIndex(2).getUrl().getSpec());
     }
 
     /**

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -114,8 +114,8 @@ void TestUploadDataStreamHandler::InitOnNetworkThread() {
   read_buffer_ = nullptr;
   bytes_read_ = 0;
   int res = upload_data_stream_->Init(
-      base::Bind(&TestUploadDataStreamHandler::OnInitCompleted,
-                 base::Unretained(this)),
+      base::BindOnce(&TestUploadDataStreamHandler::OnInitCompleted,
+                     base::Unretained(this)),
       net::NetLogWithSource());
   JNIEnv* env = base::android::AttachCurrentThread();
   cronet::Java_TestUploadDataStreamHandler_onInitCalled(
@@ -135,8 +135,8 @@ void TestUploadDataStreamHandler::ReadOnNetworkThread() {
 
   int bytes_read = upload_data_stream_->Read(
       read_buffer_.get(), kReadBufferSize,
-      base::Bind(&TestUploadDataStreamHandler::OnReadCompleted,
-                 base::Unretained(this)));
+      base::BindOnce(&TestUploadDataStreamHandler::OnReadCompleted,
+                     base::Unretained(this)));
   if (bytes_read == net::OK) {
     bytes_read_ = bytes_read;
     NotifyJavaReadCompleted();

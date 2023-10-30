@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/mirroring/service/message_dispatcher.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/timer/timer.h"
@@ -18,6 +18,9 @@ namespace mirroring {
 class MessageDispatcher::RequestHolder {
  public:
   RequestHolder() {}
+
+  RequestHolder(const RequestHolder&) = delete;
+  RequestHolder& operator=(const RequestHolder&) = delete;
 
   ~RequestHolder() {}
 
@@ -36,7 +39,7 @@ class MessageDispatcher::RequestHolder {
   // Send |response| if the sequence number matches, or if the request times
   // out, in which case the |response| is UNKNOWN type.
   void SendResponse(const ReceiverResponse& response) {
-    if (!timer_.IsRunning() || response.sequence_number == sequence_number_)
+    if (!timer_.IsRunning() || response.sequence_number() == sequence_number_)
       std::move(response_callback_).Run(response);
     // Ignore the response with mismatched sequence number.
   }
@@ -45,16 +48,14 @@ class MessageDispatcher::RequestHolder {
   OnceResponseCallback response_callback_;
   base::OneShotTimer timer_;
   int32_t sequence_number_ = -1;
-
-  DISALLOW_COPY_AND_ASSIGN(RequestHolder);
 };
 
 MessageDispatcher::MessageDispatcher(
-    mojom::CastMessageChannelPtr outbound_channel,
-    mojom::CastMessageChannelRequest inbound_channel,
+    mojo::PendingRemote<mojom::CastMessageChannel> outbound_channel,
+    mojo::PendingReceiver<mojom::CastMessageChannel> inbound_channel,
     ErrorCallback error_callback)
     : outbound_channel_(std::move(outbound_channel)),
-      binding_(this, std::move(inbound_channel)),
+      receiver_(this, std::move(inbound_channel)),
       error_callback_(std::move(error_callback)),
       last_sequence_number_(base::RandInt(0, 1e9)) {
   DCHECK(outbound_channel_);
@@ -69,36 +70,40 @@ MessageDispatcher::~MessageDispatcher() {
 }
 
 void MessageDispatcher::Send(mojom::CastMessagePtr message) {
+  // TODO(crbug.com/1117673): Add MR-internals logging:
+  // VLOG(2) << "Inbound message received: ns=" << message->message_namespace
+  //         << ", data=" << message->json_format_data;
+
   if (message->message_namespace != mojom::kWebRtcNamespace &&
       message->message_namespace != mojom::kRemotingNamespace) {
-    DVLOG(2) << "Ignore message with unknown namespace = "
+    DVLOG(2) << "Ignoring message with unknown namespace = "
              << message->message_namespace;
     return;  // Ignore message with wrong namespace.
   }
   if (message->json_format_data.empty())
     return;  // Ignore null message.
 
-  ReceiverResponse response;
-  if (!response.Parse(message->json_format_data)) {
+  auto response = ReceiverResponse::Parse(message->json_format_data);
+  if (!response) {
     error_callback_.Run("Response parsing error. message=" +
                         message->json_format_data);
     return;
   }
 
 #if DCHECK_IS_ON()
-  if (response.type == ResponseType::RPC)
+  if (response->type() == ResponseType::RPC)
     DCHECK_EQ(mojom::kRemotingNamespace, message->message_namespace);
   else
     DCHECK_EQ(mojom::kWebRtcNamespace, message->message_namespace);
 #endif  // DCHECK_IS_ON()
 
-  const auto callback_iter = callback_map_.find(response.type);
-  if (callback_iter == callback_map_.end()) {
-    error_callback_.Run("No callback subscribed. message=" +
-                        message->json_format_data);
-    return;
+  // NOTE: getting a message that we are not subscribed to is purposely
+  // not an error--subscribers are allowed to pick and choose message types
+  // to subscribe to.
+  const auto callback_iter = callback_map_.find(response->type());
+  if (callback_iter != callback_map_.end()) {
+    callback_iter->second.Run(*response);
   }
-  callback_iter->second.Run(response);
 }
 
 void MessageDispatcher::Subscribe(ResponseType type,
@@ -126,6 +131,9 @@ int32_t MessageDispatcher::GetNextSeqNumber() {
 }
 
 void MessageDispatcher::SendOutboundMessage(mojom::CastMessagePtr message) {
+  // TODO(crbug.com/1117673): Add MR-internals logging:
+  //   VLOG(2) << "Sending outbound message: ns=" << message->message_namespace
+  //           << ", data=" << message->json_format_data;
   outbound_channel_->Send(std::move(message));
 }
 
@@ -135,7 +143,7 @@ void MessageDispatcher::RequestReply(mojom::CastMessagePtr message,
                                      const base::TimeDelta& timeout,
                                      OnceResponseCallback callback) {
   DCHECK(!callback.is_null());
-  DCHECK(timeout > base::TimeDelta());
+  DCHECK(timeout.is_positive());
 
   Unsubscribe(response_type);  // Cancel the old request if there is any.
   RequestHolder* const request_holder = new RequestHolder();

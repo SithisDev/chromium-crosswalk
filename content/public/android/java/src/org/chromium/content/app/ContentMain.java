@@ -1,11 +1,12 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.app;
 
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.base.annotations.MainDex;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.build.annotations.MainDex;
 
 /**
  * This class is used to initialize all types of process. It corresponds to
@@ -23,11 +24,15 @@ public class ContentMain {
     /**
      * Start the ContentMainRunner in native side.
      *
-     * @param startServiceManagerOnly Whether to start only the ServiceManager.
+     * @param startMinimalBrowser Whether to start only a minimal browser
+     *     process environment.
      **/
-    public static int start(boolean startServiceManagerOnly) {
-        return nativeStart(startServiceManagerOnly);
+    public static int start(boolean startMinimalBrowser) {
+        return ContentMainJni.get().start(startMinimalBrowser);
     }
 
-    private static native int nativeStart(boolean startServiceManagerOnly);
+    @NativeMethods
+    interface Natives {
+        int start(boolean startMinimalBrowser);
+    }
 }

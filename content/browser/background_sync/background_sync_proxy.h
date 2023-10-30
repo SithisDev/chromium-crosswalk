@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <set>
 
 #include "base/callback.h"
-#include "base/memory/weak_ptr.h"
+#include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
@@ -18,31 +18,43 @@
 
 namespace content {
 
+class BrowserContext;
 class ServiceWorkerContextWrapper;
 
-// This class is used to take messages from BackgroundSyncManager on the IO
-// thread and pass them on BackgroundSyncController on the UI thread through
-// its Core class which lives on the UI thread.
-// This is owned by the BackgroundSyncManager.
+// This class is used to take messages from BackgroundSyncManager and pass them
+// on BackgroundSyncController. It is owned by the BackgroundSyncManager and
+// lives on the UI thread.
+//
+// TODO(crbug.com/824858): This class was previously needed because
+// BackgroundSyncManager and BackgroundSyncController were on different threads.
+// It should no longer be needed.
 class CONTENT_EXPORT BackgroundSyncProxy {
  public:
   explicit BackgroundSyncProxy(
       scoped_refptr<ServiceWorkerContextWrapper> service_worker_context);
-  ~BackgroundSyncProxy();
 
-  void ScheduleBrowserWakeUp(blink::mojom::BackgroundSyncType sync_type);
+  BackgroundSyncProxy(const BackgroundSyncProxy&) = delete;
+  BackgroundSyncProxy& operator=(const BackgroundSyncProxy&) = delete;
+
+  virtual ~BackgroundSyncProxy();
+
+  virtual void ScheduleDelayedProcessing(
+      blink::mojom::BackgroundSyncType sync_type,
+      base::TimeDelta delay,
+      base::OnceClosure delayed_task);
+  void CancelDelayedProcessing(blink::mojom::BackgroundSyncType sync_type);
   void SendSuspendedPeriodicSyncOrigins(
       std::set<url::Origin> suspended_origins);
+  void SendRegisteredPeriodicSyncOrigins(
+      std::set<url::Origin> registered_origins);
+  void AddToTrackedOrigins(url::Origin origin);
+  void RemoveFromTrackedOrigins(url::Origin origin);
 
  private:
-  // Constructed on the IO thread, lives and dies on the UI thread.
-  class Core;
+  BrowserContext* browser_context();
 
-  std::unique_ptr<Core, BrowserThread::DeleteOnUIThread> ui_core_;
-  base::WeakPtr<Core> ui_core_weak_ptr_;
-  base::WeakPtrFactory<BackgroundSyncProxy> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(BackgroundSyncProxy);
+  SEQUENCE_CHECKER(sequence_checker_);
+  scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
 };
 
 }  // namespace content

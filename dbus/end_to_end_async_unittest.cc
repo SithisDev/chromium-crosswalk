@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,23 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/time/time.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
 #include "dbus/test_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace dbus {
 
@@ -41,18 +44,18 @@ class EndToEndAsyncTest : public testing::Test {
  public:
   void SetUp() override {
     // Make the main thread not to allow IO.
-    base::ThreadRestrictions::SetIOAllowed(false);
+    disallow_blocking_.emplace();
 
     // Start the D-Bus thread.
-    dbus_thread_.reset(new base::Thread("D-Bus Thread"));
+    dbus_thread_ = std::make_unique<base::Thread>("D-Bus Thread");
     base::Thread::Options thread_options;
-    thread_options.message_loop_type = base::MessageLoop::TYPE_IO;
-    ASSERT_TRUE(dbus_thread_->StartWithOptions(thread_options));
+    thread_options.message_pump_type = base::MessagePumpType::IO;
+    ASSERT_TRUE(dbus_thread_->StartWithOptions(std::move(thread_options)));
 
     // Start the test service, using the D-Bus thread.
     TestService::Options options;
     options.dbus_task_runner = dbus_thread_->task_runner();
-    test_service_.reset(new TestService(options));
+    test_service_ = std::make_unique<TestService>(options);
     ASSERT_TRUE(test_service_->StartService());
     test_service_->WaitUntilServiceIsStarted();
     ASSERT_TRUE(test_service_->HasDBusThread());
@@ -71,14 +74,13 @@ class EndToEndAsyncTest : public testing::Test {
     // Connect to the "Test" signal of "org.chromium.TestInterface" from
     // the remote object.
     object_proxy_->ConnectToSignal(
-        "org.chromium.TestInterface",
-        "Test",
-        base::Bind(&EndToEndAsyncTest::OnTestSignal,
-                   base::Unretained(this)),
-        base::Bind(&EndToEndAsyncTest::OnConnected,
-                   base::Unretained(this)));
+        "org.chromium.TestInterface", "Test",
+        base::BindRepeating(&EndToEndAsyncTest::OnTestSignal,
+                            base::Unretained(this)),
+        base::BindOnce(&EndToEndAsyncTest::OnConnected,
+                       base::Unretained(this)));
     // Wait until the object proxy is connected to the signal.
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
 
     // Connect to the "Test2" signal of "org.chromium.TestInterface" from
@@ -87,14 +89,13 @@ class EndToEndAsyncTest : public testing::Test {
     // the shutdown of Bus when an object proxy is connected to more than
     // one signal of the same interface. See crosbug.com/23382 for details.
     object_proxy_->ConnectToSignal(
-        "org.chromium.TestInterface",
-        "Test2",
-        base::Bind(&EndToEndAsyncTest::OnTest2Signal,
-                   base::Unretained(this)),
-        base::Bind(&EndToEndAsyncTest::OnConnected,
-                   base::Unretained(this)));
+        "org.chromium.TestInterface", "Test2",
+        base::BindRepeating(&EndToEndAsyncTest::OnTest2Signal,
+                            base::Unretained(this)),
+        base::BindOnce(&EndToEndAsyncTest::OnConnected,
+                       base::Unretained(this)));
     // Wait until the object proxy is connected to the signal.
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
 
     // Create a second object proxy for the root object.
@@ -105,14 +106,13 @@ class EndToEndAsyncTest : public testing::Test {
     // Connect to the "Test" signal of "org.chromium.TestInterface" from
     // the root remote object too.
     root_object_proxy_->ConnectToSignal(
-        "org.chromium.TestInterface",
-        "Test",
-        base::Bind(&EndToEndAsyncTest::OnRootTestSignal,
-                   base::Unretained(this)),
-        base::Bind(&EndToEndAsyncTest::OnConnected,
-                   base::Unretained(this)));
+        "org.chromium.TestInterface", "Test",
+        base::BindRepeating(&EndToEndAsyncTest::OnRootTestSignal,
+                            base::Unretained(this)),
+        base::BindOnce(&EndToEndAsyncTest::OnConnected,
+                       base::Unretained(this)));
     // Wait until the root object proxy is connected to the signal.
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
 
@@ -122,11 +122,9 @@ class EndToEndAsyncTest : public testing::Test {
     // Shut down the service.
     test_service_->ShutdownAndBlock();
 
-    // Reset to the default.
-    base::ThreadRestrictions::SetIOAllowed(true);
-
     // Stopping a thread is considered an IO operation, so do this after
     // allowing IO.
+    disallow_blocking_.reset();
     test_service_->Stop();
   }
 
@@ -156,10 +154,9 @@ class EndToEndAsyncTest : public testing::Test {
   // response is received.
   void CallMethod(MethodCall* method_call,
                   int timeout_ms) {
-    object_proxy_->CallMethod(method_call,
-                              timeout_ms,
-                              base::Bind(&EndToEndAsyncTest::OnResponse,
-                                         base::Unretained(this)));
+    object_proxy_->CallMethod(
+        method_call, timeout_ms,
+        base::BindOnce(&EndToEndAsyncTest::OnResponse, base::Unretained(this)));
   }
 
   // Calls the method asynchronously. OnResponse() will be called once the
@@ -167,16 +164,15 @@ class EndToEndAsyncTest : public testing::Test {
   void CallMethodWithErrorCallback(MethodCall* method_call,
                                    int timeout_ms) {
     object_proxy_->CallMethodWithErrorCallback(
-        method_call,
-        timeout_ms,
-        base::Bind(&EndToEndAsyncTest::OnResponse, base::Unretained(this)),
-        base::Bind(&EndToEndAsyncTest::OnError, base::Unretained(this)));
+        method_call, timeout_ms,
+        base::BindOnce(&EndToEndAsyncTest::OnResponse, base::Unretained(this)),
+        base::BindOnce(&EndToEndAsyncTest::OnError, base::Unretained(this)));
   }
 
   // Wait for the give number of responses.
   void WaitForResponses(size_t num_responses) {
     while (response_strings_.size() < num_responses) {
-      run_loop_.reset(new base::RunLoop);
+      run_loop_ = std::make_unique<base::RunLoop>();
       run_loop_->Run();
     }
   }
@@ -199,7 +195,7 @@ class EndToEndAsyncTest : public testing::Test {
   // Wait for the given number of errors.
   void WaitForErrors(size_t num_errors) {
     while (error_names_.size() < num_errors) {
-      run_loop_.reset(new base::RunLoop);
+      run_loop_ = std::make_unique<base::RunLoop>();
       run_loop_->Run();
     }
   }
@@ -251,18 +247,19 @@ class EndToEndAsyncTest : public testing::Test {
   // Wait for the hey signal to be received.
   void WaitForTestSignal() {
     // OnTestSignal() will quit the message loop.
-    run_loop_.reset(new base::RunLoop);
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
+  absl::optional<base::ScopedDisallowBlocking> disallow_blocking_;
   std::unique_ptr<base::RunLoop> run_loop_;
   std::vector<std::string> response_strings_;
   std::vector<std::string> error_names_;
   std::unique_ptr<base::Thread> dbus_thread_;
   scoped_refptr<Bus> bus_;
-  ObjectProxy* object_proxy_;
-  ObjectProxy* root_object_proxy_;
+  raw_ptr<ObjectProxy> object_proxy_;
+  raw_ptr<ObjectProxy> root_object_proxy_;
   std::unique_ptr<TestService> test_service_;
   // Text message from "Test" signal.
   std::string test_signal_string_;
@@ -309,7 +306,7 @@ TEST_F(EndToEndAsyncTest, EchoWithErrorCallback) {
 TEST_F(EndToEndAsyncTest, EchoThreeTimes) {
   const char* kMessages[] = { "foo", "bar", "baz" };
 
-  for (size_t i = 0; i < base::size(kMessages); ++i) {
+  for (size_t i = 0; i < std::size(kMessages); ++i) {
     // Create the method call.
     MethodCall method_call("org.chromium.TestInterface", "Echo");
     MessageWriter writer(&method_call);
@@ -441,8 +438,8 @@ TEST_F(EndToEndAsyncTest, CancelPendingCalls) {
                           base::DoNothing());
 
   // We shouldn't receive any responses. Wait for a while just to make sure.
-  run_loop_.reset(new base::RunLoop);
-  scoped_task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
+  run_loop_ = std::make_unique<base::RunLoop>();
+  task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
       FROM_HERE, run_loop_->QuitClosure(), TestTimeouts::tiny_timeout());
   run_loop_->Run();
   EXPECT_TRUE(response_strings_.empty());
@@ -543,8 +540,8 @@ TEST_F(EndToEndAsyncTest, EmptyResponseCallback) {
   const int timeout_ms = ObjectProxy::TIMEOUT_USE_DEFAULT;
   object_proxy_->CallMethod(&method_call, timeout_ms, base::DoNothing());
   // Post a delayed task to quit the RunLoop.
-  run_loop_.reset(new base::RunLoop);
-  scoped_task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
+  run_loop_ = std::make_unique<base::RunLoop>();
+  task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
       FROM_HERE, run_loop_->QuitClosure(), TestTimeouts::tiny_timeout());
   run_loop_->Run();
   // We cannot tell if the empty callback is called, but at least we can
@@ -597,14 +594,13 @@ class SignalMultipleHandlerTest : public EndToEndAsyncTest {
     // so that we can verify that a second call to ConnectSignal() delivers
     // to both our new handler and the old.
     object_proxy_->ConnectToSignal(
-        "org.chromium.TestInterface",
-        "Test",
-        base::Bind(&SignalMultipleHandlerTest::OnAdditionalTestSignal,
-                   base::Unretained(this)),
-        base::Bind(&SignalMultipleHandlerTest::OnAdditionalConnected,
-                   base::Unretained(this)));
+        "org.chromium.TestInterface", "Test",
+        base::BindRepeating(&SignalMultipleHandlerTest::OnAdditionalTestSignal,
+                            base::Unretained(this)),
+        base::BindOnce(&SignalMultipleHandlerTest::OnAdditionalConnected,
+                       base::Unretained(this)));
     // Wait until the object proxy is connected to the signal.
-    run_loop_.reset(new base::RunLoop);
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
 

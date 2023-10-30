@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,23 +13,24 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
 #include "content/browser/media/media_internals_audio_focus_helper.h"
+#include "content/browser/media/media_internals_cdm_helper.h"
 #include "content/common/content_export.h"
+#include "content/common/media/media_log_records.mojom.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "media/audio/audio_logging.h"
 #include "media/base/media_log.h"
 #include "media/capture/video/video_capture_device_descriptor.h"
 #include "media/capture/video_capture_types.h"
-#include "media/mojo/interfaces/audio_logging.mojom.h"
+#include "media/mojo/mojom/audio_logging.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace media {
-struct MediaLogEvent;
+struct MediaLogRecord;
 }
 
 namespace media_session {
@@ -47,9 +48,12 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
                                       public NotificationObserver {
  public:
   // Called with the update string.
-  typedef base::Callback<void(const base::string16&)> UpdateCallback;
+  using UpdateCallback = base::RepeatingCallback<void(const std::u16string&)>;
 
   static MediaInternals* GetInstance();
+
+  MediaInternals(const MediaInternals&) = delete;
+  MediaInternals& operator=(const MediaInternals&) = delete;
 
   ~MediaInternals() override;
 
@@ -60,11 +64,11 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
 
   // Called when a MediaEvent occurs.
   void OnMediaEvents(int render_process_id,
-                     const std::vector<media::MediaLogEvent>& events);
+                     const std::vector<media::MediaLogRecord>& events);
 
   // Add/remove update callbacks (see above). Must be called on the UI thread.
   // The callbacks must also be fired on UI thread.
-  void AddUpdateCallback(const UpdateCallback& callback);
+  void AddUpdateCallback(UpdateCallback callback);
   void RemoveUpdateCallback(const UpdateCallback& callback);
 
   // Whether there are any update callbacks available. Can be called on any
@@ -87,6 +91,9 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
   // Sends all audio focus information to each registered UpdateCallback.
   void SendAudioFocusState();
 
+  // Get information of registered CDMs and update the "CDMs" tab.
+  void GetRegisteredCdms();
+
   // Called to inform of the capabilities enumerated for video devices.
   void UpdateVideoCaptureDeviceCapabilities(
       const std::vector<std::tuple<media::VideoCaptureDeviceDescriptor,
@@ -97,27 +104,34 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
   std::unique_ptr<media::AudioLog> CreateAudioLog(AudioComponent component,
                                                   int component_id) override;
 
-  // Creates a media::mojom::AudioLogPtr strongly bound to a new
+  // Creates a PendingRemote<media::mojom::AudioLog> strongly bound to a new
   // media::mojom::AudioLog instance. Safe to call from any thread.
-  media::mojom::AudioLogPtr CreateMojoAudioLog(
+  mojo::PendingRemote<media::mojom::AudioLog> CreateMojoAudioLog(
       AudioComponent component,
       int component_id,
       int render_process_id = -1,
       int render_frame_id = MSG_ROUTING_NONE);
 
-  // Strongly bounds |request| to a new media::mojom::AudioLog instance. Safe to
-  // call from any thread.
-  void CreateMojoAudioLog(AudioComponent component,
-                          int component_id,
-                          media::mojom::AudioLogRequest request,
-                          int render_process_id = -1,
-                          int render_frame_id = MSG_ROUTING_NONE);
+  // Strongly bounds |receiver| to a new media::mojom::AudioLog instance. Safe
+  // to call from any thread.
+  void CreateMojoAudioLog(
+      AudioComponent component,
+      int component_id,
+      mojo::PendingReceiver<media::mojom::AudioLog> receiver,
+      int render_process_id = -1,
+      int render_frame_id = MSG_ROUTING_NONE);
+
+  static void CreateMediaLogRecords(
+      int render_process_id,
+      mojo::PendingReceiver<content::mojom::MediaInternalLogRecords> receiver);
 
  private:
   // Needs access to SendUpdate.
   friend class MediaInternalsAudioFocusHelper;
+  friend class MediaInternalsCdmHelper;
 
   class AudioLogImpl;
+  class MediaInternalLogRecordsImpl;
   // Inner class to handle reporting pipelinestatus to UMA
   class MediaInternalsUMAHandler;
 
@@ -125,10 +139,10 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
 
   // Sends |update| to each registered UpdateCallback.  Safe to call from any
   // thread, but will forward to the IO thread.
-  void SendUpdate(const base::string16& update);
+  void SendUpdate(const std::u16string& update);
 
   // Saves |event| so that it can be sent later in SendHistoricalMediaEvents().
-  void SaveEvent(int process_id, const media::MediaLogEvent& event);
+  void SaveEvent(int process_id, const media::MediaLogRecord& event);
 
   // Caches |value| under |cache_key| so that future UpdateAudioLog() calls
   // will include the current data.  Calls JavaScript |function|(|value|) for
@@ -140,9 +154,9 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
     UPDATE_AND_DELETE,  // Deletes an existing AudioLog cache entry.
   };
   void UpdateAudioLog(AudioLogUpdateType type,
-                      const std::string& cache_key,
-                      const std::string& function,
-                      const base::DictionaryValue* value);
+                      base::StringPiece cache_key,
+                      base::StringPiece function,
+                      const base::Value::Dict& value);
 
   std::unique_ptr<AudioLogImpl> CreateAudioLogImpl(AudioComponent component,
                                                    int component_id,
@@ -153,22 +167,22 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
   std::vector<UpdateCallback> update_callbacks_;
 
   // Saved events by process ID for showing recent players in the UI.
-  std::map<int, std::list<media::MediaLogEvent>> saved_events_by_process_;
+  std::map<int, std::list<media::MediaLogRecord>> saved_events_by_process_;
 
   // Must only be accessed on the IO thread.
-  base::ListValue video_capture_capabilities_cached_data_;
+  base::Value::List video_capture_capabilities_cached_data_;
 
   NotificationRegistrar registrar_;
 
   MediaInternalsAudioFocusHelper audio_focus_helper_;
 
+  MediaInternalsCdmHelper cdm_helper_;
+
   // All variables below must be accessed under |lock_|.
   base::Lock lock_;
   bool can_update_;
-  base::DictionaryValue audio_streams_cached_data_;
+  base::Value::Dict audio_streams_cached_data_;
   int owner_ids_[media::AudioLogFactory::AUDIO_COMPONENT_MAX];
-
-  DISALLOW_COPY_AND_ASSIGN(MediaInternals);
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/files/scoped_file.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -29,6 +29,12 @@ constexpr char kImageData[] = "data";
 class CachedImageFetcherImageDataStoreDiskTest : public testing::Test {
  public:
   CachedImageFetcherImageDataStoreDiskTest() {}
+
+  CachedImageFetcherImageDataStoreDiskTest(
+      const CachedImageFetcherImageDataStoreDiskTest&) = delete;
+  CachedImageFetcherImageDataStoreDiskTest& operator=(
+      const CachedImageFetcherImageDataStoreDiskTest&) = delete;
+
   void SetUp() override { ASSERT_TRUE(temp_dir_.CreateUniqueTempDir()); }
 
   void CreateDataStore() {
@@ -92,9 +98,7 @@ class CachedImageFetcherImageDataStoreDiskTest : public testing::Test {
 
   ScopedTempDir temp_dir_;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(CachedImageFetcherImageDataStoreDiskTest);
+  base::test::TaskEnvironment task_environment_;
 };
 
 TEST_F(CachedImageFetcherImageDataStoreDiskTest, SanityTest) {

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,21 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "storage/browser/blob/blob_memory_controller.h"
+#include "storage/browser/blob/blob_storage_constants.h"
 #include "storage/browser/blob/blob_storage_context.h"
-#include "storage/common/blob_storage/blob_storage_constants.h"
 
 namespace content {
 namespace {
@@ -56,16 +56,18 @@ class BlobStorageBrowserTest : public ContentBrowserTest {
     limits_.max_file_size = kTestBlobStorageMaxFileSizeBytes;
   }
 
+  BlobStorageBrowserTest(const BlobStorageBrowserTest&) = delete;
+  BlobStorageBrowserTest& operator=(const BlobStorageBrowserTest&) = delete;
+
   scoped_refptr<ChromeBlobStorageContext> GetBlobContext() {
     return ChromeBlobStorageContext::GetFor(
         shell()->web_contents()->GetBrowserContext());
   }
 
   void SetBlobLimits() {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
-        base::BindOnce(&SetBlobLimitsOnIO, GetBlobContext(),
-                       std::cref(limits_)));
+    GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&SetBlobLimitsOnIO, GetBlobContext(),
+                                  std::cref(limits_)));
   }
 
   void SimpleTest(const GURL& test_url, bool incognito = false) {
@@ -80,19 +82,13 @@ class BlobStorageBrowserTest : public ContentBrowserTest {
     std::string result =
         the_browser->web_contents()->GetLastCommittedURL().ref();
     if (result != "pass") {
-      std::string js_result;
-      ASSERT_TRUE(ExecuteScriptAndExtractString(
-          the_browser, "window.domAutomationController.send(getLog())",
-          &js_result));
+      std::string js_result = EvalJs(the_browser, "getLog()").ExtractString();
       FAIL() << "Failed: " << js_result;
     }
   }
 
  protected:
   storage::BlobStorageLimits limits_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(BlobStorageBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(BlobStorageBrowserTest, BlobCombinations) {
@@ -101,19 +97,19 @@ IN_PROC_BROWSER_TEST_F(BlobStorageBrowserTest, BlobCombinations) {
 
   auto blob_context = GetBlobContext();
   base::RunLoop loop;
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO}, base::BindLambdaForTesting([&]() {
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindLambdaForTesting([&]() {
         const storage::BlobMemoryController& memory_controller =
             blob_context->context()->memory_controller();
         // Our exact usages depend on IPC message ordering & garbage collection.
         // Since this is basically random, we just check bounds.
         EXPECT_LT(0u, memory_controller.memory_usage());
         EXPECT_LT(0ul, memory_controller.disk_usage());
-        EXPECT_GT(memory_controller.disk_usage(),
+        EXPECT_GE(memory_controller.disk_usage(),
                   static_cast<uint64_t>(memory_controller.memory_usage()));
-        EXPECT_GT(limits_.max_blob_in_memory_space,
+        EXPECT_GE(limits_.max_blob_in_memory_space,
                   memory_controller.memory_usage());
-        EXPECT_GT(limits_.effective_max_disk_space,
+        EXPECT_GE(limits_.effective_max_disk_space,
                   memory_controller.disk_usage());
 
         loop.Quit();

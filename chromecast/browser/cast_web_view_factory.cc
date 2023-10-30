@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,22 +16,11 @@ CastWebViewFactory::CastWebViewFactory(content::BrowserContext* browser_context)
 
 CastWebViewFactory::~CastWebViewFactory() = default;
 
-void CastWebViewFactory::OnPageDestroyed(CastWebView* web_view) {
-  web_view->RemoveObserver(this);
-}
-
 std::unique_ptr<CastWebView> CastWebViewFactory::CreateWebView(
-    const CastWebView::CreateParams& params,
-    CastWebContentsManager* web_contents_manager,
-    scoped_refptr<content::SiteInstance> site_instance,
-    const GURL& initial_url) {
-  std::unique_ptr<CastWebView> webview;
-  webview = std::make_unique<CastWebViewDefault>(
-      params, web_contents_manager, browser_context_, site_instance);
-  if (webview) {
-    webview->AddObserver(this);
-  }
-  return webview;
+    mojom::CastWebViewParamsPtr params,
+    CastWebService* web_service) {
+  return std::make_unique<CastWebViewDefault>(std::move(params), web_service,
+                                              browser_context_);
 }
 
 }  // namespace chromecast

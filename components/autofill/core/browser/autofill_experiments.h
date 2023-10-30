@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/sync_utils.h"
 
@@ -28,6 +27,7 @@ class PersonalDataManager;
 bool IsCreditCardUploadEnabled(const PrefService* pref_service,
                                const syncer::SyncService* sync_service,
                                const std::string& user_email,
+                               const std::string& user_country,
                                const AutofillSyncSigninState sync_state,
                                LogManager* log_manager);
 
@@ -44,17 +44,10 @@ bool IsCreditCardMigrationEnabled(PersonalDataManager* personal_data_manager,
 // disables providing suggestions.
 bool IsInAutofillSuggestionsDisabledExperiment();
 
-// Returns whether locally saving card when credit card upload succeeds should
-// be disabled.
-bool IsAutofillNoLocalSaveOnUploadSuccessExperimentEnabled();
-
-// Returns true if the user should be offered to locally store unmasked cards.
-// This controls whether the option is presented at all rather than the default
-// response of the option.
-bool OfferStoreUnmaskedCards(bool is_off_the_record);
-
-// Returns whether the account of the active signed-in user should be used.
-bool ShouldUseActiveSignedInAccount();
+// Returns true if the feature is explicitly enabled by the corresponding Finch
+// flag, or if launched in general for this platform, which is true for Windows,
+// Android, and Mac OS X >= 10.13.
+bool IsCreditCardFidoAuthenticationEnabled();
 
 }  // namespace autofill
 

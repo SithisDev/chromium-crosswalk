@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,14 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "build/build_config.h"
 #include "chromecast/browser/cast_browser_context.h"
 #include "chromecast/browser/cast_content_browser_client.h"
 #include "chromecast/browser/cast_network_contexts.h"
+#include "chromecast/browser/cast_web_service.h"
 #include "chromecast/browser/devtools/remote_debugging_server.h"
 #include "chromecast/browser/metrics/cast_browser_metrics.h"
-#include "chromecast/browser/tts/tts_controller.h"
 #include "chromecast/metrics/cast_metrics_service_client.h"
 #include "chromecast/net/connectivity_checker.h"
 #include "chromecast/service/cast_service.h"
@@ -21,11 +21,7 @@
 
 #if defined(USE_AURA)
 
-#if BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
-#include "chromecast/browser/accessibility/accessibility_manager.h"
-#endif  // BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
-
-#include "chromecast/browser/cast_display_configurator.h"
+#include "chromecast/browser/cast_display_configurator.h"  // nogncheck
 #include "chromecast/graphics/cast_screen.h"
 #endif  // defined(USE_AURA)
 
@@ -42,9 +38,7 @@ CastBrowserProcess* CastBrowserProcess::GetInstance() {
   return g_instance;
 }
 
-CastBrowserProcess::CastBrowserProcess()
-    : cast_content_browser_client_(nullptr),
-      net_log_(nullptr) {
+CastBrowserProcess::CastBrowserProcess() {
   DCHECK(!g_instance);
   g_instance = this;
 }
@@ -84,10 +78,9 @@ void CastBrowserProcess::SetCastService(
 }
 
 #if defined(USE_AURA)
-void CastBrowserProcess::SetCastScreen(
-    std::unique_ptr<CastScreen> cast_screen) {
+void CastBrowserProcess::SetCastScreen(CastScreen* cast_screen) {
   DCHECK(!cast_screen_);
-  cast_screen_ = std::move(cast_screen);
+  cast_screen_ = cast_screen;
 }
 
 void CastBrowserProcess::SetDisplayConfigurator(
@@ -95,19 +88,6 @@ void CastBrowserProcess::SetDisplayConfigurator(
   DCHECK(!display_configurator_);
   display_configurator_ = std::move(display_configurator);
 }
-
-#if BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
-void CastBrowserProcess::SetAccessibilityManager(
-    std::unique_ptr<AccessibilityManager> accessibility_manager) {
-  DCHECK(!accessibility_manager_);
-  accessibility_manager_ = std::move(accessibility_manager);
-}
-
-void CastBrowserProcess::ClearAccessibilityManager() {
-  accessibility_manager_.reset();
-}
-
-#endif  // BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
 
 #endif  // defined(USE_AURA)
 
@@ -136,27 +116,5 @@ void CastBrowserProcess::SetConnectivityChecker(
   connectivity_checker_.swap(connectivity_checker);
 }
 
-void CastBrowserProcess::SetNetLog(net::NetLog* net_log) {
-  DCHECK(!net_log_);
-  net_log_ = net_log;
-}
-
-void CastBrowserProcess::SetTtsController(
-    std::unique_ptr<TtsController> tts_controller) {
-  DCHECK(!tts_controller_);
-  tts_controller_ = std::move(tts_controller);
-}
-
-void CastBrowserProcess::SetWebViewFactory(
-    CastWebViewFactory* web_view_factory) {
-  DCHECK(!web_view_factory_);
-  web_view_factory_ = web_view_factory;
-}
-
-#if BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
-void CastBrowserProcess::AccessibilityStateChanged(bool enabled) {
-  cast_service_->AccessibilityStateChanged(enabled);
-}
-#endif  // BUILDFLAG(ENABLE_CHROMECAST_EXTENSIONS)
 }  // namespace shell
 }  // namespace chromecast

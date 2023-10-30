@@ -1,105 +1,144 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/policy/core/common/cloud/realtime_reporting_job_configuration.h"
 
+#include <utility>
+
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/path_service.h"
+#include "components/enterprise/common/strings.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
-#include "components/policy/core/common/cloud/dm_auth.h"
+#include "components/policy/core/common/cloud/cloud_policy_util.h"
+#include "components/version_info/version_info.h"
 #include "google_apis/google_api_keys.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace em = enterprise_management;
 
 namespace policy {
 
-const char RealtimeReportingJobConfiguration::kDmTokenKey[] = "dmToken";
-const char RealtimeReportingJobConfiguration::kClientIdKey[] = "clientId";
-const char RealtimeReportingJobConfiguration::kEventsKey[] = "events";
+const char RealtimeReportingJobConfiguration::kContextKey[] = "context";
+const char RealtimeReportingJobConfiguration::kEventListKey[] = "events";
+
+const char RealtimeReportingJobConfiguration::kEventIdKey[] = "eventId";
+const char RealtimeReportingJobConfiguration::kUploadedEventsKey[] =
+    "uploadedEventIds";
+const char RealtimeReportingJobConfiguration::kFailedUploadsKey[] =
+    "failedUploads";
+const char RealtimeReportingJobConfiguration::kPermanentFailedUploadsKey[] =
+    "permanentFailedUploads";
+
+base::Value::Dict RealtimeReportingJobConfiguration::BuildReport(
+    base::Value::List events,
+    base::Value::Dict context) {
+  base::Value::Dict value_report;
+  value_report.Set(kEventListKey, std::move(events));
+  value_report.Set(kContextKey, std::move(context));
+  return value_report;
+}
 
 RealtimeReportingJobConfiguration::RealtimeReportingJobConfiguration(
     CloudPolicyClient* client,
-    std::unique_ptr<DMAuth> auth_data,
-    Callback callback)
-    : JobConfigurationBase(TYPE_UPLOAD_REAL_TIME_REPORT,
-                           std::move(auth_data),
-                           base::nullopt,
-                           client->GetURLLoaderFactory()),
-      server_url_(client->service()->configuration()->GetReportingServerUrl()),
-      payload_(base::Value::Type::DICTIONARY),
-      callback_(std::move(callback)) {
-  DCHECK(GetAuth().has_dm_token());
-
-  AddParameter("key", google_apis::GetAPIKey());
-
-  payload_.SetStringKey(kDmTokenKey, GetAuth().dm_token());
-  payload_.SetStringKey(kClientIdKey, client->client_id());
-  payload_.SetKey(kEventsKey, base::Value(base::Value::Type::LIST));
+    const std::string& server_url,
+    bool include_device_info,
+    bool add_connector_url_params,
+    UploadCompleteCallback callback)
+    : ReportingJobConfigurationBase(TYPE_UPLOAD_REAL_TIME_REPORT,
+                                    client->GetURLLoaderFactory(),
+                                    client,
+                                    server_url,
+                                    include_device_info,
+                                    std::move(callback)) {
+  InitializePayloadInternal(client, add_connector_url_params);
 }
 
 RealtimeReportingJobConfiguration::~RealtimeReportingJobConfiguration() {}
 
-void RealtimeReportingJobConfiguration::AddEvent(base::Value event) {
-  base::Value::ListStorage& list = payload_.FindListKey(kEventsKey)->GetList();
-  list.push_back(std::move(event));
-}
-
-std::string RealtimeReportingJobConfiguration::GetPayload() {
-  std::string payload_string;
-  base::JSONWriter::Write(payload_, &payload_string);
-  return payload_string;
-}
-
-std::string RealtimeReportingJobConfiguration::GetUmaName() {
-  return "Enterprise.RealtimeReportingSuccess." + GetJobTypeAsString(GetType());
-}
-
-void RealtimeReportingJobConfiguration::OnURLLoadComplete(
-    DeviceManagementService::Job* job,
-    int net_error,
-    int response_code,
-    const std::string& response_body) {
-  base::Optional<base::Value> response = base::JSONReader::Read(response_body);
-
-  // Parse the response even if |response_code| is not a success since the
-  // response data may contain an error message.
-  // Map the net_error/response_code to a DeviceManagementStatus.
-  DeviceManagementStatus code;
-  if (net_error != net::OK) {
-    code = DM_STATUS_REQUEST_FAILED;
-  } else {
-    switch (response_code) {
-      case DeviceManagementService::kSuccess:
-        code = DM_STATUS_SUCCESS;
-        break;
-      case DeviceManagementService::kInvalidArgument:
-        code = DM_STATUS_REQUEST_INVALID;
-        break;
-      case DeviceManagementService::kInvalidAuthCookieOrDMToken:
-        code = DM_STATUS_SERVICE_MANAGEMENT_TOKEN_INVALID;
-        break;
-      case DeviceManagementService::kDeviceManagementNotAllowed:
-        code = DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED;
-        break;
-      default:
-        // Handle all unknown 5xx HTTP error codes as temporary and any other
-        // unknown error as one that needs more time to recover.
-        if (response_code >= 500 && response_code <= 599)
-          code = DM_STATUS_TEMPORARY_UNAVAILABLE;
-        else
-          code = DM_STATUS_HTTP_STATUS_ERROR;
-        break;
-    }
+bool RealtimeReportingJobConfiguration::AddReport(base::Value::Dict report) {
+  base::Value::Dict* context = report.FindDict(kContextKey);
+  base::Value::List* events = report.FindList(kEventListKey);
+  if (!context || !events) {
+    return false;
   }
 
-  base::Value response_value = response ? std::move(*response) : base::Value();
-  std::move(callback_).Run(job, code, net_error, response_value);
+  // Overwrite internal context. |context_| will be merged with |payload_| in
+  // |GetPayload|.
+  if (context_.has_value()) {
+    context_->Merge(std::move(*context));
+  } else {
+    context_ = std::move(*context);
+  }
+
+  // Append event_list to the payload.
+  base::Value::List* to = payload_.FindList(kEventListKey);
+  for (auto& event : *events) {
+    to->Append(std::move(event));
+  }
+  return true;
 }
 
-GURL RealtimeReportingJobConfiguration::GetURL(int last_error) {
-  return GURL(server_url_);
+void RealtimeReportingJobConfiguration::InitializePayloadInternal(
+    CloudPolicyClient* client,
+    bool add_connector_url_params) {
+  payload_.Set(kEventListKey, base::Value::List());
+
+  // If specified add extra enterprise connector URL params.
+  if (add_connector_url_params) {
+    AddParameter(enterprise::kUrlParamConnector, "OnSecurityEvent");
+    AddParameter(enterprise::kUrlParamDeviceToken, client->dm_token());
+  }
+}
+
+DeviceManagementService::Job::RetryMethod
+RealtimeReportingJobConfiguration::ShouldRetryInternal(
+    int response_code,
+    const std::string& response_body) {
+  DeviceManagementService::Job::RetryMethod retry_method =
+      DeviceManagementService::Job::NO_RETRY;
+  const auto failedIds = GetFailedUploadIds(response_body);
+  if (!failedIds.empty()) {
+    retry_method = DeviceManagementService::Job::RETRY_WITH_DELAY;
+  }
+  return retry_method;
+}
+
+void RealtimeReportingJobConfiguration::OnBeforeRetryInternal(
+    int response_code,
+    const std::string& response_body) {
+  const auto& failedIds = GetFailedUploadIds(response_body);
+  if (!failedIds.empty()) {
+    auto* events = payload_.FindList(kEventListKey);
+    // Only keep the elements that temporarily failed their uploads.
+    events->EraseIf([&failedIds](const base::Value& entry) {
+      auto* id = entry.FindStringKey(kEventIdKey);
+      return id && failedIds.find(*id) == failedIds.end();
+    });
+  }
+}
+
+std::string RealtimeReportingJobConfiguration::GetUmaString() const {
+  return "Enterprise.RealtimeReportingSuccess";
+}
+
+std::set<std::string> RealtimeReportingJobConfiguration::GetFailedUploadIds(
+    const std::string& response_body) const {
+  std::set<std::string> failedIds;
+  absl::optional<base::Value> response = base::JSONReader::Read(response_body);
+  base::Value response_value = response ? std::move(*response) : base::Value();
+  base::Value* failedUploads = response_value.FindListKey(kFailedUploadsKey);
+  if (failedUploads) {
+    for (const auto& failedUpload : failedUploads->GetListDeprecated()) {
+      auto* id = failedUpload.FindStringKey(kEventIdKey);
+      if (id) {
+        failedIds.insert(*id);
+      }
+    }
+  }
+  return failedIds;
 }
 
 }  // namespace policy

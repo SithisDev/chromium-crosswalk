@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,15 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/gcm_driver/gcm_driver.h"
 #include "components/signin/public/identity_manager/access_token_fetcher.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/scope_set.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "net/base/ip_endpoint.h"
 
@@ -25,10 +27,6 @@ namespace gcm {
 
 namespace {
 
-// Scopes needed by the OAuth2 access tokens.
-const char kGCMGroupServerScope[] = "https://www.googleapis.com/auth/gcm";
-const char kGCMCheckinServerScope[] =
-    "https://www.googleapis.com/auth/android_checkin";
 // Name of the GCM account tracker for fetching access tokens.
 const char kGCMAccountTrackerName[] = "gcm_account_tracker";
 // Minimum token validity when sending to GCM groups server.
@@ -72,12 +70,12 @@ void GCMAccountTracker::Start() {
   account_tracker_->AddObserver(this);
   driver_->AddConnectionObserver(this);
 
-  std::vector<AccountIds> accounts = account_tracker_->GetAccounts();
-  for (std::vector<AccountIds>::const_iterator iter = accounts.begin();
+  std::vector<CoreAccountInfo> accounts = account_tracker_->GetAccounts();
+  for (std::vector<CoreAccountInfo>::const_iterator iter = accounts.begin();
        iter != accounts.end(); ++iter) {
     if (!iter->email.empty()) {
       account_infos_.insert(std::make_pair(
-          iter->account_key, AccountInfo(iter->email, TOKEN_NEEDED)));
+          iter->account_id, AccountInfo(iter->email, TOKEN_NEEDED)));
     }
   }
 
@@ -104,16 +102,16 @@ void GCMAccountTracker::ScheduleReportTokens() {
       GetTimeToNextTokenReporting());
 }
 
-void GCMAccountTracker::OnAccountSignInChanged(const AccountIds& ids,
+void GCMAccountTracker::OnAccountSignInChanged(const CoreAccountInfo& account,
                                                bool is_signed_in) {
   if (is_signed_in)
-    OnAccountSignedIn(ids);
+    OnAccountSignedIn(account);
   else
-    OnAccountSignedOut(ids);
+    OnAccountSignedOut(account);
 }
 
 void GCMAccountTracker::OnAccessTokenFetchCompleteForAccount(
-    std::string account_id,
+    CoreAccountId account_id,
     GoogleServiceAuthError error,
     signin::AccessTokenInfo access_token_info) {
   auto iter = account_infos_.find(account_id);
@@ -163,11 +161,9 @@ void GCMAccountTracker::ReportTokens() {
     return;
   }
 
-  // Wait for AccountTracker to be done with fetching the user info, as
-  // well as all of the pending token requests from GCMAccountTracker to be done
-  // before you report the results.
-  if (!account_tracker_->IsAllUserInfoFetched() ||
-      !pending_token_requests_.empty()) {
+  // Wait for all of the pending token requests from GCMAccountTracker to be
+  // done before you report the results.
+  if (!pending_token_requests_.empty()) {
     return;
   }
 
@@ -216,8 +212,7 @@ void GCMAccountTracker::SanitizeTokens() {
        ++iter) {
     if (iter->second.state == TOKEN_PRESENT &&
         iter->second.expiration_time <
-            base::Time::Now() +
-                base::TimeDelta::FromMilliseconds(kMinimumTokenValidityMs)) {
+            base::Time::Now() + base::Milliseconds(kMinimumTokenValidityMs)) {
       iter->second.access_token.clear();
       iter->second.state = TOKEN_NEEDED;
       iter->second.expiration_time = base::Time();
@@ -253,19 +248,18 @@ bool GCMAccountTracker::IsTokenFetchingRequired() const {
 base::TimeDelta GCMAccountTracker::GetTimeToNextTokenReporting() const {
   base::TimeDelta time_till_next_reporting =
       driver_->GetLastTokenFetchTime() +
-      base::TimeDelta::FromMilliseconds(kTokenReportingIntervalMs) -
-      base::Time::Now();
+      base::Milliseconds(kTokenReportingIntervalMs) - base::Time::Now();
 
   // Case when token fetching is overdue.
-  if (time_till_next_reporting < base::TimeDelta())
+  if (time_till_next_reporting.is_negative())
     return base::TimeDelta();
 
   // Case when calculated period is larger than expected, including the
   // situation when the method is called before GCM driver is completely
   // initialized.
   if (time_till_next_reporting >
-          base::TimeDelta::FromMilliseconds(kTokenReportingIntervalMs)) {
-    return base::TimeDelta::FromMilliseconds(kTokenReportingIntervalMs);
+      base::Milliseconds(kTokenReportingIntervalMs)) {
+    return base::Milliseconds(kTokenReportingIntervalMs);
   }
 
   return time_till_next_reporting;
@@ -280,6 +274,10 @@ void GCMAccountTracker::GetAllNeededTokens() {
   if (!driver_->IsConnected())
     return;
 
+  // Only start fetching access tokens if the user consented for sync.
+  if (!identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSync))
+    return;
+
   for (auto iter = account_infos_.begin(); iter != account_infos_.end();
        ++iter) {
     if (iter->second.state == TOKEN_NEEDED)
@@ -290,9 +288,9 @@ void GCMAccountTracker::GetAllNeededTokens() {
 void GCMAccountTracker::GetToken(AccountInfos::iterator& account_iter) {
   DCHECK_EQ(account_iter->second.state, TOKEN_NEEDED);
 
-  identity::ScopeSet scopes;
-  scopes.insert(kGCMGroupServerScope);
-  scopes.insert(kGCMCheckinServerScope);
+  signin::ScopeSet scopes;
+  scopes.insert(GaiaConstants::kGCMGroupServerOAuth2Scope);
+  scopes.insert(GaiaConstants::kGCMCheckinServerOAuth2Scope);
 
   // NOTE: It is safe to use base::Unretained() here as |token_fetcher| is owned
   // by this object and guarantees that it will not invoke its callback after
@@ -311,13 +309,13 @@ void GCMAccountTracker::GetToken(AccountInfos::iterator& account_iter) {
   account_iter->second.state = GETTING_TOKEN;
 }
 
-void GCMAccountTracker::OnAccountSignedIn(const AccountIds& ids) {
-  DVLOG(1) << "Account signed in: " << ids.email;
-  auto iter = account_infos_.find(ids.account_key);
+void GCMAccountTracker::OnAccountSignedIn(const CoreAccountInfo& account) {
+  DVLOG(1) << "Account signed in: " << account.email;
+  auto iter = account_infos_.find(account.account_id);
   if (iter == account_infos_.end()) {
-    DCHECK(!ids.email.empty());
-    account_infos_.insert(
-        std::make_pair(ids.account_key, AccountInfo(ids.email, TOKEN_NEEDED)));
+    DCHECK(!account.email.empty());
+    account_infos_.insert(std::make_pair(
+        account.account_id, AccountInfo(account.email, TOKEN_NEEDED)));
   } else if (iter->second.state == ACCOUNT_REMOVED) {
     iter->second.state = TOKEN_NEEDED;
   }
@@ -325,9 +323,9 @@ void GCMAccountTracker::OnAccountSignedIn(const AccountIds& ids) {
   GetAllNeededTokens();
 }
 
-void GCMAccountTracker::OnAccountSignedOut(const AccountIds& ids) {
-  DVLOG(1) << "Account signed out: " << ids.email;
-  auto iter = account_infos_.find(ids.account_key);
+void GCMAccountTracker::OnAccountSignedOut(const CoreAccountInfo& account) {
+  DVLOG(1) << "Account signed out: " << account.email;
+  auto iter = account_infos_.find(account.account_id);
   if (iter == account_infos_.end())
     return;
 
@@ -338,7 +336,7 @@ void GCMAccountTracker::OnAccountSignedOut(const AccountIds& ids) {
   // re-added and a new access token request made, we do not break this class'
   // invariant that there is at most one ongoing access token request per
   // account.
-  pending_token_requests_.erase(ids.account_key);
+  pending_token_requests_.erase(account.account_id);
   ReportTokens();
 }
 

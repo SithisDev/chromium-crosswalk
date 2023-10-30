@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/gpu/chromeos/video_capture_dependencies.h"
 
 #include "base/bind.h"
-#include "base/task/post_task.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -14,10 +14,11 @@ namespace content {
 
 // static
 void VideoCaptureDependencies::CreateJpegDecodeAccelerator(
-    chromeos_camera::mojom::MjpegDecodeAcceleratorRequest accelerator) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
+    mojo::PendingReceiver<chromeos_camera::mojom::MjpegDecodeAccelerator>
+        accelerator) {
+  if (!GetUIThreadTaskRunner({})->BelongsToCurrentThread()) {
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&VideoCaptureDependencies::CreateJpegDecodeAccelerator,
                        std::move(accelerator)));
     return;
@@ -32,13 +33,14 @@ void VideoCaptureDependencies::CreateJpegDecodeAccelerator(
   }
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // static
 void VideoCaptureDependencies::CreateJpegEncodeAccelerator(
-    chromeos_camera::mojom::JpegEncodeAcceleratorRequest accelerator) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
+    mojo::PendingReceiver<chromeos_camera::mojom::JpegEncodeAccelerator>
+        accelerator) {
+  if (!GetUIThreadTaskRunner({})->BelongsToCurrentThread()) {
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&VideoCaptureDependencies::CreateJpegEncodeAccelerator,
                        std::move(accelerator)));
     return;
@@ -52,6 +54,6 @@ void VideoCaptureDependencies::CreateJpegEncodeAccelerator(
     LOG(ERROR) << "No GpuProcessHost";
   }
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace content

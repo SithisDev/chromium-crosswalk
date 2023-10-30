@@ -1,17 +1,23 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/feedback/feedback_report.h"
 
+#include "base/base_paths.h"
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/files/important_file_writer.h"
 #include "base/guid.h"
-#include "base/sequenced_task_runner.h"
+#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "components/feedback/features.h"
+#include "components/feedback/proto/extension.pb.h"
 
 namespace feedback {
 
@@ -41,8 +47,10 @@ FeedbackReport::FeedbackReport(
     const base::FilePath& path,
     const base::Time& upload_at,
     std::unique_ptr<std::string> data,
-    scoped_refptr<base::SequencedTaskRunner> task_runner)
-    : reports_path_(path),
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
+    bool has_email)
+    : has_email_(has_email),
+      reports_path_(path),
       upload_at_(upload_at),
       data_(std::move(data)),
       reports_task_runner_(task_runner) {
@@ -55,13 +63,43 @@ FeedbackReport::FeedbackReport(
       FROM_HERE,
       base::BindOnce(&WriteReportOnBlockingPool, reports_path_, file_,
                      base::WrapRefCounted<FeedbackReport>(this)));
+
+  // Write feedback report to tmp directory when flag is on. This is for e2e
+  // tast test verifying feedback report contains certain data. The tast test
+  // will later clean it up after test is done.
+  if (feedback::features::IsOsFeedbackSaveReportToLocalForE2ETestingEnabled()) {
+    base::FilePath tmp_root;
+    base::PathService::Get(base::DIR_TEMP, &tmp_root);
+    const base::FilePath reports_path_for_tast =
+        tmp_root.AppendASCII("feedback-report/");
+    const base::FilePath file_for_tast =
+        reports_path_for_tast.AppendASCII("feedback-report");
+
+    reports_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&WriteReportOnBlockingPool,
+                                  reports_path_for_tast, file_for_tast,
+                                  base::WrapRefCounted<FeedbackReport>(this)));
+  }
 }
+
+FeedbackReport::FeedbackReport(
+    base::FilePath path,
+    std::unique_ptr<std::string> data,
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
+    bool has_email)
+    : file_(path),
+      has_email_(has_email),
+      data_(std::move(data)),
+      reports_task_runner_(task_runner) {}
 
 // static
 const char FeedbackReport::kCrashReportIdsKey[]  = "crash_report_ids";
 
 // static
 const char FeedbackReport::kAllCrashReportIdsKey[] = "all_crash_report_ids";
+
+// static
+const char FeedbackReport::kMemUsageWithTabTitlesKey[] = "mem_usage_with_title";
 
 // static
 void FeedbackReport::LoadReportsAndQueue(const base::FilePath& user_dir,
@@ -77,16 +115,21 @@ void FeedbackReport::LoadReportsAndQueue(const base::FilePath& user_dir,
        !name.empty();
        name = enumerator.Next()) {
     auto data = std::make_unique<std::string>();
-    if (ReadFileToString(name, data.get()))
-      callback.Run(std::move(data));
-    base::DeleteFile(name, false);
+    if (ReadFileToString(name, data.get())) {
+      userfeedback::ExtensionSubmit parsed;
+      parsed.ParseFromString(*data);
+
+      bool has_email = parsed.common_data().has_user_email() &&
+                       !parsed.common_data().user_email().empty();
+      callback.Run(base::MakeRefCounted<FeedbackReport>(
+          std::move(name), std::move(data), base::ThreadTaskRunnerHandle::Get(),
+          has_email));
+    }
   }
 }
 
 void FeedbackReport::DeleteReportOnDisk() {
-  reports_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(base::IgnoreResult(&base::DeleteFile), file_, false));
+  reports_task_runner_->PostTask(FROM_HERE, base::GetDeleteFileCallback(file_));
 }
 
 FeedbackReport::~FeedbackReport() {}

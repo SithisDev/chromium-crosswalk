@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,29 +8,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/memory/shared_memory.h"
+#include <string>
+
 #include "base/observer_list.h"
-#include "base/single_thread_task_runner.h"
-#include "base/strings/string16.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "content/public/common/widget_type.h"
 #include "content/public/renderer/render_thread.h"
 #include "ipc/ipc_test_sink.h"
 #include "ipc/message_filter.h"
-#include "services/service_manager/public/mojom/connector.mojom.h"
-#include "third_party/blink/public/mojom/frame/document_interface_broker.mojom.h"
-
-struct FrameHostMsg_CreateChildFrame_Params;
-struct FrameHostMsg_CreateChildFrame_Params_Reply;
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "third_party/blink/public/mojom/browser_interface_broker.mojom.h"
+#include "third_party/blink/public/mojom/page/page.mojom.h"
 
 namespace IPC {
 class MessageFilter;
 class MessageReplyDeserializer;
-}
-
-namespace blink {
-enum class WebSandboxFlags;
-enum class WebTreeScopeType;
 }
 
 namespace content {
@@ -38,13 +32,13 @@ namespace content {
 namespace mojom {
 class CreateNewWindowParams;
 class CreateNewWindowReply;
+class Frame;
 class RenderMessageFilter;
 }
 
 // This class is a very simple mock of RenderThread. It simulates an IPC channel
-// which supports only three messages:
-// ViewHostMsg_CreateWidget : sync message sent by the Widget.
-// WidgetMsg_Close : async, send to the Widget.
+// which supports the following message:
+// FrameHostMsg_CreateChildFrame : sync message sent by the renderer.
 class MockRenderThread : public RenderThread {
  public:
   MockRenderThread();
@@ -53,43 +47,54 @@ class MockRenderThread : public RenderThread {
   // Provides access to the messages that have been received by this thread.
   IPC::TestSink& sink() { return sink_; }
 
+  void SetIOTaskRunner(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+    io_task_runner_ = std::move(task_runner);
+  }
+
   // RenderThread implementation:
   bool Send(IPC::Message* msg) override;
   IPC::SyncChannel* GetChannel() override;
   std::string GetLocale() override;
   IPC::SyncMessageFilter* GetSyncMessageFilter() override;
   scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() override;
+  void BindHostReceiver(mojo::GenericPendingReceiver receiver) override;
   void AddRoute(int32_t routing_id, IPC::Listener* listener) override;
+  void AttachTaskRunnerToRoute(
+      int32_t routing_id,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) override;
   void RemoveRoute(int32_t routing_id) override;
   int GenerateRoutingID() override;
+  bool GenerateFrameRoutingID(
+      int32_t& routing_id,
+      blink::LocalFrameToken& frame_token,
+      base::UnguessableToken& devtools_frame_token) override;
   void AddFilter(IPC::MessageFilter* filter) override;
   void RemoveFilter(IPC::MessageFilter* filter) override;
   void AddObserver(RenderThreadObserver* observer) override;
   void RemoveObserver(RenderThreadObserver* observer) override;
-  void SetResourceDispatcherDelegate(
-      ResourceDispatcherDelegate* delegate) override;
+  void SetResourceRequestSenderDelegate(
+      blink::WebResourceRequestSenderDelegate* delegate) override;
   void RecordAction(const base::UserMetricsAction& action) override;
   void RecordComputedAction(const std::string& action) override;
-  std::unique_ptr<base::SharedMemory> HostAllocateSharedMemoryBuffer(
-      size_t buffer_size) override;
-  void RegisterExtension(std::unique_ptr<v8::Extension> extension) override;
-  int PostTaskToAllWebWorkers(const base::Closure& closure) override;
-  bool ResolveProxy(const GURL& url, std::string* proxy_list) override;
+  int PostTaskToAllWebWorkers(base::RepeatingClosure closure) override;
   base::WaitableEvent* GetShutdownEvent() override;
   int32_t GetClientId() override;
-  bool IsOnline() override;
   void SetRendererProcessType(
       blink::scheduler::WebRendererProcessType type) override;
   blink::WebString GetUserAgent() override;
+  blink::WebString GetFullUserAgent() override;
+  blink::WebString GetReducedUserAgent() override;
   const blink::UserAgentMetadata& GetUserAgentMetadata() override;
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   void PreCacheFont(const LOGFONT& log_font) override;
   void ReleaseCachedFonts() override;
 #endif
-  ServiceManagerConnection* GetServiceManagerConnection() override;
-  service_manager::Connector* GetConnector() override;
   void SetFieldTrialGroup(const std::string& trial_name,
                           const std::string& group_name) override;
+  void WriteIntoTrace(
+      perfetto::TracedProto<perfetto::protos::pbzero::RenderProcessHost> proto)
+      override;
 
   // Returns a new, unique routing ID that can be assigned to the next view,
   // widget, or frame.
@@ -108,56 +113,39 @@ class MockRenderThread : public RenderThread {
   void OnCreateWindow(const mojom::CreateNewWindowParams& params,
                       mojom::CreateNewWindowReply* reply);
 
-  // The Widget expects to be returned a valid route_id.
-  void OnCreateWidget(int opener_id, int* route_id);
+  // Releases any `blink::WebView`s that are being held onto by PageBroadcast
+  // associated remotes.
+  void ReleaseAllWebViews();
 
-  // Returns the request end of the InterfaceProvider interface whose client end
-  // was passed in to construct RenderFrame with |routing_id|; if any. The
-  // client end will be used by the RenderFrame to service interface requests
-  // originating from the initial empty document.
-  service_manager::mojom::InterfaceProviderRequest
-  TakeInitialInterfaceProviderRequestForFrame(int32_t routing_id);
+  void OnCreateChildFrame(
+      int32_t child_routing_id,
+      mojo::PendingAssociatedRemote<mojom::Frame> frame_remote,
+      mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker>
+          browser_interface_broker);
 
-  // Returns the request end of the DocumentInterfaceBroker interface whose
+  // Returns the receiver end of the BrowserInterfaceBroker interface whose
   // client end was passed in to construct RenderFrame with |routing_id|; if
   // any. The client end will be used by the RenderFrame to service interface
   // requests originating from the initial empty document.
-  blink::mojom::DocumentInterfaceBrokerRequest
-  TakeInitialDocumentInterfaceBrokerRequestForFrame(int32_t routing_id);
-
-  // Called from the RenderViewTest harness to supply the request end of the
-  // InterfaceProvider interface connection that the harness used to service the
-  // initial empty document in the RenderFrame with |routing_id|.
-  void PassInitialInterfaceProviderRequestForFrame(
-      int32_t routing_id,
-      service_manager::mojom::InterfaceProviderRequest
-          interface_provider_request);
+  mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker>
+  TakeInitialBrowserInterfaceBrokerReceiverForFrame(int32_t routing_id);
 
  protected:
   // This function operates as a regular IPC listener. Subclasses
   // overriding this should first delegate to this implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
 
-  // The Frame expects to be returned a valid route_id different from its own.
-  void OnCreateChildFrame(
-      const FrameHostMsg_CreateChildFrame_Params& params,
-      FrameHostMsg_CreateChildFrame_Params_Reply* params_reply);
-
-#if defined(OS_WIN)
-  void OnDuplicateSection(base::SharedMemoryHandle renderer_handle,
-                          base::SharedMemoryHandle* browser_handle);
-#endif
-
   IPC::TestSink sink_;
+
+  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
   // Routing ID what will be assigned to the next view, widget, or frame.
   int32_t next_routing_id_;
 
-  std::map<int32_t, service_manager::mojom::InterfaceProviderRequest>
-      frame_routing_id_to_initial_interface_provider_requests_;
-
-  std::map<int32_t, blink::mojom::DocumentInterfaceBrokerRequest>
-      frame_routing_id_to_initial_document_broker_requests_;
+  // Pending BrowserInterfaceBrokers sent from the renderer when creating a
+  // new Frame and informing the browser.
+  std::map<int32_t, mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker>>
+      frame_routing_id_to_initial_browser_brokers_;
 
   // The last known good deserializer for sync messages.
   std::unique_ptr<IPC::MessageReplyDeserializer> reply_deserializer_;
@@ -165,11 +153,13 @@ class MockRenderThread : public RenderThread {
   // A list of message filters added to this thread.
   std::vector<scoped_refptr<IPC::MessageFilter> > filters_;
 
+  // `blink::WebView`s associated with CreateNewWindow have their
+  // lifecycle associated with the mojo channel provided to them.
+  std::vector<mojo::AssociatedRemote<blink::mojom::PageBroadcast>>
+      page_broadcasts_;
+
   // Observers to notify.
   base::ObserverList<RenderThreadObserver>::Unchecked observers_;
-
-  std::unique_ptr<service_manager::Connector> connector_;
-  service_manager::mojom::ConnectorRequest pending_connector_request_;
 
   std::unique_ptr<mojom::RenderMessageFilter> mock_render_message_filter_;
 };

@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.payments;
 
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.payments.mojom.PaymentDetails;
 import org.chromium.payments.mojom.PaymentValidationErrors;
 
@@ -19,16 +20,19 @@ public class PaymentValidator {
         if (details == null) {
             return false;
         }
-        return nativeValidatePaymentDetailsAndroid(details.serialize());
+        return PaymentValidatorJni.get().validatePaymentDetailsAndroid(details.serialize());
     }
 
     public static boolean validatePaymentValidationErrors(PaymentValidationErrors errors) {
         if (errors == null) {
             return false;
         }
-        return nativeValidatePaymentValidationErrorsAndroid(errors.serialize());
+        return PaymentValidatorJni.get().validatePaymentValidationErrorsAndroid(errors.serialize());
     }
 
-    private static native boolean nativeValidatePaymentDetailsAndroid(ByteBuffer buffer);
-    private static native boolean nativeValidatePaymentValidationErrorsAndroid(ByteBuffer buffer);
+    @NativeMethods
+    interface Natives {
+        boolean validatePaymentDetailsAndroid(ByteBuffer buffer);
+        boolean validatePaymentValidationErrorsAndroid(ByteBuffer buffer);
+    }
 };

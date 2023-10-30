@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 #include <memory>
 #include <utility>
 
+#include "base/check.h"
+#include "base/containers/contains.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/observer_list.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_local.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/public/renderer/worker_thread.h"
@@ -42,7 +43,7 @@ base::LazyInstance<ThreadLocalWorkerThreadData>::DestructorAtExit
     g_worker_data_tls = LAZY_INSTANCE_INITIALIZER;
 
 // A task-runner that refuses to run any tasks.
-class DoNothingTaskRunner : public base::TaskRunner {
+class DoNothingTaskRunner : public base::SequencedTaskRunner {
  public:
   DoNothingTaskRunner() {}
 
@@ -52,6 +53,12 @@ class DoNothingTaskRunner : public base::TaskRunner {
   bool PostDelayedTask(const base::Location& from_here,
                        base::OnceClosure task,
                        base::TimeDelta delay) override {
+    return false;
+  }
+
+  bool PostNonNestableDelayedTask(const base::Location& from_here,
+                                  base::OnceClosure task,
+                                  base::TimeDelta delay) override {
     return false;
   }
 
@@ -131,7 +138,8 @@ void WorkerThreadRegistry::WillStopCurrentWorkerThread() {
   g_worker_data_tls.Pointer()->Set(nullptr);
 }
 
-base::TaskRunner* WorkerThreadRegistry::GetTaskRunnerFor(int worker_id) {
+base::SequencedTaskRunner* WorkerThreadRegistry::GetTaskRunnerFor(
+    int worker_id) {
   base::AutoLock locker(task_runner_map_lock_);
   return base::Contains(task_runner_map_, worker_id)
              ? task_runner_map_[worker_id]

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
+#include "components/variations/scoped_variations_ids_provider.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -26,6 +27,14 @@ favicon_base::FaviconImageResult GetDummyFaviconResult() {
   bitmap.allocN32Pixels(gfx::kFaviconSize, gfx::kFaviconSize);
   bitmap.eraseColor(SK_ColorBLUE);
   result.image = gfx::Image::CreateFrom1xBitmap(bitmap);
+
+  return result;
+}
+
+favicon_base::FaviconRawBitmapResult GetDummyRawFaviconResult() {
+  favicon_base::FaviconRawBitmapResult result;
+
+  result.bitmap_data = GetDummyFaviconResult().image.As1xPNGBytes();
 
   return result;
 }
@@ -83,14 +92,53 @@ class FaviconCacheTest : public testing::Test {
     }
   }
 
+  void ExpectFaviconServiceForLargestFaviconPageUrlCalls(int a_site_calls,
+                                                         int b_site_calls) {
+    if (a_site_calls > 0) {
+      EXPECT_CALL(favicon_service_,
+                  GetRawFaviconForPageURL(kUrlA, _ /*icon_types */,
+                                          0 /* desired_size_in_pixel */,
+                                          false /* fallback_to_host */,
+                                          _ /* callback */, _ /* tracker */))
+          .Times(a_site_calls)
+          .WillRepeatedly([&](auto, auto, auto, auto,
+                              favicon_base::FaviconRawBitmapCallback callback,
+                              auto) {
+            favicon_service_a_site_raw_favicon_response_ = std::move(callback);
+            return base::CancelableTaskTracker::kBadTaskId;
+          });
+    }
+
+    if (b_site_calls > 0) {
+      EXPECT_CALL(favicon_service_,
+                  GetRawFaviconForPageURL(kUrlB, _ /*icon_types */,
+                                          0 /* desired_size_in_pixel */,
+                                          false /* fallback_to_host */,
+                                          _ /* callback */, _ /* tracker */))
+          .Times(b_site_calls)
+          .WillRepeatedly([&](auto, auto, auto, auto,
+                              favicon_base::FaviconRawBitmapCallback callback,
+                              auto) {
+            favicon_service_b_site_raw_favicon_response_ = std::move(callback);
+            return base::CancelableTaskTracker::kBadTaskId;
+          });
+    }
+  }
+
   void ExpectFaviconServiceForIconUrlCalls(int calls) {
     EXPECT_CALL(favicon_service_,
                 GetFaviconImage(kIconUrl, _ /* callback */, _ /* tracker */))
         .Times(calls);
   }
 
+  variations::ScopedVariationsIdsProvider scoped_variations_ids_provider_{
+      variations::VariationsIdsProvider::Mode::kUseSignedInState};
   favicon_base::FaviconImageCallback favicon_service_a_site_response_;
   favicon_base::FaviconImageCallback favicon_service_b_site_response_;
+  favicon_base::FaviconRawBitmapCallback
+      favicon_service_a_site_raw_favicon_response_;
+  favicon_base::FaviconRawBitmapCallback
+      favicon_service_b_site_raw_favicon_response_;
 
   FaviconCache cache_;
 };
@@ -112,6 +160,29 @@ TEST_F(FaviconCacheTest, Basic) {
   // cache is populated. The above EXPECT_CALL will also verify that the
   // backing FaviconService is not hit again.
   result = cache_.GetFaviconForPageUrl(kUrlA, base::BindOnce(&Fail));
+
+  EXPECT_FALSE(result.IsEmpty());
+  EXPECT_EQ(1, response_count);
+}
+
+TEST_F(FaviconCacheTest, Largest) {
+  ExpectFaviconServiceForLargestFaviconPageUrlCalls(1, 0);
+  ExpectFaviconServiceForIconUrlCalls(0);
+
+  int response_count = 0;
+  gfx::Image result = cache_.GetLargestFaviconForPageUrl(
+      kUrlA, base::BindOnce(&VerifyFetchedFaviconAndCount, &response_count));
+
+  // Expect the synchronous result to be empty.
+  EXPECT_TRUE(result.IsEmpty());
+
+  std::move(favicon_service_a_site_raw_favicon_response_)
+      .Run(GetDummyRawFaviconResult());
+
+  // Re-request the same favicon and expect a non-empty result now that the
+  // cache is populated. The above EXPECT_CALL will also verify that the
+  // backing FaviconService is not hit again.
+  result = cache_.GetLargestFaviconForPageUrl(kUrlA, base::BindOnce(&Fail));
 
   EXPECT_FALSE(result.IsEmpty());
   EXPECT_EQ(1, response_count);
@@ -255,9 +326,8 @@ TEST_F(FaviconCacheTest, ExpireNullFaviconsByHistory) {
   std::move(favicon_service_a_site_response_)
       .Run(favicon_base::FaviconImageResult());
 
-  cache_.OnURLVisited(nullptr /* history_service */, ui::PAGE_TRANSITION_LINK,
-                      history::URLRow(kUrlA), history::RedirectList(),
-                      base::Time::Now());
+  cache_.OnURLVisited(nullptr /* history_service */, history::URLRow(kUrlA),
+                      history::VisitRow());
 
   // Now the empty favicon should have been expired and we expect our second
   // call to the mock underlying FaviconService.

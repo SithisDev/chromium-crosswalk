@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "media/capture/mojom/video_capture_buffer.mojom.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 
 namespace viz {
@@ -14,14 +16,13 @@ namespace viz {
 namespace {
 
 // How long to wait before attempting to re-establish a lost connection.
-constexpr base::TimeDelta kReEstablishConnectionDelay =
-    base::TimeDelta::FromMilliseconds(100);
+constexpr base::TimeDelta kReEstablishConnectionDelay = base::Milliseconds(100);
 
 }  // namespace
 
 ClientFrameSinkVideoCapturer::ClientFrameSinkVideoCapturer(
     EstablishConnectionCallback callback)
-    : establish_connection_callback_(callback), consumer_binding_(this) {
+    : establish_connection_callback_(callback) {
   EstablishConnection();
 }
 
@@ -29,12 +30,11 @@ ClientFrameSinkVideoCapturer::~ClientFrameSinkVideoCapturer() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
-void ClientFrameSinkVideoCapturer::SetFormat(media::VideoPixelFormat format,
-                                             gfx::ColorSpace color_space) {
+void ClientFrameSinkVideoCapturer::SetFormat(media::VideoPixelFormat format) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  format_.emplace(format, color_space);
-  capturer_->SetFormat(format, color_space);
+  format_.emplace(format);
+  capturer_remote_->SetFormat(format);
 }
 
 void ClientFrameSinkVideoCapturer::SetMinCapturePeriod(
@@ -42,7 +42,7 @@ void ClientFrameSinkVideoCapturer::SetMinCapturePeriod(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   min_capture_period_ = min_capture_period;
-  capturer_->SetMinCapturePeriod(min_capture_period);
+  capturer_remote_->SetMinCapturePeriod(min_capture_period);
 }
 
 void ClientFrameSinkVideoCapturer::SetMinSizeChangePeriod(
@@ -50,7 +50,7 @@ void ClientFrameSinkVideoCapturer::SetMinSizeChangePeriod(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   min_size_change_period_ = min_period;
-  capturer_->SetMinSizeChangePeriod(min_period);
+  capturer_remote_->SetMinSizeChangePeriod(min_period);
 }
 
 void ClientFrameSinkVideoCapturer::SetResolutionConstraints(
@@ -60,31 +60,44 @@ void ClientFrameSinkVideoCapturer::SetResolutionConstraints(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   resolution_constraints_.emplace(min_size, max_size, use_fixed_aspect_ratio);
-  capturer_->SetResolutionConstraints(min_size, max_size,
-                                      use_fixed_aspect_ratio);
+  capturer_remote_->SetResolutionConstraints(min_size, max_size,
+                                             use_fixed_aspect_ratio);
 }
 
 void ClientFrameSinkVideoCapturer::SetAutoThrottlingEnabled(bool enabled) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   auto_throttling_enabled_ = enabled;
-  capturer_->SetAutoThrottlingEnabled(enabled);
+  capturer_remote_->SetAutoThrottlingEnabled(enabled);
 }
 
 void ClientFrameSinkVideoCapturer::ChangeTarget(
-    const base::Optional<FrameSinkId>& frame_sink_id) {
+    const absl::optional<VideoCaptureTarget>& target) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  target_ = frame_sink_id;
-  capturer_->ChangeTarget(frame_sink_id);
+  ChangeTarget(target, crop_version_);
+}
+
+void ClientFrameSinkVideoCapturer::ChangeTarget(
+    const absl::optional<VideoCaptureTarget>& target,
+    uint32_t crop_version) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_GE(crop_version, crop_version_);
+
+  target_ = target;
+  crop_version_ = crop_version;
+
+  capturer_remote_->ChangeTarget(target, crop_version);
 }
 
 void ClientFrameSinkVideoCapturer::Start(
-    mojom::FrameSinkVideoConsumer* consumer) {
+    mojom::FrameSinkVideoConsumer* consumer,
+    mojom::BufferFormatPreference buffer_format_preference) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(consumer);
 
   is_started_ = true;
+  buffer_format_preference_ = buffer_format_preference;
   consumer_ = consumer;
   StartInternal();
 }
@@ -93,7 +106,8 @@ void ClientFrameSinkVideoCapturer::Stop() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   is_started_ = false;
-  capturer_->Stop();
+  buffer_format_preference_ = mojom::BufferFormatPreference::kDefault;
+  capturer_remote_->Stop();
 }
 
 void ClientFrameSinkVideoCapturer::StopAndResetConsumer() {
@@ -101,13 +115,13 @@ void ClientFrameSinkVideoCapturer::StopAndResetConsumer() {
 
   Stop();
   consumer_ = nullptr;
-  consumer_binding_.Close();
+  consumer_receiver_.reset();
 }
 
 void ClientFrameSinkVideoCapturer::RequestRefreshFrame() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  capturer_->RequestRefreshFrame();
+  capturer_remote_->RequestRefreshFrame();
 }
 
 std::unique_ptr<ClientFrameSinkVideoCapturer::Overlay>
@@ -127,15 +141,10 @@ ClientFrameSinkVideoCapturer::CreateOverlay(int32_t stacking_index) {
   auto overlay =
       std::make_unique<Overlay>(weak_factory_.GetWeakPtr(), stacking_index);
   overlays_.push_back(overlay.get());
-  if (capturer_)
-    overlays_.back()->EstablishConnection(capturer_.get());
+  if (capturer_remote_)
+    overlays_.back()->EstablishConnection(capturer_remote_.get());
   return overlay;
 }
-
-ClientFrameSinkVideoCapturer::Format::Format(
-    media::VideoPixelFormat pixel_format,
-    gfx::ColorSpace color_space)
-    : pixel_format(pixel_format), color_space(color_space) {}
 
 ClientFrameSinkVideoCapturer::ResolutionConstraints::ResolutionConstraints(
     const gfx::Size& min_size,
@@ -146,14 +155,33 @@ ClientFrameSinkVideoCapturer::ResolutionConstraints::ResolutionConstraints(
       use_fixed_aspect_ratio(use_fixed_aspect_ratio) {}
 
 void ClientFrameSinkVideoCapturer::OnFrameCaptured(
-    base::ReadOnlySharedMemoryRegion data,
+    media::mojom::VideoBufferHandlePtr data,
     media::mojom::VideoFrameInfoPtr info,
     const gfx::Rect& content_rect,
-    mojom::FrameSinkVideoConsumerFrameCallbacksPtr callbacks) {
+    mojo::PendingRemote<mojom::FrameSinkVideoConsumerFrameCallbacks>
+        callbacks) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   consumer_->OnFrameCaptured(std::move(data), std::move(info), content_rect,
                              std::move(callbacks));
+}
+
+void ClientFrameSinkVideoCapturer::OnFrameWithEmptyRegionCapture() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  consumer_->OnFrameWithEmptyRegionCapture();
+}
+
+void ClientFrameSinkVideoCapturer::OnNewCropVersion(uint32_t crop_version) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  consumer_->OnNewCropVersion(crop_version);
+}
+
+void ClientFrameSinkVideoCapturer::OnLog(const std::string& message) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  consumer_->OnLog(message);
 }
 
 void ClientFrameSinkVideoCapturer::OnStopped() {
@@ -165,27 +193,30 @@ void ClientFrameSinkVideoCapturer::OnStopped() {
 void ClientFrameSinkVideoCapturer::EstablishConnection() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  establish_connection_callback_.Run(mojo::MakeRequest(&capturer_));
-  capturer_.set_connection_error_handler(
+  capturer_remote_.reset();
+  establish_connection_callback_.Run(
+      capturer_remote_.BindNewPipeAndPassReceiver());
+  capturer_remote_.set_disconnect_handler(
       base::BindOnce(&ClientFrameSinkVideoCapturer::OnConnectionError,
                      base::Unretained(this)));
   if (format_)
-    capturer_->SetFormat(format_->pixel_format, format_->color_space);
+    capturer_remote_->SetFormat(*format_);
   if (min_capture_period_)
-    capturer_->SetMinCapturePeriod(*min_capture_period_);
+    capturer_remote_->SetMinCapturePeriod(*min_capture_period_);
   if (min_size_change_period_)
-    capturer_->SetMinSizeChangePeriod(*min_size_change_period_);
+    capturer_remote_->SetMinSizeChangePeriod(*min_size_change_period_);
   if (resolution_constraints_) {
-    capturer_->SetResolutionConstraints(
+    capturer_remote_->SetResolutionConstraints(
         resolution_constraints_->min_size, resolution_constraints_->max_size,
         resolution_constraints_->use_fixed_aspect_ratio);
   }
   if (auto_throttling_enabled_)
-    capturer_->SetAutoThrottlingEnabled(*auto_throttling_enabled_);
-  if (target_)
-    capturer_->ChangeTarget(target_);
+    capturer_remote_->SetAutoThrottlingEnabled(*auto_throttling_enabled_);
+  if (target_) {
+    capturer_remote_->ChangeTarget(target_.value(), crop_version_);
+  }
   for (Overlay* overlay : overlays_)
-    overlay->EstablishConnection(capturer_.get());
+    overlay->EstablishConnection(capturer_remote_.get());
   if (is_started_)
     StartInternal();
 }
@@ -201,11 +232,12 @@ void ClientFrameSinkVideoCapturer::OnConnectionError() {
 }
 
 void ClientFrameSinkVideoCapturer::StartInternal() {
-  if (consumer_binding_)
-    consumer_binding_.Close();
-  mojom::FrameSinkVideoConsumerPtr consumer;
-  consumer_binding_.Bind(mojo::MakeRequest(&consumer));
-  capturer_->Start(std::move(consumer));
+  DCHECK(is_started_);
+
+  if (consumer_receiver_.is_bound())
+    consumer_receiver_.reset();
+  capturer_remote_->Start(consumer_receiver_.BindNewPipeAndPassRemote(),
+                          buffer_format_preference_);
 }
 
 void ClientFrameSinkVideoCapturer::OnOverlayDestroyed(Overlay* overlay) {
@@ -266,12 +298,13 @@ void ClientFrameSinkVideoCapturer::Overlay::EstablishConnection(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(client_capturer_);
 
-  capturer->CreateOverlay(stacking_index_, mojo::MakeRequest(&overlay_));
-  // Note: There's no need to add a connection error handler on the
-  // InterfacePtr. If the connection to the service is lost, the
-  // ClientFrameSinkVideoCapturer will realize this when the
-  // FrameSinkVideoCapturer's binding is lost, and re-establish a connection to
-  // both that and this overlay.
+  overlay_.reset();
+  capturer->CreateOverlay(stacking_index_,
+                          overlay_.BindNewPipeAndPassReceiver());
+  // Note: There's no need to add a connection error handler on the remote. If
+  // the connection to the service is lost, the ClientFrameSinkVideoCapturer
+  // will realize this when the FrameSinkVideoCapturer's binding is lost, and
+  // re-establish a connection to both that and this overlay.
 
   if (!image_.isNull())
     overlay_->SetImageAndBounds(image_, bounds_);

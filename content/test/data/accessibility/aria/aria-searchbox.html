@@ -1,6 +1,5 @@
 <!--
-@MAC-ALLOW:AXRole*
-@MAC-ALLOW:AXSubrole*
+@MAC-ALLOW:AXRoleDescription
 @WIN-DENY:description*
 @WIN-ALLOW:caret_offset*
 @WIN-ALLOW:ia2_hypertext=*
@@ -9,15 +8,18 @@
 @WIN-ALLOW:selection_end*
 @WIN-ALLOW:xml-roles*
 @AURALINUX-ALLOW:xml-roles*
+@AURALINUX-ALLOW:caret_offset*
+@AURALINUX-ALLOW:selection_start*
+@AURALINUX-ALLOW:selection_end*
 -->
 <!DOCTYPE html>
 <html>
 <body>
-  <!-- There should be no selection on the document because the search box is
-      not content editable. -->
-  <div id="searchbox" role="searchbox" tabindex="0">ARIA role searchbox.</div>
+  <div id="searchbox" role="searchbox" contenteditable="plaintext-only">
+    ARIA role searchbox.
+  </div>
   <script>
-    var searchbox = document.getElementById('searchbox');
+    const searchbox = document.getElementById('searchbox');
     searchbox.focus();
   </script>
 </body>

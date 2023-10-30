@@ -1,10 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/browser/web_contents_view_delegate.h"
 
 #include <stddef.h>
+#include <utility>
+
+#include "base/callback.h"
+#include "base/check.h"
+#include "content/public/common/drop_data.h"
 
 namespace content {
 
@@ -20,8 +25,14 @@ WebDragDestDelegate* WebContentsViewDelegate::GetDragDestDelegate() {
 }
 
 void WebContentsViewDelegate::ShowContextMenu(
-    RenderFrameHost* render_frame_host,
-    const ContextMenuParams& params) {
+    RenderFrameHost& render_frame_host,
+    const ContextMenuParams& params) {}
+
+void WebContentsViewDelegate::DismissContextMenu() {}
+
+void WebContentsViewDelegate::ExecuteCommandForTesting(int command_id,
+                                                       int event_flags) {
+  NOTREACHED();
 }
 
 void WebContentsViewDelegate::StoreFocus() {
@@ -45,6 +56,11 @@ void* WebContentsViewDelegate::CreateRenderWidgetHostViewDelegate(
     RenderWidgetHost* render_widget_host,
     bool is_popup) {
   return nullptr;
+}
+
+void WebContentsViewDelegate::OnPerformDrop(const DropData& drop_data,
+                                            DropCompletionCallback callback) {
+  return std::move(callback).Run(DropCompletionResult::kContinue);
 }
 
 }  // namespace content

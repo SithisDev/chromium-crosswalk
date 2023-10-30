@@ -1,18 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/download/internal/background_service/in_memory_download.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/guid.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "net/base/io_buffer.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "storage/browser/blob/blob_reader.h"
 #include "storage/browser/blob/blob_storage_context.h"
@@ -57,6 +60,9 @@ class MockDelegate : public InMemoryDownload::Delegate {
   MockDelegate(BlobContextGetter blob_context_getter)
       : blob_context_getter_(blob_context_getter) {}
 
+  MockDelegate(const MockDelegate&) = delete;
+  MockDelegate& operator=(const MockDelegate&) = delete;
+
   void WaitForCompletion() {
     DCHECK(!run_loop_.running());
     run_loop_.Run();
@@ -78,19 +84,21 @@ class MockDelegate : public InMemoryDownload::Delegate {
  private:
   base::RunLoop run_loop_;
   BlobContextGetter blob_context_getter_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockDelegate);
 };
 
 class InMemoryDownloadTest : public testing::Test {
  public:
   InMemoryDownloadTest() = default;
+
+  InMemoryDownloadTest(const InMemoryDownloadTest&) = delete;
+  InMemoryDownloadTest& operator=(const InMemoryDownloadTest&) = delete;
+
   ~InMemoryDownloadTest() override = default;
 
   void SetUp() override {
-    io_thread_.reset(new base::Thread("Network and Blob IO thread"));
-    base::Thread::Options options(base::MessageLoop::TYPE_IO, 0);
-    io_thread_->StartWithOptions(options);
+    io_thread_ = std::make_unique<base::Thread>("Network and Blob IO thread");
+    base::Thread::Options options(base::MessagePumpType::IO, 0);
+    io_thread_->StartWithOptions(std::move(options));
 
     base::RunLoop loop;
     io_thread_->task_runner()->PostTask(
@@ -172,7 +180,7 @@ class InMemoryDownloadTest : public testing::Test {
   std::unique_ptr<base::Thread> io_thread_;
 
   // Created before other objects to provide test environment.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   std::unique_ptr<InMemoryDownloadImpl> download_;
   std::unique_ptr<NiceMock<MockDelegate>> mock_delegate_;
@@ -182,8 +190,6 @@ class InMemoryDownloadTest : public testing::Test {
 
   // Memory backed blob storage that can never page to disk.
   std::unique_ptr<storage::BlobStorageContext> blob_storage_context_;
-
-  DISALLOW_COPY_AND_ASSIGN(InMemoryDownloadTest);
 };
 
 TEST_F(InMemoryDownloadTest, DownloadTest) {
@@ -210,27 +216,28 @@ TEST_F(InMemoryDownloadTest, RedirectResponseHeaders) {
   // Add a redirect.
   net::RedirectInfo redirect_info;
   redirect_info.new_url = GURL("https://example.com/redirect12345");
-  network::TestURLLoaderFactory::Redirects redirects = {
-      {redirect_info, network::ResourceResponseHead()}};
+  network::TestURLLoaderFactory::Redirects redirects;
+  redirects.push_back({redirect_info, network::mojom::URLResponseHead::New()});
 
   // Add some random header.
-  network::ResourceResponseHead response_head;
-  response_head.headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
-  response_head.headers->AddHeader("X-Random-Test-Header: 123");
+  auto response_head = network::mojom::URLResponseHead::New();
+  response_head->headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
+  response_head->headers->SetHeader("X-Random-Test-Header", "123");
 
   // The size must match for download as stream from SimpleUrlLoader.
   network::URLLoaderCompletionStatus status;
-  status.decoded_body_length = base::size(kTestDownloadData) - 1;
+  status.decoded_body_length = std::size(kTestDownloadData) - 1;
 
-  url_loader_factory()->AddResponse(request_params.url, response_head,
-                                    kTestDownloadData, status, redirects);
+  url_loader_factory()->AddResponse(request_params.url, response_head.Clone(),
+                                    kTestDownloadData, status,
+                                    std::move(redirects));
 
   std::vector<GURL> expected_url_chain = {request_params.url,
                                           redirect_info.new_url};
 
   EXPECT_CALL(*delegate(),
               OnDownloadStarted(InMemoryDownloadMatcher(
-                  response_head.headers->raw_headers(), expected_url_chain)));
+                  response_head->headers->raw_headers(), expected_url_chain)));
 
   download()->Start();
   delegate()->WaitForCompletion();
@@ -240,7 +247,7 @@ TEST_F(InMemoryDownloadTest, RedirectResponseHeaders) {
   // the original URL and redirect URL, and should not contain the final URL.
   EXPECT_EQ(download()->url_chain(), expected_url_chain);
   EXPECT_EQ(download()->response_headers()->raw_headers(),
-            response_head.headers->raw_headers());
+            response_head->headers->raw_headers());
 
   // Verfiy the data persisted to disk after redirect chain.
   auto blob = download()->ResultAsBlob();

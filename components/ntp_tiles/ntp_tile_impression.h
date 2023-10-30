@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,6 @@ struct NTPTileImpression {
                     TileTitleSource title_source,
                     TileVisualType visual_type,
                     favicon_base::IconType icon_type,
-                    base::Time data_generation_time,
                     const GURL& url_for_rappor);
   ~NTPTileImpression();
 
@@ -32,12 +31,9 @@ struct NTPTileImpression {
   TileTitleSource title_source;
   TileVisualType visual_type;
   favicon_base::IconType icon_type;
-  // The timestamp representing when the tile data (e.g. URL) was generated
-  // originally, regardless of the impression timestamp or the time when it
-  // was fetched (for server-side suggestions).
-  base::Time data_generation_time;
-  // URL the tile points to, used to report Rappor metrics only (might be empty
-  // and is hence ignored, e.g. on desktop).
+  // URL the tile points to, formerly used to report Rappor metrics. Currently
+  // completely ignored but this code remains to leave the ability to port to
+  // UKM in the future.
   GURL url_for_rappor;
 };
 

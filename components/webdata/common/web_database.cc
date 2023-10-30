@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,23 +6,23 @@
 
 #include <algorithm>
 
-#include "base/stl_util.h"
+#include "base/logging.h"
 #include "sql/transaction.h"
 
 // Current version number.  Note: when changing the current version number,
 // corresponding changes must happen in the unit tests, and new migration test
 // added.  See |WebDatabaseMigrationTest::kCurrentTestedVersionNumber|.
 // static
-const int WebDatabase::kCurrentVersionNumber = 81;
+const int WebDatabase::kCurrentVersionNumber = 104;
 
-const int WebDatabase::kDeprecatedVersionNumber = 51;
+const int WebDatabase::kDeprecatedVersionNumber = 82;
 
 const base::FilePath::CharType WebDatabase::kInMemoryPath[] =
     FILE_PATH_LITERAL(":memory");
 
 namespace {
 
-const int kCompatibleVersionNumber = 79;
+const int kCompatibleVersionNumber = 99;
 
 // Change the version number and possibly the compatibility version of
 // |meta_table_|.
@@ -47,9 +47,20 @@ sql::InitStatus FailedMigrationTo(int version_num) {
 
 }  // namespace
 
-WebDatabase::WebDatabase() {}
+WebDatabase::WebDatabase()
+    : db_({// Run the database in exclusive mode. Nobody else should be
+           // accessing the database while we're running, and this will give
+           // somewhat improved perf.
+           .exclusive_locking = true,
+           // We don't store that much data in the tables so use a small page
+           // size. This provides a large benefit for empty tables (which is
+           // very likely with the tables we create).
+           .page_size = 2048,
+           // We shouldn't have much data and what access we currently have is
+           // quite infrequent. So we go with a small cache size.
+           .cache_size = 32}) {}
 
-WebDatabase::~WebDatabase() {}
+WebDatabase::~WebDatabase() = default;
 
 void WebDatabase::AddTable(WebDatabaseTable* table) {
   tables_[table->GetTypeKey()] = table;
@@ -79,19 +90,6 @@ sql::Database* WebDatabase::GetSQLConnection() {
 sql::InitStatus WebDatabase::Init(const base::FilePath& db_name) {
   db_.set_histogram_tag("Web");
 
-  // We don't store that much data in the tables so use a small page size.
-  // This provides a large benefit for empty tables (which is very likely with
-  // the tables we create).
-  db_.set_page_size(2048);
-
-  // We shouldn't have much data and what access we currently have is quite
-  // infrequent. So we go with a small cache size.
-  db_.set_cache_size(32);
-
-  // Run the database in exclusive mode. Nobody else should be accessing the
-  // database while we're running, and this will give somewhat improved perf.
-  db_.set_exclusive_locking();
-
   if ((db_name.value() == kInMemoryPath) ? !db_.OpenInMemory()
                                          : !db_.Open(db_name)) {
     return sql::INIT_FAILURE;
@@ -100,7 +98,9 @@ sql::InitStatus WebDatabase::Init(const base::FilePath& db_name) {
   // Clobber really old databases.
   static_assert(kDeprecatedVersionNumber < kCurrentVersionNumber,
                 "Deprecation version must be less than current");
-  sql::MetaTable::RazeIfDeprecated(&db_, kDeprecatedVersionNumber);
+  sql::MetaTable::RazeIfIncompatible(
+      &db_, /*lowest_supported_version=*/kDeprecatedVersionNumber + 1,
+      kCurrentVersionNumber);
 
   // Scope initialization in a transaction so we can't be partially
   // initialized.
@@ -117,8 +117,8 @@ sql::InitStatus WebDatabase::Init(const base::FilePath& db_name) {
   }
 
   // Initialize the tables.
-  for (auto it = tables_.begin(); it != tables_.end(); ++it) {
-    it->second->Init(&db_, &meta_table_);
+  for (const auto& table : tables_) {
+    table.second->Init(&db_, &meta_table_);
   }
 
   // If the file on disk is an older database version, bring it up to date.
@@ -132,8 +132,8 @@ sql::InitStatus WebDatabase::Init(const base::FilePath& db_name) {
   // It's important that this happen *after* the migration code runs.
   // Otherwise, the migration code would have to explicitly check for empty
   // tables created in the new format, and skip the migration in that case.
-  for (auto it = tables_.begin(); it != tables_.end(); ++it) {
-    if (!it->second->CreateTablesIfNecessary()) {
+  for (const auto& table : tables_) {
+    if (!table.second->CreateTablesIfNecessary()) {
       LOG(WARNING) << "Unable to initialize the web database.";
       return sql::INIT_FAILURE;
     }
@@ -163,11 +163,11 @@ sql::InitStatus WebDatabase::MigrateOldVersionsAsNeeded() {
     ChangeVersion(&meta_table_, next_version, update_compatible_version);
 
     // Give each table a chance to migrate to this version.
-    for (auto it = tables_.begin(); it != tables_.end(); ++it) {
+    for (const auto& table : tables_) {
       // Any of the tables may set this to true, but by default it is false.
       update_compatible_version = false;
-      if (!it->second->MigrateToVersion(next_version,
-                                        &update_compatible_version)) {
+      if (!table.second->MigrateToVersion(next_version,
+                                          &update_compatible_version)) {
         return FailedMigrationTo(next_version);
       }
 

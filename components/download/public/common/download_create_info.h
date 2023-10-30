@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,21 +10,19 @@
 #include <string>
 #include <vector>
 
-#include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/optional.h"
 #include "base/time/time.h"
 #include "components/download/public/common/download_export.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
 #include "components/download/public/common/download_item.h"
-#include "components/download/public/common/download_request_handle_interface.h"
 #include "components/download/public/common/download_save_info.h"
 #include "components/download/public/common/download_source.h"
 #include "components/download/public/common/download_url_parameters.h"
 #include "net/http/http_response_info.h"
-#include "net/url_request/url_request.h"
+#include "net/url_request/referrer_policy.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -34,7 +32,6 @@ class HttpResponseHeaders;
 }
 
 namespace download {
-
 // Server support for range request inferred from the response headers.
 // |kSupport| value means the server supports range requests. |kNoSupport|
 // means no range request is accepted by server. and |kUnknown| is used if
@@ -51,6 +48,10 @@ struct COMPONENTS_DOWNLOAD_EXPORT DownloadCreateInfo {
   DownloadCreateInfo(const base::Time& start_time,
                      std::unique_ptr<DownloadSaveInfo> save_info);
   DownloadCreateInfo();
+
+  DownloadCreateInfo(const DownloadCreateInfo&) = delete;
+  DownloadCreateInfo& operator=(const DownloadCreateInfo&) = delete;
+
   ~DownloadCreateInfo();
 
   bool is_new_download;
@@ -67,10 +68,11 @@ struct COMPONENTS_DOWNLOAD_EXPORT DownloadCreateInfo {
 
   // The URL and referrer policy that referred us.
   GURL referrer_url;
-  net::URLRequest::ReferrerPolicy referrer_policy;
+  net::ReferrerPolicy referrer_policy;
 
-  // Site URL for the site instance that initiated the download.
-  GURL site_url;
+  // The serialized embedder download data for the site instance that initiated
+  // the download.
+  std::string serialized_embedder_download_data;
 
   // The URL of the tab that started us.
   GURL tab_url;
@@ -79,7 +81,7 @@ struct COMPONENTS_DOWNLOAD_EXPORT DownloadCreateInfo {
   GURL tab_referrer_url;
 
   // The origin of the requester that originally initiated the download.
-  base::Optional<url::Origin> request_initiator;
+  absl::optional<url::Origin> request_initiator;
 
   // The time when the download started.
   base::Time start_time;
@@ -100,7 +102,10 @@ struct COMPONENTS_DOWNLOAD_EXPORT DownloadCreateInfo {
   // short-lived and is not shown in the UI.
   bool transient;
 
-  base::Optional<ui::PageTransition> transition_type;
+  // Whether this download requires safety checks.
+  bool require_safety_checks;
+
+  absl::optional<ui::PageTransition> transition_type;
 
   // The HTTP response headers. This contains a nullptr when the response has
   // not yet been received. Only for consuming headers.
@@ -123,10 +128,6 @@ struct COMPONENTS_DOWNLOAD_EXPORT DownloadCreateInfo {
 
   // The render frame id that initiates this download.
   int render_frame_id;
-
-  // The handle to the URLRequest sourcing this download.
-  // TODO(qinmin): remove this when network service is fully enabled.
-  std::unique_ptr<DownloadRequestHandleInterface> request_handle;
 
   // ---------------------------------------------------------------------------
   // The remaining fields are Entity-body properties. These are only set if
@@ -178,11 +179,15 @@ struct COMPONENTS_DOWNLOAD_EXPORT DownloadCreateInfo {
   // Source of the download, used in metrics.
   DownloadSource download_source = DownloadSource::UNKNOWN;
 
-  // Whether download is initated by the content on the page.
+  // Whether download is initiated by the content on the page.
   bool is_content_initiated;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(DownloadCreateInfo);
+  // The credentials mode for whether to expose the response headers to
+  // javascript, see Access-Control-Allow-Credentials header.
+  ::network::mojom::CredentialsMode credentials_mode;
+
+  // Isolation info for the download request, mainly for same site cookies.
+  absl::optional<net::IsolationInfo> isolation_info;
 };
 
 }  // namespace download

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/json/json_reader.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -16,6 +17,11 @@
 namespace update_client {
 
 namespace {
+
+std::string GetValueString(const base::Value& node, const char* key) {
+  const auto* value = node.FindKey(key);
+  return (value && value->is_string()) ? value->GetString() : std::string();
+}
 
 bool ParseManifest(const base::Value& manifest_node,
                    ProtocolParser::Result* result,
@@ -47,6 +53,9 @@ bool ParseManifest(const base::Value& manifest_node,
     }
   }
 
+  result->manifest.run = GetValueString(manifest_node, "run");
+  result->manifest.arguments = GetValueString(manifest_node, "arguments");
+
   const auto* packages_node = manifest_node.FindKey("packages");
   if (!packages_node || !packages_node->is_dict()) {
     *error = "Missing packages in manifest or 'packages' is not a dictionary.";
@@ -58,7 +67,7 @@ bool ParseManifest(const base::Value& manifest_node,
     return false;
   }
 
-  for (const auto& package : package_node->GetList()) {
+  for (const auto& package : package_node->GetListDeprecated()) {
     if (!package.is_dict()) {
       *error = "'package' is not a dictionary.";
       return false;
@@ -71,17 +80,10 @@ bool ParseManifest(const base::Value& manifest_node,
     }
     p.name = name->GetString();
 
-    const auto* namediff = package.FindKey("namediff");
-    if (namediff && namediff->is_string())
-      p.namediff = namediff->GetString();
-
-    const auto* fingerprint = package.FindKey("fp");
-    if (fingerprint && fingerprint->is_string())
-      p.fingerprint = fingerprint->GetString();
-
-    const auto* hash_sha256 = package.FindKey("hash_sha256");
-    if (hash_sha256 && hash_sha256->is_string())
-      p.hash_sha256 = hash_sha256->GetString();
+    p.namediff = GetValueString(package, "namediff");
+    p.fingerprint = GetValueString(package, "fp");
+    p.hash_sha256 = GetValueString(package, "hash_sha256");
+    p.hashdiff_sha256 = GetValueString(package, "hashdiff_sha256");
 
     const auto* size = package.FindKey("size");
     if (size && (size->is_int() || size->is_double())) {
@@ -89,10 +91,6 @@ bool ParseManifest(const base::Value& manifest_node,
       if (0 <= val && val < kProtocolMaxInt)
         p.size = size->GetDouble();
     }
-
-    const auto* hashdiff_sha256 = package.FindKey("hashdiff_sha256");
-    if (hashdiff_sha256 && hashdiff_sha256->is_string())
-      p.hashdiff_sha256 = hashdiff_sha256->GetString();
 
     const auto* sizediff = package.FindKey("sizediff");
     if (sizediff && (sizediff->is_int() || sizediff->is_double())) {
@@ -116,13 +114,11 @@ void ParseActions(const base::Value& actions_node,
   if (!action_node || !action_node->is_list())
     return;
 
-  const auto& action_list = action_node->GetList();
+  const auto& action_list = action_node->GetListDeprecated();
   if (action_list.empty() || !action_list[0].is_dict())
     return;
 
-  const auto* run = action_list[0].FindKey("run");
-  if (run && run->is_string())
-    result->action_run = run->GetString();
+  result->action_run = GetValueString(action_list[0], "run");
 }
 
 bool ParseUrls(const base::Value& urls_node,
@@ -138,7 +134,7 @@ bool ParseUrls(const base::Value& urls_node,
     return false;
   }
 
-  for (const auto& url : url_node->GetList()) {
+  for (const auto& url : url_node->GetListDeprecated()) {
     if (!url.is_dict())
       continue;
     const auto* codebase = url.FindKey("codebase");
@@ -164,6 +160,15 @@ bool ParseUrls(const base::Value& urls_node,
   return true;
 }
 
+void ParseData(const base::Value& data_node, ProtocolParser::Result* result) {
+  if (!data_node.is_dict())
+    return;
+
+  result->data.emplace_back(ProtocolParser::Result::Data(
+      GetValueString(data_node, "status"), GetValueString(data_node, "name"),
+      GetValueString(data_node, "index"), GetValueString(data_node, "#text")));
+}
+
 bool ParseUpdateCheck(const base::Value& updatecheck_node,
                       ProtocolParser::Result* result,
                       std::string* error) {
@@ -171,6 +176,13 @@ bool ParseUpdateCheck(const base::Value& updatecheck_node,
     *error = "'updatecheck' is not a dictionary.";
     return false;
   }
+
+  for (auto kv : updatecheck_node.DictItems()) {
+    if (kv.first.front() == '_' && kv.second.is_string()) {
+      result->custom_attributes[kv.first] = kv.second.GetString();
+    }
+  }
+
   const auto* status = updatecheck_node.FindKey("status");
   if (!status || !status->is_string()) {
     *error = "Missing status on updatecheck node";
@@ -255,6 +267,15 @@ bool ParseApp(const base::Value& app_node,
   }
 
   DCHECK(result->status.empty() || result->status == "ok");
+
+  if (const auto* data_node = app_node.FindKey("data")) {
+    if (const auto* data_list = data_node->GetIfList()) {
+      base::ranges::for_each(*data_list, [&result](const base::Value& data) {
+        ParseData(data, result);
+      });
+    }
+  }
+
   const auto* updatecheck_node = app_node.FindKey("updatecheck");
   if (!updatecheck_node) {
     *error = "Missing updatecheck on app.";
@@ -282,9 +303,9 @@ bool ProtocolParserJSON::DoParse(const std::string& response_json,
     ParseError("Missing secure JSON prefix.");
     return false;
   }
-  const auto doc = base::JSONReader::Read(
-      {response_json.begin() + std::char_traits<char>::length(kJSONPrefix),
-       response_json.end()});
+  const auto doc = base::JSONReader::Read(base::MakeStringPiece(
+      response_json.begin() + std::char_traits<char>::length(kJSONPrefix),
+      response_json.end()));
   if (!doc) {
     ParseError("JSON read error.");
     return false;
@@ -321,7 +342,7 @@ bool ProtocolParserJSON::DoParse(const std::string& response_json,
 
   const auto* app_node = response_node->FindKey("app");
   if (app_node && app_node->is_list()) {
-    for (const auto& app : app_node->GetList()) {
+    for (const auto& app : app_node->GetListDeprecated()) {
       Result result;
       std::string error;
       if (ParseApp(app, &result, &error))

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@ package org.chromium.net;
 
 import android.content.Context;
 import android.net.http.HttpResponseCache;
-import android.support.annotation.VisibleForTesting;
 import android.util.Log;
+
+import androidx.annotation.VisibleForTesting;
 
 import java.io.IOException;
 import java.net.URL;
@@ -63,7 +64,7 @@ public abstract class CronetEngine {
         /**
          * Constructs a {@link Builder} object that facilitates creating a
          * {@link CronetEngine}. The default configuration enables HTTP/2 and
-         * disables QUIC and the HTTP cache.
+         * QUIC, but disables the HTTP cache.
          *
          * @param context Android {@link Context}, which is used by
          *                {@link Builder} to retrieve the application
@@ -141,7 +142,7 @@ public abstract class CronetEngine {
 
         /**
          * Sets whether <a href="https://www.chromium.org/quic">QUIC</a> protocol
-         * is enabled. Defaults to disabled. If QUIC is enabled, then QUIC User Agent Id
+         * is enabled. Defaults to enabled. If QUIC is enabled, then QUIC User Agent Id
          * containing application name and Cronet version is sent to the server.
          * @param value {@code true} to enable QUIC, {@code false} to disable.
          * @return the builder to facilitate chaining.

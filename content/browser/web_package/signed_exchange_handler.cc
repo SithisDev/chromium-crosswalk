@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,14 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
-#include "content/browser/frame_host/frame_tree_node.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/loader/merkle_integrity_source_stream.h"
-#include "content/browser/loader/navigation_url_loader_impl.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
+#include "content/browser/storage_partition_impl.h"
+#include "content/browser/web_package/prefetched_signed_exchange_cache_entry.h"
 #include "content/browser/web_package/signed_exchange_cert_fetcher_factory.h"
 #include "content/browser/web_package/signed_exchange_certificate_chain.h"
 #include "content/browser/web_package/signed_exchange_devtools_proxy.h"
@@ -33,7 +33,6 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/url_loader_throttle.h"
 #include "crypto/sha2.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "net/base/io_buffer.h"
@@ -46,11 +45,12 @@
 #include "net/filter/source_stream.h"
 #include "net/ssl/ssl_info.h"
 #include "services/network/public/cpp/features.h"
-#include "services/network/public/cpp/resource_response.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
 #include "services/network/public/mojom/network_context.mojom.h"
-#include "third_party/blink/public/common/web_package/signed_exchange_request_matcher.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
+#include "third_party/blink/public/common/loader/url_loader_throttle.h"
+#include "third_party/blink/public/common/web_package/web_package_request_matcher.h"
 
 namespace content {
 
@@ -74,48 +74,31 @@ constexpr char kSXGWithoutNoSniffErrorMessage[] =
     "header is not supported.";
 
 network::mojom::NetworkContext* g_network_context_for_testing = nullptr;
-
-base::Optional<base::Time> g_verification_time_for_testing;
-
-base::Time GetVerificationTime() {
-  if (g_verification_time_for_testing)
-    return *g_verification_time_for_testing;
-  return base::Time::Now();
-}
+bool g_should_ignore_cert_validity_period_error = false;
 
 bool IsSupportedSignedExchangeVersion(
-    const base::Optional<SignedExchangeVersion>& version) {
+    const absl::optional<SignedExchangeVersion>& version) {
   return version == SignedExchangeVersion::kB3;
 }
 
-using VerifyCallback = base::OnceCallback<void(int32_t,
-                                               const net::CertVerifyResult&,
-                                               const net::ct::CTVerifyResult&)>;
-
-void OnVerifyCertUI(VerifyCallback callback,
-                    int32_t error_code,
-                    const net::CertVerifyResult& cv_result,
-                    const net::ct::CTVerifyResult& ct_result) {
-  NavigationURLLoaderImpl::RunOrPostTaskOnLoaderThread(
-      FROM_HERE,
-      base::BindOnce(std::move(callback), error_code, cv_result, ct_result));
-}
+using VerifyCallback = base::OnceCallback<
+    void(int32_t, const net::CertVerifyResult&, bool, const std::string&)>;
 
 void VerifyCert(const scoped_refptr<net::X509Certificate>& certificate,
                 const GURL& url,
+                const net::NetworkAnonymizationKey& network_anonymization_key,
                 const std::string& ocsp_result,
                 const std::string& sct_list,
-                base::RepeatingCallback<int(void)> frame_tree_node_id_getter,
+                int frame_tree_node_id,
                 VerifyCallback callback) {
   VerifyCallback wrapped_callback = mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-      base::BindOnce(OnVerifyCertUI, std::move(callback)), net::ERR_FAILED,
-      net::CertVerifyResult(), net::ct::CTVerifyResult());
+      std::move(callback), net::ERR_FAILED, net::CertVerifyResult(), false,
+      std::string());
 
   network::mojom::NetworkContext* network_context =
       g_network_context_for_testing;
   if (!network_context) {
-    auto* frame =
-        FrameTreeNode::GloballyFindByID(frame_tree_node_id_getter.Run());
+    auto* frame = FrameTreeNode::GloballyFindByID(frame_tree_node_id);
     if (!frame)
       return;
 
@@ -126,7 +109,8 @@ void VerifyCert(const scoped_refptr<net::X509Certificate>& certificate,
   }
 
   network_context->VerifyCertForSignedExchange(
-      certificate, url, ocsp_result, sct_list, std::move(wrapped_callback));
+      certificate, url, network_anonymization_key, ocsp_result, sct_list,
+      std::move(wrapped_callback));
 }
 
 std::string OCSPErrorToString(const net::OCSPVerifyResult& ocsp_result) {
@@ -151,6 +135,8 @@ std::string OCSPErrorToString(const net::OCSPVerifyResult& ocsp_result) {
       return "OCSPResponse structure could not be parsed.";
     case net::OCSPVerifyResult::PARSE_RESPONSE_DATA_ERROR:
       return "OCSP ResponseData structure could not be parsed.";
+    case net::OCSPVerifyResult::UNHANDLED_CRITICAL_EXTENSION:
+      return "OCSP Response contained unhandled critical extension.";
   }
 
   switch (ocsp_result.revocation_status) {
@@ -175,9 +161,9 @@ void SignedExchangeHandler::SetNetworkContextForTesting(
 }
 
 // static
-void SignedExchangeHandler::SetVerificationTimeForTesting(
-    base::Optional<base::Time> verification_time_for_testing) {
-  g_verification_time_for_testing = verification_time_for_testing;
+void SignedExchangeHandler::SetShouldIgnoreCertValidityPeriodErrorForTesting(
+    bool ignore) {
+  g_should_ignore_cert_validity_period_error = ignore;
 }
 
 SignedExchangeHandler::SignedExchangeHandler(
@@ -187,21 +173,27 @@ SignedExchangeHandler::SignedExchangeHandler(
     std::unique_ptr<net::SourceStream> body,
     ExchangeHeadersCallback headers_callback,
     std::unique_ptr<SignedExchangeCertFetcherFactory> cert_fetcher_factory,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    const absl::optional<net::IsolationInfo> outer_request_isolation_info,
     int load_flags,
-    std::unique_ptr<blink::SignedExchangeRequestMatcher> request_matcher,
+    const net::IPEndPoint& remote_endpoint,
+    std::unique_ptr<blink::WebPackageRequestMatcher> request_matcher,
     std::unique_ptr<SignedExchangeDevToolsProxy> devtools_proxy,
     SignedExchangeReporter* reporter,
-    base::RepeatingCallback<int(void)> frame_tree_node_id_getter)
+    int frame_tree_node_id)
     : is_secure_transport_(is_secure_transport),
       has_nosniff_(has_nosniff),
       headers_callback_(std::move(headers_callback)),
       source_(std::move(body)),
       cert_fetcher_factory_(std::move(cert_fetcher_factory)),
-      load_flags_(load_flags),
-      request_matcher_(std::move(request_matcher)),
       devtools_proxy_(std::move(devtools_proxy)),
+      network_anonymization_key_(network_anonymization_key),
+      outer_request_isolation_info_(std::move(outer_request_isolation_info)),
+      load_flags_(load_flags),
+      remote_endpoint_(remote_endpoint),
+      request_matcher_(std::move(request_matcher)),
       reporter_(reporter),
-      frame_tree_node_id_getter_(frame_tree_node_id_getter) {
+      frame_tree_node_id_(frame_tree_node_id) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
                "SignedExchangeHandler::SignedExchangeHandler");
 
@@ -252,7 +244,8 @@ SignedExchangeHandler::~SignedExchangeHandler() = default;
 SignedExchangeHandler::SignedExchangeHandler()
     : is_secure_transport_(true),
       has_nosniff_(true),
-      load_flags_(net::LOAD_NORMAL) {}
+      load_flags_(net::LOAD_NORMAL),
+      frame_tree_node_id_(FrameTreeNode::kFrameTreeNodeInvalidId) {}
 
 const GURL& SignedExchangeHandler::GetFallbackUrl() const {
   return prologue_fallback_url_and_after_.fallback_url().url;
@@ -268,10 +261,10 @@ void SignedExchangeHandler::DoHeaderLoop() {
   DCHECK(state_ == State::kReadingPrologueBeforeFallbackUrl ||
          state_ == State::kReadingPrologueFallbackUrlAndAfter ||
          state_ == State::kReadingHeaders);
-  int rv = source_->Read(
-      header_read_buf_.get(), header_read_buf_->BytesRemaining(),
-      base::BindRepeating(&SignedExchangeHandler::DidReadHeader,
-                          base::Unretained(this), false /* sync */));
+  int rv =
+      source_->Read(header_read_buf_.get(), header_read_buf_->BytesRemaining(),
+                    base::BindOnce(&SignedExchangeHandler::DidReadHeader,
+                                   base::Unretained(this), false /* sync */));
   if (rv != net::ERR_IO_PENDING)
     DidReadHeader(true /* sync */, rv);
 }
@@ -452,7 +445,7 @@ SignedExchangeHandler::ParseHeadersAndFetchCertificate() {
                           cert_url, force_fetch,
                           base::BindOnce(&SignedExchangeHandler::OnCertReceived,
                                          base::Unretained(this)),
-                          devtools_proxy_.get(), reporter_);
+                          devtools_proxy_.get());
 
   state_ = State::kFetchingCertificate;
   return SignedExchangeLoadResult::kSuccess;
@@ -466,22 +459,27 @@ void SignedExchangeHandler::RunErrorCallback(SignedExchangeLoadResult result,
         envelope_,
         unverified_cert_chain_ ? unverified_cert_chain_->cert()
                                : scoped_refptr<net::X509Certificate>(),
-        nullptr);
+        absl::nullopt);
   }
   std::move(headers_callback_)
-      .Run(result, error, GetFallbackUrl(), network::ResourceResponseHead(),
-           nullptr);
+      .Run(result, error, GetFallbackUrl(), nullptr, nullptr);
   state_ = State::kHeadersCallbackCalled;
 }
 
 void SignedExchangeHandler::OnCertReceived(
     SignedExchangeLoadResult result,
-    std::unique_ptr<SignedExchangeCertificateChain> cert_chain) {
+    std::unique_ptr<SignedExchangeCertificateChain> cert_chain,
+    net::IPAddress cert_server_ip_address) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
                "SignedExchangeHandler::OnCertReceived");
+  DCHECK_EQ(state_, State::kFetchingCertificate);
+
   base::TimeDelta cert_fetch_duration =
       base::TimeTicks::Now() - cert_fetch_start_time_;
-  DCHECK_EQ(state_, State::kFetchingCertificate);
+  cert_server_ip_address_ = cert_server_ip_address;
+  if (reporter_)
+    reporter_->set_cert_server_ip_address(cert_server_ip_address_);
+
   if (result != SignedExchangeLoadResult::kSuccess) {
     UMA_HISTOGRAM_MEDIUM_TIMES("SignedExchange.Time.CertificateFetch.Failure",
                                cert_fetch_duration);
@@ -502,17 +500,17 @@ void SignedExchangeHandler::OnCertReceived(
   const SignedExchangeSignatureVerifier::Result verify_result =
       SignedExchangeSignatureVerifier::Verify(
           *version_, *envelope_, unverified_cert_chain_.get(),
-          GetVerificationTime(), devtools_proxy_.get());
+          signed_exchange_utils::GetVerificationTime(), devtools_proxy_.get());
   UMA_HISTOGRAM_ENUMERATION(kHistogramSignatureVerificationResult,
                             verify_result);
   if (verify_result != SignedExchangeSignatureVerifier::Result::kSuccess) {
-    base::Optional<SignedExchangeError::Field> error_field =
+    absl::optional<SignedExchangeError::Field> error_field =
         SignedExchangeError::GetFieldFromSignatureVerifierResult(verify_result);
     signed_exchange_utils::ReportErrorAndTraceEvent(
         devtools_proxy_.get(), "Failed to verify the signed exchange header.",
-        error_field ? base::make_optional(
+        error_field ? absl::make_optional(
                           std::make_pair(0 /* signature_index */, *error_field))
-                    : base::nullopt);
+                    : absl::nullopt);
     RunErrorCallback(
         signed_exchange_utils::GetLoadResultFromSignatureVerifierResult(
             verify_result),
@@ -533,12 +531,11 @@ void SignedExchangeHandler::OnCertReceived(
   //   property, or
   const std::string& stapled_ocsp_response = unverified_cert_chain_->ocsp();
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&VerifyCert, certificate, url, stapled_ocsp_response,
-                     sct_list_from_cert_cbor, frame_tree_node_id_getter_,
-                     base::BindOnce(&SignedExchangeHandler::OnVerifyCert,
-                                    weak_factory_.GetWeakPtr())));
+  VerifyCert(certificate, url, network_anonymization_key_,
+             stapled_ocsp_response, sct_list_from_cert_cbor,
+             frame_tree_node_id_,
+             base::BindOnce(&SignedExchangeHandler::OnVerifyCert,
+                            weak_factory_.GetWeakPtr()));
 }
 
 // https://wicg.github.io/webpackage/draft-yasskin-http-origin-signed-responses.html#cross-origin-cert-req
@@ -550,54 +547,29 @@ SignedExchangeLoadResult SignedExchangeHandler::CheckCertRequirements(
   if (!net::asn1::HasCanSignHttpExchangesDraftExtension(
           net::x509_util::CryptoBufferAsStringPiece(
               verified_cert->cert_buffer())) &&
-      !base::FeatureList::IsEnabled(
-          features::kAllowSignedHTTPExchangeCertsWithoutExtension) &&
       !unverified_cert_chain_->ShouldIgnoreErrors()) {
     signed_exchange_utils::ReportErrorAndTraceEvent(
         devtools_proxy_.get(),
-        "Certificate must have CanSignHttpExchangesDraft extension. To ignore "
-        "this error for testing, enable "
-        "chrome://flags/#allow-sxg-certs-without-extension.",
+        "Certificate must have CanSignHttpExchangesDraft extension.",
         std::make_pair(0 /* signature_index */,
                        SignedExchangeError::Field::kSignatureCertUrl));
     return SignedExchangeLoadResult::kCertRequirementsNotMet;
   }
 
-  // - Clients MUST reject certificates with this extension that were issued
-  // after 2019-05-01 and have a Validity Period longer than 90 days. [spec
-  // text]
   // - After 2019-08-01, clients MUST reject all certificates with this
   // extension that have a Validity Period longer than 90 days. [spec text]
-  // TODO(crbug.com/953165): Simplify this logic after 2019-08-01.
   base::TimeDelta validity_period =
       verified_cert->valid_expiry() - verified_cert->valid_start();
-  if (validity_period > base::TimeDelta::FromDays(90)) {
-    // 2019-05-01 00:00:00 UTC.
-    const base::Time kRequirementStartDateForIssuance =
-        base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(1556668800);
-    if (verified_cert->valid_start() >= kRequirementStartDateForIssuance &&
-        !unverified_cert_chain_->ShouldIgnoreErrors()) {
-      signed_exchange_utils::ReportErrorAndTraceEvent(
-          devtools_proxy_.get(),
-          "Signed Exchange's certificate issued after 2019-05-01 must not have "
-          "a validity period longer than 90 days.",
-          std::make_pair(0 /* signature_index */,
-                         SignedExchangeError::Field::kSignatureCertUrl));
-      return SignedExchangeLoadResult::kCertValidityPeriodTooLong;
-    }
-    // 2019-08-01 00:00:00 UTC.
-    const base::Time kRequirementStartDateForVerification =
-        base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(1564617600);
-    if (GetVerificationTime() >= kRequirementStartDateForVerification &&
-        !unverified_cert_chain_->ShouldIgnoreErrors()) {
-      signed_exchange_utils::ReportErrorAndTraceEvent(
-          devtools_proxy_.get(),
-          "After 2019-08-01, Signed Exchange's certificate must not have a "
-          "validity period longer than 90 days.",
-          std::make_pair(0 /* signature_index */,
-                         SignedExchangeError::Field::kSignatureCertUrl));
-      return SignedExchangeLoadResult::kCertValidityPeriodTooLong;
-    }
+  if (validity_period > base::Days(90) &&
+      !unverified_cert_chain_->ShouldIgnoreErrors() &&
+      !g_should_ignore_cert_validity_period_error) {
+    signed_exchange_utils::ReportErrorAndTraceEvent(
+        devtools_proxy_.get(),
+        "After 2019-08-01, Signed Exchange's certificate must not have a "
+        "validity period longer than 90 days.",
+        std::make_pair(0 /* signature_index */,
+                       SignedExchangeError::Field::kSignatureCertUrl));
+    return SignedExchangeLoadResult::kCertValidityPeriodTooLong;
   }
   return SignedExchangeLoadResult::kSuccess;
 }
@@ -631,13 +603,14 @@ bool SignedExchangeHandler::CheckOCSPStatus(
 void SignedExchangeHandler::OnVerifyCert(
     int32_t error_code,
     const net::CertVerifyResult& cv_result,
-    const net::ct::CTVerifyResult& ct_result) {
+    bool pkp_bypassed,
+    const std::string& pinning_failure_log) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
                "SignedExchangeHandler::OnCertVerifyComplete");
   // net::Error codes are negative, so we put - in front of it.
   base::UmaHistogramSparse(kHistogramCertVerificationResult, -error_code);
   UMA_HISTOGRAM_ENUMERATION(kHistogramCTVerificationResult,
-                            ct_result.policy_compliance,
+                            cv_result.policy_compliance,
                             net::ct::CTPolicyCompliance::CT_POLICY_COUNT);
 
   if (error_code != net::OK) {
@@ -647,13 +620,16 @@ void SignedExchangeHandler::OnVerifyCert(
       error_message = base::StringPrintf(
           "CT verification failed. result: %s, policy compliance: %d",
           net::ErrorToShortString(error_code).c_str(),
-          ct_result.policy_compliance);
+          cv_result.policy_compliance);
       result = SignedExchangeLoadResult::kCTVerificationError;
     } else {
       error_message =
           base::StringPrintf("Certificate verification error: %s",
                              net::ErrorToShortString(error_code).c_str());
-      result = SignedExchangeLoadResult::kCertVerificationError;
+      if (error_code == net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN)
+        result = SignedExchangeLoadResult::kPKPViolationError;
+      else
+        result = SignedExchangeLoadResult::kCertVerificationError;
     }
     signed_exchange_utils::ReportErrorAndTraceEvent(
         devtools_proxy_.get(), error_message,
@@ -682,12 +658,26 @@ void SignedExchangeHandler::OnVerifyCert(
     return;
   }
 
-  network::ResourceResponseHead response_head;
-  response_head.is_signed_exchange_inner_response = true;
+  auto response_head = network::mojom::URLResponseHead::New();
+  response_head->is_signed_exchange_inner_response = true;
 
-  response_head.headers = envelope_->BuildHttpResponseHeaders();
-  response_head.headers->GetMimeTypeAndCharset(&response_head.mime_type,
-                                               &response_head.charset);
+  response_head->headers = envelope_->BuildHttpResponseHeaders();
+  response_head->headers->GetMimeTypeAndCharset(&response_head->mime_type,
+                                                &response_head->charset);
+
+  net::SSLInfo ssl_info;
+  ssl_info.cert = cv_result.verified_cert;
+  ssl_info.unverified_cert = unverified_cert_chain_->cert();
+  ssl_info.cert_status = cv_result.cert_status;
+  ssl_info.is_issued_by_known_root = cv_result.is_issued_by_known_root;
+  ssl_info.pkp_bypassed = pkp_bypassed;
+  ssl_info.public_key_hashes = cv_result.public_key_hashes;
+  ssl_info.pinning_failure_log = pinning_failure_log;
+  ssl_info.ocsp_result = cv_result.ocsp_result;
+  ssl_info.is_fatal_cert_error = net::IsCertStatusError(ssl_info.cert_status);
+  ssl_info.signed_certificate_timestamps = cv_result.scts;
+  ssl_info.ct_policy_compliance = cv_result.policy_compliance;
+  response_head->ssl_info = std::move(ssl_info);
 
   if (!request_matcher_->MatchRequest(envelope_->response_headers())) {
     signed_exchange_utils::ReportErrorAndTraceEvent(
@@ -698,15 +688,81 @@ void SignedExchangeHandler::OnVerifyCert(
     return;
   }
 
+  // For prefetch, cookies will be checked by PrefetchedSignedExchangeCache.
+  if (!(load_flags_ & net::LOAD_PREFETCH) &&
+      signed_exchange_utils::IsCookielessOnlyExchange(
+          *response_head->headers)) {
+    CheckAbsenceOfCookies(base::BindOnce(&SignedExchangeHandler::CreateResponse,
+                                         weak_factory_.GetWeakPtr(),
+                                         std::move(response_head)));
+    return;
+  }
+  CreateResponse(std::move(response_head));
+}
+
+void SignedExchangeHandler::CheckAbsenceOfCookies(base::OnceClosure callback) {
+  auto* frame = FrameTreeNode::GloballyFindByID(frame_tree_node_id_);
+  if (!frame) {
+    std::move(callback).Run();
+    return;
+  }
+  DCHECK(outer_request_isolation_info_.has_value());
+
+  StoragePartition* storage_partition =
+      frame->current_frame_host()->GetProcess()->GetStoragePartition();
+  url::Origin inner_url_origin =
+      url::Origin::Create(envelope_->request_url().url);
+  net::IsolationInfo isolation_info =
+      outer_request_isolation_info_->CreateForRedirect(inner_url_origin);
+
+  RenderFrameHostImpl* render_frame_host = frame->current_frame_host();
+  static_cast<StoragePartitionImpl*>(storage_partition)
+      ->CreateRestrictedCookieManager(
+          network::mojom::RestrictedCookieManagerRole::NETWORK,
+          inner_url_origin, isolation_info,
+          /* is_service_worker = */ false,
+          render_frame_host ? render_frame_host->GetProcess()->GetID() : -1,
+          render_frame_host ? render_frame_host->GetRoutingID()
+                            : MSG_ROUTING_NONE,
+          cookie_manager_.BindNewPipeAndPassReceiver(),
+          render_frame_host ? render_frame_host->CreateCookieAccessObserver()
+                            : mojo::NullRemote());
+
+  DCHECK(isolation_info.top_frame_origin().has_value());
+  auto match_options = network::mojom::CookieManagerGetOptions::New();
+  match_options->name = "";
+  match_options->match_type = network::mojom::CookieMatchType::STARTS_WITH;
+  cookie_manager_->GetAllForUrl(
+      envelope_->request_url().url, isolation_info.site_for_cookies(),
+      *isolation_info.top_frame_origin(), std::move(match_options),
+      /*partitioned_cookies_runtime_feature_enabled=*/false,
+      base::BindOnce(&SignedExchangeHandler::OnGetCookies,
+                     weak_factory_.GetWeakPtr(), std::move(callback)));
+}
+
+void SignedExchangeHandler::OnGetCookies(
+    base::OnceClosure callback,
+    const std::vector<net::CookieWithAccessResult>& results) {
+  if (!results.empty()) {
+    RunErrorCallback(SignedExchangeLoadResult::kHadCookieForCookielessOnlySXG,
+                     net::ERR_INVALID_SIGNED_EXCHANGE);
+    return;
+  }
+  std::move(callback).Run();
+}
+
+void SignedExchangeHandler::CreateResponse(
+    network::mojom::URLResponseHeadPtr response_head) {
   // TODO(https://crbug.com/803774): Resource timing for signed exchange
   // loading is not speced yet. https://github.com/WICG/webpackage/issues/156
-  response_head.load_timing.request_start_time = base::Time::Now();
+  response_head->load_timing.request_start_time = base::Time::Now();
   base::TimeTicks now(base::TimeTicks::Now());
-  response_head.load_timing.request_start = now;
-  response_head.load_timing.send_start = now;
-  response_head.load_timing.send_end = now;
-  response_head.load_timing.receive_headers_end = now;
-  response_head.content_length = response_head.headers->GetContentLength();
+  response_head->load_timing.request_start = now;
+  response_head->load_timing.send_start = now;
+  response_head->load_timing.send_end = now;
+  response_head->load_timing.receive_headers_end = now;
+  response_head->content_length = response_head->headers->GetContentLength();
+  response_head->remote_endpoint = remote_endpoint_;
 
   auto body_stream = CreateResponseBodyStream();
   if (!body_stream) {
@@ -715,27 +771,15 @@ void SignedExchangeHandler::OnVerifyCert(
     return;
   }
 
-  net::SSLInfo ssl_info;
-  ssl_info.cert = cv_result.verified_cert;
-  ssl_info.unverified_cert = unverified_cert_chain_->cert();
-  ssl_info.cert_status = cv_result.cert_status;
-  ssl_info.is_issued_by_known_root = cv_result.is_issued_by_known_root;
-  ssl_info.public_key_hashes = cv_result.public_key_hashes;
-  ssl_info.ocsp_result = cv_result.ocsp_result;
-  ssl_info.is_fatal_cert_error =
-      net::IsCertStatusError(ssl_info.cert_status) &&
-      !net::IsCertStatusMinorError(ssl_info.cert_status);
-  ssl_info.UpdateCertificateTransparencyInfo(ct_result);
-
   if (devtools_proxy_) {
     devtools_proxy_->OnSignedExchangeReceived(
-        envelope_, unverified_cert_chain_->cert(), &ssl_info);
+        envelope_, unverified_cert_chain_->cert(), response_head->ssl_info);
   }
 
-  response_head.ssl_info = std::move(ssl_info);
   std::move(headers_callback_)
       .Run(SignedExchangeLoadResult::kSuccess, net::OK,
-           envelope_->request_url().url, response_head, std::move(body_stream));
+           envelope_->request_url().url, std::move(response_head),
+           std::move(body_stream));
   state_ = State::kHeadersCallbackCalled;
 }
 
@@ -769,8 +813,8 @@ SignedExchangeHandler::CreateResponseBodyStream() {
         "Signed exchange has no Content-Encoding: header");
     return nullptr;
   }
-  if (!base::LowerCaseEqualsASCII(content_encoding_iter->second,
-                                  "mi-sha256-03")) {
+  if (!base::EqualsCaseInsensitiveASCII(content_encoding_iter->second,
+                                        "mi-sha256-03")) {
     signed_exchange_utils::ReportErrorAndTraceEvent(
         devtools_proxy_.get(),
         "Exchange's Content-Encoding must be \"mi-sha256-03\".");
@@ -781,17 +825,17 @@ SignedExchangeHandler::CreateResponseBodyStream() {
                                                        std::move(source_));
 }
 
-base::Optional<net::SHA256HashValue>
-SignedExchangeHandler::ComputeHeaderIntegrity() const {
+bool SignedExchangeHandler::GetSignedExchangeInfoForPrefetchCache(
+    PrefetchedSignedExchangeCacheEntry& entry) const {
   if (!envelope_)
-    return base::nullopt;
-  return envelope_->ComputeHeaderIntegrity();
+    return false;
+  entry.SetHeaderIntegrity(std::make_unique<net::SHA256HashValue>(
+      envelope_->ComputeHeaderIntegrity()));
+  entry.SetSignatureExpireTime(base::Time::UnixEpoch() +
+                               base::Seconds(envelope_->signature().expires));
+  entry.SetCertUrl(envelope_->signature().cert_url);
+  entry.SetCertServerIPAddress(cert_server_ip_address_);
+  return true;
 }
 
-base::Time SignedExchangeHandler::GetSignatureExpireTime() const {
-  if (!envelope_)
-    return base::Time();
-  return base::Time::UnixEpoch() +
-         base::TimeDelta::FromSeconds(envelope_->signature().expires);
-}
 }  // namespace content

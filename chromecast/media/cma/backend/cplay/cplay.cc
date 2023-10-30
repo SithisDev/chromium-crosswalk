@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,20 +13,20 @@
 #include <string>
 #include <vector>
 
+#include "base/cxx17_backports.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/no_destructor.h"
-#include "base/numerics/ranges.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
+#include "chromecast/media/audio/wav_header.h"
 #include "chromecast/media/cma/backend/cast_audio_json.h"
-#include "chromecast/media/cma/backend/cplay/wav_header.h"
-#include "chromecast/media/cma/backend/mixer_input.h"
-#include "chromecast/media/cma/backend/mixer_pipeline.h"
-#include "chromecast/media/cma/backend/post_processing_pipeline_impl.h"
-#include "chromecast/media/cma/backend/post_processing_pipeline_parser.h"
+#include "chromecast/media/cma/backend/mixer/mixer_input.h"
+#include "chromecast/media/cma/backend/mixer/mixer_pipeline.h"
+#include "chromecast/media/cma/backend/mixer/post_processing_pipeline_impl.h"
+#include "chromecast/media/cma/backend/mixer/post_processing_pipeline_parser.h"
 #include "chromecast/media/cma/backend/volume_map.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "media/audio/wav_audio_handler.h"
@@ -43,20 +43,18 @@ VolumeMap& GetVolumeMap() {
   return *volume_map;
 }
 
-// static
-float VolumeControl::DbFSToVolume(float db) {
-  return GetVolumeMap().DbFSToVolume(db);
-}
-
 namespace {
 
 const int kReadSize = 1024;
+const WavHeader::AudioFormat kDefaultAudioFormat =
+    WavHeader::AudioFormat::kFloat32;
 
 void PrintHelp(const std::string& command) {
   LOG(INFO) << "Usage: " << command;
   LOG(INFO) << "  -i input .wav file";
   LOG(INFO) << "  -o output .wav file";
   LOG(INFO) << "  -r output samples per second";
+  LOG(INFO) << "  -s saturate output";
   LOG(INFO) << " [-c cast_audio.json path]";
   LOG(INFO) << " [-v cast volume as fraction of 1 (0.0-1.0)]";
   LOG(INFO) << " [-d max duration (s)]";
@@ -65,7 +63,8 @@ void PrintHelp(const std::string& command) {
 struct Parameters {
   double cast_volume = 1.0;
   double duration_s = std::numeric_limits<double>::infinity();
-  int output_samples_per_second = -1.0;
+  int output_samples_per_second = -1;
+  bool saturate_output = false;
   std::string device_id = "default";
   base::FilePath input_file_path;
   base::FilePath output_file_path;
@@ -100,20 +99,29 @@ class WavMixerInputSource : public MixerInput::Source {
               << "s.";
   }
 
+  WavMixerInputSource(const WavMixerInputSource&) = delete;
+  WavMixerInputSource& operator=(const WavMixerInputSource&) = delete;
+
   ~WavMixerInputSource() override = default;
 
   bool AtEnd() { return input_handler_->AtEnd(cursor_); }
 
   // MixerInput::Source implementation:
-  int num_channels() override { return input_handler_->num_channels(); }
-  int input_samples_per_second() override {
-    return input_handler_->sample_rate();
+  size_t num_channels() const override {
+    return input_handler_->num_channels();
   }
+  ::media::ChannelLayout channel_layout() const override {
+    return ::media::GuessChannelLayout(num_channels());
+  }
+  int sample_rate() const override { return input_handler_->sample_rate(); }
   bool primary() override { return true; }
+  bool active() override { return true; }
   const std::string& device_id() override { return device_id_; }
   AudioContentType content_type() override { return AudioContentType::kMedia; }
+  AudioContentType focus_type() override { return AudioContentType::kMedia; }
   int desired_read_size() override { return kReadSize; }
   int playout_channel() override { return -1; }
+  bool require_clock_rate_simulation() const override { return false; }
 
   void InitializeAudioPlayback(
       int read_size,
@@ -124,8 +132,18 @@ class WavMixerInputSource : public MixerInput::Source {
                               ::media::AudioBus* buffer) override {
     CHECK(buffer);
     size_t bytes_written;
-    CHECK_EQ(num_frames, buffer->frames());
-    CHECK(input_handler_->CopyTo(buffer, cursor_, &bytes_written));
+    CHECK_LE(num_frames, buffer->frames());
+    if (num_frames < buffer->frames()) {
+      std::vector<float*> channel_data;
+      for (int i = 0; i < buffer->channels(); ++i) {
+        channel_data.push_back(buffer->channel(i));
+      }
+      std::unique_ptr<::media::AudioBus> buffer_wrapper =
+          ::media::AudioBus::WrapVector(num_frames, channel_data);
+      CHECK(input_handler_->CopyTo(buffer_wrapper.get(), cursor_, &bytes_written));
+    } else {
+      CHECK(input_handler_->CopyTo(buffer, cursor_, &bytes_written));
+    }
     cursor_ += bytes_written;
     return bytes_written / bytes_per_frame_;
   }
@@ -139,8 +157,6 @@ class WavMixerInputSource : public MixerInput::Source {
   size_t cursor_ = 0;
   const std::string device_id_;
   const size_t bytes_per_frame_;
-
-  DISALLOW_COPY_AND_ASSIGN(WavMixerInputSource);
 };
 
 // OutputHandler interface to allow switching between alsa and file output.
@@ -148,7 +164,7 @@ class WavMixerInputSource : public MixerInput::Source {
 class OutputHandler {
  public:
   virtual ~OutputHandler() = default;
-  virtual void WriteData(float* data, int num_frames) = 0;
+  virtual void WriteData(float* data, int num_frames, bool saturate_output) = 0;
 };
 
 class WavOutputHandler : public OutputHandler {
@@ -159,6 +175,7 @@ class WavOutputHandler : public OutputHandler {
       : wav_file_(path,
                   base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE),
         num_channels_(num_channels) {
+    header_.SetAudioFormat(kDefaultAudioFormat);
     header_.SetNumChannels(num_channels);
     header_.SetSampleRate(sample_rate);
 
@@ -167,6 +184,9 @@ class WavOutputHandler : public OutputHandler {
     wav_file_.WriteAtCurrentPos(reinterpret_cast<char*>(&header_),
                                 sizeof(header_));
   }
+
+  WavOutputHandler(const WavOutputHandler&) = delete;
+  WavOutputHandler& operator=(const WavOutputHandler&) = delete;
 
   ~WavOutputHandler() override {
     // Update size and re-write header. We only really need to overwrite 8 bytes
@@ -178,12 +198,14 @@ class WavOutputHandler : public OutputHandler {
                     sizeof(header_));
   }
 
-  void WriteData(float* data, int num_frames) override {
+  void WriteData(float* data, int num_frames, bool saturate_output) override {
     std::vector<float> clipped_data(num_frames * num_channels_);
     std::memcpy(clipped_data.data(), data,
                 clipped_data.size() * sizeof(clipped_data[0]));
-    for (size_t i = 0; i < clipped_data.size(); ++i) {
-      clipped_data[i] = base::ClampToRange(clipped_data[i], -1.0f, 1.0f);
+    if (saturate_output) {
+      for (size_t i = 0; i < clipped_data.size(); ++i) {
+        clipped_data[i] = base::clamp(clipped_data[i], -1.0f, 1.0f);
+      }
     }
     wav_file_.WriteAtCurrentPos(reinterpret_cast<char*>(clipped_data.data()),
                                 sizeof(clipped_data[0]) * clipped_data.size());
@@ -193,13 +215,15 @@ class WavOutputHandler : public OutputHandler {
   WavHeader header_;
   base::File wav_file_;
   const int num_channels_;
-
-  DISALLOW_COPY_AND_ASSIGN(WavOutputHandler);
 };
 
 class AudioMetrics {
  public:
   AudioMetrics(int num_channels) : num_channels_(num_channels) {}
+
+  AudioMetrics(const AudioMetrics&) = delete;
+  AudioMetrics& operator=(const AudioMetrics&) = delete;
+
   ~AudioMetrics() = default;
 
   void ProcessFrames(float* data, int num_frames) {
@@ -230,15 +254,13 @@ class AudioMetrics {
   int total_samples_ = 0;
   float largest_sample_ = 0.0f;
   double squared_sum_ = 0.0;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioMetrics);
 };
 
 Parameters ReadArgs(int argc, char* argv[]) {
   Parameters params;
   params.cast_audio_json_path = CastAudioJson::GetFilePath();
   int opt;
-  while ((opt = getopt(argc, argv, "i:o:c:v:d:r:")) != -1) {
+  while ((opt = getopt(argc, argv, "i:o:c:v:d:r:s")) != -1) {
     switch (opt) {
       case 'i':
         params.input_file_path = base::FilePath(optarg);
@@ -260,6 +282,9 @@ Parameters ReadArgs(int argc, char* argv[]) {
       case 'r':
         params.output_samples_per_second = strtod(optarg, nullptr);
         break;
+      case 's':
+        params.saturate_output = true;
+        break;
       default:
         PrintHelp(argv[0]);
         exit(1);
@@ -280,15 +305,18 @@ Parameters ReadArgs(int argc, char* argv[]) {
 int CplayMain(int argc, char* argv[]) {
   Parameters params = ReadArgs(argc, argv);
 
+  // Comply with CastAudioJsonProviderImpl.
+  base::ThreadPoolInstance::CreateAndStartWithDefaultParams(
+      "cplay_thread_pool");
+
   // Read input file.
   WavMixerInputSource input_source(params);
   if (params.output_samples_per_second <= 0) {
-    params.output_samples_per_second = input_source.input_samples_per_second();
+    params.output_samples_per_second = input_source.sample_rate();
   }
-  if (params.output_samples_per_second !=
-      input_source.input_samples_per_second()) {
-    LOG(INFO) << "Resampling from " << input_source.input_samples_per_second()
-              << " to " << params.output_samples_per_second;
+  if (params.output_samples_per_second != input_source.sample_rate()) {
+    LOG(INFO) << "Resampling from " << input_source.sample_rate() << " to "
+              << params.output_samples_per_second;
   } else {
     LOG(INFO) << "Sample rate: " << params.output_samples_per_second;
   }
@@ -296,7 +324,8 @@ int CplayMain(int argc, char* argv[]) {
   // Build Processing Pipeline.
   PostProcessingPipelineParser parser(params.cast_audio_json_path);
   auto factory = std::make_unique<PostProcessingPipelineFactoryImpl>();
-  auto pipeline = MixerPipeline::CreateMixerPipeline(&parser, factory.get());
+  auto pipeline = MixerPipeline::CreateMixerPipeline(
+      &parser, factory.get(), input_source.num_channels());
   CHECK(pipeline);
   pipeline->Initialize(params.output_samples_per_second, kReadSize);
   LOG(INFO) << "Initialized Cast Audio Pipeline at "
@@ -306,6 +335,7 @@ int CplayMain(int argc, char* argv[]) {
   FilterGroup* input_group = pipeline->GetInputGroup(params.device_id);
   CHECK(input_group);
   MixerInput mixer_input(&input_source, input_group);
+  mixer_input.Initialize();
 
   // Set volume.
   std::string contents;
@@ -314,7 +344,7 @@ int CplayMain(int argc, char* argv[]) {
   float volume_dbfs = GetVolumeMap().VolumeToDbFS(params.cast_volume);
   float volume_multiplier = std::pow(10.0, volume_dbfs / 20.0);
   mixer_input.SetVolumeMultiplier(1.0);
-  mixer_input.SetContentTypeVolume(volume_multiplier, 0 /* fade_ms */);
+  mixer_input.SetContentTypeVolume(volume_multiplier);
   LOG(INFO) << "Volume set to level " << params.cast_volume << " | "
             << volume_dbfs << "dBFS | multiplier=" << volume_multiplier;
 
@@ -332,11 +362,13 @@ int CplayMain(int argc, char* argv[]) {
              params.duration_s) {
     pipeline->MixAndFilter(kReadSize, MixerInput::RenderingDelay());
     audio_metrics.ProcessFrames(pipeline->GetOutput(), kReadSize);
-    output_handler_->WriteData(pipeline->GetOutput(), kReadSize);
+    output_handler_->WriteData(pipeline->GetOutput(), kReadSize,
+                               params.saturate_output);
     frames_written += kReadSize;
   }
 
   audio_metrics.PrintReport();
+  base::ThreadPoolInstance::Get()->Shutdown();
   return 0;
 }
 

@@ -1,14 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_METRICS_PROVIDER_H_
 #define COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_METRICS_PROVIDER_H_
 
-#include <memory>
-
 #include "base/callback_list.h"
-#include "base/macros.h"
 #include "components/metrics/metrics_provider.h"
 #include "components/omnibox/browser/omnibox_event_global_tracker.h"
 #include "third_party/metrics_proto/chrome_user_metrics_extension.pb.h"
@@ -21,8 +18,10 @@ class OmniboxMetricsProvider : public metrics::MetricsProvider {
  public:
   OmniboxMetricsProvider();
   ~OmniboxMetricsProvider() override;
+  OmniboxMetricsProvider(const OmniboxMetricsProvider&) = delete;
+  OmniboxMetricsProvider& operator=(const OmniboxMetricsProvider&) = delete;
 
-  // metrics::MetricsDataProvider:
+  // metrics::MetricsProvider:
   void OnRecordingEnabled() override;
   void OnRecordingDisabled() override;
   void ProvideCurrentSessionData(
@@ -37,14 +36,11 @@ class OmniboxMetricsProvider : public metrics::MetricsProvider {
   void RecordOmniboxOpenedURL(const OmniboxLog& log);
 
   // Subscription for receiving Omnibox event callbacks.
-  std::unique_ptr<base::CallbackList<void(OmniboxLog*)>::Subscription>
-      subscription_;
+  base::CallbackListSubscription subscription_;
 
   // Saved cache of generated Omnibox event protos, to be copied into the UMA
   // proto when ProvideCurrentSessionData() is called.
   metrics::ChromeUserMetricsExtension omnibox_events_cache;
-
-  DISALLOW_COPY_AND_ASSIGN(OmniboxMetricsProvider);
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_METRICS_PROVIDER_H_

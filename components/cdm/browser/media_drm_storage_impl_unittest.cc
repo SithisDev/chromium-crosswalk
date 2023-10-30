@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,17 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/unguessable_token.h"
 #include "components/prefs/testing_pref_service.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_renderer_host.h"
 #include "media/mojo/services/mojo_media_drm_storage.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -46,7 +46,7 @@ void CreateOriginId(MediaDrmStorageImpl::OriginIdObtainedCB callback) {
 
 void CreateEmptyOriginId(MediaDrmStorageImpl::OriginIdObtainedCB callback) {
   // |callback| has to fail in order to check if empty origin ID allowed.
-  std::move(callback).Run(false, base::nullopt);
+  std::move(callback).Run(false, absl::nullopt);
 }
 
 void CreateOriginIdAsync(MediaDrmStorageImpl::OriginIdObtainedCB callback) {
@@ -71,7 +71,7 @@ class MediaDrmStorageImplTest : public content::RenderViewHostTestHarness {
   void SetUp() override {
     RenderViewHostTestHarness::SetUp();
 
-    pref_service_.reset(new TestingPrefServiceSimple());
+    pref_service_ = std::make_unique<TestingPrefServiceSimple>();
     PrefRegistrySimple* registry = pref_service_->registry();
     MediaDrmStorageImpl::RegisterProfilePrefs(registry);
 
@@ -93,16 +93,17 @@ class MediaDrmStorageImplTest : public content::RenderViewHostTestHarness {
       MediaDrmStorageImpl::GetOriginIdCB get_origin_id_cb,
       MediaDrmStorageImpl::AllowEmptyOriginIdCB allow_empty_cb =
           base::BindRepeating(&AllowEmptyOriginId)) {
-    media::mojom::MediaDrmStoragePtr media_drm_storage_ptr;
-    auto request = mojo::MakeRequest(&media_drm_storage_ptr);
+    mojo::PendingRemote<media::mojom::MediaDrmStorage>
+        pending_media_drm_storage;
+    auto receiver = pending_media_drm_storage.InitWithNewPipeAndPassReceiver();
 
     auto media_drm_storage = std::make_unique<media::MojoMediaDrmStorage>(
-        std::move(media_drm_storage_ptr));
+        std::move(pending_media_drm_storage));
 
     // The created object will be destroyed on connection error.
-    new MediaDrmStorageImpl(rfh, pref_service_.get(),
+    new MediaDrmStorageImpl(*rfh, pref_service_.get(),
                             std::move(get_origin_id_cb),
-                            std::move(allow_empty_cb), std::move(request));
+                            std::move(allow_empty_cb), std::move(receiver));
 
     return std::move(media_drm_storage);
   }
@@ -122,16 +123,16 @@ class MediaDrmStorageImplTest : public content::RenderViewHostTestHarness {
     base::RunLoop().RunUntilIdle();
 
     // Verify the origin dictionary is created.
-    const base::DictionaryValue* storage_dict =
-        pref_service_->GetDictionary(prefs::kMediaDrmStorage);
-    EXPECT_TRUE(storage_dict->FindKey(kTestOrigin));
+    const base::Value::Dict& storage_dict =
+        pref_service_->GetDict(prefs::kMediaDrmStorage);
+    EXPECT_TRUE(storage_dict.Find(kTestOrigin));
 
     DCHECK(*origin_id);
     return media_drm_storage;
   }
 
   content::RenderFrameHost* SimulateNavigation(const GURL& url) {
-    content::RenderFrameHost* rfh = web_contents()->GetMainFrame();
+    content::RenderFrameHost* rfh = web_contents()->GetPrimaryMainFrame();
     content::RenderFrameHostTester::For(rfh)->InitializeRenderFrameIfNeeded();
 
     auto navigation_simulator =
@@ -290,9 +291,9 @@ TEST_F(MediaDrmStorageImplTest, OnProvisioned) {
   base::RunLoop().RunUntilIdle();
 
   // Verify the origin dictionary is created.
-  const base::DictionaryValue* storage_dict =
-      pref_service_->GetDictionary(prefs::kMediaDrmStorage);
-  EXPECT_TRUE(storage_dict->FindKey(kTestOrigin));
+  const base::Value::Dict& storage_dict =
+      pref_service_->GetDict(prefs::kMediaDrmStorage);
+  EXPECT_TRUE(storage_dict.Find(kTestOrigin));
 }
 
 TEST_F(MediaDrmStorageImplTest, OnProvisioned_Twice) {
@@ -365,26 +366,31 @@ TEST_F(MediaDrmStorageImplTest, GetAllOrigins) {
   EXPECT_EQ(1u, origins.count(GURL(kTestOrigin)));
 }
 
-TEST_F(MediaDrmStorageImplTest, GetOriginsModifiedSince) {
+TEST_F(MediaDrmStorageImplTest, GetOriginsModifiedBetween) {
   base::Time start_time = base::Time::Now();
   OnProvisioned();
   base::RunLoop().RunUntilIdle();
 
+  // Should not be found before |start_time|.
+  std::vector<GURL> origins0 = MediaDrmStorageImpl::GetOriginsModifiedBetween(
+      pref_service_.get(), base::Time(), start_time);
+  EXPECT_EQ(origins0, std::vector<GURL>{});
+
   // Verify the origin is found from all time.
-  std::vector<GURL> origins1 = MediaDrmStorageImpl::GetOriginsModifiedSince(
-      pref_service_.get(), base::Time());
+  std::vector<GURL> origins1 = MediaDrmStorageImpl::GetOriginsModifiedBetween(
+      pref_service_.get(), base::Time(), base::Time::Max());
   EXPECT_EQ(origins1, std::vector<GURL>{GURL(kTestOrigin)});
 
   // Should also be found from |start_time|.
-  std::vector<GURL> origins2 = MediaDrmStorageImpl::GetOriginsModifiedSince(
-      pref_service_.get(), start_time);
+  std::vector<GURL> origins2 = MediaDrmStorageImpl::GetOriginsModifiedBetween(
+      pref_service_.get(), start_time, base::Time::Max());
   EXPECT_EQ(origins2, std::vector<GURL>{GURL(kTestOrigin)});
 
   // Should not be found from Now().
   base::Time check_time = base::Time::Now();
   EXPECT_GT(check_time, start_time);
-  std::vector<GURL> origins3 = MediaDrmStorageImpl::GetOriginsModifiedSince(
-      pref_service_.get(), check_time);
+  std::vector<GURL> origins3 = MediaDrmStorageImpl::GetOriginsModifiedBetween(
+      pref_service_.get(), check_time, base::Time::Max());
   EXPECT_EQ(origins3, std::vector<GURL>{});
 
   // Save a new session.
@@ -392,9 +398,16 @@ TEST_F(MediaDrmStorageImplTest, GetOriginsModifiedSince) {
   base::RunLoop().RunUntilIdle();
 
   // Now that a new session has been added, the origin should be found.
-  std::vector<GURL> origins4 = MediaDrmStorageImpl::GetOriginsModifiedSince(
-      pref_service_.get(), check_time);
+  std::vector<GURL> origins4 = MediaDrmStorageImpl::GetOriginsModifiedBetween(
+      pref_service_.get(), check_time, base::Time::Max());
   EXPECT_EQ(origins4, std::vector<GURL>{GURL(kTestOrigin)});
+
+  // Now that a new session has been added, the origin should be found between
+  // two points in time.
+  base::Time second_check_time = base::Time::Now();
+  std::vector<GURL> origins5 = MediaDrmStorageImpl::GetOriginsModifiedBetween(
+      pref_service_.get(), check_time, second_check_time);
+  EXPECT_EQ(origins5, std::vector<GURL>{GURL(kTestOrigin)});
 }
 
 TEST_F(MediaDrmStorageImplTest, AllowEmptyOriginId) {

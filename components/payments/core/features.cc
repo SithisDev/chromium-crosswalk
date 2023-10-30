@@ -1,8 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/payments/core/features.h"
+
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 namespace payments {
 namespace features {
@@ -10,10 +13,7 @@ namespace features {
 const base::Feature kWebPaymentsExperimentalFeatures{
     "WebPaymentsExperimentalFeatures", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kReturnGooglePayInBasicCard{
-    "ReturnGooglePayInBasicCard", base::FEATURE_DISABLED_BY_DEFAULT};
-
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 const base::Feature kWebPaymentsNativeApps{"WebPaymentsNativeApps",
                                            base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
@@ -34,15 +34,33 @@ const base::Feature kWebPaymentsSingleAppUiSkip{
 const base::Feature kWebPaymentsJustInTimePaymentApp{
     "WebPaymentsJustInTimePaymentApp", base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kAlwaysAllowJustInTimePaymentApp{
-    "AlwaysAllowJustInTimePaymentApp", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kWebPaymentsRedactShippingAddress{
+    "WebPaymentsRedactShippingAddress", base::FEATURE_ENABLED_BY_DEFAULT};
 
-const base::Feature kWebPaymentsPerMethodCanMakePaymentQuota{
-    "WebPaymentsPerMethodCanMakePaymentQuota",
+const base::Feature kAppStoreBilling {
+  "AppStoreBilling",
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS_ASH)
+      base::FEATURE_ENABLED_BY_DEFAULT
+#else
+      base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+};
+
+const base::Feature kAppStoreBillingDebug{"AppStoreBillingDebug",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kPaymentHandlerPopUpSizeWindow{
+    "PaymentHandlerPopUpSizeWindow", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kAllowJITInstallationWhenAppIconIsMissing{
+    "AllowJITInstallationWhenAppIconIsMissing",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
-const base::Feature kWebPaymentsRedactShippingAddress{
-    "WebPaymentsRedactShippingAddress", base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kEnforceFullDelegation{"EnforceFullDelegation",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::Feature kGPayAppDynamicUpdate{"GPayAppDynamicUpdate",
+                                          base::FEATURE_ENABLED_BY_DEFAULT};
 
 }  // namespace features
 }  // namespace payments

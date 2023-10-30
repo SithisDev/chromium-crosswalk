@@ -4,12 +4,12 @@ include_rules = [
   # The subdirectories in content/ will manually allow their own include
   # directories in content/ so we disallow all of them.
   "-content",
-  "+content/app/resources/grit/content_resources.h",
   "+content/app/strings/grit",  # For generated headers
   "+content/common",
   "+content/grit",
   "+content/public/common",
   "+content/public/test",
+  "+content/services/auction_worklet/public",
   "+content/test",
   "+blink/public/resources/grit",
   "+cc",
@@ -24,12 +24,17 @@ include_rules = [
   # as autofill or extensions, and chrome implementation details such as
   # settings, packaging details, installation or crash reporting.
 
+  "+components/browsing_topics/common",
+  "+components/memory_pressure",
+  "+components/ml/mojom",
+  "+components/power_scheduler",
   "+components/services/filesystem",
   "+components/services/font/public",
+  "+components/variations",
+  "+components/value_store",
 
   "+crypto",
   "+grit/blink_resources.h",
-  "+grit/content_strings.h",
 
   "+dbus",
   "+gpu",
@@ -41,8 +46,6 @@ include_rules = [
   "+printing",
   "+sandbox",
   "+services/proxy_resolver/public/mojom",
-  "+services/service_manager/embedder",
-  "+services/service_manager/sandbox",
   "+services/service_manager/zygote",
   "+skia",
 
@@ -82,6 +85,7 @@ include_rules = [
   # Aura is analogous to Win32 or a Gtk, so it is allowed.
   "+ui/aura",
   "+ui/base",
+  "+ui/color",
   "+ui/compositor",
   "+ui/display",
   "+ui/events",
@@ -90,8 +94,8 @@ include_rules = [
   "+ui/latency",
   "+ui/native_theme",
   "+ui/resources/grit/ui_resources.h",
-  "+ui/resources/grit/webui_resources.h",
-  "+ui/resources/grit/webui_resources_map.h",
+  "+ui/resources/grit/webui_generated_resources.h",
+  "+ui/resources/grit/webui_generated_resources_map.h",
   "+ui/shell_dialogs",
   "+ui/snapshot",
   "+ui/strings/grit/ui_strings.h",
@@ -124,20 +128,5 @@ specific_include_rules = {
     # content -> content/shell dependency is disallowed, except browser tests.
     "+content/shell/browser",
     "+content/shell/common",
-
-    # components/variations/variations_params_manager.h is allowed from tests
-    # (it is part of //components/variations:test_support target).
-    "+components/variations/variations_params_manager.h",
   ],
-
-  "test_utils\.cc": [
-    # components/variations/variations_params_manager.h is allowed from tests
-    # (it is part of //components/variations:test_support target).
-    "+components/variations/variations_params_manager.h",
-  ],
-
-    # Dependencies specific for fuzz targets and other fuzzing-related code.
-  ".*fuzz.*": [
-    "+third_party/libFuzzer/src/utils",  # This contains FuzzedDataProvider.
-  ]
 }

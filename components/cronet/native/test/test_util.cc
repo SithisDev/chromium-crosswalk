@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,9 +36,10 @@ class TestCertVerifier : public net::MockCertVerifier {
              net::CompletionOnceCallback callback,
              std::unique_ptr<Request>* out_req,
              const net::NetLogWithSource& net_log) override {
+    verify_result->Reset();
     if (params.hostname() == "test.example.com") {
       verify_result->verified_cert = params.certificate();
-      verify_result->cert_status = MapNetErrorToCertStatus(net::OK);
+      verify_result->is_issued_by_known_root = true;
       return net::OK;
     }
     return net::MockCertVerifier::Verify(params, verify_result,

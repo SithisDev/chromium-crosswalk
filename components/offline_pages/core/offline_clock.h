@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,11 @@ namespace offline_pages {
 
 // Returns the clock to be used for obtaining the current time. This function
 // can be called from any threads.
-base::Clock* OfflineClock();
+const base::Clock* OfflineClock();
 
 // Allows tests to override the clock returned by |OfflineClock()|. For safety,
 // use |TestScopedOfflineClock| instead if possible.
-void SetOfflineClockForTesting(base::Clock* clock);
+void SetOfflineClockForTesting(const base::Clock* clock);
 
 // Returns the current time given by |OfflineClock|. This used as a shortcut
 // for calls to |OfflineClock()->Now()|

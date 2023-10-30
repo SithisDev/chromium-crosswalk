@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,76 +16,57 @@
 #include "components/invalidation/public/ack_handler.h"
 #include "components/invalidation/public/invalidation_util.h"
 
-namespace syncer {
+namespace invalidation {
 
 namespace {
+
 const char kObjectIdKey[] = "objectId";
 const char kIsUnknownVersionKey[] = "isUnknownVersion";
 const char kVersionKey[] = "version";
 const char kPayloadKey[] = "payload";
 const int64_t kInvalidVersion = -1;
+
+// Fills base::Value::Dict as if legacy ObjectID still would be in use.
+// Used to provide values for chrome://invalidations page.
+base::Value::Dict TopicToObjectIDValue(const Topic& topic) {
+  base::Value::Dict value;
+  // Source has been deprecated, pass 0 instead.
+  value.Set("source", 0);
+  value.Set("name", topic);
+  return value;
 }
 
-Invalidation Invalidation::Init(const invalidation::ObjectId& id,
+}  // namespace
+
+// static
+Invalidation Invalidation::Init(const Topic& topic,
                                 int64_t version,
                                 const std::string& payload) {
-  return Invalidation(id, false, version, payload, AckHandle::CreateUnique());
+  return Invalidation(topic, /*is_unknown_version=*/false, version, payload,
+                      AckHandle::CreateUnique());
 }
 
-Invalidation Invalidation::InitUnknownVersion(
-    const invalidation::ObjectId& id) {
-  return Invalidation(
-      id, true, kInvalidVersion, std::string(), AckHandle::CreateUnique());
+// static
+Invalidation Invalidation::InitUnknownVersion(const Topic& topic) {
+  return Invalidation(topic, /*is_unknown_version=*/true, kInvalidVersion,
+                      std::string(), AckHandle::CreateUnique());
 }
 
+// static
 Invalidation Invalidation::InitFromDroppedInvalidation(
     const Invalidation& dropped) {
-  return Invalidation(
-      dropped.id_, true, kInvalidVersion, std::string(), dropped.ack_handle_);
-}
-
-std::unique_ptr<Invalidation> Invalidation::InitFromValue(
-    const base::DictionaryValue& value) {
-  invalidation::ObjectId id;
-
-  const base::DictionaryValue* object_id_dict;
-  if (!value.GetDictionary(kObjectIdKey, &object_id_dict) ||
-      !ObjectIdFromValue(*object_id_dict, &id)) {
-    DLOG(WARNING) << "Failed to parse id";
-    return nullptr;
-  }
-  bool is_unknown_version;
-  if (!value.GetBoolean(kIsUnknownVersionKey, &is_unknown_version)) {
-    DLOG(WARNING) << "Failed to parse is_unknown_version flag";
-    return nullptr;
-  }
-  if (is_unknown_version) {
-    return base::WrapUnique(new Invalidation(
-        id, true, kInvalidVersion, std::string(), AckHandle::CreateUnique()));
-  }
-  int64_t version = 0;
-  std::string version_as_string;
-  if (!value.GetString(kVersionKey, &version_as_string)
-      || !base::StringToInt64(version_as_string, &version)) {
-    DLOG(WARNING) << "Failed to parse version";
-    return nullptr;
-  }
-  std::string payload;
-  if (!value.GetString(kPayloadKey, &payload)) {
-    DLOG(WARNING) << "Failed to parse payload";
-    return nullptr;
-  }
-  return base::WrapUnique(
-      new Invalidation(id, false, version, payload, AckHandle::CreateUnique()));
+  return Invalidation(dropped.topic(), /*is_unknown_version=*/true,
+                      kInvalidVersion, std::string(), dropped.ack_handle_);
 }
 
 Invalidation::Invalidation(const Invalidation& other) = default;
 
-Invalidation::~Invalidation() {
-}
+Invalidation& Invalidation::operator=(const Invalidation& other) = default;
 
-invalidation::ObjectId Invalidation::object_id() const {
-  return id_;
+Invalidation::~Invalidation() = default;
+
+Topic Invalidation::topic() const {
+  return topic_;
 }
 
 bool Invalidation::is_unknown_version() const {
@@ -120,8 +101,8 @@ bool Invalidation::SupportsAcknowledgement() const {
 void Invalidation::Acknowledge() const {
   if (SupportsAcknowledgement()) {
     ack_handler_task_runner_->PostTask(
-        FROM_HERE, base::BindOnce(&AckHandler::Acknowledge, ack_handler_, id_,
-                                  ack_handle_));
+        FROM_HERE, base::BindOnce(&AckHandler::Acknowledge, ack_handler_,
+                                  topic(), ack_handle_));
   }
 }
 
@@ -129,24 +110,28 @@ void Invalidation::Drop() {
   if (SupportsAcknowledgement()) {
     ack_handler_task_runner_->PostTask(
         FROM_HERE,
-        base::BindOnce(&AckHandler::Drop, ack_handler_, id_, ack_handle_));
+        base::BindOnce(&AckHandler::Drop, ack_handler_, topic(), ack_handle_));
   }
 }
 
-bool Invalidation::Equals(const Invalidation& other) const {
-  return id_ == other.id_ && is_unknown_version_ == other.is_unknown_version_ &&
+bool Invalidation::operator==(const Invalidation& other) const {
+  return topic_ == other.topic_ &&
+         is_unknown_version_ == other.is_unknown_version_ &&
          version_ == other.version_ && payload_ == other.payload_;
 }
 
-std::unique_ptr<base::DictionaryValue> Invalidation::ToValue() const {
-  std::unique_ptr<base::DictionaryValue> value(new base::DictionaryValue());
-  value->Set(kObjectIdKey, ObjectIdToValue(id_));
+base::Value::Dict Invalidation::ToValue() const {
+  base::Value::Dict value;
+  // TODO(crbug.com/1056181): ObjectID has been deprecated, but the value here
+  // used in the js counterpart (chrome://invalidations). Replace ObjectID with
+  // Topic here together with js counterpart update.
+  value.Set(kObjectIdKey, TopicToObjectIDValue(topic_));
   if (is_unknown_version_) {
-    value->SetBoolean(kIsUnknownVersionKey, true);
+    value.Set(kIsUnknownVersionKey, true);
   } else {
-    value->SetBoolean(kIsUnknownVersionKey, false);
-    value->SetString(kVersionKey, base::NumberToString(version_));
-    value->SetString(kPayloadKey, payload_);
+    value.Set(kIsUnknownVersionKey, false);
+    value.Set(kVersionKey, base::NumberToString(version_));
+    value.Set(kPayloadKey, payload_);
   }
   return value;
 }
@@ -155,19 +140,19 @@ std::string Invalidation::ToString() const {
   std::string output;
   JSONStringValueSerializer serializer(&output);
   serializer.set_pretty_print(true);
-  serializer.Serialize(*ToValue());
+  serializer.Serialize(ToValue());
   return output;
 }
 
-Invalidation::Invalidation(const invalidation::ObjectId& id,
+Invalidation::Invalidation(const Topic& topic,
                            bool is_unknown_version,
                            int64_t version,
                            const std::string& payload,
                            AckHandle ack_handle)
-    : id_(id),
+    : topic_(topic),
       is_unknown_version_(is_unknown_version),
       version_(version),
       payload_(payload),
       ack_handle_(ack_handle) {}
 
-}  // namespace syncer
+}  // namespace invalidation

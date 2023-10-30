@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,8 +68,8 @@ class MockBus : public Bus {
                     void* user_data,
                     DBusError* error));
   MOCK_METHOD1(UnregisterObjectPath, void(const ObjectPath& object_path));
-  MOCK_METHOD0(GetDBusTaskRunner, base::TaskRunner*());
-  MOCK_METHOD0(GetOriginTaskRunner, base::TaskRunner*());
+  MOCK_METHOD0(GetDBusTaskRunner, base::SequencedTaskRunner*());
+  MOCK_METHOD0(GetOriginTaskRunner, base::SequencedTaskRunner*());
   MOCK_METHOD0(HasDBusThread, bool());
   MOCK_METHOD0(AssertOnOriginThread, void());
   MOCK_METHOD0(AssertOnDBusThread, void());

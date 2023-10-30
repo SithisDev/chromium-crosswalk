@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,9 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/check.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/cronet/native/generated/cronet.idl_impl_interface.h"
 #include "components/cronet/native/include/cronet_c.h"
 #include "components/cronet/native/test/test_util.h"
@@ -21,6 +20,10 @@ namespace {
 class RunnablesTest : public ::testing::Test {
  public:
   RunnablesTest() = default;
+
+  RunnablesTest(const RunnablesTest&) = delete;
+  RunnablesTest& operator=(const RunnablesTest&) = delete;
+
   ~RunnablesTest() override {}
 
  protected:
@@ -43,11 +46,10 @@ class RunnablesTest : public ::testing::Test {
   bool callback_called() const { return callback_called_; }
 
   // Provide a message loop for use by TestExecutor instances.
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
  private:
   bool callback_called_ = false;
-  DISALLOW_COPY_AND_ASSIGN(RunnablesTest);
 };
 
 class OnRedirectReceived_Runnable : public Cronet_Runnable {
@@ -60,7 +62,7 @@ class OnRedirectReceived_Runnable : public Cronet_Runnable {
 
   void Run() override {
     Cronet_UrlRequestCallback_OnRedirectReceived(
-        callback_, /* request = */ nullptr, /* response_info = */ nullptr,
+        callback_, /* request = */ nullptr, /* info = */ nullptr,
         new_location_url_.c_str());
   }
 
@@ -160,7 +162,7 @@ TEST_F(RunnablesTest, TestRunOnceClosureOnExecutor) {
   // Invoke Cronet_UrlRequestCallback_OnResponseStarted using OnceClosure
   Cronet_RunnablePtr runnable = new cronet::OnceClosureRunnable(
       base::BindOnce(Cronet_UrlRequestCallback_OnResponseStarted, callback,
-                     /* request = */ nullptr, /* response_info = */ nullptr));
+                     /* request = */ nullptr, /* info = */ nullptr));
   Cronet_UrlRequestCallback_SetClientContext(callback, this);
   Cronet_Executor_Execute(executor, runnable);
   base::RunLoop().RunUntilIdle();
@@ -189,7 +191,7 @@ TEST_F(RunnablesTest, TestCronetBuffer) {
   Cronet_RunnablePtr runnable = new cronet::OnceClosureRunnable(base::BindOnce(
       RunnablesTest::UrlRequestCallback_OnReadCompleted, callback,
       /* request = */ nullptr,
-      /* response_info = */ nullptr, buffer, /* bytes_read = */ 0));
+      /* info = */ nullptr, buffer, /* bytes_read = */ 0));
   Cronet_UrlRequestCallback_SetClientContext(callback, this);
   Cronet_Executor_Execute(executor, runnable);
   base::RunLoop().RunUntilIdle();

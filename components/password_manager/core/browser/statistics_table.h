@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "url/gurl.h"
 
@@ -25,7 +25,7 @@ struct InteractionsStats {
   GURL origin_domain;
 
   // The value of the username.
-  base::string16 username_value;
+  std::u16string username_value;
 
   // Number of times the user dismissed the bubble.
   int dismissal_count = 0;
@@ -40,6 +40,10 @@ bool operator==(const InteractionsStats& lhs, const InteractionsStats& rhs);
 class StatisticsTable {
  public:
   StatisticsTable();
+
+  StatisticsTable(const StatisticsTable&) = delete;
+  StatisticsTable& operator=(const StatisticsTable&) = delete;
+
   ~StatisticsTable();
 
   // Initializes |db_|.
@@ -61,9 +65,6 @@ class StatisticsTable {
   // successfully.
   bool RemoveRow(const GURL& domain);
 
-  // Returns all statistics from the database.
-  std::vector<InteractionsStats> GetAllRows();
-
   // Returns the statistics for |domain| if it exists.
   std::vector<InteractionsStats> GetRows(const GURL& domain);
 
@@ -71,25 +72,18 @@ class StatisticsTable {
   // only statistics for matching origins are removed. Returns true if the SQL
   // completed successfully.
   bool RemoveStatsByOriginAndTime(
-      const base::Callback<bool(const GURL&)>& origin_filter,
+      const base::RepeatingCallback<bool(const GURL&)>& origin_filter,
       base::Time delete_begin,
       base::Time delete_end);
-
-  // Returns the number of distinct domains for which at least one account has
-  // |n| or more dismissals.
-  int GetNumDomainsWithAtLeastNDismissals(int64_t n);
-
-  // Returns the number of distinct accounts for which have at least |n| or more
-  // dismissals.
-  int GetNumAccountsWithAtLeastNDismissals(int64_t n);
 
   // Returns the number of rows (origin/username pairs) in the table.
   int GetNumAccounts();
 
- private:
-  sql::Database* db_;
+  // Returns all statistics from the database.
+  std::vector<InteractionsStats> GetAllRowsForTest();
 
-  DISALLOW_COPY_AND_ASSIGN(StatisticsTable);
+ private:
+  raw_ptr<sql::Database> db_ = nullptr;
 };
 
 }  // namespace password_manager

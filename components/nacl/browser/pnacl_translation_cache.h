@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,13 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "net/base/cache_type.h"
 
 namespace disk_cache {
 class Backend;
+struct BackendResult;
 }
 
 namespace nacl {
@@ -29,7 +29,7 @@ class DrainableIOBuffer;
 
 namespace pnacl {
 typedef base::OnceCallback<void(int)> CompletionOnceCallback;
-typedef base::Callback<void(int, scoped_refptr<net::DrainableIOBuffer>)>
+typedef base::OnceCallback<void(int, scoped_refptr<net::DrainableIOBuffer>)>
     GetNexeCallback;
 class PnaclTranslationCacheEntry;
 extern const int kMaxMemCacheSize;
@@ -38,6 +38,10 @@ class PnaclTranslationCache
     : public base::SupportsWeakPtr<PnaclTranslationCache> {
  public:
   PnaclTranslationCache();
+
+  PnaclTranslationCache(const PnaclTranslationCache&) = delete;
+  PnaclTranslationCache& operator=(const PnaclTranslationCache&) = delete;
+
   virtual ~PnaclTranslationCache();
 
   // Initialize the translation cache in |cache_dir|.  If the return value is
@@ -62,7 +66,7 @@ class PnaclTranslationCache
   // Retrieve the nexe from the translation cache. Write the data into |nexe|
   // and call |callback|, passing a result code (0 on success and <0 otherwise),
   // and a DrainableIOBuffer with the data.
-  void GetNexe(const std::string& key, const GetNexeCallback& callback);
+  void GetNexe(const std::string& key, GetNexeCallback callback);
 
   // Return the number of entries in the cache backend.
   int Size();
@@ -90,14 +94,12 @@ class PnaclTranslationCache
            int cache_size,
            CompletionOnceCallback callback);
 
-  void OnCreateBackendComplete(int rv);
+  void OnCreateBackendComplete(disk_cache::BackendResult result);
 
   std::unique_ptr<disk_cache::Backend> disk_cache_;
   CompletionOnceCallback init_callback_;
   bool in_memory_;
   std::map<void*, scoped_refptr<PnaclTranslationCacheEntry> > open_entries_;
-
-  DISALLOW_COPY_AND_ASSIGN(PnaclTranslationCache);
 };
 
 }  // namespace pnacl

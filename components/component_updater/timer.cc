@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 namespace component_updater {
 
-Timer::Timer() {}
+Timer::Timer() = default;
 
 Timer::~Timer() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -18,7 +18,7 @@ Timer::~Timer() {
 
 void Timer::Start(base::TimeDelta initial_delay,
                   base::TimeDelta delay,
-                  const base::Closure& user_task) {
+                  const base::RepeatingClosure& user_task) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   delay_ = delay;

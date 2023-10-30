@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,11 @@
 #define CONTENT_BROWSER_BACKGROUND_FETCH_BACKGROUND_FETCH_TEST_SERVICE_WORKER_H_
 
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
-#include "base/optional.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
+#include "third_party/blink/public/mojom/background_fetch/background_fetch.mojom.h"
 
 namespace content {
 
@@ -22,6 +20,12 @@ namespace content {
 class BackgroundFetchTestServiceWorker : public FakeServiceWorker {
  public:
   explicit BackgroundFetchTestServiceWorker(EmbeddedWorkerTestHelper* helper);
+
+  BackgroundFetchTestServiceWorker(const BackgroundFetchTestServiceWorker&) =
+      delete;
+  BackgroundFetchTestServiceWorker& operator=(
+      const BackgroundFetchTestServiceWorker&) = delete;
+
   ~BackgroundFetchTestServiceWorker() override;
 
   // Toggles whether the named Service Worker event should fail.
@@ -31,18 +35,19 @@ class BackgroundFetchTestServiceWorker : public FakeServiceWorker {
   void set_fail_fetched_event(bool fail) { fail_fetched_event_ = fail; }
   void delay_dispatch() { delay_dispatch_ = true; }
 
-  // Sets a base::Callback that should be executed when the named event is ran.
-  void set_abort_event_closure(const base::Closure& closure) {
-    abort_event_closure_ = closure;
+  // Sets a callback that should be executed when the next named event is
+  // ran.
+  void set_abort_event_closure(base::OnceClosure closure) {
+    abort_event_closure_ = std::move(closure);
   }
-  void set_click_event_closure(const base::Closure& closure) {
-    click_event_closure_ = closure;
+  void set_click_event_closure(base::OnceClosure closure) {
+    click_event_closure_ = std::move(closure);
   }
-  void set_fetch_fail_event_closure(const base::Closure& closure) {
-    fetch_fail_event_closure_ = closure;
+  void set_fetch_fail_event_closure(base::OnceClosure closure) {
+    fetch_fail_event_closure_ = std::move(closure);
   }
-  void set_fetched_event_closure(const base::Closure& closure) {
-    fetched_event_closure_ = closure;
+  void set_fetched_event_closure(base::OnceClosure closure) {
+    fetched_event_closure_ = std::move(closure);
   }
 
   const blink::mojom::BackgroundFetchRegistrationDataPtr& last_registration()
@@ -83,16 +88,14 @@ class BackgroundFetchTestServiceWorker : public FakeServiceWorker {
   bool delay_dispatch_ = false;
   base::OnceClosure delayed_closure_;
 
-  base::Closure abort_event_closure_;
-  base::Closure click_event_closure_;
-  base::Closure fetch_fail_event_closure_;
-  base::Closure fetched_event_closure_;
+  base::OnceClosure abort_event_closure_;
+  base::OnceClosure click_event_closure_;
+  base::OnceClosure fetch_fail_event_closure_;
+  base::OnceClosure fetched_event_closure_;
 
   blink::mojom::BackgroundFetchRegistrationPtr last_registration_;
-
-  DISALLOW_COPY_AND_ASSIGN(BackgroundFetchTestServiceWorker);
 };
 
 }  // namespace content
 
-#endif  // CONTENT_BROWSER_BACKGROUND_FETCH_BACKGROUND_FETCH_EMBEDDED_WORKER_TEST_HELPER_H_
+#endif  // CONTENT_BROWSER_BACKGROUND_FETCH_BACKGROUND_FETCH_TEST_SERVICE_WORKER_H_

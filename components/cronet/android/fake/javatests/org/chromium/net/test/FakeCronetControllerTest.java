@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,9 @@ import static org.junit.Assert.fail;
 
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.support.test.runner.AndroidJUnit4;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -134,13 +135,13 @@ public class FakeCronetControllerTest {
     public void testResponseMatchersConsultedInOrderOfAddition() {
         String url = "url";
         FakeUrlResponse response =
-                new FakeUrlResponse.Builder().setResponseBody("body text").build();
+                new FakeUrlResponse.Builder().setResponseBody("body text".getBytes()).build();
         ResponseMatcher matcher = new UrlResponseMatcher(url, response);
         mFakeCronetController.addResponseMatcher(matcher);
-        mFakeCronetController.addSuccessResponse(url, "different text");
+        mFakeCronetController.addSuccessResponse(url, "different text".getBytes());
 
         FakeUrlResponse foundResponse =
-                mFakeCronetController.getResponse(new String(url), null, null);
+                mFakeCronetController.getResponse(new String(url), null, null, null);
 
         assertEquals(response, foundResponse);
     }
@@ -150,12 +151,12 @@ public class FakeCronetControllerTest {
     public void testRemoveResponseMatcher() {
         String url = "url";
         FakeUrlResponse response =
-                new FakeUrlResponse.Builder().setResponseBody("body text").build();
+                new FakeUrlResponse.Builder().setResponseBody("body text".getBytes()).build();
         ResponseMatcher matcher = new UrlResponseMatcher(url, response);
         mFakeCronetController.addResponseMatcher(matcher);
         mFakeCronetController.removeResponseMatcher(matcher);
 
-        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null);
+        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null, null);
 
         assertEquals(404, foundResponse.getHttpStatusCode());
         assertNotEquals(response, foundResponse);
@@ -166,12 +167,12 @@ public class FakeCronetControllerTest {
     public void testClearResponseMatchers() {
         String url = "url";
         FakeUrlResponse response =
-                new FakeUrlResponse.Builder().setResponseBody("body text").build();
+                new FakeUrlResponse.Builder().setResponseBody("body text".getBytes()).build();
         ResponseMatcher matcher = new UrlResponseMatcher(url, response);
         mFakeCronetController.addResponseMatcher(matcher);
         mFakeCronetController.clearResponseMatchers();
 
-        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null);
+        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null, null);
 
         assertEquals(404, foundResponse.getHttpStatusCode());
         assertNotEquals(response, foundResponse);
@@ -182,10 +183,10 @@ public class FakeCronetControllerTest {
     public void testAddUrlResponseMatcher() {
         String url = "url";
         FakeUrlResponse response =
-                new FakeUrlResponse.Builder().setResponseBody("body text").build();
+                new FakeUrlResponse.Builder().setResponseBody("body text".getBytes()).build();
         mFakeCronetController.addResponseForUrl(response, url);
 
-        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null);
+        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null, null);
 
         assertEquals(foundResponse, response);
     }
@@ -193,7 +194,7 @@ public class FakeCronetControllerTest {
     @Test
     @SmallTest
     public void testDefaultResponseIs404() {
-        FakeUrlResponse foundResponse = mFakeCronetController.getResponse("url", null, null);
+        FakeUrlResponse foundResponse = mFakeCronetController.getResponse("url", null, null, null);
 
         assertEquals(404, foundResponse.getHttpStatusCode());
     }
@@ -205,7 +206,7 @@ public class FakeCronetControllerTest {
         String location = "/TEST_REDIRECT_LOCATION";
         mFakeCronetController.addRedirectResponse(location, url);
 
-        FakeUrlResponse foundResponse = mFakeCronetController.getResponse("url", null, null);
+        FakeUrlResponse foundResponse = mFakeCronetController.getResponse("url", null, null, null);
         Map.Entry<String, String> headerEntry = new AbstractMap.SimpleEntry<>("location", location);
 
         assertTrue(foundResponse.getAllHeadersList().contains(headerEntry));
@@ -220,7 +221,7 @@ public class FakeCronetControllerTest {
         int httpStatusCode = 400;
         mFakeCronetController.addHttpErrorResponse(httpStatusCode, url);
 
-        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null);
+        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null, null);
 
         assertEquals(foundResponse.getHttpStatusCode(), httpStatusCode);
     }
@@ -243,12 +244,12 @@ public class FakeCronetControllerTest {
     public void testAddSuccessResponse() {
         String url = "url";
         String body = "TEST_BODY";
-        mFakeCronetController.addSuccessResponse(url, body);
+        mFakeCronetController.addSuccessResponse(url, body.getBytes());
 
-        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null);
+        FakeUrlResponse foundResponse = mFakeCronetController.getResponse(url, null, null, null);
 
         assertTrue(foundResponse.getHttpStatusCode() >= 200);
         assertTrue(foundResponse.getHttpStatusCode() < 300);
-        assertEquals(body, foundResponse.getResponseBody());
+        assertEquals(body, new String(foundResponse.getResponseBody()));
     }
 }

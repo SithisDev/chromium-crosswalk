@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/values.h"
 #include "components/prefs/pref_service.h"
 #include "net/log/net_log.h"
@@ -37,8 +36,8 @@ HostCachePersistenceManager::HostCachePersistenceManager(
 
   registrar_.Init(pref_service_);
   registrar_.Add(pref_name_,
-                 base::Bind(&HostCachePersistenceManager::ReadFromDisk,
-                            weak_factory_.GetWeakPtr()));
+                 base::BindRepeating(&HostCachePersistenceManager::ReadFromDisk,
+                                     weak_factory_.GetWeakPtr()));
   cache_->set_persistence_delegate(this);
 }
 
@@ -57,14 +56,11 @@ void HostCachePersistenceManager::ReadFromDisk() {
     return;
 
   net_log_.BeginEvent(net::NetLogEventType::HOST_CACHE_PREF_READ);
-  const base::ListValue* pref_value = pref_service_->GetList(pref_name_);
-  bool success = cache_->RestoreFromListValue(*pref_value);
+  const base::Value::List& pref_value = pref_service_->GetList(pref_name_);
+  bool success = cache_->RestoreFromListValue(pref_value);
   net_log_.AddEntryWithBoolParams(net::NetLogEventType::HOST_CACHE_PREF_READ,
                                   net::NetLogEventPhase::END, "success",
                                   success);
-
-  UMA_HISTOGRAM_BOOLEAN("DNS.HostCache.RestoreSuccess", success);
-  UMA_HISTOGRAM_COUNTS_1000("DNS.HostCache.RestoreSize", pref_value->GetSize());
 }
 
 void HostCachePersistenceManager::ScheduleWrite() {
@@ -83,10 +79,10 @@ void HostCachePersistenceManager::WriteToDisk() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   net_log_.AddEvent(net::NetLogEventType::HOST_CACHE_PREF_WRITE);
-  base::ListValue value;
-  cache_->GetAsListValue(&value, false);
+  base::Value::List list;
+  cache_->GetList(list, false, net::HostCache::SerializationType::kRestorable);
   writing_pref_ = true;
-  pref_service_->Set(pref_name_, value);
+  pref_service_->SetList(pref_name_, std::move(list));
   writing_pref_ = false;
 }
 

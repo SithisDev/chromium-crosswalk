@@ -1,20 +1,22 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/test/test_frame_sink_manager.h"
 
+#include <utility>
+
 namespace viz {
 
-TestFrameSinkManagerImpl::TestFrameSinkManagerImpl() : binding_(this) {}
+TestFrameSinkManagerImpl::TestFrameSinkManagerImpl() = default;
 
-TestFrameSinkManagerImpl::~TestFrameSinkManagerImpl() {}
+TestFrameSinkManagerImpl::~TestFrameSinkManagerImpl() = default;
 
-void TestFrameSinkManagerImpl::BindRequest(
-    mojom::FrameSinkManagerRequest request,
-    mojom::FrameSinkManagerClientPtr client) {
-  binding_.Bind(std::move(request));
-  client_ = std::move(client);
+void TestFrameSinkManagerImpl::BindReceiver(
+    mojo::PendingReceiver<mojom::FrameSinkManager> receiver,
+    mojo::PendingRemote<mojom::FrameSinkManagerClient> client) {
+  receiver_.Bind(std::move(receiver));
+  client_.Bind(std::move(client));
 }
 
 }  // namespace viz

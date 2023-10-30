@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,9 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
-#include "base/strings/string16.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/storage_monitor/storage_info.h"
 #include "components/storage_monitor/storage_monitor.h"
 
@@ -31,6 +30,10 @@ class TestVolumeMountWatcherWin;
 class VolumeMountWatcherWin {
  public:
   VolumeMountWatcherWin();
+
+  VolumeMountWatcherWin(const VolumeMountWatcherWin&) = delete;
+  VolumeMountWatcherWin& operator=(const VolumeMountWatcherWin&) = delete;
+
   virtual ~VolumeMountWatcherWin();
 
   // Returns the volume file path of the drive specified by the |drive_number|.
@@ -57,15 +60,16 @@ class VolumeMountWatcherWin {
   // removable volumes are found.
   void SetNotifications(StorageMonitor::Receiver* notifications);
 
-  void EjectDevice(const std::string& device_id,
-                   base::Callback<void(StorageMonitor::EjectStatus)> callback);
+  void EjectDevice(
+      const std::string& device_id,
+      base::OnceCallback<void(StorageMonitor::EjectStatus)> callback);
 
  protected:
-  typedef base::Callback<bool(const base::FilePath&,
-                              StorageInfo*)> GetDeviceDetailsCallbackType;
+  using GetDeviceDetailsCallbackType =
+      base::OnceCallback<bool(const base::FilePath&, StorageInfo*)>;
 
-  typedef base::Callback<std::vector<base::FilePath>(void)>
-      GetAttachedDevicesCallbackType;
+  using GetAttachedDevicesCallbackType =
+      base::OnceCallback<std::vector<base::FilePath>()>;
 
   // Handles mass storage device attach event on UI thread.
   void HandleDeviceAttachEventOnUIThread(
@@ -73,7 +77,7 @@ class VolumeMountWatcherWin {
       const StorageInfo& info);
 
   // Handles mass storage device detach event on UI thread.
-  void HandleDeviceDetachEventOnUIThread(const base::string16& device_location);
+  void HandleDeviceDetachEventOnUIThread(const std::wstring& device_location);
 
   // UI thread delegate to set up adding storage devices.
   void AddDevicesOnUIThread(std::vector<base::FilePath> removable_devices);
@@ -82,7 +86,7 @@ class VolumeMountWatcherWin {
   // |volume_watcher| points back to the VolumeMountWatcherWin that called it.
   static void RetrieveInfoForDeviceAndAdd(
       const base::FilePath& device_path,
-      const GetDeviceDetailsCallbackType& get_device_details_callback,
+      GetDeviceDetailsCallbackType get_device_details_callback,
       base::WeakPtr<VolumeMountWatcherWin> volume_watcher);
 
   // Mark that a device we started a metadata check for has completed.
@@ -112,11 +116,9 @@ class VolumeMountWatcherWin {
 
   // The notifications object to use to signal newly attached volumes. Only
   // removable devices will be notified.
-  StorageMonitor::Receiver* notifications_;
+  raw_ptr<StorageMonitor::Receiver> notifications_;
 
-  base::WeakPtrFactory<VolumeMountWatcherWin> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(VolumeMountWatcherWin);
+  base::WeakPtrFactory<VolumeMountWatcherWin> weak_factory_{this};
 };
 
 }  // namespace storage_monitor

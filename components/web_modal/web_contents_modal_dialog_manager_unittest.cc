@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include <map>
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "components/web_modal/single_web_contents_dialog_manager.h"
 #include "components/web_modal/test_web_contents_modal_dialog_manager_delegate.h"
@@ -56,6 +56,11 @@ class TestNativeWebContentsModalDialogManager
       tracker_->SetState(NativeManagerTracker::NOT_SHOWN);
   }
 
+  TestNativeWebContentsModalDialogManager(
+      const TestNativeWebContentsModalDialogManager&) = delete;
+  TestNativeWebContentsModalDialogManager& operator=(
+      const TestNativeWebContentsModalDialogManager&) = delete;
+
   void Show() override {
     if (tracker_)
       tracker_->SetState(NativeManagerTracker::SHOWN);
@@ -77,11 +82,9 @@ class TestNativeWebContentsModalDialogManager
   void StopTracking() { tracker_ = nullptr; }
 
  private:
-  SingleWebContentsDialogManagerDelegate* delegate_;
+  raw_ptr<SingleWebContentsDialogManagerDelegate> delegate_;
   gfx::NativeWindow dialog_;
-  NativeManagerTracker* tracker_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestNativeWebContentsModalDialogManager);
+  raw_ptr<NativeManagerTracker> tracker_;
 };
 
 class WebContentsModalDialogManagerTest
@@ -89,14 +92,20 @@ class WebContentsModalDialogManagerTest
  public:
   WebContentsModalDialogManagerTest() : next_dialog_id(1), manager(nullptr) {}
 
+  WebContentsModalDialogManagerTest(const WebContentsModalDialogManagerTest&) =
+      delete;
+  WebContentsModalDialogManagerTest& operator=(
+      const WebContentsModalDialogManagerTest&) = delete;
+
   void SetUp() override {
     content::RenderViewHostTestHarness::SetUp();
 
-    delegate.reset(new TestWebContentsModalDialogManagerDelegate);
+    delegate = std::make_unique<TestWebContentsModalDialogManagerDelegate>();
     WebContentsModalDialogManager::CreateForWebContents(web_contents());
     manager = WebContentsModalDialogManager::FromWebContents(web_contents());
     manager->SetDelegate(delegate.get());
-    test_api.reset(new WebContentsModalDialogManager::TestApi(manager));
+    test_api =
+        std::make_unique<WebContentsModalDialogManager::TestApi>(manager);
   }
 
   void TearDown() override {
@@ -108,7 +117,7 @@ class WebContentsModalDialogManagerTest
   gfx::NativeWindow MakeFakeDialog() {
     // WebContentsModalDialogManager treats the dialog window as an opaque
     // type, so creating fake dialog windows using reinterpret_cast is valid.
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
     NSWindow* window = reinterpret_cast<NSWindow*>(next_dialog_id++);
     return gfx::NativeWindow(window);
 #else
@@ -118,10 +127,8 @@ class WebContentsModalDialogManagerTest
 
   int next_dialog_id;
   std::unique_ptr<TestWebContentsModalDialogManagerDelegate> delegate;
-  WebContentsModalDialogManager* manager;
+  raw_ptr<WebContentsModalDialogManager> manager;
   std::unique_ptr<WebContentsModalDialogManager::TestApi> test_api;
-
-  DISALLOW_COPY_AND_ASSIGN(WebContentsModalDialogManagerTest);
 };
 
 // Test that the dialog is shown immediately when the delegate indicates the web
@@ -220,30 +227,6 @@ TEST_F(WebContentsModalDialogManagerTest, VisibilityObservation) {
 
   native_manager->StopTracking();
 }
-
-// Test that attaching an interstitial page closes all dialogs.
-TEST_F(WebContentsModalDialogManagerTest, InterstitialPage) {
-  const gfx::NativeWindow dialog1 = MakeFakeDialog();
-  const gfx::NativeWindow dialog2 = MakeFakeDialog();
-
-  NativeManagerTracker tracker1;
-  NativeManagerTracker tracker2;
-  TestNativeWebContentsModalDialogManager* native_manager1 =
-      new TestNativeWebContentsModalDialogManager(dialog1, manager, &tracker1);
-  TestNativeWebContentsModalDialogManager* native_manager2 =
-      new TestNativeWebContentsModalDialogManager(dialog2, manager, &tracker2);
-  manager->ShowDialogWithManager(dialog1, base::WrapUnique(native_manager1));
-  manager->ShowDialogWithManager(dialog2, base::WrapUnique(native_manager2));
-
-  test_api->DidAttachInterstitialPage();
-
-  EXPECT_EQ(NativeManagerTracker::CLOSED, tracker1.state_);
-  EXPECT_EQ(NativeManagerTracker::CLOSED, tracker2.state_);
-
-  EXPECT_TRUE(tracker1.was_shown_);
-  EXPECT_FALSE(tracker2.was_shown_);
-}
-
 
 // Test that the first dialog is always shown, regardless of the order in which
 // dialogs are closed.

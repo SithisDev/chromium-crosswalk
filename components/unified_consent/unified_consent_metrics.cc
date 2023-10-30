@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,29 +34,10 @@ enum class SyncDataType {
   kPasswords = 8,
   kAutofill = 9,
   kPayments = 10,
-  kSync = 11,
+  // kSync = 11,
 
-  kMaxValue = kSync
+  kMaxValue = kPayments
 };
-
-// Records a sample in the SyncAndGoogleServicesSettings histogram. Wrapped in a
-// function to avoid code size issues caused by histogram macros.
-void RecordSettingsHistogramSample(SettingsHistogramValue value) {
-  UMA_HISTOGRAM_ENUMERATION("UnifiedConsent.SyncAndGoogleServicesSettings",
-                            value);
-}
-
-// Checks if a pref is enabled and if so, records a sample in the
-// SyncAndGoogleServicesSettings histogram. Returns true if a sample was
-// recorded.
-bool RecordSettingsHistogramFromPref(const char* pref_name,
-                                     PrefService* pref_service,
-                                     SettingsHistogramValue value) {
-  if (!pref_service->GetBoolean(pref_name))
-    return false;
-  RecordSettingsHistogramSample(value);
-  return true;
-}
 
 void RecordSyncDataTypeSample(SyncDataType data_type) {
   UMA_HISTOGRAM_ENUMERATION(
@@ -69,13 +50,6 @@ void RecordSyncDataTypeSample(SyncDataType data_type) {
 // Returns true if a sample was recorded.
 bool RecordSyncSetupDataTypesImpl(syncer::SyncUserSettings* sync_settings,
                                   PrefService* pref_service) {
-#if defined(OS_ANDROID)
-  if (!sync_settings->IsSyncRequested()) {
-    RecordSyncDataTypeSample(SyncDataType::kSync);
-    return true;  // Don't record states of data types if sync is disabled.
-  }
-#endif
-
   bool metric_recorded = false;
 
   std::vector<std::pair<SyncDataType, syncer::UserSelectableType>> sync_types;
@@ -91,7 +65,7 @@ bool RecordSyncSetupDataTypesImpl(syncer::SyncUserSettings* sync_settings,
                           syncer::UserSelectableType::kPasswords);
   sync_types.emplace_back(SyncDataType::kAutofill,
                           syncer::UserSelectableType::kAutofill);
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   sync_types.emplace_back(SyncDataType::kApps,
                           syncer::UserSelectableType::kApps);
   sync_types.emplace_back(SyncDataType::kExtensions,
@@ -100,9 +74,9 @@ bool RecordSyncSetupDataTypesImpl(syncer::SyncUserSettings* sync_settings,
                           syncer::UserSelectableType::kThemes);
 #endif
 
-  for (const auto& data_type : sync_types) {
-    if (!sync_settings->GetSelectedTypes().Has(data_type.second)) {
-      RecordSyncDataTypeSample(data_type.first);
+  for (const auto& [bucket, type] : sync_types) {
+    if (!sync_settings->GetSelectedTypes().Has(type)) {
+      RecordSyncDataTypeSample(bucket);
       metric_recorded = true;
     }
   }
@@ -117,11 +91,10 @@ bool RecordSyncSetupDataTypesImpl(syncer::SyncUserSettings* sync_settings,
 }  // namespace
 
 void RecordSettingsHistogram(PrefService* pref_service) {
-  bool metric_recorded = RecordSettingsHistogramFromPref(
-      prefs::kUrlKeyedAnonymizedDataCollectionEnabled, pref_service,
-      metrics::SettingsHistogramValue::kUrlKeyedAnonymizedDataCollection);
-  if (!metric_recorded)
-    RecordSettingsHistogramSample(metrics::SettingsHistogramValue::kNone);
+  bool is_enabled =
+      pref_service->GetBoolean(prefs::kUrlKeyedAnonymizedDataCollectionEnabled);
+  UMA_HISTOGRAM_BOOLEAN(
+      "UnifiedConsent.MakeSearchesAndBrowsingBetter.OnStartup", is_enabled);
 }
 
 void RecordSyncSetupDataTypesHistrogam(syncer::SyncUserSettings* sync_settings,

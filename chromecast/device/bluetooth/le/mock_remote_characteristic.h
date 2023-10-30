@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -63,17 +63,17 @@ class MockRemoteCharacteristic : public RemoteCharacteristic {
   }
 
   MOCK_METHOD0(NotificationEnabled, bool());
-  MOCK_CONST_METHOD0(characteristic,
-                     const bluetooth_v2_shlib::Gatt::Characteristic&());
   const bluetooth_v2_shlib::Uuid& uuid() const override { return uuid_; }
-  MOCK_CONST_METHOD0(handle, uint16_t());
+  MOCK_CONST_METHOD0(handle, HandleId());
   MOCK_CONST_METHOD0(permissions, bluetooth_v2_shlib::Gatt::Permissions());
   MOCK_CONST_METHOD0(properties, bluetooth_v2_shlib::Gatt::Properties());
 
   const bluetooth_v2_shlib::Uuid uuid_;
 
  private:
-  ~MockRemoteCharacteristic();
+  friend testing::StrictMock<MockRemoteCharacteristic>;
+
+  ~MockRemoteCharacteristic() override;
 };
 
 }  // namespace bluetooth

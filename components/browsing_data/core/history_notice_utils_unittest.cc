@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 
 #include "base/callback.h"
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
 #include "components/history/core/test/fake_web_history_service.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/driver/test_sync_service.h"
+#include "components/sync/test/test_sync_service.h"
 #include "components/version_info/version_info.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_request_test_util.h"
@@ -60,7 +60,7 @@ class HistoryNoticeUtilsTest : public ::testing::Test {
   std::unique_ptr<syncer::TestSyncService> sync_service_;
   std::unique_ptr<history::FakeWebHistoryService> history_service_;
 
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 TEST_F(HistoryNoticeUtilsTest, NotSyncing) {
@@ -74,13 +74,13 @@ TEST_F(HistoryNoticeUtilsTest, SyncingWithWrongParameters) {
 
   // ...the response is false if there's custom passphrase...
   sync_service()->SetActiveDataTypes(syncer::ModelTypeSet::All());
-  sync_service()->SetIsUsingSecondaryPassphrase(true);
+  sync_service()->SetIsUsingExplicitPassphrase(true);
   ExpectShouldPopupDialogAboutOtherFormsOfBrowsingHistoryWithResult(false);
 
   // ...or even if there's no custom passphrase, but we're not syncing history.
   syncer::ModelTypeSet only_passwords(syncer::PASSWORDS);
   sync_service()->SetActiveDataTypes(only_passwords);
-  sync_service()->SetIsUsingSecondaryPassphrase(false);
+  sync_service()->SetIsUsingExplicitPassphrase(false);
   ExpectShouldPopupDialogAboutOtherFormsOfBrowsingHistoryWithResult(false);
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 #include <memory>
 #include <vector>
 
+#include "ash/constants/ash_paths.h"
+#include "ash/constants/ash_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/containers/flat_map.h"
@@ -16,25 +18,22 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
-#include "base/sequenced_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/atomic_flag.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/system/sys_info.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/task_runner.h"
 #include "base/task/task_traits.h"
-#include "base/task_runner.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chromeos/constants/chromeos_constants.h"
-#include "chromeos/constants/chromeos_paths.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "chromeos/system/kiosk_oem_manifest_parser.h"
 #include "chromeos/system/name_value_pairs_parser.h"
 
@@ -43,12 +42,9 @@ namespace system {
 
 namespace {
 
-// Path to the tool used to get system info, and delimiters for the output
-// format of the tool.
-const char* kCrosSystemTool[] = { "/usr/bin/crossystem" };
-const char kCrosSystemEq[] = "=";
-const char kCrosSystemDelim[] = "\n";
-const char kCrosSystemCommentDelim[] = "#";
+// Path to the tool used to get system info, and special values for the
+// output of the tool.
+const char* kCrosSystemTool[] = {"/usr/bin/crossystem"};
 const char kCrosSystemValueError[] = "(error)";
 
 const char kHardwareClassCrosSystemKey[] = "hwid";
@@ -56,22 +52,10 @@ const char kHardwareClassValueUnknown[] = "unknown";
 
 const char kIsVmCrosSystemKey[] = "inside_vm";
 
-// Key/value delimiters of machine hardware info file. machine-info is generated
-// only for OOBE and enterprise enrollment and may not be present. See
-// login-manager/init/machine-info.conf.
-const char kMachineHardwareInfoEq[] = "=";
-const char kMachineHardwareInfoDelim[] = " \n";
-
 // File to get ECHO coupon info from, and key/value delimiters of
 // the file.
 const char kEchoCouponFile[] =
     "/mnt/stateful_partition/unencrypted/cache/vpd/echo/vpd_echo.txt";
-const char kEchoCouponEq[] = "=";
-const char kEchoCouponDelim[] = "\n";
-
-// Key/value delimiters for VPD file.
-const char kVpdEq[] = "=";
-const char kVpdDelim[] = "\n";
 
 // File to get regional data from.
 const char kCrosRegions[] = "/usr/share/misc/cros-regions.json";
@@ -87,6 +71,7 @@ const base::CommandLine::CharType kOemManifestFilePath[] =
 const char kKeyboardsPath[] = "keyboards";
 const char kLocalesPath[] = "locales";
 const char kTimeZonesPath[] = "time_zones";
+const char kKeyboardMechanicalLayoutPath[] = "keyboard_mechanical_layout";
 
 // These are the machine serial number keys that we check in order until we find
 // a non-empty serial number.
@@ -106,6 +91,7 @@ const char kTimeZonesPath[] = "time_zones";
 // devices. It's known *not* to be present on caroline.
 // TODO(tnagel): Remove "Product_S/N" after all devices that have it are AUE.
 const char* const kMachineInfoSerialNumberKeys[] = {
+    "flex_id",        // Used by Reven devices
     "Product_S/N",    // Samsung legacy
     "serial_number",  // VPD v2+ devices (Samsung: caroline and later)
 };
@@ -113,18 +99,18 @@ const char* const kMachineInfoSerialNumberKeys[] = {
 // Gets ListValue from given |dictionary| by given |key| and (unless |result| is
 // nullptr) sets |result| to a string with all list values joined by ','.
 // Returns true on success.
-bool JoinListValuesToString(const base::DictionaryValue* dictionary,
+bool JoinListValuesToString(const base::Value& dictionary,
                             const std::string key,
                             std::string* result) {
-  const base::ListValue* list = nullptr;
-  if (!dictionary->GetListWithoutPathExpansion(key, &list))
+  const base::Value* list_value = dictionary.FindListKey(key);
+  if (list_value == nullptr)
     return false;
 
   std::string buffer;
   bool first = true;
-  for (const auto& v : *list) {
-    std::string value;
-    if (!v.GetAsString(&value))
+  for (const auto& v : list_value->GetListDeprecated()) {
+    const std::string* value = v.GetIfString();
+    if (!value)
       return false;
 
     if (first)
@@ -132,7 +118,7 @@ bool JoinListValuesToString(const base::DictionaryValue* dictionary,
     else
       buffer += ',';
 
-    buffer += value;
+    buffer += *value;
   }
   if (result != nullptr)
     *result = buffer;
@@ -142,35 +128,57 @@ bool JoinListValuesToString(const base::DictionaryValue* dictionary,
 // Gets ListValue from given |dictionary| by given |key| and (unless |result| is
 // nullptr) sets |result| to the first value as string.  Returns true on
 // success.
-bool GetFirstListValueAsString(const base::DictionaryValue* dictionary,
+bool GetFirstListValueAsString(const base::Value& dictionary,
                                const std::string key,
                                std::string* result) {
-  const base::ListValue* list = nullptr;
-  if (!dictionary->GetListWithoutPathExpansion(key, &list))
+  const base::Value* list_value = dictionary.FindListKey(key);
+  if (list_value == nullptr || list_value->GetListDeprecated().empty())
     return false;
 
-  std::string value;
-  if (!list->GetString(0, &value))
+  const std::string* value = list_value->GetListDeprecated()[0].GetIfString();
+  if (value == nullptr)
     return false;
   if (result != nullptr)
-    *result = value;
+    *result = *value;
   return true;
 }
 
-bool GetKeyboardLayoutFromRegionalData(const base::DictionaryValue* region_dict,
+bool GetKeyboardLayoutFromRegionalData(const base::Value& region_dict,
                                        std::string* result) {
   return JoinListValuesToString(region_dict, kKeyboardsPath, result);
 }
 
-bool GetInitialTimezoneFromRegionalData(
-    const base::DictionaryValue* region_dict,
-    std::string* result) {
+bool GetKeyboardMechanicalLayoutFromRegionalData(const base::Value& region_dict,
+                                                 std::string* result) {
+  const std::string* value =
+      region_dict.FindStringPath(kKeyboardMechanicalLayoutPath);
+  if (value == nullptr)
+    return false;
+  *result = *value;
+  return true;
+}
+
+bool GetInitialTimezoneFromRegionalData(const base::Value& region_dict,
+                                        std::string* result) {
   return GetFirstListValueAsString(region_dict, kTimeZonesPath, result);
 }
 
-bool GetInitialLocaleFromRegionalData(const base::DictionaryValue* region_dict,
+bool GetInitialLocaleFromRegionalData(const base::Value& region_dict,
                                       std::string* result) {
   return JoinListValuesToString(region_dict, kLocalesPath, result);
+}
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class VpdCacheReadResult {
+  kSuccess = 0,
+  KMissing = 1,
+  kParseFailed = 2,
+  kMaxValue = kParseFailed,
+};
+
+void ReportVpdCacheReadResult(VpdCacheReadResult result) {
+  base::UmaHistogramEnumeration("Enterprise.VPDCacheReadResult", result);
 }
 
 }  // namespace
@@ -183,15 +191,17 @@ const char kShouldSendRlzPingKey[] = "should_send_rlz_ping";
 const char kShouldSendRlzPingValueFalse[] = "0";
 const char kShouldSendRlzPingValueTrue[] = "1";
 const char kRlzEmbargoEndDateKey[] = "rlz_embargo_end_date";
+const char kEnterpriseManagementEmbargoEndDateKey[] =
+    "enterprise_management_embargo_end_date";
 const char kCustomizationIdKey[] = "customization_id";
 const char kDevSwitchBootKey[] = "devsw_boot";
 const char kDevSwitchBootValueDev[] = "1";
 const char kDevSwitchBootValueVerified[] = "0";
 const char kDockMacAddressKey[] = "dock_mac";
 const char kEthernetMacAddressKey[] = "ethernet_mac0";
-const char kFirmwareWriteProtectBootKey[] = "wpsw_boot";
-const char kFirmwareWriteProtectBootValueOn[] = "1";
-const char kFirmwareWriteProtectBootValueOff[] = "0";
+const char kFirmwareWriteProtectCurrentKey[] = "wpsw_cur";
+const char kFirmwareWriteProtectCurrentValueOn[] = "1";
+const char kFirmwareWriteProtectCurrentValueOff[] = "0";
 const char kFirmwareTypeKey[] = "mainfw_type";
 const char kFirmwareTypeValueDeveloper[] = "developer";
 const char kFirmwareTypeValueNonchrome[] = "nonchrome";
@@ -209,6 +219,8 @@ const char kSerialNumberKeyForTest[] = "serial_number";
 const char kInitialLocaleKey[] = "initial_locale";
 const char kInitialTimezoneKey[] = "initial_timezone";
 const char kKeyboardLayoutKey[] = "keyboard_layout";
+const char kKeyboardMechanicalLayoutKey[] = "keyboard_mechanical_layout";
+const char kAttestedDeviceIdKey[] = "attested_device_id";
 
 // OEM specific statistics. Must be prefixed with "oem_".
 const char kOemCanExitEnterpriseEnrollmentKey[] = "oem_can_exit_enrollment";
@@ -237,10 +249,12 @@ class StatisticsProviderImpl : public StatisticsProvider {
 
   static StatisticsProviderImpl* GetInstance();
 
+  StatisticsProviderImpl(const StatisticsProviderImpl&) = delete;
+  StatisticsProviderImpl& operator=(const StatisticsProviderImpl&) = delete;
+
  private:
   typedef std::map<std::string, bool> MachineFlags;
-  typedef bool (*RegionDataExtractor)(const base::DictionaryValue*,
-                                      std::string*);
+  typedef bool (*RegionDataExtractor)(const base::Value&, std::string*);
   friend struct base::DefaultSingletonTraits<StatisticsProviderImpl>;
 
   StatisticsProviderImpl();
@@ -269,9 +283,6 @@ class StatisticsProviderImpl : public StatisticsProvider {
   bool GetRegionalInformation(const std::string& name,
                               std::string* result) const;
 
-  // Returns current region dictionary or NULL if not found.
-  const base::DictionaryValue* GetRegionDictionary() const;
-
   // Returns extractor from regional_data_extractors_ or nullptr.
   RegionDataExtractor GetRegionalDataExtractor(const std::string& name) const;
 
@@ -281,7 +292,7 @@ class StatisticsProviderImpl : public StatisticsProvider {
   base::AtomicFlag cancellation_flag_;
   bool oem_manifest_loaded_;
   std::string region_;
-  std::unique_ptr<base::Value> regional_data_;
+  base::Value region_dict_;
   base::flat_map<std::string, RegionDataExtractor> regional_data_extractors_;
 
   // Lock held when |statistics_loaded_| is signaled and when
@@ -296,8 +307,6 @@ class StatisticsProviderImpl : public StatisticsProvider {
   std::vector<
       std::pair<base::OnceClosure, scoped_refptr<base::SequencedTaskRunner>>>
       statistics_loaded_callbacks_;
-
-  DISALLOW_COPY_AND_ASSIGN(StatisticsProviderImpl);
 };
 
 void StatisticsProviderImpl::SignalStatisticsLoaded() {
@@ -330,7 +339,7 @@ bool StatisticsProviderImpl::WaitForStatisticsLoaded() {
   // happen except during OOBE.
   base::Time start_time = base::Time::Now();
   base::ScopedAllowBaseSyncPrimitives allow_wait;
-  statistics_loaded_.TimedWait(base::TimeDelta::FromSeconds(kTimeoutSecs));
+  statistics_loaded_.TimedWait(base::Seconds(kTimeoutSecs));
 
   base::TimeDelta dtime = base::Time::Now() - start_time;
   if (statistics_loaded_.IsSignaled()) {
@@ -339,22 +348,9 @@ bool StatisticsProviderImpl::WaitForStatisticsLoaded() {
     return true;
   }
 
-  LOG(ERROR) << "Statistics not loaded after waiting "
-             << dtime.InMilliseconds() << "ms.";
+  LOG(ERROR) << "Statistics not loaded after waiting " << dtime.InMilliseconds()
+             << "ms.";
   return false;
-}
-
-const base::DictionaryValue* StatisticsProviderImpl::GetRegionDictionary()
-    const {
-  const base::DictionaryValue* full_dict = nullptr;
-  if (!regional_data_->GetAsDictionary(&full_dict))
-    return nullptr;
-
-  const base::DictionaryValue* region_dict = nullptr;
-  if (!full_dict->GetDictionaryWithoutPathExpansion(region_, &region_dict))
-    return nullptr;
-
-  return region_dict;
 }
 
 StatisticsProviderImpl::RegionDataExtractor
@@ -369,18 +365,14 @@ StatisticsProviderImpl::GetRegionalDataExtractor(
 
 bool StatisticsProviderImpl::GetRegionalInformation(const std::string& name,
                                                     std::string* result) const {
-  if (region_.empty() || !regional_data_.get())
+  if (region_.empty() || region_dict_.is_none())
     return false;
 
   const RegionDataExtractor extractor = GetRegionalDataExtractor(name);
   if (!extractor)
     return false;
 
-  const base::DictionaryValue* region_dict = GetRegionDictionary();
-  if (!region_dict)
-    return false;
-
-  return extractor(region_dict, result);
+  return extractor(region_dict_, result);
 }
 
 bool StatisticsProviderImpl::GetMachineStatistic(const std::string& name,
@@ -391,33 +383,18 @@ bool StatisticsProviderImpl::GetMachineStatistic(const std::string& name,
     return false;
   }
 
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  std::string cros_regions_mode;
-  if (command_line->HasSwitch(chromeos::switches::kCrosRegionsMode)) {
-    cros_regions_mode =
-        command_line->GetSwitchValueASCII(chromeos::switches::kCrosRegionsMode);
-  }
-
-  // These two modes override existing machine statistics keys.
-  // By default (cros_regions_mode is empty), the same keys are emulated if
-  // they do not exist in machine statistics.
-  if (cros_regions_mode == chromeos::switches::kCrosRegionsModeOverride ||
-      cros_regions_mode == chromeos::switches::kCrosRegionsModeHide) {
-    if (GetRegionalInformation(name, result))
-      return true;
-  }
-
-  if (cros_regions_mode == chromeos::switches::kCrosRegionsModeHide &&
-      GetRegionalDataExtractor(name)) {
-    return false;
+  // Test region should override VPD values.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          ash::switches::kCrosRegion) &&
+      GetRegionalInformation(name, result)) {
+    return true;
   }
 
   NameValuePairsParser::NameValueMap::iterator iter = machine_info_.find(name);
   if (iter == machine_info_.end()) {
     if (GetRegionalInformation(name, result))
       return true;
-    if (result != nullptr &&
-        base::SysInfo::IsRunningOnChromeOS() &&
+    if (result != nullptr && base::SysInfo::IsRunningOnChromeOS() &&
         (oem_manifest_loaded_ || !HasOemPrefix(name))) {
       VLOG(1) << "Requested statistic not found: " << name;
     }
@@ -438,8 +415,7 @@ bool StatisticsProviderImpl::GetMachineFlag(const std::string& name,
 
   MachineFlags::const_iterator iter = machine_flags_.find(name);
   if (iter == machine_flags_.end()) {
-    if (result != nullptr &&
-        base::SysInfo::IsRunningOnChromeOS() &&
+    if (result != nullptr && base::SysInfo::IsRunningOnChromeOS() &&
         (oem_manifest_loaded_ || !HasOemPrefix(name))) {
       VLOG(1) << "Requested machine flag not found: " << name;
     }
@@ -470,6 +446,8 @@ StatisticsProviderImpl::StatisticsProviderImpl()
       &GetInitialLocaleFromRegionalData;
   regional_data_extractors_[kKeyboardLayoutKey] =
       &GetKeyboardLayoutFromRegionalData;
+  regional_data_extractors_[kKeyboardMechanicalLayoutKey] =
+      &GetKeyboardMechanicalLayoutFromRegionalData;
   regional_data_extractors_[kInitialTimezoneKey] =
       &GetInitialTimezoneFromRegionalData;
 }
@@ -486,7 +464,7 @@ void StatisticsProviderImpl::StartLoadingMachineStatistics(
 
   // TaskPriority::USER_BLOCKING because this is on the critical path of
   // rendering the NTP on startup. https://crbug.com/831835
-  base::PostTaskWithTraits(
+  base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
@@ -523,21 +501,28 @@ void StatisticsProviderImpl::LoadMachineStatistics(bool load_oem_manifest) {
   if (cancellation_flag_.IsSet())
     return;
 
+  std::string crossystem_wpsw;
   NameValuePairsParser parser(&machine_info_);
   if (base::SysInfo::IsRunningOnChromeOS()) {
     // Parse all of the key/value pairs from the crossystem tool.
     if (!parser.ParseNameValuePairsFromTool(
-            base::size(kCrosSystemTool), kCrosSystemTool, kCrosSystemEq,
-            kCrosSystemDelim, kCrosSystemCommentDelim)) {
+            std::size(kCrosSystemTool), kCrosSystemTool,
+            NameValuePairsFormat::kCrossystem)) {
       LOG(ERROR) << "Errors parsing output from: " << kCrosSystemTool;
     }
     // Drop useless "(error)" values so they don't displace valid values
     // supplied later by other tools: https://crbug.com/844258
     parser.DeletePairsWithValue(kCrosSystemValueError);
+
+    auto it = machine_info_.find(kFirmwareWriteProtectCurrentKey);
+    if (it != machine_info_.end()) {
+      crossystem_wpsw = it->second;
+      machine_info_.erase(it);
+    }
   }
 
   base::FilePath machine_info_path;
-  base::PathService::Get(chromeos::FILE_MACHINE_INFO, &machine_info_path);
+  base::PathService::Get(FILE_MACHINE_INFO, &machine_info_path);
   if (!base::SysInfo::IsRunningOnChromeOS() &&
       !base::PathExists(machine_info_path)) {
     // Use time value to create an unique stub serial because clashes of the
@@ -556,25 +541,37 @@ void StatisticsProviderImpl::LoadMachineStatistics(bool load_oem_manifest) {
   }
 
   base::FilePath vpd_path;
-  base::PathService::Get(chromeos::FILE_VPD, &vpd_path);
-  if (!base::SysInfo::IsRunningOnChromeOS() && !base::PathExists(vpd_path)) {
-    std::string stub_contents = "\"ActivateDate\"=\"2000-01\"\n";
-    int bytes_written =
-        base::WriteFile(vpd_path, stub_contents.c_str(), stub_contents.size());
-    if (bytes_written < static_cast<int>(stub_contents.size())) {
-      PLOG(ERROR) << "Error writing vpd stub " << vpd_path.value();
+  base::PathService::Get(FILE_VPD, &vpd_path);
+  if (!base::PathExists(vpd_path)) {
+    if (base::SysInfo::IsRunningOnChromeOS()) {
+      ReportVpdCacheReadResult(VpdCacheReadResult::KMissing);
+      LOG(ERROR) << "Missing FILE_VPD: " << vpd_path;
+    } else {
+      std::string stub_contents = "\"ActivateDate\"=\"2000-01\"\n";
+      int bytes_written = base::WriteFile(vpd_path, stub_contents.c_str(),
+                                          stub_contents.size());
+      if (bytes_written < static_cast<int>(stub_contents.size())) {
+        PLOG(ERROR) << "Error writing VPD stub " << vpd_path.value();
+      }
     }
   }
 
-  parser.GetNameValuePairsFromFile(machine_info_path,
-                                   kMachineHardwareInfoEq,
-                                   kMachineHardwareInfoDelim);
-  parser.GetNameValuePairsFromFile(base::FilePath(kEchoCouponFile),
-                                   kEchoCouponEq,
-                                   kEchoCouponDelim);
-  parser.GetNameValuePairsFromFile(vpd_path,
-                                   kVpdEq,
-                                   kVpdDelim);
+  // The machine-info file is generated only for OOBE and enterprise enrollment
+  // and may not be present. See login-manager/init/machine-info.conf.
+  parser.ParseNameValuePairsFromFile(machine_info_path,
+                                     NameValuePairsFormat::kMachineInfo);
+  parser.ParseNameValuePairsFromFile(base::FilePath(kEchoCouponFile),
+                                     NameValuePairsFormat::kVpdDump);
+  bool vpd_parse_result = parser.ParseNameValuePairsFromFile(
+      vpd_path, NameValuePairsFormat::kVpdDump);
+  if (base::SysInfo::IsRunningOnChromeOS()) {
+    if (vpd_parse_result) {
+      ReportVpdCacheReadResult(VpdCacheReadResult::kSuccess);
+    } else {
+      ReportVpdCacheReadResult(VpdCacheReadResult::kParseFailed);
+      LOG(ERROR) << "Failed to parse FILE_VPD: " << vpd_path;
+    }
+  }
 
   // Ensure that the hardware class key is present with the expected
   // key name, and if it couldn't be retrieved, that the value is "unknown".
@@ -591,6 +588,15 @@ void StatisticsProviderImpl::LoadMachineStatistics(bool load_oem_manifest) {
         is_vm_iter->second == kIsVmValueTrue) {
       machine_info_[kIsVmKey] = kIsVmValueTrue;
     }
+
+    // Use the write-protect value from crossystem only if it hasn't been loaded
+    // from any other source, since the result of crosystem is less reliable for
+    // this key.
+    if (machine_info_.find(kFirmwareWriteProtectCurrentKey) ==
+            machine_info_.end() &&
+        !crossystem_wpsw.empty()) {
+      machine_info_[kFirmwareWriteProtectCurrentKey] = crossystem_wpsw;
+    }
   }
 
   if (load_oem_manifest) {
@@ -604,8 +610,6 @@ void StatisticsProviderImpl::LoadMachineStatistics(bool load_oem_manifest) {
     }
   }
 
-  LoadRegionsFile(base::FilePath(kCrosRegions));
-
   // Set region
   const auto region_iter = machine_info_.find(kRegionKey);
   if (region_iter != machine_info_.end())
@@ -614,15 +618,13 @@ void StatisticsProviderImpl::LoadMachineStatistics(bool load_oem_manifest) {
     region_ = std::string();
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(chromeos::switches::kCrosRegion)) {
-    region_ =
-        command_line->GetSwitchValueASCII(chromeos::switches::kCrosRegion);
+  if (command_line->HasSwitch(ash::switches::kCrosRegion)) {
+    region_ = command_line->GetSwitchValueASCII(ash::switches::kCrosRegion);
     machine_info_[kRegionKey] = region_;
     VLOG(1) << "CrOS region set to '" << region_ << "'";
   }
 
-  if (regional_data_.get() && !region_.empty() && !GetRegionDictionary())
-    LOG(ERROR) << "Bad regional data: '" << region_ << "' << not found.";
+  LoadRegionsFile(base::FilePath(kCrosRegions));
 
   SignalStatisticsLoaded();
 }
@@ -631,21 +633,27 @@ void StatisticsProviderImpl::LoadRegionsFile(const base::FilePath& filename) {
   JSONFileValueDeserializer regions_file(filename);
   int regions_error_code = 0;
   std::string regions_error_message;
-  regional_data_ =
+  std::unique_ptr<base::Value> json_value =
       regions_file.Deserialize(&regions_error_code, &regions_error_message);
-  if (!regional_data_.get()) {
+  if (!json_value.get()) {
     if (base::SysInfo::IsRunningOnChromeOS())
       LOG(ERROR) << "Failed to load regions file '" << filename.value()
                  << "': error='" << regions_error_message << "'";
 
     return;
   }
-  const base::DictionaryValue* full_dict = nullptr;
-  if (!regional_data_->GetAsDictionary(&full_dict)) {
+  if (!json_value->is_dict()) {
     LOG(ERROR) << "Bad regions file '" << filename.value()
                << "': not a dictionary.";
-    regional_data_.reset();
+    return;
   }
+
+  base::Value* region_dict = json_value->FindDictKey(region_);
+  if (region_dict == nullptr) {
+    LOG(ERROR) << "Bad regional data: '" << region_ << "' << not found.";
+    return;
+  }
+  region_dict_ = std::move(*region_dict);
 }
 
 void StatisticsProviderImpl::LoadOemManifestFromFile(
@@ -659,14 +667,11 @@ void StatisticsProviderImpl::LoadOemManifestFromFile(
     LOG(WARNING) << "Unable to load OEM Manifest file: " << file.value();
     return;
   }
-  machine_info_[kOemDeviceRequisitionKey] =
-      oem_manifest.device_requisition;
-  machine_flags_[kOemIsEnterpriseManagedKey] =
-      oem_manifest.enterprise_managed;
+  machine_info_[kOemDeviceRequisitionKey] = oem_manifest.device_requisition;
+  machine_flags_[kOemIsEnterpriseManagedKey] = oem_manifest.enterprise_managed;
   machine_flags_[kOemCanExitEnterpriseEnrollmentKey] =
       oem_manifest.can_exit_enrollment;
-  machine_flags_[kOemKeyboardDrivenOobeKey] =
-      oem_manifest.keyboard_driven_oobe;
+  machine_flags_[kOemKeyboardDrivenOobeKey] = oem_manifest.keyboard_driven_oobe;
 
   oem_manifest_loaded_ = true;
   VLOG(1) << "Loaded OEM Manifest statistics from " << file.value();

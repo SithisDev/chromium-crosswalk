@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/stl_util.h"
+#include "base/ranges/algorithm.h"
 #include "courgette/base_test_unittest.h"
 
 class DisassemblerWin32X86Test : public BaseTest {
@@ -47,7 +47,7 @@ void DisassemblerWin32X86Test::TestExe() const {
   std::vector<courgette::RVA> relocs;
   bool can_parse_relocs = disassembler->ParseRelocs(&relocs);
   EXPECT_TRUE(can_parse_relocs);
-  EXPECT_TRUE(base::STLIsSorted(relocs));
+  EXPECT_TRUE(base::ranges::is_sorted(relocs));
 
   const uint8_t* offset_p = disassembler->FileOffsetToPointer(0);
   EXPECT_EQ(reinterpret_cast<const void*>(file1.c_str()),

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,9 @@
 #include "components/exo/data_source.h"
 #include "components/exo/data_source_delegate.h"
 #include "components/exo/display.h"
+#include "components/exo/wayland/serial_tracker.h"
 #include "components/exo/wayland/server_util.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-shared.h"
 
 namespace exo {
 namespace wayland {
@@ -78,13 +80,24 @@ base::flat_set<DndAction> DataDeviceManagerDndActions(uint32_t value) {
 
 class WaylandDataSourceDelegate : public DataSourceDelegate {
  public:
-  explicit WaylandDataSourceDelegate(wl_resource* source)
-      : data_source_resource_(source) {}
+  explicit WaylandDataSourceDelegate(wl_client* client,
+                                     wl_resource* source)
+      : client_(client),
+        data_source_resource_(source) {}
+
+  WaylandDataSourceDelegate(const WaylandDataSourceDelegate&) = delete;
+  WaylandDataSourceDelegate& operator=(const WaylandDataSourceDelegate&) =
+      delete;
 
   // Overridden from DataSourceDelegate:
   void OnDataSourceDestroying(DataSource* device) override { delete this; }
-  void OnTarget(const std::string& mime_type) override {
-    wl_data_source_send_target(data_source_resource_, mime_type.c_str());
+  bool CanAcceptDataEventsForSurface(Surface* surface) const override {
+    return surface &&
+           wl_resource_get_client(GetSurfaceResource(surface)) == client_;
+  }
+  void OnTarget(const absl::optional<std::string>& mime_type) override {
+    wl_data_source_send_target(data_source_resource_,
+                               mime_type ? mime_type->c_str() : nullptr);
     wl_client_flush(wl_resource_get_client(data_source_resource_));
   }
   void OnSend(const std::string& mime_type, base::ScopedFD fd) override {
@@ -120,9 +133,8 @@ class WaylandDataSourceDelegate : public DataSourceDelegate {
   }
 
  private:
+  wl_client* const client_;
   wl_resource* const data_source_resource_;
-
-  DISALLOW_COPY_AND_ASSIGN(WaylandDataSourceDelegate);
 };
 
 void data_source_offer(wl_client* client,
@@ -153,6 +165,9 @@ class WaylandDataOfferDelegate : public DataOfferDelegate {
   explicit WaylandDataOfferDelegate(wl_resource* offer)
       : data_offer_resource_(offer) {}
 
+  WaylandDataOfferDelegate(const WaylandDataOfferDelegate&) = delete;
+  WaylandDataOfferDelegate& operator=(const WaylandDataOfferDelegate&) = delete;
+
   // Overridden from DataOfferDelegate:
   void OnDataOfferDestroying(DataOffer* device) override { delete this; }
   void OnOffer(const std::string& mime_type) override {
@@ -180,8 +195,6 @@ class WaylandDataOfferDelegate : public DataOfferDelegate {
 
  private:
   wl_resource* const data_offer_resource_;
-
-  DISALLOW_COPY_AND_ASSIGN(WaylandDataOfferDelegate);
 };
 
 void data_offer_accept(wl_client* client,
@@ -221,29 +234,37 @@ void data_offer_set_actions(wl_client* client,
 }
 
 const struct wl_data_offer_interface data_offer_implementation = {
-    data_offer_accept, data_offer_receive, data_offer_finish,
-    data_offer_destroy, data_offer_set_actions};
+    data_offer_accept, data_offer_receive, data_offer_destroy,
+    data_offer_finish, data_offer_set_actions};
 
 ////////////////////////////////////////////////////////////////////////////////
 // wl_data_device_interface:
 
 class WaylandDataDeviceDelegate : public DataDeviceDelegate {
  public:
-  WaylandDataDeviceDelegate(wl_client* client, wl_resource* device_resource)
-      : client_(client), data_device_resource_(device_resource) {}
+  WaylandDataDeviceDelegate(wl_client* client,
+                            wl_resource* device_resource,
+                            SerialTracker* serial_tracker)
+      : client_(client),
+        data_device_resource_(device_resource),
+        serial_tracker_(serial_tracker) {}
+
+  WaylandDataDeviceDelegate(const WaylandDataDeviceDelegate&) = delete;
+  WaylandDataDeviceDelegate& operator=(const WaylandDataDeviceDelegate&) =
+      delete;
 
   // Overridden from DataDeviceDelegate:
   void OnDataDeviceDestroying(DataDevice* device) override { delete this; }
-  bool CanAcceptDataEventsForSurface(Surface* surface) override {
-    return surface &&
+  bool CanAcceptDataEventsForSurface(Surface* surface) const override {
+    return surface && GetSurfaceResource(surface) &&
            wl_resource_get_client(GetSurfaceResource(surface)) == client_;
   }
-  DataOffer* OnDataOffer(DataOffer::Purpose purpose) override {
+  DataOffer* OnDataOffer() override {
     wl_resource* data_offer_resource =
         wl_resource_create(client_, &wl_data_offer_interface,
                            wl_resource_get_version(data_device_resource_), 0);
     std::unique_ptr<DataOffer> data_offer = std::make_unique<DataOffer>(
-        new WaylandDataOfferDelegate(data_offer_resource), purpose);
+        new WaylandDataOfferDelegate(data_offer_resource));
     SetDataOfferResource(data_offer.get(), data_offer_resource);
     SetImplementation(data_offer_resource, &data_offer_implementation,
                       std::move(data_offer));
@@ -258,7 +279,7 @@ class WaylandDataDeviceDelegate : public DataDeviceDelegate {
                const DataOffer& data_offer) override {
     wl_data_device_send_enter(
         data_device_resource_,
-        wl_display_next_serial(wl_client_get_display(client_)),
+        serial_tracker_->GetNextSerial(SerialTracker::EventType::OTHER_EVENT),
         GetSurfaceResource(surface), wl_fixed_from_double(point.x()),
         wl_fixed_from_double(point.y()), GetDataOfferResource(&data_offer));
     wl_client_flush(client_);
@@ -283,11 +304,52 @@ class WaylandDataDeviceDelegate : public DataDeviceDelegate {
     wl_client_flush(client_);
   }
 
+  void StartDrag(DataDevice* data_device,
+                 DataSource* source,
+                 Surface* origin,
+                 Surface* icon,
+                 uint32_t serial) {
+    absl::optional<wayland::SerialTracker::EventType> event_type =
+        serial_tracker_->GetEventType(serial);
+    if (event_type == absl::nullopt) {
+      LOG(ERROR) << "The serial passed to StartDrag does not exist.";
+      return;
+    }
+    if (event_type == wayland::SerialTracker::EventType::POINTER_BUTTON_DOWN &&
+        serial_tracker_->GetPointerDownSerial() == serial) {
+      DCHECK(data_device);
+      data_device->StartDrag(source, origin, icon,
+                             ui::mojom::DragEventSource::kMouse);
+    } else if (event_type == wayland::SerialTracker::EventType::TOUCH_DOWN &&
+               serial_tracker_->GetTouchDownSerial() == serial) {
+      DCHECK(data_device);
+      data_device->StartDrag(source, origin, icon,
+                             ui::mojom::DragEventSource::kTouch);
+    } else {
+      LOG(ERROR) << "The serial passed to StartDrag does not match its "
+                    "expected types.";
+    }
+  }
+
+  void SetSelection(DataDevice* data_device,
+                    DataSource* source,
+                    uint32_t serial) {
+    absl::optional<wayland::SerialTracker::EventType> event_type =
+        serial_tracker_->GetEventType(serial);
+    if (event_type == absl::nullopt) {
+      LOG(ERROR) << "The serial passed to SetSelection does not exist.";
+      return;
+    }
+    DCHECK(data_device);
+    data_device->SetSelection(source);
+  }
+
  private:
   wl_client* const client_;
   wl_resource* const data_device_resource_;
 
-  DISALLOW_COPY_AND_ASSIGN(WaylandDataDeviceDelegate);
+  // Owned by Server, which always outlives this delegate.
+  SerialTracker* const serial_tracker_;
 };
 
 void data_device_start_drag(wl_client* client,
@@ -296,18 +358,28 @@ void data_device_start_drag(wl_client* client,
                             wl_resource* origin_resource,
                             wl_resource* icon_resource,
                             uint32_t serial) {
-  GetUserDataAs<DataDevice>(resource)->StartDrag(
-      source_resource ? GetUserDataAs<DataSource>(source_resource) : nullptr,
-      GetUserDataAs<Surface>(origin_resource),
-      icon_resource ? GetUserDataAs<Surface>(icon_resource) : nullptr, serial);
+  DataDevice* data_device = GetUserDataAs<DataDevice>(resource);
+  static_cast<WaylandDataDeviceDelegate*>(data_device->get_delegate())
+      ->StartDrag(
+          data_device,
+          source_resource ? GetUserDataAs<DataSource>(source_resource)
+                          : nullptr,
+          GetUserDataAs<Surface>(origin_resource),
+          icon_resource ? GetUserDataAs<Surface>(icon_resource) : nullptr,
+          serial);
 }
 
 void data_device_set_selection(wl_client* client,
                                wl_resource* resource,
-                               wl_resource* data_source,
+                               wl_resource* source_resource,
                                uint32_t serial) {
-  GetUserDataAs<DataDevice>(resource)->SetSelection(
-      data_source ? GetUserDataAs<DataSource>(data_source) : nullptr, serial);
+  DataDevice* data_device = GetUserDataAs<DataDevice>(resource);
+  static_cast<WaylandDataDeviceDelegate*>(data_device->get_delegate())
+      ->SetSelection(data_device,
+                     source_resource
+                         ? GetUserDataAs<DataSource>(source_resource)
+                         : nullptr,
+                     serial);
 }
 
 void data_device_release(wl_client* client, wl_resource* resource) {
@@ -326,20 +398,21 @@ void data_device_manager_create_data_source(wl_client* client,
   wl_resource* data_source_resource = wl_resource_create(
       client, &wl_data_source_interface, wl_resource_get_version(resource), id);
   SetImplementation(data_source_resource, &data_source_implementation,
-                    std::make_unique<DataSource>(
-                        new WaylandDataSourceDelegate(data_source_resource)));
+                    std::make_unique<DataSource>(new WaylandDataSourceDelegate(
+                        client, data_source_resource)));
 }
 
 void data_device_manager_get_data_device(wl_client* client,
                                          wl_resource* resource,
                                          uint32_t id,
                                          wl_resource* seat_resource) {
-  Display* display = GetUserDataAs<Display>(resource);
+  auto* data = GetUserDataAs<WaylandDataDeviceManager>(resource);
   wl_resource* data_device_resource = wl_resource_create(
       client, &wl_data_device_interface, wl_resource_get_version(resource), id);
-  SetImplementation(data_device_resource, &data_device_implementation,
-                    display->CreateDataDevice(new WaylandDataDeviceDelegate(
-                        client, data_device_resource)));
+  SetImplementation(
+      data_device_resource, &data_device_implementation,
+      data->display->CreateDataDevice(new WaylandDataDeviceDelegate(
+          client, data_device_resource, data->serial_tracker)));
 }
 
 const struct wl_data_device_manager_interface

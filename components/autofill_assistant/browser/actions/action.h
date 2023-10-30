@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,10 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/callback.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "components/autofill_assistant/browser/actions/stopwatch.h"
 #include "components/autofill_assistant/browser/selector.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 
@@ -18,11 +21,29 @@ namespace autofill_assistant {
 
 class ActionDelegate;
 class ClientStatus;
+class WaitForDomOperation;
+class WaitForDocumentOperation;
 
 // An action that performs a single step of a script on the website.
 class Action {
  public:
   virtual ~Action();
+
+  // Data only relevant to the currently running action.
+  struct ActionData {
+    ActionData();
+    ~ActionData();
+
+    // Navigation information relevant to this action.
+    NavigationInfoProto navigation_info;
+
+    std::unique_ptr<WaitForDomOperation> wait_for_dom;
+    std::unique_ptr<WaitForDocumentOperation> wait_for_document;
+
+    // This callback is set when a navigation event should terminate an ongoing
+    // prompt action. Only a prompt action will set a valid callback here.
+    base::OnceCallback<void()> end_prompt_on_navigation_callback;
+  };
 
   // Callback runs after this action is executed, pass the result of this action
   // through a ProcessedActionProto object.
@@ -33,6 +54,9 @@ class Action {
   void ProcessAction(ProcessActionCallback callback);
 
   const ActionProto& proto() const { return proto_; }
+
+  // Returns the current action's ActionData.
+  virtual ActionData& GetActionData();
 
  protected:
   // |delegate| must remain valid for the lifetime of this instance.
@@ -48,17 +72,38 @@ class Action {
   void UpdateProcessedAction(ProcessedActionStatusProto status);
   void UpdateProcessedAction(const ClientStatus& status);
 
+  // Wraps the `ProcesseActionCallback` to also fill the relevant timing stat
+  // fields.
+  void RecordActionTimes(ProcessActionCallback callback,
+                         std::unique_ptr<ProcessedActionProto>);
+
+  // Wraps `callback` to record the wait in the action stopwatch for wait for
+  // dom and short wait for element operations.
+  void OnWaitForElementTimed(
+      base::OnceCallback<void(const ClientStatus&)> callback,
+      const ClientStatus& element_status,
+      base::TimeDelta wait_time);
+
   // Intended for debugging. Writes a string representation of |action| to
   // |out|.
   friend std::ostream& operator<<(std::ostream& out, const Action& action);
 
   const ActionProto proto_;
+  ActionData action_data_;
 
   // Accumulate any result of this action during ProcessAction. Is only valid
   // during a run of ProcessAction.
   std::unique_ptr<ProcessedActionProto> processed_action_proto_;
   // Reference to the delegate that owns this action.
-  ActionDelegate* delegate_;
+  raw_ptr<ActionDelegate> delegate_;
+  // Used to record active and wait times in the action execution.
+  ActionStopwatch action_stopwatch_;
+
+  base::WeakPtrFactory<Action> weak_ptr_factory_{this};
+
+ private:
+  friend class CollectUserDataActionTest;
+  friend class JsFlowActionTest;
 };
 
 // Intended for debugging. Writes a string representation of |action_case| to

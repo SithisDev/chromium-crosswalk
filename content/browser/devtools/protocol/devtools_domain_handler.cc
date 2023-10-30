@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,7 @@ DevToolsDomainHandler::DevToolsDomainHandler(const std::string& name)
     : name_(name) {
 }
 
-DevToolsDomainHandler::~DevToolsDomainHandler() {
-}
+DevToolsDomainHandler::~DevToolsDomainHandler() = default;
 
 void DevToolsDomainHandler::SetRenderer(int process_host_id,
                                         RenderFrameHostImpl* frame_host) {}
@@ -24,7 +23,19 @@ void DevToolsDomainHandler::Wire(UberDispatcher* dispatcher) {
 }
 
 Response DevToolsDomainHandler::Disable() {
-  return Response::OK();
+  return Response::Success();
+}
+
+void DevToolsDomainHandler::SetSession(DevToolsSession* session) {
+  session_ = session;
+}
+
+const std::string& DevToolsDomainHandler::name() const {
+  return name_;
+}
+
+DevToolsSession* DevToolsDomainHandler::session() {
+  return session_;
 }
 
 }  // namespace protocol

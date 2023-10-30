@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -17,7 +17,7 @@ using storage::ShareableFileReference;
 namespace content {
 
 TEST(ShareableFileReferenceTest, TestReferences) {
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       base::ThreadTaskRunnerHandle::Get();
   base::ScopedTempDir temp_dir;
@@ -29,8 +29,8 @@ TEST(ShareableFileReferenceTest, TestReferences) {
   EXPECT_TRUE(base::PathExists(file));
 
   // Create a first reference to that file.
-  scoped_refptr<ShareableFileReference> reference1;
-  reference1 = ShareableFileReference::Get(file);
+  scoped_refptr<ShareableFileReference> reference1 =
+      ShareableFileReference::Get(file);
   EXPECT_FALSE(reference1.get());
   reference1 = ShareableFileReference::GetOrCreate(
       file, ShareableFileReference::DELETE_ON_FINAL_RELEASE, task_runner.get());
@@ -38,8 +38,8 @@ TEST(ShareableFileReferenceTest, TestReferences) {
   EXPECT_TRUE(file == reference1->path());
 
   // Get a second reference to that file.
-  scoped_refptr<ShareableFileReference> reference2;
-  reference2 = ShareableFileReference::Get(file);
+  scoped_refptr<ShareableFileReference> reference2 =
+      ShareableFileReference::Get(file);
   EXPECT_EQ(reference1.get(), reference2.get());
   reference2 = ShareableFileReference::GetOrCreate(
       file, ShareableFileReference::DELETE_ON_FINAL_RELEASE, task_runner.get());

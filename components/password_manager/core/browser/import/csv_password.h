@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,47 +9,76 @@
 
 #include "base/containers/flat_map.h"
 #include "base/strings/string_piece.h"
-#include "components/autofill/core/common/password_form.h"
+#include "base/types/expected.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+#include "url/gurl.h"
 
 namespace password_manager {
 
 // CSVPassword is a wrapper around one CSV line representing a credential.
 // For more details, see
 // https://docs.google.com/document/d/1wsZBl93S_WGaXZqrqq5SP08LVZ0zDKf6e9nlptyl9AY/edit?usp=sharing.
+// CSVPassword contains a triple (url, password, username).
+// In case of a valid URL, a GURL is provided, otherwise the original raw URL.
+// Partial parsing i.e. missing fields will also yield a valid CSVPassword.
 class CSVPassword {
  public:
   enum class Label { kOrigin, kUsername, kPassword };
   using ColumnMap = base::flat_map<size_t, Label>;
 
+  // Status describes parsing errors.
+  enum class Status {
+    kOK = 0,
+    kSyntaxError = 1,
+    kSemanticError = 2,
+  };
+
   // Number of values in the Label enum.
   static constexpr size_t kLabelCount = 3;
 
-  CSVPassword();
-  explicit CSVPassword(ColumnMap map, base::StringPiece csv_row);
+  explicit CSVPassword();
+  explicit CSVPassword(const ColumnMap& map, base::StringPiece csv_row);
+  explicit CSVPassword(GURL url,
+                       std::string username,
+                       std::string password,
+                       Status status);
+  // This constructor creates a valid CSVPassword but with an invalid_url, i.e.
+  // the url is not a valid GURL.
+  explicit CSVPassword(std::string invalid_url,
+                       std::string username,
+                       std::string password,
+                       Status status);
   CSVPassword(const CSVPassword&);
   CSVPassword(CSVPassword&&);
   CSVPassword& operator=(const CSVPassword&);
   CSVPassword& operator=(CSVPassword&&);
   ~CSVPassword();
 
-  // Returns whether the associated CSV row can be parsed successfully.
-  // If returning true and |form| is not null, it also stores the parsed result
-  // in |*form|. It does not return base::Optional<PasswordForm> for efficiency
-  // reasons in cases when the parsed form is not needed.
-  bool Parse(autofill::PasswordForm* form) const;
-  // Convenience wrapper around Parse() for cases known to be correctly
-  // parseable.
-  autofill::PasswordForm ParseValid() const;
+  // Returns the status of the parse.
+  Status GetParseStatus() const;
+
+  // Returns the password.
+  const std::string& GetPassword() const;
+
+  // Returns the username.
+  const std::string& GetUsername() const;
+
+  // Returns the URL or the original raw url in case of an invalid GURL.
+  const base::expected<GURL, std::string>& GetURL() const;
 
  private:
-  // The members |map_| and |row_| are only modified in constructor or
-  // operator=().
+  // Contains a valid GURL or the original raw url in case of an invalid GURL.
+  // Unparsed URL fields should also yield an emty URL.
+  base::expected<GURL, std::string> url_ = base::unexpected("");
+  std::string username_;
+  std::string password_;
 
-  // |map_| stores the meaning of particular columns in the row.
-  ColumnMap map_;
-  // |row_| contains the CSV row from which the PasswordForm is parsed.
-  base::StringPiece row_;
+  Status status_;
 };
+
+// An exact equality comparison of all the fields is only used for tests.
+bool operator==(const CSVPassword& lhs, const CSVPassword& rhs);
 
 }  // namespace password_manager
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,13 @@
 #include "components/viz/common/frame_timing_details_map.h"
 #include "components/viz/common/quads/compositor_frame_metadata.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/viz/public/mojom/compositing/compositor_frame_sink.mojom.h"
 
 namespace viz {
 class CompositorFrame;
@@ -44,34 +49,41 @@ namespace demo {
 class DemoClient : public viz::mojom::CompositorFrameSinkClient {
  public:
   DemoClient(const viz::FrameSinkId& frame_sink_id,
-             const viz::LocalSurfaceIdAllocation& local_surface_id,
+             const viz::LocalSurfaceId& local_surface_id,
              const gfx::Rect& bounds);
+
+  DemoClient(const DemoClient&) = delete;
+  DemoClient& operator=(const DemoClient&) = delete;
+
   ~DemoClient() override;
 
   const viz::FrameSinkId& frame_sink_id() const { return frame_sink_id_; }
 
   // Initializes the mojo connection to the service.
-  void Initialize(viz::mojom::CompositorFrameSinkClientRequest request,
-                  viz::mojom::CompositorFrameSinkAssociatedPtrInfo sink_info);
-  void Initialize(viz::mojom::CompositorFrameSinkClientRequest request,
-                  viz::mojom::CompositorFrameSinkPtrInfo sink_info);
+  void Initialize(
+      mojo::PendingReceiver<viz::mojom::CompositorFrameSinkClient> receiver,
+      mojo::PendingAssociatedRemote<viz::mojom::CompositorFrameSink>
+          sink_remote);
+  void Initialize(
+      mojo::PendingReceiver<viz::mojom::CompositorFrameSinkClient> receiver,
+      mojo::PendingRemote<viz::mojom::CompositorFrameSink> sink_remote);
 
   // This prepares for this client to embed another client (i.e. this client
   // acts as the embedder). Since this client is the embedder, it allocates the
   // LocalSurfaceId, and returns that. The client that should be embedded (i.e.
   // the client represented by |frame_sink_id|) should use the returned
   // LocalSurfaceId to submit visual content (CompositorFrame).
-  viz::LocalSurfaceIdAllocation Embed(const viz::FrameSinkId& frame_sink_id,
-                                      const gfx::Rect& bounds);
+  viz::LocalSurfaceId Embed(const viz::FrameSinkId& frame_sink_id,
+                            const gfx::Rect& bounds);
 
   // When this client is resized, it is important that it also receives a new
   // LocalSurfaceId with the new size.
   void Resize(const gfx::Size& size,
-              const viz::LocalSurfaceIdAllocation& local_surface_id);
+              const viz::LocalSurfaceId& local_surface_id);
 
  private:
   struct EmbedInfo {
-    viz::LocalSurfaceIdAllocation lsid;
+    viz::LocalSurfaceId lsid;
     gfx::Rect bounds;
     float degrees = 0.f;
   };
@@ -81,18 +93,20 @@ class DemoClient : public viz::mojom::CompositorFrameSinkClient {
   viz::mojom::CompositorFrameSink* GetPtr();
 
   void InitializeOnThread(
-      viz::mojom::CompositorFrameSinkClientRequest request,
-      viz::mojom::CompositorFrameSinkAssociatedPtrInfo associated_sink_info,
-      viz::mojom::CompositorFrameSinkPtrInfo sink_info);
+      mojo::PendingReceiver<viz::mojom::CompositorFrameSinkClient> receiver,
+      mojo::PendingAssociatedRemote<viz::mojom::CompositorFrameSink>
+          associated_sink_remote,
+      mojo::PendingRemote<viz::mojom::CompositorFrameSink> sink_remote);
 
   // viz::mojom::CompositorFrameSinkClient:
   void DidReceiveCompositorFrameAck(
-      const std::vector<viz::ReturnedResource>& resources) override;
+      std::vector<viz::ReturnedResource> resources) override;
   void OnBeginFrame(const viz::BeginFrameArgs& args,
                     const viz::FrameTimingDetailsMap& timing_details) override;
   void OnBeginFramePausedChanged(bool paused) override;
-  void ReclaimResources(
-      const std::vector<viz::ReturnedResource>& resources) override;
+  void ReclaimResources(std::vector<viz::ReturnedResource> resources) override;
+  void OnCompositorFrameTransitionDirectiveProcessed(
+      uint32_t sequence_id) override {}
 
   // This thread is created solely to demonstrate that the client can live in
   // its own thread (or even in its own process). A viz client does not need to
@@ -100,12 +114,12 @@ class DemoClient : public viz::mojom::CompositorFrameSinkClient {
   base::Thread thread_;
 
   const viz::FrameSinkId frame_sink_id_;
-  viz::LocalSurfaceIdAllocation local_surface_id_ GUARDED_BY(lock_);
+  viz::LocalSurfaceId local_surface_id_ GUARDED_BY(lock_);
   gfx::Rect bounds_ GUARDED_BY(lock_);
 
-  mojo::Binding<viz::mojom::CompositorFrameSinkClient> binding_;
-  viz::mojom::CompositorFrameSinkAssociatedPtr associated_sink_;
-  viz::mojom::CompositorFrameSinkPtr sink_;
+  mojo::Receiver<viz::mojom::CompositorFrameSinkClient> receiver_{this};
+  mojo::AssociatedRemote<viz::mojom::CompositorFrameSink> associated_sink_;
+  mojo::Remote<viz::mojom::CompositorFrameSink> sink_;
   viz::FrameTokenGenerator next_frame_token_;
   uint32_t frame_count_ = 0;
 
@@ -114,8 +128,6 @@ class DemoClient : public viz::mojom::CompositorFrameSinkClient {
   // embeds other clients.
   viz::ParentLocalSurfaceIdAllocator allocator_;
   std::map<viz::FrameSinkId, EmbedInfo> embeds_ GUARDED_BY(lock_);
-
-  DISALLOW_COPY_AND_ASSIGN(DemoClient);
 };
 
 }  // namespace demo

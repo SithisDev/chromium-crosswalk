@@ -1,10 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/common/fetch/fetch_api_request_proto.h"
 
 #include "content/common/fetch/fetch_api_request.pb.h"
+#include "content/public/common/referrer.h"
 
 namespace content {
 
@@ -22,8 +23,6 @@ std::string SerializeFetchRequestToString(
   request_proto.set_is_reload(request.is_reload);
   request_proto.set_mode(static_cast<int>(request.mode));
   request_proto.set_is_main_resource_load(request.is_main_resource_load);
-  request_proto.set_request_context_type(
-      static_cast<int>(request.request_context_type));
   request_proto.set_credentials_mode(
       static_cast<int>(request.credentials_mode));
   request_proto.set_cache_mode(static_cast<int>(request.cache_mode));
@@ -32,6 +31,8 @@ std::string SerializeFetchRequestToString(
     request_proto.set_integrity(request.integrity.value());
   request_proto.set_keepalive(request.keepalive);
   request_proto.set_is_history_navigation(request.is_history_navigation);
+  request_proto.set_target_address_space(
+      static_cast<int>(request.target_address_space));
   return request_proto.SerializeAsString();
 }
 
@@ -46,18 +47,15 @@ blink::mojom::FetchAPIRequestPtr DeserializeFetchRequestFromString(
   request_ptr->mode =
       static_cast<network::mojom::RequestMode>(request_proto.mode());
   request_ptr->is_main_resource_load = request_proto.is_main_resource_load();
-  request_ptr->request_context_type =
-      static_cast<blink::mojom::RequestContextType>(
-          request_proto.request_context_type());
-  request_ptr->frame_type = network::mojom::RequestContextFrameType::kNone;
+  request_ptr->frame_type = blink::mojom::RequestContextFrameType::kNone;
   request_ptr->url = GURL(request_proto.url());
   request_ptr->method = request_proto.method();
-  request_ptr->headers = {request_proto.headers().begin(),
-                          request_proto.headers().end()};
-  request_ptr->referrer =
-      blink::mojom::Referrer::New(GURL(request_proto.referrer().url()),
-                                  static_cast<network::mojom::ReferrerPolicy>(
-                                      request_proto.referrer().policy()));
+  request_ptr->headers = blink::FetchAPIRequestHeadersMap(
+      request_proto.headers().begin(), request_proto.headers().end());
+  request_ptr->referrer = blink::mojom::Referrer::New(
+      GURL(request_proto.referrer().url()),
+
+      Referrer::ConvertToPolicy(request_proto.referrer().policy()));
   request_ptr->is_reload = request_proto.is_reload();
   request_ptr->credentials_mode = static_cast<network::mojom::CredentialsMode>(
       request_proto.credentials_mode());
@@ -69,6 +67,9 @@ blink::mojom::FetchAPIRequestPtr DeserializeFetchRequestFromString(
     request_ptr->integrity = request_proto.integrity();
   request_ptr->keepalive = request_proto.keepalive();
   request_ptr->is_history_navigation = request_proto.is_history_navigation();
+  request_ptr->target_address_space =
+      static_cast<network::mojom::IPAddressSpace>(
+          request_proto.target_address_space());
   return request_ptr;
 }
 

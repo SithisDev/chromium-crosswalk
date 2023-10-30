@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@
 
 #include <stddef.h>
 
-#include <string>
+#include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "components/bookmarks/browser/titled_url_match.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 
@@ -19,7 +20,7 @@ class AutocompleteProviderClient;
 namespace bookmarks {
 class BookmarkModel;
 struct TitledUrlMatch;
-}
+}  // namespace bookmarks
 
 // This class is an autocomplete provider which quickly (and synchronously)
 // provides autocomplete suggestions based on the titles of bookmarks. Page
@@ -32,6 +33,9 @@ struct TitledUrlMatch;
 class BookmarkProvider : public AutocompleteProvider {
  public:
   explicit BookmarkProvider(AutocompleteProviderClient* client);
+
+  BookmarkProvider(const BookmarkProvider&) = delete;
+  BookmarkProvider& operator=(const BookmarkProvider&) = delete;
 
   // When |minimal_changes| is true short circuit any additional searching and
   // leave the previous matches for this provider unchanged, otherwise perform
@@ -53,14 +57,34 @@ class BookmarkProvider : public AutocompleteProvider {
   // |matches_|.
   void DoAutocomplete(const AutocompleteInput& input);
 
+  // Get the matches from |bookmark_model_| using the appropriate matching
+  // algorithm, determined by |GetMatchingAlgorithm()|, and path matching
+  // algorithm, determined by the |kBookmarkPaths| base::feature.
+  std::vector<bookmarks::TitledUrlMatch> GetMatchesWithBookmarkPaths(
+      const AutocompleteInput& input,
+      size_t kMaxBookmarkMatches);
+
+  // There are 2 short bookmark features that determine the matching algorithm
+  // used, i.e. whether input words shorter than 3 chars can prefix match.
+  // 1) |IsShortBookmarkSuggestionsEnabled()| always allows short input word
+  //    prefix matching.
+  // 2) |IsShortBookmarkSuggestionsByTotalInputLengthEnabled()| allows short
+  //    input word prefix matching only if the input is longer than a threshold
+  //    param. This feature also has a counterfactual param.
+  // 3) Otherwise, if both features are disabled (or if the counterfactual param
+  //    is true), short input word matching won't be allowed.
+  query_parser::MatchingAlgorithm GetMatchingAlgorithm(AutocompleteInput input);
+
   // Calculates the relevance score for |match|.
   int CalculateBookmarkMatchRelevance(
       const bookmarks::TitledUrlMatch& match) const;
 
-  AutocompleteProviderClient* client_;
-  bookmarks::BookmarkModel* bookmark_model_;
+  // Removes any URL matches for query parameter keys (if the matching word
+  // starts immediately after a '?' or '&').
+  void RemoveQueryParamKeyMatches(bookmarks::TitledUrlMatch& match);
 
-  DISALLOW_COPY_AND_ASSIGN(BookmarkProvider);
+  raw_ptr<AutocompleteProviderClient> client_;
+  raw_ptr<bookmarks::BookmarkModel> bookmark_model_;
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_BOOKMARK_PROVIDER_H_

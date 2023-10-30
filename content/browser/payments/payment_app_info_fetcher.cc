@@ -1,25 +1,30 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/payments/payment_app_info_fetcher.h"
 
+#include <limits>
 #include <utility>
 
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/task/post_task.h"
+#include "base/callback_helpers.h"
 #include "components/payments/content/icon/icon_size.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/manifest_icon_downloader.h"
+#include "content/public/browser/page.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/manifest/manifest_icon_selector.h"
+#include "third_party/blink/public/common/manifest/manifest_util.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "url/origin.h"
 
@@ -33,35 +38,14 @@ void PaymentAppInfoFetcher::Start(
     const GURL& context_url,
     scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
     PaymentAppInfoFetchCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  std::unique_ptr<std::vector<GlobalFrameRoutingId>> provider_hosts =
-      service_worker_context->GetProviderHostIds(context_url.GetOrigin());
-
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&PaymentAppInfoFetcher::StartOnUI, context_url,
-                     std::move(provider_hosts), std::move(callback)));
-}
-
-void PaymentAppInfoFetcher::StartOnUI(
-    const GURL& context_url,
-    const std::unique_ptr<std::vector<GlobalFrameRoutingId>>& provider_hosts,
-    PaymentAppInfoFetchCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  std::unique_ptr<std::vector<GlobalRenderFrameHostId>> frame_routing_ids =
+      service_worker_context->GetWindowClientFrameRoutingIds(
+          blink::StorageKey(url::Origin::Create(context_url)));
 
   SelfDeleteFetcher* fetcher = new SelfDeleteFetcher(std::move(callback));
-  fetcher->Start(context_url, std::move(provider_hosts));
-}
-
-PaymentAppInfoFetcher::WebContentsHelper::WebContentsHelper(
-    WebContents* web_contents)
-    : WebContentsObserver(web_contents) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-}
-
-PaymentAppInfoFetcher::WebContentsHelper::~WebContentsHelper() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  fetcher->Start(context_url, std::move(frame_routing_ids));
 }
 
 PaymentAppInfoFetcher::SelfDeleteFetcher::SelfDeleteFetcher(
@@ -77,10 +61,11 @@ PaymentAppInfoFetcher::SelfDeleteFetcher::~SelfDeleteFetcher() {
 
 void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
     const GURL& context_url,
-    const std::unique_ptr<std::vector<GlobalFrameRoutingId>>& provider_hosts) {
+    const std::unique_ptr<std::vector<GlobalRenderFrameHostId>>&
+        frame_routing_ids) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  if (provider_hosts->size() == 0U) {
+  if (frame_routing_ids->empty()) {
     // Cannot print this error to the developer console, because the appropriate
     // developer console has not been found.
     LOG(ERROR)
@@ -91,7 +76,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
     return;
   }
 
-  for (const auto& frame : *provider_hosts) {
+  for (const auto& frame : *frame_routing_ids) {
     // Find out the render frame host registering the payment app. Although a
     // service worker can manage instruments, the first instrument must be set
     // on a page that has a link to a web app manifest, so it can be fetched
@@ -104,49 +89,44 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
       continue;
     }
 
-    // Get the main frame since web app manifest is only available in the main
-    // frame's document by definition. The main frame's document must come from
-    // the same origin.
-    RenderFrameHostImpl* top_level_render_frame_host = render_frame_host;
-    while (top_level_render_frame_host->GetParent() != nullptr) {
-      top_level_render_frame_host = top_level_render_frame_host->GetParent();
-    }
-    WebContentsImpl* top_level_web_content = static_cast<WebContentsImpl*>(
-        WebContents::FromRenderFrameHost(top_level_render_frame_host));
-    if (!top_level_web_content) {
-      top_level_render_frame_host->AddMessageToConsole(
+    // Get the WebContents associated with the frame and print console messages
+    // to the main frame of the WebContents since web app manifest is only
+    // available in the main frame's document by definition. The main frame's
+    // document must come from the same origin.
+    WebContentsImpl* web_content = static_cast<WebContentsImpl*>(
+        WebContents::FromRenderFrameHost(render_frame_host));
+    if (!web_content) {
+      render_frame_host->AddMessageToConsole(
           blink::mojom::ConsoleMessageLevel::kError,
           "Unable to find the web page for \"" + context_url.spec() +
               "\" to fetch payment handler manifest (for name and icon).");
       continue;
     }
 
-    if (top_level_web_content->IsHidden()) {
-      top_level_render_frame_host->AddMessageToConsole(
+    if (web_content->IsHidden()) {
+      web_content->GetPrimaryMainFrame()->AddMessageToConsole(
           blink::mojom::ConsoleMessageLevel::kError,
           "Unable to fetch payment handler manifest (for name and icon) for "
           "\"" +
               context_url.spec() + "\" from a hidden top level web page \"" +
-              top_level_web_content->GetLastCommittedURL().spec() + "\".");
+              web_content->GetLastCommittedURL().spec() + "\".");
       continue;
     }
 
     if (!url::IsSameOriginWith(context_url,
-                               top_level_web_content->GetLastCommittedURL())) {
-      top_level_render_frame_host->AddMessageToConsole(
+                               web_content->GetLastCommittedURL())) {
+      web_content->GetPrimaryMainFrame()->AddMessageToConsole(
           blink::mojom::ConsoleMessageLevel::kError,
           "Unable to fetch payment handler manifest (for name and icon) for "
           "\"" +
               context_url.spec() +
               "\" from a cross-origin top level web page \"" +
-              top_level_web_content->GetLastCommittedURL().spec() + "\".");
+              web_content->GetLastCommittedURL().spec() + "\".");
       continue;
     }
 
-    web_contents_helper_ =
-        std::make_unique<WebContentsHelper>(top_level_web_content);
-
-    top_level_web_content->GetManifest(
+    web_contents_ = web_content->GetWeakPtr();
+    web_contents_->GetPrimaryPage().GetManifest(
         base::BindOnce(&PaymentAppInfoFetcher::SelfDeleteFetcher::
                            FetchPaymentAppManifestCallback,
                        weak_ptr_factory_.GetWeakPtr()));
@@ -166,16 +146,15 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
 void PaymentAppInfoFetcher::SelfDeleteFetcher::RunCallbackAndDestroy() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(std::move(callback_),
-                     std::move(fetched_payment_app_info_)));
+  base::SequencedTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback_),
+                                std::move(fetched_payment_app_info_)));
   delete this;
 }
 
 void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     const GURL& url,
-    const blink::Manifest& manifest) {
+    blink::mojom::ManifestPtr manifest) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   manifest_url_ = url;
@@ -190,7 +169,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     return;
   }
 
-  if (manifest.IsEmpty()) {
+  if (blink::IsEmptyManifest(manifest)) {
     WarnIfPossible(
         "Unable to download a valid payment handler web app manifest from \"" +
         manifest_url_.spec() +
@@ -203,43 +182,41 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
   }
 
   fetched_payment_app_info_->prefer_related_applications =
-      manifest.prefer_related_applications;
-  for (const auto& related_application : manifest.related_applications) {
+      manifest->prefer_related_applications;
+  for (const auto& related_application : manifest->related_applications) {
     fetched_payment_app_info_->related_applications.emplace_back(
         StoredRelatedApplication());
-    if (!related_application.platform.is_null()) {
+    if (related_application.platform) {
       base::UTF16ToUTF8(
-          related_application.platform.string().c_str(),
-          related_application.platform.string().length(),
+          related_application.platform->c_str(),
+          related_application.platform->length(),
           &(fetched_payment_app_info_->related_applications.back().platform));
     }
-    if (!related_application.id.is_null()) {
+    if (related_application.id) {
       base::UTF16ToUTF8(
-          related_application.id.string().c_str(),
-          related_application.id.string().length(),
+          related_application.id->c_str(), related_application.id->length(),
           &(fetched_payment_app_info_->related_applications.back().id));
     }
   }
 
-  if (manifest.name.is_null()) {
+  if (!manifest->name) {
     WarnIfPossible("The payment handler's web app manifest \"" +
                    manifest_url_.spec() +
                    "\" does not contain a \"name\" field. User may not "
                    "recognize this payment handler in UI, because it will be "
                    "labeled only by its origin.");
-  } else if (manifest.name.string().empty()) {
+  } else if (manifest->name->empty()) {
     WarnIfPossible(
         "The \"name\" field in the payment handler's web app manifest \"" +
         manifest_url_.spec() +
         "\" is empty. User may not recognize this payment handler in UI, "
         "because it will be labeled only by its origin.");
   } else {
-    base::UTF16ToUTF8(manifest.name.string().c_str(),
-                      manifest.name.string().length(),
+    base::UTF16ToUTF8(manifest->name->c_str(), manifest->name->length(),
                       &(fetched_payment_app_info_->name));
   }
 
-  if (manifest.icons.empty()) {
+  if (manifest->icons.empty()) {
     WarnIfPossible(
         "Unable to download the payment handler's icon, because the web app "
         "manifest \"" +
@@ -250,8 +227,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     return;
   }
 
-  WebContents* web_contents = web_contents_helper_->web_contents();
-  if (!web_contents) {
+  if (!web_contents_) {
     LOG(WARNING) << "Unable to download the payment handler's icon because no "
                     "renderer was found, possibly because the page was closed "
                     "or navigated away during installation. User may not "
@@ -260,14 +236,14 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     RunCallbackAndDestroy();
     return;
   }
-  gfx::NativeView native_view = web_contents->GetNativeView();
+  gfx::NativeView native_view = web_contents_->GetNativeView();
 
   icon_url_ = blink::ManifestIconSelector::FindBestMatchingIcon(
-      manifest.icons,
+      manifest->icons,
       payments::IconSizeCalculator::IdealIconHeight(native_view),
       payments::IconSizeCalculator::MinimumIconHeight(),
       ManifestIconDownloader::kMaxWidthToHeightRatio,
-      blink::Manifest::ImageResource::Purpose::ANY);
+      blink::mojom::ManifestImageResource_Purpose::ANY);
   if (!icon_url_.is_valid()) {
     WarnIfPossible(
         "No suitable payment handler icon found in the \"icons\" field defined "
@@ -280,9 +256,10 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
   }
 
   bool can_download = ManifestIconDownloader::Download(
-      web_contents, icon_url_,
+      web_contents_.get(), icon_url_,
       payments::IconSizeCalculator::IdealIconHeight(native_view),
       payments::IconSizeCalculator::MinimumIconHeight(),
+      /* maximum_icon_size_in_px= */ std::numeric_limits<int>::max(),
       base::BindOnce(&PaymentAppInfoFetcher::SelfDeleteFetcher::OnIconFetched,
                      weak_ptr_factory_.GetWeakPtr()),
       false /* square_only */);
@@ -320,10 +297,9 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::OnIconFetched(
 void PaymentAppInfoFetcher::SelfDeleteFetcher::WarnIfPossible(
     const std::string& message) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(web_contents_helper_);
 
-  if (web_contents_helper_->web_contents()) {
-    web_contents_helper_->web_contents()->GetMainFrame()->AddMessageToConsole(
+  if (web_contents_) {
+    web_contents_->GetPrimaryMainFrame()->AddMessageToConsole(
         blink::mojom::ConsoleMessageLevel::kWarning, message);
   } else {
     LOG(WARNING) << message;

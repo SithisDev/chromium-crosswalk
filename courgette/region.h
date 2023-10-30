@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright 2009 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ namespace courgette {
 class Region {
  public:
   // Default constructor: and empty region.
-  Region() : start_(NULL), length_(0) {}
+  Region() : start_(nullptr), length_(0) {}
 
   // Usual constructor for regions given a |start| address and |length|.
   Region(const void* start, size_t length)

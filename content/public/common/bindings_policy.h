@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@ namespace content {
 // This enum specifies flag values for the types of JavaScript bindings exposed
 // to renderers.
 enum BindingsPolicy {
+  BINDINGS_POLICY_NONE = 0,
   // HTML-based UI bindings that allows the JS content to send JSON-encoded
   // data back to the browser process.
   // These bindings should not be exposed to normal web content.

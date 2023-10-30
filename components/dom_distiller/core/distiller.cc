@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,10 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -25,7 +26,6 @@
 #include "components/dom_distiller/core/distiller_url_fetcher.h"
 #include "components/dom_distiller/core/proto/distilled_article.pb.h"
 #include "components/dom_distiller/core/proto/distilled_page.pb.h"
-#include "net/url_request/url_request_context_getter.h"
 
 namespace {
 // Maximum number of distilled pages in an article.
@@ -68,7 +68,7 @@ DistillerImpl::~DistillerImpl() {
 
 bool DistillerImpl::DoesFetchImages() {
 // Only iOS makes use of the fetched image data.
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   return true;
 #else
   return false;
@@ -112,11 +112,11 @@ DistillerImpl::DistilledPageData* DistillerImpl::GetPageAtIndex(
 
 void DistillerImpl::DistillPage(const GURL& url,
                                 std::unique_ptr<DistillerPage> distiller_page,
-                                const DistillationFinishedCallback& finished_cb,
+                                DistillationFinishedCallback finished_cb,
                                 const DistillationUpdateCallback& update_cb) {
   DCHECK(AreAllPagesFinished());
   distiller_page_ = std::move(distiller_page);
-  finished_cb_ = finished_cb;
+  finished_cb_ = std::move(finished_cb);
   update_cb_ = update_cb;
 
   AddToDistillationQueue(0, url);
@@ -167,7 +167,14 @@ void DistillerImpl::OnPageDistillationFinished(
   }
 
   DCHECK(distiller_result);
+  CHECK_LT(started_pages_index_[page_num], pages_.size())
+      << "started_pages_index_[" << page_num
+      << "] (=" << started_pages_index_[page_num] << ") is out of range.";
   DistilledPageData* page_data = GetPageAtIndex(started_pages_index_[page_num]);
+  CHECK(page_data) << "GetPageAtIndex(started_pages_index_[" << page_num
+                   << "] (=" << started_pages_index_[page_num]
+                   << ")) returns nullptr. pages_.size() = " << pages_.size()
+                   << ".";
   page_data->distilled_page_proto =
       new base::RefCountedData<DistilledPageProto>();
   page_data->page_num = page_num;
@@ -247,20 +254,24 @@ void DistillerImpl::OnPageDistillationFinished(
       GURL next_page_url(pagination_info.next_page());
       if (next_page_url.is_valid()) {
         // The pages should be in same origin.
-        DCHECK_EQ(next_page_url.GetOrigin(), page_url.GetOrigin());
-        AddToDistillationQueue(page_num + 1, next_page_url);
-        page_data->distilled_page_proto->data.mutable_pagination_info()
-            ->set_next_page(next_page_url.spec());
+        if (next_page_url.DeprecatedGetOriginAsURL() ==
+            page_url.DeprecatedGetOriginAsURL()) {
+          AddToDistillationQueue(page_num + 1, next_page_url);
+          page_data->distilled_page_proto->data.mutable_pagination_info()
+              ->set_next_page(next_page_url.spec());
+        }
       }
     }
 
     if (pagination_info.has_prev_page()) {
       GURL prev_page_url(pagination_info.prev_page());
       if (prev_page_url.is_valid()) {
-        DCHECK_EQ(prev_page_url.GetOrigin(), page_url.GetOrigin());
-        AddToDistillationQueue(page_num - 1, prev_page_url);
-        page_data->distilled_page_proto->data.mutable_pagination_info()
-            ->set_prev_page(prev_page_url.spec());
+        if (prev_page_url.DeprecatedGetOriginAsURL() ==
+            page_url.DeprecatedGetOriginAsURL()) {
+          AddToDistillationQueue(page_num - 1, prev_page_url);
+          page_data->distilled_page_proto->data.mutable_pagination_info()
+              ->set_prev_page(prev_page_url.spec());
+        }
       }
     }
 
@@ -323,11 +334,9 @@ void DistillerImpl::OnFetchImageDone(int page_num,
   DistilledPageData* page_data = GetPageAtIndex(started_pages_index_[page_num]);
   DCHECK(page_data->distilled_page_proto);
   DCHECK(url_fetcher);
-  auto fetcher_it = std::find_if(
-      page_data->image_fetchers_.begin(), page_data->image_fetchers_.end(),
-      [url_fetcher](const std::unique_ptr<DistillerURLFetcher>& f) {
-        return url_fetcher == f.get();
-      });
+  auto fetcher_it =
+      base::ranges::find(page_data->image_fetchers_, url_fetcher,
+                         &std::unique_ptr<DistillerURLFetcher>::get);
 
   DCHECK(fetcher_it != page_data->image_fetchers_.end());
   // Delete the |url_fetcher| by DeleteSoon since the OnFetchImageDone
@@ -409,8 +418,7 @@ void DistillerImpl::RunDistillerCallbackIfDone() {
 
     base::AutoReset<bool> dont_delete_this_in_callback(&destruction_allowed_,
                                                        false);
-    finished_cb_.Run(std::move(article_proto));
-    finished_cb_.Reset();
+    std::move(finished_cb_).Run(std::move(article_proto));
   }
 }
 

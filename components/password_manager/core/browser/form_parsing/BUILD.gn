@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,12 +12,16 @@ static_library("form_parsing") {
     "password_field_prediction.h",
   ]
 
-  deps = [
+  public_deps = [
     "//base",
+    "//components/password_manager/core/browser:password_form",
+  ]
+
+  deps = [
     "//components/autofill/core/browser",
-    "//components/autofill/core/browser/proto",
     "//components/autofill/core/common",
     "//components/password_manager/core/common",
+    "//components/password_manager/core/common:features",
   ]
 }
 
@@ -30,11 +34,11 @@ source_set("unit_tests") {
 
   deps = [
     ":form_parsing",
-    "//base",
     "//base/test:test_support",
     "//components/autofill/core/browser",
-    "//components/autofill/core/browser/proto",
     "//components/autofill/core/common",
+    "//components/password_manager/core/common",
+    "//components/password_manager/core/common:features",
     "//testing/gmock",
     "//testing/gtest",
     "//url",

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/download/public/background_service/blob_context_getter_factory.h"
 #include "components/download/public/background_service/clients.h"
 
@@ -21,9 +21,13 @@ class NetworkConnectionTracker;
 class SharedURLLoaderFactory;
 }  // namespace network
 
+namespace leveldb_proto {
+class ProtoDatabaseProvider;
+}  // namespace leveldb_proto
+
 namespace download {
 
-class DownloadService;
+class BackgroundDownloadService;
 class SimpleDownloadManagerCoordinator;
 class TaskScheduler;
 
@@ -37,18 +41,19 @@ class TaskScheduler;
 // will act as an in-memory only service (this means no auto-retries after
 // restarts, no files written on completion, etc.).
 // |background_task_runner| will be used for all disk reads and writes.
-std::unique_ptr<DownloadService> BuildDownloadService(
+std::unique_ptr<BackgroundDownloadService> BuildDownloadService(
     SimpleFactoryKey* simple_factory_key,
     std::unique_ptr<DownloadClientMap> clients,
     network::NetworkConnectionTracker* network_connection_tracker,
     const base::FilePath& storage_dir,
     SimpleDownloadManagerCoordinator* download_manager_coordinator,
+    leveldb_proto::ProtoDatabaseProvider* proto_db_provider,
     const scoped_refptr<base::SequencedTaskRunner>& background_task_runner,
     std::unique_ptr<TaskScheduler> task_scheduler);
 
 // Create download service used in incognito mode, without any database or
 // download file IO.
-std::unique_ptr<DownloadService> BuildInMemoryDownloadService(
+std::unique_ptr<BackgroundDownloadService> BuildInMemoryDownloadService(
     SimpleFactoryKey* simple_factory_key,
     std::unique_ptr<DownloadClientMap> clients,
     network::NetworkConnectionTracker* network_connection_tracker,

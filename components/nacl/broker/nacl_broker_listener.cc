@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,13 +23,16 @@
 #include "components/nacl/common/nacl_service.h"
 #include "components/nacl/common/nacl_switches.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/sandbox_init.h"
+#include "content/public/common/sandbox_init_win.h"
 #include "ipc/ipc_channel.h"
 #include "mojo/public/cpp/platform/platform_channel.h"
 #include "mojo/public/cpp/system/invitation.h"
 #include "mojo/public/cpp/system/message_pipe.h"
+#include "sandbox/policy/mojom/sandbox.mojom.h"
+#include "sandbox/policy/win/sandbox_win.h"
 #include "sandbox/win/src/sandbox_policy.h"
-#include "services/service_manager/embedder/switches.h"
+
+#include <windows.h>
 
 namespace {
 
@@ -44,31 +47,21 @@ NaClBrokerListener::NaClBrokerListener() = default;
 NaClBrokerListener::~NaClBrokerListener() = default;
 
 void NaClBrokerListener::Listen() {
-  mojo::ScopedMessagePipeHandle channel_handle;
-  auto service =
-      CreateNaClService(base::ThreadTaskRunnerHandle::Get(), &channel_handle);
-  channel_ = IPC::Channel::CreateClient(channel_handle.release(), this,
-                                        base::ThreadTaskRunnerHandle::Get());
+  NaClService service(base::ThreadTaskRunnerHandle::Get());
+  channel_ =
+      IPC::Channel::CreateClient(service.TakeChannelPipe().release(), this,
+                                 base::ThreadTaskRunnerHandle::Get());
   CHECK(channel_->Connect());
   run_loop_.Run();
 }
 
-// NOTE: changes to this method need to be reviewed by the security team.
-bool NaClBrokerListener::PreSpawnTarget(sandbox::TargetPolicy* policy) {
-  // This code is duplicated in chrome_content_browser_client.cc.
-
-  // Allow the server side of a pipe restricted to the "chrome.nacl."
-  // namespace so that it cannot impersonate other system or other chrome
-  // service pipes.
-  sandbox::ResultCode result = policy->AddRule(
-      sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
-      sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
-      L"\\\\.\\pipe\\chrome.nacl.*");
-  return result == sandbox::SBOX_ALL_OK;
+sandbox::mojom::Sandbox NaClBrokerListener::GetSandboxType() {
+  return sandbox::mojom::Sandbox::kPpapi;
 }
 
-service_manager::SandboxType NaClBrokerListener::GetSandboxType() {
-  return service_manager::SANDBOX_TYPE_PPAPI;
+std::string NaClBrokerListener::GetSandboxTag() {
+  return sandbox::policy::SandboxWin::GetSandboxTagForDelegate(
+      "nacl-broker-listener", GetSandboxType());
 }
 
 void NaClBrokerListener::OnChannelConnected(int32_t peer_pid) {
@@ -96,7 +89,7 @@ void NaClBrokerListener::OnChannelError() {
 
 void NaClBrokerListener::OnLaunchLoaderThroughBroker(
     int launch_id,
-    mojo::MessagePipeHandle service_request_pipe) {
+    mojo::MessagePipeHandle ipc_channel_handle) {
   base::ProcessHandle loader_handle_in_browser = 0;
 
   // Create the path to the nacl broker/loader executable - it's the executable
@@ -115,18 +108,15 @@ void NaClBrokerListener::OnLaunchLoaderThroughBroker(
     base::HandlesToInheritVector handles;
     channel.PrepareToPassRemoteEndpoint(&handles, cmd_line);
 
-    std::string token = base::NumberToString(base::RandUint64());
-    cmd_line->AppendSwitchASCII(
-        service_manager::switches::kServiceRequestChannelToken, token);
     mojo::OutgoingInvitation invitation;
     MojoResult fuse_result = mojo::FuseMessagePipes(
-        mojo::ScopedMessagePipeHandle(service_request_pipe),
-        invitation.AttachMessagePipe(token));
+        mojo::ScopedMessagePipeHandle(ipc_channel_handle),
+        invitation.AttachMessagePipe(0));
     DCHECK_EQ(MOJO_RESULT_OK, fuse_result);
 
     base::Process loader_process;
     sandbox::ResultCode result = content::StartSandboxedProcess(
-        this, cmd_line, handles, &loader_process);
+        this, *cmd_line, handles, &loader_process);
 
     if (result == sandbox::SBOX_ALL_OK) {
       mojo::OutgoingInvitation::Send(std::move(invitation),
@@ -160,7 +150,7 @@ void NaClBrokerListener::OnLaunchDebugExceptionHandler(
   NaClStartDebugExceptionHandlerThread(
       base::Process(process_handle), startup_info,
       base::ThreadTaskRunnerHandle::Get(),
-      base::Bind(SendReply, channel_.get(), pid));
+      base::BindRepeating(SendReply, channel_.get(), pid));
 }
 
 void NaClBrokerListener::OnStopBroker() {

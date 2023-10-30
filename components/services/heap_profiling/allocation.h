@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,10 @@ struct AllocationSite {
   AllocationSite(AllocatorType allocator,
                  std::vector<Address>&& stack,
                  int context_id);
+
+  AllocationSite(const AllocationSite&) = delete;
+  AllocationSite& operator=(const AllocationSite&) = delete;
+
   ~AllocationSite();
 
   // Type of the allocator responsible for the allocation. Possible values are
@@ -42,8 +46,6 @@ struct AllocationSite {
 
  private:
   const uint32_t hash_;
-
-  DISALLOW_COPY_AND_ASSIGN(AllocationSite);
 };
 
 inline bool operator==(const AllocationSite& a, const AllocationSite& b) {
@@ -53,11 +55,11 @@ inline bool operator==(const AllocationSite& a, const AllocationSite& b) {
 
 // Data associated with an allocation site in the AllocationMap.
 struct AllocationMetrics {
-  // Size of the allocation responsible for prodicing the sample.
+  // Total size of allocations associated with a given sample.
   size_t size = 0;
 
   // Number of allocations associated with the sample.
-  size_t count = 0;
+  float count = 0;
 };
 
 using AllocationMap =

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,20 +11,14 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/mac/scoped_nsobject.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/translate/core/common/translate_errors.h"
-#import "ios/web/public/web_state/web_state.h"
-#include "ios/web/public/web_state/web_state_observer.h"
+#import "ios/web/public/web_state.h"
+#include "ios/web/public/web_state_observer.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 
 @class JsTranslateManager;
 class GURL;
-
-namespace base {
-class DictionaryValue;
-}  // namespace base
 
 namespace web {
 class NavigationContext;
@@ -41,18 +35,22 @@ class TranslateController : public web::WebStateObserver {
    public:
     // Called when the translate script is ready.
     // |error_type| Indicates error code.
-    virtual void OnTranslateScriptReady(TranslateErrors::Type error_type,
+    virtual void OnTranslateScriptReady(TranslateErrors error_type,
                                         double load_time,
                                         double ready_time) = 0;
 
     // Called when the translation is complete.
     // |error_type| Indicates error code.
-    virtual void OnTranslateComplete(TranslateErrors::Type error_type,
-                                     const std::string& original_language,
+    virtual void OnTranslateComplete(TranslateErrors error_type,
+                                     const std::string& source_language,
                                      double translation_time) = 0;
   };
 
   TranslateController(web::WebState* web_state, JsTranslateManager* manager);
+
+  TranslateController(const TranslateController&) = delete;
+  TranslateController& operator=(const TranslateController&) = delete;
+
   ~TranslateController() override;
 
   // Sets the observer.
@@ -85,19 +83,24 @@ class TranslateController : public web::WebStateObserver {
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, TranslationSuccess);
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, TranslationFailure);
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, OnTranslateLoadJavascript);
-  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, OnTranslateSendRequest);
+  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
+                           OnTranslateSendRequestWithValidCommand);
+  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
+                           OnTranslateSendRequestWithBadURL);
+  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
+                           OnTranslateSendRequestWithBadMethod);
 
   // Called when a JavaScript command is received.
-  bool OnJavascriptCommandReceived(const base::DictionaryValue& command,
+  bool OnJavascriptCommandReceived(const base::Value& command,
                                    const GURL& url,
                                    bool interacting,
                                    web::WebFrame* sender_frame);
   // Methods to handle specific JavaScript commands.
   // Return false if the command is invalid.
-  bool OnTranslateReady(const base::DictionaryValue& command);
-  bool OnTranslateComplete(const base::DictionaryValue& command);
-  bool OnTranslateLoadJavaScript(const base::DictionaryValue& command);
-  bool OnTranslateSendRequest(const base::DictionaryValue& command);
+  bool OnTranslateReady(const base::Value& command);
+  bool OnTranslateComplete(const base::Value& command);
+  bool OnTranslateLoadJavaScript(const base::Value& command);
+  bool OnTranslateSendRequest(const base::Value& command);
 
   // The callback when the script is fetched or a server error occurred.
   void OnScriptFetchComplete(std::unique_ptr<std::string> response_body);
@@ -123,13 +126,11 @@ class TranslateController : public web::WebStateObserver {
   std::unique_ptr<network::SimpleURLLoader> script_fetcher_;
 
   // Subscription for JS message.
-  std::unique_ptr<web::WebState::ScriptCommandSubscription> subscription_;
+  base::CallbackListSubscription subscription_;
 
   Observer* observer_;
-  base::scoped_nsobject<JsTranslateManager> js_manager_;
+  __strong JsTranslateManager* js_manager_;
   base::WeakPtrFactory<TranslateController> weak_method_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(TranslateController);
 };
 
 }  // namespace translate

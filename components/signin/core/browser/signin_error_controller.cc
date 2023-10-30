@@ -1,9 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/signin/core/browser/signin_error_controller.h"
 
+#include "base/observer_list.h"
 #include "components/signin/public/base/signin_metrics.h"
 
 SigninErrorController::SigninErrorController(
@@ -11,10 +12,9 @@ SigninErrorController::SigninErrorController(
     signin::IdentityManager* identity_manager)
     : account_mode_(mode),
       identity_manager_(identity_manager),
-      scoped_identity_manager_observer_(this),
       auth_error_(GoogleServiceAuthError::AuthErrorNone()) {
   DCHECK(identity_manager_);
-  scoped_identity_manager_observer_.Add(identity_manager_);
+  scoped_identity_manager_observation_.Observe(identity_manager_.get());
 
   Update();
 }
@@ -22,16 +22,17 @@ SigninErrorController::SigninErrorController(
 SigninErrorController::~SigninErrorController() = default;
 
 void SigninErrorController::Shutdown() {
-  scoped_identity_manager_observer_.RemoveAll();
+  DCHECK(scoped_identity_manager_observation_.IsObserving());
+  scoped_identity_manager_observation_.Reset();
 }
 
 void SigninErrorController::Update() {
   const GoogleServiceAuthError::State prev_error_state = auth_error_.state();
-  const std::string prev_account_id = error_account_id_;
+  const CoreAccountId prev_account_id = error_account_id_;
   bool error_changed = false;
 
-  const std::string& primary_account_id =
-      identity_manager_->GetPrimaryAccountId();
+  const CoreAccountId& primary_account_id =
+      identity_manager_->GetPrimaryAccountId(signin::ConsentLevel::kSignin);
 
   if (identity_manager_->HasAccountWithRefreshTokenInPersistentErrorState(
           primary_account_id)) {
@@ -51,7 +52,7 @@ void SigninErrorController::Update() {
   if (!error_changed && prev_error_state != GoogleServiceAuthError::NONE) {
     // No provider reported an error, so clear the error we have now.
     auth_error_ = GoogleServiceAuthError::AuthErrorNone();
-    error_account_id_.clear();
+    error_account_id_ = CoreAccountId();
     error_changed = true;
   }
 
@@ -70,8 +71,8 @@ void SigninErrorController::Update() {
 }
 
 bool SigninErrorController::UpdateSecondaryAccountErrors(
-    const std::string& primary_account_id,
-    const std::string& prev_account_id,
+    const CoreAccountId& primary_account_id,
+    const CoreAccountId& prev_account_id,
     const GoogleServiceAuthError::State& prev_error_state) {
   // This method should not have been called if we are in
   // |AccountMode::PRIMARY_ACCOUNT|.
@@ -84,7 +85,7 @@ bool SigninErrorController::UpdateSecondaryAccountErrors(
   bool error_changed = false;
   for (const CoreAccountInfo& account_info :
        identity_manager_->GetAccountsWithRefreshTokens()) {
-    std::string account_id = account_info.account_id;
+    CoreAccountId account_id = account_info.account_id;
 
     // Ignore the Primary Account. We are only interested in Secondary Accounts.
     if (account_id == primary_account_id) {
@@ -149,17 +150,12 @@ void SigninErrorController::OnErrorStateOfRefreshTokenUpdatedForAccount(
   Update();
 }
 
-void SigninErrorController::OnPrimaryAccountSet(
-    const CoreAccountInfo& primary_account_info) {
-  // Ignore updates to the primary account if not in PRIMARY_ACCOUNT mode.
-  if (account_mode_ != AccountMode::PRIMARY_ACCOUNT)
+void SigninErrorController::OnPrimaryAccountChanged(
+    const signin::PrimaryAccountChangeEvent& event) {
+  if (event.GetEventTypeFor(signin::ConsentLevel::kSync) ==
+      signin::PrimaryAccountChangeEvent::Type::kNone) {
     return;
-
-  Update();
-}
-
-void SigninErrorController::OnPrimaryAccountCleared(
-    const CoreAccountInfo& previous_primary_account_info) {
+  }
   // Ignore updates to the primary account if not in PRIMARY_ACCOUNT mode.
   if (account_mode_ != AccountMode::PRIMARY_ACCOUNT)
     return;

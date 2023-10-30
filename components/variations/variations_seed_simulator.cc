@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "components/variations/proto/study.pb.h"
 #include "components/variations/study_filtering.h"
 #include "components/variations/variations_associated_data.h"
+#include "components/variations/variations_layers.h"
 #include "components/variations/variations_seed_processor.h"
 
 namespace variations {
@@ -25,8 +26,8 @@ namespace {
 void GetCurrentTrialState(std::map<std::string, std::string>* current_state) {
   base::FieldTrial::ActiveGroups trial_groups;
   base::FieldTrialList::GetActiveFieldTrialGroups(&trial_groups);
-  for (size_t i = 0; i < trial_groups.size(); ++i)
-    (*current_state)[trial_groups[i].trial_name] = trial_groups[i].group_name;
+  for (auto& group : trial_groups)
+    (*current_state)[group.trial_name] = group.group_name;
 }
 
 // Simulate group assignment for the specified study with PERMANENT consistency.
@@ -56,8 +57,6 @@ std::string SimulateGroupAssignment(
       trial->AppendGroup(experiment.name(), experiment.probability_weight());
     }
   }
-  if (processed_study.is_expired())
-    trial->Disable();
   return trial->group_name();
 }
 
@@ -117,7 +116,8 @@ VariationsSeedSimulator::Result VariationsSeedSimulator::SimulateSeedStudies(
     const VariationsSeed& seed,
     const ClientFilterableState& client_state) {
   std::vector<ProcessedStudy> filtered_studies;
-  FilterAndValidateStudies(seed, client_state, &filtered_studies);
+  VariationsLayers layers(seed, &low_entropy_provider_);
+  FilterAndValidateStudies(seed, client_state, layers, &filtered_studies);
 
   return ComputeDifferences(filtered_studies);
 }
@@ -137,9 +137,7 @@ VariationsSeedSimulator::Result VariationsSeedSimulator::ComputeDifferences(
     // TODO(asvitkine): This should be handled more intelligently. There are
     // several cases that fall into this category:
     //   1) There's an existing field trial with this name but it is not active.
-    //   2) There's an existing expired field trial with this name, which is
-    //      also not considered as active.
-    //   3) This is a new study config that previously didn't exist.
+    //   2) This is a new study config that previously didn't exist.
     // The above cases should be differentiated and handled explicitly.
     if (it == current_state.end())
       continue;
@@ -236,15 +234,6 @@ VariationsSeedSimulator::SessionStudyGroupChanged(
   DCHECK_EQ(Study_Consistency_SESSION, study.consistency());
 
   const Study_Experiment* experiment = FindExperiment(study, selected_group);
-  if (processed_study.is_expired() &&
-      selected_group != study.default_experiment_name()) {
-    // An expired study will result in the default group being selected - mark
-    // it as changed if the current group differs from the default.
-    if (experiment)
-      return ConvertExperimentTypeToChangeType(experiment->type());
-    return CHANGED;
-  }
-
   if (!experiment)
     return CHANGED;
   if (experiment->probability_weight() == 0 &&

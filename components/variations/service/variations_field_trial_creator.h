@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,62 @@
 #define COMPONENTS_VARIATIONS_SERVICE_VARIATIONS_FIELD_TRIAL_CREATOR_H_
 
 #include <memory>
-#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/field_trial.h"
+#include "base/time/time.h"
+#include "build/build_config.h"
 #include "components/variations/client_filterable_state.h"
+#include "components/variations/metrics.h"
 #include "components/variations/proto/study.pb.h"
 #include "components/variations/seed_response.h"
+#include "components/variations/service/buildflags.h"
 #include "components/variations/service/ui_string_overrider.h"
 #include "components/variations/variations_seed_store.h"
 
+namespace metrics {
+class MetricsStateManager;
+}
+
 namespace variations {
+
+// Denotes whether Chrome used a variations seed. Also captures (a) the kind of
+// seed and (b) the conditions under which the seed was used or failed to be
+// used. Exposed for testing.
+//
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class SeedUsage {
+  kRegularSeedUsed = 0,
+  kExpiredRegularSeedNotUsed = 1,
+  kUnloadableRegularSeedNotUsed = 2,
+  kSafeSeedUsed = 3,
+  kExpiredSafeSeedNotUsed = 4,
+  // The below three enumerators were deprecated in M100.
+  // kCorruptedSafeSeedNotUsed = 5,
+  // kRegularSeedUsedAfterEmptySafeSeedLoaded = 6,
+  // kExpiredRegularSeedNotUsedAfterEmptySafeSeedLoaded = 7,
+  // kCorruptedRegularSeedNotUsedAfterEmptySafeSeedLoaded = 8,
+  kRegularSeedForFutureMilestoneNotUsed = 9,
+  kSafeSeedForFutureMilestoneNotUsed = 10,
+  kUnloadableSafeSeedNotUsed = 11,
+  kMaxValue = kUnloadableSafeSeedNotUsed,
+};
+
+// Denotes a variations seed's expiry state. Exposed for testing.
+//
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class VariationsSeedExpiry {
+  kNotExpired = 0,
+  kFetchTimeMissing = 1,
+  kExpired = 2,
+  kMaxValue = kExpired,
+};
 
 enum LoadPermanentConsistencyCountryResult {
   LOAD_COUNTRY_NO_PREF_NO_SEED = 0,
@@ -41,15 +82,19 @@ class PlatformFieldTrials;
 class SafeSeedManager;
 class VariationsServiceClient;
 
-// Used to setup field trials based on stored variations seed data.
+// Used to set up field trials based on stored variations seed data.
 class VariationsFieldTrialCreator {
  public:
   // Caller is responsible for ensuring that objects passed to the constructor
   // stay valid for the lifetime of this object.
-  VariationsFieldTrialCreator(PrefService* local_state,
-                              VariationsServiceClient* client,
+  VariationsFieldTrialCreator(VariationsServiceClient* client,
                               std::unique_ptr<VariationsSeedStore> seed_store,
                               const UIStringOverrider& ui_string_overrider);
+
+  VariationsFieldTrialCreator(const VariationsFieldTrialCreator&) = delete;
+  VariationsFieldTrialCreator& operator=(const VariationsFieldTrialCreator&) =
+      delete;
+
   virtual ~VariationsFieldTrialCreator();
 
   // Returns what variations will consider to be the latest country. Returns
@@ -60,29 +105,44 @@ class VariationsFieldTrialCreator {
 
   // Sets up field trials based on stored variations seed data. Returns whether
   // setup completed successfully.
-  // |kEnableGpuBenchmarking|, |kEnableFeatures|, |kDisableFeatures| are
-  // feature controlling flags not directly accesible from variations.
-  // |unforcable_field_trials| contains the list of trials that can not be
-  // overridden.
-  // |variation_ids| allows for forcing ids selected in chrome://flags and/or
-  // specified using the command-line flag.
-  // |low_entropy_provider| allows for field trial randomization.
+  //
+  // |variation_ids| allows for forcing ids selected in chrome://flags.
+  // |command_line_variation_ids| allows for forcing ids through the
+  // "--force-variation-ids" command line flag. It should be a comma-separated
+  // list of variation ids. Ids prefixed with the character "t" will be treated
+  // as Trigger Variation Ids.
+  // |extra_overrides| gives a list of feature overrides that should be applied
+  // after the features explicitly disabled/enabled from the command line via
+  // --disable-features and --enable-features, but before field trials.
+  // |low_entropy_provider| allows for field trial randomization. May be null.
   // |feature_list| contains the list of all active features for this client.
-  // |platform_field_trials| provides the platform specific field trial set up
-  // for Chrome.
+  // Must not be null.
+  // |metrics_state_manager| facilitates signaling that Chrome has not yet
+  // exited cleanly. Must not be null.
+  // |platform_field_trials| provides the platform-specific field trial setup
+  // for Chrome. Must not be null.
   // |safe_seed_manager| should be notified of the combined server and client
   // state that was activated to create the field trials (only when the return
-  // value is true).
-  bool SetupFieldTrials(const char* kEnableGpuBenchmarking,
-                        const char* kEnableFeatures,
-                        const char* kDisableFeatures,
-                        const std::set<std::string>& unforceable_field_trials,
-                        const std::vector<std::string>& variation_ids,
-                        std::unique_ptr<const base::FieldTrial::EntropyProvider>
-                            low_entropy_provider,
-                        std::unique_ptr<base::FeatureList> feature_list,
-                        PlatformFieldTrials* platform_field_trials,
-                        SafeSeedManager* safe_seed_manager);
+  // value is true). Must not be null.
+  // |low_entropy_source_value| contains the low entropy source value that was
+  // used for client-side randomization of variations.
+  //
+  // NOTE: The ordering of the FeatureList method calls is such that the
+  // explicit --disable-features and --enable-features from the command line
+  // take precedence over |extra_overrides|, which takes precedence over the
+  // field trials.
+  bool SetUpFieldTrials(
+      const std::vector<std::string>& variation_ids,
+      const std::string& command_line_variation_ids,
+      const std::vector<base::FeatureList::FeatureOverrideInfo>&
+          extra_overrides,
+      std::unique_ptr<const base::FieldTrial::EntropyProvider>
+          low_entropy_provider,
+      std::unique_ptr<base::FeatureList> feature_list,
+      metrics::MetricsStateManager* metrics_state_manager,
+      PlatformFieldTrials* platform_field_trials,
+      SafeSeedManager* safe_seed_manager,
+      absl::optional<int> low_entropy_source_value);
 
   // Returns all of the client state used for filtering studies.
   // As a side-effect, may update the stored permanent consistency country.
@@ -106,9 +166,6 @@ class VariationsFieldTrialCreator {
   // client.
   void StoreVariationsOverriddenCountry(const std::string& country);
 
-  // Records the time of the most recent successful fetch.
-  void RecordLastFetchTime();
-
   // Allow the platform that is used to filter the set of active trials to be
   // overridden.
   void OverrideVariationsPlatform(Study::Platform platform_override);
@@ -122,25 +179,38 @@ class VariationsFieldTrialCreator {
   // Returns the locale that was used for evaluating trials.
   const std::string& application_locale() const { return application_locale_; }
 
-  // Returns the short hardware class value used to evaluate variations hardware
-  // class filters. Only implemented on CrOS and Android - returns empty string
-  // on other platforms.
-  static std::string GetShortHardwareClass();
+ protected:
+  // Get the platform we're running on, respecting OverrideVariationsPlatform().
+  // Protected for testing.
+  Study::Platform GetPlatform();
+
+  // Overrides the string resource specified by |hash| with |str| in the
+  // resource bundle. Protected for testing.
+  void OverrideUIString(uint32_t hash, const std::u16string& str);
+
+  // Get the client's current form factor. Protected for testing.
+  Study::FormFactor GetCurrentFormFactor();
+
+#if BUILDFLAG(FIELDTRIAL_TESTING_ENABLED)
+  // Applies the field trial testing config defined in
+  // testing/variations/fieldtrial_testing_config.json to the current session.
+  // Protected and virtual for testing.
+  virtual void ApplyFieldTrialTestingConfig(base::FeatureList* feature_list);
+#endif  // BUILDFLAG(FIELDTRIAL_TESTING_ENABLED)
 
  private:
-  // Loads the seed from the variations store into |seed|, and records metrics
-  // about the loaded seed. Returns true on success, in which case |seed| will
-  // contain the loaded data, and |seed_data| and |base64_signature| will
-  // contain the raw pref values.
-  bool LoadSeed(VariationsSeed* seed,
-                std::string* seed_data,
-                std::string* base64_signature) WARN_UNUSED_RESULT;
+  // Returns true if the loaded VariationsSeed has expired. An expired seed is
+  // one that (a) was fetched over |kMaxVariationsSeedAgeDays| ago and (b) is
+  // older than the binary build time.
+  //
+  // Also, records a couple VariationsSeed-related metrics.
+  bool HasSeedExpired(bool is_safe_seed);
 
-  // Loads the safe seed from the variations store into |seed| and updates any
-  // relevant fields in |client_state|. If the load succeeds, records metrics
-  // about the loaded seed. Returns whether the load succeeded.
-  bool LoadSafeSeed(VariationsSeed* seed,
-                    ClientFilterableState* client_state) WARN_UNUSED_RESULT;
+  // Returns true if the loaded VariationsSeed is for a future milestone (e.g.
+  // if the client is on M92 and the seed was fetched with M93). A seed for a
+  // future milestone is invalid as it may be missing studies filtered out by
+  // the server.
+  bool IsSeedForFutureMilestone(bool is_safe_seed);
 
   // Creates field trials based on the variations seed loaded from local state.
   // If there is a problem loading the seed data, all trials specified by the
@@ -150,25 +220,27 @@ class VariationsFieldTrialCreator {
   // successfully; and if so, stores the loaded variations state into the
   // |safe_seed_manager|.
   bool CreateTrialsFromSeed(
-      std::unique_ptr<const base::FieldTrial::EntropyProvider>
-          low_entropy_provider,
+      const base::FieldTrial::EntropyProvider* low_entropy_provider,
       base::FeatureList* feature_list,
       SafeSeedManager* safe_seed_manager);
 
-  // Overrides the string resource specified by |hash| with |str| in the
-  // resource bundle.
-  void OverrideUIString(uint32_t hash, const base::string16& str);
+  // Reads a seed's data and signature from the file at |seed_path| and writes
+  // them to Local State. Exits Chrome (A) if the file's contents can't be
+  // loaded or (B) if the contents do not contain |kVariationsCompressedSeed| or
+  // |kVariationsSeedSignature|. Also forces Chrome to not run in variations
+  // safe mode. Used for variations seed testing.
+  void LoadSeedFromFile(const base::FilePath& seed_path);
 
   // Returns the seed store. Virtual for testing.
   virtual VariationsSeedStore* GetSeedStore();
 
-  // Get the platform we're running on, respecting OverrideVariationsPlatform().
-  Study::Platform GetPlatform();
+  // Returns the time at which the binary was built. Virtual for testing.
+  virtual base::Time GetBuildTime() const;
 
   PrefService* local_state() { return seed_store_->local_state(); }
   const PrefService* local_state() const { return seed_store_->local_state(); }
 
-  VariationsServiceClient* client_;
+  raw_ptr<VariationsServiceClient> client_;
 
   UIStringOverrider ui_string_overrider_;
 
@@ -193,12 +265,14 @@ class VariationsFieldTrialCreator {
 
   // Caches the UI strings which need to be overridden in the resource bundle.
   // These strings are cached before the resource bundle is initialized.
-  std::unordered_map<int, base::string16> overridden_strings_map_;
+  std::unordered_map<int, std::u16string> overridden_strings_map_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(VariationsFieldTrialCreator);
 };
+
+// A testing feature that forces a crash during field trial creation
+// on developer and test builds.
+extern const base::Feature kForceFieldTrialSetupCrashForTesting;
 
 }  // namespace variations
 

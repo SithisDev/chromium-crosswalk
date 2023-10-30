@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@
 
 #include <limits>
 
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/allocator/buildflags.h"
+#include "base/check.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "build/build_config.h"
 #include "components/cronet/native/test/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -18,6 +19,10 @@ namespace {
 class BufferTest : public ::testing::Test {
  public:
   BufferTest() = default;
+
+  BufferTest(const BufferTest&) = delete;
+  BufferTest& operator=(const BufferTest&) = delete;
+
   ~BufferTest() override {}
 
  protected:
@@ -27,14 +32,12 @@ class BufferTest : public ::testing::Test {
 
   // Provide a task environment for use by TestExecutor instances. Do not
   // initialize the ThreadPool as this is done by the Cronet_Engine
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::ThreadingMode::MAIN_THREAD_ONLY};
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
  private:
   void set_on_destroy_called(bool value) { on_destroy_called_ = value; }
 
   bool on_destroy_called_ = false;
-  DISALLOW_COPY_AND_ASSIGN(BufferTest);
 };
 
 const uint64_t kTestBufferSize = 20;
@@ -74,11 +77,16 @@ TEST_F(BufferTest, TestInitWithAlloc) {
   ASSERT_FALSE(on_destroy_called());
 }
 
-#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) || \
-    defined(THREAD_SANITIZER) || defined(OS_FUCHSIA)
-// ASAN and MSAN malloc by default triggers crash instead of returning null on
-// failure. Fuchsia malloc() also crashes on allocation failure in some kernel
-// builds.
+#if defined(ARCH_CPU_64_BITS) &&                                              \
+    (defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) ||               \
+     defined(THREAD_SANITIZER) || BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) || \
+     BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_FUCHSIA))
+// - ASAN and MSAN malloc by default triggers crash instead of returning null on
+//   failure.
+// - PartitionAlloc malloc also crashes on allocation failure by design.
+// - Fuchsia malloc() also crashes on allocation failure in some kernel builds.
+// - On Linux and Chrome OS, the allocator shims crash for large allocations, on
+//   purpose.
 #define MAYBE_TestInitWithHugeAllocFails DISABLED_TestInitWithHugeAllocFails
 #else
 #define MAYBE_TestInitWithHugeAllocFails TestInitWithHugeAllocFails

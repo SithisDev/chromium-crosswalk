@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,9 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
 
-import android.support.test.filters.SmallTest;
 import android.support.test.runner.AndroidJUnit4;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -48,10 +49,10 @@ public class UrlResponseMatcherTest {
     public void testGetMatchingUrlResponse() {
         String url = "url";
         FakeUrlResponse response =
-                new FakeUrlResponse.Builder().setResponseBody("TestBody").build();
+                new FakeUrlResponse.Builder().setResponseBody("TestBody".getBytes()).build();
         ResponseMatcher matcher = new UrlResponseMatcher(url, response);
 
-        FakeUrlResponse found = matcher.getMatchingResponse(url, null, null);
+        FakeUrlResponse found = matcher.getMatchingResponse(url, null, null, null);
 
         assertNotNull(found);
         assertEquals(found, response);
@@ -63,10 +64,11 @@ public class UrlResponseMatcherTest {
         String url = "url";
         String urlWithoutResponse = "NO_RESPONSE";
         FakeUrlResponse response =
-                new FakeUrlResponse.Builder().setResponseBody("TestBody").build();
+                new FakeUrlResponse.Builder().setResponseBody("TestBody".getBytes()).build();
         ResponseMatcher matcher = new UrlResponseMatcher(url, response);
 
-        FakeUrlResponse notFound = matcher.getMatchingResponse(urlWithoutResponse, null, null);
+        FakeUrlResponse notFound =
+                matcher.getMatchingResponse(urlWithoutResponse, null, null, null);
 
         assertNull(notFound);
     }

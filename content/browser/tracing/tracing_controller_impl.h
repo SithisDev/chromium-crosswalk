@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,25 @@
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
+#include "base/task/task_traits.h"
 #include "base/timer/timer.h"
+#include "base/values.h"
+#include "build/chromeos_buildflags.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/tracing_controller.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe_drainer.h"
-#include "services/tracing/public/mojom/tracing.mojom.h"
+#include "services/tracing/public/mojom/perfetto_service.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+namespace perfetto {
+namespace protos {
+namespace pbzero {
+class TracePacket;
+}  // namespace pbzero
+}  // namespace protos
+}  // namespace perfetto
 
 namespace base {
 
@@ -24,8 +38,6 @@ namespace trace_event {
 class TraceConfig;
 }  // namespace trace_event
 
-class DictionaryValue;
-class RefCountedString;
 }  // namespace base
 
 namespace tracing {
@@ -34,17 +46,15 @@ class BaseAgent;
 
 namespace content {
 
-class PerfettoFileTracer;
 class TracingDelegate;
-class TracingUI;
 
 class TracingControllerImpl : public TracingController,
-                              public mojo::DataPipeDrainer::Client {
+                              public mojo::DataPipeDrainer::Client,
+                              public tracing::mojom::TracingSessionClient {
  public:
   // Create an endpoint for dumping the trace data to a callback.
   CONTENT_EXPORT static scoped_refptr<TraceDataEndpoint> CreateCallbackEndpoint(
-      const base::Callback<void(std::unique_ptr<const base::DictionaryValue>,
-                                base::RefCountedString*)>& callback);
+      CompletionCallback callback);
 
   CONTENT_EXPORT static scoped_refptr<TraceDataEndpoint>
   CreateCompressedStringEndpoint(scoped_refptr<TraceDataEndpoint> endpoint,
@@ -55,38 +65,29 @@ class TracingControllerImpl : public TracingController,
   // Should be called on the UI thread.
   CONTENT_EXPORT TracingControllerImpl();
 
+  TracingControllerImpl(const TracingControllerImpl&) = delete;
+  TracingControllerImpl& operator=(const TracingControllerImpl&) = delete;
+
   // TracingController implementation.
   bool GetCategories(GetCategoriesDoneCallback callback) override;
   bool StartTracing(const base::trace_event::TraceConfig& trace_config,
                     StartTracingDoneCallback callback) override;
   bool StopTracing(const scoped_refptr<TraceDataEndpoint>& endpoint) override;
   bool StopTracing(const scoped_refptr<TraceDataEndpoint>& endpoint,
-                   const std::string& agent_label) override;
+                   const std::string& agent_label,
+                   bool privacy_filtering_enabled = false) override;
   bool GetTraceBufferUsage(GetTraceBufferUsageCallback callback) override;
   bool IsTracing() override;
 
-  void RegisterTracingUI(TracingUI* tracing_ui);
-  void UnregisterTracingUI(TracingUI* tracing_ui);
+  // tracing::mojom::TracingSessionClient implementation:
+  void OnTracingEnabled() override;
+  void OnTracingDisabled(bool tracing_succeeded) override;
+
+  void OnTracingFailed();
 
   // For unittests.
   CONTENT_EXPORT void SetTracingDelegateForTesting(
       std::unique_ptr<TracingDelegate> delegate);
-
-  // If command line flags specify startup tracing options, adopts the startup
-  // tracing session and relays it to all tracing agents. Note that the local
-  // TraceLog has already been enabled at this point by
-  // tracing::EnableStartupTracingIfNeeded(), before threads were available.
-  // Requires browser threads to have started and a started main message loop.
-  void StartStartupTracingIfNeeded();
-
-  // Should be called before browser main loop shutdown. If startup tracing is
-  // tracing to a file and is still active, this stops the duration timer if it
-  // exists.
-  void FinalizeStartupTracingIfNeeded();
-
-  const PerfettoFileTracer* perfetto_file_tracer_for_testing() const {
-    return perfetto_file_tracer_.get();
-  }
 
  private:
   friend std::default_delete<TracingControllerImpl>;
@@ -94,38 +95,42 @@ class TracingControllerImpl : public TracingController,
   ~TracingControllerImpl() override;
   void AddAgents();
   void ConnectToServiceIfNeeded();
-  void DisconnectFromService();
-  std::unique_ptr<base::DictionaryValue> GenerateMetadataDict();
+  absl::optional<base::Value::Dict> GenerateMetadataDict();
+  void GenerateMetadataPacket(perfetto::protos::pbzero::TracePacket* packet,
+                              bool privacy_filtering_enabled);
 
   // mojo::DataPipeDrainer::Client
   void OnDataAvailable(const void* data, size_t num_bytes) override;
   void OnDataComplete() override;
 
-  void OnMetadataAvailable(base::Value metadata);
+  void OnReadBuffersComplete();
 
   void CompleteFlush();
 
   void InitStartupTracingForDuration();
   void EndStartupTracing();
-  base::FilePath GetStartupTraceFileName() const;
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  void OnMachineStatisticsLoaded();
+#endif
 
-  std::unique_ptr<PerfettoFileTracer> perfetto_file_tracer_;
-  tracing::mojom::CoordinatorPtr coordinator_;
+  mojo::Remote<tracing::mojom::ConsumerHost> consumer_host_;
+  mojo::Remote<tracing::mojom::TracingSessionHost> tracing_session_host_;
+  mojo::Receiver<tracing::mojom::TracingSessionClient> receiver_{this};
+  StartTracingDoneCallback start_tracing_callback_;
+
   std::vector<std::unique_ptr<tracing::BaseAgent>> agents_;
   std::unique_ptr<TracingDelegate> delegate_;
   std::unique_ptr<base::trace_event::TraceConfig> trace_config_;
   std::unique_ptr<mojo::DataPipeDrainer> drainer_;
   scoped_refptr<TraceDataEndpoint> trace_data_endpoint_;
-  std::unique_ptr<base::DictionaryValue> filtered_metadata_;
-  std::set<TracingUI*> tracing_uis_;
   bool is_data_complete_ = false;
-  bool is_metadata_available_ = false;
+  bool read_buffers_complete_ = false;
 
-  base::FilePath startup_trace_file_;
-  // This timer initiates trace file saving.
-  base::OneShotTimer startup_trace_timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(TracingControllerImpl);
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  bool are_statistics_loaded_ = false;
+  std::string hardware_class_;
+  base::WeakPtrFactory<TracingControllerImpl> weak_ptr_factory_{this};
+#endif
 };
 
 }  // namespace content

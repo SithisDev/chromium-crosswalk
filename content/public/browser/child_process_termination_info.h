@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,16 @@
 #define CONTENT_PUBLIC_BROWSER_CHILD_PROCESS_TERMINATION_INFO_H_
 
 #include "base/process/kill.h"
-#include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/public/common/result_codes.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/child_process_binding_types.h"
+#endif
+
+#if BUILDFLAG(IS_WIN)
+#include "base/win/windows_types.h"
 #endif
 
 namespace content {
@@ -28,12 +31,9 @@ struct CONTENT_EXPORT ChildProcessTerminationInfo {
   // contain a platform specific launch failure error code. Otherwise, it will
   // contain the exit code for the process (e.g. status from waitpid if on
   // posix, from GetExitCodeProcess on Windows).
-  int exit_code = service_manager::RESULT_CODE_NORMAL_EXIT;
+  int exit_code = RESULT_CODE_NORMAL_EXIT;
 
-  // Time delta between 1) the process start and 2) the time when
-  // ChildProcessTerminationInfo is computed.
-  base::TimeDelta uptime = base::TimeDelta::Max();
-
+#if BUILDFLAG(IS_ANDROID)
   // Populated only for renderer process. True if there are any visible
   // clients at the time of process death.
   bool renderer_has_visible_clients = false;
@@ -43,27 +43,34 @@ struct CONTENT_EXPORT ChildProcessTerminationInfo {
   // the same as not having main frames.
   bool renderer_was_subframe = false;
 
-#if defined(OS_ANDROID)
-  // True if child service has strong or moderate binding at time of death.
+  // Child service binding state at time of death.
   base::android::ChildBindingState binding_state =
       base::android::ChildBindingState::UNBOUND;
 
   // True if child service was explicitly killed by browser.
   bool was_killed_intentionally_by_browser = false;
 
+  // True if child process threw an exception before calling into main.
+  bool threw_exception_during_init = false;
+
   // True if the child shut itself down cleanly by quitting the main runloop.
   bool clean_exit = false;
-
-  // Counts of remaining child processes with corresponding binding.
-  int remaining_process_with_strong_binding = 0;
-  int remaining_process_with_moderate_binding = 0;
-  int remaining_process_with_waived_binding = 0;
 
   // Eg lowest ranked process at time of death should have value 0.
   // Valid values are non-negative.
   // -1 means could not be obtained due to threading restrictions.
   // -2 means not applicable because process is not ranked.
   int best_effort_reverse_rank = -1;
+#endif
+
+#if BUILDFLAG(IS_WIN)
+  // The LastError if there was a failure to launch the process.
+  DWORD last_error;
+#endif
+
+#if !BUILDFLAG(IS_ANDROID)
+  // The cumulative CPU usage of this process.
+  base::TimeDelta cpu_usage;
 #endif
 };
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,13 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "chromecast/base/metrics/cast_histograms.h"
 #include "chromecast/base/metrics/cast_metrics_helper.h"
@@ -37,7 +38,7 @@ namespace {
 bool CheckValues(const std::string& name,
                  int minimum,
                  int maximum,
-                 uint32_t bucket_count) {
+                 size_t bucket_count) {
   if (!base::Histogram::InspectConstructionArguments(
           name, &minimum, &maximum, &bucket_count))
     return false;
@@ -57,7 +58,7 @@ bool CheckLinearValues(const std::string& name, int maximum) {
 scoped_refptr<base::SequencedTaskRunner> CreateTaskRunner() {
   // Note that CollectEvents accesses a global singleton, and thus
   // scheduling with CONTINUE_ON_SHUTDOWN might not be safe.
-  return base::CreateSequencedTaskRunnerWithTraits(
+  return base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 }
@@ -94,17 +95,17 @@ void ExternalMetrics::Start() {
   ScheduleCollection();
 }
 
-void ExternalMetrics::ProcessExternalEvents(const base::Closure& cb) {
+void ExternalMetrics::ProcessExternalEvents(base::OnceClosure cb) {
   task_runner_->PostTaskAndReply(
       FROM_HERE,
       base::BindOnce(base::IgnoreResult(&ExternalMetrics::CollectEvents),
                      weak_factory_.GetWeakPtr()),
-      cb);
+      std::move(cb));
 }
 
 void ExternalMetrics::RecordCrash(const std::string& crash_kind) {
-  base::PostTaskWithTraits(
-      FROM_HERE, {content::BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&CastStabilityMetricsProvider::LogExternalCrash,
                      base::Unretained(stability_provider_), crash_kind));
 }
@@ -177,7 +178,7 @@ void ExternalMetrics::ScheduleCollection() {
       FROM_HERE,
       base::BindOnce(&ExternalMetrics::CollectEventsAndReschedule,
                      weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromSeconds(kExternalMetricsCollectionIntervalSeconds));
+      base::Seconds(kExternalMetricsCollectionIntervalSeconds));
 }
 
 }  // namespace metrics

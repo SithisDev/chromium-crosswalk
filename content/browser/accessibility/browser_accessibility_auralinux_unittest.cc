@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,22 @@
 
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/accessibility/test_browser_accessibility_delegate.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/browser/browser_accessibility_state.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/accessibility/platform/ax_platform_node_auralinux.h"
 
 namespace content {
 
-class BrowserAccessibilityAuraLinuxTest : public testing::Test {
+class BrowserAccessibilityAuraLinuxTest : public ::testing::Test {
  public:
   BrowserAccessibilityAuraLinuxTest();
+
+  BrowserAccessibilityAuraLinuxTest(const BrowserAccessibilityAuraLinuxTest&) =
+      delete;
+  BrowserAccessibilityAuraLinuxTest& operator=(
+      const BrowserAccessibilityAuraLinuxTest&) = delete;
+
   ~BrowserAccessibilityAuraLinuxTest() override;
 
  protected:
@@ -29,14 +36,15 @@ class BrowserAccessibilityAuraLinuxTest : public testing::Test {
  private:
   void SetUp() override;
 
-  content::TestBrowserThreadBundle thread_bundle_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityAuraLinuxTest);
+  content::BrowserTaskEnvironment task_environment_;
+  content::testing::ScopedContentAXModeSetter ax_mode_setter_;
 };
 
-BrowserAccessibilityAuraLinuxTest::BrowserAccessibilityAuraLinuxTest() {}
+BrowserAccessibilityAuraLinuxTest::BrowserAccessibilityAuraLinuxTest()
+    : ax_mode_setter_(ui::kAXModeComplete) {}
 
-BrowserAccessibilityAuraLinuxTest::~BrowserAccessibilityAuraLinuxTest() {}
+BrowserAccessibilityAuraLinuxTest::~BrowserAccessibilityAuraLinuxTest() =
+    default;
 
 void BrowserAccessibilityAuraLinuxTest::SetUp() {
   test_browser_accessibility_delegate_ =
@@ -51,12 +59,12 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TestSimpleAtkText) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root_data),
-          test_browser_accessibility_delegate_.get(),
-          new BrowserAccessibilityFactory()));
+          MakeAXTreeUpdateForTesting(root_data),
+          test_browser_accessibility_delegate_.get()));
 
   ui::AXPlatformNodeAuraLinux* root_obj =
-      ToBrowserAccessibilityAuraLinux(manager->GetRoot())->GetNode();
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot())
+          ->GetNode();
   AtkObject* root_atk_object(root_obj->GetNativeViewAccessible());
   ASSERT_TRUE(ATK_IS_OBJECT(root_atk_object));
   ASSERT_TRUE(ATK_IS_TEXT(root_atk_object));
@@ -105,12 +113,12 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TestCompositeAtkText) {
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, text1, text2),
-          test_browser_accessibility_delegate_.get(),
-          new BrowserAccessibilityFactory()));
+          MakeAXTreeUpdateForTesting(root, text1, text2),
+          test_browser_accessibility_delegate_.get()));
 
   ui::AXPlatformNodeAuraLinux* root_obj =
-      ToBrowserAccessibilityAuraLinux(manager->GetRoot())->GetNode();
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot())
+          ->GetNode();
   AtkObject* root_atk_object(root_obj->GetNativeViewAccessible());
 
   ASSERT_TRUE(ATK_IS_OBJECT(root_atk_object));
@@ -146,11 +154,11 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TestComplexHypertext) {
   const std::string text2_name = " Four five six.";
   const std::string check_box_name = "I agree";
   const std::string check_box_value = "Checked";
-  const std::string button_text_name = "Red";
+  const std::string radio_button_text_name = "Red";
   const std::string link_text_name = "Blue";
-  // Each control (combo / check box, button and link) will be represented by an
-  // embedded object character.
-  const base::string16 string16_embed(
+  // Each control (combo / check box, radio button and link) will be represented
+  // by an embedded object character.
+  const std::u16string string16_embed(
       1, ui::AXPlatformNodeAuraLinux::kEmbeddedCharacter);
   const std::string embed = base::UTF16ToUTF8(string16_embed);
   const std::string root_hypertext =
@@ -165,6 +173,8 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TestComplexHypertext) {
   combo_box.id = 12;
   combo_box.role = ax::mojom::Role::kTextFieldWithComboBox;
   combo_box.AddState(ax::mojom::State::kEditable);
+  combo_box.AddStringAttribute(ax::mojom::StringAttribute::kHtmlTag, "input");
+  combo_box.AddStringAttribute(ax::mojom::StringAttribute::kInputType, "text");
   combo_box.SetName(combo_box_name);
   combo_box.SetValue(combo_box_value);
 
@@ -178,43 +188,46 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TestComplexHypertext) {
   check_box.role = ax::mojom::Role::kCheckBox;
   check_box.SetCheckedState(ax::mojom::CheckedState::kTrue);
   check_box.SetName(check_box_name);
+  // ARIA checkbox where the name is derived from its inner text.
+  check_box.SetNameFrom(ax::mojom::NameFrom::kContents);
   check_box.SetValue(check_box_value);
 
-  ui::AXNodeData button, button_text;
-  button.id = 15;
-  button_text.id = 17;
-  button_text.SetName(button_text_name);
-  button.role = ax::mojom::Role::kButton;
-  button_text.role = ax::mojom::Role::kStaticText;
-  button.child_ids.push_back(button_text.id);
+  ui::AXNodeData radio_button, radio_button_text;
+  radio_button.id = 15;
+  radio_button_text.id = 17;
+  radio_button.role = ax::mojom::Role::kRadioButton;
+  radio_button.SetName(radio_button_text_name);
+  radio_button.SetNameFrom(ax::mojom::NameFrom::kContents);
+  // Even though text is being appended as a child the radio button will be
+  // be treated as a leaf because of AXNode::IsLeaf().
+  radio_button_text.role = ax::mojom::Role::kStaticText;
+  radio_button_text.SetName(radio_button_text_name);
+  radio_button.child_ids.push_back(radio_button_text.id);
 
   ui::AXNodeData link, link_text;
   link.id = 16;
   link_text.id = 18;
-  link_text.SetName(link_text_name);
   link.role = ax::mojom::Role::kLink;
   link_text.role = ax::mojom::Role::kStaticText;
+  link_text.SetName(link_text_name);
   link.child_ids.push_back(link_text.id);
 
   ui::AXNodeData root;
   root.id = 1;
   root.role = ax::mojom::Role::kRootWebArea;
-  root.child_ids.push_back(text1.id);
-  root.child_ids.push_back(combo_box.id);
-  root.child_ids.push_back(text2.id);
-  root.child_ids.push_back(check_box.id);
-  root.child_ids.push_back(button.id);
-  root.child_ids.push_back(link.id);
+  root.child_ids = {text1.id,     combo_box.id,    text2.id,
+                    check_box.id, radio_button.id, link.id};
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, text1, combo_box, text2, check_box, button,
-                           button_text, link, link_text),
-          test_browser_accessibility_delegate_.get(),
-          new BrowserAccessibilityFactory()));
+          MakeAXTreeUpdateForTesting(root, text1, combo_box, text2, check_box,
+                                     radio_button, radio_button_text, link,
+                                     link_text),
+          test_browser_accessibility_delegate_.get()));
 
   ui::AXPlatformNodeAuraLinux* root_obj =
-      ToBrowserAccessibilityAuraLinux(manager->GetRoot())->GetNode();
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot())
+          ->GetNode();
   AtkObject* root_atk_object(root_obj->GetNativeViewAccessible());
 
   ASSERT_TRUE(ATK_IS_OBJECT(root_atk_object));
@@ -270,8 +283,8 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TestComplexHypertext) {
   // Get the text of the check box. It should be its name.
   verify_atk_link_text(check_box_name.c_str(), 1, 30);
 
-  // Get the text of the button.
-  verify_atk_link_text(button_text_name.c_str(), 2, 31);
+  // Get the text of the radio button.
+  verify_atk_link_text(radio_button_text_name.c_str(), 2, 31);
 
   // Get the text of the link.
   verify_atk_link_text(link_text_name.c_str(), 3, 32);
@@ -291,14 +304,81 @@ TEST_F(BrowserAccessibilityAuraLinuxTest, TestComplexHypertext) {
 
   g_object_unref(root_atk_object);
 
+  text1.SetName(text1_name + text1_name);
+  AXEventNotificationDetails event_bundle;
+  event_bundle.updates.resize(1);
+  event_bundle.updates[0].nodes.push_back(text1);
+  event_bundle.updates[0].nodes.push_back(root);
+  ASSERT_TRUE(manager->OnAccessibilityEvents(event_bundle));
+
+  // The hypertext offsets should reflect the new length of the static text.
+  verify_atk_link_text(combo_box_value.c_str(), 0, 28);
+  verify_atk_link_text(check_box_name.c_str(), 1, 44);
+  verify_atk_link_text(radio_button_text_name.c_str(), 2, 45);
+  verify_atk_link_text(link_text_name.c_str(), 3, 46);
+
   manager.reset();
+}
+
+TEST_F(BrowserAccessibilityAuraLinuxTest, TestTextAttributesInButtons) {
+  ui::AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kRootWebArea;
+  root.AddState(ax::mojom::State::kFocusable);
+
+  ui::AXNodeData button;
+  button.id = 2;
+  button.role = ax::mojom::Role::kButton;
+  button.AddStringAttribute(ax::mojom::StringAttribute::kFontFamily, "Times");
+  root.child_ids.push_back(button.id);
+
+  ui::AXNodeData text;
+  text.id = 3;
+  text.role = ax::mojom::Role::kStaticText;
+  text.SetName("OK");
+  button.child_ids.push_back(text.id);
+
+  ui::AXNodeData empty_button;
+  empty_button.id = 4;
+  empty_button.role = ax::mojom::Role::kButton;
+  empty_button.AddStringAttribute(ax::mojom::StringAttribute::kFontFamily,
+                                  "Times");
+  root.child_ids.push_back(empty_button.id);
+
+  ui::AXTreeUpdate update =
+      MakeAXTreeUpdateForTesting(root, button, text, empty_button);
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          update, test_browser_accessibility_delegate_.get()));
+
+  BrowserAccessibilityAuraLinux* ax_root =
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot());
+
+  BrowserAccessibilityAuraLinux* ax_button =
+      ToBrowserAccessibilityAuraLinux(ax_root->PlatformGetChild(0));
+  AtkObject* atk_button = ax_button->GetNode()->GetNativeViewAccessible();
+
+  int start_offset, end_offset;
+  AtkAttributeSet* attributes = atk_text_get_run_attributes(
+      ATK_TEXT(atk_button), 0, &start_offset, &end_offset);
+  ASSERT_EQ(1U, g_slist_length(attributes));
+  atk_attribute_set_free(attributes);
+
+  BrowserAccessibilityAuraLinux* ax_empty_button =
+      ToBrowserAccessibilityAuraLinux(ax_root->PlatformGetChild(1));
+  AtkObject* atk_empty_button =
+      ax_empty_button->GetNode()->GetNativeViewAccessible();
+  attributes = atk_text_get_run_attributes(ATK_TEXT(atk_empty_button), 0,
+                                           &start_offset, &end_offset);
+  ASSERT_EQ(1U, g_slist_length(attributes));
+  atk_attribute_set_free(attributes);
 }
 
 TEST_F(BrowserAccessibilityAuraLinuxTest,
        TestTextAttributesInContentEditables) {
   auto has_attribute = [](AtkAttributeSet* attributes,
                           AtkTextAttribute text_attribute,
-                          base::Optional<const char*> expected_value) {
+                          absl::optional<const char*> expected_value) {
     const char* name = atk_text_attribute_get_name(text_attribute);
     while (attributes) {
       const AtkAttribute* attribute =
@@ -342,6 +422,7 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
   link.AddState(ax::mojom::State::kFocusable);
   link.AddState(ax::mojom::State::kLinked);
   link.SetName("lnk");
+  link.SetNameFrom(ax::mojom::NameFrom::kContents);
   link.AddTextStyle(ax::mojom::TextStyle::kUnderline);
 
   ui::AXNodeData link_text;
@@ -377,17 +458,16 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
   div_editable.child_ids = {text_before.id, link.id, text_after.id};
   link.child_ids.push_back(link_text.id);
 
-  ui::AXTreeUpdate update = MakeAXTreeUpdate(root, div_editable, text_before,
-                                             link, link_text, text_after);
+  ui::AXTreeUpdate update = MakeAXTreeUpdateForTesting(
+      root, div_editable, text_before, link, link_text, text_after);
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          update, test_browser_accessibility_delegate_.get(),
-          new BrowserAccessibilityFactory()));
+          update, test_browser_accessibility_delegate_.get()));
 
-  ASSERT_NE(nullptr, manager->GetRoot());
+  ASSERT_NE(nullptr, manager->GetBrowserAccessibilityRoot());
   BrowserAccessibilityAuraLinux* ax_root =
-      ToBrowserAccessibilityAuraLinux(manager->GetRoot());
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot());
   ASSERT_NE(nullptr, ax_root);
   ASSERT_EQ(1U, ax_root->PlatformChildCount());
 
@@ -460,8 +540,8 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
     ASSERT_TRUE(
         has_attribute(attributes, ATK_TEXT_ATTR_FAMILY_NAME, "Helvetica"));
     ASSERT_FALSE(
-        has_attribute(attributes, ATK_TEXT_ATTR_WEIGHT, base::nullopt));
-    ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_STYLE, base::nullopt));
+        has_attribute(attributes, ATK_TEXT_ATTR_WEIGHT, absl::nullopt));
+    ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_STYLE, absl::nullopt));
     ASSERT_TRUE(has_attribute(attributes, ATK_TEXT_ATTR_UNDERLINE, "single"));
     ASSERT_TRUE(has_attribute(attributes, ATK_TEXT_ATTR_LANGUAGE, "fr"));
 
@@ -484,12 +564,12 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
     ASSERT_TRUE(
         has_attribute(attributes, ATK_TEXT_ATTR_FAMILY_NAME, "Helvetica"));
     ASSERT_FALSE(
-        has_attribute(attributes, ATK_TEXT_ATTR_WEIGHT, base::nullopt));
-    ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_STYLE, base::nullopt));
+        has_attribute(attributes, ATK_TEXT_ATTR_WEIGHT, absl::nullopt));
+    ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_STYLE, absl::nullopt));
     ASSERT_FALSE(
-        has_attribute(attributes, ATK_TEXT_ATTR_UNDERLINE, base::nullopt));
+        has_attribute(attributes, ATK_TEXT_ATTR_UNDERLINE, absl::nullopt));
     ASSERT_FALSE(
-        has_attribute(attributes, ATK_TEXT_ATTR_INVALID, base::nullopt));
+        has_attribute(attributes, ATK_TEXT_ATTR_INVALID, absl::nullopt));
 
     atk_attribute_set_free(attributes);
   }
@@ -507,8 +587,8 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
   ASSERT_TRUE(has_attribute(attributes, ATK_TEXT_ATTR_WEIGHT, "700"));
   ASSERT_TRUE(has_attribute(attributes, ATK_TEXT_ATTR_STYLE, "italic"));
   ASSERT_FALSE(
-      has_attribute(attributes, ATK_TEXT_ATTR_UNDERLINE, base::nullopt));
-  ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_INVALID, base::nullopt));
+      has_attribute(attributes, ATK_TEXT_ATTR_UNDERLINE, absl::nullopt));
+  ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_INVALID, absl::nullopt));
   atk_attribute_set_free(attributes);
 
   AtkObject* ax_after_atk_object =
@@ -519,10 +599,10 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
   EXPECT_EQ(7, end_offset);
   ASSERT_TRUE(
       has_attribute(attributes, ATK_TEXT_ATTR_FAMILY_NAME, "Helvetica"));
-  ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_WEIGHT, base::nullopt));
+  ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_WEIGHT, absl::nullopt));
   ASSERT_FALSE(has_attribute(attributes, ATK_TEXT_ATTR_STYLE, "italic"));
   ASSERT_FALSE(
-      has_attribute(attributes, ATK_TEXT_ATTR_UNDERLINE, base::nullopt));
+      has_attribute(attributes, ATK_TEXT_ATTR_UNDERLINE, absl::nullopt));
   atk_attribute_set_free(attributes);
 
   manager.reset();
@@ -536,7 +616,7 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
 
   ui::AXNodeData combo_box;
   combo_box.id = 6;
-  combo_box.role = ax::mojom::Role::kPopUpButton;
+  combo_box.role = ax::mojom::Role::kComboBoxSelect;
   combo_box.AddStringAttribute(ax::mojom::StringAttribute::kHtmlTag, "select");
   combo_box.AddState(ax::mojom::State::kCollapsed);
   combo_box.SetValue("1");
@@ -568,10 +648,9 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
 
   std::unique_ptr<BrowserAccessibilityManager> manager(
       BrowserAccessibilityManager::Create(
-          MakeAXTreeUpdate(root, container, combo_box, menu_list, menu_option_1,
-                           menu_option_2),
-          test_browser_accessibility_delegate_.get(),
-          new BrowserAccessibilityFactory()));
+          MakeAXTreeUpdateForTesting(root, container, combo_box, menu_list,
+                                     menu_option_1, menu_option_2),
+          test_browser_accessibility_delegate_.get()));
 
   ui::AXPlatformNodeAuraLinux* combo_box_node =
       ToBrowserAccessibilityAuraLinux(manager->GetFromID(combo_box.id))
@@ -584,11 +663,229 @@ TEST_F(BrowserAccessibilityAuraLinuxTest,
   // which won't modify this.
   container.SetName("container");
   ui::AXTree* tree = const_cast<ui::AXTree*>(manager->ax_tree());
-  ASSERT_TRUE(tree->Unserialize(MakeAXTreeUpdate(container)));
+  ASSERT_TRUE(tree->Unserialize(MakeAXTreeUpdateForTesting(container)));
   ASSERT_FALSE(combo_box_node->IsChildOfLeaf());
   ASSERT_EQ(original_atk_object, combo_box_node->GetNativeViewAccessible());
 
   g_object_unref(original_atk_object);
+  manager.reset();
+}
+
+TEST_F(BrowserAccessibilityAuraLinuxTest,
+       TestExistingMisspellingsInSimpleTextFields) {
+  std::string value1("Testing .");
+  // The word "helo" is misspelled.
+  std::string value2("Helo there.");
+
+  int value1_length = value1.length();
+  int value2_length = value2.length();
+  int combo_box_value_length = value1_length + value2_length;
+
+  ui::AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kRootWebArea;
+  root.AddState(ax::mojom::State::kFocusable);
+
+  ui::AXNodeData combo_box;
+  combo_box.id = 2;
+  combo_box.role = ax::mojom::Role::kTextFieldWithComboBox;
+  combo_box.AddState(ax::mojom::State::kEditable);
+  combo_box.AddStringAttribute(ax::mojom::StringAttribute::kHtmlTag, "input");
+  combo_box.AddStringAttribute(ax::mojom::StringAttribute::kInputType, "text");
+  combo_box.AddState(ax::mojom::State::kFocusable);
+  combo_box.SetValue(value1 + value2);
+
+  ui::AXNodeData combo_box_div;
+  combo_box_div.id = 3;
+  combo_box_div.role = ax::mojom::Role::kGenericContainer;
+  combo_box_div.AddState(ax::mojom::State::kEditable);
+
+  ui::AXNodeData static_text1;
+  static_text1.id = 4;
+  static_text1.role = ax::mojom::Role::kStaticText;
+  static_text1.AddState(ax::mojom::State::kEditable);
+  static_text1.SetName(value1);
+
+  ui::AXNodeData static_text2;
+  static_text2.id = 5;
+  static_text2.role = ax::mojom::Role::kStaticText;
+  static_text2.AddState(ax::mojom::State::kEditable);
+  static_text2.SetName(value2);
+
+  std::vector<int32_t> marker_types;
+  marker_types.push_back(
+      static_cast<int32_t>(ax::mojom::MarkerType::kSpelling));
+  std::vector<int32_t> marker_starts;
+  marker_starts.push_back(0);
+  std::vector<int32_t> marker_ends;
+  marker_ends.push_back(4);
+  static_text2.AddIntListAttribute(ax::mojom::IntListAttribute::kMarkerTypes,
+                                   marker_types);
+  static_text2.AddIntListAttribute(ax::mojom::IntListAttribute::kMarkerStarts,
+                                   marker_starts);
+  static_text2.AddIntListAttribute(ax::mojom::IntListAttribute::kMarkerEnds,
+                                   marker_ends);
+
+  root.child_ids.push_back(combo_box.id);
+  combo_box.child_ids.push_back(combo_box_div.id);
+  combo_box_div.child_ids.push_back(static_text1.id);
+  combo_box_div.child_ids.push_back(static_text2.id);
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdateForTesting(root, combo_box, combo_box_div,
+                                     static_text1, static_text2),
+          test_browser_accessibility_delegate_.get()));
+
+  ASSERT_NE(nullptr, manager->GetBrowserAccessibilityRoot());
+  BrowserAccessibilityAuraLinux* ax_root =
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot());
+  ASSERT_NE(nullptr, ax_root);
+  ASSERT_EQ(1U, ax_root->PlatformChildCount());
+
+  BrowserAccessibilityAuraLinux* ax_combo_box =
+      ToBrowserAccessibilityAuraLinux(ax_root->PlatformGetChild(0));
+  ASSERT_NE(nullptr, ax_combo_box);
+
+  AtkText* combo_box_text =
+      ATK_TEXT(ax_combo_box->GetNode()->GetNativeViewAccessible());
+  int start_offset, end_offset;
+
+  auto contains_spelling_attribute = [](AtkAttributeSet* attributes) {
+    const char* invalid_str =
+        atk_text_attribute_get_name(ATK_TEXT_ATTR_INVALID);
+    while (attributes) {
+      AtkAttribute* attribute = static_cast<AtkAttribute*>(attributes->data);
+      if (!g_strcmp0(attribute->name, invalid_str) &&
+          !g_strcmp0(attribute->value, "spelling"))
+        return true;
+      attributes = g_slist_next(attributes);
+    }
+
+    return false;
+  };
+
+  // Ensure that the first part of the value is not marked misspelled.
+  for (int offset = 0; offset < value1_length; ++offset) {
+    AtkAttributeSet* attributes = atk_text_get_run_attributes(
+        combo_box_text, offset, &start_offset, &end_offset);
+    EXPECT_FALSE(contains_spelling_attribute(attributes));
+    EXPECT_EQ(0, start_offset);
+    EXPECT_EQ(value1_length, end_offset);
+    atk_attribute_set_free(attributes);
+  }
+
+  // Ensure that "helo" is marked misspelled.
+  for (int offset = value1_length; offset < value1_length + 4; ++offset) {
+    AtkAttributeSet* attributes = atk_text_get_run_attributes(
+        combo_box_text, offset, &start_offset, &end_offset);
+    EXPECT_EQ(value1_length, start_offset);
+    EXPECT_EQ(value1_length + 4, end_offset);
+    EXPECT_TRUE(contains_spelling_attribute(attributes));
+    atk_attribute_set_free(attributes);
+  }
+
+  // Ensure that the last part of the value is not marked misspelled.
+  for (int offset = value1_length + 4; offset < combo_box_value_length;
+       ++offset) {
+    AtkAttributeSet* attributes = atk_text_get_run_attributes(
+        combo_box_text, offset, &start_offset, &end_offset);
+    EXPECT_FALSE(contains_spelling_attribute(attributes));
+    EXPECT_EQ(value1_length + 4, start_offset);
+    EXPECT_EQ(combo_box_value_length, end_offset);
+    atk_attribute_set_free(attributes);
+  }
+
+  manager.reset();
+}
+
+TEST_F(BrowserAccessibilityAuraLinuxTest, TextAtkStaticTextChange) {
+  ui::AXNodeData root;
+  root.id = 1;
+  root.role = ax::mojom::Role::kRootWebArea;
+  root.AddState(ax::mojom::State::kFocusable);
+
+  ui::AXNodeData div_editable;
+  div_editable.id = 2;
+  div_editable.role = ax::mojom::Role::kGenericContainer;
+
+  ui::AXNodeData text;
+  text.id = 3;
+  text.role = ax::mojom::Role::kStaticText;
+  text.SetName("Text1 ");
+
+  root.child_ids.push_back(div_editable.id);
+  div_editable.child_ids.push_back(text.id);
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdateForTesting(root, div_editable, text),
+          test_browser_accessibility_delegate_.get()));
+
+  text.SetName("Text2");
+  ui::AXTree* tree = const_cast<ui::AXTree*>(manager->ax_tree());
+  ASSERT_TRUE(tree->Unserialize(MakeAXTreeUpdateForTesting(text)));
+
+  // The change to the static text node should have triggered an update of the
+  // containing div's hypertext.
+  ui::AXPlatformNodeAuraLinux* div_node =
+      ToBrowserAccessibilityAuraLinux(manager->GetFromID(div_editable.id))
+          ->GetNode();
+  EXPECT_STREQ(base::UTF16ToUTF8(div_node->GetHypertext()).c_str(), "Text2");
+}
+
+TEST_F(BrowserAccessibilityAuraLinuxTest, TestAtkTextGetOffesetAtPoint) {
+  ui::AXNodeData static_text1;
+  static_text1.id = 1;
+  static_text1.role = ax::mojom::Role::kStaticText;
+  static_text1.SetName("Hello");
+  static_text1.child_ids = {2};
+
+  ui::AXNodeData inline_box1;
+  inline_box1.id = 2;
+  inline_box1.role = ax::mojom::Role::kInlineTextBox;
+  inline_box1.SetName("Hello");
+  inline_box1.relative_bounds.bounds = gfx::RectF(0, 50, 25, 30);
+  std::vector<int32_t> character_offsets1;
+  // The width of each character is 5px.
+  character_offsets1.push_back(5);
+  character_offsets1.push_back(10);
+  character_offsets1.push_back(15);
+  character_offsets1.push_back(20);
+  character_offsets1.push_back(25);
+  inline_box1.AddIntListAttribute(
+      ax::mojom::IntListAttribute::kCharacterOffsets, character_offsets1);
+  inline_box1.AddIntListAttribute(ax::mojom::IntListAttribute::kWordStarts,
+                                  std::vector<int32_t>{0});
+  inline_box1.AddIntListAttribute(ax::mojom::IntListAttribute::kWordEnds,
+                                  std::vector<int32_t>{5});
+
+  std::unique_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdateForTesting(static_text1, inline_box1),
+          test_browser_accessibility_delegate_.get()));
+
+  ASSERT_NE(nullptr, manager->GetBrowserAccessibilityRoot());
+  BrowserAccessibilityAuraLinux* ax_root =
+      ToBrowserAccessibilityAuraLinux(manager->GetBrowserAccessibilityRoot());
+  ASSERT_NE(nullptr, ax_root);
+
+  AtkObject* root_atk_object = ax_root->GetNode()->GetNativeViewAccessible();
+  g_object_ref(root_atk_object);
+  AtkText* atk_text = ATK_TEXT(root_atk_object);
+  ASSERT_TRUE(ATK_IS_TEXT(atk_text));
+
+  int x, y, width, height;
+  char* text = atk_text_get_text(atk_text, 0, -1);
+  int root_text_length = g_utf8_strlen(text, -1);
+  g_free(text);
+  for (int offset = 0; offset < root_text_length; offset++) {
+    atk_text_get_character_extents(atk_text, offset, &x, &y, &width, &height,
+                                   ATK_XY_SCREEN);
+    int result = atk_text_get_offset_at_point(atk_text, x, y, ATK_XY_SCREEN);
+    ASSERT_EQ(offset, result);
+  }
+  g_object_unref(root_atk_object);
   manager.reset();
 }
 

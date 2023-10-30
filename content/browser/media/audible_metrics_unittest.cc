@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "base/test/simple_test_tick_clock.h"
 #include "content/browser/media/media_web_contents_observer.h"
 #include "content/public/test/test_renderer_host.h"
-#include "content/public/test/test_service_manager_context.h"
 #include "content/test/test_web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -31,22 +30,21 @@ class AudibleMetricsTest : public RenderViewHostTestHarness {
  public:
   AudibleMetricsTest() = default;
 
+  AudibleMetricsTest(const AudibleMetricsTest&) = delete;
+  AudibleMetricsTest& operator=(const AudibleMetricsTest&) = delete;
+
   void SetUp() override {
     RenderViewHostTestHarness::SetUp();
-    test_service_manager_context_ =
-        std::make_unique<content::TestServiceManagerContext>();
     audible_metrics_ = std::make_unique<AudibleMetrics>();
 
     // Set the clock to a value different than 0 so the time it gives is
     // recognized as initialized.
-    clock_.Advance(base::TimeDelta::FromMilliseconds(1));
+    clock_.Advance(base::Milliseconds(1));
     audible_metrics_->SetClockForTest(&clock_);
   }
 
   void TearDown() override {
     audible_metrics_.reset();
-    // Must be reset before browser thread teardown.
-    test_service_manager_context_.reset();
     RenderViewHostTestHarness::TearDown();
   }
 
@@ -81,13 +79,6 @@ class AudibleMetricsTest : public RenderViewHostTestHarness {
   base::SimpleTestTickClock clock_;
   base::HistogramTester histogram_tester_;
   base::UserActionTester user_action_tester_;
-
-  // WebContentsImpl accesses the system Connector, so the Service Manager must
-  // be initialized.
-  std::unique_ptr<content::TestServiceManagerContext>
-      test_service_manager_context_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudibleMetricsTest);
 };
 
 }  // anonymous namespace
@@ -358,7 +349,7 @@ TEST_F(AudibleMetricsTest, ConcurrentTabsTimeRequiresTwoAudibleTabs) {
   audible_metrics()->UpdateAudibleWebContentsState(web_contents_0.get(), true);
   audible_metrics()->UpdateAudibleWebContentsState(web_contents_1.get(), true);
 
-  clock()->Advance(base::TimeDelta::FromMilliseconds(1000));
+  clock()->Advance(base::Milliseconds(1000));
 
   // No record because concurrent audible tabs still running.
   EXPECT_EQ(0, GetHistogramSamplesSinceTestStart(
@@ -391,11 +382,11 @@ TEST_F(AudibleMetricsTest, ConcurrentTabsTimeRunsAsLongAsTwoAudibleTabs) {
   audible_metrics()->UpdateAudibleWebContentsState(web_contents_0.get(), true);
   audible_metrics()->UpdateAudibleWebContentsState(web_contents_1.get(), true);
 
-  clock()->Advance(base::TimeDelta::FromMilliseconds(1000));
+  clock()->Advance(base::Milliseconds(1000));
 
   audible_metrics()->UpdateAudibleWebContentsState(web_contents_2.get(), true);
 
-  clock()->Advance(base::TimeDelta::FromMilliseconds(500));
+  clock()->Advance(base::Milliseconds(500));
 
   // Mutes one of the three audible tabs.
   audible_metrics()->UpdateAudibleWebContentsState(web_contents_1.get(), false);

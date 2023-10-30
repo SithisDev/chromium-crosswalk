@@ -1,26 +1,27 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_UPDATE_CLIENT_PATCH_PATCH_IMPL_H_
 #define COMPONENTS_UPDATE_CLIENT_PATCH_PATCH_IMPL_H_
 
-#include <memory>
-
-#include "base/macros.h"
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "components/services/patch/public/mojom/file_patcher.mojom.h"
 #include "components/update_client/patcher.h"
-
-namespace service_manager {
-class Connector;
-}
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace update_client {
 
 class PatchChromiumFactory : public PatcherFactory {
  public:
-  explicit PatchChromiumFactory(
-      std::unique_ptr<service_manager::Connector> connector);
+  using Callback =
+      base::RepeatingCallback<mojo::PendingRemote<patch::mojom::FilePatcher>()>;
+
+  explicit PatchChromiumFactory(Callback callback);
+
+  PatchChromiumFactory(const PatchChromiumFactory&) = delete;
+  PatchChromiumFactory& operator=(const PatchChromiumFactory&) = delete;
 
   scoped_refptr<Patcher> Create() const override;
 
@@ -28,9 +29,7 @@ class PatchChromiumFactory : public PatcherFactory {
   ~PatchChromiumFactory() override;
 
  private:
-  std::unique_ptr<service_manager::Connector> connector_;
-
-  DISALLOW_COPY_AND_ASSIGN(PatchChromiumFactory);
+  const Callback callback_;
 };
 
 }  // namespace update_client

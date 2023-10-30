@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/path_service.h"
@@ -23,13 +22,23 @@
 #include "components/subresource_filter/tools/filter_tool.h"
 #include "components/subresource_filter/tools/indexing_tool.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 
 namespace subresource_filter {
+
+namespace {
+
+static constexpr char kMetricIndexAndWriteTimeUs[] = "index_and_write_time";
+static constexpr char kMetricMedianMatchTimeUs[] = "median_match_time";
+
+}  // namespace
 
 class IndexedRulesetPerftest : public testing::Test {
  public:
   IndexedRulesetPerftest() {}
+
+  IndexedRulesetPerftest(const IndexedRulesetPerftest&) = delete;
+  IndexedRulesetPerftest& operator=(const IndexedRulesetPerftest&) = delete;
 
   ~IndexedRulesetPerftest() override {}
 
@@ -45,8 +54,7 @@ class IndexedRulesetPerftest : public testing::Test {
     base::ReadFileToString(request_path, &requests_);
 
     unindexed_path_ = dir_path.AppendASCII(
-        "components/subresource_filter/core/common/perftests/"
-        "data/UnindexedRules_8.0");
+        "third_party/subresource-filter-ruleset/data/UnindexedRules");
 
     ASSERT_TRUE(scoped_dir_.CreateUniqueTempDir());
     base::FilePath indexed_path =
@@ -69,6 +77,13 @@ class IndexedRulesetPerftest : public testing::Test {
 
   const base::FilePath& unindexed_path() const { return unindexed_path_; }
 
+  perf_test::PerfResultReporter SetUpReporter(const std::string& story_name) {
+    perf_test::PerfResultReporter reporter("IndexedRuleset.", story_name);
+    reporter.RegisterImportantMetric(kMetricIndexAndWriteTimeUs, "us");
+    reporter.RegisterImportantMetric(kMetricMedianMatchTimeUs, "us");
+    return reporter;
+  }
+
  private:
   base::ScopedTempDir scoped_dir_;
   base::FilePath unindexed_path_;
@@ -80,7 +95,6 @@ class IndexedRulesetPerftest : public testing::Test {
   std::ofstream output_;
 
   std::unique_ptr<FilterTool> filter_tool_;
-  DISALLOW_COPY_AND_ASSIGN(IndexedRulesetPerftest);
 };
 
 TEST_F(IndexedRulesetPerftest, IndexRuleset) {
@@ -91,9 +105,9 @@ TEST_F(IndexedRulesetPerftest, IndexRuleset) {
 
   base::ElapsedTimer timer;
   ASSERT_TRUE(IndexAndWriteRuleset(unindexed_path(), indexed_path));
-  perf_test::PrintResult("index_and_write_time", "", "",
-                         static_cast<size_t>(timer.Elapsed().InMicroseconds()),
-                         "microseconds", true /* important */);
+  perf_test::PerfResultReporter reporter = SetUpReporter("IndexRuleset");
+  reporter.AddResult(kMetricIndexAndWriteTimeUs,
+                     static_cast<size_t>(timer.Elapsed().InMicroseconds()));
 }
 
 TEST_F(IndexedRulesetPerftest, MatchAll) {
@@ -105,9 +119,8 @@ TEST_F(IndexedRulesetPerftest, MatchAll) {
     results.push_back(timer.Elapsed().InMicroseconds());
   }
   std::sort(results.begin(), results.end());
-  perf_test::PrintResult("median_match_time", "", "",
-                         static_cast<size_t>(results[2]), "microseconds",
-                         true /* important */);
+  perf_test::PerfResultReporter reporter = SetUpReporter("MatchAll");
+  reporter.AddResult(kMetricMedianMatchTimeUs, static_cast<size_t>(results[2]));
 }
 
 }  // namespace subresource_filter

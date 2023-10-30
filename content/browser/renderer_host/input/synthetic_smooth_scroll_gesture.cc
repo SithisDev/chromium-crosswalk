@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,7 @@ SyntheticSmoothScrollGesture::SyntheticSmoothScrollGesture(
     : params_(params) {
 }
 
-SyntheticSmoothScrollGesture::~SyntheticSmoothScrollGesture() {
-}
+SyntheticSmoothScrollGesture::~SyntheticSmoothScrollGesture() = default;
 
 SyntheticGesture::Result SyntheticSmoothScrollGesture::ForwardInputEvents(
     const base::TimeTicks& timestamp,
@@ -33,21 +32,21 @@ void SyntheticSmoothScrollGesture::WaitForTargetAck(
 
 SyntheticSmoothMoveGestureParams::InputType
 SyntheticSmoothScrollGesture::GetInputSourceType(
-    SyntheticGestureParams::GestureSourceType gesture_source_type) {
-  if (gesture_source_type == SyntheticGestureParams::MOUSE_INPUT)
+    content::mojom::GestureSourceType gesture_source_type) {
+  if (gesture_source_type == content::mojom::GestureSourceType::kMouseInput)
     return SyntheticSmoothMoveGestureParams::MOUSE_WHEEL_INPUT;
   else
     return SyntheticSmoothMoveGestureParams::TOUCH_INPUT;
 }
 
 bool SyntheticSmoothScrollGesture::InitializeMoveGesture(
-    SyntheticGestureParams::GestureSourceType gesture_type,
+    content::mojom::GestureSourceType gesture_type,
     SyntheticGestureTarget* target) {
-  if (gesture_type == SyntheticGestureParams::DEFAULT_INPUT)
+  if (gesture_type == content::mojom::GestureSourceType::kDefaultInput)
     gesture_type = target->GetDefaultSyntheticGestureSourceType();
 
-  if (gesture_type == SyntheticGestureParams::TOUCH_INPUT ||
-      gesture_type == SyntheticGestureParams::MOUSE_INPUT) {
+  if (gesture_type == content::mojom::GestureSourceType::kTouchInput ||
+      gesture_type == content::mojom::GestureSourceType::kMouseInput) {
     SyntheticSmoothMoveGestureParams move_params;
     move_params.start_point = params_.anchor;
     move_params.distances = params_.distances;
@@ -57,9 +56,10 @@ bool SyntheticSmoothScrollGesture::InitializeMoveGesture(
     move_params.prevent_fling = params_.prevent_fling;
     move_params.input_type = GetInputSourceType(gesture_type);
     move_params.add_slop = true;
-    move_params.precise_scrolling_deltas = params_.precise_scrolling_deltas;
-    move_params.scroll_by_page = params_.scroll_by_page;
-    move_gesture_.reset(new SyntheticSmoothMoveGesture(move_params));
+    move_params.granularity = params_.granularity;
+    move_params.modifiers = params_.modifiers;
+    move_params.from_devtools_debugger = params_.from_devtools_debugger;
+    move_gesture_ = std::make_unique<SyntheticSmoothMoveGesture>(move_params);
     return true;
   }
   return false;

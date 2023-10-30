@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,19 @@
 #include "build/build_config.h"
 #include "content/browser/webrtc/webrtc_webcam_browsertest.h"
 #include "content/public/browser/browser_child_process_host.h"
-#include "content/public/browser/system_connector.h"
+#include "content/public/browser/video_capture_service.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "media/base/media_switches.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "services/video_capture/public/mojom/constants.mojom.h"
 #include "services/video_capture/public/mojom/testing_controls.mojom.h"
+#include "services/video_capture/public/mojom/video_capture_service.mojom.h"
 
 namespace content {
 
@@ -36,6 +37,11 @@ static const char kVerifyHasReceivedTrackEndedEvent[] =
 // Integration test that exercises video capture functionality from the
 // JavaScript level.
 class WebRtcVideoCaptureBrowserTest : public ContentBrowserTest {
+ public:
+  WebRtcVideoCaptureBrowserTest(const WebRtcVideoCaptureBrowserTest&) = delete;
+  WebRtcVideoCaptureBrowserTest& operator=(
+      const WebRtcVideoCaptureBrowserTest&) = delete;
+
  protected:
   WebRtcVideoCaptureBrowserTest() {
     scoped_feature_list_.InitAndEnableFeature(features::kMojoVideoCapture);
@@ -44,7 +50,6 @@ class WebRtcVideoCaptureBrowserTest : public ContentBrowserTest {
   ~WebRtcVideoCaptureBrowserTest() override {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
     command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
     base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kEnableBlinkFeatures, "GetUserMedia");
@@ -59,44 +64,45 @@ class WebRtcVideoCaptureBrowserTest : public ContentBrowserTest {
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebRtcVideoCaptureBrowserTest);
 };
 
+#if BUILDFLAG(IS_MAC)
+// TODO(https://crbug.com/1235254): This test is flakey on macOS.
+#define MAYBE_RecoverFromCrashInVideoCaptureProcess \
+  DISABLED_RecoverFromCrashInVideoCaptureProcess
+#else
+#define MAYBE_RecoverFromCrashInVideoCaptureProcess \
+  RecoverFromCrashInVideoCaptureProcess
+#endif
 IN_PROC_BROWSER_TEST_F(WebRtcVideoCaptureBrowserTest,
-                       RecoverFromCrashInVideoCaptureProcess) {
+                       MAYBE_RecoverFromCrashInVideoCaptureProcess) {
   // This test only makes sense if the video capture service runs in a
   // separate process.
   if (!features::IsVideoCaptureServiceEnabledForOutOfProcess())
     return;
 
   GURL url(embedded_test_server()->GetURL(kVideoCaptureHtmlFile));
-  NavigateToURL(shell(), url);
+  EXPECT_TRUE(NavigateToURL(shell(), url));
 
-  std::string result;
   // Start video capture and wait until it started rendering
-  ASSERT_TRUE(ExecuteScriptAndExtractString(
-      shell(), kStartVideoCaptureAndVerifySize, &result));
-  ASSERT_EQ("OK", result);
+  ASSERT_EQ("OK", EvalJs(shell(), kStartVideoCaptureAndVerifySize,
+                         EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   // Simulate crash in video capture process
-  video_capture::mojom::TestingControlsPtr service_controls;
-  GetSystemConnector()->BindInterface(video_capture::mojom::kServiceName,
-                                      mojo::MakeRequest(&service_controls));
+  mojo::Remote<video_capture::mojom::TestingControls> service_controls;
+  GetVideoCaptureService().BindControlsForTesting(
+      service_controls.BindNewPipeAndPassReceiver());
   service_controls->Crash();
 
   // Wait for video element to turn black
-  ASSERT_TRUE(ExecuteScriptAndExtractString(shell(), kWaitForVideoToTurnBlack,
-                                            &result));
-  ASSERT_EQ("OK", result);
-  ASSERT_TRUE(ExecuteScriptAndExtractString(
-      shell(), kVerifyHasReceivedTrackEndedEvent, &result));
-  ASSERT_EQ("OK", result);
+  ASSERT_EQ("OK", EvalJs(shell(), kWaitForVideoToTurnBlack,
+                         EXECUTE_SCRIPT_USE_MANUAL_REPLY));
+  ASSERT_EQ("OK", EvalJs(shell(), kVerifyHasReceivedTrackEndedEvent,
+                         EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
   // Start capturing again and expect it to work.
-  ASSERT_TRUE(ExecuteScriptAndExtractString(
-      shell(), kStartVideoCaptureAndVerifySize, &result));
-  ASSERT_EQ("OK", result);
+  ASSERT_EQ("OK", EvalJs(shell(), kStartVideoCaptureAndVerifySize,
+                         EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 }
 
 }  // namespace content

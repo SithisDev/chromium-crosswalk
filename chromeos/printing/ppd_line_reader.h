@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,14 @@
 #include <memory>
 #include <string>
 
-#include "chromeos/chromeos_export.h"
+#include "base/component_export.h"
 
 namespace chromeos {
 
 // Class supporting line-oriented input from unencoded and gzip-encoded PPDs.
 // Decompression, when required, is streamed to avoid excessive memory usage due
 // to malicious gzip contents.
-class CHROMEOS_EXPORT PpdLineReader {
+class COMPONENT_EXPORT(CHROMEOS_PRINTING) PpdLineReader {
  public:
   // Create a new PpdLineReader using ppd contents in |contents|.  The max
   // allowed line length in the ppd is also parameterized.
@@ -23,14 +23,14 @@ class CHROMEOS_EXPORT PpdLineReader {
   // |contents| may or may not be gzip-compressed, and must remain valid and
   // unchanged while the Created PpdReader exists.
   static std::unique_ptr<PpdLineReader> Create(const std::string& contents,
-                                               int max_line_length);
+                                               size_t max_line_length);
 
   // Checks to see whether the file contents in |contents| contains the magic
   // number which is found at the beginning of every PPD file. To verify this,
   // a line reader is created which simply attempts to read the first line and
   // checks whether it contains the magic number.
   static bool ContainsMagicNumber(const std::string& contents,
-                                  int max_line_length);
+                                  size_t max_line_length);
 
   virtual ~PpdLineReader() = default;
 

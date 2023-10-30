@@ -1,23 +1,26 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/policy/core/common/cloud/cloud_policy_client_registration_helper.h"
 
+#include <memory>
+
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "components/policy/core/common/cloud/client_data_delegate.h"
 #include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/signin/public/identity_manager/access_token_fetcher.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/scope_set.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "services/identity/public/cpp/scope_set.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace policy {
@@ -26,7 +29,7 @@ namespace policy {
 // response.
 const char kGetHostedDomainKey[] = "hd";
 
-typedef base::Callback<void(const std::string&)> StringCallback;
+typedef base::OnceCallback<void(const std::string&)> StringCallback;
 
 // This class fetches an OAuth2 token scoped for the userinfo and DM services.
 class CloudPolicyClientRegistrationHelper::IdentityManagerHelper {
@@ -34,8 +37,8 @@ class CloudPolicyClientRegistrationHelper::IdentityManagerHelper {
   IdentityManagerHelper() = default;
 
   void FetchAccessToken(signin::IdentityManager* identity_manager,
-                        const std::string& username,
-                        const StringCallback& callback);
+                        const CoreAccountId& account_id,
+                        StringCallback callback);
 
  private:
   void OnAccessTokenFetchComplete(GoogleServiceAuthError error,
@@ -47,18 +50,18 @@ class CloudPolicyClientRegistrationHelper::IdentityManagerHelper {
 
 void CloudPolicyClientRegistrationHelper::IdentityManagerHelper::
     FetchAccessToken(signin::IdentityManager* identity_manager,
-                     const std::string& account_id,
-                     const StringCallback& callback) {
+                     const CoreAccountId& account_id,
+                     StringCallback callback) {
   DCHECK(!access_token_fetcher_);
   // The caller must supply a username.
   DCHECK(!account_id.empty());
   DCHECK(identity_manager->HasAccountWithRefreshToken(account_id));
 
-  callback_ = callback;
+  callback_ = std::move(callback);
 
-  identity::ScopeSet scopes;
+  signin::ScopeSet scopes;
   scopes.insert(GaiaConstants::kDeviceManagementServiceOAuth);
-  scopes.insert(GaiaConstants::kOAuthWrapBridgeUserInfoScope);
+  scopes.insert(GaiaConstants::kGoogleUserInfoEmail);
 
   access_token_fetcher_ = identity_manager->CreateAccessTokenFetcherForAccount(
       account_id, "cloud_policy", scopes,
@@ -75,9 +78,9 @@ void CloudPolicyClientRegistrationHelper::IdentityManagerHelper::
   access_token_fetcher_.reset();
 
   if (error.state() == GoogleServiceAuthError::NONE)
-    callback_.Run(token_info.token);
+    std::move(callback_).Run(token_info.token);
   else
-    callback_.Run("");
+    std::move(callback_).Run("");
 }
 
 CloudPolicyClientRegistrationHelper::CloudPolicyClientRegistrationHelper(
@@ -96,29 +99,32 @@ CloudPolicyClientRegistrationHelper::~CloudPolicyClientRegistrationHelper() {
 
 void CloudPolicyClientRegistrationHelper::StartRegistration(
     signin::IdentityManager* identity_manager,
-    const std::string& account_id,
-    const base::Closure& callback) {
+    const CoreAccountId& account_id,
+    base::OnceClosure callback) {
   DVLOG(1) << "Starting registration process with account_id";
   DCHECK(!client_->is_registered());
-  callback_ = callback;
+  callback_ = std::move(callback);
   client_->AddObserver(this);
 
-  identity_manager_helper_.reset(new IdentityManagerHelper());
+  identity_manager_helper_ = std::make_unique<IdentityManagerHelper>();
   identity_manager_helper_->FetchAccessToken(
       identity_manager, account_id,
-      base::Bind(&CloudPolicyClientRegistrationHelper::OnTokenFetched,
-                 base::Unretained(this)));
+      base::BindOnce(&CloudPolicyClientRegistrationHelper::OnTokenFetched,
+                     base::Unretained(this)));
 }
 
 void CloudPolicyClientRegistrationHelper::StartRegistrationWithEnrollmentToken(
     const std::string& token,
     const std::string& client_id,
-    const base::Closure& callback) {
+    const ClientDataDelegate& client_data_delegate,
+    bool is_mandatory,
+    base::OnceClosure callback) {
   DVLOG(1) << "Starting registration process with enrollment token";
   DCHECK(!client_->is_registered());
-  callback_ = callback;
+  callback_ = std::move(callback);
   client_->AddObserver(this);
-  client_->RegisterWithToken(token, client_id);
+  client_->RegisterWithToken(token, client_id, client_data_delegate,
+                             is_mandatory);
 }
 
 void CloudPolicyClientRegistrationHelper::OnTokenFetched(
@@ -137,8 +143,8 @@ void CloudPolicyClientRegistrationHelper::OnTokenFetched(
   DVLOG(1) << "Fetched new scoped OAuth token:" << oauth_access_token_;
   // Now we've gotten our access token - contact GAIA to see if this is a
   // hosted domain.
-  user_info_fetcher_.reset(
-      new UserInfoFetcher(this, client_->GetURLLoaderFactory()));
+  user_info_fetcher_ =
+      std::make_unique<UserInfoFetcher>(this, client_->GetURLLoaderFactory());
   user_info_fetcher_->Start(oauth_access_token_);
 }
 
@@ -150,9 +156,9 @@ void CloudPolicyClientRegistrationHelper::OnGetUserInfoFailure(
 }
 
 void CloudPolicyClientRegistrationHelper::OnGetUserInfoSuccess(
-    const base::DictionaryValue* data) {
+    const base::Value::Dict& data) {
   user_info_fetcher_.reset();
-  if (!data->HasKey(kGetHostedDomainKey)) {
+  if (!data.Find(kGetHostedDomainKey)) {
     DVLOG(1) << "User not from a hosted domain - skipping registration";
     RequestCompleted();
     return;
@@ -201,7 +207,7 @@ void CloudPolicyClientRegistrationHelper::RequestCompleted() {
     client_->RemoveObserver(this);
     // |client_| may be freed by the callback so clear it now.
     client_ = nullptr;
-    callback_.Run();
+    std::move(callback_).Run();
   }
 }
 

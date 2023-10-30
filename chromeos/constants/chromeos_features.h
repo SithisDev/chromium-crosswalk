@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,86 +8,46 @@
 #include "base/component_export.h"
 #include "base/feature_list.h"
 
+// This file is only for the feature flags that are shared between ash-chrome
+// and lacros-chrome that are not common. For ash features, please add them
+// in //ash/constants/ash_features.h.
 namespace chromeos {
 
 namespace features {
 
 // All features in alphabetical order. The features should be documented
-// alongside the definition of their values in the .cc file.
+// alongside the definition of their values in the .cc file. If a feature is
+// being rolled out via Finch, add a comment in the .cc file.
 
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kAutoScreenBrightness;
+extern const base::Feature kBluetoothPhoneFilter;
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kBluetoothAggressiveAppearanceFilter;
+extern const base::Feature kCloudGamingDevice;
+COMPONENT_EXPORT(CHROMEOS_CONSTANTS) extern const base::Feature kDarkLightMode;
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kBlueZLongTermKeyBlocklist;
+extern const base::Feature kDisableIdleSocketsCloseOnMemoryPressure;
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const char kBlueZLongTermKeyBlocklistParamName[];
+extern const base::Feature kDisableOfficeEditingComponentApp;
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kCameraSystemWebApp;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS) extern const base::Feature kCrostiniBackup;
+extern const base::Feature kDisableQuickAnswersV2Translation;
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kCrostiniGpuSupport;
+extern const base::Feature kQuickAnswersV2SettingsSubToggle;
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kCrostiniUsbSupport;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kCrostiniUsbAllowUnsupported;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kCrostiniWebUIInstaller;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kCryptAuthV2Enrollment;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS) extern const base::Feature kDiscoverApp;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS) extern const base::Feature kDriveFs;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kDriveFsMirroring;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kEnableFileManagerFeedbackPanel;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kEnableFileManagerFormatDialog;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kEnableFileManagerPiexWasm;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kEnableMessagesWebPush;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS) extern const base::Feature kMojoDBusRelay;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS) extern const base::Feature kMyFilesVolume;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kEnableSupervisionTransitionScreens;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS) extern const base::Feature kFsNosymfollow;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kGaiaActionButtons;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kGesturePropertiesDBusService;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kImeInputLogicFst;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kInstantTethering;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kReleaseNotes;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kShowBluetoothDeviceBattery;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kSmartDimModelV3;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kSplitSettings;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kUpdatedCellularActivationUi;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kUseMessagesGoogleComDomain;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kUseMessagesStagingUrl;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kUserActivityPrediction;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kUseSearchClickForRightClick;
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-extern const base::Feature kVideoPlayerNativeControls;
+extern const base::Feature kQuickAnswersForMoreLocales;
 
 // Keep alphabetized.
 
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS) bool IsSplitSettingsEnabled();
+COMPONENT_EXPORT(CHROMEOS_CONSTANTS) bool IsDarkLightModeEnabled();
+COMPONENT_EXPORT(CHROMEOS_CONSTANTS) bool IsCloudGamingDeviceEnabled();
+COMPONENT_EXPORT(CHROMEOS_CONSTANTS) bool IsQuickAnswersV2TranslationDisabled();
+COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
+bool IsQuickAnswersV2SettingsSubToggleEnabled();
+COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
+bool IsQuickAnswersAlwaysTriggerForSingleWord();
+COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
+bool IsQuickAnswersForMoreLocalesEnabled();
 
 }  // namespace features
-
 }  // namespace chromeos
 
 #endif  // CHROMEOS_CONSTANTS_CHROMEOS_FEATURES_H_

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/storage_monitor/mock_removable_storage_observer.h"
 #include "components/storage_monitor/test_storage_monitor.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,13 +24,13 @@ void SetLatch(bool* called) {
 namespace storage_monitor {
 
 TEST(StorageMonitorTest, TestInitialize) {
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   TestStorageMonitor::Destroy();
   TestStorageMonitor monitor;
   EXPECT_FALSE(monitor.init_called());
 
   bool initialized = false;
-  monitor.EnsureInitialized(base::Bind(&SetLatch, &initialized));
+  monitor.EnsureInitialized(base::BindOnce(&SetLatch, &initialized));
   EXPECT_TRUE(monitor.init_called());
   EXPECT_FALSE(initialized);
   monitor.MarkInitialized();
@@ -39,7 +39,7 @@ TEST(StorageMonitorTest, TestInitialize) {
 
 TEST(StorageMonitorTest, DeviceAttachDetachNotifications) {
   TestStorageMonitor::Destroy();
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   const std::string kDeviceId1 = "dcim:UUID:FFF0-0001";
   const std::string kDeviceId2 = "dcim:UUID:FFF0-0002";
   MockRemovableStorageObserver observer1;
@@ -48,8 +48,8 @@ TEST(StorageMonitorTest, DeviceAttachDetachNotifications) {
   monitor.AddObserver(&observer1);
   monitor.AddObserver(&observer2);
 
-  StorageInfo info(kDeviceId1, FILE_PATH_LITERAL("path"), base::string16(),
-                   base::string16(), base::string16(), 0);
+  StorageInfo info(kDeviceId1, FILE_PATH_LITERAL("path"), std::u16string(),
+                   std::u16string(), std::u16string(), 0);
   monitor.receiver()->ProcessAttach(info);
   base::RunLoop().RunUntilIdle();
 
@@ -82,7 +82,7 @@ TEST(StorageMonitorTest, DeviceAttachDetachNotifications) {
 
 TEST(StorageMonitorTest, GetAllAvailableStoragesEmpty) {
   TestStorageMonitor::Destroy();
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   TestStorageMonitor monitor;
   std::vector<StorageInfo> devices = monitor.GetAllAvailableStorages();
   EXPECT_EQ(0U, devices.size());
@@ -90,12 +90,12 @@ TEST(StorageMonitorTest, GetAllAvailableStoragesEmpty) {
 
 TEST(StorageMonitorTest, GetAllAvailableStorageAttachDetach) {
   TestStorageMonitor::Destroy();
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
   TestStorageMonitor monitor;
   const std::string kDeviceId1 = "dcim:UUID:FFF0-0042";
   const base::FilePath kDevicePath1(FILE_PATH_LITERAL("/testfoo"));
-  StorageInfo info1(kDeviceId1, kDevicePath1.value(), base::string16(),
-                    base::string16(), base::string16(), 0);
+  StorageInfo info1(kDeviceId1, kDevicePath1.value(), std::u16string(),
+                    std::u16string(), std::u16string(), 0);
   monitor.receiver()->ProcessAttach(info1);
   base::RunLoop().RunUntilIdle();
   std::vector<StorageInfo> devices = monitor.GetAllAvailableStorages();
@@ -105,8 +105,8 @@ TEST(StorageMonitorTest, GetAllAvailableStorageAttachDetach) {
 
   const std::string kDeviceId2 = "dcim:UUID:FFF0-0044";
   const base::FilePath kDevicePath2(FILE_PATH_LITERAL("/testbar"));
-  StorageInfo info2(kDeviceId2, kDevicePath2.value(), base::string16(),
-                    base::string16(), base::string16(), 0);
+  StorageInfo info2(kDeviceId2, kDevicePath2.value(), std::u16string(),
+                    std::u16string(), std::u16string(), 0);
   monitor.receiver()->ProcessAttach(info2);
   base::RunLoop().RunUntilIdle();
   devices = monitor.GetAllAvailableStorages();

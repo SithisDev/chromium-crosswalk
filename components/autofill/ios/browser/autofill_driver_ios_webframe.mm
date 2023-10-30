@@ -1,10 +1,8 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/ios/browser/autofill_driver_ios_webframe.h"
-
-#import "ios/web/public/web_state/web_state.h"
 
 namespace autofill {
 
@@ -14,7 +12,7 @@ void AutofillDriverIOSWebFrameFactory::CreateForWebStateAndDelegate(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    AutofillManager::AutofillDownloadManagerState enable_download_manager) {
+    AutofillManager::EnableDownloadManager enable_download_manager) {
   if (FromWebState(web_state))
     return;
 
@@ -29,7 +27,7 @@ AutofillDriverIOSWebFrameFactory::AutofillDriverIOSWebFrameFactory(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    AutofillManager::AutofillDownloadManagerState enable_download_manager)
+    AutofillManager::EnableDownloadManager enable_download_manager)
     : web_state_(web_state),
       client_(client),
       bridge_(bridge),
@@ -54,7 +52,7 @@ void AutofillDriverIOSWebFrame::CreateForWebFrameAndDelegate(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    AutofillManager::AutofillDownloadManagerState enable_download_manager) {
+    AutofillManager::EnableDownloadManager enable_download_manager) {
   if (FromWebFrame(web_frame))
     return;
 
@@ -70,8 +68,7 @@ AutofillDriverIOSRefCountable::AutofillDriverIOSRefCountable(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    AutofillManager::AutofillDownloadManagerState enable_download_manager)
-
+    AutofillManager::EnableDownloadManager enable_download_manager)
     : AutofillDriverIOS(web_state,
                         web_frame,
                         client,
@@ -85,7 +82,7 @@ AutofillDriverIOSWebFrame::AutofillDriverIOSWebFrame(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    AutofillManager::AutofillDownloadManagerState enable_download_manager)
+    AutofillManager::EnableDownloadManager enable_download_manager)
     : driver_(base::MakeRefCounted<AutofillDriverIOSRefCountable>(
           web_state,
           web_frame,

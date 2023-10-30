@@ -1,12 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/download/public/common/download_item_impl_delegate.h"
 
-#include "base/logging.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "build/build_config.h"
-#include "components/download/database/in_progress/download_entry.h"
 #include "components/download/public/common/auto_resumption_handler.h"
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_item_impl.h"
@@ -32,27 +32,37 @@ void DownloadItemImplDelegate::Detach() {
 
 void DownloadItemImplDelegate::DetermineDownloadTarget(
     DownloadItemImpl* download,
-    const DownloadTargetCallback& callback) {
-  // TODO(rdsmith/asanka): Do something useful if forced file path is null.
+    DownloadTargetCallback callback) {
   base::FilePath target_path(download->GetForcedFilePath());
-  callback.Run(target_path, DownloadItem::TARGET_DISPOSITION_OVERWRITE,
-               DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS, target_path,
-               DOWNLOAD_INTERRUPT_REASON_NONE);
+  std::move(callback).Run(
+      target_path, DownloadItem::TARGET_DISPOSITION_OVERWRITE,
+      DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+      DownloadItem::MixedContentStatus::UNKNOWN, target_path, base::FilePath(),
+      std::string(), DOWNLOAD_INTERRUPT_REASON_NONE);
 }
 
 bool DownloadItemImplDelegate::ShouldCompleteDownload(
     DownloadItemImpl* download,
-    const base::Closure& complete_callback) {
+    base::OnceClosure complete_callback) {
   return true;
 }
 
 bool DownloadItemImplDelegate::ShouldOpenDownload(
     DownloadItemImpl* download,
-    const ShouldOpenDownloadCallback& callback) {
+    ShouldOpenDownloadCallback callback) {
+  // TODO(qinmin): When this returns false it means this should run the callback
+  // at some point.
   return false;
 }
 
-bool DownloadItemImplDelegate::ShouldOpenFileBasedOnExtension(
+bool DownloadItemImplDelegate::ShouldAutomaticallyOpenFile(
+    const GURL& url,
+    const base::FilePath& path) {
+  return false;
+}
+
+bool DownloadItemImplDelegate::ShouldAutomaticallyOpenFileByPolicy(
+    const GURL& url,
     const base::FilePath& path) {
   return false;
 }
@@ -67,16 +77,11 @@ std::string DownloadItemImplDelegate::GetApplicationClientIdForFileScanning()
 
 void DownloadItemImplDelegate::ResumeInterruptedDownload(
     std::unique_ptr<DownloadUrlParameters> params,
-    const GURL& site_url) {}
+    const std::string& serialized_embedder_download_data) {}
 
 void DownloadItemImplDelegate::UpdatePersistence(DownloadItemImpl* download) {}
 
 void DownloadItemImplDelegate::OpenDownload(DownloadItemImpl* download) {}
-
-bool DownloadItemImplDelegate::IsMostRecentDownloadItemAtFilePath(
-    DownloadItemImpl* download) {
-  return true;
-}
 
 void DownloadItemImplDelegate::ShowDownloadInShell(DownloadItemImpl* download) {
 }
@@ -84,11 +89,6 @@ void DownloadItemImplDelegate::ShowDownloadInShell(DownloadItemImpl* download) {
 void DownloadItemImplDelegate::DownloadRemoved(DownloadItemImpl* download) {}
 
 void DownloadItemImplDelegate::DownloadInterrupted(DownloadItemImpl* download) {
-}
-
-base::Optional<DownloadEntry> DownloadItemImplDelegate::GetInProgressEntry(
-    DownloadItemImpl* download) {
-  return base::Optional<DownloadEntry>();
 }
 
 bool DownloadItemImplDelegate::IsOffTheRecord() const {
@@ -103,8 +103,17 @@ bool DownloadItemImplDelegate::IsActiveNetworkMetered() const {
 
 void DownloadItemImplDelegate::ReportBytesWasted(DownloadItemImpl* download) {}
 
-service_manager::Connector*
-DownloadItemImplDelegate::GetServiceManagerConnector() {
+void DownloadItemImplDelegate::BindWakeLockProvider(
+    mojo::PendingReceiver<device::mojom::WakeLockProvider> receiver) {}
+
+QuarantineConnectionCallback
+DownloadItemImplDelegate::GetQuarantineConnectionCallback() {
+  return base::NullCallback();
+}
+
+std::unique_ptr<DownloadItemRenameHandler>
+DownloadItemImplDelegate::GetRenameHandlerForDownload(
+    DownloadItemImpl* download_item) {
   return nullptr;
 }
 

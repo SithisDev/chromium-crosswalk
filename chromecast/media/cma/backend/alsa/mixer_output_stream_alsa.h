@@ -1,17 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROMECAST_MEDIA_CMA_BACKEND_ALSA_MIXER_OUTPUT_STREAM_ALSA_H_
 #define CHROMECAST_MEDIA_CMA_BACKEND_ALSA_MIXER_OUTPUT_STREAM_ALSA_H_
 
+#include <alsa/asoundlib.h>
+
 #include <cstdint>
 #include <vector>
 
-#include "base/macros.h"
 #include "chromecast/public/media/mixer_output_stream.h"
-
-#include <alsa/asoundlib.h>
 
 namespace chromecast {
 namespace media {
@@ -22,12 +21,17 @@ class AlsaWrapper;
 class MixerOutputStreamAlsa : public MixerOutputStream {
  public:
   MixerOutputStreamAlsa();
+
+  MixerOutputStreamAlsa(const MixerOutputStreamAlsa&) = delete;
+  MixerOutputStreamAlsa& operator=(const MixerOutputStreamAlsa&) = delete;
+
   ~MixerOutputStreamAlsa() override;
 
   void SetAlsaWrapperForTest(std::unique_ptr<AlsaWrapper> alsa);
 
   // MixerOutputStream implementation:
   bool Start(int requested_sample_rate, int channels) override;
+  int GetNumChannels() override;
   int GetSampleRate() override;
   MediaPipelineBackend::AudioDecoder::RenderingDelay GetRenderingDelay()
       override;
@@ -78,11 +82,10 @@ class MixerOutputStreamAlsa : public MixerOutputStream {
   snd_pcm_uframes_t alsa_start_threshold_ = 0;
   snd_pcm_uframes_t alsa_avail_min_ = 0;
 
+  bool first_write_ = false;
   MediaPipelineBackend::AudioDecoder::RenderingDelay rendering_delay_;
 
   std::vector<uint8_t> output_buffer_;
-
-  DISALLOW_COPY_AND_ASSIGN(MixerOutputStreamAlsa);
 };
 
 }  // namespace media

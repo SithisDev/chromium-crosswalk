@@ -1,11 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/omnibox/browser/tailored_word_break_iterator.h"
 
+#include "base/strings/string_piece.h"
+
 namespace {
-constexpr base::char16 kUnderscore = '_';
+constexpr char16_t kUnderscore = '_';
 }  // namespace
 
 using base::i18n::BreakIterator;
@@ -20,15 +22,14 @@ TailoredWordBreakIterator::TailoredWordBreakIterator(
 TailoredWordBreakIterator::~TailoredWordBreakIterator() {}
 
 bool TailoredWordBreakIterator::Advance() {
-  if (HasUnderscoreWord()) {
-    AdvanceInUnderscoreWord();
+  if (HasUnderscoreWord() && AdvanceInUnderscoreWord()) {
     return true;
   }
   if (!BreakIterator::Advance())
     return false;
   prev_ = 0;
   pos_ = 0;
-  underscore_word_.clear();
+  underscore_word_ = base::StringPiece16();
   if (!IsWord())
     return true;
   base::StringPiece16 word = BreakIterator::GetStringPiece();
@@ -54,8 +55,8 @@ base::StringPiece16 TailoredWordBreakIterator::GetStringPiece() const {
   return BreakIterator::GetStringPiece();
 }
 
-base::string16 TailoredWordBreakIterator::GetString() const {
-  return GetStringPiece().as_string();
+std::u16string TailoredWordBreakIterator::GetString() const {
+  return std::u16string(GetStringPiece());
 }
 
 size_t TailoredWordBreakIterator::prev() const {
@@ -67,15 +68,25 @@ size_t TailoredWordBreakIterator::pos() const {
 }
 
 bool TailoredWordBreakIterator::HasUnderscoreWord() const {
-  return pos_ != underscore_word_.size();
+  return !underscore_word_.empty();
 }
 
-void TailoredWordBreakIterator::AdvanceInUnderscoreWord() {
+bool TailoredWordBreakIterator::AdvanceInUnderscoreWord() {
+  DCHECK(HasUnderscoreWord());
+  // If we've finished with the underscore word we're processing, return false
+  // and let the caller call advance on the outer BreakIterator.
+  if (pos_ == underscore_word_.size()) {
+    prev_ = 0;
+    pos_ = 0;
+    underscore_word_ = base::StringPiece16();
+    return false;
+  }
+
   std::size_t next_pos = underscore_word_.find(kUnderscore, pos_);
   prev_ = pos_;
   if (next_pos == base::StringPiece16::npos) {
     pos_ = underscore_word_.size();
-    return;
+    return true;
   }
   // If an underscore is found at the current position, index moves to next
   // char.
@@ -83,4 +94,6 @@ void TailoredWordBreakIterator::AdvanceInUnderscoreWord() {
     pos_ += 1;
   else
     pos_ = next_pos;
+
+  return true;
 }

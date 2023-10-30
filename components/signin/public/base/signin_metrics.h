@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,57 +8,75 @@
 #include <limits.h>
 
 #include "base/time/time.h"
+#include "build/build_config.h"
+#include "components/signin/public/base/consent_level.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
 namespace signin_metrics {
 
-// Enum for the ways in which primary account detection is done.
-enum DifferentPrimaryAccounts {
-  // token and cookie had same primary accounts.
-  ACCOUNTS_SAME = 0,
-  // Deprecated. Indicates different primary accounts.
-  UNUSED_ACCOUNTS_DIFFERENT,
-  // No GAIA cookie present, so the primaries are considered different.
-  NO_COOKIE_PRESENT,
-  // There was at least one cookie and one token, and the primaries differed.
-  COOKIE_AND_TOKEN_PRIMARIES_DIFFERENT,
-  NUM_DIFFERENT_PRIMARY_ACCOUNT_METRICS,
-};
-
 // Track all the ways a profile can become signed out as a histogram.
-// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.signin
+// Enum SigninSignoutProfile.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
 // GENERATED_JAVA_CLASS_NAME_OVERRIDE: SignoutReason
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
 enum ProfileSignout : int {
   // The value used within unit tests.
   SIGNOUT_TEST = 0,
   // The preference or policy controlling if signin is valid has changed.
   SIGNOUT_PREF_CHANGED = 0,
   // The valid pattern for signing in to the Google service changed.
-  GOOGLE_SERVICE_NAME_PATTERN_CHANGED,
+  GOOGLE_SERVICE_NAME_PATTERN_CHANGED = 1,
   // The preference or policy controlling if signin is valid changed during
   // the signin process.
-  SIGNIN_PREF_CHANGED_DURING_SIGNIN,
+  SIGNIN_PREF_CHANGED_DURING_SIGNIN = 2,
   // User clicked to signout from the settings page.
-  USER_CLICKED_SIGNOUT_SETTINGS,
+  USER_CLICKED_SIGNOUT_SETTINGS = 3,
   // The signin process was aborted, but signin had succeeded, so signout. This
   // may be due to a server response, policy definition or user action.
-  ABORT_SIGNIN,
+  ABORT_SIGNIN = 4,
   // The sync server caused the profile to be signed out.
-  SERVER_FORCED_DISABLE,
+  SERVER_FORCED_DISABLE = 5,
   // The credentials are being transfered to a new profile, so the old one is
   // signed out.
-  TRANSFER_CREDENTIALS,
+  TRANSFER_CREDENTIALS = 6,
   // Signed out because credentials are invalid and force-sign-in is enabled.
-  AUTHENTICATION_FAILED_WITH_FORCE_SIGNIN,
+  AUTHENTICATION_FAILED_WITH_FORCE_SIGNIN = 7,
   // The user disables sync from the DICE UI.
-  USER_TUNED_OFF_SYNC_FROM_DICE_UI,
-  // Android specific. Signout forced because the account was removed from the
-  // device.
-  ACCOUNT_REMOVED_FROM_DEVICE,
+  // Deprecated: USER_TUNED_OFF_SYNC_FROM_DICE_UI = 8,
+  // Signout forced because the account was removed from the device.
+  ACCOUNT_REMOVED_FROM_DEVICE = 9,
   // Signin is no longer allowed when the profile is initialized.
-  SIGNIN_NOT_ALLOWED_ON_PROFILE_INIT,
+  SIGNIN_NOT_ALLOWED_ON_PROFILE_INIT = 10,
   // Sign out is forced allowed. Only used for tests.
-  FORCE_SIGNOUT_ALWAYS_ALLOWED_FOR_TEST,
+  FORCE_SIGNOUT_ALWAYS_ALLOWED_FOR_TEST = 11,
+  // User cleared account cookies when there's no sync consent, which has caused
+  // sign out.
+  USER_DELETED_ACCOUNT_COOKIES = 12,
+  // Signout triggered by MobileIdentityConsistency rollback.
+  MOBILE_IDENTITY_CONSISTENCY_ROLLBACK = 13,
+  // Sign-out when the account id migration to Gaia ID did not finish,
+  ACCOUNT_ID_MIGRATION = 14,
+  // iOS Specific. Sign-out forced because the account was removed from the
+  // device after a device restore.
+  IOS_ACCOUNT_REMOVED_FROM_DEVICE_AFTER_RESTORE = 15,
+  // User clicked to 'Turn off sync' from the settings page.
+  // Currently only available for Android Unicorn users.
+  USER_CLICKED_REVOKE_SYNC_CONSENT_SETTINGS = 16,
+  // User clicked to signout from the settings page.
+  USER_CLICKED_SIGNOUT_PROFILE_MENU = 17,
+  // User retriggered signin from the Android web sign-in bottomsheet.
+  SIGNIN_RETRIGGERD_FROM_WEB_SIGNIN = 18,
+  // User clicked on sign-out from the notification dialog for User Policy. The
+  // notification informs the user that from now on user policies may be
+  // effective on their browser if they Sync with their managed account. The
+  // user has the option to sign out to avoid user policies.
+  USER_CLICKED_SIGNOUT_FROM_USER_POLICY_NOTIFICATION_DIALOG = 19,
+  // The email address of the primary account on the device was updated,
+  // triggering an automatic signout followed by signin.
+  ACCOUNT_EMAIL_UPDATED = 20,
+  // User clicked on sign-out from the clear browsing data page.
+  USER_CLICKED_SIGNOUT_FROM_CLEAR_BROWSING_DATA_PAGE = 21,
   // Keep this as the last enum.
   NUM_PROFILE_SIGNOUT_METRICS,
 };
@@ -128,7 +146,7 @@ enum Source {
 // "Signin.SigninStartedAccessPoint" and "Signin.SigninCompletedAccessPoint"
 // histograms.
 // A Java counterpart will be generated for this enum.
-// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.signin
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
 // GENERATED_JAVA_CLASS_NAME_OVERRIDE: SigninAccessPoint
 enum class AccessPoint : int {
   ACCESS_POINT_START_PAGE = 0,
@@ -138,7 +156,7 @@ enum class AccessPoint : int {
   ACCESS_POINT_SUPERVISED_USER = 4,
   ACCESS_POINT_EXTENSION_INSTALL_BUBBLE = 5,
   ACCESS_POINT_EXTENSIONS = 6,
-  ACCESS_POINT_APPS_PAGE_LINK = 7,
+  // ACCESS_POINT_APPS_PAGE_LINK = 7, no longer used.
   ACCESS_POINT_BOOKMARK_BUBBLE = 8,
   ACCESS_POINT_BOOKMARK_MANAGER = 9,
   ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN = 10,
@@ -155,12 +173,48 @@ enum class AccessPoint : int {
   ACCESS_POINT_NTP_CONTENT_SUGGESTIONS = 20,
   ACCESS_POINT_RESIGNIN_INFOBAR = 21,
   ACCESS_POINT_TAB_SWITCHER = 22,
-  // ACCESS_POINT_FORCE_SIGNIN_WARNING is no longer used.
-  ACCESS_POINT_SAVE_CARD_BUBBLE = 24,
-  ACCESS_POINT_MANAGE_CARDS_BUBBLE = 25,
+  // ACCESS_POINT_FORCE_SIGNIN_WARNING = 23, no longer used.
+  // ACCESS_POINT_SAVE_CARD_BUBBLE = 24, no longer used
+  // ACCESS_POINT_MANAGE_CARDS_BUBBLE = 25, no longer used
   ACCESS_POINT_MACHINE_LOGON = 26,
   ACCESS_POINT_GOOGLE_SERVICES_SETTINGS = 27,
+  ACCESS_POINT_SYNC_ERROR_CARD = 28,
+  ACCESS_POINT_FORCED_SIGNIN = 29,
+  ACCESS_POINT_ACCOUNT_RENAMED = 30,
+  ACCESS_POINT_WEB_SIGNIN = 31,
+  ACCESS_POINT_SAFETY_CHECK = 32,
+  ACCESS_POINT_KALEIDOSCOPE = 33,
+  ACCESS_POINT_ENTERPRISE_SIGNOUT_COORDINATOR = 34,
+  ACCESS_POINT_SIGNIN_INTERCEPT_FIRST_RUN_EXPERIENCE = 35,
+  ACCESS_POINT_SEND_TAB_TO_SELF_PROMO = 36,
+  ACCESS_POINT_NTP_FEED_TOP_PROMO = 37,
+  ACCESS_POINT_SETTINGS_SYNC_OFF_ROW = 38,
+  // Add values above this line with a corresponding label to the
+  // "SigninAccessPoint" enum in tools/metrics/histograms/enums.xml
   ACCESS_POINT_MAX,  // This must be last.
+};
+
+// Enum values which enumerates all access points where transactional reauth
+// could be initiated. Transactional reauth is used when the user already has
+// a valid refresh token but a system still wants to verify user's identity.
+enum class ReauthAccessPoint {
+  // The code expects kUnknown to be the first, so it should not be reordered.
+  kUnknown = 0,
+
+  // Account password storage opt-in:
+  kAutofillDropdown = 1,
+  // The password save bubble, which included the destination picker (set to
+  // "Save to your Google Account").
+  kPasswordSaveBubble = 2,
+  kPasswordSettings = 3,
+  kGeneratePasswordDropdown = 4,
+  kGeneratePasswordContextMenu = 5,
+  kPasswordMoveBubble = 6,
+  // The password save bubble *without* a destination picker, i.e. the password
+  // was already saved locally.
+  kPasswordSaveLocallyBubble = 7,
+
+  kMaxValue = kPasswordSaveLocallyBubble
 };
 
 // Enum values which enumerates all user actions on the sign-in promo.
@@ -171,8 +225,6 @@ enum class PromoAction : int {
   // On desktop, the user selected an account that is not the default. On
   // mobile, the user selected the generic "Use another account" button.
   PROMO_ACTION_NOT_DEFAULT,
-  // Non-personalized promo, pre-dice on desktop.
-  PROMO_ACTION_NEW_ACCOUNT_PRE_DICE,
   // Non personalized promo, when there is no account on the device.
   PROMO_ACTION_NEW_ACCOUNT_NO_EXISTING_ACCOUNT,
   // The user clicked on the "Add account" button, when there are already
@@ -181,32 +233,89 @@ enum class PromoAction : int {
   PROMO_ACTION_NEW_ACCOUNT_EXISTING_ACCOUNT
 };
 
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+// This class is used to record user action that was taken after
+// receiving the header from Gaia in the web sign-in flow.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
+// GENERATED_JAVA_CLASS_NAME_OVERRIDE: AccountConsistencyPromoAction
+enum class AccountConsistencyPromoAction : int {
+  // Promo is not shown as there are no accounts on device.
+  SUPPRESSED_NO_ACCOUNTS = 0,
+  // User has dismissed the promo by tapping back button.
+  DISMISSED_BACK = 1,
+  // User has tapped |Add account to device| from expanded account list.
+  ADD_ACCOUNT_STARTED = 2,
+
+  // Deprecated 05/2021, since the Incognito option has been removed from
+  // account picker bottomsheet.
+  // STARTED_INCOGNITO_SESSION = 3,
+
+  // User has selected the default account and signed in with it
+  SIGNED_IN_WITH_DEFAULT_ACCOUNT = 4,
+  // User has selected one of the non default accounts and signed in with it.
+  SIGNED_IN_WITH_NON_DEFAULT_ACCOUNT = 5,
+  // The promo was shown to user.
+  SHOWN = 6,
+  // Promo is not shown due to sign-in being disallowed either by an enterprise
+  // policy
+  // or by |Allow Chrome sign-in| toggle.
+  SUPPRESSED_SIGNIN_NOT_ALLOWED = 7,
+  // User has added an account and signed in with this account.
+  // When this metric is recorded, we won't record
+  // SIGNED_IN_WITH_DEFAULT_ACCOUNT or
+  // SIGNED_IN_WITH_NON_DEFAULT_ACCOUNT.
+  SIGNED_IN_WITH_ADDED_ACCOUNT = 8,
+  // User has dismissed the promo by tapping on the scrim above the bottom
+  // sheet.
+  DISMISSED_SCRIM = 9,
+  // User has dismissed the promo by swiping down the bottom sheet.
+  DISMISSED_SWIPE_DOWN = 10,
+  // User has dismissed the promo by other means.
+  DISMISSED_OTHER = 11,
+  // The auth error screen was shown to the user.
+  AUTH_ERROR_SHOWN = 12,
+  // The generic error screen was shown to the user.
+  GENERIC_ERROR_SHOWN = 13,
+  // User has dismissed the promo by tapping on the dismissal button in the
+  // bottom sheet.
+  DISMISSED_BUTTON = 14,
+  // User has completed the account addition flow triggered from the bottom
+  // sheet.
+  ADD_ACCOUNT_COMPLETED = 15,
+  // The bottom sheet was suppressed as the user hit consecutive active
+  // dismissal limit.
+  SUPPRESSED_CONSECUTIVE_DISMISSALS = 16,
+  // The timeout erreur was shown to the user.
+  TIMEOUT_ERROR_SHOWN = 17,
+  // The web sign-in is not shown because the user is already signed in.
+  SUPPRESSED_ALREADY_SIGNED_IN = 18,
+  // AuthenticationFlow failed to sign-in.
+  SIGN_IN_FAILED = 19,
+  kMaxValue = SIGN_IN_FAILED,
+};
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+
 // Enum values which enumerates all reasons to start sign in process.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// Please keep in Sync with "SigninReason" in
+// src/tools/metrics/histograms/enums.xml.
 // A Java counterpart will be generated for this enum.
-// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.signin
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
 // GENERATED_JAVA_CLASS_NAME_OVERRIDE: SigninReason
 enum class Reason : int {
-  REASON_SIGNIN_PRIMARY_ACCOUNT = 0,
-  REASON_ADD_SECONDARY_ACCOUNT,
-  REASON_REAUTHENTICATION,
-  REASON_UNLOCK,
-  REASON_UNKNOWN_REASON,  // This should never have been used to get signin URL.
-  REASON_FORCED_SIGNIN_PRIMARY_ACCOUNT,
-  REASON_FETCH_LST_ONLY,  // Used to simply login and acquire a login scope
-                          // token without actually signing into any profiles on
-                          // Chrome. This allows the chrome signin page to work
-                          // in incognito mode.
-  REASON_MAX,             // This must be last.
-};
-
-// Enum values used for use with the "Signin.Reauth" histogram.
-enum AccountReauth {
-  // The user gave the wrong email when doing a reauthentication.
-  HISTOGRAM_ACCOUNT_MISSMATCH,
-  // The user was shown a reauthentication login screen.
-  HISTOGRAM_REAUTH_SHOWN,
-
-  HISTOGRAM_REAUTH_MAX
+  kSigninPrimaryAccount = 0,
+  kAddSecondaryAccount = 1,
+  kReauthentication = 2,
+  // REASON_UNLOCK = 3,  // DEPRECATED, profile unlocking was removed.
+  // This should never have been used to get signin URL.
+  kUnknownReason = 4,
+  kForcedSigninPrimaryAccount = 5,
+  // Used to simply login and acquire a login scope token without actually
+  // signing into any profiles on Chrome. This allows the chrome signin page to
+  // work in incognito mode.
+  kFetchLstOnly = 6,
+  kMaxValue = kFetchLstOnly,
 };
 
 // Enum values used for "Signin.AccountReconcilorState.OnGaiaResponse"
@@ -221,37 +330,32 @@ enum AccountReconcilorState {
   ACCOUNT_RECONCILOR_ERROR,
   // The account reconcilor will start running soon.
   ACCOUNT_RECONCILOR_SCHEDULED,
+  // The account reconcilor is inactive, e.g. initializing or disabled.
+  ACCOUNT_RECONCILOR_INACTIVE,
+
   // Always the last enumerated type.
-  ACCOUNT_RECONCILOR_HISTOGRAM_COUNT,
+  kMaxValue = ACCOUNT_RECONCILOR_SCHEDULED,
 };
 
-// Values of histogram comparing account id and email.
-enum class AccountEquality : int {
-  // Expected case when the user is not switching accounts.
-  BOTH_EQUAL = 0,
-  // Expected case when the user is switching accounts.
-  BOTH_DIFFERENT,
-  // The user has changed at least two email account names. This is actually
-  // a different account, even though the email matches.
-  ONLY_SAME_EMAIL,
-  // The user has changed the email of their account, but the account is
-  // actually the same.
-  ONLY_SAME_ID,
-  // The last account id was not present, email equality was used. This should
-  // happen once to all old clients. Does not differentiate between same and
-  // different accounts.
-  EMAIL_FALLBACK,
+// Values of Signin.AccountType histogram. This histogram records if the user
+// uses a gmail account or a managed account when signing in.
+enum class SigninAccountType : int {
+  // Gmail account.
+  kRegular = 0,
+  // Managed account.
+  kManaged = 1,
   // Always the last enumerated type.
-  HISTOGRAM_COUNT,
+  kMaxValue = kManaged,
 };
 
 // When the user is give a choice of deleting their profile or not when signing
-// out, the |DELETED| or |KEEPING| metric should be used. If the user is not
-// given any option, then use the |IGNORE_METRIC| value should be used.
+// out, the |kDeleted| or |kKeeping| metric should be used. If the user is not
+// given any option, then use the |kIgnoreMetric| value should be used.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
 enum class SignoutDelete : int {
-  DELETED = 0,
-  KEEPING,
-  IGNORE_METRIC,
+  kDeleted = 0,
+  kKeeping,
+  kIgnoreMetric,
 };
 
 // This is the relationship between the account used to sign into chrome, and
@@ -292,30 +396,60 @@ enum class AccountRelation : int {
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
 enum class SourceForRefreshTokenOperation {
-  kUnknown,
-  kTokenService_LoadCredentials,
-  kSupervisedUser_InitSync,
-  kInlineLoginHandler_Signin,
-  kPrimaryAccountManager_ClearAccount,
-  kPrimaryAccountManager_LegacyPreDiceSigninFlow,
-  kUserMenu_RemoveAccount,
-  kUserMenu_SignOutAllAccounts,
-  kSettings_Signout,
-  kSettings_PauseSync,
-  kAccountReconcilor_GaiaCookiesDeletedByUser,
-  kAccountReconcilor_GaiaCookiesUpdated,
-  kAccountReconcilor_Reconcile,
-  kDiceResponseHandler_Signin,
-  kDiceResponseHandler_Signout,
-  kDiceTurnOnSyncHelper_Abort,
-  kMachineLogon_CredentialProvider,
-  kTokenService_ExtractCredentials,
+  kUnknown = 0,
+  kTokenService_LoadCredentials = 1,
+  // DEPRECATED
+  // kSupervisedUser_InitSync = 2,
+  kInlineLoginHandler_Signin = 3,
+  kPrimaryAccountManager_ClearAccount = 4,
+  kPrimaryAccountManager_LegacyPreDiceSigninFlow = 5,
+  kUserMenu_RemoveAccount = 6,
+  kUserMenu_SignOutAllAccounts = 7,
+  kSettings_Signout = 8,
+  kSettings_PauseSync = 9,
+  kAccountReconcilor_GaiaCookiesDeletedByUser = 10,
+  kAccountReconcilor_GaiaCookiesUpdated = 11,
+  kAccountReconcilor_Reconcile = 12,
+  kDiceResponseHandler_Signin = 13,
+  kDiceResponseHandler_Signout = 14,
+  kTurnOnSyncHelper_Abort = 15,
+  kMachineLogon_CredentialProvider = 16,
+  kTokenService_ExtractCredentials = 17,
+  // DEPRECATED on 09/2021 (used for force migration to DICE)
+  // kAccountReconcilor_RevokeTokensNotInCookies = 18,
+  kLogoutTabHelper_PrimaryPageChanged = 19,
 
-  kMaxValue = kTokenService_ExtractCredentials
+  kMaxValue = kLogoutTabHelper_PrimaryPageChanged,
 };
 
 // Different types of reporting. This is used as a histogram suffix.
 enum class ReportingType { PERIODIC, ON_CHANGE };
+
+// Result for fetching account capabilities from the system library, used to
+// record histogram Signin.AccountCapabilities.GetFromSystemLibraryResult.
+//
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.signin.metrics
+enum class FetchAccountCapabilitiesFromSystemLibraryResult {
+  // Errors common to iOS and Android.
+  kSuccess = 0,
+  kErrorGeneric = 1,
+
+  // Errors from 10 to 19 are reserved for Android.
+  kApiRequestFailed = 10,
+  kApiError = 11,
+  kApiNotPermitted = 12,
+  kApiUnknownCapability = 13,
+  kApiFailedToSync = 14,
+  kApiNotAvailable = 15,
+
+  // Errors after 20 are reserved for iOS.
+  kErrorMissingCapability = 20,
+  kErrorUnexpectedValue = 21,
+
+  kMaxValue = kErrorUnexpectedValue
+};
 
 // -----------------------------------------------------------------------------
 // Histograms
@@ -329,27 +463,6 @@ void LogSigninAccessPointCompleted(AccessPoint access_point,
 
 // Tracks the reason of sign in.
 void LogSigninReason(Reason reason);
-
-// Log to UMA histograms and UserCounts stats about a single execution of the
-// AccountReconciler.
-// |total_number_accounts| - How many accounts are in the browser for this
-//                           profile.
-// |count_added_to_cookie_jar| - How many accounts were in the browser but not
-//                               in the cookie jar.
-// |count_removed_from_cookie_jar| - How many accounts were in the cookie jar
-//                                   but not in the browser.
-// |primary_accounts_same| - False if the primary account for the cookie jar
-//                           and the token service were different; else true.
-// |is_first_reconcile| - True if these stats are from the first execution of
-//                        the AccountReconcilor.
-// |pre_count_gaia_cookies| - How many GAIA cookies were present before
-//                            the AccountReconcilor began modifying the state.
-void LogSigninAccountReconciliation(int total_number_accounts,
-                                    int count_added_to_cookie_jar,
-                                    int count_removed_from_cookie_jar,
-                                    bool primary_accounts_same,
-                                    bool is_first_reconcile,
-                                    int pre_count_gaia_cookies);
 
 // Logs to UMA histograms how many accounts are in the browser for this
 // profile.
@@ -374,22 +487,16 @@ void LogExternalCcResultFetches(
 // Track when the current authentication error changed.
 void LogAuthError(const GoogleServiceAuthError& auth_error);
 
-void LogSigninConfirmHistogramValue(ConfirmationUsage action);
-
 // Records the AccountReconcilor |state| when GAIA returns a specific response.
 // If |state| is different than ACCOUNT_RECONCILOR_OK it means the user will
 // be shown a different set of accounts in the content-area and the settings UI.
 void LogAccountReconcilorStateOnGaiaResponse(AccountReconcilorState state);
 
-// Records the AccountEquality metric when an investigator compares the current
-// and previous id/emails during a signin.
-void LogAccountEquality(AccountEquality equality);
-
 // Records the amount of time since the cookie jar was last changed.
 void LogCookieJarStableAge(const base::TimeDelta stable_age,
                            const ReportingType type);
 
-// Records three counts for the number of accounts in the cookei jar.
+// Records three counts for the number of accounts in the cookie jar.
 void LogCookieJarCounts(const int signed_in,
                         const int signed_out,
                         const int total,
@@ -404,6 +511,14 @@ void LogAccountRelation(const AccountRelation relation,
 // between multiple users.
 void LogIsShared(const bool is_shared, const ReportingType type);
 
+// Records the number of signed-in accounts in the cookie jar for the given
+// (potentially unconsented) primary account type, characterized by sync being
+// enabled (`primary_syncing`) and the account being managed (i.e. enterprise,
+// `primary_managed`).
+void LogSignedInCookiesCountsPerPrimaryAccountType(int signed_in_accounts_count,
+                                                   bool primary_syncing,
+                                                   bool primary_managed);
+
 // Records the source that updated a refresh token.
 void RecordRefreshTokenUpdatedFromSource(bool refresh_token_is_valid,
                                          SourceForRefreshTokenOperation source);
@@ -411,21 +526,24 @@ void RecordRefreshTokenUpdatedFromSource(bool refresh_token_is_valid,
 // Records the source that revoked a refresh token.
 void RecordRefreshTokenRevokedFromSource(SourceForRefreshTokenOperation source);
 
+// Records the account type when the user signs in.
+void RecordSigninAccountType(signin::ConsentLevel consent_level,
+                             bool is_managed_account);
+
 // -----------------------------------------------------------------------------
 // User actions
 // -----------------------------------------------------------------------------
 
 // Records corresponding sign in user action for an access point.
-void RecordSigninUserActionForAccessPoint(AccessPoint access_point,
-                                          PromoAction promo_action);
+void RecordSigninUserActionForAccessPoint(AccessPoint access_point);
 
-// Records |Signin_ImpressionWithAccount_From*| user action.
+// Records |Signin_Impression_From*| user action.
 void RecordSigninImpressionUserActionForAccessPoint(AccessPoint access_point);
 
-// Records |Signin_Impression{With|No}Account_From*| user action.
-void RecordSigninImpressionWithAccountUserActionForAccessPoint(
-    AccessPoint access_point,
-    bool with_account);
+#if BUILDFLAG(IS_IOS)
+// Records |Signin.AccountConsistencyPromoAction| histogram.
+void RecordConsistencyPromoUserAction(AccountConsistencyPromoAction action);
+#endif  // BUILDFLAG(IS_IOS)
 
 }  // namespace signin_metrics
 

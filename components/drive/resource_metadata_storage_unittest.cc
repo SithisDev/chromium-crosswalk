@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,16 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_split.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "components/drive/chromeos/drive_test_util.h"
 #include "components/drive/drive.pb.h"
 #include "components/drive/file_system_core_util.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 #include "third_party/leveldatabase/src/include/leveldb/write_batch.h"
@@ -27,7 +27,29 @@
 namespace drive {
 namespace internal {
 
+namespace {
+
+// Helper to destroy objects which needs Destroy() to be called on destruction.
+// Note: When using this helper, you should destruct objects before
+// BrowserThread.
+struct DestroyHelperForTests {
+  template <typename T>
+  void operator()(T* object) const {
+    if (object) {
+      object->Destroy();
+      content::RunAllTasksUntilIdle();  // Finish destruction.
+    }
+  }
+};
+
+}  // namespace
+
 class ResourceMetadataStorageTest : public testing::Test {
+ public:
+  ResourceMetadataStorageTest(const ResourceMetadataStorageTest&) = delete;
+  ResourceMetadataStorageTest& operator=(const ResourceMetadataStorageTest&) =
+      delete;
+
  protected:
   ResourceMetadataStorageTest() = default;
   ~ResourceMetadataStorageTest() override = default;
@@ -76,12 +98,9 @@ class ResourceMetadataStorageTest : public testing::Test {
     return ResourceMetadataStorage::UpgradeOldDB(temp_dir_.GetPath());
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   base::ScopedTempDir temp_dir_;
-  std::unique_ptr<ResourceMetadataStorage, test_util::DestroyHelperForTests>
-      storage_;
-
-  DISALLOW_COPY_AND_ASSIGN(ResourceMetadataStorageTest);
+  std::unique_ptr<ResourceMetadataStorage, DestroyHelperForTests> storage_;
 };
 
 TEST_F(ResourceMetadataStorageTest, LargestChangestamp) {
@@ -225,7 +244,7 @@ TEST_F(ResourceMetadataStorageTest, GetIdByResourceId) {
 TEST_F(ResourceMetadataStorageTest, GetChildren) {
   const std::string parents_id[] = { "mercury", "venus", "mars", "jupiter",
                                      "saturn" };
-  std::vector<base::StringPairs> children_name_id(base::size(parents_id));
+  std::vector<base::StringPairs> children_name_id(std::size(parents_id));
   // Skip children_name_id[0/1] here because Mercury and Venus have no moon.
   children_name_id[2].push_back(std::make_pair("phobos", "mars_i"));
   children_name_id[2].push_back(std::make_pair("deimos", "mars_ii"));

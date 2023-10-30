@@ -1,31 +1,31 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/test/fake_display_client.h"
 
+#include "build/build_config.h"
+
 namespace viz {
 
-FakeDisplayClient::FakeDisplayClient() : binding_(this) {}
+FakeDisplayClient::FakeDisplayClient() = default;
 FakeDisplayClient::~FakeDisplayClient() = default;
 
-mojom::DisplayClientPtr FakeDisplayClient::BindInterfacePtr() {
-  mojom::DisplayClientPtr ptr;
-  binding_.Bind(MakeRequest(&ptr));
-  return ptr;
+mojo::PendingRemote<mojom::DisplayClient> FakeDisplayClient::BindRemote() {
+  return receiver_.BindNewPipeAndPassRemote();
 }
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
 void FakeDisplayClient::OnDisplayReceivedCALayerParams(
     const gfx::CALayerParams& ca_layer_params) {}
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 void FakeDisplayClient::CreateLayeredWindowUpdater(
-    mojom::LayeredWindowUpdaterRequest request) {}
+    mojo::PendingReceiver<mojom::LayeredWindowUpdater> receiver) {}
 #endif
 
-#if defined(USE_X11)
+#if BUILDFLAG(IS_LINUX)
 void FakeDisplayClient::DidCompleteSwapWithNewSize(const gfx::Size& size) {}
 #endif
 

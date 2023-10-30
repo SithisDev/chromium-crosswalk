@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,10 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "components/gcm_driver/gcm_client.h"
 #include "components/gcm_driver/gcm_stats_recorder_impl.h"
@@ -29,6 +30,7 @@
 #include "google_apis/gcm/engine/unregistration_request.h"
 #include "google_apis/gcm/protocol/android_checkin.pb.h"
 #include "google_apis/gcm/protocol/checkin.pb.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "net/http/http_status_code.h"
 #include "services/network/public/mojom/proxy_resolving_socket.mojom.h"
 
@@ -72,8 +74,8 @@ class GCMInternalsBuilder {
   virtual std::unique_ptr<ConnectionFactory> BuildConnectionFactory(
       const std::vector<GURL>& endpoints,
       const net::BackoffEntry::Policy& backoff_policy,
-      base::RepeatingCallback<
-          void(network::mojom::ProxyResolvingSocketFactoryRequest)>
+      base::RepeatingCallback<void(
+          mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>
           get_socket_factory_callback,
       scoped_refptr<base::SequencedTaskRunner> io_task_runner,
       GCMStatsRecorder* recorder,
@@ -108,16 +110,21 @@ class GCMClientImpl
 
   explicit GCMClientImpl(
       std::unique_ptr<GCMInternalsBuilder> internals_builder);
+
+  GCMClientImpl(const GCMClientImpl&) = delete;
+  GCMClientImpl& operator=(const GCMClientImpl&) = delete;
+
   ~GCMClientImpl() override;
 
   // GCMClient implementation.
   void Initialize(
       const ChromeBuildInfo& chrome_build_info,
       const base::FilePath& store_path,
+      bool remove_account_mappings_with_email_key,
       const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
       scoped_refptr<base::SequencedTaskRunner> io_task_runner,
-      base::RepeatingCallback<
-          void(network::mojom::ProxyResolvingSocketFactoryRequest)>
+      base::RepeatingCallback<void(
+          mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>
           get_socket_factory_callback,
       const scoped_refptr<network::SharedURLLoaderFactory>& url_loader_factory,
       network::NetworkConnectionTracker* network_connection_tracker,
@@ -140,7 +147,7 @@ class GCMClientImpl
   void SetAccountTokens(
       const std::vector<AccountTokenInfo>& account_tokens) override;
   void UpdateAccountMapping(const AccountMapping& account_mapping) override;
-  void RemoveAccountMapping(const std::string& account_id) override;
+  void RemoveAccountMapping(const CoreAccountId& account_id) override;
   void SetLastTokenFetchTime(const base::Time& time) override;
   void UpdateHeartbeatTimer(
       std::unique_ptr<base::RetainingOneShotTimer> timer) override;
@@ -278,7 +285,8 @@ class GCMClientImpl
   void DefaultStoreCallback(bool success);
 
   // Callback for store operation where result does not matter.
-  void IgnoreWriteResultCallback(bool success);
+  void IgnoreWriteResultCallback(const std::string& operation_suffix_for_uma,
+                                 bool success);
 
   // Callback for destroying the GCM store.
   void DestroyStoreCallback(bool success);
@@ -341,7 +349,7 @@ class GCMClientImpl
   // State of the GCM Client Implementation.
   State state_;
 
-  GCMClient::Delegate* delegate_;
+  raw_ptr<GCMClient::Delegate> delegate_;
 
   // Flag to indicate if the GCM should be delay started until it is actually
   // used in either of the following cases:
@@ -353,7 +361,7 @@ class GCMClientImpl
   CheckinInfo device_checkin_info_;
 
   // Clock used for timing of retry logic. Passed in for testing.
-  base::Clock* clock_;
+  raw_ptr<base::Clock> clock_;
 
   // Information about the chrome build.
   // TODO(fgorski): Check if it can be passed in constructor and made const.
@@ -372,12 +380,12 @@ class GCMClientImpl
 
   std::unique_ptr<ConnectionFactory> connection_factory_;
   base::RepeatingCallback<void(
-      network::mojom::ProxyResolvingSocketFactoryRequest)>
+      mojo::PendingReceiver<network::mojom::ProxyResolvingSocketFactory>)>
       get_socket_factory_callback_;
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
-  network::NetworkConnectionTracker* network_connection_tracker_;
+  raw_ptr<network::NetworkConnectionTracker> network_connection_tracker_;
 
   scoped_refptr<base::SequencedTaskRunner> io_task_runner_;
 
@@ -416,8 +424,6 @@ class GCMClientImpl
 
   // Factory for creating references in callbacks.
   base::WeakPtrFactory<GCMClientImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(GCMClientImpl);
 };
 
 }  // namespace gcm

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,7 @@ PrefetchTaskTestBase::PrefetchTaskTestBase()
           base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
               &test_url_loader_factory_)),
       prefs_(std::make_unique<TestingPrefServiceSimple>()),
-      prefetch_request_factory_(test_shared_url_loader_factory_, prefs()),
-      store_test_util_(task_runner()) {}
+      prefetch_request_factory_(test_shared_url_loader_factory_, prefs()) {}
 
 PrefetchTaskTestBase::~PrefetchTaskTestBase() = default;
 

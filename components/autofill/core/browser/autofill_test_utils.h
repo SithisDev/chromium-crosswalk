@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,14 @@
 #include <vector>
 
 #include "components/autofill/core/browser/autofill_field.h"
+#include "components/autofill/core/browser/data_model/autofill_offer_data.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
+#include "components/autofill/core/browser/data_model/credit_card_cloud_token_data.h"
+#include "components/autofill/core/browser/data_model/iban.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/form_structure.h"
+#include "components/autofill/core/browser/proto/api_v1.pb.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
 
 class PrefService;
@@ -28,9 +33,112 @@ class AutofillProfile;
 class AutofillTable;
 struct FormData;
 struct FormFieldData;
+struct FormDataPredictions;
+struct FormFieldDataPredictions;
+
+// Defined by pair-wise equality of all members.
+bool operator==(const FormFieldDataPredictions& a,
+                const FormFieldDataPredictions& b);
+
+inline bool operator!=(const FormFieldDataPredictions& a,
+                       const FormFieldDataPredictions& b) {
+  return !(a == b);
+}
+
+// Holds iff the underlying FormDatas sans field values are equal and the
+// remaining members are pairwise equal.
+bool operator==(const FormDataPredictions& a, const FormDataPredictions& b);
+
+inline bool operator!=(const FormDataPredictions& a,
+                       const FormDataPredictions& b) {
+  return !(a == b);
+}
 
 // Common utilities shared amongst Autofill tests.
 namespace test {
+
+// A compound data type that contains the type, the value and the verification
+// status for a form group entry (an AutofillProfile).
+struct FormGroupValue {
+  ServerFieldType type;
+  std::string value;
+  structured_address::VerificationStatus verification_status =
+      structured_address::VerificationStatus::kNoStatus;
+};
+
+// Convenience declaration for multiple FormGroup values.
+using FormGroupValues = std::vector<FormGroupValue>;
+
+using RandomizeFrame = base::StrongAlias<struct RandomizeFrameTag, bool>;
+
+// AutofillEnvironment encapsulates global state for test data that should
+// be reset automatically after each test.
+class AutofillEnvironment {
+ public:
+  static AutofillEnvironment& GetCurrent(const base::Location& = FROM_HERE);
+
+  AutofillEnvironment();
+  AutofillEnvironment(const AutofillEnvironment&) = delete;
+  AutofillEnvironment& operator=(const AutofillEnvironment&) = delete;
+  ~AutofillEnvironment();
+
+  LocalFrameToken NextLocalFrameToken();
+  FormRendererId NextFormRendererId();
+  FieldRendererId NextFieldRendererId();
+
+ private:
+  static AutofillEnvironment* current_instance_;
+
+  // Use some distinct 64 bit numbers to start the counters.
+  uint64_t local_frame_token_counter_high_ = 0xAAAAAAAAAAAAAAAA;
+  uint64_t local_frame_token_counter_low_ = 0xBBBBBBBBBBBBBBBB;
+  FormRendererId::underlying_type form_renderer_id_counter_ = 10;
+  FieldRendererId::underlying_type field_renderer_id_counter_ = 10;
+};
+
+// Creates non-empty LocalFrameToken. If `randomize` is false, the
+// LocalFrameToken is stable across multiple calls.
+LocalFrameToken MakeLocalFrameToken(
+    RandomizeFrame randomize = RandomizeFrame(false));
+
+// Creates new, pairwise distinct FormRendererIds.
+inline FormRendererId MakeFormRendererId() {
+  return AutofillEnvironment::GetCurrent().NextFormRendererId();
+}
+
+// Creates new, pairwise distinct FieldRendererIds.
+inline FieldRendererId MakeFieldRendererId() {
+  return AutofillEnvironment::GetCurrent().NextFieldRendererId();
+}
+
+// Creates new, pairwise distinct FormGlobalIds. If `randomize` is true, the
+// LocalFrameToken is generated randomly, otherwise it is stable across multiple
+// calls.
+inline FormGlobalId MakeFormGlobalId(
+    RandomizeFrame randomize = RandomizeFrame(false)) {
+  return {MakeLocalFrameToken(randomize), MakeFormRendererId()};
+}
+
+// Creates new, pairwise distinct FieldGlobalIds. If `randomize` is true, the
+// LocalFrameToken is generated randomly, otherwise it is stable.
+inline FieldGlobalId MakeFieldGlobalId(
+    RandomizeFrame randomize = RandomizeFrame(false)) {
+  return {MakeLocalFrameToken(randomize), MakeFieldRendererId()};
+}
+
+// Returns a copy of `form` with cleared values.
+FormData WithoutValues(FormData form);
+
+// Helper function to set values and verification statuses to a form group.
+void SetFormGroupValues(FormGroup& form_group,
+                        const std::vector<FormGroupValue>& values);
+
+// Helper function to verify the expectation of values and verification
+// statuses in a form group. If |ignore_status| is set, status checking is
+// omitted.
+void VerifyFormGroupValues(const FormGroup& form_group,
+                           const std::vector<FormGroupValue>& values,
+                           bool ignore_status = false);
 
 const char kEmptyOrigin[] = "";
 
@@ -50,6 +158,21 @@ void CreateTestFormField(const char* label,
                          const char* type,
                          FormFieldData* field);
 
+void CreateTestFormField(const char* label,
+                         const char* name,
+                         const char* value,
+                         const char* type,
+                         const char* autocomplete,
+                         FormFieldData* field);
+
+void CreateTestFormField(const char* label,
+                         const char* name,
+                         const char* value,
+                         const char* type,
+                         const char* autocomplete,
+                         uint64_t max_length,
+                         FormFieldData* field);
+
 // Provides a quick way to populate a select field.
 void CreateTestSelectField(const char* label,
                            const char* name,
@@ -59,8 +182,25 @@ void CreateTestSelectField(const char* label,
                            size_t select_size,
                            FormFieldData* field);
 
+void CreateTestSelectField(const char* label,
+                           const char* name,
+                           const char* value,
+                           const char* autocomplete,
+                           const std::vector<const char*>& values,
+                           const std::vector<const char*>& contents,
+                           size_t select_size,
+                           FormFieldData* field);
+
 void CreateTestSelectField(const std::vector<const char*>& values,
                            FormFieldData* field);
+
+// Provides a quick way to populate a datalist field.
+void CreateTestDatalistField(const char* label,
+                             const char* name,
+                             const char* value,
+                             const std::vector<const char*>& values,
+                             const std::vector<const char*>& labels,
+                             FormFieldData* field);
 
 // Populates |form| with data corresponding to a simple address form.
 // Note that this actually appends fields to the form data, which can be useful
@@ -87,6 +227,11 @@ void CreateTestCreditCardFormData(FormData* form,
                                   bool use_month_type,
                                   bool split_names = false,
                                   const char* unique_id = nullptr);
+
+// Strips those members from |form| and |field| that are not serialized via
+// mojo, i.e., resets them to `{}`.
+FormData WithoutUnserializedData(FormData form);
+FormFieldData WithoutUnserializedData(FormFieldData field);
 
 // Returns a full profile with valid info according to rules for Canada.
 AutofillProfile GetFullValidProfileForCanada();
@@ -118,6 +263,9 @@ AutofillProfile GetServerProfile();
 // Returns a server profile full of dummy info, different to the above.
 AutofillProfile GetServerProfile2();
 
+// Returns an IBAN full of dummy info.
+IBAN GetIBAN();
+
 // Returns a credit card full of dummy info.
 CreditCard GetCreditCard();
 
@@ -133,14 +281,43 @@ CreditCard GetIncompleteCreditCard();
 
 // Returns a masked server card full of dummy info.
 CreditCard GetMaskedServerCard();
+CreditCard GetMaskedServerCardWithNonLegacyId();
+CreditCard GetMaskedServerCardWithLegacyId();
 CreditCard GetMaskedServerCardAmex();
+CreditCard GetMaskedServerCardWithNickname();
 
 // Returns a full server card full of dummy info.
 CreditCard GetFullServerCard();
 
+// Returns a virtual card full of dummy info.
+CreditCard GetVirtualCard();
+
 // Returns a randomly generated credit card of |record_type|. Note that the
 // card is not guaranteed to be valid/sane from a card validation standpoint.
 CreditCard GetRandomCreditCard(CreditCard::RecordType record_Type);
+
+// Returns a credit card cloud token data full of dummy info.
+CreditCardCloudTokenData GetCreditCardCloudTokenData1();
+
+// Returns a credit card cloud token data full of dummy info, different from the
+// one above.
+CreditCardCloudTokenData GetCreditCardCloudTokenData2();
+
+// Returns an Autofill card-linked offer data full of dummy info. Use
+// |offer_id| to optionally set the offer id.
+AutofillOfferData GetCardLinkedOfferData1(int64_t offer_id = 111);
+
+// Returns an Autofill card-linked offer data full of dummy info, different from
+// the one above. Use |offer_id| to optionally set the offer id.
+AutofillOfferData GetCardLinkedOfferData2(int64_t offer_id = 222);
+
+// Returns an Autofill promo code offer data full of dummy info, using |origin|
+// if provided and expired if |is_expired| is true. Use |offer_id| to optionally
+// set the offer id.
+AutofillOfferData GetPromoCodeOfferData(
+    GURL origin = GURL("http://www.example.com"),
+    bool is_expired = false,
+    int64_t offer_id = 333);
 
 // A unit testing utility that is common to a number of the Autofill unit
 // tests.  |SetProfileInfo| provides a quick way to populate a profile with
@@ -158,7 +335,10 @@ void SetProfileInfo(AutofillProfile* profile,
                     const char* state,
                     const char* zipcode,
                     const char* country,
-                    const char* phone);
+                    const char* phone,
+                    bool finalize = true,
+                    structured_address::VerificationStatus =
+                        structured_address::VerificationStatus::kObserved);
 
 // This one doesn't require the |dependent_locality|.
 void SetProfileInfo(AutofillProfile* profile,
@@ -173,14 +353,29 @@ void SetProfileInfo(AutofillProfile* profile,
                     const char* state,
                     const char* zipcode,
                     const char* country,
-                    const char* phone);
+                    const char* phone,
+                    bool finalize = true,
+                    structured_address::VerificationStatus =
+                        structured_address::VerificationStatus::kObserved);
 
-void SetProfileInfoWithGuid(AutofillProfile* profile,
-    const char* guid, const char* first_name, const char* middle_name,
-    const char* last_name, const char* email, const char* company,
-    const char* address1, const char* address2, const char* city,
-    const char* state, const char* zipcode, const char* country,
-    const char* phone);
+void SetProfileInfoWithGuid(
+    AutofillProfile* profile,
+    const char* guid,
+    const char* first_name,
+    const char* middle_name,
+    const char* last_name,
+    const char* email,
+    const char* company,
+    const char* address1,
+    const char* address2,
+    const char* city,
+    const char* state,
+    const char* zipcode,
+    const char* country,
+    const char* phone,
+    bool finalize = true,
+    structured_address::VerificationStatus =
+        structured_address::VerificationStatus::kObserved);
 
 // A unit testing utility that is common to a number of the Autofill unit
 // tests.  |SetCreditCardInfo| provides a quick way to populate a credit card
@@ -243,24 +438,46 @@ void FillUploadField(AutofillUploadContents::Field* field,
                      unsigned autofill_type,
                      const std::vector<unsigned>& validity_states);
 
-// Fills the query form |field| with the information passed by parameter. If the
-// value of a const char* parameter is NULL, the corresponding attribute won't
-// be set at all, as opposed to being set to empty string.
-void FillQueryField(AutofillQueryContents::Form::Field* field,
-                    unsigned signature,
-                    const char* name,
-                    const char* control_type);
+// Creates the structure of signatures that would be encoded by
+// FormStructure::EncodeUploadRequest() and FormStructure::EncodeQueryRequest()
+// and consumed by FormStructure::ParseQueryResponse() and
+// FormStructure::ParseApiQueryResponse().
+//
+// Perhaps a neater way would be to move this to TestFormStructure.
+std::vector<FormSignature> GetEncodedSignatures(const FormStructure& form);
+std::vector<FormSignature> GetEncodedSignatures(
+    const std::vector<FormStructure*>& forms);
 
 // Calls the required functions on the given external delegate to cause the
 // delegate to display a popup.
 void GenerateTestAutofillPopup(
     AutofillExternalDelegate* autofill_external_delegate);
 
-std::string ObfuscatedCardDigitsAsUTF8(const std::string& str);
+std::string ObfuscatedCardDigitsAsUTF8(const std::string& str,
+                                       int obfuscation_length = 4);
 
+// Returns 2-digit month string, like "02", "10".
+std::string NextMonth();
 std::string LastYear();
 std::string NextYear();
 std::string TenYearsFromNow();
+
+void AddFieldSuggestionToForm(
+    const autofill::FormFieldData& field_data,
+    ServerFieldType field_type,
+    ::autofill::AutofillQueryResponse_FormSuggestion* form_suggestion);
+
+// Adds |field_types| predictions of |field_data| to |form_suggestion| query
+// response. Assumes int type can be cast to ServerFieldType.
+void AddFieldPredictionsToForm(
+    const autofill::FormFieldData& field_data,
+    const std::vector<int>& field_types,
+    ::autofill::AutofillQueryResponse_FormSuggestion* form_suggestion);
+
+void AddFieldPredictionsToForm(
+    const autofill::FormFieldData& field_data,
+    const std::vector<ServerFieldType>& field_types,
+    ::autofill::AutofillQueryResponse_FormSuggestion* form_suggestion);
 
 }  // namespace test
 }  // namespace autofill

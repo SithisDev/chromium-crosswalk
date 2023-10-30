@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@ import android.graphics.Bitmap;
 import android.view.ViewGroup;
 
 import org.chromium.ui.base.ViewAndroidDelegate;
-import org.chromium.ui_base.web.CursorType;
+import org.chromium.ui.mojom.CursorType;
 
 /**
  * Implementation of the abstract class {@link ViewAndroidDelegate} for content shell.

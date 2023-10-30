@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,37 +6,27 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 
 namespace gcm {
 
-FakeGCMDriver::FakeGCMDriver()
-    : GCMDriver(
-          base::FilePath(),
-          nullptr,
-          base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
-              &test_url_loader_factory_)) {}
+FakeGCMDriver::FakeGCMDriver() : GCMDriver(base::FilePath(), nullptr) {}
 
 FakeGCMDriver::FakeGCMDriver(
+    const base::FilePath& store_path,
     const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner)
-    : GCMDriver(
-          base::FilePath(),
-          blocking_task_runner,
-          base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
-              &test_url_loader_factory_)) {}
+    : GCMDriver(store_path, blocking_task_runner) {}
 
-FakeGCMDriver::~FakeGCMDriver() {
-}
+FakeGCMDriver::~FakeGCMDriver() = default;
 
 void FakeGCMDriver::ValidateRegistration(
     const std::string& app_id,
     const std::vector<std::string>& sender_ids,
     const std::string& registration_id,
-    const ValidateRegistrationCallback& callback) {
+    ValidateRegistrationCallback callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback, true /* is_valid */));
+      FROM_HERE, base::BindOnce(std::move(callback), true /* is_valid */));
 }
 
 void FakeGCMDriver::OnSignedIn() {
@@ -51,12 +41,6 @@ void FakeGCMDriver::AddConnectionObserver(GCMConnectionObserver* observer) {
 void FakeGCMDriver::RemoveConnectionObserver(GCMConnectionObserver* observer) {
 }
 
-void FakeGCMDriver::Enable() {
-}
-
-void FakeGCMDriver::Disable() {
-}
-
 GCMClient* FakeGCMDriver::GetGCMClientForTesting() const {
   return nullptr;
 }
@@ -69,13 +53,12 @@ bool FakeGCMDriver::IsConnected() const {
   return true;
 }
 
-void FakeGCMDriver::GetGCMStatistics(const GetGCMStatisticsCallback& callback,
-                                     ClearActivityLogs clear_logs) {
-}
+void FakeGCMDriver::GetGCMStatistics(GetGCMStatisticsCallback callback,
+                                     ClearActivityLogs clear_logs) {}
 
-void FakeGCMDriver::SetGCMRecording(const GetGCMStatisticsCallback& callback,
-                                    bool recording) {
-}
+void FakeGCMDriver::SetGCMRecording(
+    const GCMStatisticsRecordingCallback& callback,
+    bool recording) {}
 
 GCMClient::Result FakeGCMDriver::EnsureStarted(
     GCMClient::StartMode start_mode) {
@@ -105,17 +88,13 @@ void FakeGCMDriver::UpdateAccountMapping(
     const AccountMapping& account_mapping) {
 }
 
-void FakeGCMDriver::RemoveAccountMapping(const std::string& account_id) {
-}
+void FakeGCMDriver::RemoveAccountMapping(const CoreAccountId& account_id) {}
 
 base::Time FakeGCMDriver::GetLastTokenFetchTime() {
   return base::Time();
 }
 
 void FakeGCMDriver::SetLastTokenFetchTime(const base::Time& time) {
-}
-
-void FakeGCMDriver::WakeFromSuspendForHeartbeat(bool wake) {
 }
 
 InstanceIDHandler* FakeGCMDriver::GetInstanceIDHandlerInternal() {

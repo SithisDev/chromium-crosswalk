@@ -1,24 +1,31 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <map>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/synchronization/lock.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/page.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "media/media_buildflags.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "ppapi/buildflags/buildflags.h"
+#include "third_party/blink/public/common/buildflags.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 
-#if BUILDFLAG(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PPAPI)
 #include "content/test/ppapi/ppapi_test.h"
 #endif
 
@@ -28,6 +35,9 @@ namespace {
 class AcceptHeaderTest : public ContentBrowserTest {
  public:
   AcceptHeaderTest() {}
+
+  AcceptHeaderTest(const AcceptHeaderTest&) = delete;
+  AcceptHeaderTest& operator=(const AcceptHeaderTest&) = delete;
 
   void SetUpOnMainThread() override {
     embedded_test_server()->RegisterRequestMonitor(base::BindRepeating(
@@ -62,6 +72,21 @@ class AcceptHeaderTest : public ContentBrowserTest {
     return it->second;
   }
 
+#if BUILDFLAG(ENABLE_AV1_DECODER) || BUILDFLAG(ENABLE_JXL_DECODER)
+  std::string GetOptionalImageCodecs() const {
+    std::string result;
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+    if (base::FeatureList::IsEnabled(blink::features::kJXL)) {
+      result.append("image/jxl,");
+    }
+#endif
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+    result.append("image/avif,");
+#endif
+    return result;
+  }
+#endif  // BUILDFLAG(ENABLE_AV1_DECODER) || BUILDFLAG(ENABLE_JXL_DECODER)
+
  private:
   void Monitor(const net::test_server::HttpRequest& request) {
     auto it = request.headers.find("Accept");
@@ -86,24 +111,37 @@ class AcceptHeaderTest : public ContentBrowserTest {
   base::Lock waiting_lock_;
   std::unique_ptr<base::RunLoop> waiting_run_loop_;
   std::string waiting_for_path_;
-
-  DISALLOW_COPY_AND_ASSIGN(AcceptHeaderTest);
 };
 
 IN_PROC_BROWSER_TEST_F(AcceptHeaderTest, Check) {
-  NavigateToURL(shell(), embedded_test_server()->GetURL("/accept-header.html"));
+  EXPECT_TRUE(NavigateToURL(
+      shell(), embedded_test_server()->GetURL("/accept-header.html")));
 
   // ResourceType::kMainFrame
-  EXPECT_EQ(
+  std::string expected_main_frame_accept_header =
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,"
-      "image/apng,*/*;q=0.8,application/signed-exchange;v=b3",
-      GetFor("/accept-header.html"));
+      "image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9";
+#if BUILDFLAG(ENABLE_AV1_DECODER) || BUILDFLAG(ENABLE_JXL_DECODER)
+  expected_main_frame_accept_header =
+      "text/html,application/xhtml+xml,application/xml;q=0.9," +
+      GetOptionalImageCodecs() +
+      "image/webp,image/apng,*/*;q=0.8,"
+      "application/signed-exchange;v=b3;q=0.9";
+#endif
+  EXPECT_EQ(expected_main_frame_accept_header, GetFor("/accept-header.html"));
 
   // ResourceType::kSubFrame
-  EXPECT_EQ(
+  std::string expected_sub_frame_accept_header =
       "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,"
-      "image/apng,*/*;q=0.8,application/signed-exchange;v=b3",
-      GetFor("/iframe.html"));
+      "image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9";
+#if BUILDFLAG(ENABLE_AV1_DECODER) || BUILDFLAG(ENABLE_JXL_DECODER)
+  expected_sub_frame_accept_header =
+      "text/html,application/xhtml+xml,application/xml;q=0.9," +
+      GetOptionalImageCodecs() +
+      "image/webp,image/apng,*/*;q=0.8,"
+      "application/signed-exchange;v=b3;q=0.9";
+#endif
+  EXPECT_EQ(expected_sub_frame_accept_header, GetFor("/iframe.html"));
 
   // ResourceType::kStylesheet
   EXPECT_EQ("text/css,*/*;q=0.1", GetFor("/test.css"));
@@ -112,7 +150,14 @@ IN_PROC_BROWSER_TEST_F(AcceptHeaderTest, Check) {
   EXPECT_EQ("*/*", GetFor("/test.js"));
 
   // ResourceType::kImage
-  EXPECT_EQ("image/webp,image/apng,image/*,*/*;q=0.8", GetFor("/image.gif"));
+  std::string expected_image_accept_header =
+      "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
+#if BUILDFLAG(ENABLE_AV1_DECODER) || BUILDFLAG(ENABLE_JXL_DECODER)
+  expected_image_accept_header =
+      GetOptionalImageCodecs() +
+      "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
+#endif
+  EXPECT_EQ(expected_image_accept_header, GetFor("/image.gif"));
 
   // ResourceType::kFontResource
   EXPECT_EQ("*/*", GetFor("/test.js"));
@@ -125,13 +170,13 @@ IN_PROC_BROWSER_TEST_F(AcceptHeaderTest, Check) {
 
 // Shared workers aren't implemented on Android.
 // https://bugs.chromium.org/p/chromium/issues/detail?id=154571
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // ResourceType::kSharedWorker
   EXPECT_EQ("*/*", GetFor("/shared_worker.js"));
 #endif
 
   // ResourceType::kPrefetch
-  EXPECT_EQ("application/signed-exchange;v=b3;q=0.9,*/*;q=0.8",
+  EXPECT_EQ("application/signed-exchange;v=b3;q=0.7,*/*;q=0.8",
             GetFor("/prefetch"));
 
   // ResourceType::kXhr
@@ -149,8 +194,7 @@ IN_PROC_BROWSER_TEST_F(AcceptHeaderTest, Check) {
   // Ensure that if an Accept header is already set, it is not overwritten.
   EXPECT_EQ("custom/type", GetFor("/xhr_with_accept_header"));
 
-  shell()->web_contents()->GetManifest(
-      base::BindOnce([](const GURL&, const blink::Manifest&) {}));
+  shell()->web_contents()->GetPrimaryPage().GetManifest(base::DoNothing());
 
   // ResourceType::kSubResource
   EXPECT_EQ("*/*", GetFor("/manifest"));
@@ -159,8 +203,7 @@ IN_PROC_BROWSER_TEST_F(AcceptHeaderTest, Check) {
   // ChromeAcceptHeaderTest.ObjectAndFavicon.
 }
 
-#if BUILDFLAG(ENABLE_PLUGINS)
-
+#if BUILDFLAG(ENABLE_PPAPI)
 // Checks Accept header for ResourceType::kPluginResource.
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, PluginAcceptHeader) {
   net::EmbeddedTestServer server(net::EmbeddedTestServer::TYPE_HTTP);
@@ -191,7 +234,7 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, PluginAcceptHeader) {
   // Since the server uses local variables.
   ASSERT_TRUE(server.ShutdownAndWaitUntilComplete());
 }
+#endif  // BUILDFLAG(ENABLE_PPAPI)
 
-#endif  // BUILDFLAG(ENABLE_PLUGINS)
 }  //  namespace
 }  //  namespace content

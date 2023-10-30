@@ -1,7 +1,8 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/files/file_path.h"
 #include "components/leveldb_proto/public/proto_database.h"
 
 #include <stddef.h>
@@ -11,18 +12,19 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/leveldb_proto/internal/leveldb_database.h"
 #include "components/leveldb_proto/internal/proto_database_impl.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
+#include "components/leveldb_proto/public/shared_proto_database_client_list.h"
 #include "components/leveldb_proto/testing/proto/test_db.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -30,7 +32,7 @@
 #include "third_party/leveldatabase/leveldb_chrome.h"
 
 using base::ScopedTempDir;
-using base::test::ScopedTaskEnvironment;
+using base::test::TaskEnvironment;
 using leveldb_env::Options;
 using testing::_;
 using testing::Invoke;
@@ -82,6 +84,11 @@ class MockDB : public LevelDB {
                     std::map<std::string, std::string>*,
                     const leveldb::ReadOptions&,
                     const std::string&));
+  MOCK_METHOD4(LoadKeysAndEntriesWhile,
+               bool(std::map<std::string, std::string>*,
+                    const leveldb::ReadOptions&,
+                    const std::string&,
+                    const KeyIteratorController&));
   MOCK_METHOD5(LoadKeysAndEntriesWhile,
                bool(const KeyFilter&,
                     std::map<std::string, std::string>*,
@@ -124,6 +131,9 @@ class OptionsEqMatcher : public MatcherInterface<const Options&> {
  public:
   explicit OptionsEqMatcher(const Options& expected) : expected_(expected) {}
 
+  OptionsEqMatcher(const OptionsEqMatcher&) = delete;
+  OptionsEqMatcher& operator=(const OptionsEqMatcher&) = delete;
+
   bool MatchAndExplain(const Options& actual,
                        MatchResultListener* listener) const override {
     return actual.comparator == expected_.comparator &&
@@ -153,8 +163,6 @@ class OptionsEqMatcher : public MatcherInterface<const Options&> {
 
  private:
   Options expected_;
-
-  DISALLOW_COPY_AND_ASSIGN(OptionsEqMatcher);
 };
 
 Matcher<const Options&> OptionsEq(const Options& expected) {
@@ -222,6 +230,7 @@ class UniqueProtoDatabaseTest : public testing::Test {
       : options_(MakeMatcher(new OptionsEqMatcher(CreateSimpleOptions()))) {}
   void SetUp() override {
     db_ = std::make_unique<ProtoDatabaseImpl<TestProto>>(
+        ProtoDbType::TEST_DATABASE0, base::FilePath(),
         base::ThreadTaskRunnerHandle::Get());
   }
 
@@ -231,7 +240,7 @@ class UniqueProtoDatabaseTest : public testing::Test {
   }
 
   const Matcher<const Options&> options_;
-  ScopedTaskEnvironment task_environment_;
+  TaskEnvironment task_environment_;
   std::unique_ptr<ProtoDatabaseImpl<TestProto>> db_;
 };
 
@@ -329,7 +338,7 @@ ACTION_P(AppendLoadEntries, model) {
 }
 
 ACTION_P(AppendLoadKeysAndEntries, model) {
-  std::map<std::string, std::string>* output = arg1;
+  std::map<std::string, std::string>* output = arg0;
   for (const auto& pair : model)
     output->insert(std::make_pair(pair.first, pair.second.SerializeAsString()));
 
@@ -366,7 +375,7 @@ TEST_F(UniqueProtoDatabaseTest, TestDBLoadSuccess) {
                         base::BindOnce(&MockDatabaseCaller::InitStatusCallback,
                                        base::Unretained(&caller)));
 
-  EXPECT_CALL(*mock_db, LoadKeysAndEntriesWhile(_, _, _, _, _))
+  EXPECT_CALL(*mock_db, LoadKeysAndEntriesWhile(_, _, _, _))
       .WillOnce(AppendLoadKeysAndEntries(model));
   EXPECT_CALL(caller, LoadKeysAndEntriesCallback1(true, _))
       .WillOnce(VerifyLoadKeysAndEntries(testing::ByRef(model)));
@@ -548,9 +557,7 @@ TEST_F(UniqueProtoDatabaseTest, TestDBRemoveKeys) {
         std::move(signal).Run();
       },
       run_update_entries.QuitClosure());
-  ProtoDatabaseImpl<TestProto>* wrapper =
-      reinterpret_cast<ProtoDatabaseImpl<TestProto>*>(db_.get());
-  wrapper->RemoveKeysForTesting(
+  db_->RemoveKeysForTesting(
       base::BindRepeating([](const std::string& str) { return true; }),
       kTestPrefix, std::move(expect_update_success));
   run_update_entries.Run();
@@ -561,7 +568,7 @@ class UniqueProtoDatabaseLevelDBTest : public testing::Test {
   void TearDown() override { base::RunLoop().RunUntilIdle(); }
 
  private:
-  ScopedTaskEnvironment scoped_task_environment_;
+  TaskEnvironment task_environment_;
 };
 
 TEST_F(UniqueProtoDatabaseLevelDBTest, TestDBSaveAndLoadKeys) {
@@ -570,13 +577,16 @@ TEST_F(UniqueProtoDatabaseLevelDBTest, TestDBSaveAndLoadKeys) {
   base::Thread db_thread("dbthread");
   ASSERT_TRUE(db_thread.Start());
   std::unique_ptr<ProtoDatabase<TestProto>> db =
-      ProtoDatabaseProvider::CreateUniqueDB<TestProto>(db_thread.task_runner());
+      ProtoDatabaseProvider::GetUniqueDB<TestProto>(ProtoDbType::TEST_DATABASE0,
+                                                    temp_dir.GetPath(),
+                                                    db_thread.task_runner());
 
   base::RunLoop init_loop;
-  db->Init(kTestLevelDBClientName, temp_dir.GetPath(), CreateSimpleOptions(),
-           base::BindOnce([](base::OnceClosure closure,
-                             bool success) { std::move(closure).Run(); },
-                          init_loop.QuitClosure()));
+  db->Init(base::BindOnce(
+      [](base::OnceClosure closure, leveldb_proto::Enums::InitStatus status) {
+        std::move(closure).Run();
+      },
+      init_loop.QuitClosure()));
   init_loop.Run();
 
   base::RunLoop run_update_entries;
@@ -793,7 +803,7 @@ TEST_F(UniqueProtoDatabaseTest, TestDBRemoveFailure) {
 // This tests that normal usage of the real database does not cause any
 // threading violations.
 TEST(UniqueProtoDatabaseThreadingTest, TestDBDestruction) {
-  ScopedTaskEnvironment scoped_task_environment;
+  TaskEnvironment task_environment;
 
   ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
@@ -802,19 +812,21 @@ TEST(UniqueProtoDatabaseThreadingTest, TestDBDestruction) {
   ASSERT_TRUE(db_thread.Start());
 
   std::unique_ptr<ProtoDatabase<TestProto>> db =
-      ProtoDatabaseProvider::CreateUniqueDB<TestProto>(db_thread.task_runner());
+      ProtoDatabaseProvider::GetUniqueDB<TestProto>(ProtoDbType::TEST_DATABASE0,
+                                                    temp_dir.GetPath(),
+                                                    db_thread.task_runner());
 
   MockDatabaseCaller caller;
   EXPECT_CALL(caller, InitCallback(_));
   base::RunLoop init_loop;
-  db->Init(kTestLevelDBClientName, temp_dir.GetPath(), CreateSimpleOptions(),
-           base::BindOnce(
-               [](MockDatabaseCaller* caller, base::OnceClosure closure,
-                  bool success) {
-                 caller->InitCallback(success);
-                 std::move(closure).Run();
-               },
-               &caller, init_loop.QuitClosure()));
+  db->Init(base::BindOnce(
+      [](MockDatabaseCaller* caller, base::OnceClosure closure,
+         leveldb_proto::Enums::InitStatus status) {
+        bool success = status == Enums::kOK;
+        caller->InitCallback(success);
+        std::move(closure).Run();
+      },
+      &caller, init_loop.QuitClosure()));
   init_loop.Run();
 
   db.reset();
@@ -827,7 +839,7 @@ TEST(UniqueProtoDatabaseThreadingTest, TestDBDestruction) {
 // This tests that normal usage of the real database does not cause any
 // threading violations.
 TEST(UniqueProtoDatabaseThreadingTest, TestDBDestroy) {
-  ScopedTaskEnvironment scoped_task_environment;
+  TaskEnvironment task_environment;
 
   ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
@@ -836,19 +848,21 @@ TEST(UniqueProtoDatabaseThreadingTest, TestDBDestroy) {
   ASSERT_TRUE(db_thread.Start());
 
   std::unique_ptr<ProtoDatabase<TestProto>> db =
-      ProtoDatabaseProvider::CreateUniqueDB<TestProto>(db_thread.task_runner());
+      ProtoDatabaseProvider::GetUniqueDB<TestProto>(ProtoDbType::TEST_DATABASE0,
+                                                    temp_dir.GetPath(),
+                                                    db_thread.task_runner());
 
   MockDatabaseCaller caller;
   EXPECT_CALL(caller, InitCallback(_));
   base::RunLoop init_loop;
-  db->Init(kTestLevelDBClientName, temp_dir.GetPath(), CreateSimpleOptions(),
-           base::BindOnce(
-               [](MockDatabaseCaller* caller, base::OnceClosure closure,
-                  bool success) {
-                 caller->InitCallback(success);
-                 std::move(closure).Run();
-               },
-               &caller, init_loop.QuitClosure()));
+  db->Init(base::BindOnce(
+      [](MockDatabaseCaller* caller, base::OnceClosure closure,
+         leveldb_proto::Enums::InitStatus status) {
+        bool success = status == Enums::kOK;
+        caller->InitCallback(success);
+        std::move(closure).Run();
+      },
+      &caller, init_loop.QuitClosure()));
   init_loop.Run();
 
   EXPECT_CALL(caller, DestroyCallback(_));
@@ -889,7 +903,7 @@ void TestLevelDBSaveAndLoad(bool close_after_save) {
   EXPECT_TRUE(db->Save(save_entries, remove_keys, &status));
 
   if (close_after_save) {
-    db.reset(new LevelDB(kTestLevelDBClientName));
+    db = std::make_unique<LevelDB>(kTestLevelDBClientName);
     EXPECT_TRUE(db->Init(temp_dir.GetPath(), CreateSimpleOptions()));
   }
 

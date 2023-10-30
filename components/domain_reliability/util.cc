@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <stddef.h>
 
 #include "base/callback.h"
-#include "base/logging.h"
 #include "base/memory/weak_ptr.h"
-#include "base/stl_util.h"
+#include "base/notreached.h"
+#include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "net/base/net_errors.h"
@@ -41,6 +41,7 @@ const struct NetErrorMapping {
     {net::ERR_CERT_COMMON_NAME_INVALID, "ssl.cert.name_invalid"},
     {net::ERR_CERT_DATE_INVALID, "ssl.cert.date_invalid"},
     {net::ERR_CERT_AUTHORITY_INVALID, "ssl.cert.authority_invalid"},
+    {net::ERR_CERT_KNOWN_INTERCEPTION_BLOCKED, "ssl.cert.authority_invalid"},
     {net::ERR_CERT_REVOKED, "ssl.cert.revoked"},
     {net::ERR_CERT_INVALID, "ssl.cert.invalid"},
     {net::ERR_EMPTY_RESPONSE, "http.response.empty"},
@@ -70,7 +71,8 @@ const struct NetErrorMapping {
 
 bool CanReportFullBeaconURLToCollector(const GURL& beacon_url,
                                        const GURL& collector_url) {
-  return beacon_url.GetOrigin() == collector_url.GetOrigin();
+  return beacon_url.DeprecatedGetOriginAsURL() ==
+         collector_url.DeprecatedGetOriginAsURL();
 }
 
 }  // namespace
@@ -89,7 +91,7 @@ bool GetDomainReliabilityBeaconStatus(
   }
 
   // TODO(juliatuttle): Consider sorting and using binary search?
-  for (size_t i = 0; i < base::size(net_error_map); i++) {
+  for (size_t i = 0; i < std::size(net_error_map); i++) {
     if (net_error_map[i].net_error == net_error) {
       *beacon_status_out = net_error_map[i].beacon_status;
       return true;
@@ -98,87 +100,44 @@ bool GetDomainReliabilityBeaconStatus(
   return false;
 }
 
-// TODO(juliatuttle): Consider using NPN/ALPN instead, if there's a good way to
+// TODO(juliatuttle): Consider using ALPN instead, if there's a good way to
 //                    differentiate HTTP and HTTPS.
 std::string GetDomainReliabilityProtocol(
     net::HttpResponseInfo::ConnectionInfo connection_info,
     bool ssl_info_populated) {
-  switch (connection_info) {
-    case net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN:
-      return "";
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP0_9:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP1_0:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP1_1:
+  switch (net::HttpResponseInfo::ConnectionInfoToCoarse(connection_info)) {
+    case net::HttpResponseInfo::CONNECTION_INFO_COARSE_HTTP1:
       return ssl_info_populated ? "HTTPS" : "HTTP";
-    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_SPDY2:
-    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_SPDY3:
-    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_HTTP2_14:
-    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_HTTP2_15:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP2:
+    case net::HttpResponseInfo::CONNECTION_INFO_COARSE_HTTP2:
       return "SPDY";
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_UNKNOWN_VERSION:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_32:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_33:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_34:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_35:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_36:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_37:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_38:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_39:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_40:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_41:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_42:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_43:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_44:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_45:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_46:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_47:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_48:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_99:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_999:
+    case net::HttpResponseInfo::CONNECTION_INFO_COARSE_QUIC:
       return "QUIC";
-    case net::HttpResponseInfo::NUM_OF_CONNECTION_INFOS:
-      NOTREACHED();
+    case net::HttpResponseInfo::CONNECTION_INFO_COARSE_OTHER:
       return "";
   }
   NOTREACHED();
   return "";
 }
 
-int GetNetErrorFromURLRequestStatus(const net::URLRequestStatus& status) {
-  switch (status.status()) {
-    case net::URLRequestStatus::SUCCESS:
-      return net::OK;
-    case net::URLRequestStatus::CANCELED:
-      return net::ERR_ABORTED;
-    case net::URLRequestStatus::FAILED:
-      return status.error();
-    default:
-      NOTREACHED();
-      return net::ERR_FAILED;
-  }
-}
-
-void GetUploadResultFromResponseDetails(
+DomainReliabilityUploader::UploadResult GetUploadResultFromResponseDetails(
     int net_error,
     int http_response_code,
-    base::TimeDelta retry_after,
-    DomainReliabilityUploader::UploadResult* result) {
+    base::TimeDelta retry_after) {
+  DomainReliabilityUploader::UploadResult result;
   if (net_error == net::OK && http_response_code == 200) {
-    result->status = DomainReliabilityUploader::UploadResult::SUCCESS;
-    return;
+    result.status = DomainReliabilityUploader::UploadResult::SUCCESS;
+    return result;
   }
 
-  if (net_error == net::OK &&
-      http_response_code == 503 &&
+  if (net_error == net::OK && http_response_code == 503 &&
       !retry_after.is_zero()) {
-    result->status = DomainReliabilityUploader::UploadResult::RETRY_AFTER;
-    result->retry_after = retry_after;
-    return;
+    result.status = DomainReliabilityUploader::UploadResult::RETRY_AFTER;
+    result.retry_after = retry_after;
+    return result;
   }
 
-  result->status = DomainReliabilityUploader::UploadResult::FAILURE;
-  return;
+  result.status = DomainReliabilityUploader::UploadResult::FAILURE;
+  return result;
 }
 
 // N.B. This uses a std::vector<std::unique_ptr<>> because that's what
@@ -220,8 +179,8 @@ class ActualTimer : public MockableTime::Timer {
   // MockableTime::Timer implementation:
   void Start(const base::Location& posted_from,
              base::TimeDelta delay,
-             const base::Closure& user_task) override {
-    base_timer_.Start(posted_from, delay, user_task);
+             base::OnceClosure user_task) override {
+    base_timer_.Start(posted_from, delay, std::move(user_task));
   }
 
   void Stop() override { base_timer_.Stop(); }
@@ -252,6 +211,10 @@ base::TimeTicks ActualTime::NowTicks() const {
 
 std::unique_ptr<MockableTime::Timer> ActualTime::CreateTimer() {
   return std::unique_ptr<MockableTime::Timer>(new ActualTimer());
+}
+
+const base::TickClock* ActualTime::AsTickClock() const {
+  return base::DefaultTickClock::GetInstance();
 }
 
 }  // namespace domain_reliability

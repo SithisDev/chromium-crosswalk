@@ -1,12 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content_public.browser;
 
-import android.support.annotation.Nullable;
-
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.Nullable;
 
 /**
  * The NavigationController Java wrapper to allow communicating with the native
@@ -43,12 +41,12 @@ public interface NavigationController {
     void goToNavigationIndex(int index);
 
     /**
-     * Goes to the navigation entry before the current one.
+     * Goes to the first non-skippable navigation entry before the current.
      */
     void goBack();
 
     /**
-     * Goes to the navigation entry following the current one.
+     * Goes to the first non-skippable navigation entry following the current.
      */
     void goForward();
 
@@ -137,15 +135,15 @@ public interface NavigationController {
      * Set whether or not we're using a desktop user agent for the currently loaded page.
      * @param override If true, use a desktop user agent.  Use a mobile one otherwise.
      * @param reloadOnChange Reload the page if the UA has changed.
+     * @param caller The caller of this method.
      */
-    public void setUseDesktopUserAgent(boolean override, boolean reloadOnChange);
+    public void setUseDesktopUserAgent(boolean override, boolean reloadOnChange, int caller);
 
     /**
      * Return the NavigationEntry at the given index.
      * @param index Index to retrieve the NavigationEntry for.
      * @return Entry containing info about the navigation, null if the index is out of bounds.
      */
-    @VisibleForTesting
     public NavigationEntry getEntryAtIndex(int index);
 
     /**
@@ -171,6 +169,12 @@ public interface NavigationController {
      *         call discards any transient or pending entries.
      */
     public boolean removeEntryAtIndex(int index);
+
+    /**
+     * Discards any transient or pending entries, then discards all entries after the current entry
+     * index.
+     */
+    void pruneForwardEntries();
 
     /**
      * Gets extra data on the {@link NavigationEntry} at {@code index}.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,13 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
+#include "ppapi/buildflags/buildflags.h"
+
+#if !BUILDFLAG(ENABLE_PLUGINS)
+#error "Plugins should be enabled"
+#endif
 
 class GURL;
 
@@ -19,16 +23,11 @@ namespace base {
 class FilePath;
 }
 
-namespace url {
-class Origin;
-}
-
 namespace content {
 
 class BrowserContext;
 class PluginServiceFilter;
-class ResourceContext;
-struct PepperPluginInfo;
+struct ContentPluginInfo;
 struct WebPluginInfo;
 
 // This must be created on the main thread but it's only called on the IO/file
@@ -36,6 +35,7 @@ struct WebPluginInfo;
 // PluginList interface for querying plugin information. This must be used
 // instead of that to avoid doing expensive disk operations on the IO/UI
 // threads.
+// TODO(http://crbug.com/990013): Only use this on the UI thread.
 class CONTENT_EXPORT PluginService {
  public:
   using GetPluginsCallback =
@@ -68,14 +68,11 @@ class CONTENT_EXPORT PluginService {
       std::vector<std::string>* actual_mime_types) = 0;
 
   // Gets plugin info for an individual plugin and filters the plugins using
-  // the |context| and renderer IDs. This will report whether the data is stale
-  // via |is_stale| and returns whether or not the plugin can be found.
-  // This can be called from any thread.
-  virtual bool GetPluginInfo(int render_process_id,
-                             int render_frame_id,
-                             ResourceContext* context,
+  // the |browser_context|. This will report whether the data is stale via
+  // |is_stale| and returns whether or not the plugin can be found. This must be
+  // called from the UI thread.
+  virtual bool GetPluginInfo(content::BrowserContext* browser_context,
                              const GURL& url,
-                             const url::Origin& main_frame_origin,
                              const std::string& mime_type,
                              bool allow_wildcard,
                              bool* is_stale,
@@ -93,7 +90,7 @@ class CONTENT_EXPORT PluginService {
   // the path doesn't identify a plugin, or the plugin has no display name,
   // this will attempt to generate a display name from the path.
   // This can be called from any thread.
-  virtual base::string16 GetPluginDisplayNameByPath(
+  virtual std::u16string GetPluginDisplayNameByPath(
       const base::FilePath& plugin_path) = 0;
 
   // Asynchronously loads plugins if necessary and then calls back to the
@@ -101,10 +98,15 @@ class CONTENT_EXPORT PluginService {
   // This can be called from any thread.
   virtual void GetPlugins(GetPluginsCallback callback) = 0;
 
-  // Returns information about a pepper plugin if it exists, otherwise nullptr.
-  // The caller does not own the pointer, and it's not guaranteed to live past
-  // the call stack.
-  virtual const PepperPluginInfo* GetRegisteredPpapiPluginInfo(
+  // Synchronously loads plugins if necessary and returns the list of plugin
+  // infos. This can be called from any thread. This method is expected to
+  // not perform any disk IO.
+  virtual std::vector<WebPluginInfo> GetPluginsSynchronous() = 0;
+
+  // Returns information about a plugin if it exists, otherwise `nullptr`. The
+  // caller does not own the pointer, and it's not guaranteed to live past the
+  // call stack.
+  virtual const ContentPluginInfo* GetRegisteredPluginInfo(
       const base::FilePath& plugin_path) = 0;
 
   virtual void SetFilter(PluginServiceFilter* filter) = 0;
@@ -136,12 +138,6 @@ class CONTENT_EXPORT PluginService {
   // Returns true iff PPAPI "dev channel" methods are supported.
   virtual bool PpapiDevChannelSupported(BrowserContext* browser_context,
                                         const GURL& document_url) = 0;
-
-  // Determine the number of PPAPI processes currently tracked by the service.
-  // Exposed primarily for testing purposes.
-  virtual int CountPpapiPluginProcessesForProfile(
-      const base::FilePath& plugin_path,
-      const base::FilePath& profile_data_directory) = 0;
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@ package org.chromium.components.offline_items_collection;
 import org.chromium.base.Callback;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * This interface is a Java counterpart to the C++ OfflineContentProvider
@@ -19,7 +20,7 @@ public interface OfflineContentProvider {
      */
     interface Observer {
         /** See OfflineContentProvider::Observer::OnItemsAdded(...). */
-        void onItemsAdded(ArrayList<OfflineItem> items);
+        void onItemsAdded(List<OfflineItem> items);
 
         /** See OfflineContentProvider::Observer::OnItemRemoved(...). */
         void onItemRemoved(ContentId id);
@@ -29,7 +30,7 @@ public interface OfflineContentProvider {
     }
 
     /** See OfflineContentProvider::OpenItem(...). */
-    void openItem(@LaunchLocation int location, ContentId id);
+    void openItem(OpenParams openParams, ContentId id);
 
     /** See OfflineContentProvider::RemoveItem(...). */
     void removeItem(ContentId id);

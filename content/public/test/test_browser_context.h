@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,36 +7,40 @@
 
 #include <memory>
 
-#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/browser_context.h"
 
 namespace content {
 
 class MockBackgroundSyncController;
+class MockReduceAcceptLanguageControllerDelegate;
 class MockResourceContext;
 class MockSSLHostStateDelegate;
-#if !defined(OS_ANDROID)
 class ZoomLevelDelegate;
-#endif  // !defined(OS_ANDROID)
 
 class TestBrowserContext : public BrowserContext {
  public:
   explicit TestBrowserContext(
       base::FilePath browser_context_dir_path = base::FilePath());
+
+  TestBrowserContext(const TestBrowserContext&) = delete;
+  TestBrowserContext& operator=(const TestBrowserContext&) = delete;
+
   ~TestBrowserContext() override;
 
   // Takes ownership of the temporary directory so that it's not deleted when
   // this object is destructed.
   base::FilePath TakePath();
 
+  void SetReduceAcceptLanguageControllerDelegate(
+      std::unique_ptr<MockReduceAcceptLanguageControllerDelegate> delegate);
   void SetSpecialStoragePolicy(storage::SpecialStoragePolicy* policy);
   void SetPermissionControllerDelegate(
       std::unique_ptr<PermissionControllerDelegate> delegate);
-  net::URLRequestContextGetter* GetRequestContext();
+  void SetPlatformNotificationService(
+      std::unique_ptr<PlatformNotificationService> service);
 
   // Allow clients to make this an incognito context.
   void set_is_off_the_record(bool is_off_the_record) {
@@ -45,40 +49,37 @@ class TestBrowserContext : public BrowserContext {
 
   // BrowserContext implementation.
   base::FilePath GetPath() override;
-#if !defined(OS_ANDROID)
   std::unique_ptr<ZoomLevelDelegate> CreateZoomLevelDelegate(
       const base::FilePath& partition_path) override;
-#endif  // !defined(OS_ANDROID)
   bool IsOffTheRecord() override;
   DownloadManagerDelegate* GetDownloadManagerDelegate() override;
   ResourceContext* GetResourceContext() override;
   BrowserPluginGuestManager* GetGuestManager() override;
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
+  PlatformNotificationService* GetPlatformNotificationService() override;
   PushMessagingService* GetPushMessagingService() override;
+  StorageNotificationService* GetStorageNotificationService() override;
   SSLHostStateDelegate* GetSSLHostStateDelegate() override;
   PermissionControllerDelegate* GetPermissionControllerDelegate() override;
   ClientHintsControllerDelegate* GetClientHintsControllerDelegate() override;
   BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   BackgroundSyncController* GetBackgroundSyncController() override;
   BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate() override;
-  net::URLRequestContextGetter* CreateRequestContext(
-      ProtocolHandlerMap* protocol_handlers,
-      URLRequestInterceptorScopedVector request_interceptors) override;
-  net::URLRequestContextGetter* CreateMediaRequestContext() override;
+  ReduceAcceptLanguageControllerDelegate*
+  GetReduceAcceptLanguageControllerDelegate() override;
 
  private:
   // Hold a reference here because BrowserContext owns lifetime.
-  URLRequestInterceptorScopedVector request_interceptors_;
   base::ScopedTempDir browser_context_dir_;
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
   std::unique_ptr<MockResourceContext> resource_context_;
   scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy_;
   std::unique_ptr<MockSSLHostStateDelegate> ssl_host_state_delegate_;
   std::unique_ptr<PermissionControllerDelegate> permission_controller_delegate_;
   std::unique_ptr<MockBackgroundSyncController> background_sync_controller_;
+  std::unique_ptr<PlatformNotificationService> platform_notification_service_;
+  std::unique_ptr<MockReduceAcceptLanguageControllerDelegate>
+      reduce_accept_language_controller_delegate_;
   bool is_off_the_record_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(TestBrowserContext);
 };
 
 }  // namespace content

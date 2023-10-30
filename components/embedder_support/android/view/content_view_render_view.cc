@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,6 +85,12 @@ void ContentViewRenderView::SurfaceCreated(JNIEnv* env,
 
 void ContentViewRenderView::SurfaceDestroyed(JNIEnv* env,
                                              const JavaParamRef<jobject>& obj) {
+  // When we switch from Chrome to other app we can't detach child surface
+  // controls because it leads to a visible hole: b/157439199. To avoid this we
+  // don't detach surfaces if the surface is going to be destroyed, they will be
+  // detached and freed by OS.
+  compositor_->PreserveChildSurfaceControls();
+
   compositor_->SetSurface(nullptr, false);
   current_surface_format_ = 0;
 }
@@ -98,7 +104,8 @@ void ContentViewRenderView::SurfaceChanged(
     const JavaParamRef<jobject>& surface) {
   if (current_surface_format_ != format) {
     current_surface_format_ = format;
-    compositor_->SetSurface(surface, false /* backed_by_surface_texture */);
+    compositor_->SetSurface(surface,
+                            true /* can_be_used_with_surface_control */);
   }
   compositor_->SetWindowBounds(gfx::Size(width, height));
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,7 @@ AutofillCounter::~AutofillCounter() {
 
 void AutofillCounter::OnInitialized() {
   DCHECK(web_data_service_);
-  sync_tracker_.OnInitialized(base::Bind(&IsAutofillSyncEnabled));
+  sync_tracker_.OnInitialized(base::BindRepeating(&IsAutofillSyncEnabled));
 }
 
 const char* AutofillCounter::GetPrefName() const {

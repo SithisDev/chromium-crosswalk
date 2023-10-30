@@ -1,13 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.minidump_uploader;
 
+import android.util.Pair;
+
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 import java.io.File;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -27,7 +31,26 @@ public class CrashReportMimeWriter {
      * @param destDir The directory in which to write the MIME files.
      */
     public static void rewriteMinidumpsAsMIMEs(File srcDir, File destDir) {
-        nativeRewriteMinidumpsAsMIMEs(srcDir.getAbsolutePath(), destDir.getAbsolutePath());
+        CrashReportMimeWriterJni.get().rewriteMinidumpsAsMIMEs(
+                srcDir.getAbsolutePath(), destDir.getAbsolutePath());
+    }
+
+    /*
+     * Rewrites ANR reports as MIME multipart messages, including the serialized AnrData as a file
+     * attachment.
+     *
+     * @param anrFiles Pairs of serialized ANR proto file names and the versions they happened on.
+     * @param destDir The directory in which to write the MIME files.
+     */
+    public static void rewriteAnrsAsMIMEs(List<Pair<File, String>> anrFiles, File destDir) {
+        String[] anrFileNames = new String[anrFiles.size()];
+        String[] versionNumbers = new String[anrFiles.size()];
+        for (int i = 0; i < anrFiles.size(); i++) {
+            anrFileNames[i] = anrFiles.get(i).first.getAbsolutePath();
+            versionNumbers[i] = anrFiles.get(i).second;
+        }
+        CrashReportMimeWriterJni.get().rewriteAnrsAsMIMEs(
+                anrFileNames, versionNumbers, destDir.getAbsolutePath());
     }
 
     /*
@@ -41,8 +64,9 @@ public class CrashReportMimeWriter {
      */
     public static Map<String, Map<String, String>> rewriteMinidumpsAsMIMEsAndGetCrashKeys(
             File srcDir, File destDir) {
-        String[] crashesKeyValueArr = nativeRewriteMinidumpsAsMIMEsAndGetCrashKeys(
-                srcDir.getAbsolutePath(), destDir.getAbsolutePath());
+        String[] crashesKeyValueArr =
+                CrashReportMimeWriterJni.get().rewriteMinidumpsAsMIMEsAndGetCrashKeys(
+                        srcDir.getAbsolutePath(), destDir.getAbsolutePath());
         Map<String, Map<String, String>> crashesInfoMap = new HashMap<>();
         Map<String, String> lastCrashInfo = new HashMap<>();
         // Keys and values for all crash files are flattened in a String array. Each key is followed
@@ -65,7 +89,10 @@ public class CrashReportMimeWriter {
         return crashesInfoMap;
     }
 
-    private static native void nativeRewriteMinidumpsAsMIMEs(String srcDir, String destDir);
-    private static native String[] nativeRewriteMinidumpsAsMIMEsAndGetCrashKeys(
-            String srcDir, String destDir);
+    @NativeMethods
+    interface Natives {
+        void rewriteMinidumpsAsMIMEs(String srcDir, String destDir);
+        String[] rewriteMinidumpsAsMIMEsAndGetCrashKeys(String srcDir, String destDir);
+        void rewriteAnrsAsMIMEs(String[] anrFiles, String[] versionNumbers, String destDir);
+    }
 }

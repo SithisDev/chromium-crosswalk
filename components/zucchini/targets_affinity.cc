@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "components/zucchini/equivalence_map.h"
 
 namespace zucchini {
@@ -21,8 +21,8 @@ TargetsAffinity::~TargetsAffinity() = default;
 
 void TargetsAffinity::InferFromSimilarities(
     const EquivalenceMap& equivalences,
-    const std::vector<offset_t>& old_targets,
-    const std::vector<offset_t>& new_targets) {
+    const std::deque<offset_t>& old_targets,
+    const std::deque<offset_t>& new_targets) {
   forward_association_.assign(old_targets.size(), {});
   backward_association_.assign(new_targets.size(), {});
 

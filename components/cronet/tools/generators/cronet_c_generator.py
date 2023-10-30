@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -6,10 +6,16 @@
 
 import os
 
+# This is called from cronet_bindings_generator.py which does some magic to add
+# libraries to the lookup path which pylint does not
+# pylint: disable=import-error
 import mojom.generate.generator as generator
 import mojom.generate.module as mojom
 import mojom.generate.pack as pack
 from mojom.generate.template_expander import UseJinja
+# pylint: enable=import-error
+
+# pylint: disable=useless-object-inheritance,super-with-arguments
 
 
 _kind_to_cpp_type = {
@@ -114,9 +120,12 @@ class _NameFormatter(object):
   def _ShouldIncludeNamespace(self, omit_namespace_for_module):
     return self._token.module
 
+
+  # pylint: disable=inconsistent-return-statements
   def _GetNamespace(self):
     if self._token.module:
       return NamespaceToArray(self._token.module.namespace)
+  # pylint: enable=inconsistent-return-statements
 
 
 def NamespaceToArray(namespace):
@@ -202,8 +211,6 @@ class StructConstructor(object):
 
 
 class Generator(generator.Generator):
-  def __init__(self, *args, **kwargs):
-    super(Generator, self).__init__(*args, **kwargs)
 
   def _GetExtraTraitsHeaders(self):
     extra_headers = set()
@@ -271,7 +278,7 @@ class Generator(generator.Generator):
                 for typename in
                 self.module.structs + all_enums + self.module.unions)
     headers = set()
-    for typename, typemap in self.typemap.iteritems():
+    for typename, typemap in self.typemap.items():
       if typename in types:
         headers.update(typemap.get("public_headers", []))
     return sorted(headers)
@@ -503,30 +510,29 @@ class Generator(generator.Generator):
       checked.add(kind.spec)
       if mojom.IsNullableKind(kind):
         return False
-      elif mojom.IsStructKind(kind):
+      if mojom.IsStructKind(kind):
         if kind.native_only:
           return False
         if (self._IsTypemappedKind(kind) and
             not self.typemap[self._GetFullMojomNameForKind(kind)]["hashable"]):
           return False
         return all(Check(field.kind) for field in kind.fields)
-      elif mojom.IsEnumKind(kind):
+      if mojom.IsEnumKind(kind):
         return not self._IsTypemappedKind(kind) or self.typemap[
             self._GetFullMojomNameForKind(kind)]["hashable"]
-      elif mojom.IsUnionKind(kind):
+      if mojom.IsUnionKind(kind):
         return all(Check(field.kind) for field in kind.fields)
-      elif mojom.IsAnyHandleKind(kind):
+      if mojom.IsAnyHandleKind(kind):
         return False
-      elif mojom.IsAnyInterfaceKind(kind):
+      if mojom.IsAnyInterfaceKind(kind):
         return False
       # TODO(crbug.com/735301): Arrays and maps could be made hashable. We just
       # don't have a use case yet.
-      elif mojom.IsArrayKind(kind):
+      if mojom.IsArrayKind(kind):
         return False
-      elif mojom.IsMapKind(kind):
+      if mojom.IsMapKind(kind):
         return False
-      else:
-        return True
+      return True
     return Check(kind)
 
   def _GetNativeTypeName(self, typemapped_kind):
@@ -546,7 +552,7 @@ class Generator(generator.Generator):
 
   def _GetCppWrapperType(self, kind, add_same_module_namespaces=False):
     def _AddOptional(type_name):
-      return "base::Optional<%s>" % type_name
+      return "absl::optional<%s>" % type_name
 
     if self._IsTypemappedKind(kind):
       type_name = self._GetNativeTypeName(kind)
@@ -734,21 +740,6 @@ class Generator(generator.Generator):
     if (kind is not None and mojom.IsFloatKind(kind)):
       return token if token.isdigit() else token + "f";
 
-    # Per C++11, 2.14.2, the type of an integer literal is the first of the
-    # corresponding list in Table 6 in which its value can be represented. In
-    # this case, the list for decimal constants with no suffix is:
-    #   int, long int, long long int
-    # The standard considers a program ill-formed if it contains an integer
-    # literal that cannot be represented by any of the allowed types.
-    #
-    # As it turns out, MSVC doesn't bother trying to fall back to long long int,
-    # so the integral constant -2147483648 causes it grief: it decides to
-    # represent 2147483648 as an unsigned integer, and then warns that the unary
-    # minus operator doesn't make sense on unsigned types. Doh!
-    if kind == mojom.INT32 and token == "-2147483648":
-      return "(-%d - 1) /* %s */" % (
-          2**31 - 1, "Workaround for MSVC bug; see https://crbug.com/445618")
-
     return "%s%s" % (token, _kind_to_cpp_literal_suffix.get(kind, ""))
 
   def _ExpressionToText(self, value, kind=None):
@@ -820,10 +811,8 @@ class Generator(generator.Generator):
         return "%d, %s, %s" % (expected_num_elements,
                                "true" if element_is_nullable else "false",
                                element_validate_params)
-      else:
-        return "%s, %s" % (key_validate_params, element_validate_params)
-    else:
-      return "%d, %s" % (expected_num_elements, enum_validate_func)
+      return "%s, %s" % (key_validate_params, element_validate_params)
+    return "%d, %s" % (expected_num_elements, enum_validate_func)
 
   def _GetNewContainerValidateParams(self, kind):
     if (not mojom.IsArrayKind(kind) and not mojom.IsMapKind(kind) and

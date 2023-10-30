@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,13 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/strings/string_piece.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/values.h"
 #include "content/common/content_export.h"
+
+namespace base {
+class RefCountedMemory;
+}
 
 namespace content {
 
@@ -24,7 +29,7 @@ class RenderFrameHost;
 class DevToolsFrontendHost {
  public:
   using HandleMessageCallback =
-      base::RepeatingCallback<void(const std::string&)>;
+      base::RepeatingCallback<void(base::Value::Dict)>;
 
   // Creates a new DevToolsFrontendHost for RenderFrameHost where DevTools
   // frontend is loaded.
@@ -38,11 +43,15 @@ class DevToolsFrontendHost {
 
   CONTENT_EXPORT virtual ~DevToolsFrontendHost() {}
 
-  CONTENT_EXPORT virtual void BadMessageRecieved() {}
+  CONTENT_EXPORT virtual void BadMessageReceived() {}
 
-  // Returns bundled DevTools frontend resource by |path|. Returns empty string
-  // if |path| does not correspond to any frontend resource.
-  CONTENT_EXPORT static base::StringPiece GetFrontendResource(
+  // Returns bundled DevTools frontend resource by |path|. Returns null if
+  // |path| does not correspond to any frontend resource.
+  CONTENT_EXPORT static scoped_refptr<base::RefCountedMemory>
+  GetFrontendResourceBytes(const std::string& path);
+
+  // Convenience wrapper to return GetFrontendResourceBytes() as a string.
+  CONTENT_EXPORT static std::string GetFrontendResource(
       const std::string& path);
 };
 

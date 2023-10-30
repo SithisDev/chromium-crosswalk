@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "content/browser/indexed_db/indexed_db_backing_store.h"
 #include "third_party/blink/public/common/indexeddb/indexeddb_key.h"
 
@@ -24,16 +23,23 @@ class IndexedDBKeyRange;
 
 namespace content {
 
-class IndexedDBFactory;
-
 class IndexedDBFakeBackingStore : public IndexedDBBackingStore {
  public:
   IndexedDBFakeBackingStore();
-  IndexedDBFakeBackingStore(IndexedDBFactory* factory,
-                            base::SequencedTaskRunner* task_runner);
+  IndexedDBFakeBackingStore(
+      BlobFilesCleanedCallback blob_files_cleaned,
+      ReportOutstandingBlobsCallback report_outstanding_blobs,
+      scoped_refptr<base::SequencedTaskRunner> task_runner);
+
+  IndexedDBFakeBackingStore(const IndexedDBFakeBackingStore&) = delete;
+  IndexedDBFakeBackingStore& operator=(const IndexedDBFakeBackingStore&) =
+      delete;
+
   ~IndexedDBFakeBackingStore() override;
 
-  leveldb::Status DeleteDatabase(const base::string16& name) override;
+  leveldb::Status DeleteDatabase(
+      const std::u16string& name,
+      TransactionalLevelDBTransaction* transaction) override;
 
   leveldb::Status PutRecord(IndexedDBBackingStore::Transaction* transaction,
                             int64_t database_id,
@@ -78,7 +84,7 @@ class IndexedDBFakeBackingStore : public IndexedDBBackingStore {
                                         int64_t index_id,
                                         const blink::IndexedDBKey&,
                                         const RecordIdentifier&) override;
-  void ReportBlobUnused(int64_t database_id, int64_t blob_key) override;
+  void ReportBlobUnused(int64_t database_id, int64_t blob_number) override;
   std::unique_ptr<Cursor> OpenObjectStoreKeyCursor(
       Transaction* transaction,
       int64_t database_id,
@@ -112,21 +118,28 @@ class IndexedDBFakeBackingStore : public IndexedDBBackingStore {
 
   class FakeTransaction : public IndexedDBBackingStore::Transaction {
    public:
+    FakeTransaction(leveldb::Status phase_two_result,
+                    blink::mojom::IDBTransactionMode mode);
     explicit FakeTransaction(leveldb::Status phase_two_result);
-    void Begin() override;
+
+    FakeTransaction(const FakeTransaction&) = delete;
+    FakeTransaction& operator=(const FakeTransaction&) = delete;
+
+    void Begin(std::vector<LeveledLock> locks) override;
     leveldb::Status CommitPhaseOne(BlobWriteCallback) override;
     leveldb::Status CommitPhaseTwo() override;
     uint64_t GetTransactionSize() override;
-    void Rollback() override;
+    leveldb::Status Rollback() override;
 
    private:
     leveldb::Status result_;
-
-    DISALLOW_COPY_AND_ASSIGN(FakeTransaction);
   };
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBFakeBackingStore);
+  std::unique_ptr<IndexedDBBackingStore::Transaction> CreateTransaction(
+      blink::mojom::IDBTransactionDurability durability,
+      blink::mojom::IDBTransactionMode mode) override;
+
+ protected:
 };
 
 }  // namespace content

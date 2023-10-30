@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,29 +7,61 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/feature_list.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
+#include "build/build_config.h"
 #include "content/browser/cache_storage/cache_storage_histogram_utils.h"
 #include "content/browser/cache_storage/cache_storage_operation.h"
-#include "content/public/common/content_features.h"
 
 namespace content {
 
 namespace {
 
+// Maximum parallel shared operations.  This constant was selected via
+// experimentation.  We tried 4, 16, and 64 for the limit.  16 was clearly
+// better than 4, but 64 was did not provide significant further benefit.
+constexpr int kDefaultMaxSharedOps = 16;
+
 const base::FeatureParam<int> kCacheStorageMaxSharedOps{
-    &features::kCacheStorageParallelOps, "max_shared_ops", 1};
+    &kCacheStorageParallelOps, "max_shared_ops", kDefaultMaxSharedOps};
+
+bool OpPointerLessThan(const std::unique_ptr<CacheStorageOperation>& left,
+                       const std::unique_ptr<CacheStorageOperation>& right) {
+  DCHECK(left);
+  DCHECK(right);
+  // We want to prioritize high priority operations, but otherwise sort
+  // by creation order.  Since the first created operations will have a lower
+  // identifier value we reverse the logic of the id comparison.
+  //
+  // Note, there might be a slight mis-ordering when the 64-bit id values
+  // rollover, but this should not be critical and will happen very rarely.
+  if (left->priority() < right->priority()) {
+    return true;
+  }
+  if (left->priority() > right->priority()) {
+    return false;
+  }
+  return left->id() > right->id();
+}
 
 }  // namespace
+
+// Enables support for parallel cache_storage operations via the
+// "max_shared_ops" fieldtrial parameter.
+const base::Feature kCacheStorageParallelOps{"CacheStorageParallelOps",
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
 CacheStorageScheduler::CacheStorageScheduler(
     CacheStorageSchedulerClient client_type,
     scoped_refptr<base::SequencedTaskRunner> task_runner)
-    : task_runner_(std::move(task_runner)), client_type_(client_type) {}
+    : task_runner_(std::move(task_runner)), client_type_(client_type) {
+  std::make_heap(pending_operations_.begin(), pending_operations_.end(),
+                 &OpPointerLessThan);
+}
 
 CacheStorageScheduler::~CacheStorageScheduler() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -40,17 +72,22 @@ CacheStorageSchedulerId CacheStorageScheduler::CreateId() {
   return next_id_++;
 }
 
-void CacheStorageScheduler::ScheduleOperation(CacheStorageSchedulerId id,
-                                              CacheStorageSchedulerMode mode,
-                                              CacheStorageSchedulerOp op_type,
-                                              base::OnceClosure closure) {
+void CacheStorageScheduler::ScheduleOperation(
+    CacheStorageSchedulerId id,
+    CacheStorageSchedulerMode mode,
+    CacheStorageSchedulerOp op_type,
+    CacheStorageSchedulerPriority priority,
+    base::OnceClosure closure) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   RecordCacheStorageSchedulerUMA(CacheStorageSchedulerUMA::kQueueLength,
                                  client_type_, op_type,
                                  pending_operations_.size());
 
   pending_operations_.push_back(std::make_unique<CacheStorageOperation>(
-      std::move(closure), id, client_type_, mode, op_type, task_runner_));
+      std::move(closure), id, client_type_, mode, op_type, priority,
+      task_runner_));
+  std::push_heap(pending_operations_.begin(), pending_operations_.end(),
+                 &OpPointerLessThan);
   MaybeRunOperation();
 }
 
@@ -65,11 +102,6 @@ void CacheStorageScheduler::CompleteOperationAndRunNext(
     DCHECK_EQ(num_running_exclusive_, 0);
     DCHECK_GT(num_running_shared_, 0);
     num_running_shared_ -= 1;
-    if (num_running_shared_ == 0) {
-      UMA_HISTOGRAM_COUNTS_1000("ServiceWorkerCache.PeakParallelSharedOps",
-                                peak_parallel_shared_);
-      peak_parallel_shared_ = 0;
-    }
   } else {
     DCHECK_EQ(num_running_shared_, 0);
     DCHECK_EQ(num_running_exclusive_, 1);
@@ -124,7 +156,9 @@ void CacheStorageScheduler::MaybeRunOperation() {
 
   running_operations_.emplace(next_operation->id(),
                               std::move(pending_operations_.front()));
-  pending_operations_.pop_front();
+  std::pop_heap(pending_operations_.begin(), pending_operations_.end(),
+                &OpPointerLessThan);
+  pending_operations_.pop_back();
 
   RecordCacheStorageSchedulerUMA(
       CacheStorageSchedulerUMA::kQueueDuration, client_type_,
@@ -134,8 +168,6 @@ void CacheStorageScheduler::MaybeRunOperation() {
   if (next_operation->mode() == CacheStorageSchedulerMode::kShared) {
     DCHECK_EQ(num_running_exclusive_, 0);
     num_running_shared_ += 1;
-    peak_parallel_shared_ =
-        std::max(num_running_shared_, peak_parallel_shared_);
   } else {
     DCHECK_EQ(num_running_exclusive_, 0);
     DCHECK_EQ(num_running_shared_, 0);

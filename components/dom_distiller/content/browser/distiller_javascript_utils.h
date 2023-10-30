@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 namespace dom_distiller {
 
 // Set the world for JavaScript to execute in. This can only be called once.
-void SetDistillerJavaScriptWorldId(const int id);
+void SetDistillerJavaScriptWorldId(const int32_t id);
 
 bool DistillerJavaScriptWorldIdIsSet();
 

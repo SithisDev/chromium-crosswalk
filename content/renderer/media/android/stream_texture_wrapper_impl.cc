@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,13 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
+#include "base/logging.h"
+#include "base/task/bind_post_task.h"
 #include "cc/layers/video_frame_provider.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/shared_image_interface.h"
+#include "gpu/command_buffer/common/shared_image_usage.h"
 #include "media/base/bind_to_current_loop.h"
 
 namespace {
@@ -30,11 +34,16 @@ StreamTextureWrapperImpl::StreamTextureWrapperImpl(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner)
     : enable_texture_copy_(enable_texture_copy),
       factory_(factory),
-      main_task_runner_(main_task_runner),
-      weak_factory_(this) {}
+      main_task_runner_(main_task_runner) {}
 
 StreamTextureWrapperImpl::~StreamTextureWrapperImpl() {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
+
+  // Clears create video frame callback so it couldn't be called from compositor
+  // thread after |this| is being destroyed.
+  if (stream_texture_proxy_)
+    stream_texture_proxy_->ClearCreateVideoFrameCB();
+
   SetCurrentFrameInternal(nullptr);
 }
 
@@ -51,30 +60,40 @@ scoped_refptr<media::VideoFrame> StreamTextureWrapperImpl::GetCurrentFrame() {
   return current_frame_;
 }
 
-void StreamTextureWrapperImpl::ReallocateVideoFrame() {
-  DVLOG(2) << __func__;
-  DCHECK(main_task_runner_->BelongsToCurrentThread());
-
-  gpu::Mailbox mailbox;
-  gpu::SyncToken texture_mailbox_sync_token;
-  stream_texture_proxy_->CreateSharedImage(natural_size_, &mailbox,
-                                           &texture_mailbox_sync_token);
+void StreamTextureWrapperImpl::CreateVideoFrame(
+    const gpu::Mailbox& mailbox,
+    const gfx::Size& coded_size,
+    const gfx::Rect& visible_rect,
+    const absl::optional<gpu::VulkanYCbCrInfo>& ycbcr_info) {
+  // This message comes from GPU process when the SharedImage is already
+  // created, so we don't need to wait on any synctoken, mailbox is ready to
+  // use.
   gpu::MailboxHolder holders[media::VideoFrame::kMaxPlanes] = {
-      gpu::MailboxHolder(mailbox, texture_mailbox_sync_token,
-                         GL_TEXTURE_EXTERNAL_OES)};
+      gpu::MailboxHolder(mailbox, gpu::SyncToken(), GL_TEXTURE_EXTERNAL_OES)};
 
+  gpu::SharedImageInterface* sii = factory_->SharedImageInterface();
+  sii->NotifyMailboxAdded(mailbox, gpu::SHARED_IMAGE_USAGE_DISPLAY |
+                                       gpu::SHARED_IMAGE_USAGE_GLES2 |
+                                       gpu::SHARED_IMAGE_USAGE_RASTER);
+
+  // The pixel format doesn't matter here as long as it's valid for texture
+  // frames. But SkiaRenderer wants to ensure that the format of the resource
+  // used here which will eventually create a promise image must match the
+  // format of the resource(SharedImageVideo) used to create fulfill image.
+  // crbug.com/1028746. Since we create all the textures/abstract textures as
+  // well as shared images for video to be of format RGBA, we need to use the
+  // pixel format as ABGR here(which corresponds to 32bpp RGBA).
   scoped_refptr<media::VideoFrame> new_frame =
       media::VideoFrame::WrapNativeTextures(
-          media::PIXEL_FORMAT_ARGB, holders,
-          media::BindToCurrentLoop(
+          media::PIXEL_FORMAT_ABGR, holders,
+          base::BindPostTask(
+              main_task_runner_,
               base::BindOnce(&OnReleaseVideoFrame, factory_, mailbox)),
-          natural_size_, gfx::Rect(natural_size_), natural_size_,
-          base::TimeDelta());
+          coded_size, visible_rect, visible_rect.size(), base::TimeDelta());
+  new_frame->set_ycbcr_info(ycbcr_info);
 
-  if (enable_texture_copy_) {
-    new_frame->metadata()->SetBoolean(media::VideoFrameMetadata::COPY_REQUIRED,
-                                      true);
-  }
+  if (enable_texture_copy_)
+    new_frame->metadata().copy_required = true;
 
   SetCurrentFrameInternal(new_frame);
 }
@@ -110,55 +129,57 @@ void StreamTextureWrapperImpl::UpdateTextureSize(const gfx::Size& new_size) {
   if (!stream_texture_proxy_)
     return;
 
-  if (natural_size_ == new_size)
+  if (rotated_visible_size_ == new_size)
     return;
 
-  natural_size_ = new_size;
-  ReallocateVideoFrame();
+  rotated_visible_size_ = new_size;
+  stream_texture_proxy_->UpdateRotatedVisibleSize(rotated_visible_size_);
 }
 
 void StreamTextureWrapperImpl::Initialize(
     const base::RepeatingClosure& received_frame_cb,
-    const gfx::Size& natural_size,
     scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
-    const StreamTextureWrapperInitCB& init_cb) {
+    StreamTextureWrapperInitCB init_cb) {
   DVLOG(2) << __func__;
 
   compositor_task_runner_ = compositor_task_runner;
-  natural_size_ = natural_size;
 
   main_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&StreamTextureWrapperImpl::InitializeOnMainThread,
                      weak_factory_.GetWeakPtr(), received_frame_cb,
-                     media::BindToCurrentLoop(init_cb)));
+                     media::BindToCurrentLoop(std::move(init_cb))));
 }
 
 void StreamTextureWrapperImpl::InitializeOnMainThread(
     const base::RepeatingClosure& received_frame_cb,
-    const StreamTextureWrapperInitCB& init_cb) {
+    StreamTextureWrapperInitCB init_cb) {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   DVLOG(2) << __func__;
 
   // Normally, we have a factory.  However, if the gpu process is restarting,
   // then we might not.
   if (!factory_) {
-    init_cb.Run(false);
+    std::move(init_cb).Run(false);
     return;
   }
 
   stream_texture_proxy_ = factory_->CreateProxy();
   if (!stream_texture_proxy_) {
-    init_cb.Run(false);
+    std::move(init_cb).Run(false);
     return;
   }
 
-  ReallocateVideoFrame();
+  // Unretained is safe here since |stream_texture_proxy_| is a scoped member of
+  // the this StreamTextureWrapperImpl class which clears/resets this callback
+  // before |this| is destroyed.
+  stream_texture_proxy_->BindToTaskRunner(
+      received_frame_cb,
+      base::BindRepeating(&StreamTextureWrapperImpl::CreateVideoFrame,
+                          base::Unretained(this)),
+      compositor_task_runner_);
 
-  stream_texture_proxy_->BindToTaskRunner(received_frame_cb,
-                                          compositor_task_runner_);
-
-  init_cb.Run(true);
+  std::move(init_cb).Run(true);
 }
 
 void StreamTextureWrapperImpl::Destroy() {

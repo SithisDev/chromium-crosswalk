@@ -1,21 +1,21 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_INSTALLED_SCRIPTS_SENDER_H_
 #define CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_INSTALLED_SCRIPTS_SENDER_H_
 
-#include "base/containers/flat_map.h"
 #include "base/containers/queue.h"
+#include "base/memory/raw_ptr.h"
 #include "content/browser/service_worker/service_worker_installed_script_reader.h"
 #include "content/common/content_export.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_installed_scripts_manager.mojom.h"
 
 namespace content {
 
-struct HttpResponseInfoIOBuffer;
 class ServiceWorkerVersion;
 
 // ServiceWorkerInstalledScriptsSender serves the service worker's installed
@@ -38,6 +38,11 @@ class CONTENT_EXPORT ServiceWorkerInstalledScriptsSender
  public:
   // |owner| must be an installed service worker.
   explicit ServiceWorkerInstalledScriptsSender(ServiceWorkerVersion* owner);
+
+  ServiceWorkerInstalledScriptsSender(
+      const ServiceWorkerInstalledScriptsSender&) = delete;
+  ServiceWorkerInstalledScriptsSender& operator=(
+      const ServiceWorkerInstalledScriptsSender&) = delete;
 
   ~ServiceWorkerInstalledScriptsSender() override;
 
@@ -75,14 +80,10 @@ class CONTENT_EXPORT ServiceWorkerInstalledScriptsSender
       ServiceWorkerInstalledScriptReader::FinishedReason reason);
 
   // Implements ServiceWorkerInstalledScriptReader::Client.
-  void OnStarted(std::string encoding,
-                 base::flat_map<std::string, std::string> headers,
+  void OnStarted(network::mojom::URLResponseHeadPtr response_head,
+                 absl::optional<mojo_base::BigBuffer> metadata,
                  mojo::ScopedDataPipeConsumerHandle body_handle,
-                 uint64_t body_size,
-                 mojo::ScopedDataPipeConsumerHandle meta_data_handle,
-                 uint64_t meta_data_size) override;
-  void OnHttpInfoRead(
-      scoped_refptr<HttpResponseInfoIOBuffer> http_info) override;
+                 mojo::ScopedDataPipeConsumerHandle meta_data_handle) override;
   void OnFinished(
       ServiceWorkerInstalledScriptReader::FinishedReason reason) override;
 
@@ -91,14 +92,14 @@ class CONTENT_EXPORT ServiceWorkerInstalledScriptsSender
 
   bool IsSendingMainScript() const;
 
-  ServiceWorkerVersion* owner_;
+  raw_ptr<ServiceWorkerVersion> owner_;
   const GURL main_script_url_;
   const int64_t main_script_id_;
   bool sent_main_script_;
 
-  mojo::Binding<blink::mojom::ServiceWorkerInstalledScriptsManagerHost>
-      binding_;
-  blink::mojom::ServiceWorkerInstalledScriptsManagerPtr manager_;
+  mojo::Receiver<blink::mojom::ServiceWorkerInstalledScriptsManagerHost>
+      receiver_{this};
+  mojo::Remote<blink::mojom::ServiceWorkerInstalledScriptsManager> manager_;
   std::unique_ptr<ServiceWorkerInstalledScriptReader> reader_;
 
   State state_;
@@ -106,8 +107,6 @@ class CONTENT_EXPORT ServiceWorkerInstalledScriptsSender
 
   GURL current_sending_url_;
   base::queue<std::pair<int64_t /* resource_id */, GURL>> pending_scripts_;
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerInstalledScriptsSender);
 };
 
 }  // namespace content

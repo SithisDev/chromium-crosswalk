@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 
 #include "base/bind.h"
 #include "base/guid.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "components/download/database/download_db_conversions.h"
 #include "components/download/database/download_db_entry.h"
@@ -37,6 +38,7 @@ DownloadDBEntry CreateDownloadDBEntry() {
   download_info.guid = base::GenerateGUID();
   static int id = 0;
   download_info.id = ++id;
+  download_info.in_progress_info->hash = "abc";
   entry.download_info = download_info;
   return entry;
 }
@@ -53,6 +55,7 @@ void CleanUpInProgressEntry(DownloadDBEntry* entry) {
   entry->download_info->in_progress_info->state = DownloadItem::INTERRUPTED;
   entry->download_info->in_progress_info->interrupt_reason =
       DOWNLOAD_INTERRUPT_REASON_CRASH;
+  entry->download_info->in_progress_info->hash = std::string();
 }
 
 }  // namespace
@@ -62,6 +65,9 @@ class DownloadDBCacheTest : public testing::Test {
   DownloadDBCacheTest()
       : db_(nullptr), task_runner_(new base::TestMockTimeTaskRunner) {}
 
+  DownloadDBCacheTest(const DownloadDBCacheTest&) = delete;
+  DownloadDBCacheTest& operator=(const DownloadDBCacheTest&) = delete;
+
   ~DownloadDBCacheTest() override = default;
 
   void CreateDBCache() {
@@ -70,8 +76,7 @@ class DownloadDBCacheTest : public testing::Test {
         &db_entries_);
     db_ = db.get();
     auto download_db = std::make_unique<DownloadDBImpl>(
-        DownloadNamespace::NAMESPACE_BROWSER_DOWNLOAD,
-        base::FilePath(FILE_PATH_LITERAL("/test/db/fakepath")), std::move(db));
+        DownloadNamespace::NAMESPACE_BROWSER_DOWNLOAD, std::move(db));
     db_cache_ = std::make_unique<DownloadDBCache>(std::move(download_db));
     db_cache_->SetTimerTaskRunnerForTesting(task_runner_);
   }
@@ -105,11 +110,10 @@ class DownloadDBCacheTest : public testing::Test {
 
  protected:
   std::map<std::string, download_pb::DownloadDBEntry> db_entries_;
-  leveldb_proto::test::FakeDB<download_pb::DownloadDBEntry>* db_;
+  raw_ptr<leveldb_proto::test::FakeDB<download_pb::DownloadDBEntry>> db_;
   std::unique_ptr<DownloadDBCache> db_cache_;
   scoped_refptr<base::TestMockTimeTaskRunner> task_runner_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  DISALLOW_COPY_AND_ASSIGN(DownloadDBCacheTest);
+  base::test::TaskEnvironment task_environment_;
 };
 
 TEST_F(DownloadDBCacheTest, InitializeAndRetrieve) {
@@ -119,7 +123,7 @@ TEST_F(DownloadDBCacheTest, InitializeAndRetrieve) {
   db_cache_->Initialize(
       base::BindOnce(&DownloadDBCacheTest::InitCallback, base::Unretained(this),
                      &loaded_entries));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   db_->LoadCallback(true);
   ASSERT_EQ(loaded_entries.size(), 2u);
 
@@ -141,7 +145,7 @@ TEST_F(DownloadDBCacheTest, AddNewEntry) {
   db_cache_->Initialize(
       base::BindOnce(&DownloadDBCacheTest::InitCallback, base::Unretained(this),
                      &loaded_entries));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   db_->LoadCallback(true);
   ASSERT_EQ(loaded_entries.size(), 2u);
 
@@ -166,7 +170,7 @@ TEST_F(DownloadDBCacheTest, ModifyExistingEntry) {
   db_cache_->Initialize(
       base::BindOnce(&DownloadDBCacheTest::InitCallback, base::Unretained(this),
                      &loaded_entries));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   db_->LoadCallback(true);
   ASSERT_EQ(loaded_entries.size(), 2u);
 
@@ -216,7 +220,7 @@ TEST_F(DownloadDBCacheTest, FilePathChange) {
   db_cache_->Initialize(
       base::BindOnce(&DownloadDBCacheTest::InitCallback, base::Unretained(this),
                      &loaded_entries));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   db_->LoadCallback(true);
   ASSERT_EQ(loaded_entries.size(), 1u);
   ASSERT_EQ(loaded_entries[0].download_info->in_progress_info->current_path,
@@ -238,6 +242,47 @@ TEST_F(DownloadDBCacheTest, FilePathChange) {
             test_path);
 }
 
+// Test that modifying reroute info will immediately update the DB.
+TEST_F(DownloadDBCacheTest, RerouteInfoChange) {
+  DownloadDBEntry entry = CreateDownloadDBEntry();
+  InProgressInfo info;
+  DownloadItemRerouteInfo test_reroute_info;
+  info.reroute_info = test_reroute_info;
+  entry.download_info->in_progress_info = info;
+  db_entries_.insert(
+      std::make_pair(GetKey(entry.GetGuid()),
+                     DownloadDBConversions::DownloadDBEntryToProto(entry)));
+  CreateDBCache();
+  std::vector<DownloadDBEntry> loaded_entries;
+  db_cache_->Initialize(base::BindOnce(&DownloadDBCacheTest::InitCallback,
+                                       base::Unretained(this),
+                                       &loaded_entries));
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
+  db_->LoadCallback(true);
+  ASSERT_EQ(loaded_entries.size(), 1u);
+  absl::optional<InProgressInfo> loaded_info =
+      loaded_entries[0].download_info->in_progress_info;
+  ASSERT_TRUE(RerouteInfosEqual(loaded_info->reroute_info, test_reroute_info))
+      << "Expected: " << loaded_info->reroute_info.DebugString()
+      << "\nActual:" << test_reroute_info.DebugString();
+
+  test_reroute_info.mutable_box()->set_file_id("12345");
+  loaded_info->reroute_info = test_reroute_info;
+  db_cache_->AddOrReplaceEntry(loaded_entries[0]);
+  db_->UpdateCallback(true);
+
+  loaded_entries.clear();
+  DownloadDB* download_db = GetDownloadDB();
+  download_db->LoadEntries(base::BindOnce(&DownloadDBCacheTest::InitCallback,
+                                          base::Unretained(this),
+                                          &loaded_entries));
+  db_->LoadCallback(true);
+  ASSERT_EQ(loaded_entries.size(), 1u);
+  ASSERT_TRUE(RerouteInfosEqual(loaded_info->reroute_info, test_reroute_info))
+      << "Expected: " << loaded_info->reroute_info.DebugString()
+      << "\nActual:" << test_reroute_info.DebugString();
+}
+
 TEST_F(DownloadDBCacheTest, RemoveEntry) {
   PrepopulateSampleEntries();
   CreateDBCache();
@@ -245,7 +290,7 @@ TEST_F(DownloadDBCacheTest, RemoveEntry) {
   db_cache_->Initialize(
       base::BindOnce(&DownloadDBCacheTest::InitCallback, base::Unretained(this),
                      &loaded_entries));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   db_->LoadCallback(true);
   ASSERT_EQ(loaded_entries.size(), 2u);
 
@@ -272,7 +317,7 @@ TEST_F(DownloadDBCacheTest, RemoveWhileModifyExistingEntry) {
   db_cache_->Initialize(
       base::BindOnce(&DownloadDBCacheTest::InitCallback, base::Unretained(this),
                      &loaded_entries));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   db_->LoadCallback(true);
   ASSERT_EQ(loaded_entries.size(), 2u);
   // Let the DBCache to cache the entry first.

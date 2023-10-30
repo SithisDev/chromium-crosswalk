@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "base/time/time.h"
+#include "build/build_config.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/base/signin_pref_names.h"
@@ -22,7 +24,6 @@
 
 using base::HistogramTester;
 using base::Time;
-using base::TimeDelta;
 using gaia::ListedAccount;
 using signin_metrics::AccountRelation;
 using signin_metrics::ReportingType;
@@ -44,9 +45,9 @@ class AccountInvestigatorTest : public testing::Test {
   AccountInvestigator* investigator() { return &investigator_; }
 
   // Wrappers to invoke private methods through friend class.
-  TimeDelta Delay(const Time previous,
-                  const Time now,
-                  const TimeDelta interval) {
+  base::TimeDelta Delay(const Time previous,
+                        const Time now,
+                        const base::TimeDelta interval) {
     return AccountInvestigator::CalculatePeriodicDelay(previous, now, interval);
   }
   std::string Hash(const std::vector<ListedAccount>& signed_in_accounts,
@@ -99,7 +100,7 @@ class AccountInvestigatorTest : public testing::Test {
   // should have been, but it still should have been recorded.
   void ExpectSharedReportHistograms(const ReportingType type,
                                     const HistogramTester& histogram_tester,
-                                    const TimeDelta* stable_age,
+                                    const base::TimeDelta* stable_age,
                                     const int signed_in_count,
                                     const int signed_out_count,
                                     const int total_count,
@@ -133,7 +134,7 @@ class AccountInvestigatorTest : public testing::Test {
 
  private:
   // Timer needs a message loop.
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   sync_preferences::TestingPrefServiceSyncable prefs_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   signin::IdentityTestEnvironment identity_test_env_;
@@ -145,9 +146,9 @@ class AccountInvestigatorTest : public testing::Test {
 
 namespace {
 
-ListedAccount Account(const std::string& id) {
+ListedAccount Account(const CoreAccountId& account_id) {
   ListedAccount account;
-  account.id = id;
+  account.id = account_id;
   return account;
 }
 
@@ -166,9 +167,9 @@ const std::string kGaiaId1 = signin::GetTestGaiaIdForEmail("1@mail.com");
 const std::string kGaiaId2 = signin::GetTestGaiaIdForEmail("2@mail.com");
 const std::string kGaiaId3 = signin::GetTestGaiaIdForEmail("3@mail.com");
 
-const ListedAccount one(Account(kGaiaId1));
-const ListedAccount two(Account(kGaiaId2));
-const ListedAccount three(Account(kGaiaId3));
+const ListedAccount one(Account(CoreAccountId(kGaiaId1)));
+const ListedAccount two(Account(CoreAccountId(kGaiaId2)));
+const ListedAccount three(Account(CoreAccountId(kGaiaId3)));
 
 const std::vector<ListedAccount> no_accounts{};
 const std::vector<ListedAccount> just_one{one};
@@ -178,14 +179,14 @@ const std::vector<ListedAccount> both_reversed{two, one};
 
 TEST_F(AccountInvestigatorTest, CalculatePeriodicDelay) {
   const Time epoch;
-  const TimeDelta day(TimeDelta::FromDays(1));
-  const TimeDelta big(TimeDelta::FromDays(1000));
+  const base::TimeDelta day(base::Days(1));
+  const base::TimeDelta big(base::Days(1000));
 
   EXPECT_EQ(day, Delay(epoch, epoch, day));
   EXPECT_EQ(day, Delay(epoch + big, epoch + big, day));
-  EXPECT_EQ(TimeDelta(), Delay(epoch, epoch + big, day));
+  EXPECT_EQ(base::TimeDelta(), Delay(epoch, epoch + big, day));
   EXPECT_EQ(day, Delay(epoch + big, epoch, day));
-  EXPECT_EQ(day, Delay(epoch, epoch + day, TimeDelta::FromDays(2)));
+  EXPECT_EQ(day, Delay(epoch, epoch + day, base::Days(2)));
 }
 
 TEST_F(AccountInvestigatorTest, HashAccounts) {
@@ -229,7 +230,8 @@ TEST_F(AccountInvestigatorTest, DiscernRelation) {
 TEST_F(AccountInvestigatorTest, SignedInAccountRelationReport) {
   ExpectRelationReport(just_one, no_accounts, ReportingType::PERIODIC,
                        AccountRelation::WITH_SIGNED_IN_NO_MATCH);
-  identity_test_env()->SetPrimaryAccount("1@mail.com");
+  identity_test_env()->SetPrimaryAccount("1@mail.com",
+                                         signin::ConsentLevel::kSync);
   ExpectRelationReport(just_one, no_accounts, ReportingType::PERIODIC,
                        AccountRelation::SINGLE_SIGNED_IN_MATCH_NO_SIGNED_OUT);
   ExpectRelationReport(just_two, no_accounts, ReportingType::ON_CHANGE,
@@ -238,21 +240,22 @@ TEST_F(AccountInvestigatorTest, SignedInAccountRelationReport) {
 
 TEST_F(AccountInvestigatorTest, SharedCookieJarReportEmpty) {
   const HistogramTester histogram_tester;
-  const TimeDelta expected_stable_age;
+  const base::TimeDelta expected_stable_age;
   SharedReport(no_accounts, no_accounts, Time(), ReportingType::PERIODIC);
   ExpectSharedReportHistograms(ReportingType::PERIODIC, histogram_tester,
                                &expected_stable_age, 0, 0, 0, nullptr, false);
 }
 
 TEST_F(AccountInvestigatorTest, SharedCookieJarReportWithAccount) {
-  identity_test_env()->SetPrimaryAccount("1@mail.com");
+  identity_test_env()->SetPrimaryAccount("1@mail.com",
+                                         signin::ConsentLevel::kSync);
   base::Time now = base::Time::Now();
   pref_service()->SetDouble(prefs::kGaiaCookieChangedTime, now.ToDoubleT());
   const AccountRelation expected_relation(
       AccountRelation::ONE_OF_SIGNED_IN_MATCH_ANY_SIGNED_OUT);
   const HistogramTester histogram_tester;
-  const TimeDelta expected_stable_age(TimeDelta::FromDays(1));
-  SharedReport(both, no_accounts, now + TimeDelta::FromDays(1),
+  const base::TimeDelta expected_stable_age(base::Days(1));
+  SharedReport(both, no_accounts, now + base::Days(1),
                ReportingType::ON_CHANGE);
   ExpectSharedReportHistograms(ReportingType::ON_CHANGE, histogram_tester,
                                &expected_stable_age, 2, 0, 2,
@@ -286,7 +289,8 @@ TEST_F(AccountInvestigatorTest, OnGaiaAccountsInCookieUpdatedSigninOnly) {
       GoogleServiceAuthError::AuthErrorNone());
 
   const HistogramTester histogram_tester;
-  identity_test_env()->SetPrimaryAccount("1@mail.com");
+  identity_test_env()->SetPrimaryAccount("1@mail.com",
+                                         signin::ConsentLevel::kSync);
   pref_service()->SetString(prefs::kGaiaCookieHash,
                             Hash(just_one, no_accounts));
   signin::AccountsInCookieJarInfo accounts_in_cookie_jar_info = {
@@ -302,7 +306,8 @@ TEST_F(AccountInvestigatorTest, OnGaiaAccountsInCookieUpdatedSigninOnly) {
 TEST_F(AccountInvestigatorTest,
        OnGaiaAccountsInCookieUpdatedSigninSignOutOfContent) {
   const HistogramTester histogram_tester;
-  identity_test_env()->SetPrimaryAccount("1@mail.com");
+  identity_test_env()->SetPrimaryAccount("1@mail.com",
+                                         signin::ConsentLevel::kSync);
   signin::AccountsInCookieJarInfo accounts_in_cookie_jar_info = {
       /*accounts_are_fresh=*/true, just_one, no_accounts};
   investigator()->OnAccountsInCookieUpdated(
@@ -335,7 +340,8 @@ TEST_F(AccountInvestigatorTest, Initialize) {
 }
 
 TEST_F(AccountInvestigatorTest, InitializeSignedIn) {
-  identity_test_env()->SetPrimaryAccount("1@mail.com");
+  identity_test_env()->SetPrimaryAccount("1@mail.com",
+                                         signin::ConsentLevel::kSync);
   EXPECT_FALSE(*previously_authenticated());
 
   investigator()->Initialize();
@@ -358,6 +364,78 @@ TEST_F(AccountInvestigatorTest, TryPeriodicReportStale) {
   EXPECT_FALSE(*periodic_pending());
   ExpectSharedReportHistograms(ReportingType::PERIODIC, histogram_tester,
                                nullptr, 1, 0, 1, nullptr, false);
+
+  // There's no primary account and thus no break-down into types of primary
+  // accounts.
+  EXPECT_EQ(0u, histogram_tester
+                    .GetTotalCountsForPrefix(
+                        "Signin.CookieJar.SignedInCountWithPrimary.")
+                    .size());
+}
+
+TEST_F(AccountInvestigatorTest, TryPeriodicReportWithPrimary) {
+  investigator()->Initialize();
+
+  std::string email("f@bar.com");
+  identity_test_env()->SetCookieAccounts(
+      {{email, signin::GetTestGaiaIdForEmail(email)}});
+  identity_test_env()->MakePrimaryAccountAvailable(email,
+                                                   signin::ConsentLevel::kSync);
+
+  const HistogramTester histogram_tester;
+  TryPeriodicReport();
+  EXPECT_FALSE(*periodic_pending());
+  histogram_tester.ExpectUniqueSample(
+      "Signin.CookieJar.SignedInCountWithPrimary.SyncConsumer",
+      /*bucket=*/1, /*count=*/1);
+  histogram_tester.ExpectTotalCount(
+      "Signin.CookieJar.SignedInCountWithPrimary.NoSyncConsumer",
+      /*count=*/0);
+}
+
+// Neither iOS nor Android support unconsented primary accounts.
+#if !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_ANDROID)
+TEST_F(AccountInvestigatorTest, TryPeriodicReportWithUnconsentedPrimary) {
+  investigator()->Initialize();
+
+  std::string email("f@bar.com");
+  identity_test_env()->SetCookieAccounts(
+      {{email, signin::GetTestGaiaIdForEmail(email)}});
+  identity_test_env()->MakePrimaryAccountAvailable(
+      email, signin::ConsentLevel::kSignin);
+
+  const HistogramTester histogram_tester;
+  TryPeriodicReport();
+  EXPECT_FALSE(*periodic_pending());
+  histogram_tester.ExpectUniqueSample(
+      "Signin.CookieJar.SignedInCountWithPrimary.NoSyncConsumer",
+      /*bucket=*/1, /*count=*/1);
+  histogram_tester.ExpectTotalCount(
+      "Signin.CookieJar.SignedInCountWithPrimary.SyncConsumer",
+      /*count=*/0);
+}
+#endif  // !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_ANDROID)
+
+TEST_F(AccountInvestigatorTest, TryPeriodicReportWithEnterprisePrimary) {
+  investigator()->Initialize();
+
+  std::string email("f@bar.com");
+  identity_test_env()->SetCookieAccounts(
+      {{email, signin::GetTestGaiaIdForEmail(email)}});
+  AccountInfo account_info = identity_test_env()->MakePrimaryAccountAvailable(
+      email, signin::ConsentLevel::kSync);
+  account_info.hosted_domain = "bar.com";
+  identity_test_env()->UpdateAccountInfoForAccount(account_info);
+
+  const HistogramTester histogram_tester;
+  TryPeriodicReport();
+  EXPECT_FALSE(*periodic_pending());
+  histogram_tester.ExpectUniqueSample(
+      "Signin.CookieJar.SignedInCountWithPrimary.SyncEnterprise",
+      /*bucket=*/1, /*count=*/1);
+  histogram_tester.ExpectTotalCount(
+      "Signin.CookieJar.SignedInCountWithPrimary.NoSyncEnterprise",
+      /*count=*/0);
 }
 
 TEST_F(AccountInvestigatorTest, TryPeriodicReportEmpty) {

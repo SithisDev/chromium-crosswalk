@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 #include <memory>
 
 #include "base/callback_list.h"
-#include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
+#include "base/sequence_checker.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/autocomplete_provider_client.h"
-#include "components/omnibox/browser/on_device_head_serving.h"
-#include "components/omnibox/browser/on_device_model_update_listener.h"
+#include "components/omnibox/browser/on_device_head_model.h"
 
 class AutocompleteProviderListener;
 
@@ -23,6 +23,8 @@ class AutocompleteProviderListener;
 // greater than 99, such that its matches will not show before any other
 // providers; However the relevance can be changed to any arbitrary value by
 // Finch when the input is not classified as a URL.
+// TODO(crbug.com/925072): make some cleanups after removing |model_| and |this|
+// in task postings from this class.
 class OnDeviceHeadProvider : public AutocompleteProvider {
  public:
   static OnDeviceHeadProvider* Create(AutocompleteProviderClient* client,
@@ -44,6 +46,8 @@ class OnDeviceHeadProvider : public AutocompleteProvider {
   OnDeviceHeadProvider(AutocompleteProviderClient* client,
                        AutocompleteProviderListener* listener);
   ~OnDeviceHeadProvider() override;
+  OnDeviceHeadProvider(const OnDeviceHeadProvider&) = delete;
+  OnDeviceHeadProvider& operator=(const OnDeviceHeadProvider&) = delete;
 
   bool IsOnDeviceHeadProviderAllowed(const AutocompleteInput& input);
 
@@ -54,48 +58,36 @@ class OnDeviceHeadProvider : public AutocompleteProvider {
   // matches the given AutocompleteInput.
   void DoSearch(std::unique_ptr<OnDeviceHeadProviderParams> params);
   // SearchDone: called after DoSearch, fills |matches_| with the suggestions
-  // fetches by DoSearch and then calls OnProviderUpdate.
+  // fetches by DoSearch and then calls NotifyListeners.
   void SearchDone(std::unique_ptr<OnDeviceHeadProviderParams> params);
 
-  // Used by OnDeviceModelUpdateListener to notify this provider when new model
-  // is available.
-  void OnModelUpdate(const std::string& new_model_filename);
+  // Helper functions to read model filename from the static
+  // OnDeviceModelUpdateListener instance.
+  std::string GetOnDeviceHeadModelFilename() const;
 
-  // Resets |serving_| if new model is available and cleans up the old model if
-  // it exists.
-  void MaybeResetServingInstanceFromNewModel();
+  // Fetches suggestions matching the params from the given on device head
+  // model.
+  static std::unique_ptr<OnDeviceHeadProviderParams> GetSuggestionsFromModel(
+      const std::string& model_filename,
+      const size_t provider_max_matches,
+      std::unique_ptr<OnDeviceHeadProviderParams> params);
 
-  AutocompleteProviderClient* client_;
-  AutocompleteProviderListener* listener_;
+  raw_ptr<AutocompleteProviderClient> client_;
 
-  // The instance which does the search in the head model and returns top
-  // suggestions matching the Autocomplete input.
-  std::unique_ptr<OnDeviceHeadServing> serving_;
+  // The task runner dedicated for on device head model operations which is
+  // added to offload expensive operations out of the UI sequence.
+  scoped_refptr<base::SequencedTaskRunner> worker_task_runner_;
 
-  // The task runner instance where asynchronous searches to the head model will
-  // be run.
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+  // Sequence checker that ensure autocomplete request handling will only happen
+  // on main thread.
+  SEQUENCE_CHECKER(main_sequence_checker_);
 
   // The request id used to trace current request to the on device head model.
   // The id will be increased whenever a new request is received from the
   // AutocompleteController.
   size_t on_device_search_request_id_;
 
-  // The filename for the on device model currently being used.
-  std::string current_model_filename_;
-
-  // The filename for the new model updated by Component Updater.
-  std::string new_model_filename_;
-
-  // Owns the subscription after adding the model update callback to the
-  // listener such that the callback can be removed automatically from the
-  // listener on provider's deconstruction.
-  std::unique_ptr<OnDeviceModelUpdateListener::UpdateSubscription>
-      model_update_subscription_;
-
   base::WeakPtrFactory<OnDeviceHeadProvider> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(OnDeviceHeadProvider);
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_ON_DEVICE_HEAD_PROVIDER_H_

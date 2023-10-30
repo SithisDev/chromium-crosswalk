@@ -1,23 +1,26 @@
-AXWebArea AXInvalid='false'
-++AXGroup AXInvalid='true'
+AXWebArea
+++AXGroup
 ++++AXStaticText AXValue='invalid=true'
-++AXTextArea AXValue='An eror via invalid=spelling' AXInvalid='false'
+++AXTextArea AXInvalid='false' AXValue='An error via invalid=spelling'
 ++++AXStaticText AXValue='An '
-++++AXGroup AXInvalid='spelling'
-++++++AXStaticText AXValue='eror'
+++++AXGroup
+++++++AXStaticText AXValue='error'
 ++++AXStaticText AXValue=' via invalid=spelling'
-++AXTextArea AXValue='An errors via invalid=grammar' AXInvalid='false'
+++AXTextArea AXInvalid='false' AXValue='An error via invalid=grammar'
 ++++AXStaticText AXValue='An '
-++++AXGroup AXInvalid='grammar'
-++++++AXStaticText AXValue='errors'
+++++AXGroup
+++++++AXStaticText AXValue='error'
 ++++AXStaticText AXValue=' via invalid=grammar'
-++AXGroup AXInvalid='false'
+++AXGroup
 ++++AXStaticText AXValue='invalid=false'
 ++AXGroup
 ++++AXStaticText AXValue='invalid=<empty>'
 ++AXGroup
 ++++AXStaticText AXValue='invalid=<default>'
-++AXGroup AXInvalid='unknown'
+++AXGroup
 ++++AXStaticText AXValue='invalid=unknown'
 ++AXGroup
-++++AXTextField AXValue='1234' AXInvalid='true'
+++++AXTextField AXInvalid='true' AXValue='1234'
+++AXTextField AXInvalid='true' AXValue='a'
+++AXTextField AXInvalid='false' AXValue='a'
+++AXTextField AXInvalid='true' AXValue='a'

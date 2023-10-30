@@ -1,11 +1,7 @@
-chfremer@chromium.org
+eladalon@chromium.org
 guidou@chromium.org
 tommi@chromium.org
 
-per-file *test*=phoglund@chromium.org
-
-# Original (legacy) owner.
+# Original (legacy) owners.
 emircan@chromium.org
 mcasas@chromium.org
-
-# COMPONENT: Blink>WebRTC

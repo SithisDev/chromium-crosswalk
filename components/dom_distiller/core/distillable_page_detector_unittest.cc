@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace dom_distiller {
@@ -33,7 +32,7 @@ class Builder {
     proto_.set_num_features(num_features);
     proto_.set_num_stumps(proto_.stump_size());
     return std::make_unique<DistillablePageDetector>(
-        base::WrapUnique(new AdaBoostProto(proto_)));
+        std::make_unique<AdaBoostProto>(proto_));
   }
 
  private:

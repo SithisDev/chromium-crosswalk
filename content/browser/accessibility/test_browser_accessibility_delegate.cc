@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,29 +7,26 @@
 namespace content {
 
 TestBrowserAccessibilityDelegate::TestBrowserAccessibilityDelegate()
-    : is_root_frame_(true),
-      accelerated_widget_(gfx::kNullAcceleratedWidget),
-      got_fatal_error_(false) {}
+    : is_root_frame_(true), accelerated_widget_(gfx::kNullAcceleratedWidget) {}
 
 void TestBrowserAccessibilityDelegate::AccessibilityPerformAction(
     const ui::AXActionData& data) {}
 
-bool TestBrowserAccessibilityDelegate::AccessibilityViewHasFocus() const {
+bool TestBrowserAccessibilityDelegate::AccessibilityViewHasFocus() {
   return false;
 }
 
-gfx::Rect TestBrowserAccessibilityDelegate::AccessibilityGetViewBounds() const {
+void TestBrowserAccessibilityDelegate::AccessibilityViewSetFocus() {}
+
+gfx::Rect TestBrowserAccessibilityDelegate::AccessibilityGetViewBounds() {
   return gfx::Rect();
 }
 
-float TestBrowserAccessibilityDelegate::AccessibilityGetDeviceScaleFactor()
-    const {
+float TestBrowserAccessibilityDelegate::AccessibilityGetDeviceScaleFactor() {
   return 1.0f;
 }
 
-void TestBrowserAccessibilityDelegate::AccessibilityFatalError() {
-  got_fatal_error_ = true;
-}
+void TestBrowserAccessibilityDelegate::AccessibilityFatalError() {}
 
 gfx::AcceleratedWidget
 TestBrowserAccessibilityDelegate::AccessibilityGetAcceleratedWidget() {
@@ -46,20 +43,25 @@ gfx::NativeViewAccessible TestBrowserAccessibilityDelegate::
   return nullptr;
 }
 
-WebContents* TestBrowserAccessibilityDelegate::AccessibilityWebContents() {
+RenderFrameHostImpl*
+TestBrowserAccessibilityDelegate::AccessibilityRenderFrameHost() {
   return nullptr;
 }
 
-bool TestBrowserAccessibilityDelegate::AccessibilityIsMainFrame() const {
+bool TestBrowserAccessibilityDelegate::AccessibilityIsMainFrame() {
   return is_root_frame_;
 }
 
-bool TestBrowserAccessibilityDelegate::got_fatal_error() const {
-  return got_fatal_error_;
-}
+void TestBrowserAccessibilityDelegate::AccessibilityHitTest(
+    const gfx::Point& point_in_frame_pixels,
+    ax::mojom::Event opt_event_to_fire,
+    int opt_request_id,
+    base::OnceCallback<void(BrowserAccessibilityManager* hit_manager,
+                            int hit_node_id)> opt_callback) {}
 
-void TestBrowserAccessibilityDelegate::reset_got_fatal_error() {
-  got_fatal_error_ = false;
+WebContentsAccessibility*
+TestBrowserAccessibilityDelegate::AccessibilityGetWebContentsAccessibility() {
+  return nullptr;
 }
 
 }  // namespace content

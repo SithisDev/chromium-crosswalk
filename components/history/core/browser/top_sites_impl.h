@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,31 +7,29 @@
 
 #include <stddef.h>
 
-#include <list>
-#include <memory>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "base/synchronization/lock.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/thread_checker.h"
-#include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/history/core/browser/top_sites_backend.h"
-#include "third_party/skia/include/core/SkColor.h"
-#include "url/gurl.h"
 
 class PrefRegistrySimple;
 class PrefService;
+class SearchTermsData;
+class TemplateURL;
+class TemplateURLService;
 
 namespace base {
 class FilePath;
@@ -39,9 +37,18 @@ class FilePath;
 
 namespace history {
 
-class HistoryService;
-class TopSitesCache;
 class TopSitesImplTest;
+
+// How many top sites to store in the cache.
+static constexpr size_t kTopSitesNumber = 10;
+
+// Returns true if it can set |url| to a valid canonical search results page
+// URL for |default_provider| given the search terms.
+bool GetSearchResultsPageForDefaultSearchProvider(
+    const TemplateURL& default_provider,
+    const SearchTermsData& search_terms_data,
+    const std::u16string& search_terms,
+    GURL* url);
 
 // This class allows requests for most visited urls on any thread. All other
 // methods must be invoked on the UI thread. All mutations to internal state
@@ -51,28 +58,28 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
  public:
   // Called to check whether an URL can be added to the history. Must be
   // callable multiple time and during the whole lifetime of TopSitesImpl.
-  using CanAddURLToHistoryFn = base::Callback<bool(const GURL&)>;
-
-  // How many top sites to store in the cache.
-  static constexpr size_t kTopSitesNumber = 10;
+  using CanAddURLToHistoryFn = base::RepeatingCallback<bool(const GURL&)>;
 
   TopSitesImpl(PrefService* pref_service,
                HistoryService* history_service,
+               TemplateURLService* template_url_service,
                const PrepopulatedPageList& prepopulated_pages,
                const CanAddURLToHistoryFn& can_add_url_to_history);
+
+  TopSitesImpl(const TopSitesImpl&) = delete;
+  TopSitesImpl& operator=(const TopSitesImpl&) = delete;
 
   // Initializes TopSitesImpl.
   void Init(const base::FilePath& db_name);
 
   // TopSites implementation.
-  void GetMostVisitedURLs(const GetMostVisitedURLsCallback& callback) override;
+  void GetMostVisitedURLs(GetMostVisitedURLsCallback callback) override;
   void SyncWithHistory() override;
-  bool HasBlacklistedItems() const override;
-  void AddBlacklistedURL(const GURL& url) override;
-  void RemoveBlacklistedURL(const GURL& url) override;
-  bool IsBlacklisted(const GURL& url) override;
-  void ClearBlacklistedURLs() override;
-  bool IsKnownURL(const GURL& url) override;
+  bool HasBlockedUrls() const override;
+  void AddBlockedUrl(const GURL& url) override;
+  void RemoveBlockedUrl(const GURL& url) override;
+  bool IsBlocked(const GURL& url) override;
+  void ClearBlockedUrls() override;
   bool IsFull() override;
   PrepopulatedPageList GetPrepopulatedPages() override;
   bool loaded() const override;
@@ -105,10 +112,11 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   friend class TopSitesImplTest;
   FRIEND_TEST_ALL_PREFIXES(TopSitesImplTest, DiffMostVisited);
   FRIEND_TEST_ALL_PREFIXES(TopSitesImplTest, DiffMostVisitedWithForced);
+  FRIEND_TEST_ALL_PREFIXES(TopSitesImplTest, GetMostVisitedURLsAndQueries);
 
-  typedef base::Callback<void(const MostVisitedURLList&)> PendingCallback;
+  using PendingCallback = base::OnceCallback<void(const MostVisitedURLList&)>;
 
-  typedef std::vector<PendingCallback> PendingCallbacks;
+  using PendingCallbacks = std::vector<PendingCallback>;
 
   // Starts to query most visited URLs from history database instantly. Also
   // cancels any pending queries requested in a delayed manner by canceling the
@@ -118,40 +126,37 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   // Generates the diff of things that happened between "old" and "new."
   //
   // The URLs that are in "new" but not "old" will be have their index from
-  // "new" placed in |added_urls|. The URLs that are in "old" but not "new" will
-  // have their index from "old" placed in |deleted_urls|.
+  // "new" placed in `added_urls`. The URLs that are in "old" but not "new" will
+  // have their index from "old" placed in `deleted_urls`.
   //
   // URLs that appear in both lists but have different indices will have their
-  // index from "new" placed in |moved_urls|.
+  // index from "new" placed in `moved_urls`.
   static void DiffMostVisited(const MostVisitedURLList& old_list,
                               const MostVisitedURLList& new_list,
                               TopSitesDelta* delta);
 
-  // Finds the given URL in the redirect chain for the given TopSite, and
-  // returns the distance from the destination in hops that the given URL is.
-  // The URL is assumed to be in the list. The destination is 0.
-  static int GetRedirectDistanceForURL(const MostVisitedURL& most_visited,
-                                       const GURL& url);
+  // Adds the most repeated search terms to TopSites and returns a new list.
+  MostVisitedURLList AddMostRepeatedQueries(const MostVisitedURLList& urls);
 
   // Adds prepopulated pages to TopSites. Returns true if any pages were added.
   bool AddPrepopulatedPages(MostVisitedURLList* urls) const;
 
-  // Takes |urls|, produces it's copy in |out| after removing blacklisted URLs.
+  // Takes `urls`, produces it's copy in `out` after removing blocked urls.
   // Also ensures we respect the maximum number TopSites URLs.
-  void ApplyBlacklist(const MostVisitedURLList& urls, MostVisitedURLList* out);
+  MostVisitedURLList ApplyBlockedUrls(const MostVisitedURLList& urls);
 
-  // Returns an MD5 hash of the URL. Hashing is required for blacklisted URLs.
+  // Returns an MD5 hash of the URL. Hashing is required for blocking urls.
   static std::string GetURLHash(const GURL& url);
 
-  // Updates URLs in |cache_| and the db (in the background). The URLs in
-  // |new_top_sites| replace those in |cache_|. All mutations to cache_ *must*
+  // Updates URLs in `cache_` and the db (in the background). The URLs in
+  // `new_top_sites` replace those in `cache_`. All mutations to cache_ *must*
   // go through this. Should be called from the UI thread.
-  void SetTopSites(const MostVisitedURLList& new_top_sites,
+  void SetTopSites(MostVisitedURLList new_top_sites,
                    const CallLocation location);
 
   // Returns the number of most visited results to request from history. This
-  // changes depending upon how many urls have been blacklisted. Should be
-  // called from the UI thread.
+  // changes depending upon how many urls have been blocked. Should be called
+  // from the UI thread.
   int num_results_to_request_from_history() const;
 
   // Invoked when transitioning to LOADED. Notifies any queued up callbacks.
@@ -166,7 +171,7 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
 
   // Callback from TopSites with the list of top sites. Should be called from
   // the UI thread.
-  void OnGotMostVisitedURLs(const scoped_refptr<MostVisitedThreadSafe>& sites);
+  void OnGotMostVisitedURLs(MostVisitedURLList sites);
 
   // Called when history service returns a list of top URLs.
   void OnTopSitesAvailableFromHistory(MostVisitedURLList data);
@@ -180,16 +185,16 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
 
   scoped_refptr<TopSitesBackend> backend_;
 
+  // Lock used to access `thread_safe_cache_`.
+  mutable base::Lock lock_;
+
   // The top sites data.
-  std::unique_ptr<TopSitesCache> cache_;
+  MostVisitedURLList top_sites_;
 
   // Copy of the top sites data that may be accessed on any thread (assuming
-  // you hold |lock_|). The data in |thread_safe_cache_| has blacklisted urls
-  // applied (|cache_| does not).
-  std::unique_ptr<TopSitesCache> thread_safe_cache_;
-
-  // Lock used to access |thread_safe_cache_|.
-  mutable base::Lock lock_;
+  // you hold `lock_`). The data in `thread_safe_cache_` has blocked urls
+  // applied (`top_sites_` does not).
+  MostVisitedURLList thread_safe_cache_ GUARDED_BY(lock_);
 
   // Task tracker for history and backend requests.
   base::CancelableTaskTracker cancelable_task_tracker_;
@@ -201,18 +206,21 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   // The pending requests for the top sites list. Can only be non-empty at
   // startup. After we read the top sites from the DB, we'll always have a
   // cached list and be able to run callbacks immediately.
-  PendingCallbacks pending_callbacks_;
+  PendingCallbacks pending_callbacks_ GUARDED_BY(lock_);
 
   // URL List of prepopulated page.
   const PrepopulatedPageList prepopulated_pages_;
 
-  // PrefService holding the NTP URL blacklist dictionary. Must outlive
-  // TopSitesImpl.
-  PrefService* pref_service_;
+  // PrefService holding the set of blocked urls. Must outlive TopSitesImpl.
+  raw_ptr<PrefService> pref_service_;
 
   // HistoryService that TopSitesImpl can query. May be null, but if defined it
   // must outlive TopSitesImpl.
-  HistoryService* history_service_;
+  raw_ptr<HistoryService> history_service_;
+
+  // Used to identify and create search results page URLs for the default
+  // provider. May be nullptr. Must outlive |this| if provided.
+  raw_ptr<TemplateURLService> template_url_service_;
 
   // Can URL be added to the history?
   CanAddURLToHistoryFn can_add_url_to_history_;
@@ -224,10 +232,8 @@ class TopSitesImpl : public TopSites, public HistoryServiceObserver {
   // The histogram should only be recorded once for each Chrome execution.
   static bool histogram_recorded_;
 
-  ScopedObserver<HistoryService, HistoryServiceObserver>
-      history_service_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(TopSitesImpl);
+  base::ScopedObservation<HistoryService, HistoryServiceObserver>
+      history_service_observation_{this};
 };
 
 }  // namespace history

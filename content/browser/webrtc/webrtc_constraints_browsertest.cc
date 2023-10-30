@@ -1,18 +1,20 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
 #include "base/command_line.h"
+#include "build/build_config.h"
 #include "content/browser/webrtc/webrtc_content_browsertest_base.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #endif
 
@@ -53,8 +55,11 @@ class WebRtcConstraintsBrowserTest
   const UserMediaSizes user_media_;
 };
 
-// Test fails under MSan, http://crbug.com/445745
-#if defined(MEMORY_SANITIZER)
+// Test fails under MSan, https://crbug.com/445745.
+// Test is also flaky (on Mac, Linux, LaCrOS, Android, but mostly on Mac):
+// https://crbug.com/1241538
+// TODO(https://crbug.com/1318234): Fix and enable on Fuchsia.
+#if defined(MEMORY_SANITIZER) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_GetUserMediaConstraints DISABLED_GetUserMediaConstraints
 #else
 #define MAYBE_GetUserMediaConstraints GetUserMediaConstraints
@@ -74,7 +79,7 @@ IN_PROC_BROWSER_TEST_P(WebRtcConstraintsBrowserTest,
                                               user_media().min_frame_rate,
                                               user_media().max_frame_rate);
   DVLOG(1) << "Calling getUserMedia: " << call;
-  NavigateToURL(shell(), url);
+  EXPECT_TRUE(NavigateToURL(shell(), url));
   ExecuteJavascriptAndWaitForOk(call);
 }
 

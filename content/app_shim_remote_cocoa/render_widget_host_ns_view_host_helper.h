@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_APP_SHIM_REMOTE_COCOA_RENDER_WIDGET_HOST_NS_VIEW_HOST_HELPER_H_
 #define CONTENT_APP_SHIM_REMOTE_COCOA_RENDER_WIDGET_HOST_NS_VIEW_HOST_HELPER_H_
 
-#include "base/macros.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-forward.h"
 
 #include <vector>
 
@@ -21,7 +21,6 @@ class LatencyInfo;
 }  // namespace ui
 
 namespace content {
-struct EditCommand;
 struct NativeWebKeyboardEvent;
 }  // namespace content
 
@@ -40,7 +39,16 @@ class RenderWidgetHostNSViewHost;
 class RenderWidgetHostNSViewHostHelper {
  public:
   RenderWidgetHostNSViewHostHelper() {}
+
+  RenderWidgetHostNSViewHostHelper(const RenderWidgetHostNSViewHostHelper&) =
+      delete;
+  RenderWidgetHostNSViewHostHelper& operator=(
+      const RenderWidgetHostNSViewHostHelper&) = delete;
+
   virtual ~RenderWidgetHostNSViewHostHelper() {}
+
+  // Return the RenderWidget's accessibility node.
+  virtual id GetAccessibilityElement() = 0;
 
   // Return the RenderWidget's BrowserAccessibilityManager's root accessibility
   // node.
@@ -60,7 +68,7 @@ class RenderWidgetHostNSViewHostHelper {
   virtual void ForwardKeyboardEventWithCommands(
       const content::NativeWebKeyboardEvent& key_event,
       const ui::LatencyInfo& latency_info,
-      const std::vector<content::EditCommand>& commands) = 0;
+      std::vector<blink::mojom::EditCommandPtr> commands) = 0;
 
   // Forward events to the renderer or the input router, as appropriate.
   virtual void RouteOrProcessMouseEvent(
@@ -82,9 +90,6 @@ class RenderWidgetHostNSViewHostHelper {
   virtual void GestureEnd(blink::WebGestureEvent end_event) = 0;
   virtual void SmartMagnify(
       const blink::WebGestureEvent& smart_magnify_event) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostNSViewHostHelper);
 };
 
 }  // namespace remote_cocoa

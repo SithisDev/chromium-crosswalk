@@ -1,32 +1,35 @@
 #!/usr/bin/env python
 #
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import optparse
+# Tool that combines a sequence of input proguard files and outputs a single
+# proguard file.
+#
+# The final output file is formed by concatenating all of the
+# input proguard files.
+
+import argparse
 import sys
 
-# Combines files in |input_files| as one proguard file and write that to
-# |output_file|
-def GenerateProguardFile(output_file, input_files):
-  try:
-    with open(output_file, "wb") as target:
-      for input_file in input_files:
-        f = open(input_file, "rb")
-        for line in f:
-          target.write(line)
-  except IOError:
-    raise Exception("Proguard file generation failed")
+
+def ReadFile(path):
+  with open(path, 'rb') as f:
+    return f.read()
 
 
 def main():
-  parser = optparse.OptionParser()
-  parser.add_option('--output-file',
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--output-file',
           help='Output file for the generated proguard file')
 
-  options, input_files = parser.parse_args()
-  GenerateProguardFile(options.output_file, input_files)
+  args, input_files = parser.parse_known_args()
+
+  # Concatenate all the proguard files.
+  with open(args.output_file, 'wb') as target:
+    for input_file in input_files:
+      target.write(ReadFile(input_file))
 
 
 if __name__ == '__main__':

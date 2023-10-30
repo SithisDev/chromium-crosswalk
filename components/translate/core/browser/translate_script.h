@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,10 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/callback_forward.h"
+#include "base/callback_list.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 
@@ -24,9 +23,13 @@ class TranslateURLFetcher;
 
 class TranslateScript {
  public:
-  typedef base::Callback<void(bool, const std::string&)> RequestCallback;
+  using RequestCallback = base::OnceCallback<void(bool)>;
 
   TranslateScript();
+
+  TranslateScript(const TranslateScript&) = delete;
+  TranslateScript& operator=(const TranslateScript&) = delete;
+
   virtual ~TranslateScript();
 
   // Returns the fetched translate script.
@@ -36,7 +39,7 @@ class TranslateScript {
   // Delay after which the translate script is fetched again from the
   // translation server.
   void set_expiration_delay(int delay_ms) {
-    expiration_delay_ = base::TimeDelta::FromMilliseconds(delay_ms);
+    expiration_delay_ = base::Milliseconds(delay_ms);
   }
 
   // Clears the translate script, so it will be fetched next time we translate.
@@ -45,7 +48,7 @@ class TranslateScript {
   // Fetches the JS translate script (the script that is injected in the page
   // to translate it). |is_incognito| is used during the fetch to determine
   // which variations headers to add.
-  void Request(const RequestCallback& callback, bool is_incognito);
+  void Request(RequestCallback callback, bool is_incognito);
 
   // Returns the URL to be used to load the translate script.
   static GURL GetTranslateScriptURL();
@@ -93,12 +96,10 @@ class TranslateScript {
   base::TimeDelta expiration_delay_;
 
   // The callbacks called when the server sends a response.
-  typedef std::vector<RequestCallback> RequestCallbackList;
+  using RequestCallbackList = base::OnceCallbackList<RequestCallback::RunType>;
   RequestCallbackList callback_list_;
 
   base::WeakPtrFactory<TranslateScript> weak_method_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(TranslateScript);
 };
 
 }  // namespace translate

@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,7 +8,6 @@ class TemplateWriter(object):
   '''Abstract base class for writing policy templates in various formats.
   The methods of this class will be called by PolicyTemplateGenerator.
   '''
-
   def __init__(self, platforms, config):
     '''Initializes a TemplateWriter object.
 
@@ -43,7 +42,31 @@ class TemplateWriter(object):
       policy: The dictionary of the policy.
 
     Returns:
-      True if the writer chooses to include the deprecated 'policy' in its
+      True if the writer chooses to include the unreleased 'policy' in its
+      output.
+    '''
+    return False
+
+  def IsCloudOnlyPolicySupported(self, policy):
+    '''Checks if the given cloud only policy is supported by the writer.
+
+    Args:
+      policy: The dictionary of the policy.
+
+    Returns:
+      True if the writer chooses to include the cloud only 'policy' in its
+      output.
+    '''
+    return False
+
+  def IsInternalOnlyPolicySupported(self, policy):
+    '''Checks if the given internal policy is supported by the writer.
+
+    Args:
+      policy: The dictionary of the policy.
+
+    Returns:
+      True if the writer chooses to include the internal only 'policy' in its
       output.
     '''
     return False
@@ -60,44 +83,65 @@ class TemplateWriter(object):
     Returns:
       True if the writer chooses to include 'policy' in its output.
     '''
-    if ('deprecated' in policy and policy['deprecated'] is True and
-        not self.IsDeprecatedPolicySupported(policy)):
+    if ('deprecated' in policy and policy['deprecated'] is True
+        and not self.IsDeprecatedPolicySupported(policy)):
       return False
 
-    if ('future' in policy and policy['future'] is True and
-        not self.IsFuturePolicySupported(policy)):
+    if (self.IsCloudOnlyPolicy(policy)
+        and not self.IsCloudOnlyPolicySupported(policy)):
+      return False
+
+    if (self.IsInternalOnlyPolicy(policy)
+        and not self.IsInternalOnlyPolicySupported(policy)):
       return False
 
     for supported_on in policy['supported_on']:
       if not self.IsVersionSupported(policy, supported_on):
         continue
-      if '*' in self.platforms:
+      if '*' in self.platforms or supported_on['platform'] in self.platforms:
         return True
-      if any(
-          platform in self.platforms for platform in supported_on['platforms']):
+
+    if self.IsFuturePolicySupported(policy):
+      if '*' in self.platforms and policy['future_on']:
         return True
+      for future in policy['future_on']:
+        if future['platform'] in self.platforms:
+          return True
     return False
+
+  def GetPolicyFeature(self, policy, feature_name, value=None):
+    '''Returns policy feature with |feature_name| if exsits. Otherwise, returns
+    |value|.'''
+    return policy.get('features', {}).get(feature_name, value)
 
   def CanBeRecommended(self, policy):
     '''Checks if the given policy can be recommended.'''
-    return policy.get('features', {}).get('can_be_recommended', False)
+    return self.GetPolicyFeature(policy, 'can_be_recommended', False)
 
   def CanBeMandatory(self, policy):
     '''Checks if the given policy can be mandatory.'''
-    return policy.get('features', {}).get('can_be_mandatory', True)
+    return self.GetPolicyFeature(policy, 'can_be_mandatory', True)
 
-  def IsPolicySupportedOnPlatform(self,
-                                  policy,
-                                  platform,
-                                  product=None,
-                                  management=None):
-    '''Checks if |policy| is supported on |product| for |platform|. If
+  def IsCloudOnlyPolicy(self, policy):
+    '''Checks if the given policy is cloud only'''
+    return self.GetPolicyFeature(policy, 'cloud_only', False)
+
+  def IsInternalOnlyPolicy(self, policy):
+    '''Checks if the given policy is internal only'''
+    return self.GetPolicyFeature(policy, 'internal_only', False)
+
+  def IsPolicyOrItemSupportedOnPlatform(self,
+                                        item,
+                                        platform,
+                                        product=None,
+                                        management=None):
+    '''Checks if |item| is supported on |product| for |platform|. If
     |product| is not specified, only the platform support is checked.
     If |management| is specified, also checks for support for Chrome OS
     management type.
 
     Args:
-      policy: The dictionary of the policy.
+      item: The dictionary of the policy or item.
       platform: The platform to check; one of
         'win', 'mac', 'linux', 'chrome_os', 'android'.
       product: Optional product to check; one of
@@ -105,13 +149,22 @@ class TemplateWriter(object):
       management: Optional Chrome OS management type to check; one of
         'active_directory', 'google_cloud'.
     '''
-    if management and not self.IsCrOSManagementSupported(policy, management):
+    if management and not self.IsCrOSManagementSupported(item, management):
       return False
 
-    for supported_on in policy['supported_on']:
-      if (platform in supported_on['platforms'] and
-          (not product or product in supported_on['product']) and
-          self.IsVersionSupported(policy, supported_on)):
+    for supported_on in item['supported_on']:
+      if (platform == supported_on['platform']
+          and (not product or product in supported_on['product'])
+          and self.IsVersionSupported(item, supported_on)):
+        return True
+    if self.IsFuturePolicySupported(item):
+      if (product and {
+          'platform': platform,
+          'product': product
+      } in item.get('future_on', [])):
+        return True
+      if (not product and filter(lambda f: f['platform'] == platform,
+                                 item.get('future_on', []))):
         return True
     return False
 
@@ -123,8 +176,8 @@ class TemplateWriter(object):
       product: Optional product to check; one of
         'chrome', 'chrome_frame', 'chrome_os', 'webview'
     '''
-    return (self.IsPolicySupportedOnPlatform(policy, 'win', product) or
-            self.IsPolicySupportedOnPlatform(policy, 'win7', product))
+    return (self.IsPolicyOrItemSupportedOnPlatform(policy, 'win', product)
+            or self.IsPolicyOrItemSupportedOnPlatform(policy, 'win7', product))
 
   def IsCrOSManagementSupported(self, policy, management):
     '''Checks whether |policy| supports the Chrome OS |management| type.
@@ -148,8 +201,8 @@ class TemplateWriter(object):
     since_version = supported_on.get('since_version', None)
     until_version = supported_on.get('until_version', None)
 
-    return ((not since_version or int(since_version) <= major_version) and
-            (not until_version or int(until_version) >= major_version))
+    return ((not since_version or int(since_version) <= major_version)
+            and (not until_version or int(until_version) >= major_version))
 
   def _GetChromiumVersionString(self):
     '''Returns the Chromium version string stored in the environment variable
@@ -204,27 +257,7 @@ class TemplateWriter(object):
     template['policy_definitions'] = \
         self.PreprocessPolicies(template['policy_definitions'])
     self.BeginTemplate()
-    for policy in template['policy_definitions']:
-      if policy['type'] == 'group':
-        child_policies = self._GetPoliciesForWriter(policy)
-        child_recommended_policies = filter(self.CanBeRecommended,
-                                            child_policies)
-        if child_policies:
-          # Only write nonempty groups.
-          self.BeginPolicyGroup(policy)
-          for child_policy in child_policies:
-            # Nesting of groups is currently not supported.
-            self.WritePolicy(child_policy)
-          self.EndPolicyGroup()
-        if child_recommended_policies:
-          self.BeginRecommendedPolicyGroup(policy)
-          for child_policy in child_recommended_policies:
-            self.WriteRecommendedPolicy(child_policy)
-          self.EndRecommendedPolicyGroup()
-      elif self.IsPolicySupported(policy):
-        self.WritePolicy(policy)
-        if self.CanBeRecommended(policy):
-          self.WriteRecommendedPolicy(policy)
+    self.WritePolicies(template['policy_definitions'])
     self.EndTemplate()
 
     return self.GetTemplateText()
@@ -244,6 +277,35 @@ class TemplateWriter(object):
       The sorted policy list.
     '''
     return self.SortPoliciesGroupsFirst(policy_list)
+
+  def WritePolicies(self, policy_list):
+    '''Appends the template text corresponding to all the policies into the
+    internal buffer.
+
+    Args:
+      policy_list: A list containing the policies to write.
+    '''
+    for policy in policy_list:
+      if policy['type'] == 'group':
+        child_policies = list(self._GetPoliciesForWriter(policy))
+        child_recommended_policies = list(
+            filter(self.CanBeRecommended, child_policies))
+        if child_policies:
+          # Only write nonempty groups.
+          self.BeginPolicyGroup(policy)
+          for child_policy in child_policies:
+            # Nesting of groups is currently not supported.
+            self.WritePolicy(child_policy)
+          self.EndPolicyGroup()
+        if child_recommended_policies:
+          self.BeginRecommendedPolicyGroup(policy)
+          for child_policy in child_recommended_policies:
+            self.WriteRecommendedPolicy(child_policy)
+          self.EndRecommendedPolicyGroup()
+      elif self.IsPolicySupported(policy):
+        self.WritePolicy(policy)
+        if self.CanBeRecommended(policy):
+          self.WriteRecommendedPolicy(policy)
 
   def WritePolicy(self, policy):
     '''Appends the template text corresponding to a policy into the
@@ -386,8 +448,8 @@ class TemplateWriter(object):
     '''Returns whether the policy has expanded documentation containing the link
     to the documentation with schema and formatting.
     '''
-    return (policy['type'] in ('dict', 'external') or 'url_schema' in policy or
-            'validation_schema' in policy or 'description_schema' in policy)
+    return (policy['type'] in ('dict', 'external') or 'url_schema' in policy
+            or 'validation_schema' in policy or 'description_schema' in policy)
 
   def GetExpandedPolicyDescription(self, policy):
     '''Returns the expanded description of the policy containing the link to the
@@ -398,8 +460,9 @@ class TemplateWriter(object):
     url = None
     if 'url_schema' in policy:
       url = policy['url_schema']
-    if (policy['type'] in ('dict', 'external') or
-        'validation_schema' in policy or 'description_schema' in policy):
-      url = 'https://www.chromium.org/administrators/policy-list-3#' + policy[
-          'name']
+    if (policy['type'] in ('dict', 'external') or 'validation_schema' in policy
+        or 'description_schema' in policy):
+      url = (
+          'https://cloud.google.com/docs/chrome-enterprise/policies/?policy=' +
+          policy['name'])
     return schema_description_link_text.replace('$6', url) if url else ''

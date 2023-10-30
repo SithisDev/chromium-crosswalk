@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,18 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/check_op.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/net_errors.h"
 #include "net/proxy_resolution/proxy_info.h"
 #include "services/network/public/mojom/proxy_lookup_client.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -40,8 +39,8 @@ class PepperProxyLookupHelperTest : public testing::Test {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     base::RunLoop run_loop;
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
+    GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&PepperProxyLookupHelperTest::StartLookupOnIOThread,
                        base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
@@ -51,10 +50,10 @@ class PepperProxyLookupHelperTest : public testing::Test {
       EXPECT_TRUE(proxy_lookup_client_);
   }
 
-  // Takes the |ProxyLookupClientPtr| passed by |lookup_helper_| to
+  // Takes the |mojo::Remote<ProxyLookupClient>| passed by |lookup_helper_| to
   // LookUpProxyForURLOnUIThread(). May only be called after |lookup_helper_|
   // has successfully called into LookUpProxyForURLOnUIThread().
-  network::mojom::ProxyLookupClientPtr ClaimProxyLookupClient() {
+  mojo::Remote<network::mojom::ProxyLookupClient> ClaimProxyLookupClient() {
     EXPECT_TRUE(proxy_lookup_client_);
     return std::move(proxy_lookup_client_);
   }
@@ -63,8 +62,8 @@ class PepperProxyLookupHelperTest : public testing::Test {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     base::RunLoop run_loop;
 
-    base::PostTaskWithTraitsAndReply(
-        FROM_HERE, {BrowserThread::IO},
+    GetIOThreadTaskRunner({})->PostTaskAndReply(
+        FROM_HERE,
         base::BindOnce(
             &PepperProxyLookupHelperTest::DestroyLookupHelperOnIOThread,
             base::Unretained(this)),
@@ -80,7 +79,7 @@ class PepperProxyLookupHelperTest : public testing::Test {
   }
 
   // Get the proxy information passed into OnLookupCompleteOnIOThread().
-  const base::Optional<net::ProxyInfo>& proxy_info() const {
+  const absl::optional<net::ProxyInfo>& proxy_info() const {
     return proxy_info_;
   }
 
@@ -112,7 +111,8 @@ class PepperProxyLookupHelperTest : public testing::Test {
   bool LookUpProxyForURLOnUIThread(
       base::OnceClosure closure,
       const GURL& url,
-      network::mojom::ProxyLookupClientPtr proxy_lookup_client) {
+      mojo::PendingRemote<network::mojom::ProxyLookupClient>
+          proxy_lookup_client) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     std::move(closure).Run();
@@ -121,13 +121,13 @@ class PepperProxyLookupHelperTest : public testing::Test {
       return false;
 
     EXPECT_EQ(GURL(kTestURL), url);
-    proxy_lookup_client_ = std::move(proxy_lookup_client);
+    proxy_lookup_client_.Bind(std::move(proxy_lookup_client));
     return true;
   }
 
   // Invoked by |lookup_helper_| on the IO thread once the proxy lookup has
   // completed.
-  void OnLookupCompleteOnIOThread(base::Optional<net::ProxyInfo> proxy_info) {
+  void OnLookupCompleteOnIOThread(absl::optional<net::ProxyInfo> proxy_info) {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
     proxy_info_ = std::move(proxy_info);
@@ -140,14 +140,14 @@ class PepperProxyLookupHelperTest : public testing::Test {
     lookup_helper_.reset();
   }
 
-  TestBrowserThreadBundle test_browser_thread_bundle_;
+  BrowserTaskEnvironment task_environment_;
 
   bool fail_to_start_request_ = false;
 
   std::unique_ptr<PepperProxyLookupHelper> lookup_helper_;
 
-  base::Optional<net::ProxyInfo> proxy_info_;
-  network::mojom::ProxyLookupClientPtr proxy_lookup_client_;
+  absl::optional<net::ProxyInfo> proxy_info_;
+  mojo::Remote<network::mojom::ProxyLookupClient> proxy_lookup_client_;
 
   base::RunLoop lookup_complete_run_loop_;
 };
@@ -167,7 +167,7 @@ TEST_F(PepperProxyLookupHelperTest, Success) {
 TEST_F(PepperProxyLookupHelperTest, Failure) {
   StartLookup();
   ClaimProxyLookupClient()->OnProxyLookupComplete(net::ERR_FAILED,
-                                                  base::nullopt);
+                                                  absl::nullopt);
   WaitForLookupCompletion();
   EXPECT_FALSE(proxy_info());
 }
@@ -196,9 +196,9 @@ TEST_F(PepperProxyLookupHelperTest, FailToStartRequest) {
 TEST_F(PepperProxyLookupHelperTest, DestroyBeforeComplete) {
   StartLookup();
   base::RunLoop run_loop;
-  network::mojom::ProxyLookupClientPtr proxy_lookup_client =
+  mojo::Remote<network::mojom::ProxyLookupClient> proxy_lookup_client =
       ClaimProxyLookupClient();
-  proxy_lookup_client.set_connection_error_handler(run_loop.QuitClosure());
+  proxy_lookup_client.set_disconnect_handler(run_loop.QuitClosure());
   DestroyLookupHelper();
   run_loop.Run();
 }

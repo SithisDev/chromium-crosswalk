@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/token.h"
 #include "chromecast/external_mojo/external_service_support/external_connector.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/bind_source_info.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/mojom/connector.mojom.h"
@@ -23,12 +25,12 @@ namespace {
 
 void OnStartCallback(
     ExternalConnector* connector,
-    service_manager::mojom::ConnectorRequest connector_request,
-    service_manager::mojom::ServiceControlAssociatedRequest control_request) {
+    mojo::PendingReceiver<service_manager::mojom::Connector> connector_receiver,
+    mojo::PendingAssociatedReceiver<service_manager::mojom::ServiceControl>
+        control_receiver) {
   DCHECK(connector);
-  if (connector_request.is_pending()) {
-    connector->SendChromiumConnectorRequest(
-        connector_request.PassMessagePipe());
+  if (connector_receiver.is_valid()) {
+    connector->SendChromiumConnectorRequest(connector_receiver.PassPipe());
   }
 }
 
@@ -36,18 +38,16 @@ void OnStartCallback(
 
 ChromiumServiceWrapper::ChromiumServiceWrapper(
     ExternalConnector* connector,
-    service_manager::mojom::ServicePtr service_ptr,
+    mojo::Remote<service_manager::mojom::Service> service_remote,
     std::unique_ptr<service_manager::Service> chromium_service,
     const std::string& service_name)
-    : service_ptr_(std::move(service_ptr)),
-      chromium_service_(std::move(chromium_service)),
-      service_binding_(this) {
+    : service_remote_(std::move(service_remote)),
+      chromium_service_(std::move(chromium_service)) {
   DCHECK(connector);
   DCHECK(chromium_service_);
 
-  external_mojo::mojom::ExternalServicePtr ptr;
-  service_binding_.Bind(mojo::MakeRequest(&ptr));
-  connector->RegisterService(service_name, std::move(ptr));
+  connector->RegisterService(service_name,
+                             service_receiver_.BindNewPipeAndPassRemote());
 }
 
 ChromiumServiceWrapper::~ChromiumServiceWrapper() = default;
@@ -64,9 +64,10 @@ void ChromiumServiceWrapper::OnBindInterface(
       interface_name, std::move(interface_pipe));
 }
 
-service_manager::mojom::ServiceRequest CreateChromiumServiceRequest(
+mojo::PendingReceiver<service_manager::mojom::Service>
+CreateChromiumServiceReceiver(
     ExternalConnector* connector,
-    service_manager::mojom::ServicePtr* service_ptr,
+    mojo::Remote<service_manager::mojom::Service>* service_remote,
     service_manager::Identity identity) {
   DCHECK(connector);
 
@@ -76,10 +77,10 @@ service_manager::mojom::ServiceRequest CreateChromiumServiceRequest(
         base::Token::CreateRandom());
   }
 
-  auto request = mojo::MakeRequest(service_ptr);
-  (*service_ptr)
+  auto receiver = service_remote->BindNewPipeAndPassReceiver();
+  (*service_remote)
       ->OnStart(identity, base::BindOnce(&OnStartCallback, connector));
-  return request;
+  return receiver;
 }
 
 std::unique_ptr<service_manager::Connector> CreateChromiumConnector(
@@ -87,9 +88,9 @@ std::unique_ptr<service_manager::Connector> CreateChromiumConnector(
   mojo::MessagePipe pipe;
   connector->SendChromiumConnectorRequest(std::move(pipe.handle1));
   return std::make_unique<service_manager::Connector>(
-      service_manager::mojom::ConnectorPtr(
-          service_manager::mojom::ConnectorPtrInfo(std::move(pipe.handle0),
-                                                   0)));
+      mojo::Remote<service_manager::mojom::Connector>(
+          mojo::PendingRemote<service_manager::mojom::Connector>(
+              std::move(pipe.handle0), 0)));
 }
 
 }  // namespace external_service_support

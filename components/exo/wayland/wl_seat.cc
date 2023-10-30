@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,19 @@
 #include <wayland-server-core.h>
 #include <wayland-server-protocol-core.h>
 
+#include "build/chromeos_buildflags.h"
 #include "components/exo/pointer.h"
 #include "components/exo/touch.h"
+#include "components/exo/wayland/serial_tracker.h"
 #include "components/exo/wayland/server_util.h"
 #include "components/exo/wayland/wayland_pointer_delegate.h"
 #include "components/exo/wayland/wayland_touch_delegate.h"
 #include "ui/base/buildflags.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "components/exo/keyboard.h"
 #include "components/exo/wayland/wayland_keyboard_delegate.h"
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace exo {
 namespace wayland {
@@ -45,7 +47,7 @@ void pointer_release(wl_client* client, wl_resource* resource) {
 const struct wl_pointer_interface pointer_implementation = {pointer_set_cursor,
                                                             pointer_release};
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 ////////////////////////////////////////////////////////////////////////////////
 // wl_keyboard_interface:
 
@@ -58,7 +60,7 @@ void keyboard_release(wl_client* client, wl_resource* resource) {
 const struct wl_keyboard_interface keyboard_implementation = {keyboard_release};
 
 #endif  // BUILDFLAG(USE_XKBCOMMON)
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 ////////////////////////////////////////////////////////////////////////////////
 // wl_touch_interface:
 
@@ -72,47 +74,48 @@ const struct wl_touch_interface touch_implementation = {touch_release};
 // wl_seat_interface:
 
 void seat_get_pointer(wl_client* client, wl_resource* resource, uint32_t id) {
+  auto* data = GetUserDataAs<WaylandSeat>(resource);
+
   wl_resource* pointer_resource = wl_resource_create(
       client, &wl_pointer_interface, wl_resource_get_version(resource), id);
 
   SetImplementation(
       pointer_resource, &pointer_implementation,
-      std::make_unique<Pointer>(new WaylandPointerDelegate(pointer_resource)));
+      std::make_unique<Pointer>(
+          new WaylandPointerDelegate(pointer_resource, data->serial_tracker),
+          data->seat));
 }
 
 void seat_get_keyboard(wl_client* client, wl_resource* resource, uint32_t id) {
-#if defined(OS_CHROMEOS)
-#if BUILDFLAG(USE_XKBCOMMON)
+#if BUILDFLAG(IS_CHROMEOS_ASH) && BUILDFLAG(USE_XKBCOMMON)
+  auto* data = GetUserDataAs<WaylandSeat>(resource);
+
   uint32_t version = wl_resource_get_version(resource);
   wl_resource* keyboard_resource =
       wl_resource_create(client, &wl_keyboard_interface, version, id);
 
-  WaylandKeyboardDelegate* delegate =
-      new WaylandKeyboardDelegate(keyboard_resource);
-  std::unique_ptr<Keyboard> keyboard =
-      std::make_unique<Keyboard>(delegate, GetUserDataAs<Seat>(resource));
-  keyboard->AddObserver(delegate);
+  auto keyboard =
+      std::make_unique<Keyboard>(std::make_unique<WaylandKeyboardDelegate>(
+                                     keyboard_resource, data->serial_tracker),
+                                 data->seat);
   SetImplementation(keyboard_resource, &keyboard_implementation,
                     std::move(keyboard));
-
-  // TODO(reveman): Keep repeat info synchronized with chromium and the host OS.
-  if (version >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
-    wl_keyboard_send_repeat_info(keyboard_resource, 40, 500);
 #else
   NOTIMPLEMENTED();
-#endif  // BUILDFLAG(USE_XKBCOMMON)
-#else
-  NOTIMPLEMENTED();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) && BUILDFLAG(USE_XKBCOMMON)
 }
 
 void seat_get_touch(wl_client* client, wl_resource* resource, uint32_t id) {
+  auto* data = GetUserDataAs<WaylandSeat>(resource);
+
   wl_resource* touch_resource = wl_resource_create(
       client, &wl_touch_interface, wl_resource_get_version(resource), id);
 
   SetImplementation(
       touch_resource, &touch_implementation,
-      std::make_unique<Touch>(new WaylandTouchDelegate(touch_resource)));
+      std::make_unique<Touch>(
+          new WaylandTouchDelegate(touch_resource, data->serial_tracker),
+          data->seat));
 }
 
 void seat_release(wl_client* client, wl_resource* resource) {
@@ -134,9 +137,9 @@ void bind_seat(wl_client* client, void* data, uint32_t version, uint32_t id) {
     wl_seat_send_name(resource, "default");
   uint32_t capabilities = WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_TOUCH;
 
-#if defined(OS_CHROMEOS) && BUILDFLAG(USE_XKBCOMMON)
+#if BUILDFLAG(IS_CHROMEOS_ASH) && BUILDFLAG(USE_XKBCOMMON)
   capabilities |= WL_SEAT_CAPABILITY_KEYBOARD;
-#endif  // defined(OS_CHROMEOS) && BUILDFLAG(USE_XKBCOMMON)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) && BUILDFLAG(USE_XKBCOMMON)
   wl_seat_send_capabilities(resource, capabilities);
 }
 

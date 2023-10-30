@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ import java.io.File;
  * Android activity for running content_public.browser.tests
  */
 public class ContentBrowserTestsActivity extends ContentShellBrowserTestActivity {
-    private static final String TAG = "cr.native_test";
+    private static final String TAG = "native_test";
 
     @Override
     public void onCreate(Bundle savedInstanceState) {

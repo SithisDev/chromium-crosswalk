@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/strings/string_piece.h"
 
 namespace metrics {
@@ -22,7 +21,7 @@ class MetricsLogUploader {
   // Type for OnUploadComplete callbacks.  These callbacks will receive three
   // parameters: A response code, a net error code, and a boolean specifying
   // if the connection was secure (over HTTPS).
-  typedef base::Callback<void(int, int, bool)> UploadCallback;
+  using UploadCallback = base::RepeatingCallback<void(int, int, bool)>;
 
   // Possible service types. This should correspond to a type from
   // DataUseUserData.

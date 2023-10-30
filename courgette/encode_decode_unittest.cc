@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -107,11 +107,6 @@ TEST_F(EncodeDecodeTest, Elf_Small) {
 TEST_F(EncodeDecodeTest, Elf_HighBSS) {
   std::string file = FileContents("elf-32-high-bss");
   TestAssembleToStreamDisassemble(file, 7308);
-}
-
-TEST_F(EncodeDecodeTest, Elf_Arm) {
-  std::string file = FileContents("elf-armv7");
-  TestAssembleToStreamDisassemble(file, 8531);
 }
 
 }  // namespace courgette

@@ -1,19 +1,17 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/renderer_host/input/tap_suppression_controller.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 
 namespace content {
 
 TapSuppressionController::Config::Config()
-    : enabled(false),
-      max_cancel_to_down_time(base::TimeDelta::FromMilliseconds(180)) {
-}
+    : enabled(false), max_cancel_to_down_time(base::Milliseconds(180)) {}
 
 TapSuppressionController::TapSuppressionController(const Config& config)
     : state_(config.enabled ? NOTHING : DISABLED),

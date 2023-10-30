@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,6 @@
 #include "components/leveldb_proto/public/proto_database_provider.h"
 
 namespace leveldb_proto {
-
-void GetSharedDBInstance(
-    ProtoDatabaseProvider* db_provider,
-    base::OnceCallback<void(scoped_refptr<SharedProtoDatabase>)> callback) {
-  DCHECK(base::SequencedTaskRunnerHandle::IsSet());
-  db_provider->GetSharedDBInstance(std::move(callback),
-                                   base::SequencedTaskRunnerHandle::Get());
-}
 
 void RunUpdateCallback(
     scoped_refptr<base::SequencedTaskRunner> callback_task_runner,

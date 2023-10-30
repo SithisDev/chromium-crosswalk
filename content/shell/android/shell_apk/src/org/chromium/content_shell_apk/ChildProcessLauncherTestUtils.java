@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ public final class ChildProcessLauncherTestUtils {
         done.acquireUninterruptibly();
     }
 
-    public static <R> R runOnLauncherAndGetResult(Callable<R> callable) {
+    public static <T> T runOnLauncherAndGetResult(Callable<T> callable) {
         if (LauncherThread.runningOnLauncherThread()) {
             try {
                 return callable.call();
@@ -44,7 +44,7 @@ public final class ChildProcessLauncherTestUtils {
             }
         }
         try {
-            FutureTask<R> task = new FutureTask<R>(callable);
+            FutureTask<T> task = new FutureTask<T>(callable);
             LauncherThread.post(task);
             return task.get();
         } catch (Exception e) {
@@ -59,8 +59,9 @@ public final class ChildProcessLauncherTestUtils {
             @Override
             public ChildProcessLauncherHelperImpl call() {
                 return ChildProcessLauncherHelperImpl.createAndStartForTesting(commandLine,
-                        filesToBeMapped, sandboxed, true /* canUseWarmUpConnection */,
-                        null /* binderCallback */, doSetupConnection);
+                        filesToBeMapped, sandboxed, false /* reducePriorityOnBackground */,
+                        true /* canUseWarmUpConnection */, null /* binderCallback */,
+                        doSetupConnection);
             }
         });
     }

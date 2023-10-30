@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,21 @@
 
 #include <string>
 
+#include "base/component_export.h"
+
 namespace variations {
 
 // Represents data received when downloading the seed: "data" is the response
 // body while the other fields come from headers.
-struct SeedResponse {
+// This is only used on Android.
+struct COMPONENT_EXPORT(VARIATIONS) SeedResponse {
   SeedResponse();
   ~SeedResponse();
 
   std::string data;  // "data" is binary, for which protobuf uses strings.
   std::string signature;
   std::string country;
-  std::string date;
+  int64_t date;
   bool is_gzip_compressed = false;
 };
 

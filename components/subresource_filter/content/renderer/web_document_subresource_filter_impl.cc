@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,7 +71,6 @@ proto::ElementType ToElementType(
 
     case blink::mojom::RequestContextType::CSP_REPORT:
     case blink::mojom::RequestContextType::DOWNLOAD:
-    case blink::mojom::RequestContextType::IMPORT:
     case blink::mojom::RequestContextType::MANIFEST:
     case blink::mojom::RequestContextType::UNSPECIFIED:
     default:
@@ -81,6 +80,8 @@ proto::ElementType ToElementType(
 
 WebLoadPolicy ToWebLoadPolicy(LoadPolicy load_policy) {
   switch (load_policy) {
+    case LoadPolicy::EXPLICITLY_ALLOW:
+      [[fallthrough]];
     case LoadPolicy::ALLOW:
       return WebLoadPolicy::kAllow;
     case LoadPolicy::DISALLOW:
@@ -125,6 +126,12 @@ WebDocumentSubresourceFilterImpl::GetLoadPolicyForWebSocketConnect(
   return getLoadPolicyImpl(url, proto::ELEMENT_TYPE_WEBSOCKET);
 }
 
+WebLoadPolicy
+WebDocumentSubresourceFilterImpl::GetLoadPolicyForWebTransportConnect(
+    const blink::WebURL& url) {
+  return getLoadPolicyImpl(url, proto::ELEMENT_TYPE_WEBTRANSPORT);
+}
+
 void WebDocumentSubresourceFilterImpl::ReportDisallowedLoad() {
   if (!first_disallowed_load_callback_.is_null())
     std::move(first_disallowed_load_callback_).Run();
@@ -163,7 +170,6 @@ WebDocumentSubresourceFilterImpl::BuilderImpl::~BuilderImpl() {}
 std::unique_ptr<blink::WebDocumentSubresourceFilter>
 WebDocumentSubresourceFilterImpl::BuilderImpl::Build() {
   DCHECK(ruleset_file_.IsValid());
-  DCHECK(!main_task_runner_->BelongsToCurrentThread());
   scoped_refptr<MemoryMappedRuleset> ruleset =
       MemoryMappedRuleset::CreateAndInitialize(std::move(ruleset_file_));
   if (!ruleset)

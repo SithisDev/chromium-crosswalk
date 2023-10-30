@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,6 @@ const char kEventResize[] = "guestViewInternal.onResize";
 
 // Parameters/properties on events.
 const char kCode[] = "code";
-const char kContentWindowID[] = "contentWindowId";
 const char kID[] = "id";
 const char kIsTopLevel[] = "isTopLevel";
 const char kNewWidth[] = "newWidth";

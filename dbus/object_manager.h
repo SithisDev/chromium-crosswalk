@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include <map>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "dbus/object_path.h"
@@ -86,9 +86,9 @@
 //       override {
 //     Properties* properties = new Properties(
 //           object_proxy, interface_name,
-//           base::Bind(&PropertyChanged,
-//                      weak_ptr_factory_.GetWeakPtr(),
-//                      object_path));
+//           base::BindRepeating(&PropertyChanged,
+//                               weak_ptr_factory_.GetWeakPtr(),
+//                               object_path));
 //     return static_cast<dbus::PropertySet*>(properties);
 //   }
 //
@@ -188,6 +188,9 @@ class CHROME_DBUS_EXPORT ObjectManager final
                                              const std::string& service_name,
                                              const ObjectPath& object_path);
 
+  ObjectManager(const ObjectManager&) = delete;
+  ObjectManager& operator=(const ObjectManager&) = delete;
+
   // Register a client implementation class |interface| for the given D-Bus
   // interface named in |interface_name|. That object's CreateProperties()
   // method will be used to create instances of dbus::PropertySet* when
@@ -199,6 +202,9 @@ class CHROME_DBUS_EXPORT ObjectManager final
   // |interface_name|, objects and properties of this interface will be
   // ignored.
   void UnregisterInterface(const std::string& interface_name);
+
+  // Checks whether an interface is registered.
+  bool IsInterfaceRegisteredForTesting(const std::string& interface_name) const;
 
   // Returns a list of object paths, in an undefined order, of objects known
   // to this manager.
@@ -317,12 +323,17 @@ class CHROME_DBUS_EXPORT ObjectManager final
   void NameOwnerChanged(const std::string& old_owner,
                         const std::string& new_owner);
 
-  Bus* bus_;
+  // Write |new_owner| to |service_name_owner_|. This method makes sure write
+  // happens on the DBus thread, which is the sole writer to
+  // |service_name_owner_|.
+  void UpdateServiceNameOwner(const std::string& new_owner);
+
+  raw_ptr<Bus> bus_;
   std::string service_name_;
   std::string service_name_owner_;
   std::string match_rule_;
   ObjectPath object_path_;
-  ObjectProxy* object_proxy_;
+  raw_ptr<ObjectProxy> object_proxy_;
   bool setup_success_;
   bool cleanup_called_;
 
@@ -338,7 +349,7 @@ class CHROME_DBUS_EXPORT ObjectManager final
     Object();
     ~Object();
 
-    ObjectProxy* object_proxy;
+    raw_ptr<ObjectProxy> object_proxy;
 
     // Maps the name of an interface to the specific PropertySet structure
     // of that interface's properties.
@@ -354,9 +365,7 @@ class CHROME_DBUS_EXPORT ObjectManager final
   // than we do.
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<ObjectManager> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ObjectManager);
+  base::WeakPtrFactory<ObjectManager> weak_ptr_factory_{this};
 };
 
 }  // namespace dbus

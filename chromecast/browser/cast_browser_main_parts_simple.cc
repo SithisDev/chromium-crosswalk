@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,8 @@ namespace shell {
 
 // static
 std::unique_ptr<CastBrowserMainParts> CastBrowserMainParts::Create(
-    const content::MainFunctionParams& parameters,
-    URLRequestContextFactory* url_request_context_factory,
     CastContentBrowserClient* cast_content_browser_client) {
-  return std::make_unique<CastBrowserMainParts>(
-      parameters, url_request_context_factory, cast_content_browser_client);
+  return std::make_unique<CastBrowserMainParts>(cast_content_browser_client);
 }
 
 }  // namespace shell

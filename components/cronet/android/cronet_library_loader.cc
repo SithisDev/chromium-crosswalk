@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "base/android/base_jni_onload.h"
 #include "base/android/build_info.h"
@@ -15,13 +14,13 @@
 #include "base/android/jni_string.h"
 #include "base/android/jni_utils.h"
 #include "base/android/library_loader/library_loader_hooks.h"
+#include "base/check_op.h"
 #include "base/feature_list.h"
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/message_loop/message_loop_current.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/current_thread.h"
 #include "base/task/single_thread_task_executor.h"
-#include "base/task/thread_pool/thread_pool.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
 #include "build/build_config.h"
 #include "components/cronet/android/buildflags.h"
 #include "components/cronet/android/cronet_jni_headers/CronetLibraryLoader_jni.h"
@@ -29,11 +28,10 @@
 #include "components/cronet/version.h"
 #include "net/android/network_change_notifier_factory_android.h"
 #include "net/base/network_change_notifier.h"
+#include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/proxy_resolution/proxy_config_service_android.h"
-#include "net/proxy_resolution/proxy_resolution_service.h"
 #include "third_party/zlib/zlib.h"
 #include "url/buildflags.h"
-#include "url/url_util.h"
 
 #if !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
 #include "base/i18n/icu_util.h"  // nogncheck
@@ -73,7 +71,6 @@ void NativeInit() {
 
   if (!base::ThreadPoolInstance::Get())
     base::ThreadPoolInstance::CreateAndStartWithDefaultParams("Cronet");
-  url::Initialize();
 }
 
 }  // namespace
@@ -109,21 +106,22 @@ void CronetOnUnLoad(JavaVM* jvm, void* reserved) {
 
 void JNI_CronetLibraryLoader_CronetInitOnInitThread(JNIEnv* env) {
   // Initialize SingleThreadTaskExecutor for init thread.
-  DCHECK(!base::MessageLoopCurrent::IsSet());
+  DCHECK(!base::CurrentThread::IsSet());
   DCHECK(!g_init_task_executor);
   g_init_task_executor =
-      new base::SingleThreadTaskExecutor(base::MessageLoop::Type::JAVA);
+      new base::SingleThreadTaskExecutor(base::MessagePumpType::JAVA);
 
 // In integrated mode, NetworkChangeNotifier has been initialized by the host.
 #if BUILDFLAG(INTEGRATED_MODE)
-  CHECK(net::NetworkChangeNotifier::HasNetworkChangeNotifier());
+  CHECK(!net::NetworkChangeNotifier::CreateIfNeeded());
 #else
   DCHECK(!g_network_change_notifier);
   if (!net::NetworkChangeNotifier::GetFactory()) {
     net::NetworkChangeNotifier::SetFactory(
         new net::NetworkChangeNotifierFactoryAndroid());
   }
-  g_network_change_notifier = net::NetworkChangeNotifier::Create();
+  g_network_change_notifier = net::NetworkChangeNotifier::CreateIfNeeded();
+  DCHECK(g_network_change_notifier);
 #endif
 
   g_init_thread_init_done.Signal();
@@ -170,8 +168,10 @@ void EnsureInitialized() {
 
 std::unique_ptr<net::ProxyConfigService> CreateProxyConfigService(
     const scoped_refptr<base::SequencedTaskRunner>& io_task_runner) {
+  // Note: CreateSystemProxyConfigService internally assumes that
+  // base::ThreadTaskRunnerHandle::Get() == JNI communication thread.
   std::unique_ptr<net::ProxyConfigService> service =
-      net::ProxyResolutionService::CreateSystemProxyConfigService(io_task_runner);
+      net::ProxyConfigService::CreateSystemProxyConfigService(io_task_runner);
   // If a PAC URL is present, ignore it and use the address and port of
   // Android system's local HTTP proxy server. See: crbug.com/432539.
   // TODO(csharrison) Architect the wrapper better so we don't need to cast for
@@ -189,7 +189,7 @@ std::unique_ptr<net::ProxyResolutionService> CreateProxyResolutionService(
   // Android provides a local HTTP proxy server that handles proxying when a PAC
   // URL is present. Create a proxy service without a resolver and rely on this
   // local HTTP proxy. See: crbug.com/432539.
-  return net::ProxyResolutionService::CreateWithoutProxyResolver(
+  return net::ConfiguredProxyResolutionService::CreateWithoutProxyResolver(
       std::move(proxy_config_service), net_log);
 }
 

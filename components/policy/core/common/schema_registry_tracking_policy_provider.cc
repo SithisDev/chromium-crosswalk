@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,6 +33,14 @@ bool SchemaRegistryTrackingPolicyProvider::IsInitializationComplete(
     PolicyDomain domain) const {
   if (domain == POLICY_DOMAIN_CHROME)
     return delegate_->IsInitializationComplete(domain);
+  // This provider keeps its own state for all the other domains.
+  return state_ == READY;
+}
+
+bool SchemaRegistryTrackingPolicyProvider::IsFirstPolicyLoadComplete(
+    PolicyDomain domain) const {
+  if (domain == POLICY_DOMAIN_CHROME)
+    return delegate_->IsFirstPolicyLoadComplete(domain);
   // This provider keeps its own state for all the other domains.
   return state_ == READY;
 }
@@ -85,12 +93,13 @@ void SchemaRegistryTrackingPolicyProvider::OnUpdatePolicy(
   std::unique_ptr<PolicyBundle> bundle(new PolicyBundle());
   if (state_ == READY) {
     bundle->CopyFrom(delegate_->policies());
-    schema_map()->FilterBundle(bundle.get());
+    schema_map()->FilterBundle(bundle.get(),
+                               /*drop_invalid_component_policies=*/true);
   } else {
     // Always pass on the Chrome policy, even if the components are not ready
     // yet.
     const PolicyNamespace chrome_ns(POLICY_DOMAIN_CHROME, "");
-    bundle->Get(chrome_ns).CopyFrom(delegate_->policies().Get(chrome_ns));
+    bundle->Get(chrome_ns) = delegate_->policies().Get(chrome_ns).Clone();
   }
 
   UpdatePolicy(std::move(bundle));

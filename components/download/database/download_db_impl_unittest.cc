@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/guid.h"
+#include "base/memory/raw_ptr.h"
 #include "components/download/database/download_db_conversions.h"
 #include "components/download/database/download_db_entry.h"
 #include "components/download/database/proto/download_entry.pb.h"
@@ -42,6 +43,9 @@ class DownloadDBTest : public testing::Test {
  public:
   DownloadDBTest() : db_(nullptr), init_success_(false) {}
 
+  DownloadDBTest(const DownloadDBTest&) = delete;
+  DownloadDBTest& operator=(const DownloadDBTest&) = delete;
+
   ~DownloadDBTest() override = default;
 
   void CreateDatabase() {
@@ -49,9 +53,8 @@ class DownloadDBTest : public testing::Test {
         leveldb_proto::test::FakeDB<download_pb::DownloadDBEntry>>(
         &db_entries_);
     db_ = db.get();
-    download_db_.reset(new DownloadDBImpl(
-        DownloadNamespace::NAMESPACE_BROWSER_DOWNLOAD,
-        base::FilePath(FILE_PATH_LITERAL("/test/db/fakepath")), std::move(db)));
+    download_db_ = std::make_unique<DownloadDBImpl>(
+        DownloadNamespace::NAMESPACE_BROWSER_DOWNLOAD, std::move(db));
   }
 
   void InitCallback(bool success) { init_success_ = success; }
@@ -87,10 +90,9 @@ class DownloadDBTest : public testing::Test {
 
  protected:
   std::map<std::string, download_pb::DownloadDBEntry> db_entries_;
-  leveldb_proto::test::FakeDB<download_pb::DownloadDBEntry>* db_;
+  raw_ptr<leveldb_proto::test::FakeDB<download_pb::DownloadDBEntry>> db_;
   std::unique_ptr<DownloadDBImpl> download_db_;
   bool init_success_;
-  DISALLOW_COPY_AND_ASSIGN(DownloadDBTest);
 };
 
 TEST_F(DownloadDBTest, InitializeSucceeded) {
@@ -99,7 +101,7 @@ TEST_F(DownloadDBTest, InitializeSucceeded) {
 
   download_db_->Initialize(
       base::BindOnce(&DownloadDBTest::InitCallback, base::Unretained(this)));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
 
   ASSERT_TRUE(IsInitialized());
   ASSERT_TRUE(init_success_);
@@ -111,7 +113,7 @@ TEST_F(DownloadDBTest, InitializeFailed) {
 
   download_db_->Initialize(
       base::BindOnce(&DownloadDBTest::InitCallback, base::Unretained(this)));
-  db_->InitCallback(false);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kError);
 
   ASSERT_FALSE(IsInitialized());
   ASSERT_FALSE(init_success_);
@@ -122,7 +124,7 @@ TEST_F(DownloadDBTest, LoadEntries) {
   CreateDatabase();
   download_db_->Initialize(
       base::BindOnce(&DownloadDBTest::InitCallback, base::Unretained(this)));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   ASSERT_TRUE(IsInitialized());
 
   std::vector<DownloadDBEntry> loaded_entries;
@@ -142,7 +144,7 @@ TEST_F(DownloadDBTest, AddEntry) {
   CreateDatabase();
   download_db_->Initialize(
       base::BindOnce(&DownloadDBTest::InitCallback, base::Unretained(this)));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   ASSERT_TRUE(IsInitialized());
 
   DownloadDBEntry entry = CreateDownloadDBEntry();
@@ -173,13 +175,17 @@ TEST_F(DownloadDBTest, ReplaceEntry) {
   CreateDatabase();
   download_db_->Initialize(
       base::BindOnce(&DownloadDBTest::InitCallback, base::Unretained(this)));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   ASSERT_TRUE(IsInitialized());
 
   InProgressInfo in_progress_info;
   in_progress_info.current_path =
       base::FilePath(FILE_PATH_LITERAL("/tmp.crdownload"));
   in_progress_info.target_path = base::FilePath(FILE_PATH_LITERAL("/tmp"));
+  in_progress_info.reroute_info = DownloadItemRerouteInfo();
+  in_progress_info.reroute_info.set_service_provider(
+      enterprise_connectors::BOX);
+  in_progress_info.reroute_info.mutable_box()->set_file_id("12345");
   in_progress_info.url_chain.emplace_back("http://foo");
   in_progress_info.url_chain.emplace_back("http://foo2");
   first.download_info->in_progress_info = in_progress_info;
@@ -210,7 +216,7 @@ TEST_F(DownloadDBTest, Remove) {
   CreateDatabase();
   download_db_->Initialize(
       base::BindOnce(&DownloadDBTest::InitCallback, base::Unretained(this)));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   ASSERT_TRUE(IsInitialized());
 
   download_db_->Remove(first.GetGuid());
@@ -231,7 +237,7 @@ TEST_F(DownloadDBTest, DestroyAndReinitialize) {
   CreateDatabase();
   download_db_->Initialize(
       base::BindOnce(&DownloadDBTest::InitCallback, base::Unretained(this)));
-  db_->InitCallback(true);
+  db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
   ASSERT_TRUE(IsInitialized());
 
   std::vector<DownloadDBEntry> loaded_entries;

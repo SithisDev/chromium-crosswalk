@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_STATE_H_
 
 #include <ostream>
+#include "components/autofill_assistant/browser/service.pb.h"
 
 namespace autofill_assistant {
 
@@ -31,8 +32,10 @@ enum class AutofillAssistantState {
 
   // Autofill assistant is keeping track of script availability.
   //
-  // In this mode, no UI is shown and scripts are not autostarted. User
-  // actions might be available.
+  // UI will only be shown if the previous state was RUNNING and if the script
+  // finished with tell + stop.
+  //
+  // In this mode, scripts are not autostarted. User actions might be available.
   //
   // Note that it is possible to go from TRACKING to STARTING to trigger
   // whatever autostartable scripts is defined for a page.
@@ -64,14 +67,6 @@ enum class AutofillAssistantState {
   // Next states: RUNNING, TRACKING, STOPPED
   PROMPT,
 
-  // Autofill assistant is waiting for the user to make the first choice.
-  //
-  // When autostartable scripts are expected, this is only triggered as a
-  // fallback if there are non-autostartable scripts to choose from instead.
-  //
-  // Next states: RUNNING, STOPPED
-  AUTOSTART_FALLBACK_PROMPT,
-
   // Autofill assistant is expecting a modal dialog, such as the one asking for
   // CVC.
   //
@@ -81,14 +76,28 @@ enum class AutofillAssistantState {
   // Autofill assistant is stopped, but the controller is still available.
   //
   // This is a final state for the UI, which, when entering this state, detaches
-  // itself from the controller, waits for a few seconds to let the user read
-  // the message and then disappears.
+  // itself from the controller and lets the user read  the message.
   //
   // In that scenario, the status message at the time of transition to STOPPED
   // is supposed to contain the final message.
   //
-  // Next states: TRACKING.
-  STOPPED
+  // Next states: TRACKING
+  STOPPED,
+
+  // Autofill assistant is waiting for the user to browse the website until one
+  // of a set of specified preconditions match.
+  //
+  // Prompt-like state where a user is expected to browse a website with a
+  // minimal autofill assistant UI. Preconditions are still evaluated and
+  // buttons displayed if they match. There is no touchable
+  // area set for this state.
+  //
+  // In praticular, navigation to subdomains and user gestures like 'go back'
+  // are not a reason to shutdown autofill assistant. Navigating away from the
+  // original domain will however shut down autofill assistant.
+  //
+  // Next states: RUNNING, TRACKING, STOPPED
+  BROWSE,
 };
 
 inline std::ostream& operator<<(std::ostream& out,
@@ -115,14 +124,14 @@ inline std::ostream& operator<<(std::ostream& out,
     case AutofillAssistantState::PROMPT:
       out << "PROMPT";
       break;
-    case AutofillAssistantState::AUTOSTART_FALLBACK_PROMPT:
-      out << "AUTOSTART_FALLBACK_PROMPT";
-      break;
     case AutofillAssistantState::MODAL_DIALOG:
       out << "MODAL_DIALOG";
       break;
     case AutofillAssistantState::STOPPED:
       out << "STOPPED";
+      break;
+    case AutofillAssistantState::BROWSE:
+      out << "BROWSE";
       break;
       // Intentionally no default case to make compilation fail if a new value
       // was added to the enum but not to this list.

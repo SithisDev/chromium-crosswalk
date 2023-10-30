@@ -1,8 +1,6 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-#include "build/build_config.h"
 
 #include <stddef.h>
 
@@ -12,18 +10,23 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/common/shell_switches.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -85,19 +88,19 @@ class SnapshotBrowserTest : public ContentBrowserTest {
   void SetupTestServer() {
     // Use an embedded test server so we can open multiple windows in
     // the same renderer process, all referring to the same origin.
-    embedded_test_server()->RegisterRequestHandler(base::Bind(
+    embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
         &SnapshotBrowserTest::HandleRequest, base::Unretained(this)));
     ASSERT_TRUE(embedded_test_server()->Start());
 
-    ASSERT_NO_FATAL_FAILURE(content::NavigateToURL(
-        shell(), embedded_test_server()->GetURL("/test")));
+    ASSERT_TRUE(
+        NavigateToURL(shell(), embedded_test_server()->GetURL("/test")));
   }
 
   std::unique_ptr<net::test_server::HttpResponse> HandleRequest(
       const net::test_server::HttpRequest& request) {
     GURL absolute_url = embedded_test_server()->GetURL(request.relative_url);
     if (absolute_url.path() != "/test")
-      return std::unique_ptr<net::test_server::HttpResponse>();
+      return nullptr;
 
     std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
         new net::test_server::BasicHttpResponse());
@@ -108,13 +111,13 @@ class SnapshotBrowserTest : public ContentBrowserTest {
   }
 
   void WaitForAllWindowsToBeReady() {
-    const base::string16 expected_title = base::UTF8ToUTF16("Ready");
+    const std::u16string expected_title = u"Ready";
     // The subordinate windows may load asynchronously. Wait for all of
     // them to execute their script before proceeding.
     auto browser_list = Shell::windows();
     for (Shell* browser : browser_list) {
       TitleWatcher watcher(GetWebContents(browser), expected_title);
-      const base::string16& actual_title = watcher.WaitAndGetTitle();
+      const std::u16string& actual_title = watcher.WaitAndGetTitle();
       EXPECT_EQ(expected_title, actual_title);
     }
   }
@@ -138,20 +141,17 @@ class SnapshotBrowserTest : public ContentBrowserTest {
   struct SerialSnapshot {
     SerialSnapshot() : host(nullptr) {}
 
-    content::RenderWidgetHost* host;
+    raw_ptr<content::RenderWidgetHost> host;
     ExpectedColor color;
   };
   std::vector<SerialSnapshot> expected_snapshots_;
 
   void SyncSnapshotCallback(content::RenderWidgetHostImpl* rwhi,
                             const gfx::Image& image) {
-    bool found = false;
     for (auto iter = expected_snapshots_.begin();
          iter != expected_snapshots_.end(); ++iter) {
       const SerialSnapshot& expected = *iter;
       if (expected.host == rwhi) {
-        found = true;
-
         const SkBitmap* bitmap = image.ToSkBitmap();
         SkColor color = bitmap->getColor(1, 1);
 
@@ -212,9 +212,15 @@ class SnapshotBrowserTest : public ContentBrowserTest {
 
 // Even the single-window test doesn't work on Android yet. It's expected
 // that the multi-window tests would never work on that platform.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
-IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, SingleWindowTest) {
+#if BUILDFLAG(IS_MAC)
+// TODO(crbug.com/1347296): This test is flakey on macOS.
+#define MAYBE_SingleWindowTest DISABLED_SingleWindowTest
+#else
+#define MAYBE_SingleWindowTest SingleWindowTest
+#endif
+IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SingleWindowTest) {
   SetupTestServer();
 
   content::RenderWidgetHostImpl* rwhi = GetRenderWidgetHostImpl(shell());
@@ -227,10 +233,8 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, SingleWindowTest) {
     std::string colorString = base::StringPrintf(
         "#%02x%02x%02x", expected.color.r, expected.color.g, expected.color.b);
     std::string script = std::string("fillWithColor(\"") + colorString + "\");";
-    std::string result;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractString(GetWebContents(shell()),
-                                                       script, &result));
-    EXPECT_EQ(result, colorString);
+    EXPECT_EQ(colorString, EvalJs(GetWebContents(shell()), script,
+                                  EXECUTE_SCRIPT_USE_MANUAL_REPLY));
 
     expected_snapshots_.push_back(expected);
 
@@ -239,8 +243,8 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, SingleWindowTest) {
     // seems difficult to figure out the colorspace transformation
     // required to make these color comparisons.
     rwhi->GetSnapshotFromBrowser(
-        base::Bind(&SnapshotBrowserTest::SyncSnapshotCallback,
-                   base::Unretained(this), base::Unretained(rwhi)),
+        base::BindOnce(&SnapshotBrowserTest::SyncSnapshotCallback,
+                       base::Unretained(this), base::Unretained(rwhi)),
         true);
     while (expected_snapshots_.size() > 0) {
       base::RunLoop().RunUntilIdle();
@@ -254,23 +258,21 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, SingleWindowTest) {
 //   Linux Chromium OS ASAN LSAN Tests (1)
 //   Linux TSAN Tests
 // See crbug.com/771119
-#if (defined(OS_WIN) && !defined(NDEBUG)) || (defined(OS_CHROMEOS)) || \
-    (defined(OS_LINUX) && defined(THREAD_SANITIZER))
+// TODO(https://crbug.com/1317446): Fix and enable on Fuchsia.
+#if (BUILDFLAG(IS_WIN) && !defined(NDEBUG)) || BUILDFLAG(IS_CHROMEOS_ASH) || \
+    ((BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) &&                      \
+     defined(THREAD_SANITIZER)) ||                                           \
+    BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_SyncMultiWindowTest DISABLED_SyncMultiWindowTest
-#define MAYBE_AsyncMultiWindowTest DISABLED_AsyncMultiWindowTest
 #else
 #define MAYBE_SyncMultiWindowTest SyncMultiWindowTest
-#define MAYBE_AsyncMultiWindowTest AsyncMultiWindowTest
 #endif
-
 IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SyncMultiWindowTest) {
   SetupTestServer();
 
   for (int i = 0; i < 3; ++i) {
-    bool result = false;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-        GetWebContents(shell()), "openNewWindow()", &result));
-    EXPECT_TRUE(result);
+    EXPECT_EQ(true, EvalJs(GetWebContents(shell()), "openNewWindow()",
+                           EXECUTE_SCRIPT_USE_MANUAL_REPLY));
   }
 
   base::RunLoop().RunUntilIdle();
@@ -297,18 +299,16 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SyncMultiWindowTest) {
                              expected.color.g, expected.color.b);
       std::string script =
           std::string("fillWithColor(\"") + colorString + "\");";
-      std::string result;
-      EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-          GetWebContents(browser), script, &result));
-      EXPECT_EQ(result, colorString);
+      EXPECT_EQ(colorString, EvalJs(GetWebContents(browser), script,
+                                    EXECUTE_SCRIPT_USE_MANUAL_REPLY));
       expected_snapshots_.push_back(expected);
       // Get the snapshot from the surface rather than the window. The
       // on-screen display path is verified by the GPU tests, and it
       // seems difficult to figure out the colorspace transformation
       // required to make these color comparisons.
       rwhi->GetSnapshotFromBrowser(
-          base::Bind(&SnapshotBrowserTest::SyncSnapshotCallback,
-                     base::Unretained(this), base::Unretained(rwhi)),
+          base::BindOnce(&SnapshotBrowserTest::SyncSnapshotCallback,
+                         base::Unretained(this), base::Unretained(rwhi)),
           true);
     }
 
@@ -318,14 +318,28 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_SyncMultiWindowTest) {
   }
 }
 
+// Timing out either all the time, or infrequently, apparently because
+// they're too slow, on the following configurations:
+//   Windows Debug
+//   Linux Chromium OS ASAN LSAN Tests (1)
+//   Linux TSAN Tests
+// See crbug.com/771119
+// TODO(crbug.com/1164581): recently crashes flakily on
+// linux_chromium_asan_rel_ng and linux-rel.
+// TODO(https://crbug.com/1317446): Fix and enable on Fuchsia.
+#if (BUILDFLAG(IS_WIN) && !defined(NDEBUG)) || BUILDFLAG(IS_CHROMEOS_ASH) || \
+    (BUILDFLAG(IS_CHROMEOS) && defined(THREAD_SANITIZER)) ||                 \
+    BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_FUCHSIA)
+#define MAYBE_AsyncMultiWindowTest DISABLED_AsyncMultiWindowTest
+#else
+#define MAYBE_AsyncMultiWindowTest AsyncMultiWindowTest
+#endif
 IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_AsyncMultiWindowTest) {
   SetupTestServer();
 
   for (int i = 0; i < 3; ++i) {
-    bool result = false;
-    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-        GetWebContents(shell()), "openNewWindow()", &result));
-    EXPECT_TRUE(result);
+    EXPECT_EQ(true, EvalJs(GetWebContents(shell()), "openNewWindow()",
+                           EXECUTE_SCRIPT_USE_MANUAL_REPLY));
   }
 
   base::RunLoop().RunUntilIdle();
@@ -364,17 +378,15 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_AsyncMultiWindowTest) {
                                                    expected.g, expected.b);
       std::string script =
           std::string("fillWithColor(\"") + colorString + "\");";
-      std::string result;
-      EXPECT_TRUE(content::ExecuteScriptAndExtractString(
-          GetWebContents(browser), script, &result));
-      EXPECT_EQ(result, colorString);
+      EXPECT_EQ(colorString, EvalJs(GetWebContents(browser), script,
+                                    EXECUTE_SCRIPT_USE_MANUAL_REPLY));
       // Get the snapshot from the surface rather than the window. The
       // on-screen display path is verified by the GPU tests, and it
       // seems difficult to figure out the colorspace transformation
       // required to make these color comparisons.
       rwhi->GetSnapshotFromBrowser(
-          base::Bind(&SnapshotBrowserTest::AsyncSnapshotCallback,
-                     base::Unretained(this), base::Unretained(rwhi)),
+          base::BindOnce(&SnapshotBrowserTest::AsyncSnapshotCallback,
+                         base::Unretained(this), base::Unretained(rwhi)),
           true);
       ++num_remaining_async_snapshots_;
     }
@@ -408,6 +420,6 @@ IN_PROC_BROWSER_TEST_F(SnapshotBrowserTest, MAYBE_AsyncMultiWindowTest) {
   }
 }
 
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace content

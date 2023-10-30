@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,18 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "storage/browser/fileapi/quota/quota_reservation.h"
+#include "storage/browser/file_system/quota/quota_reservation.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "url/origin.h"
 
 using storage::QuotaReservationManager;
@@ -42,6 +42,10 @@ const int kFile3ID = 3;
 class FakeBackend : public QuotaReservationManager::QuotaBackend {
  public:
   FakeBackend() {}
+
+  FakeBackend(const FakeBackend&) = delete;
+  FakeBackend& operator=(const FakeBackend&) = delete;
+
   ~FakeBackend() override {}
 
   void ReserveQuota(
@@ -66,9 +70,6 @@ class FakeBackend : public QuotaReservationManager::QuotaBackend {
                            storage::FileSystemType type) override {}
   void DecrementDirtyCount(const url::Origin& origin,
                            storage::FileSystemType type) override {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FakeBackend);
 };
 
 }  // namespace
@@ -76,6 +77,10 @@ class FakeBackend : public QuotaReservationManager::QuotaBackend {
 class QuotaReservationTest : public testing::Test {
  public:
   QuotaReservationTest() {}
+
+  QuotaReservationTest(const QuotaReservationTest&) = delete;
+  QuotaReservationTest& operator=(const QuotaReservationTest&) = delete;
+
   ~QuotaReservationTest() override {}
 
   void SetUp() override {
@@ -97,7 +102,8 @@ class QuotaReservationTest : public testing::Test {
   storage::FileSystemURL MakeFileSystemURL(
       const base::FilePath::StringType& file_name) {
     return storage::FileSystemURL::CreateForTest(
-        url::Origin::Create(GURL(kOrigin)), kType, MakeFilePath(file_name));
+        blink::StorageKey::CreateFromStringForTesting(kOrigin), kType,
+        MakeFilePath(file_name));
   }
 
   scoped_refptr<QuotaReservation> CreateQuotaReservation(
@@ -105,7 +111,7 @@ class QuotaReservationTest : public testing::Test {
       const GURL& origin,
       storage::FileSystemType type) {
     // Sets reservation_ as a side effect.
-    return scoped_refptr<QuotaReservation>(
+    return base::WrapRefCounted(
         new QuotaReservation(reservation, origin, type));
   }
 
@@ -121,15 +127,14 @@ class QuotaReservationTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   base::ScopedTempDir work_dir_;
   std::unique_ptr<storage::QuotaReservationManager> reservation_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(QuotaReservationTest);
 };
 
 void GotReservedQuota(int64_t* reserved_quota_ptr,
                       ppapi::FileGrowthMap* file_growths_ptr,
+                      base::OnceClosure after_callback,
                       int64_t reserved_quota,
                       const ppapi::FileSizeMap& maximum_written_offsets) {
   *reserved_quota_ptr = reserved_quota;
@@ -138,17 +143,20 @@ void GotReservedQuota(int64_t* reserved_quota_ptr,
   for (auto it = maximum_written_offsets.begin();
        it != maximum_written_offsets.end(); ++it)
     (*file_growths_ptr)[it->first] = ppapi::FileGrowth(it->second, 0);
+
+  std::move(after_callback).Run();
 }
 
 void ReserveQuota(scoped_refptr<QuotaReservation> quota_reservation,
                   int64_t amount,
                   int64_t* reserved_quota,
                   ppapi::FileGrowthMap* file_growths) {
+  base::RunLoop loop;
   quota_reservation->ReserveQuota(
-      amount,
-      *file_growths,
-      base::Bind(&GotReservedQuota, reserved_quota, file_growths));
-  base::RunLoop().RunUntilIdle();
+      amount, *file_growths,
+      base::BindOnce(&GotReservedQuota, reserved_quota, file_growths,
+                     loop.QuitClosure()));
+  loop.Run();
 }
 
 // Tests that:

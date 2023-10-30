@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,15 +83,6 @@ TransformationPatchGenerator* MakeGenerator(Element* old_element,
               new_element,
               new PatcherX86_32(old_element->region()),
               EXE_ELF_32_X86);
-      return generator;
-    }
-    case EXE_ELF_32_ARM: {
-      TransformationPatchGenerator* generator =
-          new PatchGeneratorX86_32(
-              old_element,
-              new_element,
-              new PatcherX86_32(old_element->region()),
-              EXE_ELF_32_ARM);
       return generator;
     }
     case EXE_WIN_32_X64: {

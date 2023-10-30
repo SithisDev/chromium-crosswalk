@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,18 @@ package org.chromium.components.minidump_uploader;
 import static org.junit.Assert.assertArrayEquals;
 
 import android.os.ParcelFileDescriptor;
-import android.support.test.filters.MediumTest;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.annotation.Config;
 
-import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 
 import java.io.File;
@@ -30,7 +32,8 @@ import java.util.regex.Pattern;
 /**
  * Unittests for {@link CrashFileManager}.
  */
-@RunWith(BaseJUnit4ClassRunner.class)
+@RunWith(BaseRobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class CrashFileManagerTest {
     @Rule
     public CrashTestRule mTestRule = new CrashTestRule();
@@ -154,6 +157,18 @@ public class CrashFileManagerTest {
         mLogfile.createNewFile();
         mLogfile.setLastModified(mModificationTimestamp);
         mModificationTimestamp += 1000;
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Android-AppBase"})
+    public void testReadyForUploadForFirstTime() {
+        Assert.assertTrue(CrashFileManager.isReadyUploadForFirstTime(
+                new File(mTestRule.getCrashDir(), "foo.try0")));
+        Assert.assertFalse(CrashFileManager.isReadyUploadForFirstTime(
+                new File(mTestRule.getCrashDir(), "foo.try1")));
+        Assert.assertFalse(CrashFileManager.isReadyUploadForFirstTime(
+                new File(mTestRule.getCrashDir(), "foo")));
     }
 
     @Test
@@ -320,6 +335,59 @@ public class CrashFileManagerTest {
                 mOneBelowMaxTriesFile, mDmpFile2, mDmpFile1};
         File[] actualFiles =
                 crashFileManager.getMinidumpsReadyForUpload(MULTI_DIGIT_MAX_TRIES_ALLOWED);
+        Assert.assertNotNull(actualFiles);
+        assertArrayEquals("Failed to get the correct minidump files in directory", expectedFiles,
+                actualFiles);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Android-AppBase"})
+    public void testGetMinidumpsNotForcedReadyForUpload() throws IOException {
+        File forcedFile = new File(mTestRule.getCrashDir(), "456_def.forced" + TEST_PID + ".try2");
+        forcedFile.createNewFile();
+        forcedFile.setLastModified(mModificationTimestamp);
+        mModificationTimestamp += 1000;
+
+        CrashFileManager crashFileManager = new CrashFileManager(mTestRule.getCacheDir());
+        File[] expectedFiles = new File[] {mMultiDigitMaxTriesFile, mOneBelowMultiDigitMaxTriesFile,
+                mMaxTriesFile, mOneBelowMaxTriesFile, mDmpFile2, mDmpFile1};
+        File[] actualFiles = crashFileManager.getMinidumpsNotForcedReadyForUpload();
+        Assert.assertNotNull(actualFiles);
+        assertArrayEquals("Failed to get the correct minidump files in directory", expectedFiles,
+                actualFiles);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Android-AppBase"})
+    public void testGetMinidumpsSkippedUpload() throws IOException {
+        File skippedFile =
+                new File(mTestRule.getCrashDir(), "456_def.skipped" + TEST_PID + ".try2");
+        skippedFile.createNewFile();
+        skippedFile.setLastModified(mModificationTimestamp);
+        mModificationTimestamp += 1000;
+
+        CrashFileManager crashFileManager = new CrashFileManager(mTestRule.getCacheDir());
+        File[] expectedFiles = new File[] {skippedFile};
+        File[] actualFiles = crashFileManager.getMinidumpsSkippedUpload();
+        Assert.assertNotNull(actualFiles);
+        assertArrayEquals("Failed to get the correct minidump files in directory", expectedFiles,
+                actualFiles);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"Android-AppBase"})
+    public void testGetMinidumpsForcedUpload() throws IOException {
+        File forcedFile = new File(mTestRule.getCrashDir(), "456_def.forced" + TEST_PID + ".try2");
+        forcedFile.createNewFile();
+        forcedFile.setLastModified(mModificationTimestamp);
+        mModificationTimestamp += 1000;
+
+        CrashFileManager crashFileManager = new CrashFileManager(mTestRule.getCacheDir());
+        File[] expectedFiles = new File[] {forcedFile};
+        File[] actualFiles = crashFileManager.getMinidumpsForcedUpload();
         Assert.assertNotNull(actualFiles);
         assertArrayEquals("Failed to get the correct minidump files in directory", expectedFiles,
                 actualFiles);

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,15 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
+#include "components/autofill_assistant/browser/actions/action_delegate_util.h"
+#include "components/autofill_assistant/browser/client_status.h"
+#include "components/autofill_assistant/browser/web/web_controller.h"
 
 namespace autofill_assistant {
 
 SetAttributeAction::SetAttributeAction(ActionDelegate* delegate,
                                        const ActionProto& proto)
-    : Action(delegate, proto), weak_ptr_factory_(this) {
-  DCHECK_GT(proto_.set_attribute().element().selectors_size(), 0);
+    : Action(delegate, proto) {
   DCHECK_GT(proto_.set_attribute().attribute_size(), 0);
 }
 
@@ -24,29 +26,35 @@ SetAttributeAction::~SetAttributeAction() {}
 void SetAttributeAction::InternalProcessAction(ProcessActionCallback callback) {
   Selector selector = Selector(proto_.set_attribute().element());
   if (selector.empty()) {
-    DVLOG(1) << __func__ << ": empty selector";
+    VLOG(1) << __func__ << ": empty selector";
     UpdateProcessedAction(INVALID_SELECTOR);
     std::move(callback).Run(std::move(processed_action_proto_));
     return;
   }
-  delegate_->ShortWaitForElement(
-      selector, base::BindOnce(&SetAttributeAction::OnWaitForElement,
-                               weak_ptr_factory_.GetWeakPtr(),
-                               std::move(callback), selector));
+  delegate_->ShortWaitForElementWithSlowWarning(
+      selector,
+      base::BindOnce(&SetAttributeAction::OnWaitForElementTimed,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     base::BindOnce(&SetAttributeAction::OnWaitForElement,
+                                    weak_ptr_factory_.GetWeakPtr(),
+                                    std::move(callback), selector)));
 }
 
 void SetAttributeAction::OnWaitForElement(ProcessActionCallback callback,
                                           const Selector& selector,
-                                          bool element_found) {
-  if (!element_found) {
-    UpdateProcessedAction(ELEMENT_RESOLUTION_FAILED);
+                                          const ClientStatus& element_status) {
+  if (!element_status.ok()) {
+    UpdateProcessedAction(element_status.proto_status());
     std::move(callback).Run(std::move(processed_action_proto_));
     return;
   }
 
-  delegate_->SetAttribute(
-      selector, ExtractVector(proto_.set_attribute().attribute()),
-      proto_.set_attribute().value(),
+  action_delegate_util::FindElementAndPerform(
+      delegate_, selector,
+      base::BindOnce(&WebController::SetAttribute,
+                     delegate_->GetWebController()->GetWeakPtr(),
+                     ExtractVector(proto_.set_attribute().attribute()),
+                     proto_.set_attribute().value()),
       base::BindOnce(&SetAttributeAction::OnSetAttribute,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }

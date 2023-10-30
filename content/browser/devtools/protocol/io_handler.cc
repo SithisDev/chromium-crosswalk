@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include <memory>
 
 #include "base/bind.h"
 #include "base/files/file.h"
@@ -16,9 +18,9 @@
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/devtools/devtools_io_context.h"
 #include "content/browser/devtools/devtools_stream_blob.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_process_host.h"
 
 namespace content {
 namespace protocol {
@@ -29,10 +31,10 @@ IOHandler::IOHandler(DevToolsIOContext* io_context)
       browser_context_(nullptr),
       storage_partition_(nullptr) {}
 
-IOHandler::~IOHandler() {}
+IOHandler::~IOHandler() = default;
 
 void IOHandler::Wire(UberDispatcher* dispatcher) {
-  frontend_.reset(new IO::Frontend(dispatcher->channel()));
+  frontend_ = std::make_unique<IO::Frontend>(dispatcher->channel());
   IO::Dispatcher::wire(dispatcher, this);
 }
 
@@ -77,7 +79,12 @@ void IOHandler::Read(
                                 "does not support random access"));
     return;
   }
-  stream->Read(offset.fromMaybe(-1), max_size.fromMaybe(kDefaultChunkSize),
+  int size = max_size.fromMaybe(kDefaultChunkSize);
+  if (size <= 0) {
+    callback->sendFailure(Response::InvalidParams("Invalid max read size"));
+    return;
+  }
+  stream->Read(offset.fromMaybe(-1), size,
                base::BindOnce(&IOHandler::ReadComplete,
                               weak_factory_.GetWeakPtr(), std::move(callback)));
 }
@@ -87,7 +94,7 @@ void IOHandler::ReadComplete(std::unique_ptr<ReadCallback> callback,
                              bool base64_encoded,
                              int status) {
   if (status == DevToolsIOContext::Stream::StatusFailure) {
-    callback->sendFailure(Response::Error("Read failed"));
+    callback->sendFailure(Response::ServerError("Read failed"));
     return;
   }
   bool eof = status == DevToolsIOContext::Stream::StatusEOF;
@@ -95,8 +102,9 @@ void IOHandler::ReadComplete(std::unique_ptr<ReadCallback> callback,
 }
 
 Response IOHandler::Close(const std::string& handle) {
-  return io_context_->Close(handle) ? Response::OK()
-      : Response::InvalidParams("Invalid stream handle");
+  return io_context_->Close(handle)
+             ? Response::Success()
+             : Response::InvalidParams("Invalid stream handle");
 }
 
 }  // namespace protocol

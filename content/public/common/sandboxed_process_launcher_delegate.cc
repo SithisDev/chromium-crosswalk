@@ -1,15 +1,20 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 
 #include "build/build_config.h"
-#include "services/service_manager/zygote/common/zygote_buildflags.h"
+#include "content/public/common/zygote/zygote_buildflags.h"
 
 namespace content {
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
+std::string SandboxedProcessLauncherDelegate::GetSandboxTag() {
+  // This implies that policies will not share backing data.
+  return "";
+}
+
 bool SandboxedProcessLauncherDelegate::DisableDefaultPolicy() {
   return false;
 }
@@ -30,18 +35,40 @@ void SandboxedProcessLauncherDelegate::PostSpawnTarget(
 bool SandboxedProcessLauncherDelegate::ShouldLaunchElevated() {
   return false;
 }
-#endif  // defined(OS_WIN)
+
+bool SandboxedProcessLauncherDelegate::ShouldUnsandboxedRunInJob() {
+  return false;
+}
+
+bool SandboxedProcessLauncherDelegate::CetCompatible() {
+  return true;
+}
+#endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(USE_ZYGOTE_HANDLE)
-service_manager::ZygoteHandle SandboxedProcessLauncherDelegate::GetZygote() {
-  return nullptr;
+ZygoteHandle SandboxedProcessLauncherDelegate::GetZygote() {
+  // Default to the sandboxed zygote. If a more lax sandbox is needed, then the
+  // child class should override this method and use the unsandboxed zygote.
+  return GetGenericZygote();
 }
 #endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 base::EnvironmentMap SandboxedProcessLauncherDelegate::GetEnvironment() {
   return base::EnvironmentMap();
 }
-#endif  // defined(OS_POSIX)
+#endif  // BUILDFLAG(IS_POSIX)
+
+#if BUILDFLAG(IS_MAC)
+
+bool SandboxedProcessLauncherDelegate::DisclaimResponsibility() {
+  return false;
+}
+
+bool SandboxedProcessLauncherDelegate::EnableCpuSecurityMitigations() {
+  return false;
+}
+
+#endif  // BUILDFLAG(IS_MAC)
 
 }  // namespace content

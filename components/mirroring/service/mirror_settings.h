@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 #define COMPONENTS_MIRRORING_SERVICE_MIRROR_SETTINGS_H_
 
 #include "base/component_export.h"
-#include "base/time/time.h"
-#include "base/values.h"
 #include "media/capture/video_capture_types.h"
 #include "media/cast/cast_config.h"
 
@@ -20,12 +18,15 @@ namespace mirroring {
 // Holds the default settings for a mirroring session. This class provides the
 // audio/video configs that this sender supports. And also provides the
 // audio/video constraints used for capturing.
-// TODO(xjz): Add the function to generate the audio capture contraints.
-// TODO(xjz): Add setters to the settings that might be overriden by integration
-// tests.
+// TODO(issuetracker.google.com/158032164): as part of migration to libcast's
+// OFFER/ANSWER exchange, expose constraints here from the OFFER message.
 class COMPONENT_EXPORT(MIRRORING_SERVICE) MirrorSettings {
  public:
   MirrorSettings();
+
+  MirrorSettings(const MirrorSettings&) = delete;
+  MirrorSettings& operator=(const MirrorSettings&) = delete;
+
   ~MirrorSettings();
 
   // Get the audio/video config with given codec.
@@ -37,7 +38,8 @@ class COMPONENT_EXPORT(MIRRORING_SERVICE) MirrorSettings {
       media::cast::Codec codec);
 
   // Call to override the default resolution settings.
-  void SetResolutionContraints(int max_width, int max_height);
+  void SetResolutionConstraints(int max_width, int max_height);
+  void SetSenderSideLetterboxingEnabled(bool enabled);
 
   // Get video capture constraints with the current settings.
   media::VideoCaptureParams GetVideoCaptureParams();
@@ -48,16 +50,12 @@ class COMPONENT_EXPORT(MIRRORING_SERVICE) MirrorSettings {
   int max_width() const { return max_width_; }
   int max_height() const { return max_height_; }
 
-  // Returns a dictionary value of the current settings.
-  base::Value ToDictionaryValue();
-
  private:
   const int min_width_;
   const int min_height_;
   int max_width_;
   int max_height_;
-
-  DISALLOW_COPY_AND_ASSIGN(MirrorSettings);
+  bool enable_sender_side_letterboxing_ = true;
 };
 
 }  // namespace mirroring

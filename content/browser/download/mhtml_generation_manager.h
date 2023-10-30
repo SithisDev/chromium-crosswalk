@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #ifndef CONTENT_BROWSER_DOWNLOAD_MHTML_GENERATION_MANAGER_H_
@@ -6,13 +6,9 @@
 
 #include <stdint.h>
 
-#include <memory>
-#include <set>
-#include <string>
-
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/process/process.h"
+#include "content/public/browser/mhtml_generation_result.h"
 #include "content/public/common/mhtml_generation_params.h"
 
 namespace content {
@@ -29,16 +25,14 @@ class MHTMLGenerationManager {
  public:
   static MHTMLGenerationManager* GetInstance();
 
-  // GenerateMHTMLCallback is called to report completion and status of MHTML
-  // generation.  On success |file_size| indicates the size of the
-  // generated file.  On failure |file_size| is -1.
-  using GenerateMHTMLCallback = base::OnceCallback<void(int64_t file_size)>;
+  MHTMLGenerationManager(const MHTMLGenerationManager&) = delete;
+  MHTMLGenerationManager& operator=(const MHTMLGenerationManager&) = delete;
 
   // Instructs the RenderFrames in |web_contents| to generate a MHTML
   // representation of the current page.
   void SaveMHTML(WebContents* web_contents,
                  const MHTMLGenerationParams& params,
-                 GenerateMHTMLCallback callback);
+                 MHTMLGenerationResult::GenerateMHTMLCallback callback);
 
  private:
   friend struct base::DefaultSingletonTraits<MHTMLGenerationManager>;
@@ -46,8 +40,6 @@ class MHTMLGenerationManager {
 
   MHTMLGenerationManager();
   virtual ~MHTMLGenerationManager();
-
-  DISALLOW_COPY_AND_ASSIGN(MHTMLGenerationManager);
 };
 
 }  // namespace content

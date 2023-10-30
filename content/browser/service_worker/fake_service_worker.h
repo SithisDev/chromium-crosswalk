@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,14 @@
 
 #include <string>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "base/time/time.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker.mojom.h"
 
 namespace content {
@@ -27,27 +33,37 @@ class FakeServiceWorker : public blink::mojom::ServiceWorker {
 
   ~FakeServiceWorker() override;
 
-  blink::mojom::ServiceWorkerHostAssociatedPtr& host() { return host_; }
+  mojo::AssociatedRemote<blink::mojom::ServiceWorkerHost>& host() {
+    return host_;
+  }
 
-  EmbeddedWorkerTestHelper* helper() { return helper_; }
-
-  void Bind(blink::mojom::ServiceWorkerRequest request);
+  void Bind(mojo::PendingReceiver<blink::mojom::ServiceWorker> receiver);
 
   // Returns after InitializeGlobalScope() is called.
   void RunUntilInitializeGlobalScope();
 
-  bool is_zero_idle_timer_delay() const { return is_zero_idle_timer_delay_; }
+  const absl::optional<base::TimeDelta>& idle_delay() const {
+    return idle_delay_;
+  }
 
   FetchHandlerExistence fetch_handler_existence() const {
     return fetch_handler_existence_;
   }
 
+  // Flush messages in the message pipe.
+  void FlushForTesting();
+
  protected:
   // blink::mojom::ServiceWorker overrides:
   void InitializeGlobalScope(
-      blink::mojom::ServiceWorkerHostAssociatedPtrInfo service_worker_host,
+      mojo::PendingAssociatedRemote<blink::mojom::ServiceWorkerHost>
+          service_worker_host,
       blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration_info,
-      FetchHandlerExistence fetch_handler_existence) override;
+      blink::mojom::ServiceWorkerObjectInfoPtr service_worker_info,
+      FetchHandlerExistence fetch_handler_existence,
+      mojo::PendingReceiver<blink::mojom::ReportingObserver>
+          reporting_observer_receiver,
+      blink::mojom::AncestorFrameType ancestor_frame_type) override;
   void DispatchInstallEvent(DispatchInstallEventCallback callback) override;
   void DispatchActivateEvent(DispatchActivateEventCallback callback) override;
   void DispatchBackgroundFetchAbortEvent(
@@ -63,24 +79,24 @@ class FakeServiceWorker : public blink::mojom::ServiceWorker {
       blink::mojom::BackgroundFetchRegistrationPtr registration,
       DispatchBackgroundFetchSuccessEventCallback callback) override;
   void DispatchCookieChangeEvent(
-      const net::CanonicalCookie& cookie,
-      ::network::mojom::CookieChangeCause cause,
+      const net::CookieChangeInfo& change,
       DispatchCookieChangeEventCallback callback) override;
   void DispatchFetchEventForMainResource(
       blink::mojom::DispatchFetchEventParamsPtr params,
-      blink::mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
+      mojo::PendingRemote<blink::mojom::ServiceWorkerFetchResponseCallback>
+          response_callback,
       DispatchFetchEventForMainResourceCallback callback) override;
   void DispatchNotificationClickEvent(
       const std::string& notification_id,
       const blink::PlatformNotificationData& notification_data,
       int action_index,
-      const base::Optional<base::string16>& reply,
+      const absl::optional<std::u16string>& reply,
       DispatchNotificationClickEventCallback callback) override;
   void DispatchNotificationCloseEvent(
       const std::string& notification_id,
       const blink::PlatformNotificationData& notification_data,
       DispatchNotificationCloseEventCallback callback) override;
-  void DispatchPushEvent(const base::Optional<std::string>& payload,
+  void DispatchPushEvent(const absl::optional<std::string>& payload,
                          DispatchPushEventCallback callback) override;
   void DispatchPushSubscriptionChangeEvent(
       blink::mojom::PushSubscriptionPtr old_subscription,
@@ -95,29 +111,32 @@ class FakeServiceWorker : public blink::mojom::ServiceWorker {
       base::TimeDelta timeout,
       DispatchPeriodicSyncEventCallback callback) override;
   void DispatchAbortPaymentEvent(
-      payments::mojom::PaymentHandlerResponseCallbackPtr response_callback,
+      mojo::PendingRemote<payments::mojom::PaymentHandlerResponseCallback>
+          pending_response_callback,
       DispatchAbortPaymentEventCallback callback) override;
   void DispatchCanMakePaymentEvent(
       payments::mojom::CanMakePaymentEventDataPtr event_data,
-      payments::mojom::PaymentHandlerResponseCallbackPtr response_callback,
+      mojo::PendingRemote<payments::mojom::PaymentHandlerResponseCallback>
+          pending_response_callback,
       DispatchCanMakePaymentEventCallback callback) override;
   void DispatchPaymentRequestEvent(
       payments::mojom::PaymentRequestEventDataPtr event_data,
-      payments::mojom::PaymentHandlerResponseCallbackPtr response_callback,
+      mojo::PendingRemote<payments::mojom::PaymentHandlerResponseCallback>
+          pending_response_callback,
       DispatchPaymentRequestEventCallback callback) override;
   void DispatchExtendableMessageEvent(
       blink::mojom::ExtendableMessageEventPtr event,
       DispatchExtendableMessageEventCallback callback) override;
-  void DispatchExtendableMessageEventWithCustomTimeout(
-      blink::mojom::ExtendableMessageEventPtr event,
-      base::TimeDelta timeout,
-      DispatchExtendableMessageEventWithCustomTimeoutCallback callback)
-      override;
   void DispatchContentDeleteEvent(
       const std::string& id,
       DispatchContentDeleteEventCallback callback) override;
   void Ping(PingCallback callback) override;
-  void SetIdleTimerDelayToZero() override;
+  void SetIdleDelay(base::TimeDelta delay) override;
+  void AddMessageToConsole(blink::mojom::ConsoleMessageLevel level,
+                           const std::string& message) override;
+  void ExecuteScriptForTest(const std::u16string& script,
+                            bool wants_result,
+                            ExecuteScriptForTestCallback callback) override;
 
   virtual void OnConnectionError();
 
@@ -125,17 +144,19 @@ class FakeServiceWorker : public blink::mojom::ServiceWorker {
   void CallOnConnectionError();
 
   // |helper_| owns |this|.
-  EmbeddedWorkerTestHelper* const helper_;
+  const raw_ptr<EmbeddedWorkerTestHelper> helper_;
 
-  blink::mojom::ServiceWorkerHostAssociatedPtr host_;
+  mojo::AssociatedRemote<blink::mojom::ServiceWorkerHost> host_;
   blink::mojom::ServiceWorkerRegistrationObjectInfoPtr registration_info_;
+  blink::mojom::ServiceWorkerObjectInfoPtr service_worker_info_;
   FetchHandlerExistence fetch_handler_existence_ =
       FetchHandlerExistence::UNKNOWN;
   base::OnceClosure quit_closure_for_initialize_global_scope_;
 
-  mojo::Binding<blink::mojom::ServiceWorker> binding_;
+  mojo::Receiver<blink::mojom::ServiceWorker> receiver_{this};
 
-  bool is_zero_idle_timer_delay_ = false;
+  // absl::nullopt means SetIdleDelay() is not called.
+  absl::optional<base::TimeDelta> idle_delay_;
 };
 
 }  // namespace content

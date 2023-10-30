@@ -1,29 +1,14 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/gcm_driver/instance_id/instance_id_driver.h"
 
-#include "base/metrics/field_trial.h"
-#include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "components/gcm_driver/gcm_driver.h"
 #include "components/gcm_driver/instance_id/instance_id.h"
 
 namespace instance_id {
-
-namespace {
-const char kInstanceIDFieldTrialName[] = "InstanceID";
-const char kInstanceIDFieldTrialDisabledGroupPrefix[] = "Disabled";
-}  // namespace
-
-// static
-bool InstanceIDDriver::IsInstanceIDEnabled() {
-  std::string group_name =
-      base::FieldTrialList::FindFullName(kInstanceIDFieldTrialName);
-  return !base::StartsWith(group_name, kInstanceIDFieldTrialDisabledGroupPrefix,
-                           base::CompareCase::INSENSITIVE_ASCII);
-}
 
 InstanceIDDriver::InstanceIDDriver(gcm::GCMDriver* gcm_driver)
     : gcm_driver_(gcm_driver) {

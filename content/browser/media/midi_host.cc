@@ -1,23 +1,25 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/media/midi_host.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/containers/contains.h"
+#include "base/memory/ptr_util.h"
 #include "base/process/process.h"
-#include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/common/content_features.h"
 #include "media/midi/message_util.h"
 #include "media/midi/midi_message_queue.h"
 #include "media/midi/midi_service.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 
 namespace content {
 namespace {
@@ -48,8 +50,7 @@ MidiHost::MidiHost(int renderer_process_id, midi::MidiService* midi_service)
       midi_service_(midi_service),
       sent_bytes_in_flight_(0),
       bytes_sent_since_last_acknowledgement_(0),
-      output_port_count_(0),
-      midi_session_(this) {
+      output_port_count_(0) {
   DCHECK(midi_service_);
 }
 
@@ -60,20 +61,21 @@ MidiHost::~MidiHost() {
 }
 
 // static
-void MidiHost::BindRequest(int render_process_id,
-                           midi::MidiService* midi_service,
-                           midi::mojom::MidiSessionProviderRequest request) {
+void MidiHost::BindReceiver(
+    int render_process_id,
+    midi::MidiService* midi_service,
+    mojo::PendingReceiver<midi::mojom::MidiSessionProvider> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  mojo::MakeStrongBinding(
+  mojo::MakeSelfOwnedReceiver(
       base::WrapUnique(new MidiHost(render_process_id, midi_service)),
-      std::move(request));
+      std::move(receiver));
 }
 
 void MidiHost::CompleteStartSession(Result result) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(midi_client_);
   if (result == Result::OK)
-    midi_session_.Bind(std::move(pending_session_request_));
+    midi_session_.Bind(std::move(pending_session_receiver_));
   midi_client_->SessionStarted(result);
 }
 
@@ -127,6 +129,8 @@ void MidiHost::ReceiveMidiData(uint32_t port,
     // SendData() does.
     if (message[0] == kSysExByte) {
       if (!has_sys_ex_permission_) {
+        // TODO(987505): This should check permission with the Frame and not the
+        // Process.
         has_sys_ex_permission_ =
             ChildProcessSecurityPolicyImpl::GetInstance()
                 ->CanSendMidiSysExMessage(renderer_process_id_);
@@ -164,18 +168,28 @@ void MidiHost::Detach() {
   midi_service_ = nullptr;
 }
 
-void MidiHost::StartSession(midi::mojom::MidiSessionRequest request,
-                            midi::mojom::MidiSessionClientPtr client) {
+void MidiHost::StartSession(
+    mojo::PendingReceiver<midi::mojom::MidiSession> session_receiver,
+    mojo::PendingRemote<midi::mojom::MidiSessionClient> pending_client) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(!pending_session_request_);
+
+  // When the feature is disabled return early and use a temporary remote to
+  // send a "not supported" response before closing the pipes.
+  if (!base::FeatureList::IsEnabled(features::kWebMidi)) {
+    mojo::Remote<midi::mojom::MidiSessionClient> client(
+        std::move(pending_client));
+    client->SessionStarted(Result::NOT_SUPPORTED);
+    return;
+  }
+
+  DCHECK(!pending_session_receiver_);
   // Checks to see if |midi_session_| isn't already bound to another
   // MidiSessionRequest.
-  DCHECK(!midi_session_);
-  pending_session_request_ = std::move(request);
+  pending_session_receiver_ = std::move(session_receiver);
 
   DCHECK(!midi_client_);
-  midi_client_ = std::move(client);
-  midi_client_.set_connection_error_handler(
+  midi_client_.Bind(std::move(pending_client));
+  midi_client_.set_disconnect_handler(
       base::BindOnce(&MidiHost::EndSession, base::Unretained(this)));
 
   if (midi_service_)
@@ -204,15 +218,13 @@ void MidiHost::SendData(uint32_t port,
   // Check |has_sys_ex_permission_| first to avoid searching kSysExByte in large
   // bulk data transfers for correct uses.
   if (!has_sys_ex_permission_ && base::Contains(data, kSysExByte)) {
+    has_sys_ex_permission_ =
+        ChildProcessSecurityPolicyImpl::GetInstance()->CanSendMidiSysExMessage(
+            renderer_process_id_);
     if (!has_sys_ex_permission_) {
-      has_sys_ex_permission_ =
-          ChildProcessSecurityPolicyImpl::GetInstance()
-              ->CanSendMidiSysExMessage(renderer_process_id_);
-      if (!has_sys_ex_permission_) {
-        bad_message::ReceivedBadMessage(renderer_process_id_,
-                                        bad_message::MH_SYS_EX_PERMISSION);
-        return;
-      }
+      bad_message::ReceivedBadMessage(renderer_process_id_,
+                                      bad_message::MH_SYS_EX_PERMISSION);
+      return;
     }
   }
 
@@ -235,10 +247,9 @@ void MidiHost::SendData(uint32_t port,
 template <typename Method, typename... Params>
 void MidiHost::CallClient(Method method, Params... params) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
-        base::BindOnce(&MidiHost::CallClient<Method, Params...>, AsWeakPtr(),
-                       method, std::move(params)...));
+    GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&MidiHost::CallClient<Method, Params...>,
+                                  AsWeakPtr(), method, std::move(params)...));
     return;
   }
   (midi_client_.get()->*method)(std::move(params)...);
@@ -248,7 +259,7 @@ void MidiHost::EndSession() {
   if (midi_service_)
     midi_service_->EndSession(this);
   midi_client_.reset();
-  midi_session_.Close();
+  midi_session_.reset();
 }
 
 }  // namespace content

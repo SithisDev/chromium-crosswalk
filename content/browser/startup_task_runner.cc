@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/metrics/histogram_macros.h"
 
 namespace content {
 
@@ -18,7 +19,7 @@ StartupTaskRunner::StartupTaskRunner(
 StartupTaskRunner::~StartupTaskRunner() {}
 
 void StartupTaskRunner::AddTask(StartupTask callback) {
-  task_list_.push_back(callback);
+  task_list_.push_back(std::move(callback));
 }
 
 void StartupTaskRunner::StartRunningTasksAsync() {
@@ -29,16 +30,17 @@ void StartupTaskRunner::StartRunningTasksAsync() {
       std::move(startup_complete_callback_).Run(result);
     }
   } else {
-    const base::Closure next_task =
-        base::Bind(&StartupTaskRunner::WrappedTask, base::Unretained(this));
-    proxy_->PostNonNestableTask(FROM_HERE, next_task);
+    base::OnceClosure next_task =
+        base::BindOnce(&StartupTaskRunner::WrappedTask, base::Unretained(this));
+    last_wrapped_task_post_time_ = base::TimeTicks::Now();
+    proxy_->PostNonNestableTask(FROM_HERE, std::move(next_task));
   }
 }
 
 void StartupTaskRunner::RunAllTasksNow() {
   int result = 0;
   for (auto it = task_list_.begin(); it != task_list_.end(); it++) {
-    result = it->Run();
+    result = std::move(*it).Run();
     if (result > 0) break;
   }
   task_list_.clear();
@@ -54,7 +56,12 @@ void StartupTaskRunner::WrappedTask() {
     // so there is nothing to do
     return;
   }
-  int result = task_list_.front().Run();
+
+  // Log the time that this task spent queued.
+  UMA_HISTOGRAM_TIMES("Startup.StartupTaskRunner.AsyncTaskQueueTime",
+                      base::TimeTicks::Now() - last_wrapped_task_post_time_);
+
+  int result = std::move(task_list_.front()).Run();
   task_list_.pop_front();
   if (result > 0) {
     // Stop now and throw away the remaining tasks
@@ -65,9 +72,10 @@ void StartupTaskRunner::WrappedTask() {
       std::move(startup_complete_callback_).Run(result);
     }
   } else {
-    const base::Closure next_task =
-        base::Bind(&StartupTaskRunner::WrappedTask, base::Unretained(this));
-    proxy_->PostNonNestableTask(FROM_HERE, next_task);
+    base::OnceClosure next_task =
+        base::BindOnce(&StartupTaskRunner::WrappedTask, base::Unretained(this));
+    last_wrapped_task_post_time_ = base::TimeTicks::Now();
+    proxy_->PostNonNestableTask(FROM_HERE, std::move(next_task));
   }
 }
 

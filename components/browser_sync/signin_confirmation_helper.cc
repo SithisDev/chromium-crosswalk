@@ -1,16 +1,17 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/browser_sync/signin_confirmation_helper.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/sequenced_task_runner.h"
-#include "base/strings/string16.h"
+#include "base/logging.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_db_task.h"
@@ -25,16 +26,16 @@ namespace {
 class HasTypedURLsTask : public history::HistoryDBTask {
  public:
   explicit HasTypedURLsTask(base::OnceCallback<void(bool)> cb)
-      : has_typed_urls_(false), cb_(std::move(cb)) {}
-  ~HasTypedURLsTask() override {}
+      : cb_(std::move(cb)) {}
+  ~HasTypedURLsTask() override = default;
 
   bool RunOnDBThread(history::HistoryBackend* backend,
                      history::HistoryDatabase* db) override {
     history::URLRows rows;
     backend->GetAllTypedURLs(&rows);
     if (!rows.empty()) {
-      DVLOG(1) << "SigninConfirmationHelper: history contains " << rows.size()
-               << " typed URLs";
+      VLOG(1) << "SigninConfirmationHelper: history contains " << rows.size()
+              << " typed URLs";
       has_typed_urls_ = true;
     }
     return true;
@@ -43,7 +44,7 @@ class HasTypedURLsTask : public history::HistoryDBTask {
   void DoneRunOnMainThread() override { std::move(cb_).Run(has_typed_urls_); }
 
  private:
-  bool has_typed_urls_;
+  bool has_typed_urls_ = false;
   base::OnceCallback<void(bool)> cb_;
 };
 
@@ -66,8 +67,8 @@ void SigninConfirmationHelper::OnHistoryQueryResults(
     history::QueryResults results) {
   bool too_much_history = results.size() >= max_entries;
   if (too_much_history) {
-    DVLOG(1) << "SigninConfirmationHelper: profile contains " << results.size()
-             << " history entries";
+    VLOG(1) << "SigninConfirmationHelper: profile contains " << results.size()
+            << " history entries";
   }
   ReturnResult(too_much_history);
 }
@@ -81,7 +82,7 @@ void SigninConfirmationHelper::CheckHasHistory(int max_entries) {
   history::QueryOptions opts;
   opts.max_count = max_entries;
   history_service_->QueryHistory(
-      base::string16(), opts,
+      std::u16string(), opts,
       base::BindOnce(&SigninConfirmationHelper::OnHistoryQueryResults,
                      base::Unretained(this), max_entries),
       &task_tracker_);

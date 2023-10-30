@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/android/javascript_injector.h"
 
 #include "base/android/jni_string.h"
+#include "base/memory/ptr_util.h"
 #include "content/browser/android/java/gin_java_bridge_dispatcher_host.h"
 #include "content/public/android/content_jni_headers/JavascriptInjectorImpl_jni.h"
 
@@ -20,7 +21,8 @@ JavascriptInjector::JavascriptInjector(
     const base::android::JavaParamRef<jobject>& obj,
     const base::android::JavaParamRef<jobject>& retained_objects,
     WebContents* web_contents)
-    : java_ref_(env, obj) {
+    : WebContentsUserData<JavascriptInjector>(*web_contents),
+      java_ref_(env, obj) {
   java_bridge_dispatcher_host_ =
       new GinJavaBridgeDispatcherHost(web_contents, retained_objects);
   web_contents->SetUserData(UserDataKey(), base::WrapUnique(this));
@@ -75,6 +77,6 @@ jlong JNI_JavascriptInjectorImpl_Init(
   return reinterpret_cast<intptr_t>(injector);
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(JavascriptInjector)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(JavascriptInjector);
 
 }  // namespace content

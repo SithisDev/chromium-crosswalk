@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,10 @@ class NigoriKeyBag {
   NigoriKeyBag(NigoriKeyBag&& other);
   ~NigoriKeyBag();
 
+  NigoriKeyBag& operator=(NigoriKeyBag&&) = default;
+
+  void CopyFrom(const NigoriKeyBag& other);
+
   // Serialization to proto.
   sync_pb::NigoriKeyBag ToProto() const;
 
@@ -46,6 +50,10 @@ class NigoriKeyBag {
   // string in case of failure.
   std::string AddKey(std::unique_ptr<Nigori> nigori);
 
+  // Similar to AddKey(), but reads the key material from a proto. The |name|
+  // field is ignored since it's redundant.
+  std::string AddKeyFromProto(const sync_pb::NigoriKey& key);
+
   // Merges all keys from another keybag, which means adding all keys that we
   // don't know about.
   void AddAllUnknownKeysFrom(const NigoriKeyBag& other);
@@ -55,6 +63,9 @@ class NigoriKeyBag {
   bool EncryptWithKey(const std::string& key_name,
                       const std::string& input,
                       sync_pb::EncryptedData* encrypted_output) const;
+
+  // Returns whether the key required to decrypt |encrypted_input| is known.
+  bool CanDecrypt(const sync_pb::EncryptedData& encrypted_input) const;
 
   // Decryption of strings (possibly binary). Returns true if success.
   // |decrypted_output| must not be null.

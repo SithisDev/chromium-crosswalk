@@ -1,13 +1,11 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROMECAST_BROWSER_SERVICE_CAST_SERVICE_SIMPLE_H_
 #define CHROMECAST_BROWSER_SERVICE_CAST_SERVICE_SIMPLE_H_
 
-#include <memory>
-
-#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "chromecast/browser/cast_content_window.h"
 #include "chromecast/browser/cast_web_view.h"
 #include "chromecast/service/cast_service.h"
@@ -15,17 +13,17 @@
 
 namespace chromecast {
 
-class CastWebContentsManager;
-class CastWebViewFactory;
-class CastWindowManager;
+class CastWebService;
 
 namespace shell {
 
-class CastServiceSimple : public CastService, public CastWebView::Delegate {
+class CastServiceSimple : public CastService {
  public:
-  CastServiceSimple(content::BrowserContext* browser_context,
-                    PrefService* pref_service,
-                    CastWindowManager* window_manager);
+  explicit CastServiceSimple(CastWebService* web_service);
+
+  CastServiceSimple(const CastServiceSimple&) = delete;
+  CastServiceSimple& operator=(const CastServiceSimple&) = delete;
+
   ~CastServiceSimple() override;
 
  protected:
@@ -35,22 +33,12 @@ class CastServiceSimple : public CastService, public CastWebView::Delegate {
   void StartInternal() override;
   void StopInternal() override;
 
-  // CastContentWindow::Delegate implementation:
-  void OnWindowDestroyed() override;
-  void OnKeyEvent(const ui::KeyEvent& key_event) override;
-  bool CanHandleGesture(GestureType gesture_type) override;
-  bool ConsumeGesture(GestureType gesture_type) override;
-  void OnVisibilityChange(VisibilityType visibility_type) override;
-  std::string GetId() override;
-
  private:
-  CastWindowManager* const window_manager_;
-  const std::unique_ptr<CastWebViewFactory> web_view_factory_;
-  const std::unique_ptr<CastWebContentsManager> web_contents_manager_;
-  std::unique_ptr<CastWebView> cast_web_view_;
+  CastWebService* const web_service_;
+  CastWebView::Scoped cast_web_view_;
   GURL startup_url_;
 
-  DISALLOW_COPY_AND_ASSIGN(CastServiceSimple);
+  base::WeakPtrFactory<CastServiceSimple> weak_factory_{this};
 };
 
 }  // namespace shell

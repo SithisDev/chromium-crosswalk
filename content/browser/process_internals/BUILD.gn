@@ -1,18 +1,12 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//mojo/public/tools/bindings/mojom.gni")
 
 mojom("mojo_bindings") {
-  sources = [
-    "process_internals.mojom",
-  ]
+  sources = [ "process_internals.mojom" ]
 
-  deps = [
-    "//url/mojom:url_mojom_gurl",
-  ]
-
-  # TODO(https://crbug.com/968369): Change to use new names.
-  use_old_js_lite_bindings_names = true
+  deps = [ "//url/mojom:url_mojom_gurl" ]
+  webui_module_path = "/"
 }

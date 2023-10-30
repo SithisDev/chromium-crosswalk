@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,9 @@
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/ios/browser/autofill_driver_ios_bridge.h"
 #include "components/autofill/ios/browser/autofill_driver_ios_webframe.h"
-#import "ios/web/common/origin_util.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/js_messaging/web_frame_util.h"
-#import "ios/web/public/web_state/web_state.h"
+#import "ios/web/public/web_state.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "ui/accessibility/ax_tree_id.h"
@@ -29,7 +28,7 @@ void AutofillDriverIOS::PrepareForWebStateWebFrameAndDelegate(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    AutofillManager::AutofillDownloadManagerState enable_download_manager) {
+    AutofillManager::EnableDownloadManager enable_download_manager) {
   // By the time this method is called, no web_frame is available. This method
   // only prepares the factory and the AutofillDriverIOS will be created in the
   // first call to FromWebStateAndWebFrame.
@@ -52,33 +51,45 @@ AutofillDriverIOS::AutofillDriverIOS(
     AutofillClient* client,
     id<AutofillDriverIOSBridge> bridge,
     const std::string& app_locale,
-    AutofillManager::AutofillDownloadManagerState enable_download_manager)
+    AutofillManager::EnableDownloadManager enable_download_manager)
     : web_state_(web_state),
       bridge_(bridge),
-      autofill_manager_(this, client, app_locale, enable_download_manager),
-      autofill_external_delegate_(&autofill_manager_, this) {
+      client_(client),
+      browser_autofill_manager_(
+          std::make_unique<BrowserAutofillManager>(this,
+                                                   client,
+                                                   app_locale,
+                                                   enable_download_manager)) {
   web_frame_id_ = web::GetWebFrameId(web_frame);
-  autofill_manager_.SetExternalDelegate(&autofill_external_delegate_);
 }
 
-AutofillDriverIOS::~AutofillDriverIOS() {}
+AutofillDriverIOS::~AutofillDriverIOS() = default;
 
 bool AutofillDriverIOS::IsIncognito() const {
   return web_state_->GetBrowserState()->IsOffTheRecord();
 }
 
-bool AutofillDriverIOS::IsInMainFrame() const {
+// Return true as iOS has no MPArch.
+bool AutofillDriverIOS::IsInActiveFrame() const {
+  return true;
+}
+
+bool AutofillDriverIOS::IsInAnyMainFrame() const {
   web::WebFrame* web_frame = web::GetWebFrameWithId(web_state_, web_frame_id_);
   return web_frame ? web_frame->IsMainFrame() : true;
+}
+
+bool AutofillDriverIOS::IsPrerendering() const {
+  return false;
+}
+
+bool AutofillDriverIOS::CanShowAutofillUi() const {
+  return true;
 }
 
 ui::AXTreeID AutofillDriverIOS::GetAxTreeId() const {
   NOTIMPLEMENTED() << "See https://crbug.com/985933";
   return ui::AXTreeIDUnknown();
-}
-
-net::URLRequestContextGetter* AutofillDriverIOS::GetURLRequestContext() {
-  return web_state_->GetBrowserState()->GetRequestContext();
 }
 
 scoped_refptr<network::SharedURLLoaderFactory>
@@ -91,20 +102,38 @@ bool AutofillDriverIOS::RendererIsAvailable() {
   return true;
 }
 
-void AutofillDriverIOS::SendFormDataToRenderer(
+std::vector<FieldGlobalId> AutofillDriverIOS::FillOrPreviewForm(
     int query_id,
-    RendererFormDataAction action,
-    const FormData& data) {
+    mojom::RendererFormDataAction action,
+    const FormData& data,
+    const url::Origin& triggered_origin,
+    const base::flat_map<FieldGlobalId, ServerFieldType>& field_type_map) {
+  web::WebFrame* web_frame = web::GetWebFrameWithId(web_state_, web_frame_id_);
+  if (web_frame) {
+    [bridge_ fillFormData:data inFrame:web_frame];
+  }
+  std::vector<FieldGlobalId> safe_fields;
+  for (const auto& field : data.fields)
+    safe_fields.push_back(field.global_id());
+  return safe_fields;
+}
+
+void AutofillDriverIOS::HandleParsedForms(const std::vector<FormData>& forms) {
+  const std::map<FormGlobalId, std::unique_ptr<FormStructure>>& map =
+      browser_autofill_manager_->form_structures();
+  std::vector<FormStructure*> form_structures;
+  form_structures.reserve(forms.size());
+  for (const FormData& form : forms) {
+    auto it = map.find(form.global_id());
+    if (it != map.end())
+      form_structures.push_back(it->second.get());
+  }
+
   web::WebFrame* web_frame = web::GetWebFrameWithId(web_state_, web_frame_id_);
   if (!web_frame) {
     return;
   }
-  [bridge_ fillFormData:data inFrame:web_frame];
-}
-
-void AutofillDriverIOS::PropagateAutofillPredictions(
-    const std::vector<autofill::FormStructure*>& forms) {
-  autofill_manager_.client()->PropagateAutofillPredictions(nullptr, forms);
+  [bridge_ handleParsedForms:form_structures inFrame:web_frame];
 }
 
 void AutofillDriverIOS::SendAutofillTypePredictionsToRenderer(
@@ -118,8 +147,11 @@ void AutofillDriverIOS::SendAutofillTypePredictionsToRenderer(
 }
 
 void AutofillDriverIOS::RendererShouldAcceptDataListSuggestion(
-    const base::string16& value) {
-}
+    const FieldGlobalId& field,
+    const std::u16string& value) {}
+
+void AutofillDriverIOS::SendFieldsEligibleForManualFillingToRenderer(
+    const std::vector<FieldGlobalId>& fields) {}
 
 void AutofillDriverIOS::RendererShouldClearFilledSection() {}
 
@@ -127,22 +159,40 @@ void AutofillDriverIOS::RendererShouldClearPreviewedForm() {
 }
 
 void AutofillDriverIOS::RendererShouldFillFieldWithValue(
-    const base::string16& value) {
-}
+    const FieldGlobalId& field,
+    const std::u16string& value) {}
 
 void AutofillDriverIOS::RendererShouldPreviewFieldWithValue(
-    const base::string16& value) {
-}
+    const FieldGlobalId& field,
+    const std::u16string& value) {}
 
 void AutofillDriverIOS::RendererShouldSetSuggestionAvailability(
-    bool available) {}
+    const FieldGlobalId& field,
+    const mojom::AutofillState state) {}
 
 void AutofillDriverIOS::PopupHidden() {
 }
 
-gfx::RectF AutofillDriverIOS::TransformBoundingBoxToViewportCoordinates(
-    const gfx::RectF& bounding_box) {
-  return bounding_box;
+net::IsolationInfo AutofillDriverIOS::IsolationInfo() {
+  std::string main_web_frame_id = web::GetMainWebFrameId(web_state_);
+  web::WebFrame* main_web_frame =
+      web::GetWebFrameWithId(web_state_, main_web_frame_id);
+  if (!main_web_frame)
+    return net::IsolationInfo();
+
+  web::WebFrame* web_frame = web::GetWebFrameWithId(web_state_, web_frame_id_);
+  if (!web_frame)
+    return net::IsolationInfo();
+
+  return net::IsolationInfo::Create(
+      net::IsolationInfo::RequestType::kOther,
+      url::Origin::Create(main_web_frame->GetSecurityOrigin()),
+      url::Origin::Create(web_frame->GetSecurityOrigin()),
+      net::SiteForCookies());
+}
+
+web::WebFrame* AutofillDriverIOS::web_frame() {
+  return web::GetWebFrameWithId(web_state_, web_frame_id_);
 }
 
 }  // namespace autofill

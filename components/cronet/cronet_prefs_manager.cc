@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,18 +11,20 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "components/cronet/host_cache_persistence_manager.h"
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/pref_service_factory.h"
-#include "net/http/http_server_properties_manager.h"
+#include "net/http/http_server_properties.h"
 #include "net/nqe/network_qualities_prefs_manager.h"
 #include "net/url_request/url_request_context_builder.h"
 
@@ -70,9 +72,9 @@ void InitializeStorageDirectory(const base::FilePath& dir) {
     return;
   }
   // Delete old directory recursively and create a new directory.
-  // base::DeleteFile returns true if the directory does not exist, so it is
-  // fine if there is nothing on disk.
-  if (!(base::DeleteFile(dir, true) && base::CreateDirectory(dir))) {
+  // base::DeletePathRecursively() returns true if the directory does not exist,
+  // so it is fine if there is nothing on disk.
+  if (!(base::DeletePathRecursively(dir) && base::CreateDirectory(dir))) {
     DLOG(WARNING) << "Cannot purge directory.";
     return;
   }
@@ -99,43 +101,42 @@ void InitializeStorageDirectory(const base::FilePath& dir) {
   }
 }
 
-// Connects the HttpServerPropertiesManager's storage to the prefs.
-class PrefServiceAdapter
-    : public net::HttpServerPropertiesManager::PrefDelegate {
+// Connects the HttpServerProperties's storage to the prefs.
+class PrefServiceAdapter : public net::HttpServerProperties::PrefDelegate {
  public:
   explicit PrefServiceAdapter(PrefService* pref_service)
       : pref_service_(pref_service), path_(kHttpServerPropertiesPref) {
     pref_change_registrar_.Init(pref_service_);
   }
 
+  PrefServiceAdapter(const PrefServiceAdapter&) = delete;
+  PrefServiceAdapter& operator=(const PrefServiceAdapter&) = delete;
+
   ~PrefServiceAdapter() override {}
 
   // PrefDelegate implementation.
-  const base::DictionaryValue* GetServerProperties() const override {
-    return pref_service_->GetDictionary(path_);
+  const base::Value* GetServerProperties() const override {
+    return &pref_service_->GetValue(path_);
   }
 
-  void SetServerProperties(const base::DictionaryValue& value,
+  void SetServerProperties(const base::Value& value,
                            base::OnceClosure callback) override {
     pref_service_->Set(path_, value);
     if (callback)
       pref_service_->CommitPendingWrite(std::move(callback));
   }
 
-  void StartListeningForUpdates(
-      const base::RepeatingClosure& callback) override {
-    pref_change_registrar_.Add(path_, callback);
+  void WaitForPrefLoad(base::OnceClosure callback) override {
     // Notify the pref manager that settings are already loaded, as a result
-    // of initializing the pref store synchornously.
-    base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
+    // of initializing the pref store synchronously.
+    base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                     std::move(callback));
   }
 
  private:
-  PrefService* pref_service_;
+  raw_ptr<PrefService> pref_service_;
   const std::string path_;
   PrefChangeRegistrar pref_change_registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(PrefServiceAdapter);
 };  // class PrefServiceAdapter
 
 class NetworkQualitiesPrefDelegateImpl
@@ -147,13 +148,18 @@ class NetworkQualitiesPrefDelegateImpl
     DCHECK(pref_service_);
   }
 
+  NetworkQualitiesPrefDelegateImpl(const NetworkQualitiesPrefDelegateImpl&) =
+      delete;
+  NetworkQualitiesPrefDelegateImpl& operator=(
+      const NetworkQualitiesPrefDelegateImpl&) = delete;
+
   ~NetworkQualitiesPrefDelegateImpl() override {}
 
   // net::NetworkQualitiesPrefsManager::PrefDelegate implementation.
-  void SetDictionaryValue(const base::DictionaryValue& value) override {
+  void SetDictionaryValue(const base::Value::Dict& dict) override {
     DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-    pref_service_->Set(kNetworkQualitiesPref, value);
+    pref_service_->SetDict(kNetworkQualitiesPref, dict.Clone());
     if (lossy_prefs_writing_task_posted_)
       return;
 
@@ -171,13 +177,13 @@ class NetworkQualitiesPrefDelegateImpl
         base::BindOnce(
             &NetworkQualitiesPrefDelegateImpl::SchedulePendingLossyWrites,
             weak_ptr_factory_.GetWeakPtr()),
-        base::TimeDelta::FromSeconds(kUpdatePrefsDelaySeconds));
+        base::Seconds(kUpdatePrefsDelaySeconds));
   }
-  std::unique_ptr<base::DictionaryValue> GetDictionaryValue() override {
+
+  base::Value::Dict GetDictionaryValue() override {
     DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
     UMA_HISTOGRAM_EXACT_LINEAR("NQE.Prefs.ReadCount", 1, 2);
-    return pref_service_->GetDictionary(kNetworkQualitiesPref)
-        ->CreateDeepCopy();
+    return pref_service_->GetDict(kNetworkQualitiesPref).Clone();
   }
 
  private:
@@ -189,7 +195,7 @@ class NetworkQualitiesPrefDelegateImpl
     lossy_prefs_writing_task_posted_ = false;
   }
 
-  PrefService* pref_service_;
+  raw_ptr<PrefService> pref_service_;
 
   // True if the task that schedules the writing of the lossy prefs has been
   // posted.
@@ -199,8 +205,6 @@ class NetworkQualitiesPrefDelegateImpl
 
   base::WeakPtrFactory<NetworkQualitiesPrefDelegateImpl> weak_ptr_factory_{
       this};
-
-  DISALLOW_COPY_AND_ASSIGN(NetworkQualitiesPrefDelegateImpl);
 };
 
 }  // namespace
@@ -212,12 +216,11 @@ CronetPrefsManager::CronetPrefsManager(
     bool enable_network_quality_estimator,
     bool enable_host_cache_persistence,
     net::NetLog* net_log,
-    net::URLRequestContextBuilder* context_builder)
-    : http_server_properties_manager_(nullptr) {
+    net::URLRequestContextBuilder* context_builder) {
   DCHECK(network_task_runner->BelongsToCurrentThread());
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   base::FilePath storage_file_path(
       base::FilePath::FromUTF8Unsafe(storage_path));
 #else
@@ -257,14 +260,9 @@ CronetPrefsManager::CronetPrefsManager(
     pref_service_ = factory.Create(registry.get());
   }
 
-  http_server_properties_manager_ = new net::HttpServerPropertiesManager(
-      std::make_unique<PrefServiceAdapter>(pref_service_.get()), net_log);
-
-  // Passes |http_server_properties_manager_| ownership to |context_builder|.
-  // The ownership will be subsequently passed to UrlRequestContext.
   context_builder->SetHttpServerProperties(
-      std::unique_ptr<net::HttpServerPropertiesManager>(
-          http_server_properties_manager_));
+      std::make_unique<net::HttpServerProperties>(
+          std::make_unique<PrefServiceAdapter>(pref_service_.get()), net_log));
 }
 
 CronetPrefsManager::~CronetPrefsManager() {
@@ -290,8 +288,7 @@ void CronetPrefsManager::SetupHostCachePersistence(
   host_cache_persistence_manager_ =
       std::make_unique<HostCachePersistenceManager>(
           host_cache, pref_service_.get(), kHostCachePref,
-          base::TimeDelta::FromMilliseconds(host_cache_persistence_delay_ms),
-          net_log);
+          base::Milliseconds(host_cache_persistence_delay_ms), net_log);
 }
 
 void CronetPrefsManager::PrepareForShutdown() {

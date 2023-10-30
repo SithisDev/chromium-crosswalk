@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,21 +55,28 @@ std::vector<std::string> UlpLanguageCodeLocator::GetLanguageCodes(
   std::vector<std::string> languages;
 
   ListPrefUpdate update(prefs_, kCachedGeoLanguagesPref);
-  base::ListValue* celllangs_cached = update.Get();
+  base::Value::List& celllangs_cached = update->GetList();
   for (size_t index = 0; index < serialized_langtrees_.size(); index++) {
     std::string language;
 
-    const base::DictionaryValue* celllang_cached;
-    const bool is_cached =
-        celllangs_cached->GetDictionary(index, &celllang_cached);
+    bool is_cached = false;
+    const base::Value* celllang_cached = nullptr;
+    if (index < celllangs_cached.size()) {
+      celllang_cached = &celllangs_cached[index];
+      is_cached = celllang_cached->is_dict();
+    }
 
-    const S2CellId cell_cached =
-        is_cached ? S2CellId::FromToken(
-                        *celllang_cached->FindStringKey(kCellTokenKey))
-                  : S2CellId::None();
+    const std::string* token_cached =
+        is_cached ? celllang_cached->FindStringKey(kCellTokenKey) : nullptr;
+    const S2CellId cell_cached = token_cached != nullptr
+                                     ? S2CellId::FromToken(*token_cached)
+                                     : S2CellId::None();
 
-    if (cell_cached.is_valid() && cell_cached.contains(cell)) {
-      language = *celllang_cached->FindStringKey(kLanguageKey);
+    const std::string* lang_cached =
+        is_cached ? celllang_cached->FindStringKey(kLanguageKey) : nullptr;
+    if (cell_cached.is_valid() && cell_cached.contains(cell) &&
+        lang_cached != nullptr) {
+      language = *lang_cached;
     } else {
       const S2LangQuadTreeNode& root =
           S2LangQuadTreeNode::Deserialize(serialized_langtrees_[index].get());
@@ -77,10 +84,10 @@ std::vector<std::string> UlpLanguageCodeLocator::GetLanguageCodes(
       language = root.Get(cell, &level);
       if (level != -1) {
         if (is_cached) {
-          celllangs_cached->GetList()[index] =
+          celllangs_cached[index] =
               GetCellLanguagePairValue(cell.parent(level), language);
         } else {
-          celllangs_cached->GetList().push_back(
+          celllangs_cached.Append(
               GetCellLanguagePairValue(cell.parent(level), language));
         }
       }

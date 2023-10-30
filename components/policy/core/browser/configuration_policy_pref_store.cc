@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,22 +10,33 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/strings/string16.h"
+#include "base/observer_list.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/policy/core/browser/browser_policy_connector_base.h"
 #include "components/policy/core/browser/configuration_policy_handler_list.h"
+#include "components/policy/core/browser/policy_conversions_client.h"
 #include "components/policy/core/browser/policy_error_map.h"
 #include "components/prefs/pref_value_map.h"
+#include "components/strings/grit/components_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace policy {
 
 namespace {
 
-void LogErrors(std::unique_ptr<PolicyErrorMap> errors) {
+void LogErrors(std::unique_ptr<PolicyErrorMap> errors,
+               PoliciesSet deprecated_policies,
+               PoliciesSet future_policies) {
   DCHECK(errors->IsReady());
   for (auto& pair : *errors) {
-    base::string16 policy = base::ASCIIToUTF16(pair.first);
-    DLOG(WARNING) << "Policy " << policy << ": " << pair.second;
+    std::u16string policy = base::ASCIIToUTF16(pair.first);
+    DLOG(WARNING) << "Policy " << policy << ": " << pair.second.message;
+  }
+  for (const auto& policy : deprecated_policies) {
+    VLOG(1) << "Policy " << policy << " has been deprecated.";
+  }
+  for (const auto& policy : future_policies) {
+    VLOG(1) << "Policy " << policy << " has not been released yet.";
   }
 }
 
@@ -59,7 +70,7 @@ void ConfigurationPolicyPrefStore::RemoveObserver(
 }
 
 bool ConfigurationPolicyPrefStore::HasObservers() const {
-  return observers_.might_have_observers();
+  return !observers_.empty();
 }
 
 bool ConfigurationPolicyPrefStore::IsInitializationComplete() const {
@@ -77,17 +88,15 @@ bool ConfigurationPolicyPrefStore::GetValue(const std::string& key,
   return true;
 }
 
-std::unique_ptr<base::DictionaryValue> ConfigurationPolicyPrefStore::GetValues()
-    const {
+base::Value::Dict ConfigurationPolicyPrefStore::GetValues() const {
   if (!prefs_)
-    return std::make_unique<base::DictionaryValue>();
-  return prefs_->AsDictionaryValue();
+    return base::Value::Dict();
+  return prefs_->AsDict();
 }
 
-void ConfigurationPolicyPrefStore::OnPolicyUpdated(
-    const PolicyNamespace& ns,
-    const PolicyMap& previous,
-    const PolicyMap& current) {
+void ConfigurationPolicyPrefStore::OnPolicyUpdated(const PolicyNamespace& ns,
+                                                   const PolicyMap& previous,
+                                                   const PolicyMap& current) {
   DCHECK_EQ(POLICY_DOMAIN_CHROME, ns.domain);
   DCHECK(ns.component_id.empty());
   Refresh();
@@ -113,8 +122,7 @@ void ConfigurationPolicyPrefStore::Refresh() {
 
   // Send out change notifications.
   for (std::vector<std::string>::const_iterator pref(changed_prefs.begin());
-       pref != changed_prefs.end();
-       ++pref) {
+       pref != changed_prefs.end(); ++pref) {
     for (auto& observer : observers_)
       observer.OnPrefValueChanged(*pref);
   }
@@ -122,23 +130,28 @@ void ConfigurationPolicyPrefStore::Refresh() {
 
 PrefValueMap* ConfigurationPolicyPrefStore::CreatePreferencesFromPolicies() {
   std::unique_ptr<PrefValueMap> prefs(new PrefValueMap);
-  PolicyMap filtered_policies;
-  filtered_policies.CopyFrom(policy_service_->GetPolicies(
-      PolicyNamespace(POLICY_DOMAIN_CHROME, std::string())));
-  filtered_policies.EraseNonmatching(base::Bind(&IsLevel, level_));
+  PolicyMap filtered_policies =
+      policy_service_
+          ->GetPolicies(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
+          .Clone();
+  filtered_policies.EraseNonmatching(base::BindRepeating(&IsLevel, level_));
 
   std::unique_ptr<PolicyErrorMap> errors = std::make_unique<PolicyErrorMap>();
 
-  handler_list_->ApplyPolicySettings(filtered_policies,
-                                     prefs.get(),
-                                     errors.get());
+  PoliciesSet deprecated_policies;
+  PoliciesSet future_policies;
+  handler_list_->ApplyPolicySettings(filtered_policies, prefs.get(),
+                                     errors.get(), &deprecated_policies,
+                                     &future_policies);
 
   if (!errors->empty()) {
     if (errors->IsReady()) {
-      LogErrors(std::move(errors));
+      LogErrors(std::move(errors), std::move(deprecated_policies),
+                std::move(future_policies));
     } else if (policy_connector_) {  // May be null in tests.
-      policy_connector_->NotifyWhenResourceBundleReady(
-          base::BindOnce(&LogErrors, std::move(errors)));
+      policy_connector_->NotifyWhenResourceBundleReady(base::BindOnce(
+          &LogErrors, std::move(errors), std::move(deprecated_policies),
+          std::move(future_policies)));
     }
   }
 

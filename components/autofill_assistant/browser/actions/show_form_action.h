@@ -1,14 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_ACTIONS_SHOW_FORM_ACTION_H_
 #define COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_ACTIONS_SHOW_FORM_ACTION_H_
 
-#include <string>
-
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill_assistant/browser/actions/action.h"
 
@@ -18,6 +15,10 @@ namespace autofill_assistant {
 class ShowFormAction : public Action {
  public:
   explicit ShowFormAction(ActionDelegate* delegate, const ActionProto& proto);
+
+  ShowFormAction(const ShowFormAction&) = delete;
+  ShowFormAction& operator=(const ShowFormAction&) = delete;
+
   ~ShowFormAction() override;
 
  private:
@@ -25,6 +26,7 @@ class ShowFormAction : public Action {
   void InternalProcessAction(ProcessActionCallback callback) override;
 
   void OnFormValuesChanged(const FormProto::Result* form_result);
+  void OnCancelForm(const ClientStatus& status);
   void OnButtonClicked();
   bool IsFormValid(const FormProto& form, const FormProto::Result& result);
   bool IsCounterInputValid(const CounterInputProto& input,
@@ -35,11 +37,10 @@ class ShowFormAction : public Action {
       const CounterInputProto::Result& result);
   bool IsSelectionInputValid(const SelectionInputProto& input,
                              const SelectionInputProto::Result& result);
+  void EndAction(const ClientStatus& status);
 
   ProcessActionCallback callback_;
-  base::WeakPtrFactory<ShowFormAction> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShowFormAction);
+  base::WeakPtrFactory<ShowFormAction> weak_ptr_factory_{this};
 };
 
 }  // namespace autofill_assistant

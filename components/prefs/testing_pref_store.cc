@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,8 @@ bool TestingPrefStore::GetValue(const std::string& key,
   return prefs_.GetValue(key, value);
 }
 
-std::unique_ptr<base::DictionaryValue> TestingPrefStore::GetValues() const {
-  return prefs_.AsDictionaryValue();
+base::Value::Dict TestingPrefStore::GetValues() const {
+  return prefs_.AsDict();
 }
 
 bool TestingPrefStore::GetMutableValue(const std::string& key,
@@ -44,7 +44,7 @@ void TestingPrefStore::RemoveObserver(PrefStore::Observer* observer) {
 }
 
 bool TestingPrefStore::HasObservers() const {
-  return observers_.might_have_observers();
+  return !observers_.empty();
 }
 
 bool TestingPrefStore::IsInitializationComplete() const {
@@ -75,6 +75,10 @@ void TestingPrefStore::RemoveValue(const std::string& key, uint32_t flags) {
     committed_ = false;
     NotifyPrefValueChanged(key);
   }
+}
+
+void TestingPrefStore::RemoveValuesByPrefixSilently(const std::string& prefix) {
+  prefs_.ClearWithPrefix(prefix);
 }
 
 bool TestingPrefStore::ReadOnly() const {
@@ -156,7 +160,11 @@ bool TestingPrefStore::GetString(const std::string& key,
   if (!prefs_.GetValue(key, &stored_value) || !stored_value)
     return false;
 
-  return stored_value->GetAsString(value);
+  if (value && stored_value->is_string()) {
+    *value = stored_value->GetString();
+    return true;
+  }
+  return stored_value->is_string();
 }
 
 bool TestingPrefStore::GetInteger(const std::string& key, int* value) const {
@@ -164,7 +172,11 @@ bool TestingPrefStore::GetInteger(const std::string& key, int* value) const {
   if (!prefs_.GetValue(key, &stored_value) || !stored_value)
     return false;
 
-  return stored_value->GetAsInteger(value);
+  if (value && stored_value->is_int()) {
+    *value = stored_value->GetInt();
+    return true;
+  }
+  return stored_value->is_int();
 }
 
 bool TestingPrefStore::GetBoolean(const std::string& key, bool* value) const {
@@ -172,7 +184,11 @@ bool TestingPrefStore::GetBoolean(const std::string& key, bool* value) const {
   if (!prefs_.GetValue(key, &stored_value) || !stored_value)
     return false;
 
-  return stored_value->GetAsBoolean(value);
+  if (value && stored_value->is_bool()) {
+    *value = stored_value->GetBool();
+    return true;
+  }
+  return stored_value->is_bool();
 }
 
 void TestingPrefStore::SetBlockAsyncRead(bool block_async_read) {

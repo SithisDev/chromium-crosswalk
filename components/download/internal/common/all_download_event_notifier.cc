@@ -1,8 +1,9 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/download/public/common/all_download_event_notifier.h"
+#include "base/observer_list.h"
 
 namespace download {
 
@@ -26,6 +27,8 @@ AllDownloadEventNotifier::~AllDownloadEventNotifier() {
     (*it)->RemoveObserver(this);
   }
   observing_.clear();
+
+  CHECK(!IsInObserverList());
 }
 
 void AllDownloadEventNotifier::AddObserver(Observer* observer) {
@@ -49,7 +52,9 @@ void AllDownloadEventNotifier::OnDownloadsInitialized(
                                     active_downloads_only);
 }
 
-void AllDownloadEventNotifier::OnManagerGoingDown() {
+void AllDownloadEventNotifier::OnManagerGoingDown(
+    SimpleDownloadManagerCoordinator* manager) {
+  DCHECK_EQ(manager, simple_download_manager_coordinator_);
   for (auto& observer : observers_)
     observer.OnManagerGoingDown(simple_download_manager_coordinator_);
   simple_download_manager_coordinator_->RemoveObserver(this);

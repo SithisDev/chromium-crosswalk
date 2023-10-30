@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,18 +12,21 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
 #include "content/common/content_export.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "net/base/address_list.h"
 #include "net/base/ip_endpoint.h"
+#include "net/dns/public/host_resolver_results.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/ppb_tcp_socket.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
@@ -33,10 +36,11 @@
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/tcp_socket.mojom.h"
 #include "services/network/public/mojom/tls_socket.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if defined(OS_CHROMEOS)
-#include "chromeos/network/firewall_hole.h"
-#endif  // defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "chromeos/ash/components/network/firewall_hole.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace ppapi {
 class SocketOptionData;
@@ -71,11 +75,16 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
                                PP_Instance instance,
                                ppapi::TCPSocketVersion version);
 
+  PepperTCPSocketMessageFilter(const PepperTCPSocketMessageFilter&) = delete;
+  PepperTCPSocketMessageFilter& operator=(const PepperTCPSocketMessageFilter&) =
+      delete;
+
   // Switches state to CONNECTED using the provided pipes. May only be called
   // before any messages are received,
   void SetConnectedSocket(
-      network::mojom::TCPConnectedSocketPtrInfo connected_socket,
-      network::mojom::SocketObserverRequest socket_observer_request,
+      mojo::PendingRemote<network::mojom::TCPConnectedSocket> connected_socket,
+      mojo::PendingReceiver<network::mojom::SocketObserver>
+          socket_observer_receiver,
       mojo::ScopedDataPipeConsumerHandle receive_stream,
       mojo::ScopedDataPipeProducerHandle send_stream);
 
@@ -96,29 +105,29 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
   ~PepperTCPSocketMessageFilter() override;
 
   void SetConnectedSocketOnUIThread(
-      network::mojom::TCPConnectedSocketPtrInfo connected_socket,
-      network::mojom::SocketObserverRequest socket_observer_request,
+      mojo::PendingRemote<network::mojom::TCPConnectedSocket> connected_socket,
+      mojo::PendingReceiver<network::mojom::SocketObserver>
+          socket_observer_receiver,
       mojo::ScopedDataPipeConsumerHandle receive_stream,
       mojo::ScopedDataPipeProducerHandle send_stream);
 
   // ppapi::host::ResourceMessageFilter overrides.
   void OnFilterDestroyed() override;
-  scoped_refptr<base::TaskRunner> OverrideTaskRunnerForMessage(
+  scoped_refptr<base::SequencedTaskRunner> OverrideTaskRunnerForMessage(
       const IPC::Message& message) override;
   int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
       ppapi::host::HostMessageContext* context) override;
 
   // BrowserPpapiHostImpl::InstanceObserver overrides.
-  void OnThrottleStateChanged(bool is_throttled) override;
   void OnHostDestroyed() override;
 
-  void ThrottleStateChangedOnUIThread(bool is_throttled);
-
   // network::mojom::ResolveHostClient overrides.
-  void OnComplete(
-      int result,
-      const base::Optional<net::AddressList>& resolved_addresses) override;
+  void OnComplete(int result,
+                  const net::ResolveErrorInfo& resolve_error_info,
+                  const absl::optional<net::AddressList>& resolved_addresses,
+                  const absl::optional<net::HostResolverEndpointResults>&
+                      endpoint_results_with_metadata) override;
 
   // network::mojom::SocketObserver overrides.
   void OnReadError(int net_error) override;
@@ -167,7 +176,7 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
 
   void OnResolveCompleted(
       int net_result,
-      const base::Optional<net::AddressList>& resolved_addresses);
+      const absl::optional<net::AddressList>& resolved_addresses);
 
   // Attempts to connect to all addresses in |address_list| in order.
   void StartConnect(const ppapi::host::ReplyMessageContext& context,
@@ -175,8 +184,8 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
 
   void OnConnectCompleted(const ppapi::host::ReplyMessageContext& context,
                           int net_result,
-                          const base::Optional<net::IPEndPoint>& local_addr,
-                          const base::Optional<net::IPEndPoint>& peer_addr,
+                          const absl::optional<net::IPEndPoint>& local_addr,
+                          const absl::optional<net::IPEndPoint>& peer_addr,
                           mojo::ScopedDataPipeConsumerHandle receive_stream,
                           mojo::ScopedDataPipeProducerHandle send_stream);
 
@@ -185,28 +194,30 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
       int net_result,
       mojo::ScopedDataPipeConsumerHandle receive_stream,
       mojo::ScopedDataPipeProducerHandle send_stream,
-      const base::Optional<net::SSLInfo>& ssl_info);
+      const absl::optional<net::SSLInfo>& ssl_info);
 
   void OnListenCompleted(const ppapi::host::ReplyMessageContext& context,
                          int net_result);
 
   void OnBindCompleted(const ppapi::host::ReplyMessageContext& context,
                        int net_result,
-                       const base::Optional<net::IPEndPoint>& local_addr);
+                       const absl::optional<net::IPEndPoint>& local_addr);
 
   void OnAcceptCompleted(
       const ppapi::host::ReplyMessageContext& context,
-      network::mojom::SocketObserverRequest socket_observer_request,
+      mojo::PendingReceiver<network::mojom::SocketObserver>
+          socket_observer_receiver,
       int net_result,
-      const base::Optional<net::IPEndPoint>& remote_addr,
-      network::mojom::TCPConnectedSocketPtr connected_socket,
+      const absl::optional<net::IPEndPoint>& remote_addr,
+      mojo::PendingRemote<network::mojom::TCPConnectedSocket> connected_socket,
       mojo::ScopedDataPipeConsumerHandle receive_stream,
       mojo::ScopedDataPipeProducerHandle send_stream);
 
   void OnAcceptCompletedOnIOThread(
       const ppapi::host::ReplyMessageContext& context,
-      network::mojom::TCPConnectedSocketPtrInfo connected_socket,
-      network::mojom::SocketObserverRequest socket_observer_request,
+      mojo::PendingRemote<network::mojom::TCPConnectedSocket> connected_socket,
+      mojo::PendingReceiver<network::mojom::SocketObserver>
+          socket_observer_receiver,
       mojo::ScopedDataPipeConsumerHandle receive_stream,
       mojo::ScopedDataPipeProducerHandle send_stream,
       PP_NetAddress_Private pp_local_addr,
@@ -218,11 +229,11 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
   void SetStreams(mojo::ScopedDataPipeConsumerHandle receive_stream,
                   mojo::ScopedDataPipeProducerHandle send_stream);
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   void OpenFirewallHole(const ppapi::host::ReplyMessageContext& context);
   void OnFirewallHoleOpened(const ppapi::host::ReplyMessageContext& context,
-                            std::unique_ptr<chromeos::FirewallHole> hole);
-#endif  // defined(OS_CHROMEOS)
+                            std::unique_ptr<ash::FirewallHole> hole);
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   void SendBindReply(const ppapi::host::ReplyMessageContext& context,
                      int32_t pp_result,
@@ -237,7 +248,7 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
                         int32_t pp_error);
   void SendSSLHandshakeReply(const ppapi::host::ReplyMessageContext& context,
                              int32_t pp_result,
-                             const base::Optional<net::SSLInfo>& ssl_info);
+                             const absl::optional<net::SSLInfo>& ssl_info);
   // The read and write reply messages use the |pending_*_context_| fields, and
   // clear fields related to the pending read / write request as needed.
   void SendReadReply(int32_t pp_result, const std::string& data);
@@ -278,24 +289,22 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
 
   // The following fields are used only on the IO thread.
   // Non-owning ptr.
-  BrowserPpapiHostImpl* host_;
+  raw_ptr<BrowserPpapiHostImpl> host_;
   // Non-owning ptr.
-  ContentBrowserPepperHostFactory* factory_;
+  raw_ptr<ContentBrowserPepperHostFactory> factory_;
   PP_Instance instance_;
 
   // The following fields are used only on the UI thread.
   const bool external_plugin_;
 
-  // Mirrors state of host_->IsThrottled(), but is on UI thread.
-  bool is_throttled_;
-
   int render_process_id_;
   int render_frame_id_;
 
-  // A reference to |this| must always be taken while |binding_| is bound to
+  // A reference to |this| must always be taken while |receiver_| is bound to
   // ensure that if the error callback is called the object is alive.
-  mojo::Binding<network::mojom::ResolveHostClient> binding_;
-  mojo::Binding<network::mojom::SocketObserver> socket_observer_binding_;
+  mojo::Receiver<network::mojom::ResolveHostClient> receiver_{this};
+  mojo::Receiver<network::mojom::SocketObserver> socket_observer_receiver_{
+      this};
 
   ppapi::TCPSocketState state_;
 
@@ -307,9 +316,9 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
   // The bound address.
   net::IPEndPoint bind_output_ip_endpoint_;
 
-#if defined(OS_CHROMEOS)
-  std::unique_ptr<chromeos::FirewallHole> firewall_hole_;
-#endif  // defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  std::unique_ptr<ash::FirewallHole> firewall_hole_;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   // Bitwise-or of SocketOption flags. This stores the state about whether
   // each option is set before Connect() is called.
@@ -323,13 +332,13 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
 
   // Holds socket if Bind() is called. Will be used to create a connected or
   // server socket, depending on the next call.
-  network::mojom::TCPBoundSocketPtr bound_socket_;
+  mojo::Remote<network::mojom::TCPBoundSocket> bound_socket_;
   // Holds socket if Connect() is called.
-  network::mojom::TCPConnectedSocketPtr connected_socket_;
+  mojo::Remote<network::mojom::TCPConnectedSocket> connected_socket_;
   // Holds socket if socket was upgraded to SSL.
-  network::mojom::TLSClientSocketPtr tls_client_socket_;
+  mojo::Remote<network::mojom::TLSClientSocket> tls_client_socket_;
   // Holds socket if Listen() is called.
-  network::mojom::TCPServerSocketPtr server_socket_;
+  mojo::Remote<network::mojom::TCPServerSocket> server_socket_;
 
   // Read/write pipes and their watchers. Both the watchers are configured so
   // that they must be armed to receive a notification.
@@ -348,9 +357,6 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
   // from its initial value of PP_OK_COMPLETIONPENDING, it's set to
   // PP_ERROR_FAILED.
   int pending_read_pp_error_;
-  // If the plugin is throttled, we defer completing socket reads until
-  // the plugin is unthrottled.
-  bool pending_read_on_unthrottle_;
 
   std::string pending_write_data_;
   // Number of bytes from |pending_write_data_| that have already been written.
@@ -368,8 +374,6 @@ class CONTENT_EXPORT PepperTCPSocketMessageFilter
   // Vends weak pointers on the UI thread, for callbacks passed through Mojo
   // pipes not owned by |this|. All weak pointers released in Close().
   base::WeakPtrFactory<PepperTCPSocketMessageFilter> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PepperTCPSocketMessageFilter);
 };
 
 }  // namespace content

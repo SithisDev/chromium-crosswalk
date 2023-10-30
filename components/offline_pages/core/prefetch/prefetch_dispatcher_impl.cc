@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/guid.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
-#include "base/task_runner.h"
+#include "base/task/task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
 #include "components/offline_pages/core/offline_event_logger.h"
@@ -29,7 +28,6 @@
 #include "components/offline_pages/core/prefetch/prefetch_service.h"
 #include "components/offline_pages/core/prefetch/prefetch_types.h"
 #include "components/offline_pages/core/prefetch/server_forbidden_check_request.h"
-#include "components/offline_pages/core/prefetch/suggested_articles_observer.h"
 #include "components/offline_pages/core/prefetch/suggestions_provider.h"
 #include "components/offline_pages/core/prefetch/tasks/add_unique_urls_task.h"
 #include "components/offline_pages/core/prefetch/tasks/download_archives_task.h"
@@ -48,7 +46,6 @@
 #include "components/offline_pages/core/prefetch/tasks/remove_url_task.h"
 #include "components/offline_pages/core/prefetch/tasks/sent_get_operation_cleanup_task.h"
 #include "components/offline_pages/core/prefetch/tasks/stale_entry_finalizer_task.h"
-#include "components/offline_pages/core/prefetch/thumbnail_fetcher.h"
 #include "components/offline_pages/core/prefetch/visuals_fetch_by_url.h"
 #include "components/prefs/pref_service.h"
 #include "url/gurl.h"
@@ -100,9 +97,8 @@ void PrefetchDispatcherImpl::AddCandidatePrefetchURLs(
     const std::string& name_space,
     const std::vector<PrefetchURL>& prefetch_urls) {
   if (!prefetch_prefs::IsEnabled(pref_service_)) {
-    if (prefetch_prefs::IsForbiddenCheckDue(pref_service_)) {
+    if (prefetch_prefs::IsForbiddenCheckDue(pref_service_))
       CheckIfEnabledByServer(pref_service_, service_);
-    }
     return;
   }
 
@@ -134,6 +130,14 @@ void PrefetchDispatcherImpl::AddCandidatePrefetchURLs(
 
 void PrefetchDispatcherImpl::NewSuggestionsAvailable(
     SuggestionsProvider* suggestions_provider) {
+  // No need to GetKnownContent if prefetching is disabled (however, we don't
+  // want to prevent the server-forbidden check).
+  if (!prefetch_prefs::IsEnabled(pref_service_)) {
+    if (prefetch_prefs::IsForbiddenCheckDue(pref_service_))
+      CheckIfEnabledByServer(pref_service_, service_);
+    return;
+  }
+
   suggestions_provider->GetCurrentArticleSuggestions(
       base::BindOnce(&PrefetchDispatcherImpl::AddSuggestions, GetWeakPtr()));
 }
@@ -473,21 +477,11 @@ void PrefetchDispatcherImpl::VisualsAvailabilityChecked(
   if (availability.has_thumbnail && availability.has_favicon) {
     FetchVisuals(std::move(remaining_ids), is_first_attempt);
   } else {
-    // Zine/Feed: thumbnail_fetcher is non-null only with Zine.
-    ThumbnailFetcher* thumbnail_fetcher = service_->GetThumbnailFetcher();
-    if (thumbnail_fetcher) {
-      auto complete_callback = base::BindOnce(
-          &PrefetchDispatcherImpl::ThumbnailFetchComplete, GetWeakPtr(),
-          offline_id, std::move(remaining_ids), is_first_attempt, GURL());
-      thumbnail_fetcher->FetchSuggestionImageData(client_id,
-                                                  std::move(complete_callback));
-    } else {
-      task_queue_.AddTask(std::make_unique<GetVisualsInfoTask>(
-          service_->GetPrefetchStore(), offline_id,
-          base::BindOnce(&PrefetchDispatcherImpl::VisualsInfoReceived,
-                         GetWeakPtr(), offline_id, std::move(remaining_ids),
-                         is_first_attempt, availability)));
-    }
+    task_queue_.AddTask(std::make_unique<GetVisualsInfoTask>(
+        service_->GetPrefetchStore(), offline_id,
+        base::BindOnce(&PrefetchDispatcherImpl::VisualsInfoReceived,
+                       GetWeakPtr(), offline_id, std::move(remaining_ids),
+                       is_first_attempt, availability)));
   }
 }
 

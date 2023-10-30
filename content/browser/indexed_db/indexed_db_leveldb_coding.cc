@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,19 @@
 
 #include <iterator>
 #include <limits>
+#include <sstream>
+#include <string>
 #include <utility>
 
 #include "base/big_endian.h"
-#include "base/logging.h"
-#include "base/strings/string16.h"
+#include "base/check_op.h"
+#include "base/containers/span.h"
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_byteorder.h"
 #include "build/build_config.h"
+#include "components/services/storage/indexed_db/scopes/leveldb_scopes_coding.h"
+#include "components/services/storage/indexed_db/scopes/varint_coding.h"
 
 // See leveldb_coding_scheme.md for detailed documentation of the coding
 // scheme implemented here.
@@ -24,7 +29,6 @@ using blink::IndexedDBKeyPath;
 
 namespace content {
 namespace {
-
 inline uint64_t ByteSwapToBE64(uint64_t x) {
 #if defined(ARCH_CPU_LITTLE_ENDIAN)
   return base::ByteSwap(x);
@@ -60,11 +64,13 @@ constexpr unsigned char kBlobEntryIndexId = 3;
 constexpr unsigned char kSchemaVersionTypeByte = 0;
 constexpr unsigned char kMaxDatabaseIdTypeByte = 1;
 constexpr unsigned char kDataVersionTypeByte = 2;
-constexpr unsigned char kBlobJournalTypeByte = 3;
-constexpr unsigned char kLiveBlobJournalTypeByte = 4;
+constexpr unsigned char kRecoveryBlobJournalTypeByte = 3;
+constexpr unsigned char kActiveBlobJournalTypeByte = 4;
 constexpr unsigned char kEarliestSweepTimeTypeByte = 5;
+constexpr unsigned char kEarliestCompactionTimeTypeByte = 6;
 constexpr unsigned char kMaxSimpleGlobalMetaDataTypeByte =
-    6;  // Insert before this and increment.
+    7;  // Insert before this and increment.
+constexpr unsigned char kScopesPrefixByte = 50;
 constexpr unsigned char kDatabaseFreeListTypeByte = 100;
 constexpr unsigned char kDatabaseNameTypeByte = 201;
 
@@ -121,33 +127,16 @@ void EncodeInt(int64_t value, std::string* into) {
   } while (n);
 }
 
-void EncodeVarInt(int64_t value, std::string* into) {
-#ifndef NDEBUG
-  // Exercised by unit tests in debug only.
-  DCHECK_GE(value, 0);
-#endif
-  uint64_t n = static_cast<uint64_t>(value);
-
-  do {
-    unsigned char c = n & 0x7f;
-    n >>= 7;
-    if (n)
-      c |= 0x80;
-    into->push_back(c);
-  } while (n);
-}
-
-void EncodeString(const base::string16& value, std::string* into) {
+void EncodeString(const std::u16string& value, std::string* into) {
   if (value.empty())
     return;
   // Backing store is UTF-16BE, convert from host endianness.
   size_t length = value.length();
   size_t current = into->size();
-  into->resize(into->size() + length * sizeof(base::char16));
+  into->resize(into->size() + length * sizeof(char16_t));
 
-  const base::char16* src = value.c_str();
-  base::char16* dst =
-      reinterpret_cast<base::char16*>(&*into->begin() + current);
+  const char16_t* src = value.c_str();
+  char16_t* dst = reinterpret_cast<char16_t*>(&*into->begin() + current);
   for (unsigned i = 0; i < length; ++i)
     *dst++ = base::HostToNet16(*src++);
 }
@@ -155,10 +144,16 @@ void EncodeString(const base::string16& value, std::string* into) {
 void EncodeBinary(const std::string& value, std::string* into) {
   EncodeVarInt(value.length(), into);
   into->append(value.begin(), value.end());
-  DCHECK(into->size() >= value.size());
+  DCHECK_GE(into->size(), value.size());
 }
 
-void EncodeStringWithLength(const base::string16& value, std::string* into) {
+void EncodeBinary(base::span<const uint8_t> value, std::string* into) {
+  EncodeVarInt(value.size(), into);
+  into->append(value.begin(), value.end());
+  DCHECK_GE(into->size(), value.size());
+}
+
+void EncodeStringWithLength(const std::u16string& value, std::string* into) {
   EncodeVarInt(value.length(), into);
   EncodeString(value, into);
 }
@@ -202,7 +197,7 @@ void EncodeIDBKey(const IndexedDBKey& value, std::string* into) {
       EncodeDouble(value.number(), into);
       DCHECK_EQ(9u, static_cast<size_t>(into->size() - previous_size));
       return;
-    case blink::mojom::IDBKeyType::Null:
+    case blink::mojom::IDBKeyType::None:
     case blink::mojom::IDBKeyType::Invalid:
     case blink::mojom::IDBKeyType::Min:
     default:
@@ -239,7 +234,7 @@ void EncodeIDBKeyPath(const IndexedDBKeyPath& value, std::string* into) {
       break;
     }
     case blink::mojom::IDBKeyPathType::Array: {
-      const std::vector<base::string16>& array = value.array();
+      const std::vector<std::u16string>& array = value.array();
       size_t count = array.size();
       EncodeVarInt(count, into);
       for (size_t i = 0; i < count; ++i) {
@@ -292,55 +287,34 @@ bool DecodeInt(StringPiece* slice, int64_t* value) {
   return true;
 }
 
-bool DecodeVarInt(StringPiece* slice, int64_t* value) {
-  if (slice->empty())
-    return false;
-
-  StringPiece::const_iterator it = slice->begin();
-  int shift = 0;
-  int64_t ret = 0;
-  do {
-    if (it == slice->end())
-      return false;
-
-    unsigned char c = *it;
-    ret |= static_cast<int64_t>(c & 0x7f) << shift;
-    shift += 7;
-  } while (*it++ & 0x80);
-  *value = ret;
-  slice->remove_prefix(it - slice->begin());
-  return true;
-}
-
-bool DecodeString(StringPiece* slice, base::string16* value) {
+bool DecodeString(StringPiece* slice, std::u16string* value) {
   if (slice->empty()) {
     value->clear();
     return true;
   }
 
   // Backing store is UTF-16BE, convert to host endianness.
-  DCHECK(!(slice->size() % sizeof(base::char16)));
-  size_t length = slice->size() / sizeof(base::char16);
-  base::string16 decoded;
+  DCHECK(!(slice->size() % sizeof(char16_t)));
+  size_t length = slice->size() / sizeof(char16_t);
+  std::u16string decoded;
   decoded.reserve(length);
-  const base::char16* encoded =
-      reinterpret_cast<const base::char16*>(slice->begin());
+  const char16_t* encoded = reinterpret_cast<const char16_t*>(slice->begin());
   for (unsigned i = 0; i < length; ++i)
     decoded.push_back(base::NetToHost16(*encoded++));
 
   *value = decoded;
-  slice->remove_prefix(length * sizeof(base::char16));
+  slice->remove_prefix(length * sizeof(char16_t));
   return true;
 }
 
-bool DecodeStringWithLength(StringPiece* slice, base::string16* value) {
+bool DecodeStringWithLength(StringPiece* slice, std::u16string* value) {
   if (slice->empty())
     return false;
 
   int64_t length = 0;
   if (!DecodeVarInt(slice, &length) || length < 0)
     return false;
-  size_t bytes = length * sizeof(base::char16);
+  size_t bytes = length * sizeof(char16_t);
   if (slice->size() < bytes)
     return false;
 
@@ -368,8 +342,29 @@ bool DecodeBinary(StringPiece* slice, std::string* value) {
   return true;
 }
 
-bool DecodeIDBKey(StringPiece* slice, std::unique_ptr<IndexedDBKey>* value) {
+bool DecodeBinary(StringPiece* slice, base::span<const uint8_t>* value) {
   if (slice->empty())
+    return false;
+
+  int64_t length = 0;
+  if (!DecodeVarInt(slice, &length) || length < 0)
+    return false;
+  size_t size = length;
+  if (slice->size() < size)
+    return false;
+
+  *value = base::as_bytes(base::make_span(slice->substr(0, size)));
+  slice->remove_prefix(size);
+  return true;
+}
+
+bool DecodeIDBKeyRecursive(StringPiece* slice,
+                           std::unique_ptr<IndexedDBKey>* value,
+                           size_t recursion) {
+  if (slice->empty())
+    return false;
+
+  if (recursion > IndexedDBKey::kMaximumDepth)
     return false;
 
   unsigned char type = (*slice)[0];
@@ -387,7 +382,7 @@ bool DecodeIDBKey(StringPiece* slice, std::unique_ptr<IndexedDBKey>* value) {
       IndexedDBKey::KeyArray array;
       while (length--) {
         std::unique_ptr<IndexedDBKey> key;
-        if (!DecodeIDBKey(slice, &key))
+        if (!DecodeIDBKeyRecursive(slice, &key, recursion + 1))
           return false;
         array.push_back(*key);
       }
@@ -402,7 +397,7 @@ bool DecodeIDBKey(StringPiece* slice, std::unique_ptr<IndexedDBKey>* value) {
       return true;
     }
     case kIndexedDBKeyStringTypeByte: {
-      base::string16 s;
+      std::u16string s;
       if (!DecodeStringWithLength(slice, &s))
         return false;
       *value = std::make_unique<IndexedDBKey>(std::move(s));
@@ -424,10 +419,18 @@ bool DecodeIDBKey(StringPiece* slice, std::unique_ptr<IndexedDBKey>* value) {
           std::make_unique<IndexedDBKey>(d, blink::mojom::IDBKeyType::Number);
       return true;
     }
+    case kIndexedDBKeyMinKeyTypeByte: {
+      *value = std::make_unique<IndexedDBKey>(blink::mojom::IDBKeyType::Min);
+      return true;
+    }
   }
 
   NOTREACHED();
   return false;
+}
+
+bool DecodeIDBKey(StringPiece* slice, std::unique_ptr<IndexedDBKey>* value) {
+  return DecodeIDBKeyRecursive(slice, value, 0);
 }
 
 bool DecodeDouble(StringPiece* slice, double* value) {
@@ -445,7 +448,7 @@ bool DecodeIDBKeyPath(StringPiece* slice, IndexedDBKeyPath* value) {
   // always written as typed.
   if (slice->size() < 3 || (*slice)[0] != kIndexedDBKeyPathTypeCodedByte1 ||
       (*slice)[1] != kIndexedDBKeyPathTypeCodedByte2) {
-    base::string16 s;
+    std::u16string s;
     if (!DecodeString(slice, &s))
       return false;
     *value = IndexedDBKeyPath(s);
@@ -464,7 +467,7 @@ bool DecodeIDBKeyPath(StringPiece* slice, IndexedDBKeyPath* value) {
       *value = IndexedDBKeyPath();
       return true;
     case blink::mojom::IDBKeyPathType::String: {
-      base::string16 string;
+      std::u16string string;
       if (!DecodeStringWithLength(slice, &string))
         return false;
       DCHECK(slice->empty());
@@ -472,13 +475,12 @@ bool DecodeIDBKeyPath(StringPiece* slice, IndexedDBKeyPath* value) {
       return true;
     }
     case blink::mojom::IDBKeyPathType::Array: {
-      std::vector<base::string16> array;
+      std::vector<std::u16string> array;
       int64_t count;
-      if (!DecodeVarInt(slice, &count))
+      if (!DecodeVarInt(slice, &count) || count < 0)
         return false;
-      DCHECK_GE(count, 0);
       while (count--) {
-        base::string16 string;
+        std::u16string string;
         if (!DecodeStringWithLength(slice, &string))
           return false;
         array.push_back(string);
@@ -496,18 +498,18 @@ bool DecodeBlobJournal(StringPiece* slice, BlobJournalType* journal) {
   BlobJournalType output;
   while (!slice->empty()) {
     int64_t database_id = -1;
-    int64_t blob_key = -1;
+    int64_t blob_number = -1;
     if (!DecodeVarInt(slice, &database_id))
       return false;
     if (!KeyPrefix::IsValidDatabaseId(database_id))
       return false;
-    if (!DecodeVarInt(slice, &blob_key))
+    if (!DecodeVarInt(slice, &blob_number))
       return false;
-    if (!DatabaseMetaDataKey::IsValidBlobKey(blob_key) &&
-        (blob_key != DatabaseMetaDataKey::kAllBlobsKey)) {
+    if (!DatabaseMetaDataKey::IsValidBlobNumber(blob_number) &&
+        (blob_number != DatabaseMetaDataKey::kAllBlobsNumber)) {
       return false;
     }
-    output.push_back({database_id, blob_key});
+    output.push_back({database_id, blob_number});
   }
   journal->swap(output);
   return true;
@@ -523,7 +525,7 @@ bool ConsumeEncodedIDBKey(StringPiece* slice) {
       return true;
     case kIndexedDBKeyArrayTypeByte: {
       int64_t length;
-      if (!DecodeVarInt(slice, &length))
+      if (!DecodeVarInt(slice, &length) || length < 0)
         return false;
       while (length--) {
         if (!ConsumeEncodedIDBKey(slice))
@@ -544,9 +546,9 @@ bool ConsumeEncodedIDBKey(StringPiece* slice) {
       int64_t length = 0;
       if (!DecodeVarInt(slice, &length) || length < 0)
         return false;
-      if (slice->size() < static_cast<size_t>(length) * sizeof(base::char16))
+      if (slice->size() < static_cast<size_t>(length) * sizeof(char16_t))
         return false;
-      slice->remove_prefix(length * sizeof(base::char16));
+      slice->remove_prefix(length * sizeof(char16_t));
       return true;
     }
     case kIndexedDBKeyDateTypeByte:
@@ -588,7 +590,7 @@ static blink::mojom::IDBKeyType KeyTypeByteToKeyType(unsigned char type) {
       return blink::mojom::IDBKeyType::Min;
   }
 
-  NOTREACHED();
+  NOTREACHED() << "Got invalid type " << type;
   return blink::mojom::IDBKeyType::Invalid;
 }
 
@@ -600,41 +602,33 @@ int CompareEncodedStringsWithLength(StringPiece* slice1,
     *ok = false;
     return 0;
   }
-  DCHECK_GE(len1, 0);
-  DCHECK_GE(len2, 0);
   if (len1 < 0 || len2 < 0) {
     *ok = false;
     return 0;
   }
-  DCHECK_GE(slice1->size(), len1 * sizeof(base::char16));
-  DCHECK_GE(slice2->size(), len2 * sizeof(base::char16));
-  if (slice1->size() < len1 * sizeof(base::char16) ||
-      slice2->size() < len2 * sizeof(base::char16)) {
+  if (slice1->size() < len1 * sizeof(char16_t) ||
+      slice2->size() < len2 * sizeof(char16_t)) {
     *ok = false;
     return 0;
   }
 
   // Extract the string data, and advance the passed slices.
-  StringPiece string1(slice1->begin(), len1 * sizeof(base::char16));
-  StringPiece string2(slice2->begin(), len2 * sizeof(base::char16));
-  slice1->remove_prefix(len1 * sizeof(base::char16));
-  slice2->remove_prefix(len2 * sizeof(base::char16));
+  StringPiece string1(slice1->begin(), len1 * sizeof(char16_t));
+  StringPiece string2(slice2->begin(), len2 * sizeof(char16_t));
+  slice1->remove_prefix(len1 * sizeof(char16_t));
+  slice2->remove_prefix(len2 * sizeof(char16_t));
 
   *ok = true;
   // Strings are UTF-16BE encoded, so a simple memcmp is sufficient.
   return string1.compare(string2);
 }
 
-int CompareEncodedBinary(StringPiece* slice1,
-                         StringPiece* slice2,
-                         bool* ok) {
+int CompareEncodedBinary(StringPiece* slice1, StringPiece* slice2, bool* ok) {
   int64_t len1, len2;
   if (!DecodeVarInt(slice1, &len1) || !DecodeVarInt(slice2, &len2)) {
     *ok = false;
     return 0;
   }
-  DCHECK_GE(len1, 0);
-  DCHECK_GE(len2, 0);
   if (len1 < 0 || len2 < 0) {
     *ok = false;
     return 0;
@@ -642,8 +636,6 @@ int CompareEncodedBinary(StringPiece* slice1,
   size_t size1 = len1;
   size_t size2 = len2;
 
-  DCHECK_GE(slice1->size(), size1);
-  DCHECK_GE(slice2->size(), size2);
   if (slice1->size() < size1 || slice2->size() < size2) {
     *ok = false;
     return 0;
@@ -820,9 +812,9 @@ int CompareSuffix<IndexDataKey>(StringPiece* slice_a,
   int64_t sequence_number_a = -1;
   int64_t sequence_number_b = -1;
   if (!slice_a->empty() && !DecodeVarInt(slice_a, &sequence_number_a))
-      return 0;
+    return 0;
   if (!slice_b->empty() && !DecodeVarInt(slice_b, &sequence_number_b))
-      return 0;
+    return 0;
 
   if (slice_a->empty() || slice_b->empty())
     return CompareSizes(slice_a->size(), slice_b->size());
@@ -845,8 +837,6 @@ int Compare(const StringPiece& a,
   KeyPrefix prefix_b;
   bool ok_a = KeyPrefix::Decode(&slice_a, &prefix_a);
   bool ok_b = KeyPrefix::Decode(&slice_b, &prefix_b);
-  DCHECK(ok_a);
-  DCHECK(ok_b);
   if (!ok_a || !ok_b) {
     *ok = false;
     return 0;
@@ -878,6 +868,9 @@ int Compare(const StringPiece& a,
       if (type_byte_a < kMaxSimpleGlobalMetaDataTypeByte)
         return 0;
 
+      if (type_byte_a == kScopesPrefixByte)
+        return slice_a.compare(slice_b);
+
       // Compare<> is used (which re-decodes the prefix) rather than an
       // specialized CompareSuffix<> because metadata is relatively uncommon
       // in the database.
@@ -887,8 +880,8 @@ int Compare(const StringPiece& a,
         return Compare<DatabaseFreeListKey>(a, b, only_compare_index_keys, ok);
       }
       if (type_byte_a == kDatabaseNameTypeByte) {
-        return Compare<DatabaseNameKey>(
-            a, b, /*only_compare_index_keys*/ false, ok);
+        return Compare<DatabaseNameKey>(a, b, /*only_compare_index_keys*/ false,
+                                        ok);
       }
       break;
     }
@@ -920,29 +913,28 @@ int Compare(const StringPiece& a,
 
       if (type_byte_a == kObjectStoreMetaDataTypeByte) {
         // TODO(jsbell): No need to pass only_compare_index_keys through here.
-        return Compare<ObjectStoreMetaDataKey>(
-            a, b, only_compare_index_keys, ok);
+        return Compare<ObjectStoreMetaDataKey>(a, b, only_compare_index_keys,
+                                               ok);
       }
       if (type_byte_a == kIndexMetaDataTypeByte) {
-        return Compare<IndexMetaDataKey>(
-            a, b, /*only_compare_index_keys*/ false, ok);
+        return Compare<IndexMetaDataKey>(a, b,
+                                         /*only_compare_index_keys*/ false, ok);
       }
       if (type_byte_a == kObjectStoreFreeListTypeByte) {
-        return Compare<ObjectStoreFreeListKey>(
-            a, b, only_compare_index_keys, ok);
+        return Compare<ObjectStoreFreeListKey>(a, b, only_compare_index_keys,
+                                               ok);
       }
       if (type_byte_a == kIndexFreeListTypeByte) {
-        return Compare<IndexFreeListKey>(
-            a, b, /*only_compare_index_keys*/ false, ok);
+        return Compare<IndexFreeListKey>(a, b,
+                                         /*only_compare_index_keys*/ false, ok);
       }
       if (type_byte_a == kObjectStoreNamesTypeByte) {
         // TODO(jsbell): No need to pass only_compare_index_keys through here.
-        return Compare<ObjectStoreNamesKey>(
-            a, b, only_compare_index_keys, ok);
+        return Compare<ObjectStoreNamesKey>(a, b, only_compare_index_keys, ok);
       }
       if (type_byte_a == kIndexNamesKeyTypeByte) {
-        return Compare<IndexNamesKey>(
-            a, b, /*only_compare_index_keys*/ false, ok);
+        return Compare<IndexNamesKey>(a, b, /*only_compare_index_keys*/ false,
+                                      ok);
       }
       break;
     }
@@ -970,8 +962,8 @@ int Compare(const StringPiece& a,
       if (slice_a.empty() || slice_b.empty())
         return CompareSizes(slice_a.size(), slice_b.size());
 
-      return CompareSuffix<BlobEntryKey>(
-          &slice_a, &slice_b, /*only_compare_index_keys*/ false, ok);
+      return CompareSuffix<BlobEntryKey>(&slice_a, &slice_b,
+                                         /*only_compare_index_keys*/ false, ok);
     }
 
     case KeyPrefix::INDEX_DATA: {
@@ -979,8 +971,8 @@ int Compare(const StringPiece& a,
       if (slice_a.empty() || slice_b.empty())
         return CompareSizes(slice_a.size(), slice_b.size());
 
-      return CompareSuffix<IndexDataKey>(
-          &slice_a, &slice_b, only_compare_index_keys, ok);
+      return CompareSuffix<IndexDataKey>(&slice_a, &slice_b,
+                                         only_compare_index_keys, ok);
     }
 
     case KeyPrefix::INVALID_TYPE:
@@ -1007,14 +999,219 @@ int Compare(const StringPiece& a,
 }
 
 int CompareKeys(const StringPiece& a, const StringPiece& b) {
-  return Compare(a, b, false /*index_keys*/);
+  return Compare(a, b, /*index_keys=*/false);
 }
 
 int CompareIndexKeys(const StringPiece& a, const StringPiece& b) {
-  return Compare(a, b, true /*index_keys*/);
+  return Compare(a, b, /*index_keys=*/true);
 }
 
-ScopeLockRange GetDatabaseLockRange(int64_t database_id) {
+std::string IndexedDBKeyToDebugString(base::StringPiece key) {
+  base::StringPiece key_with_prefix_preserved = key;
+  KeyPrefix prefix;
+  std::stringstream result;
+  if (!KeyPrefix::Decode(&key, &prefix)) {
+    result << "<Error decoding key prefix>";
+    return result.str();
+  }
+  result << prefix.DebugString() << ", ";
+
+  switch (prefix.type()) {
+    case KeyPrefix::GLOBAL_METADATA: {
+      unsigned char type_byte;
+      if (!DecodeByte(&key, &type_byte)) {
+        result << "No_Type_Byte";
+        break;
+      }
+      switch (type_byte) {
+        case kSchemaVersionTypeByte:
+          result << "kSchemaVersionTypeByte";
+          break;
+        case kMaxDatabaseIdTypeByte:
+          result << "kMaxDatabaseIdTypeByte";
+          break;
+        case kDataVersionTypeByte:
+          result << "kDataVersionTypeByte";
+          break;
+        case kRecoveryBlobJournalTypeByte:
+          result << "kRecoveryBlobJournalTypeByte";
+          break;
+        case kActiveBlobJournalTypeByte:
+          result << "kActiveBlobJournalTypeByte";
+          break;
+        case kEarliestSweepTimeTypeByte:
+          result << "kEarliestSweepTimeTypeByte";
+          break;
+        case kEarliestCompactionTimeTypeByte:
+          result << "kEarliestCompactionTimeTypeByte";
+          break;
+        case kScopesPrefixByte:
+          result << "Scopes key: "
+                 << leveldb_scopes::KeyToDebugString(base::make_span(
+                        reinterpret_cast<const uint8_t*>(key.data()),
+                        key.size()));
+          break;
+        case kDatabaseFreeListTypeByte: {
+          DatabaseFreeListKey db_free_list_key;
+          if (!DatabaseFreeListKey::Decode(&key_with_prefix_preserved,
+                                           &db_free_list_key)) {
+            result << "kDatabaseFreeListTypeByte, Invalid_Key";
+            break;
+          }
+          result << db_free_list_key.DebugString();
+          break;
+        }
+        case kDatabaseNameTypeByte: {
+          DatabaseNameKey db_name_key;
+          if (!DatabaseNameKey::Decode(&key_with_prefix_preserved,
+                                       &db_name_key)) {
+            result << "kDatabaseNameTypeByte, Invalid_Key";
+            break;
+          }
+          result << db_name_key.DebugString();
+          break;
+        }
+        default:
+          result << "Invalid_metadata_type";
+          break;
+      }
+      break;
+    }
+
+    case KeyPrefix::DATABASE_METADATA: {
+      unsigned char type_byte;
+      if (!DecodeByte(&key, &type_byte)) {
+        result << "No_Type_Byte";
+        break;
+      }
+      switch (type_byte) {
+        case DatabaseMetaDataKey::ORIGIN_NAME:
+          result << "ORIGIN_NAME";
+          break;
+        case DatabaseMetaDataKey::DATABASE_NAME:
+          result << "DATABASE_NAME";
+          break;
+        case DatabaseMetaDataKey::USER_STRING_VERSION:
+          result << "USER_STRING_VERSION";
+          break;
+        case DatabaseMetaDataKey::MAX_OBJECT_STORE_ID:
+          result << "MAX_OBJECT_STORE_ID";
+          break;
+        case DatabaseMetaDataKey::USER_VERSION:
+          result << "USER_VERSION";
+          break;
+        case DatabaseMetaDataKey::BLOB_KEY_GENERATOR_CURRENT_NUMBER:
+          result << "BLOB_KEY_GENERATOR_CURRENT_NUMBER";
+          break;
+        case kObjectStoreMetaDataTypeByte: {
+          ObjectStoreMetaDataKey sub_key;
+          if (!ObjectStoreMetaDataKey::Decode(&key_with_prefix_preserved,
+                                              &sub_key)) {
+            result << "Invalid_ObjectStoreMetaDataKey";
+            break;
+          }
+          result << sub_key.DebugString();
+          break;
+        }
+        case kIndexMetaDataTypeByte: {
+          IndexMetaDataKey sub_key;
+          if (!IndexMetaDataKey::Decode(&key_with_prefix_preserved, &sub_key)) {
+            result << "Invalid_IndexMetaDataKey";
+            break;
+          }
+          result << sub_key.DebugString();
+          break;
+        }
+        case kObjectStoreFreeListTypeByte: {
+          ObjectStoreFreeListKey sub_key;
+          if (!ObjectStoreFreeListKey::Decode(&key_with_prefix_preserved,
+                                              &sub_key)) {
+            result << "Invalid_ObjectStoreFreeListKey";
+            break;
+          }
+          result << sub_key.DebugString();
+          break;
+        }
+        case kIndexFreeListTypeByte: {
+          IndexFreeListKey sub_key;
+          if (!IndexFreeListKey::Decode(&key_with_prefix_preserved, &sub_key)) {
+            result << "Invalid_IndexFreeListKey";
+            break;
+          }
+          result << sub_key.DebugString();
+          break;
+        }
+        case kObjectStoreNamesTypeByte: {
+          ObjectStoreNamesKey sub_key;
+          if (!ObjectStoreNamesKey::Decode(&key_with_prefix_preserved,
+                                           &sub_key)) {
+            result << "Invalid_ObjectStoreNamesKey";
+            break;
+          }
+          result << sub_key.DebugString();
+          break;
+        }  // namespace content
+        case kIndexNamesKeyTypeByte: {
+          IndexNamesKey sub_key;
+          if (!IndexNamesKey::Decode(&key_with_prefix_preserved, &sub_key)) {
+            result << "Invalid_IndexNamesKey";
+            break;
+          }
+          result << sub_key.DebugString();
+          break;
+        }
+      }
+      break;
+    }
+    case KeyPrefix::OBJECT_STORE_DATA: {
+      ObjectStoreDataKey sub_key;
+      if (!ObjectStoreDataKey::Decode(&key_with_prefix_preserved, &sub_key)) {
+        result << "Invalid_ObjectStoreDataKey";
+        break;
+      }
+      result << sub_key.DebugString();
+      break;
+    }
+
+    case KeyPrefix::EXISTS_ENTRY: {
+      ExistsEntryKey sub_key;
+      if (!ExistsEntryKey::Decode(&key_with_prefix_preserved, &sub_key)) {
+        result << "Invalid_ExistsEntryKey";
+        break;
+      }
+      result << sub_key.DebugString();
+      break;
+    }
+
+    case KeyPrefix::BLOB_ENTRY: {
+      BlobEntryKey sub_key;
+      if (!BlobEntryKey::Decode(&key_with_prefix_preserved, &sub_key)) {
+        result << "Invalid_BlobEntryKey";
+        break;
+      }
+      result << sub_key.DebugString();
+      break;
+    }
+
+    case KeyPrefix::INDEX_DATA: {
+      IndexDataKey sub_key;
+      if (!IndexDataKey::Decode(&key_with_prefix_preserved, &sub_key)) {
+        result << "Invalid_IndexDataKey";
+        break;
+      }
+      result << sub_key.DebugString();
+      break;
+    }
+
+    case KeyPrefix::INVALID_TYPE:
+      result << "InvalidKeyType";
+      break;
+  }
+  result << "]";
+  return result.str();
+}
+
+LeveledLockRange GetDatabaseLockRange(int64_t database_id) {
   // The numbers are transformed into big-endian to make them
   // bytewise-comparable. Eventually, these lock ranges should just match the
   // leveldb keys when they are bytewise-comparable.
@@ -1024,8 +1221,8 @@ ScopeLockRange GetDatabaseLockRange(int64_t database_id) {
           std::string(reinterpret_cast<char*>(&next), sizeof(next))};
 }
 
-ScopeLockRange GetObjectStoreLockRange(int64_t database_id,
-                                       int64_t object_store_id) {
+LeveledLockRange GetObjectStoreLockRange(int64_t database_id,
+                                         int64_t object_store_id) {
   // The numbers are transformed into big-endian to make them
   // bytewise-comparable. Eventually, these lock ranges should just match the
   // leveldb keys when they are bytewise-comparable.
@@ -1137,14 +1334,14 @@ bool KeyPrefix::Decode(StringPiece* slice, KeyPrefix* result) {
 
 std::string KeyPrefix::EncodeEmpty() {
   const std::string result(4, 0);
-  DCHECK(EncodeInternal(0, 0, 0) == std::string(4, 0));
+  DCHECK_EQ(EncodeInternal(0, 0, 0), std::string(4, 0));
   return result;
 }
 
 std::string KeyPrefix::Encode() const {
-  DCHECK(database_id_ != kInvalidId);
-  DCHECK(object_store_id_ != kInvalidId);
-  DCHECK(index_id_ != kInvalidId);
+  DCHECK_NE(database_id_, kInvalidId);
+  DCHECK_NE(object_store_id_, kInvalidId);
+  DCHECK_NE(index_id_, kInvalidId);
   return EncodeInternal(database_id_, object_store_id_, index_id_);
 }
 
@@ -1159,13 +1356,13 @@ std::string KeyPrefix::EncodeInternal(int64_t database_id,
   EncodeIntSafely(object_store_id, kMaxObjectStoreId, &object_store_id_string);
   EncodeIntSafely(index_id, kMaxIndexId, &index_id_string);
 
-  DCHECK(database_id_string.size() <= kMaxDatabaseIdSizeBytes);
-  DCHECK(object_store_id_string.size() <= kMaxObjectStoreIdSizeBytes);
-  DCHECK(index_id_string.size() <= kMaxIndexIdSizeBytes);
+  DCHECK_LE(database_id_string.size(), kMaxDatabaseIdSizeBytes);
+  DCHECK_LE(object_store_id_string.size(), kMaxObjectStoreIdSizeBytes);
+  DCHECK_LE(index_id_string.size(), kMaxIndexIdSizeBytes);
 
   unsigned char first_byte =
-      (database_id_string.size() - 1) << (kMaxObjectStoreIdSizeBits +
-                                          kMaxIndexIdSizeBits) |
+      (database_id_string.size() - 1)
+          << (kMaxObjectStoreIdSizeBits + kMaxIndexIdSizeBits) |
       (object_store_id_string.size() - 1) << kMaxIndexIdSizeBits |
       (index_id_string.size() - 1);
   static_assert(kMaxDatabaseIdSizeBits + kMaxObjectStoreIdSizeBits +
@@ -1184,9 +1381,9 @@ std::string KeyPrefix::EncodeInternal(int64_t database_id,
 }
 
 int KeyPrefix::Compare(const KeyPrefix& other) const {
-  DCHECK(database_id_ != kInvalidId);
-  DCHECK(object_store_id_ != kInvalidId);
-  DCHECK(index_id_ != kInvalidId);
+  DCHECK_NE(database_id_, kInvalidId);
+  DCHECK_NE(object_store_id_, kInvalidId);
+  DCHECK_NE(index_id_, kInvalidId);
 
   if (database_id_ != other.database_id_)
     return CompareInts(database_id_, other.database_id_);
@@ -1197,10 +1394,43 @@ int KeyPrefix::Compare(const KeyPrefix& other) const {
   return 0;
 }
 
+std::string KeyPrefix::DebugString() {
+  std::stringstream result;
+  result << "{";
+  switch (type()) {
+    case GLOBAL_METADATA:
+      result << "GLOBAL_META";
+      break;
+    case DATABASE_METADATA:
+      result << "DB_META, db: " << database_id_;
+      break;
+    case OBJECT_STORE_DATA:
+      result << "OS_DATA, db: " << database_id_ << ", os: " << object_store_id_;
+      break;
+    case EXISTS_ENTRY:
+      result << "EXISTS_ENTRY, db: " << database_id_
+             << ", os: " << object_store_id_;
+      break;
+    case BLOB_ENTRY:
+      result << "BLOB_ENTRY, db: " << database_id_
+             << ", os: " << object_store_id_;
+      break;
+    case INDEX_DATA:
+      result << "INDEX_DATA, db: " << database_id_
+             << ", os: " << object_store_id_ << ", idx: " << index_id_;
+      break;
+    case INVALID_TYPE:
+      result << "INVALID_TYPE";
+      break;
+  }
+  result << "}";
+  return result.str();
+}
+
 KeyPrefix::Type KeyPrefix::type() const {
-  DCHECK(database_id_ != kInvalidId);
-  DCHECK(object_store_id_ != kInvalidId);
-  DCHECK(index_id_ != kInvalidId);
+  DCHECK_NE(database_id_, kInvalidId);
+  DCHECK_NE(object_store_id_, kInvalidId);
+  DCHECK_NE(index_id_, kInvalidId);
 
   if (!database_id_)
     return GLOBAL_METADATA;
@@ -1237,15 +1467,15 @@ std::string DataVersionKey::Encode() {
   return ret;
 }
 
-std::string BlobJournalKey::Encode() {
+std::string RecoveryBlobJournalKey::Encode() {
   std::string ret = KeyPrefix::EncodeEmpty();
-  ret.push_back(kBlobJournalTypeByte);
+  ret.push_back(kRecoveryBlobJournalTypeByte);
   return ret;
 }
 
-std::string LiveBlobJournalKey::Encode() {
+std::string ActiveBlobJournalKey::Encode() {
   std::string ret = KeyPrefix::EncodeEmpty();
-  ret.push_back(kLiveBlobJournalTypeByte);
+  ret.push_back(kActiveBlobJournalTypeByte);
   return ret;
 }
 
@@ -1253,6 +1483,19 @@ std::string EarliestSweepKey::Encode() {
   std::string ret = KeyPrefix::EncodeEmpty();
   ret.push_back(kEarliestSweepTimeTypeByte);
   return ret;
+}
+
+std::string EarliestCompactionKey::Encode() {
+  std::string ret = KeyPrefix::EncodeEmpty();
+  ret.push_back(kEarliestCompactionTimeTypeByte);
+  return ret;
+}
+
+std::vector<uint8_t> ScopesPrefix::Encode() {
+  std::string ret = KeyPrefix::EncodeEmpty();
+  ret.push_back(kScopesPrefixByte);
+  auto span = base::make_span(ret);
+  return std::vector<uint8_t>(span.begin(), span.end());
 }
 
 DatabaseFreeListKey::DatabaseFreeListKey() : database_id_(-1) {}
@@ -1295,6 +1538,12 @@ int DatabaseFreeListKey::Compare(const DatabaseFreeListKey& other) const {
   return CompareInts(database_id_, other.database_id_);
 }
 
+std::string DatabaseFreeListKey::DebugString() const {
+  std::stringstream result;
+  result << "DatabaseFreeListKey{db: " << database_id_ << "}";
+  return result.str();
+}
+
 bool DatabaseNameKey::Decode(StringPiece* slice, DatabaseNameKey* result) {
   KeyPrefix prefix;
   if (!KeyPrefix::Decode(slice, &prefix))
@@ -1314,7 +1563,7 @@ bool DatabaseNameKey::Decode(StringPiece* slice, DatabaseNameKey* result) {
 }
 
 std::string DatabaseNameKey::Encode(const std::string& origin_identifier,
-                                    const base::string16& database_name) {
+                                    const std::u16string& database_name) {
   std::string ret = KeyPrefix::EncodeEmpty();
   ret.push_back(kDatabaseNameTypeByte);
   EncodeStringWithLength(base::ASCIIToUTF16(origin_identifier), &ret);
@@ -1324,7 +1573,7 @@ std::string DatabaseNameKey::Encode(const std::string& origin_identifier,
 
 std::string DatabaseNameKey::EncodeMinKeyForOrigin(
     const std::string& origin_identifier) {
-  return Encode(origin_identifier, base::string16());
+  return Encode(origin_identifier, std::u16string());
 }
 
 std::string DatabaseNameKey::EncodeStopKeyForOrigin(
@@ -1339,13 +1588,20 @@ int DatabaseNameKey::Compare(const DatabaseNameKey& other) {
   return database_name_.compare(other.database_name_);
 }
 
-bool DatabaseMetaDataKey::IsValidBlobKey(int64_t blob_key) {
-  return blob_key >= kBlobKeyGeneratorInitialNumber;
+std::string DatabaseNameKey::DebugString() const {
+  std::stringstream result;
+  result << "DatabaseNameKey{origin: " << origin_
+         << ", database_name: " << database_name_ << "}";
+  return result.str();
 }
 
-const int64_t DatabaseMetaDataKey::kAllBlobsKey = 1;
-const int64_t DatabaseMetaDataKey::kBlobKeyGeneratorInitialNumber = 2;
-const int64_t DatabaseMetaDataKey::kInvalidBlobKey = -1;
+bool DatabaseMetaDataKey::IsValidBlobNumber(int64_t blob_number) {
+  return blob_number >= kBlobNumberGeneratorInitialNumber;
+}
+
+const int64_t DatabaseMetaDataKey::kAllBlobsNumber = 1;
+const int64_t DatabaseMetaDataKey::kBlobNumberGeneratorInitialNumber = 2;
+const int64_t DatabaseMetaDataKey::kInvalidBlobNumber = -1;
 
 std::string DatabaseMetaDataKey::Encode(int64_t database_id,
                                         MetaDataType meta_data_type) {
@@ -1416,6 +1672,41 @@ int ObjectStoreMetaDataKey::Compare(const ObjectStoreMetaDataKey& other) {
   return meta_data_type_ - other.meta_data_type_;
 }
 
+std::string ObjectStoreMetaDataKey::DebugString() const {
+  std::stringstream result;
+  result << "ObjectStoreMetaDataKey{os: " << object_store_id_;
+  switch (meta_data_type_) {
+    case NAME:
+      result << ", NAME";
+      break;
+    case KEY_PATH:
+      result << ", KEY_PATH";
+      break;
+    case AUTO_INCREMENT:
+      result << ", AUTO_INCREMENT";
+      break;
+    case EVICTABLE:
+      result << ", EVICTABLE";
+      break;
+    case LAST_VERSION:
+      result << ", LAST_VERSION";
+      break;
+    case MAX_INDEX_ID:
+      result << ", MAX_INDEX_ID";
+      break;
+    case HAS_KEY_PATH:
+      result << ", HAS_KEY_PATH";
+      break;
+    case KEY_GENERATOR_CURRENT_NUMBER:
+      result << ", KEY_GENERATOR_CURRENT_NUMBER";
+      break;
+    default:
+      result << ", INVALID_TYPE";
+  }
+  result << "}";
+  return result.str();
+}
+
 IndexMetaDataKey::IndexMetaDataKey()
     : object_store_id_(-1), index_id_(-1), meta_data_type_(0) {}
 
@@ -1461,8 +1752,8 @@ std::string IndexMetaDataKey::EncodeMaxKey(int64_t database_id,
 std::string IndexMetaDataKey::EncodeMaxKey(int64_t database_id,
                                            int64_t object_store_id,
                                            int64_t index_id) {
-  return Encode(
-      database_id, object_store_id, index_id, kIndexMetaDataTypeMaximum);
+  return Encode(database_id, object_store_id, index_id,
+                kIndexMetaDataTypeMaximum);
 }
 
 int IndexMetaDataKey::Compare(const IndexMetaDataKey& other) {
@@ -1474,6 +1765,30 @@ int IndexMetaDataKey::Compare(const IndexMetaDataKey& other) {
   if (int x = CompareInts(index_id_, other.index_id_))
     return x;
   return meta_data_type_ - other.meta_data_type_;
+}
+
+std::string IndexMetaDataKey::DebugString() const {
+  std::stringstream result;
+  result << "IndexMetaDataKey{os: " << object_store_id_
+         << ", idx: " << index_id_;
+  switch (meta_data_type_) {
+    case NAME:
+      result << ", NAME";
+      break;
+    case UNIQUE:
+      result << ", UNIQUE";
+      break;
+    case KEY_PATH:
+      result << ", KEY_PATH";
+      break;
+    case MULTI_ENTRY:
+      result << ", MULTI_ENTRY";
+      break;
+    default:
+      result << ", INVALID_TYPE";
+  }
+  result << "}";
+  return result.str();
 }
 
 int64_t IndexMetaDataKey::IndexId() const {
@@ -1526,6 +1841,12 @@ int ObjectStoreFreeListKey::Compare(const ObjectStoreFreeListKey& other) {
   return CompareInts(object_store_id_, other.object_store_id_);
 }
 
+std::string ObjectStoreFreeListKey::DebugString() const {
+  std::stringstream result;
+  result << "ObjectStoreFreeListKey{os: " << object_store_id_ << "}";
+  return result.str();
+}
+
 IndexFreeListKey::IndexFreeListKey() : object_store_id_(-1), index_id_(-1) {}
 
 bool IndexFreeListKey::Decode(StringPiece* slice, IndexFreeListKey* result) {
@@ -1571,6 +1892,13 @@ int IndexFreeListKey::Compare(const IndexFreeListKey& other) {
   return CompareInts(index_id_, other.index_id_);
 }
 
+std::string IndexFreeListKey::DebugString() const {
+  std::stringstream result;
+  result << "IndexFreeListKey{os: " << object_store_id_
+         << ", idx: " << index_id_ << "}";
+  return result.str();
+}
+
 int64_t IndexFreeListKey::ObjectStoreId() const {
   DCHECK_GE(object_store_id_, 0);
   return object_store_id_;
@@ -1603,7 +1931,7 @@ bool ObjectStoreNamesKey::Decode(StringPiece* slice,
 
 std::string ObjectStoreNamesKey::Encode(
     int64_t database_id,
-    const base::string16& object_store_name) {
+    const std::u16string& object_store_name) {
   KeyPrefix prefix(database_id);
   std::string ret = prefix.Encode();
   ret.push_back(kObjectStoreNamesTypeByte);
@@ -1613,6 +1941,13 @@ std::string ObjectStoreNamesKey::Encode(
 
 int ObjectStoreNamesKey::Compare(const ObjectStoreNamesKey& other) {
   return object_store_name_.compare(other.object_store_name_);
+}
+
+std::string ObjectStoreNamesKey::DebugString() const {
+  std::stringstream result;
+  result << "ObjectStoreNamesKey{object_store_name: " << object_store_name_
+         << "}";
+  return result.str();
 }
 
 IndexNamesKey::IndexNamesKey() : object_store_id_(-1) {}
@@ -1639,7 +1974,7 @@ bool IndexNamesKey::Decode(StringPiece* slice, IndexNamesKey* result) {
 
 std::string IndexNamesKey::Encode(int64_t database_id,
                                   int64_t object_store_id,
-                                  const base::string16& index_name) {
+                                  const std::u16string& index_name) {
   KeyPrefix prefix(database_id);
   std::string ret = prefix.Encode();
   ret.push_back(kIndexNamesKeyTypeByte);
@@ -1653,6 +1988,13 @@ int IndexNamesKey::Compare(const IndexNamesKey& other) {
   if (int x = CompareInts(object_store_id_, other.object_store_id_))
     return x;
   return index_name_.compare(other.index_name_);
+}
+
+std::string IndexNamesKey::DebugString() const {
+  std::stringstream result;
+  result << "IndexNamesKey{os: " << object_store_id_
+         << ", index_name: " << index_name_ << "}";
+  return result.str();
 }
 
 ObjectStoreDataKey::ObjectStoreDataKey() {}
@@ -1688,6 +2030,14 @@ std::string ObjectStoreDataKey::Encode(int64_t database_id,
   std::string encoded_key;
   EncodeIDBKey(user_key, &encoded_key);
   return Encode(database_id, object_store_id, encoded_key);
+}
+
+std::string ObjectStoreDataKey::DebugString() const {
+  std::unique_ptr<blink::IndexedDBKey> key = user_key();
+  std::stringstream result;
+  result << "ObjectStoreDataKey{user_key: "
+         << (key ? key->DebugString() : "Invalid") << "}";
+  return result.str();
 }
 
 std::unique_ptr<IndexedDBKey> ObjectStoreDataKey::user_key() const {
@@ -1732,6 +2082,14 @@ std::string ExistsEntryKey::Encode(int64_t database_id,
   std::string encoded_key;
   EncodeIDBKey(user_key, &encoded_key);
   return Encode(database_id, object_store_id, encoded_key);
+}
+
+std::string ExistsEntryKey::DebugString() const {
+  std::unique_ptr<blink::IndexedDBKey> key = user_key();
+  std::stringstream result;
+  result << "ExistsEntryKey{user_key: "
+         << (key ? key->DebugString() : "Invalid") << "}";
+  return result.str();
 }
 
 std::unique_ptr<IndexedDBKey> ExistsEntryKey::user_key() const {
@@ -1783,8 +2141,8 @@ std::string BlobEntryKey::ReencodeToObjectStoreDataKey(StringPiece* slice) {
   if (!Decode(slice, &key))
     return std::string();
 
-  return ObjectStoreDataKey::Encode(
-      key.database_id_, key.object_store_id_, key.encoded_user_key_);
+  return ObjectStoreDataKey::Encode(key.database_id_, key.object_store_id_,
+                                    key.encoded_user_key_);
 }
 
 std::string BlobEntryKey::EncodeMinKeyForObjectStore(int64_t database_id,
@@ -1821,6 +2179,21 @@ std::string BlobEntryKey::Encode(int64_t database_id,
   KeyPrefix prefix(KeyPrefix::CreateWithSpecialIndex(
       database_id, object_store_id, kSpecialIndexNumber));
   return prefix.Encode() + encoded_user_key;
+}
+
+std::string BlobEntryKey::DebugString() const {
+  std::stringstream result;
+  result << "BlobEntryKey{db: " << database_id_ << "os: " << object_store_id_
+         << ", user_key: ";
+  std::unique_ptr<blink::IndexedDBKey> key;
+  StringPiece slice(encoded_user_key_);
+  if (!DecodeIDBKey(&slice, &key)) {
+    result << "Invalid";
+  } else {
+    result << key->DebugString();
+  }
+  result << "}";
+  return result.str();
 }
 
 const int64_t BlobEntryKey::kSpecialIndexNumber = kBlobEntryIndexId;
@@ -1888,8 +2261,8 @@ std::string IndexDataKey::Encode(int64_t database_id,
                                  const IndexedDBKey& user_key) {
   std::string encoded_key;
   EncodeIDBKey(user_key, &encoded_key);
-  return Encode(
-      database_id, object_store_id, index_id, encoded_key, MinIDBKey(), 0);
+  return Encode(database_id, object_store_id, index_id, encoded_key,
+                MinIDBKey(), 0);
 }
 
 std::string IndexDataKey::Encode(int64_t database_id,
@@ -1901,19 +2274,15 @@ std::string IndexDataKey::Encode(int64_t database_id,
   EncodeIDBKey(user_key, &encoded_key);
   std::string encoded_primary_key;
   EncodeIDBKey(user_primary_key, &encoded_primary_key);
-  return Encode(database_id,
-                object_store_id,
-                index_id,
-                encoded_key,
-                encoded_primary_key,
-                0);
+  return Encode(database_id, object_store_id, index_id, encoded_key,
+                encoded_primary_key, 0);
 }
 
 std::string IndexDataKey::EncodeMinKey(int64_t database_id,
                                        int64_t object_store_id,
                                        int64_t index_id) {
-  return Encode(
-      database_id, object_store_id, index_id, MinIDBKey(), MinIDBKey(), 0);
+  return Encode(database_id, object_store_id, index_id, MinIDBKey(),
+                MinIDBKey(), 0);
 }
 
 std::string IndexDataKey::EncodeMaxKey(int64_t database_id,
@@ -1926,6 +2295,18 @@ std::string IndexDataKey::EncodeMaxKey(int64_t database_id,
 std::string IndexDataKey::Encode() const {
   return Encode(database_id_, object_store_id_, index_id_, encoded_user_key_,
                 encoded_primary_key_, sequence_number_);
+}
+
+std::string IndexDataKey::DebugString() const {
+  std::unique_ptr<blink::IndexedDBKey> user = user_key();
+  std::unique_ptr<blink::IndexedDBKey> primary = primary_key();
+  std::stringstream result;
+  result << "IndexDataKey{db: " << database_id_ << ", os: " << object_store_id_
+         << ", idx: " << index_id_ << ", sequence_number: " << sequence_number_
+         << ", user_key: " << (user ? user->DebugString() : "Invalid")
+         << ", primary_key: " << (primary ? primary->DebugString() : "Invalid")
+         << "}";
+  return result.str();
 }
 
 int64_t IndexDataKey::DatabaseId() const {

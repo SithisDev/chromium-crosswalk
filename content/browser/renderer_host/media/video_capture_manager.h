@@ -1,28 +1,32 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_MEDIA_VIDEO_CAPTURE_MANAGER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_MEDIA_VIDEO_CAPTURE_MANAGER_H_
 
-#include <list>
 #include <map>
 #include <set>
 #include <string>
 
-#include "base/macros.h"
+#include "base/containers/circular_deque.h"
+#include "base/containers/flat_set.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/process/process_handle.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
+#include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
 #include "content/browser/renderer_host/media/video_capture_device_launch_observer.h"
 #include "content/browser/renderer_host/media/video_capture_provider.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/screenlock_observer.h"
 #include "media/base/video_facing.h"
 #include "media/capture/video/video_capture_device.h"
@@ -30,14 +34,13 @@
 #include "media/capture/video_capture_types.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/application_status_listener.h"
 #endif
 
 namespace content {
 class VideoCaptureController;
 class VideoCaptureControllerEventHandler;
-class ScreenlockMonitor;
 
 // VideoCaptureManager is used to open/close, start/stop, enumerate available
 // video capture devices, and manage VideoCaptureController's.
@@ -53,12 +56,18 @@ class CONTENT_EXPORT VideoCaptureManager
 
   // Callback used to signal the completion of a controller lookup.
   using DoneCB =
-      base::Callback<void(const base::WeakPtr<VideoCaptureController>&)>;
+      base::OnceCallback<void(const base::WeakPtr<VideoCaptureController>&)>;
+
+  using SetDesktopCaptureWindowIdCallback = base::RepeatingCallback<void(
+      const media::VideoCaptureSessionId& session_id,
+      gfx::NativeViewId window_id)>;
 
   explicit VideoCaptureManager(
       std::unique_ptr<VideoCaptureProvider> video_capture_provider,
-      base::RepeatingCallback<void(const std::string&)> emit_log_message_cb,
-      ScreenlockMonitor* monitor = nullptr);
+      base::RepeatingCallback<void(const std::string&)> emit_log_message_cb);
+
+  VideoCaptureManager(const VideoCaptureManager&) = delete;
+  VideoCaptureManager& operator=(const VideoCaptureManager&) = delete;
 
   // AddVideoCaptureObserver() can be called only before any devices are opened.
   // RemoveAllVideoCaptureObservers() can be called only after all devices
@@ -73,8 +82,23 @@ class CONTENT_EXPORT VideoCaptureManager
   // Implements MediaStreamProvider.
   void RegisterListener(MediaStreamProviderListener* listener) override;
   void UnregisterListener(MediaStreamProviderListener* listener) override;
-  int Open(const blink::MediaStreamDevice& device) override;
-  void Close(int capture_session_id) override;
+  base::UnguessableToken Open(const blink::MediaStreamDevice& device) override;
+  void Close(const base::UnguessableToken& capture_session_id) override;
+
+  // Start/stop cropping the video track.
+  //
+  // Non-empty |crop_id| sets (or changes) the crop-target.
+  // Empty |crop_id| reverts the capture to its original, uncropped state.
+  //
+  // |crop_version| must be incremented by at least one for each call.
+  // By including it in frame's metadata, Viz informs Blink what was the
+  // latest invocation of cropTo() before a given frame was produced.
+  //
+  // The callback reports success/failure.
+  void Crop(const base::UnguessableToken& session_id,
+            const base::Token& crop_id,
+            uint32_t crop_version,
+            base::OnceCallback<void(media::mojom::CropRequestResult)> callback);
 
   // Called by VideoCaptureHost to locate a capture device for |capture_params|,
   // adding the Host as a client of the device's controller if successful. The
@@ -89,11 +113,11 @@ class CONTENT_EXPORT VideoCaptureManager
   // that the client was successfully added. A NULL controller is passed to
   // the callback on failure. |done_cb| is not allowed to synchronously call
   // StopCaptureForClient().
-  void ConnectClient(media::VideoCaptureSessionId session_id,
+  void ConnectClient(const media::VideoCaptureSessionId& session_id,
                      const media::VideoCaptureParams& capture_params,
                      VideoCaptureControllerID client_id,
                      VideoCaptureControllerEventHandler* client_handler,
-                     const DoneCB& done_cb);
+                     DoneCB done_cb);
 
   // Called by VideoCaptureHost to remove |client_handler|. If this is the last
   // client of the device, the |controller| and its VideoCaptureDevice may be
@@ -120,7 +144,7 @@ class CONTENT_EXPORT VideoCaptureManager
   // Allocating device could failed if other app holds the camera, the error
   // will be notified through VideoCaptureControllerEventHandler::OnError().
   void ResumeCaptureForClient(
-      media::VideoCaptureSessionId session_id,
+      const media::VideoCaptureSessionId& session_id,
       const media::VideoCaptureParams& params,
       VideoCaptureController* controller,
       VideoCaptureControllerID client_id,
@@ -135,7 +159,7 @@ class CONTENT_EXPORT VideoCaptureManager
   // cached during device(s) enumeration, and depending on the underlying
   // implementation, could be an empty list.
   bool GetDeviceSupportedFormats(
-      media::VideoCaptureSessionId capture_session_id,
+      const media::VideoCaptureSessionId& capture_session_id,
       media::VideoCaptureFormats* supported_formats);
   // Retrieves all capture supported formats for a particular device. Returns
   // false if the  |device_id| is not found. The supported formats are cached
@@ -147,29 +171,36 @@ class CONTENT_EXPORT VideoCaptureManager
   // Retrieves the format(s) currently in use.  Returns false if the
   // |capture_session_id| is not found. Returns true and |formats_in_use|
   // otherwise. |formats_in_use| is empty if the device is not in use.
-  bool GetDeviceFormatsInUse(media::VideoCaptureSessionId capture_session_id,
-                             media::VideoCaptureFormats* formats_in_use);
-  // Retrieves the format currently in use.  Returns base::nullopt if the
+  bool GetDeviceFormatsInUse(
+      const media::VideoCaptureSessionId& capture_session_id,
+      media::VideoCaptureFormats* formats_in_use);
+  // Retrieves the format currently in use.  Returns absl::nullopt if the
   // |stream_type|, |device_id| pair is not found. Returns in-use format of the
   // device otherwise.
-  base::Optional<media::VideoCaptureFormat> GetDeviceFormatInUse(
+  absl::optional<media::VideoCaptureFormat> GetDeviceFormatInUse(
       blink::mojom::MediaStreamType stream_type,
       const std::string& device_id);
 
+  // If there is a capture session associated with |session_id|, and the
+  // captured entity a tab, return the GlobalRoutingID of the captured tab.
+  // Otherwise, returns an empty GlobalRoutingID.
+  GlobalRoutingID GetGlobalRoutingID(
+      const base::UnguessableToken& session_id) const;
+
   // Sets the platform-dependent window ID for the desktop capture notification
   // UI for the given session.
-  void SetDesktopCaptureWindowId(media::VideoCaptureSessionId session_id,
+  void SetDesktopCaptureWindowId(const media::VideoCaptureSessionId& session_id,
                                  gfx::NativeViewId window_id);
 
-  void GetPhotoState(int session_id,
+  void GetPhotoState(const base::UnguessableToken& session_id,
                      VideoCaptureDevice::GetPhotoStateCallback callback);
-  void SetPhotoOptions(int session_id,
+  void SetPhotoOptions(const base::UnguessableToken& session_id,
                        media::mojom::PhotoSettingsPtr settings,
                        VideoCaptureDevice::SetPhotoOptionsCallback callback);
-  void TakePhoto(int session_id,
+  void TakePhoto(const base::UnguessableToken& session_id,
                  VideoCaptureDevice::TakePhotoCallback callback);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Some devices had troubles when stopped and restarted quickly, so the device
   // is only stopped when Chrome is sent to background and not when, e.g., a tab
   // is hidden, see http://crbug.com/582295.
@@ -189,37 +220,52 @@ class CONTENT_EXPORT VideoCaptureManager
   void OnDeviceLaunchAborted() override;
   void OnDeviceConnectionLost(VideoCaptureController* controller) override;
 
+  bool is_idle_close_timer_running_for_testing() const {
+    return idle_close_timer_.IsRunning();
+  }
+  void set_idle_close_timeout_for_testing(base::TimeDelta timeout) {
+    idle_close_timeout_ = timeout;
+  }
+
+  void set_desktop_capture_window_id_callback_for_testing(
+      SetDesktopCaptureWindowIdCallback callback) {
+    set_desktop_capture_window_id_callback_for_testing_ = callback;
+  }
+
  private:
   class CaptureDeviceStartRequest;
 
   using SessionMap =
       std::map<media::VideoCaptureSessionId, blink::MediaStreamDevice>;
-  using DeviceStartQueue = std::list<CaptureDeviceStartRequest>;
+  using DeviceStartQueue = base::circular_deque<CaptureDeviceStartRequest>;
   using VideoCaptureDeviceDescriptor = media::VideoCaptureDeviceDescriptor;
   using VideoCaptureDeviceDescriptors = media::VideoCaptureDeviceDescriptors;
 
   ~VideoCaptureManager() override;
 
   void OnDeviceInfosReceived(
-      base::ElapsedTimer* timer,
+      base::ElapsedTimer timer,
       EnumerationCallback client_callback,
       const std::vector<media::VideoCaptureDeviceInfo>& device_infos);
 
   // Helpers to report an event to our Listener.
   void OnOpened(blink::mojom::MediaStreamType type,
-                media::VideoCaptureSessionId capture_session_id);
+                const media::VideoCaptureSessionId& capture_session_id);
   void OnClosed(blink::mojom::MediaStreamType type,
-                media::VideoCaptureSessionId capture_session_id);
+                const media::VideoCaptureSessionId& capture_session_id);
 
   // Checks to see if |controller| has no clients left. If so, remove it from
   // the list of controllers, and delete it asynchronously. |controller| may be
   // freed by this function.
-  void DestroyControllerIfNoClients(VideoCaptureController* controller);
+  void DestroyControllerIfNoClients(
+      const base::UnguessableToken& capture_session_id,
+      VideoCaptureController* controller);
 
   // Finds a VideoCaptureController in different ways: by |session_id|, by its
   // |device_id| and |type| (if it is already opened), by its |controller| or by
   // its |serial_id|. In all cases, if not found, nullptr is returned.
-  VideoCaptureController* LookupControllerBySessionId(int session_id);
+  VideoCaptureController* LookupControllerBySessionId(
+      const base::UnguessableToken& session_id) const;
   VideoCaptureController* LookupControllerByMediaTypeAndDeviceId(
       blink::mojom::MediaStreamType type,
       const std::string& device_id) const;
@@ -234,7 +280,7 @@ class CONTENT_EXPORT VideoCaptureManager
   // creating a fresh one if necessary. Returns nullptr if said
   // |capture_session_id| is invalid.
   VideoCaptureController* GetOrCreateController(
-      media::VideoCaptureSessionId capture_session_id,
+      const media::VideoCaptureSessionId& capture_session_id,
       const media::VideoCaptureParams& params);
 
   // Starting a capture device can take 1-2 seconds.
@@ -244,18 +290,19 @@ class CONTENT_EXPORT VideoCaptureManager
   // posts a
   // request to start the device on the device thread unless there is
   // another request pending start.
-  void QueueStartDevice(media::VideoCaptureSessionId session_id,
+  void QueueStartDevice(const media::VideoCaptureSessionId& session_id,
                         VideoCaptureController* controller,
                         const media::VideoCaptureParams& params);
   void DoStopDevice(VideoCaptureController* controller);
   void ProcessDeviceStartRequestQueue();
 
-  void MaybePostDesktopCaptureWindowId(media::VideoCaptureSessionId session_id);
+  void MaybePostDesktopCaptureWindowId(
+      const media::VideoCaptureSessionId& session_id);
 
-#if defined(OS_ANDROID)
   void ReleaseDevices();
   void ResumeDevices();
 
+#if BUILDFLAG(IS_ANDROID)
   std::unique_ptr<base::android::ApplicationStatusListener>
       app_status_listener_;
   bool application_state_has_running_activities_;
@@ -263,18 +310,24 @@ class CONTENT_EXPORT VideoCaptureManager
 
   // ScreenlockObserver implementation:
   void OnScreenLocked() override;
+  void OnScreenUnlocked() override;
 
   void EmitLogMessage(const std::string& message, int verbose_log_level);
 
+  void RecordDeviceSessionLockDuration();
+
   // Only accessed on Browser::IO thread.
   base::ObserverList<MediaStreamProviderListener>::Unchecked listeners_;
-  media::VideoCaptureSessionId new_capture_session_id_;
 
   // An entry is kept in this map for every session that has been created via
   // the Open() entry point. The keys are session_id's. This map is used to
   // determine which device to use when ConnectClient() occurs. Used
   // only on the IO thread.
   SessionMap sessions_;
+
+  // A set of sessions that have encountered screen lock.
+  base::flat_set<media::VideoCaptureSessionId> locked_sessions_;
+  base::TimeTicks lock_time_;
 
   // Currently opened VideoCaptureController instances. The device may or may
   // not be started. This member is only accessed on IO thread.
@@ -285,12 +338,12 @@ class CONTENT_EXPORT VideoCaptureManager
   DeviceStartQueue device_start_request_queue_;
 
   // Queue to keep photo-associated requests waiting for a device to initialize,
-  // bundles a session id integer and an associated photo-related request.
-  std::list<std::pair<int, base::Closure>> photo_request_queue_;
+  // bundles a session id token and an associated photo-related request.
+  base::circular_deque<std::pair<base::UnguessableToken, base::OnceClosure>>
+      photo_request_queue_;
 
   const std::unique_ptr<VideoCaptureProvider> video_capture_provider_;
   base::RepeatingCallback<void(const std::string&)> emit_log_message_cb_;
-  ScreenlockMonitor* screenlock_monitor_;
 
   base::ObserverList<media::VideoCaptureObserver>::Unchecked capture_observers_;
 
@@ -303,7 +356,13 @@ class CONTENT_EXPORT VideoCaptureManager
   std::map<media::VideoCaptureSessionId, gfx::NativeViewId>
       notification_window_ids_;
 
-  DISALLOW_COPY_AND_ASSIGN(VideoCaptureManager);
+  // Closes video device capture sessions after a timeout. Idle timeout value
+  // chosen based on UMA metrics. See https://crbug.com/1163105#c28
+  base::TimeDelta idle_close_timeout_ = base::Seconds(15);
+  base::OneShotTimer idle_close_timer_;
+
+  SetDesktopCaptureWindowIdCallback
+      set_desktop_capture_window_id_callback_for_testing_;
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include "base/containers/cxx20_erase.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "third_party/icu/source/common/unicode/uniset.h"
 #include "third_party/icu/source/common/unicode/unistr.h"
@@ -753,11 +753,11 @@ ChineseScriptClassifier::ChineseScriptClassifier() {
 
   // Create UnicodeSets for zh-Hans and zh-Hant for later reference.
   UErrorCode status = U_ZERO_ERROR;
-  hans_set_.reset(new icu::UnicodeSet(
-      icu::UnicodeString::fromUTF8(hans_codepoints), status));
+  hans_set_ = std::make_unique<icu::UnicodeSet>(
+      icu::UnicodeString::fromUTF8(hans_codepoints), status);
   DVLOG(1) << u_errorName(status);
-  hant_set_.reset(new icu::UnicodeSet(
-      icu::UnicodeString::fromUTF8(hant_codepoints), status));
+  hant_set_ = std::make_unique<icu::UnicodeSet>(
+      icu::UnicodeString::fromUTF8(hant_codepoints), status);
   DVLOG(1) << u_errorName(status);
 
   // Make these sets immutable. This keeps the class threadsafe and
@@ -783,7 +783,7 @@ std::string ChineseScriptClassifier::Classify(const std::string& input) const {
   base::TruncateUTF8ToByteSize(input, 500, &input_subset);
 
   // Remove whitespace since transliterators may not preserve it.
-  base::EraseIf(input_subset, base::IsUnicodeWhitespace);
+  base::EraseIf(input_subset, base::IsAsciiWhitespace<char>);
 
   // Convert the input to icu::UnicodeString so we can iterate over codepoints.
   icu::UnicodeString input_codepoints =

@@ -1,9 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/host/layered_window_updater_impl.h"
 
+#include "base/trace_event/trace_event.h"
 #include "components/viz/common/resources/resource_format.h"
 #include "components/viz/common/resources/resource_sizes.h"
 #include "mojo/public/cpp/system/platform_handle.h"
@@ -15,8 +16,8 @@ namespace viz {
 
 LayeredWindowUpdaterImpl::LayeredWindowUpdaterImpl(
     HWND hwnd,
-    mojom::LayeredWindowUpdaterRequest request)
-    : hwnd_(hwnd), binding_(this, std::move(request)) {}
+    mojo::PendingReceiver<mojom::LayeredWindowUpdater> receiver)
+    : hwnd_(hwnd), receiver_(this, std::move(receiver)) {}
 
 LayeredWindowUpdaterImpl::~LayeredWindowUpdaterImpl() = default;
 

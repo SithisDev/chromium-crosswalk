@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,19 +10,15 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/values.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
-#include "content/public/browser/indexed_db_context.h"
+#include "components/services/storage/privileged/mojom/indexed_db_control.mojom.h"
+#include "components/services/storage/public/cpp/buckets/bucket_id.h"
 #include "content/public/browser/web_ui_controller.h"
-
-namespace base {
-class ListValue;
-}
-
-namespace url {
-class Origin;
-}
+#include "content/public/browser/web_ui_message_handler.h"
+#include "content/public/browser/webui_config.h"
+#include "content/public/common/url_constants.h"
 
 namespace download {
 class DownloadItem;
@@ -30,68 +26,72 @@ class DownloadItem;
 
 namespace content {
 
-class IndexedDBContextImpl;
-class StoragePartition;
+class IndexedDBInternalsUI;
+
+class IndexedDBInternalsUIConfig
+    : public DefaultWebUIConfig<IndexedDBInternalsUI> {
+ public:
+  IndexedDBInternalsUIConfig()
+      : DefaultWebUIConfig(kChromeUIScheme, kChromeUIIndexedDBInternalsHost) {}
+};
 
 // The implementation for the chrome://indexeddb-internals page.
 class IndexedDBInternalsUI : public WebUIController {
  public:
   explicit IndexedDBInternalsUI(WebUI* web_ui);
+
+  IndexedDBInternalsUI(const IndexedDBInternalsUI&) = delete;
+  IndexedDBInternalsUI& operator=(const IndexedDBInternalsUI&) = delete;
+
   ~IndexedDBInternalsUI() override;
 
  private:
-  void GetAllOrigins(const base::ListValue* args);
-  void GetAllOriginsOnIndexedDBThread(scoped_refptr<IndexedDBContext> context,
-                                      const base::FilePath& context_path);
-  void OnOriginsReady(std::unique_ptr<base::ListValue> origins,
+  base::WeakPtrFactory<IndexedDBInternalsUI> weak_factory_{this};
+};
+
+class IndexedDBInternalsHandler : public WebUIMessageHandler {
+ public:
+  IndexedDBInternalsHandler();
+
+  IndexedDBInternalsHandler(const IndexedDBInternalsHandler&) = delete;
+  IndexedDBInternalsHandler& operator=(const IndexedDBInternalsHandler&) =
+      delete;
+
+  ~IndexedDBInternalsHandler() override;
+
+  // WebUIMessageHandler implementation.
+  void RegisterMessages() override;
+  void OnJavascriptDisallowed() override;
+
+ private:
+  void GetAllBuckets(const base::Value::List& args);
+  void OnBucketsReady(const base::Value::List& storage_keys,
                       const base::FilePath& path);
 
-  void AddContextFromStoragePartition(StoragePartition* partition);
-
-  void DownloadOriginData(const base::ListValue* args);
-  void DownloadOriginDataOnIndexedDBThread(
-      const base::FilePath& partition_path,
-      const scoped_refptr<IndexedDBContextImpl> context,
-      const url::Origin& origin);
-  void OnDownloadDataReady(const base::FilePath& partition_path,
-                           const url::Origin& origin,
-                           const base::FilePath temp_path,
-                           const base::FilePath zip_path,
-                           size_t connection_count);
-  void OnDownloadStarted(const base::FilePath& partition_path,
-                         const url::Origin& origin,
-                         const base::FilePath& temp_path,
+  void DownloadBucketData(const base::Value::List& args);
+  void OnDownloadDataReady(const std::string& callback_id,
+                           uint64_t connection_count,
+                           bool success,
+                           const base::FilePath& temp_path,
+                           const base::FilePath& zip_path);
+  void OnDownloadStarted(const base::FilePath& temp_path,
+                         const std::string& callback_id,
                          size_t connection_count,
                          download::DownloadItem* item,
                          download::DownloadInterruptReason interrupt_reason);
 
-  void ForceCloseOrigin(const base::ListValue* args);
-  void ForceCloseOriginOnIndexedDBThread(
-      const base::FilePath& partition_path,
-      const scoped_refptr<IndexedDBContextImpl> context,
-      const url::Origin& origin);
-  void OnForcedClose(const base::FilePath& partition_path,
-                     const url::Origin& origin,
-                     size_t connection_count);
+  void ForceCloseBucket(const base::Value::List& args);
+  void OnForcedClose(const std::string& callback_id, uint64_t connection_count);
 
-  void ForceSchemaDowngradeOrigin(const base::ListValue* args);
-  void ForceSchemaDowngradeOriginOnIndexedDBThread(
-      const base::FilePath& partition_path,
-      const scoped_refptr<IndexedDBContextImpl> context,
-      const url::Origin& origin);
-  void OnForcedSchemaDowngrade(const base::FilePath& partition_path,
-                               const url::Origin& origin,
-                               size_t connection_count);
-
-  bool GetOriginContext(const base::FilePath& path,
-                        const url::Origin& origin,
-                        scoped_refptr<IndexedDBContextImpl>* context);
-  bool GetOriginData(const base::ListValue* args,
+  bool GetBucketControl(const base::FilePath& path,
+                        storage::mojom::IndexedDBControl** control);
+  bool GetBucketData(const base::Value::List& args,
+                     std::string* callback_id,
                      base::FilePath* path,
-                     url::Origin* origin,
-                     scoped_refptr<IndexedDBContextImpl>* context);
+                     storage::BucketId* bucket_id,
+                     storage::mojom::IndexedDBControl** control);
 
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBInternalsUI);
+  base::WeakPtrFactory<IndexedDBInternalsHandler> weak_factory_{this};
 };
 
 }  // namespace content

@@ -1,10 +1,11 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content_shell;
 
 import android.content.Context;
+import android.graphics.Rect;
 import android.graphics.drawable.ClipDrawable;
 import android.text.TextUtils;
 import android.util.AttributeSet;
@@ -13,7 +14,6 @@ import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
@@ -26,6 +26,7 @@ import android.widget.TextView.OnEditorActionListener;
 import org.chromium.base.Callback;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.components.embedder_support.view.ContentView;
 import org.chromium.components.embedder_support.view.ContentViewRenderView;
 import org.chromium.content_public.browser.ActionModeCallbackHelper;
@@ -43,6 +44,13 @@ import org.chromium.ui.base.WindowAndroid;
 public class Shell extends LinearLayout {
 
     private static final long COMPLETED_PROGRESS_TIMEOUT_MS = 200;
+
+    // Stylus handwriting: Setting this ime option instructs stylus writing service to restrict
+    // capturing writing events slightly outside the Url bar area. This is needed to prevent stylus
+    // handwriting in inputs in web content area that are very close to url bar area, from being
+    // committed to Url bar's Edit text. Ex: google.com search field.
+    private static final String IME_OPTION_RESTRICT_STYLUS_WRITING_AREA =
+            "restrictDirectWritingArea=true";
 
     private final Runnable mClearProgressRunnable = new Runnable() {
         @Override
@@ -112,7 +120,7 @@ public class Shell extends LinearLayout {
      */
     public void close() {
         if (mNativeShell == 0) return;
-        nativeCloseShell(mNativeShell);
+        ShellJni.get().closeShell(mNativeShell);
     }
 
     @CalledByNative
@@ -171,7 +179,7 @@ public class Shell extends LinearLayout {
                 mPrevButton.setVisibility(hasFocus ? GONE : VISIBLE);
                 mStopReloadButton.setVisibility(hasFocus ? GONE : VISIBLE);
                 if (!hasFocus) {
-                    mUrlTextView.setText(mWebContents.getVisibleUrl());
+                    mUrlTextView.setText(mWebContents.getVisibleUrl().getSpec());
                 }
             }
         });
@@ -185,6 +193,7 @@ public class Shell extends LinearLayout {
                 return false;
             }
         });
+        mUrlTextView.setPrivateImeOptions(IME_OPTION_RESTRICT_STYLUS_WRITING_AREA);
     }
 
     /**
@@ -196,7 +205,7 @@ public class Shell extends LinearLayout {
     public void loadUrl(String url) {
         if (url == null) return;
 
-        if (TextUtils.equals(url, mWebContents.getLastCommittedUrl())) {
+        if (TextUtils.equals(url, mWebContents.getLastCommittedUrl().getSpec())) {
             mNavigationController.reload(true);
         } else {
             mNavigationController.loadUrl(new LoadUrlParams(sanitizeUrl(url)));
@@ -294,7 +303,8 @@ public class Shell extends LinearLayout {
     @CalledByNative
     private void initFromNativeTabContents(WebContents webContents) {
         Context context = getContext();
-        ContentView cv = ContentView.createContentView(context, webContents);
+        ContentView cv =
+                ContentView.createContentView(context, null /* eventOffsetHandler */, webContents);
         mViewAndroidDelegate = new ShellViewAndroidDelegate(cv);
         assert (mWebContents != webContents);
         if (mWebContents != null) mWebContents.clearNativeReference();
@@ -305,9 +315,7 @@ public class Shell extends LinearLayout {
                 .setActionModeCallback(defaultActionCallback());
         mNavigationController = mWebContents.getNavigationController();
         if (getParent() != null) mWebContents.onShow();
-        if (mWebContents.getVisibleUrl() != null) {
-            mUrlTextView.setText(mWebContents.getVisibleUrl());
-        }
+        mUrlTextView.setText(mWebContents.getVisibleUrl().getSpec());
         ((FrameLayout) findViewById(R.id.contentview_holder)).addView(cv,
                 new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
@@ -320,12 +328,12 @@ public class Shell extends LinearLayout {
      * {link @ActionMode.Callback} that uses the default implementation in
      * {@link SelectionPopupController}.
      */
-    private ActionMode.Callback defaultActionCallback() {
+    private ActionMode.Callback2 defaultActionCallback() {
         final ActionModeCallbackHelper helper =
                 SelectionPopupController.fromWebContents(mWebContents)
                         .getActionModeCallbackHelper();
 
-        return new ActionMode.Callback() {
+        return new ActionMode.Callback2() {
             @Override
             public boolean onCreateActionMode(ActionMode mode, Menu menu) {
                 helper.onCreateActionMode(mode, menu);
@@ -346,6 +354,11 @@ public class Shell extends LinearLayout {
             public void onDestroyActionMode(ActionMode mode) {
                 helper.onDestroyActionMode();
             }
+
+            @Override
+            public void onGetContentRect(ActionMode mode, View view, Rect outRect) {
+                helper.onGetContentRect(mode, view, outRect);
+            }
         };
     }
 
@@ -355,11 +368,6 @@ public class Shell extends LinearLayout {
         if (mOverlayModeChangedCallbackForTesting != null) {
             mOverlayModeChangedCallbackForTesting.onResult(useOverlayMode);
         }
-    }
-
-    @CalledByNative
-    public void sizeTo(int width, int height) {
-        mWebContents.setSize(width, height);
     }
 
     public void setOverayModeChangedCallbackForTesting(Callback<Boolean> callback) {
@@ -382,9 +390,9 @@ public class Shell extends LinearLayout {
     }
 
     /**
-     * @return The {@link ViewGroup} currently shown by this Shell.
+     * @return The {@link View} currently shown by this Shell.
      */
-    public ViewGroup getContentView() {
+    public View getContentView() {
         ViewAndroidDelegate viewDelegate = mWebContents.getViewAndroidDelegate();
         return viewDelegate != null ? viewDelegate.getContainerView() : null;
     }
@@ -406,5 +414,8 @@ public class Shell extends LinearLayout {
         }
     }
 
-    private static native void nativeCloseShell(long shellPtr);
+    @NativeMethods
+    interface Natives {
+        void closeShell(long shellPtr);
+    }
 }

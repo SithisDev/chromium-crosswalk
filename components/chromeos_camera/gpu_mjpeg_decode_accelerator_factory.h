@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,7 @@ namespace chromeos_camera {
 class GpuMjpegDecodeAcceleratorFactory {
  public:
   using CreateAcceleratorCB =
-      base::Callback<std::unique_ptr<MjpegDecodeAccelerator>(
+      base::OnceCallback<std::unique_ptr<MjpegDecodeAccelerator>(
           scoped_refptr<base::SingleThreadTaskRunner>)>;
 
   // Static query for JPEG supported. This query calls the appropriate

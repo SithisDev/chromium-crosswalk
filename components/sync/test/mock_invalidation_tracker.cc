@@ -1,29 +1,31 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/sync/test/mock_invalidation_tracker.h"
 
-#include "base/logging.h"
+#include <memory>
+
+#include "base/check_op.h"
 
 namespace syncer {
 
 std::unique_ptr<TrackableMockInvalidation>
 MockInvalidationTracker::IssueUnknownVersionInvalidation() {
-  return std::unique_ptr<TrackableMockInvalidation>(
-      new TrackableMockInvalidation(true, -1, std::string(), this, next_id_++));
+  return std::make_unique<TrackableMockInvalidation>(true, -1, std::string(),
+                                                     this, next_id_++);
 }
 
 std::unique_ptr<TrackableMockInvalidation>
 MockInvalidationTracker::IssueInvalidation(int64_t version,
                                            const std::string& payload) {
-  return std::unique_ptr<TrackableMockInvalidation>(
-      new TrackableMockInvalidation(false, version, payload, this, next_id_++));
+  return std::make_unique<TrackableMockInvalidation>(false, version, payload,
+                                                     this, next_id_++);
 }
 
 MockInvalidationTracker::MockInvalidationTracker() : next_id_(0) {}
 
-MockInvalidationTracker::~MockInvalidationTracker() {}
+MockInvalidationTracker::~MockInvalidationTracker() = default;
 
 void MockInvalidationTracker::Acknowledge(int invalidation_id) {
   acknowledged_.insert(invalidation_id);

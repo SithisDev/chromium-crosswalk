@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,7 +42,7 @@ public class TestUrlRequestCallback extends UrlRequest.Callback {
     public int mHttpResponseDataLength;
     public String mResponseAsString = "";
 
-    private static final int READ_BUFFER_SIZE = 32 * 1024;
+    public int mReadBufferSize = 32 * 1024;
 
     // When false, the consumer is responsible for all calls into the request
     // that advance it.
@@ -309,7 +309,7 @@ public class TestUrlRequestCallback extends UrlRequest.Callback {
     }
 
     public void startNextRead(UrlRequest request) {
-        startNextRead(request, ByteBuffer.allocateDirect(READ_BUFFER_SIZE));
+        startNextRead(request, ByteBuffer.allocateDirect(mReadBufferSize));
     }
 
     public void startNextRead(UrlRequest request, ByteBuffer buffer) {

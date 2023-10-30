@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/time/time.h"
 #include "components/gcm_driver/account_tracker.h"
 #include "components/gcm_driver/gcm_client.h"
 #include "components/gcm_driver/gcm_connection_observer.h"
@@ -78,6 +78,10 @@ class GCMAccountTracker : public AccountTracker::Observer,
   GCMAccountTracker(std::unique_ptr<AccountTracker> account_tracker,
                     signin::IdentityManager* identity_manager,
                     GCMDriver* driver);
+
+  GCMAccountTracker(const GCMAccountTracker&) = delete;
+  GCMAccountTracker& operator=(const GCMAccountTracker&) = delete;
+
   ~GCMAccountTracker() override;
 
   // Shuts down the tracker ensuring a proper clean up. After Shutdown() is
@@ -96,16 +100,16 @@ class GCMAccountTracker : public AccountTracker::Observer,
  private:
   friend class GCMAccountTrackerTest;
 
-  // Maps account keys to account states. Keyed by account_ids as used by
-  // OAuth2TokenService.
-  typedef std::map<std::string, AccountInfo> AccountInfos;
+  // Maps account keys to account states. Keyed by account_id as used by
+  // IdentityManager.
+  typedef std::map<CoreAccountId, AccountInfo> AccountInfos;
 
   // AccountTracker::Observer overrides.
-  void OnAccountSignInChanged(const AccountIds& ids,
+  void OnAccountSignInChanged(const CoreAccountInfo& account,
                               bool is_signed_in) override;
 
   void OnAccessTokenFetchCompleteForAccount(
-      std::string account_id,
+      CoreAccountId account_id,
       GoogleServiceAuthError error,
       signin::AccessTokenInfo access_token_info);
 
@@ -136,15 +140,15 @@ class GCMAccountTracker : public AccountTracker::Observer,
   void GetToken(AccountInfos::iterator& account_iter);
 
   // Handling of actual sign in and sign out for accounts.
-  void OnAccountSignedIn(const AccountIds& ids);
-  void OnAccountSignedOut(const AccountIds& ids);
+  void OnAccountSignedIn(const CoreAccountInfo& account);
+  void OnAccountSignedOut(const CoreAccountInfo& account);
 
   // Account tracker.
   std::unique_ptr<AccountTracker> account_tracker_;
 
-  signin::IdentityManager* identity_manager_;
+  raw_ptr<signin::IdentityManager> identity_manager_;
 
-  GCMDriver* driver_;
+  raw_ptr<GCMDriver> driver_;
 
   // State of the account.
   AccountInfos account_infos_;
@@ -156,14 +160,12 @@ class GCMAccountTracker : public AccountTracker::Observer,
   // completion or upon signout of the account for which the request is being
   // made.
   using AccountIDToTokenFetcherMap =
-      std::map<std::string, std::unique_ptr<signin::AccessTokenFetcher>>;
+      std::map<CoreAccountId, std::unique_ptr<signin::AccessTokenFetcher>>;
   AccountIDToTokenFetcherMap pending_token_requests_;
 
   // Creates weak pointers used to postpone reporting tokens. See
   // ScheduleReportTokens.
   base::WeakPtrFactory<GCMAccountTracker> reporting_weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(GCMAccountTracker);
 };
 
 }  // namespace gcm

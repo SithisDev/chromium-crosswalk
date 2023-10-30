@@ -1,40 +1,45 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/indexed_db/indexed_db_database_callbacks.h"
 
+#include <utility>
+
 #include "base/bind.h"
-#include "base/task/post_task.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/indexed_db/indexed_db_database_error.h"
 #include "content/browser/indexed_db/indexed_db_dispatcher_host.h"
 #include "content/browser/indexed_db/indexed_db_transaction.h"
-#include "content/public/browser/browser_task_traits.h"
-
-using blink::mojom::IDBDatabaseCallbacksAssociatedPtrInfo;
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace content {
 
 IndexedDBDatabaseCallbacks::IndexedDBDatabaseCallbacks(
     scoped_refptr<IndexedDBContextImpl> context,
-    IDBDatabaseCallbacksAssociatedPtrInfo callbacks_info,
+    mojo::PendingAssociatedRemote<blink::mojom::IDBDatabaseCallbacks>
+        callbacks_remote,
     base::SequencedTaskRunner* idb_runner)
     : indexed_db_context_(std::move(context)) {
   DCHECK(idb_runner->RunsTasksInCurrentSequence());
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!callbacks_info.is_valid())
+  if (!callbacks_remote.is_valid())
     return;
-  callbacks_.Bind(std::move(callbacks_info));
+  callbacks_.Bind(std::move(callbacks_remote));
   // |callbacks_| is owned by |this|, so if |this| is destroyed, then
   // |callbacks_| will also be destroyed.  While |callbacks_| is otherwise
   // alive, |this| will always be valid.
-  callbacks_.set_connection_error_handler(base::BindOnce(
+  callbacks_.set_disconnect_handler(base::BindOnce(
       &IndexedDBDatabaseCallbacks::OnConnectionError, base::Unretained(this)));
 }
 
 IndexedDBDatabaseCallbacks::~IndexedDBDatabaseCallbacks() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // Transfer |context_| ownership to a new task to prevent re-entrancy through
+  // IndexedDBFactory::ContextDestroyed.
+  base::SequencedTaskRunnerHandle::Get()->ReleaseSoon(
+      FROM_HERE, std::move(indexed_db_context_));
 }
 
 void IndexedDBDatabaseCallbacks::OnForcedClose() {
@@ -74,16 +79,10 @@ void IndexedDBDatabaseCallbacks::OnComplete(
   if (complete_)
     return;
 
-  indexed_db_context_->TransactionComplete(transaction.database()->origin());
+  indexed_db_context_->TransactionComplete(
+      transaction.database()->bucket_locator());
   if (callbacks_)
     callbacks_->Complete(transaction.id());
-}
-
-void IndexedDBDatabaseCallbacks::OnDatabaseChange(
-    blink::mojom::IDBObserverChangesPtr changes) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (callbacks_)
-    callbacks_->Changes(std::move(changes));
 }
 
 void IndexedDBDatabaseCallbacks::OnConnectionError() {

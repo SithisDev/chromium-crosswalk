@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,23 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "components/services/unzip/public/mojom/unzipper.mojom.h"
 #include "components/update_client/unzipper.h"
-
-namespace service_manager {
-class Connector;
-}
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace update_client {
 
 class UnzipChromiumFactory : public UnzipperFactory {
  public:
-  explicit UnzipChromiumFactory(
-      std::unique_ptr<service_manager::Connector> connector);
+  using Callback =
+      base::RepeatingCallback<mojo::PendingRemote<unzip::mojom::Unzipper>()>;
+
+  explicit UnzipChromiumFactory(Callback callback);
+
+  UnzipChromiumFactory(const UnzipChromiumFactory&) = delete;
+  UnzipChromiumFactory& operator=(const UnzipChromiumFactory&) = delete;
 
   std::unique_ptr<Unzipper> Create() const override;
 
@@ -28,9 +31,7 @@ class UnzipChromiumFactory : public UnzipperFactory {
   ~UnzipChromiumFactory() override;
 
  private:
-  std::unique_ptr<service_manager::Connector> connector_;
-
-  DISALLOW_COPY_AND_ASSIGN(UnzipChromiumFactory);
+  const Callback callback_;
 };
 
 }  // namespace update_client

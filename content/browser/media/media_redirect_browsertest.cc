@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
 #include "build/build_config.h"
 #include "content/browser/media/media_browsertest.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "media/base/test_data_util.h"
@@ -30,12 +31,12 @@ class MediaRedirectTest : public MediaBrowserTest {
     const GURL dest_url = http_test_server->GetURL("/" + media_file);
 
     http_test_server->RegisterRequestHandler(
-        base::Bind(&MediaRedirectTest::RedirectResponseHandler,
-                   base::Unretained(this), dest_url));
+        base::BindRepeating(&MediaRedirectTest::RedirectResponseHandler,
+                            base::Unretained(this), dest_url));
     http_test_server->StartAcceptingConnections();
 
     // Run the normal media playback test.
-    EXPECT_EQ(media::kEnded, RunTest(player_url, media::kEnded));
+    EXPECT_EQ(media::kEndedTitle, RunTest(player_url, media::kEndedTitle));
   }
 
   std::unique_ptr<net::test_server::HttpResponse> RedirectResponseHandler(
@@ -43,7 +44,7 @@ class MediaRedirectTest : public MediaBrowserTest {
       const net::test_server::HttpRequest& request) {
     if (!base::StartsWith(request.relative_url, "/" + kHiddenPath,
                           base::CompareCase::SENSITIVE)) {
-      return std::unique_ptr<net::test_server::HttpResponse>();
+      return nullptr;
     }
 
     std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
@@ -61,7 +62,7 @@ IN_PROC_BROWSER_TEST_F(MediaRedirectTest, CanPlayHiddenWebm) {
   RunRedirectTest("bear.webm");
 }
 
-#if defined(OS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(IS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)
 // Flaky, see http://crbug.com/624005
 IN_PROC_BROWSER_TEST_F(MediaRedirectTest, DISABLED_CanPlayHiddenHls) {
   RunRedirectTest("bear.m3u8");

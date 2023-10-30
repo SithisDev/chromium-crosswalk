@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <iterator>
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "components/zucchini/algorithm.h"
 #include "components/zucchini/equivalence_map.h"
 
@@ -16,7 +16,7 @@ namespace zucchini {
 
 TargetPool::TargetPool() = default;
 
-TargetPool::TargetPool(std::vector<offset_t>&& targets) {
+TargetPool::TargetPool(std::deque<offset_t>&& targets) {
   DCHECK(targets_.empty());
   DCHECK(std::is_sorted(targets.begin(), targets.end()));
   targets_ = std::move(targets);

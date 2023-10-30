@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include <set>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/service_worker.h"
@@ -31,7 +30,11 @@ namespace protocol {
 class ServiceWorkerHandler : public DevToolsDomainHandler,
                              public ServiceWorker::Backend {
  public:
-  ServiceWorkerHandler();
+  explicit ServiceWorkerHandler(bool allow_inspect_worker);
+
+  ServiceWorkerHandler(const ServiceWorkerHandler&) = delete;
+  ServiceWorkerHandler& operator=(const ServiceWorkerHandler&) = delete;
+
   ~ServiceWorkerHandler() override;
 
   void Wire(UberDispatcher* dispatcher) override;
@@ -56,7 +59,9 @@ class ServiceWorkerHandler : public DevToolsDomainHandler,
                              const std::string& registration_id,
                              const std::string& tag,
                              bool last_chance) override;
-  // TODO(crbug.com/961238): Add DispatchPeriodicSyncEvent().
+  Response DispatchPeriodicSyncEvent(const std::string& origin,
+                                     const std::string& registration_id,
+                                     const std::string& tag) override;
 
  private:
   void OnWorkerRegistrationUpdated(
@@ -65,11 +70,12 @@ class ServiceWorkerHandler : public DevToolsDomainHandler,
       const std::vector<ServiceWorkerVersionInfo>& registrations);
   void OnErrorReported(int64_t registration_id,
                        int64_t version_id,
-                       const ServiceWorkerContextCoreObserver::ErrorInfo& info);
+                       const ServiceWorkerContextObserver::ErrorInfo& info);
 
   void OpenNewDevToolsWindow(int process_id, int devtools_agent_route_id);
   void ClearForceUpdate();
 
+  const bool allow_inspect_worker_;
   scoped_refptr<ServiceWorkerContextWrapper> context_;
   std::unique_ptr<ServiceWorker::Frontend> frontend_;
   bool enabled_;
@@ -78,8 +84,6 @@ class ServiceWorkerHandler : public DevToolsDomainHandler,
   StoragePartitionImpl* storage_partition_;
 
   base::WeakPtrFactory<ServiceWorkerHandler> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerHandler);
 };
 
 }  // namespace protocol

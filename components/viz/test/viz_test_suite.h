@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,26 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_discardable_memory_allocator.h"
 #include "base/test/test_suite.h"
 
-namespace base {
-class MessageLoop;
-}
+namespace ui {
+class PlatformEventSource;
+}  // namespace ui
 
 namespace viz {
 
 class VizTestSuite : public base::TestSuite {
  public:
   VizTestSuite(int argc, char** argv);
+
+  VizTestSuite(const VizTestSuite&) = delete;
+  VizTestSuite& operator=(const VizTestSuite&) = delete;
+
   ~VizTestSuite() override;
+
+  static void RunUntilIdle();
 
  protected:
   // Overridden from base::TestSuite:
@@ -29,10 +34,10 @@ class VizTestSuite : public base::TestSuite {
   void Shutdown() override;
 
  private:
-  std::unique_ptr<base::MessageLoop> message_loop_;
-  base::TestDiscardableMemoryAllocator discardable_memory_allocator_;
+  static std::unique_ptr<base::test::TaskEnvironment> task_environment_;
+  std::unique_ptr<ui::PlatformEventSource> platform_event_source_;
 
-  DISALLOW_COPY_AND_ASSIGN(VizTestSuite);
+  base::TestDiscardableMemoryAllocator discardable_memory_allocator_;
 };
 
 }  // namespace viz

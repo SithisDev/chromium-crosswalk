@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,11 @@
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
 #include "base/json/json_reader.h"
-#include "base/optional.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
@@ -32,13 +31,16 @@
 #include "components/prefs/testing_pref_service.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/variations/entropy_provider.h"
+#include "components/variations/scoped_variations_ids_provider.h"
 #include "net/http/http_util.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace ntp_snippets {
 
@@ -150,12 +152,11 @@ class MockSnippetsAvailableCallback {
 void ParseJson(const std::string& json,
                SuccessCallback success_callback,
                ErrorCallback error_callback) {
-  base::JSONReader json_reader;
-  base::Optional<base::Value> value = json_reader.ReadToValue(json);
-  if (value) {
-    std::move(success_callback).Run(std::move(*value));
+  auto parsed_json = base::JSONReader::ReadAndReturnValueWithError(json);
+  if (parsed_json.has_value()) {
+    std::move(success_callback).Run(std::move(*parsed_json));
   } else {
-    std::move(error_callback).Run(json_reader.GetErrorMessage());
+    std::move(error_callback).Run(std::move(parsed_json.error().message));
   }
 }
 
@@ -166,7 +167,7 @@ void ParseJsonDelayed(const std::string& json,
       FROM_HERE,
       base::BindOnce(&ParseJson, json, std::move(success_callback),
                      std::move(error_callback)),
-      base::TimeDelta::FromMilliseconds(kTestJsonParsingLatencyMs));
+      base::Milliseconds(kTestJsonParsingLatencyMs));
 }
 
 }  // namespace
@@ -185,6 +186,10 @@ class RemoteSuggestionsFetcherImplTest : public testing::Test {
         utils_.pref_service(), base::DefaultClock::GetInstance());
     ResetFetcher();
   }
+  RemoteSuggestionsFetcherImplTest(const RemoteSuggestionsFetcherImplTest&) =
+      delete;
+  RemoteSuggestionsFetcherImplTest& operator=(
+      const RemoteSuggestionsFetcherImplTest&) = delete;
 
   ~RemoteSuggestionsFetcherImplTest() override {}
 
@@ -201,10 +206,13 @@ class RemoteSuggestionsFetcherImplTest : public testing::Test {
         base::BindRepeating(&ParseJsonDelayed), GetFetchEndpoint(), api_key,
         user_classifier_.get());
 
-    fetcher_->SetClockForTesting(scoped_task_environment_.GetMockClock());
+    fetcher_->SetClockForTesting(task_environment_.GetMockClock());
   }
 
-  void SignIn() { identity_test_env_.MakePrimaryAccountAvailable(kTestEmail); }
+  void SignIn() {
+    identity_test_env_.MakePrimaryAccountAvailable(kTestEmail,
+                                                   signin::ConsentLevel::kSync);
+  }
 
   RemoteSuggestionsFetcher::SnippetsAvailableCallback
   ToSnippetsAvailableCallback(MockSnippetsAvailableCallback* callback) {
@@ -215,7 +223,7 @@ class RemoteSuggestionsFetcherImplTest : public testing::Test {
   RemoteSuggestionsFetcherImpl& fetcher() { return *fetcher_; }
   MockSnippetsAvailableCallback& mock_callback() { return mock_callback_; }
   void FastForwardUntilNoTasksRemain() {
-    scoped_task_environment_.FastForwardUntilNoTasksRemain();
+    task_environment_.FastForwardUntilNoTasksRemain();
   }
   base::HistogramTester& histogram_tester() { return histogram_tester_; }
 
@@ -239,22 +247,22 @@ class RemoteSuggestionsFetcherImplTest : public testing::Test {
                        const std::string& response_data,
                        net::HttpStatusCode response_code,
                        net::Error error) {
-    network::ResourceResponseHead head;
+    auto head = network::mojom::URLResponseHead::New();
     std::string headers(base::StringPrintf(
         "HTTP/1.1 %d %s\nContent-type: application/json\n\n",
         static_cast<int>(response_code), GetHttpReasonPhrase(response_code)));
-    head.headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+    head->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
         net::HttpUtil::AssembleRawHeaders(headers));
-    head.mime_type = "application/json";
+    head->mime_type = "application/json";
     network::URLLoaderCompletionStatus status(error);
     status.decoded_body_length = response_data.size();
-    test_url_loader_factory_.AddResponse(request_url, head, response_data,
-                                         status);
+    test_url_loader_factory_.AddResponse(request_url, std::move(head),
+                                         response_data, status);
   }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME};
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   std::map<std::string, std::string> default_variation_params_;
   signin::IdentityTestEnvironment identity_test_env_;
   network::TestURLLoaderFactory test_url_loader_factory_;
@@ -262,13 +270,13 @@ class RemoteSuggestionsFetcherImplTest : public testing::Test {
  private:
   test::RemoteSuggestionsTestUtils utils_;
   base::test::ScopedFeatureList scoped_feature_list_;
+  variations::ScopedVariationsIdsProvider scoped_variations_ids_provider_{
+      variations::VariationsIdsProvider::Mode::kUseSignedInState};
   std::unique_ptr<RemoteSuggestionsFetcherImpl> fetcher_;
   std::unique_ptr<UserClassifier> user_classifier_;
   MockSnippetsAvailableCallback mock_callback_;
   GURL test_url_;
   base::HistogramTester histogram_tester_;
-
-  DISALLOW_COPY_AND_ASSIGN(RemoteSuggestionsFetcherImplTest);
 };
 
 TEST_F(RemoteSuggestionsFetcherImplTest, ShouldNotFetchOnCreation) {
@@ -652,8 +660,7 @@ TEST_F(RemoteSuggestionsFetcherImplTest,
   ASSERT_THAT(fetched_categories->size(), Eq(1u));
   EXPECT_THAT(fetched_categories->front().info.additional_action(),
               Eq(ContentSuggestionsAdditionalAction::NONE));
-  EXPECT_THAT(fetched_categories->front().info.title(),
-              Eq(base::UTF8ToUTF16("Articles for Me")));
+  EXPECT_THAT(fetched_categories->front().info.title(), Eq(u"Articles for Me"));
 }
 
 TEST_F(RemoteSuggestionsFetcherImplTest, ExclusiveCategoryOnly) {
@@ -714,7 +721,7 @@ TEST_F(RemoteSuggestionsFetcherImplTest, ExclusiveCategoryOnly) {
 
   RequestParams params = test_params();
   params.exclusive_category =
-      base::Optional<Category>(Category::FromRemoteCategory(2));
+      absl::optional<Category>(Category::FromRemoteCategory(2));
 
   fetcher().FetchSnippets(params,
                           ToSnippetsAvailableCallback(&mock_callback()));

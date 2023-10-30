@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,12 @@
 #include <stdint.h>
 
 #include "base/debug/alias.h"
+#include "base/logging.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/process/memory.h"
 #include "build/build_config.h"
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "components/viz/common/resources/resource_sizes.h"
-#include "mojo/public/cpp/base/shared_memory_utils.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -23,7 +23,7 @@ namespace {
 void CollectMemoryUsageAndDie(const gfx::Size& size,
                               ResourceFormat format,
                               size_t alloc_size) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   DWORD last_error = GetLastError();
   base::debug::Alias(&last_error);
 #endif
@@ -50,11 +50,8 @@ base::MappedReadOnlyRegion AllocateSharedBitmap(const gfx::Size& size,
     CollectMemoryUsageAndDie(size, format, std::numeric_limits<int>::max());
   }
 
-  // NOTE: Need to use mojo::CreateReadOnlySharedMemoryRegion() instead of
-  // base::ReadOnlySharedMemoryRegion::Create() to ensure that this always work,
-  // even in sandboxed processes.
   base::MappedReadOnlyRegion shm =
-      mojo::CreateReadOnlySharedMemoryRegion(bytes);
+      base::ReadOnlySharedMemoryRegion::Create(bytes);
   if (!shm.IsValid()) {
     DLOG(ERROR) << "Browser failed to allocate shared memory";
     CollectMemoryUsageAndDie(size, format, bytes);

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,13 +33,10 @@ void FlingScheduler::ScheduleFlingProgress(
     return;
 
   ui::Compositor* compositor = GetCompositor();
-  // If a ui::Compositor can't be obtained, ask the host for BeginFrames.
-  if (!compositor) {
-    host_->SetNeedsBeginFrameForFlingProgress();
-    return;
+  if (compositor) {
+    compositor->AddAnimationObserver(this);
+    observed_compositor_ = compositor;
   }
-  compositor->AddAnimationObserver(this);
-  observed_compositor_ = compositor;
 }
 
 void FlingScheduler::DidStopFlingingOnBrowser(

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,20 @@
 #include <map>
 #include <string>
 
-#include "content/common/content_export.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/desktop_streams_registry.h"
-#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 
-class CONTENT_EXPORT DesktopStreamsRegistryImpl
-    : public DesktopStreamsRegistry {
+class DesktopStreamsRegistryImpl : public DesktopStreamsRegistry {
  public:
   DesktopStreamsRegistryImpl();
+
+  DesktopStreamsRegistryImpl(const DesktopStreamsRegistryImpl&) = delete;
+  DesktopStreamsRegistryImpl& operator=(const DesktopStreamsRegistryImpl&) =
+      delete;
+
   ~DesktopStreamsRegistryImpl() override;
 
   // Returns the DesktopStreamRegistryImpl singleton.
@@ -26,7 +29,7 @@ class CONTENT_EXPORT DesktopStreamsRegistryImpl
 
   std::string RegisterStream(int render_process_id,
                              int render_frame_id,
-                             const GURL& origin,
+                             const url::Origin& origin,
                              const DesktopMediaID& source,
                              const std::string& extension_name,
                              const DesktopStreamRegistryType type) override;
@@ -35,7 +38,7 @@ class CONTENT_EXPORT DesktopStreamsRegistryImpl
       const std::string& id,
       int render_process_id,
       int render_frame_id,
-      const GURL& origin,
+      const url::Origin& origin,
       std::string* extension_name,
       const DesktopStreamRegistryType type) override;
 
@@ -46,7 +49,7 @@ class CONTENT_EXPORT DesktopStreamsRegistryImpl
 
     int render_process_id;
     int render_frame_id;
-    GURL origin;
+    url::Origin origin;
     DesktopMediaID source;
     std::string extension_name;
     DesktopStreamRegistryType type;
@@ -57,8 +60,6 @@ class CONTENT_EXPORT DesktopStreamsRegistryImpl
   void CleanupStream(const std::string& id);
 
   StreamsMap approved_streams_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopStreamsRegistryImpl);
 };
 
 }  // namespace content

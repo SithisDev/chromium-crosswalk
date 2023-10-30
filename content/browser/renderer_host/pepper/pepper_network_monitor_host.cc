@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/callback_helpers.h"
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
 #include "content/browser/renderer_host/pepper/pepper_socket_utils.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -41,10 +39,10 @@ bool CanUseNetworkMonitor(bool external_plugin,
 
 void OnGetNetworkList(
     base::OnceCallback<void(const net::NetworkInterfaceList&)> callback,
-    const base::Optional<net::NetworkInterfaceList>& networks) {
+    const absl::optional<net::NetworkInterfaceList>& networks) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(std::move(callback), networks.has_value()
                                               ? *networks
                                               : net::NetworkInterfaceList()));
@@ -70,12 +68,12 @@ PepperNetworkMonitorHost::PepperNetworkMonitorHost(BrowserPpapiHostImpl* host,
   host->GetRenderFrameIDsForInstance(
       instance, &render_process_id, &render_frame_id);
 
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {BrowserThread::UI},
-      base::Bind(&CanUseNetworkMonitor, host->external_plugin(),
-                 render_process_id, render_frame_id),
-      base::Bind(&PepperNetworkMonitorHost::OnPermissionCheckResult,
-                 weak_factory_.GetWeakPtr()));
+  GetUIThreadTaskRunner({})->PostTaskAndReplyWithResult(
+      FROM_HERE,
+      base::BindOnce(&CanUseNetworkMonitor, host->external_plugin(),
+                     render_process_id, render_frame_id),
+      base::BindOnce(&PepperNetworkMonitorHost::OnPermissionCheckResult,
+                     weak_factory_.GetWeakPtr()));
 }
 
 PepperNetworkMonitorHost::~PepperNetworkMonitorHost() {
@@ -100,9 +98,8 @@ void PepperNetworkMonitorHost::OnPermissionCheckResult(
     return;
   }
 
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&content::GetNetworkConnectionTracker),
+  GetUIThreadTaskRunner({})->PostTaskAndReplyWithResult(
+      FROM_HERE, base::BindOnce(&content::GetNetworkConnectionTracker),
       base::BindOnce(&PepperNetworkMonitorHost::SetNetworkConnectionTracker,
                      weak_factory_.GetWeakPtr()));
   GetAndSendNetworkList();
@@ -116,9 +113,9 @@ void PepperNetworkMonitorHost::SetNetworkConnectionTracker(
 }
 
 void PepperNetworkMonitorHost::GetAndSendNetworkList() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&GetNetworkList,
                      base::BindOnce(&PepperNetworkMonitorHost::SendNetworkList,
                                     weak_factory_.GetWeakPtr())));
@@ -126,7 +123,7 @@ void PepperNetworkMonitorHost::GetAndSendNetworkList() {
 
 void PepperNetworkMonitorHost::SendNetworkList(
     const net::NetworkInterfaceList& list) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   std::unique_ptr<ppapi::proxy::SerializedNetworkList> list_copy(
       new ppapi::proxy::SerializedNetworkList(list.size()));

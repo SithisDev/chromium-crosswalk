@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,16 @@
 #include <memory>
 
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
+#include "build/build_config.h"
 #include "content/browser/renderer_host/input/mouse_wheel_phase_handler.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/input/pointer_lock_result.mojom.h"
+#include "ui/aura/scoped_enable_unadjusted_mouse_events.h"
 #include "ui/aura/scoped_keyboard_hook.h"
-#include "ui/aura/window_tracker.h"
 #include "ui/events/event_handler.h"
 #include "ui/events/gestures/motion_event_aura.h"
 #include "ui/latency/latency_info.h"
@@ -42,7 +45,6 @@ class OverscrollController;
 class RenderWidgetHostImpl;
 class RenderWidgetHostViewBase;
 class TouchSelectionControllerClientAura;
-class HitTestDebugKeyEventObserver;
 
 // Provides an implementation of ui::EventHandler for use with
 // RenderWidgetHostViewBase. A delegate is required in order to provide platform
@@ -63,6 +65,9 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
    public:
     Delegate();
 
+    Delegate(const Delegate&) = delete;
+    Delegate& operator=(const Delegate&) = delete;
+
     // Converts |rect| from window coordinate to screen coordinate.
     virtual gfx::Rect ConvertRectToScreen(const gfx::Rect& rect) const = 0;
     // Call keybindings handler against the event and send matched edit commands
@@ -76,7 +81,6 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
     // Returns whether the widget needs to grab mouse capture to work properly.
     virtual bool NeedsMouseCapture() = 0;
     virtual void SetTooltipsEnabled(bool enable) = 0;
-    virtual void ShowContextMenu(const ContextMenuParams& params) = 0;
     // Sends shutdown request.
     virtual void Shutdown() = 0;
 
@@ -99,14 +103,17 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
         selection_controller_client_;
     std::unique_ptr<ui::TouchSelectionController> selection_controller_;
     std::unique_ptr<OverscrollController> overscroll_controller_;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Delegate);
   };
 
   RenderWidgetHostViewEventHandler(RenderWidgetHostImpl* host,
                                    RenderWidgetHostViewBase* host_view,
                                    Delegate* delegate);
+
+  RenderWidgetHostViewEventHandler(const RenderWidgetHostViewEventHandler&) =
+      delete;
+  RenderWidgetHostViewEventHandler& operator=(
+      const RenderWidgetHostViewEventHandler&) = delete;
+
   ~RenderWidgetHostViewEventHandler() override;
 
   // Set child popup's host view, and event handler, in order to redirect input.
@@ -120,17 +127,17 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
     return mouse_wheel_phase_handler_;
   }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Sets the ContextMenuParams when a context menu is triggered. Required for
   // subsequent event processing.
   void SetContextMenuParams(const ContextMenuParams& params);
-
-  // Updates the cursor clip region. Used for mouse locking.
-  void UpdateMouseLockRegion();
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
   bool accept_return_character() { return accept_return_character_; }
   bool mouse_locked() { return mouse_locked_; }
+  bool mouse_locked_unadjusted_movement() {
+    return mouse_locked_ && mouse_locked_unadjusted_movement_;
+  }
   const ui::MotionEventAura& pointer_state() const { return pointer_state_; }
   void set_focus_on_mouse_down_or_key_event(
       bool focus_on_mouse_down_or_key_event) {
@@ -139,11 +146,14 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   void set_window(aura::Window* window) { window_ = window; }
 
   // Lock/Unlock processing of future mouse events.
-  bool LockMouse();
+  blink::mojom::PointerLockResult LockMouse(bool request_unadjusted_movement);
+  // Change the current lock to have the given unadjusted_movement.
+  blink::mojom::PointerLockResult ChangeMouseLock(
+      bool request_unadjusted_movement);
   void UnlockMouse();
 
   // Start/Stop processing of future system keyboard events.
-  bool LockKeyboard(base::Optional<base::flat_set<ui::DomCode>> codes);
+  bool LockKeyboard(absl::optional<base::flat_set<ui::DomCode>> codes);
   void UnlockKeyboard();
   bool IsKeyboardLocked() const;
 
@@ -155,11 +165,19 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   void OnGestureEvent(ui::GestureEvent* event) override;
 
   void GestureEventAck(const blink::WebGestureEvent& event,
-                       InputEventAckState ack_result);
+                       blink::mojom::InputEventResultState ack_result);
 
   // Used to set the mouse_wheel_phase_handler_ timer timeout for testing.
   void set_mouse_wheel_wheel_phase_handler_timeout(base::TimeDelta timeout) {
     mouse_wheel_phase_handler_.set_mouse_wheel_end_dispatch_timeout(timeout);
+  }
+
+  // Used in testing for setting the max time to wait for momentum phase began
+  // after a scroll phase end.
+  void set_max_time_between_phase_ended_and_momentum_phase_began(
+      base::TimeDelta timeout) {
+    mouse_wheel_phase_handler_
+        .set_max_time_between_phase_ended_and_momentum_phase_began(timeout);
   }
 
  private:
@@ -178,6 +196,7 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
       RenderWidgetHostViewAuraTest,
       KeyEventRoutingKeyboardLockAndChildPopupWithoutInputGrab);
   friend class MockPointerLockRenderWidgetHostView;
+  friend class FakeRenderWidgetHostViewAura;
 
   // Returns true if the |event| passed in can be forwarded to the renderer.
   bool CanRendererHandleEvent(const ui::MouseEvent* event,
@@ -217,6 +236,9 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   // moved to center.
   bool ShouldMoveToCenter(gfx::PointF mouse_screen_position);
 
+  // Return whether the event is a synthesized move from |MoveCursorTo|.
+  bool MatchesSynthesizedMovePosition(const blink::WebMouseEvent& event);
+
   // Returns true when we can hit test input events with location data to be
   // sent to the targeted RenderWidgetHost.
   bool ShouldRouteEvents() const;
@@ -232,8 +254,10 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   // Returns true if event is a reserved key for an active KeyboardLock request.
   bool IsKeyLocked(const ui::KeyEvent& event);
 
+  void HandleMouseWheelEvent(ui::MouseEvent* event);
+
   // Whether return characters should be passed on to the RenderWidgetHostImpl.
-  bool accept_return_character_;
+  bool accept_return_character_ = false;
 
   // Deactivates keyboard lock when destroyed.
   std::unique_ptr<aura::ScopedKeyboardHook> scoped_keyboard_hook_;
@@ -243,19 +267,22 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   // mouse position just as mouse lock was entered; the movement they report
   // indicates what the change in position of the mouse would be had it not been
   // locked.
-  bool mouse_locked_;
+  bool mouse_locked_ = false;
+
+  // Use to track whether pointer lock is in the unadjusted movement mode and
+  // mousemoves are using unadjusted movement value (without mouse
+  // accelerations) from OS, i.e. WM_INPUT on Windows. Deactivates raw input
+  // mode when destroyed.
+  std::unique_ptr<aura::ScopedEnableUnadjustedMouseEvents>
+      mouse_locked_unadjusted_movement_;
 
   // Whether pinch-to-zoom should be enabled and pinch events forwarded to the
   // renderer.
-  bool pinch_zoom_enabled_;
+  const bool pinch_zoom_enabled_;
 
   // This flag when set ensures that we send over a notification to blink that
-  // the current view has focus. Defaults to false.
-  bool set_focus_on_mouse_down_or_key_event_;
-
-  // Used to track the state of the window we're created from. Only used when
-  // created fullscreen.
-  std::unique_ptr<aura::WindowTracker> host_tracker_;
+  // the current view has focus.
+  bool set_focus_on_mouse_down_or_key_event_ = false;
 
   // Used to record the last position of the mouse.
   // While the mouse is locked, they store the last known position just as mouse
@@ -268,31 +295,26 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   gfx::PointF global_mouse_position_;
   // In mouse locked mode, we synthetically move the mouse cursor to the center
   // of the window when it reaches the window borders to avoid it going outside.
-  // This flag is used to differentiate between these synthetic mouse move
+  // This value is used to differentiate between these synthetic mouse move
   // events vs. normal mouse move events.
-  bool synthetic_move_sent_;
+  absl::optional<gfx::Point> synthetic_move_position_;
 
   bool enable_consolidated_movement_;
-  base::Optional<gfx::Point> synthetic_move_position_;
 
   // Stores the current state of the active pointers targeting this
   // object.
   ui::MotionEventAura pointer_state_;
 
   // The following are not owned. They should outlive |this|
-  RenderWidgetHostImpl* const host_;
+  const raw_ptr<RenderWidgetHostImpl> host_;
   // Should create |this| and own it.
-  RenderWidgetHostViewBase* const host_view_;
+  const raw_ptr<RenderWidgetHostViewBase> host_view_;
   // Optional, used to redirect events to a popup and associated handler.
-  RenderWidgetHostViewBase* popup_child_host_view_;
-  ui::EventHandler* popup_child_event_handler_;
-  Delegate* const delegate_;
-  aura::Window* window_;
+  raw_ptr<RenderWidgetHostViewBase> popup_child_host_view_ = nullptr;
+  raw_ptr<ui::EventHandler> popup_child_event_handler_ = nullptr;
+  const raw_ptr<Delegate> delegate_;
+  raw_ptr<aura::Window> window_ = nullptr;
   MouseWheelPhaseHandler mouse_wheel_phase_handler_;
-
-  std::unique_ptr<HitTestDebugKeyEventObserver> debug_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewEventHandler);
 };
 
 }  // namespace content

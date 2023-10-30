@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,16 @@
 
 #include <memory>
 
-#include "base/single_thread_task_runner.h"
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/gpu/raster_context_provider.h"
 #include "components/viz/test/test_gpu_memory_buffer_manager.h"
 #include "components/viz/test/test_image_factory.h"
 #include "gpu/config/gpu_feature_info.h"
 
-class GrContext;
+class GrDirectContext;
 
 namespace gpu {
 class GLInProcessContext;
@@ -37,13 +38,19 @@ namespace viz {
 
 std::unique_ptr<gpu::GLInProcessContext> CreateTestInProcessContext();
 
+enum TestContextType {
+  kGLES2,           // Provides GLES2Interface.
+  kSoftwareRaster,  // Provides RasterInterface for software raster.
+  kGpuRaster        // Provides RasterInterface for GPU raster.
+};
+
 class TestInProcessContextProvider
     : public base::RefCountedThreadSafe<TestInProcessContextProvider>,
       public ContextProvider,
       public RasterContextProvider {
  public:
   explicit TestInProcessContextProvider(
-      bool enable_oop_rasterization,
+      TestContextType type,
       bool support_locking,
       gpu::raster::GrShaderCache* gr_shader_cache = nullptr,
       gpu::GpuProcessActivityFlags* activity_flags = nullptr);
@@ -55,7 +62,7 @@ class TestInProcessContextProvider
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::raster::RasterInterface* RasterInterface() override;
   gpu::ContextSupport* ContextSupport() override;
-  class GrContext* GrContext() override;
+  class GrDirectContext* GrContext() override;
   gpu::SharedImageInterface* SharedImageInterface() override;
   ContextCacheController* CacheController() override;
   base::Lock* GetLock() override;
@@ -71,23 +78,22 @@ class TestInProcessContextProvider
   ~TestInProcessContextProvider() override;
 
  private:
-  bool enable_oop_rasterization_ = false;
-  gpu::raster::GrShaderCache* gr_shader_cache_ = nullptr;
-  gpu::GpuProcessActivityFlags* activity_flags_ = nullptr;
+  const TestContextType type_;
+  raw_ptr<gpu::raster::GrShaderCache> gr_shader_cache_ = nullptr;
+  raw_ptr<gpu::GpuProcessActivityFlags> activity_flags_ = nullptr;
 
-  TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
   TestImageFactory image_factory_;
+  gpu::Capabilities caps_;
 
-  // Used if support_gles2_interface.
+  // Used for GLES2 contexts only.
   std::unique_ptr<gpu::GLInProcessContext> gles2_context_;
-  std::unique_ptr<gpu::raster::RasterInterface> raster_implementation_gles2_;
   std::unique_ptr<skia_bindings::GrContextForGLES2Interface> gr_context_;
 
-  // Used if !support_gles2_interface.
+  // Used for raster contexts only.
   std::unique_ptr<gpu::RasterInProcessContext> raster_context_;
 
   std::unique_ptr<ContextCacheController> cache_controller_;
-  base::Optional<base::Lock> context_lock_;
+  absl::optional<base::Lock> context_lock_;
   gpu::GpuFeatureInfo gpu_feature_info_;
 };
 

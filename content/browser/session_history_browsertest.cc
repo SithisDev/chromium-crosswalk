@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,24 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "content/browser/web_contents/web_contents_impl.h"
+#include "content/common/content_navigation_policy.h"
 #include "content/public/browser/navigation_controller.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/back_forward_cache_util.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/test_frame_navigation_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
@@ -34,8 +41,9 @@ std::unique_ptr<net::test_server::HttpResponse> HandleEchoTitleRequest(
     const std::string& echotitle_path,
     const net::test_server::HttpRequest& request) {
   if (!base::StartsWith(request.relative_url, echotitle_path,
-                        base::CompareCase::SENSITIVE))
-    return std::unique_ptr<net::test_server::HttpResponse>();
+                        base::CompareCase::SENSITIVE)) {
+    return nullptr;
+  }
 
   std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
       new net::test_server::BasicHttpResponse);
@@ -58,39 +66,36 @@ class SessionHistoryTest : public ContentBrowserTest {
 
     SetupCrossSiteRedirector(embedded_test_server());
     embedded_test_server()->RegisterRequestHandler(
-        base::Bind(&HandleEchoTitleRequest, "/echotitle"));
+        base::BindRepeating(&HandleEchoTitleRequest, "/echotitle"));
 
     ASSERT_TRUE(embedded_test_server()->Start());
-    NavigateToURL(shell(), GURL(url::kAboutBlankURL));
+    EXPECT_TRUE(NavigateToURL(shell(), GURL(url::kAboutBlankURL)));
   }
 
   // Simulate clicking a link.  Only works on the frames.html testserver page.
   void ClickLink(const std::string& node_id) {
-    GURL url("javascript:clickLink('" + node_id + "')");
-    NavigateToURL(shell(), url);
-  }
-
-  // Simulate filling in form data.  Only works on the frames.html page with
-  // subframe = form.html, and on form.html itself.
-  void FillForm(const std::string& node_id, const std::string& value) {
-    GURL url("javascript:fillForm('" + node_id + "', '" + value + "')");
-    // This will return immediately, but since the JS executes synchronously
-    // on the renderer, it will complete before the next navigate message is
-    // processed.
-    NavigateToURL(shell(), url);
+    TestNavigationObserver observer(shell()->web_contents());
+    shell()->LoadURL(GURL("javascript:clickLink('" + node_id + "')"));
+    observer.Wait();
   }
 
   // Simulate submitting a form.  Only works on the frames.html page with
-  // subframe = form.html, and on form.html itself.
+  // subframe = form.html, and on form.html itself.  Assumes that the form
+  // submission triggers a navigation and waits for that navigation to complete
+  // before returning.  Expects caller to validate the new URL after the
+  // navigation.
   void SubmitForm(const std::string& node_id) {
-    GURL url("javascript:submitForm('" + node_id + "')");
-    NavigateToURL(shell(), url);
+    TestNavigationObserver observer(shell()->web_contents());
+    shell()->LoadURL(GURL("javascript:submitForm('" + node_id + "')"));
+    observer.Wait();
   }
 
   // Navigate session history using history.go(distance).
   void JavascriptGo(const std::string& distance) {
-    GURL url("javascript:history.go('" + distance + "')");
-    NavigateToURL(shell(), url);
+    TestNavigationObserver observer(shell()->web_contents());
+    EXPECT_TRUE(ExecuteScript(ToRenderFrameHost(shell()->web_contents()),
+                              "history.go('" + distance + "')"));
+    observer.Wait();
   }
 
   std::string GetTabTitle() {
@@ -108,9 +113,9 @@ class SessionHistoryTest : public ContentBrowserTest {
 
   void NavigateAndCheckTitle(const char* filename,
                              const std::string& expected_title) {
-    base::string16 expected_title16(base::ASCIIToUTF16(expected_title));
+    std::u16string expected_title16(base::ASCIIToUTF16(expected_title));
     TitleWatcher title_watcher(shell()->web_contents(), expected_title16);
-    NavigateToURL(shell(), GetURL(filename));
+    EXPECT_TRUE(NavigateToURL(shell(), GetURL(filename)));
     ASSERT_EQ(expected_title16, title_watcher.WaitAndGetTitle());
   }
 
@@ -123,17 +128,13 @@ class SessionHistoryTest : public ContentBrowserTest {
   }
 
   void GoBack() {
-    WindowedNotificationObserver load_stop_observer(
-        NOTIFICATION_LOAD_STOP,
-        NotificationService::AllSources());
+    LoadStopObserver load_stop_observer(shell()->web_contents());
     shell()->web_contents()->GetController().GoBack();
     load_stop_observer.Wait();
   }
 
   void GoForward() {
-    WindowedNotificationObserver load_stop_observer(
-        NOTIFICATION_LOAD_STOP,
-        NotificationService::AllSources());
+    LoadStopObserver load_stop_observer(shell()->web_contents());
     shell()->web_contents()->GetController().GoForward();
     load_stop_observer.Wait();
   }
@@ -145,7 +146,7 @@ class SessionHistoryScrollAnchorTest : public SessionHistoryTest {
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     SessionHistoryTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII("enable-blink-features",
+    command_line->AppendSwitchASCII(switches::kEnableBlinkFeatures,
                                     "ScrollAnchorSerialization");
   }
 };
@@ -302,40 +303,49 @@ IN_PROC_BROWSER_TEST_F(SessionHistoryTest, FrameFormBackForward) {
   EXPECT_EQ(frames, GetTabURL());
 }
 
-// TODO(mpcomplete): enable this when Bug 734372 is fixed:
-// "Doing a session history navigation does not restore newly-created subframe
-// document state"
-// Test that back/forward preserves POST data and document state when navigating
-// across frames (ie, from frame -> nonframe).
-// Hangs, see http://crbug.com/45058.
 IN_PROC_BROWSER_TEST_F(SessionHistoryTest, CrossFrameFormBackForward) {
   ASSERT_FALSE(CanGoBack());
 
   GURL frames(GetURL("frames.html"));
+  // Open a page with "ftop" and  "fbot" iframe.
+  // The title of the main frame follows the title of the "fbot" iframe.
   ASSERT_NO_FATAL_FAILURE(NavigateAndCheckTitle("frames.html", "bot1"));
 
+  // Click link in the "fbot" iframe. This updates the title of the main frame
+  // to "form".
   ClickLink("aform");
   EXPECT_EQ("form", GetTabTitle());
   EXPECT_EQ(frames, GetTabURL());
 
+  // Submit form in the "fbot" iframe. This submits to /echotitle which sets the
+  // title to the submission content of the form.
   SubmitForm("isubmit");
   EXPECT_EQ("text=&select=a", GetTabTitle());
   EXPECT_EQ(frames, GetTabURL());
 
+  // Go back, navigating the "fbot"  iframe. This updates the title of the main
+  // frame back to "form".
   GoBack();
   EXPECT_EQ("form", GetTabTitle());
   EXPECT_EQ(frames, GetTabURL());
 
   // history is [blank, bot1, *form, post]
 
+  // Navigate the main frame.
   ASSERT_NO_FATAL_FAILURE(NavigateAndCheckTitle("bot2.html", "bot2"));
 
   // history is [blank, bot1, form, *bot2]
 
+  // Navigate the main frame back. If back/forward cache is enabled, the page
+  // will be restored as it was before we navigated away from it, with the title
+  // set to "form". If not, the page will be reloaded from scratch, setting the
+  // title to "bot1" again.
   GoBack();
-  EXPECT_EQ("bot1", GetTabTitle());
+  EXPECT_EQ(IsBackForwardCacheEnabled() ? "form" : "bot1", GetTabTitle());
   EXPECT_EQ(frames, GetTabURL());
 
+  // Submit the form in the "fbot" iframe again . This submits to /echotitle
+  // which sets the title to the submission content of the form.
   SubmitForm("isubmit");
   EXPECT_EQ("text=&select=a", GetTabTitle());
   EXPECT_EQ(frames, GetTabURL());
@@ -390,7 +400,13 @@ IN_PROC_BROWSER_TEST_F(SessionHistoryTest, FragmentBackForward) {
 //
 // TODO(brettw) bug 50648: fix flakyness. This test seems like it was failing
 // about 1/4 of the time on Vista by failing to execute JavascriptGo (see bug).
-IN_PROC_BROWSER_TEST_F(SessionHistoryTest, JavascriptHistory) {
+// TODO(crbug.com/1280512): Flaky on Linux and Lacros.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#define MAYBE_JavascriptHistory DISABLED_JavascriptHistory
+#else
+#define MAYBE_JavascriptHistory JavascriptHistory
+#endif
+IN_PROC_BROWSER_TEST_F(SessionHistoryTest, MAYBE_JavascriptHistory) {
   ASSERT_FALSE(CanGoBack());
 
   ASSERT_NO_FATAL_FAILURE(NavigateAndCheckTitle("bot1.html", "bot1"));
@@ -455,20 +471,29 @@ IN_PROC_BROWSER_TEST_F(SessionHistoryTest, JavascriptHistory) {
   // NotificationService.)
 }
 
-// This test is failing consistently. See http://crbug.com/22560
 IN_PROC_BROWSER_TEST_F(SessionHistoryTest, LocationReplace) {
   // Test that using location.replace doesn't leave the title of the old page
   // visible.
-  ASSERT_NO_FATAL_FAILURE(NavigateAndCheckTitle(
-      "replace.html?bot1.html", "bot1"));
+  std::u16string expected_title16(u"bot1");
+  TitleWatcher title_watcher(shell()->web_contents(), expected_title16);
+  EXPECT_TRUE(NavigateToURL(shell(), GetURL("replace.html?bot1.html"),
+                            GetURL("bot1.html") /* expected_commit_url */));
+  ASSERT_EQ(expected_title16, title_watcher.WaitAndGetTitle());
 }
 
 IN_PROC_BROWSER_TEST_F(SessionHistoryTest, LocationChangeInSubframe) {
   ASSERT_NO_FATAL_FAILURE(NavigateAndCheckTitle(
       "location_redirect.html", "Default Title"));
 
-  NavigateToURL(shell(), GURL("javascript:void(frames[0].navigate())"));
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetPrimaryFrameTree()
+                            .root();
+  TestFrameNavigationObserver observer(root->child_at(0));
+  shell()->LoadURL(GURL("javascript:void(frames[0].navigate())"));
+  observer.Wait();
   EXPECT_EQ("foo", GetTabTitle());
+  EXPECT_EQ(GetURL("location_redirect_frame2.html"),
+            root->child_at(0)->current_url());
 
   GoBack();
   EXPECT_EQ("Default Title", GetTabTitle());
@@ -479,8 +504,15 @@ IN_PROC_BROWSER_TEST_F(SessionHistoryScrollAnchorTest,
   ASSERT_NO_FATAL_FAILURE(
       NavigateAndCheckTitle("location_redirect.html", "Default Title"));
 
-  NavigateToURL(shell(), GURL("javascript:void(frames[0].navigate())"));
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetPrimaryFrameTree()
+                            .root();
+  TestFrameNavigationObserver observer(root->child_at(0));
+  shell()->LoadURL(GURL("javascript:void(frames[0].navigate())"));
+  observer.Wait();
   EXPECT_EQ("foo", GetTabTitle());
+  EXPECT_EQ(GetURL("location_redirect_frame2.html"),
+            root->child_at(0)->current_url());
 
   GoBack();
   EXPECT_EQ("Default Title", GetTabTitle());
@@ -489,12 +521,13 @@ IN_PROC_BROWSER_TEST_F(SessionHistoryScrollAnchorTest,
 // http://code.google.com/p/chromium/issues/detail?id=56267
 IN_PROC_BROWSER_TEST_F(SessionHistoryTest, HistoryLength) {
   EXPECT_EQ(1, EvalJs(shell(), "history.length"));
-  NavigateToURL(shell(), GetURL("title1.html"));
+  EXPECT_TRUE(
+      NavigateToURL(shell(), embedded_test_server()->GetURL("/title1.html")));
 
   EXPECT_EQ(2, EvalJs(shell(), "history.length"));
 
   // Now test that history.length is updated when the navigation is committed.
-  NavigateToURL(shell(), GetURL("record_length.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), GetURL("record_length.html")));
 
   EXPECT_EQ(3, EvalJs(shell(), "history.length"));
 
@@ -502,7 +535,8 @@ IN_PROC_BROWSER_TEST_F(SessionHistoryTest, HistoryLength) {
   GoBack();
 
   // Ensure history.length is properly truncated.
-  NavigateToURL(shell(), GetURL("title2.html"));
+  EXPECT_TRUE(
+      NavigateToURL(shell(), embedded_test_server()->GetURL("/title2.html")));
 
   EXPECT_EQ(2, EvalJs(shell(), "history.length"));
 }

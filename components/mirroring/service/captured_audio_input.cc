@@ -1,19 +1,19 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/mirroring/service/captured_audio_input.h"
 
-#include "base/logging.h"
-#include "media/mojo/interfaces/audio_data_pipe.mojom.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
+#include "media/mojo/common/input_error_code_converter.h"
+#include "media/mojo/mojom/audio_data_pipe.mojom.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 
 namespace mirroring {
 
 CapturedAudioInput::CapturedAudioInput(StreamCreatorCallback callback)
-    : stream_creator_callback_(std::move(callback)),
-      stream_client_binding_(this),
-      stream_creator_client_binding_(this) {
+    : stream_creator_callback_(std::move(callback)) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
   DCHECK(!stream_creator_callback_.is_null());
 }
@@ -29,9 +29,9 @@ void CapturedAudioInput::CreateStream(media::AudioInputIPCDelegate* delegate,
   DCHECK(delegate);
   DCHECK(!delegate_);
   delegate_ = delegate;
-  mojom::AudioStreamCreatorClientPtr client;
-  stream_creator_client_binding_.Bind(mojo::MakeRequest(&client));
-  stream_creator_callback_.Run(std::move(client), params, total_segments);
+  stream_creator_callback_.Run(
+      stream_creator_client_receiver_.BindNewPipeAndPassRemote(), params,
+      total_segments);
 }
 
 void CapturedAudioInput::RecordStream() {
@@ -49,8 +49,7 @@ void CapturedAudioInput::SetVolume(double volume) {
 void CapturedAudioInput::CloseStream() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   delegate_ = nullptr;
-  if (stream_client_binding_.is_bound())
-    stream_client_binding_.Unbind();
+  stream_client_receiver_.reset();
   stream_.reset();
 }
 
@@ -60,35 +59,34 @@ void CapturedAudioInput::SetOutputDeviceForAec(
 }
 
 void CapturedAudioInput::StreamCreated(
-    media::mojom::AudioInputStreamPtr stream,
-    media::mojom::AudioInputStreamClientRequest client_request,
-    media::mojom::ReadOnlyAudioDataPipePtr data_pipe,
-    bool initially_muted) {
+    mojo::PendingRemote<media::mojom::AudioInputStream> stream,
+    mojo::PendingReceiver<media::mojom::AudioInputStreamClient> client_receiver,
+    media::mojom::ReadOnlyAudioDataPipePtr data_pipe) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(delegate_);
   DCHECK(!stream_);
-  DCHECK(!stream_client_binding_.is_bound());
+  DCHECK(!stream_client_receiver_.is_bound());
 
-  stream_ = std::move(stream);
-  stream_client_binding_.Bind(std::move(client_request));
+  stream_.Bind(std::move(stream));
+  stream_client_receiver_.Bind(std::move(client_receiver));
 
-  base::PlatformFile socket_handle;
-  auto result =
-      mojo::UnwrapPlatformFile(std::move(data_pipe->socket), &socket_handle);
-  DCHECK_EQ(result, MOJO_RESULT_OK);
+  DCHECK(data_pipe->socket.is_valid_platform_file());
+  base::ScopedPlatformFile socket_handle = data_pipe->socket.TakePlatformFile();
 
   base::ReadOnlySharedMemoryRegion& shared_memory_region =
       data_pipe->shared_memory;
   DCHECK(shared_memory_region.IsValid());
 
-  delegate_->OnStreamCreated(std::move(shared_memory_region), socket_handle,
-                             initially_muted);
+  delegate_->OnStreamCreated(std::move(shared_memory_region),
+                             std::move(socket_handle),
+                             /* initally_muted */ false);
 }
 
-void CapturedAudioInput::OnError() {
+void CapturedAudioInput::OnError(media::mojom::InputStreamErrorCode code) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(delegate_);
-  delegate_->OnError();
+
+  delegate_->OnError(media::ConvertToCaptureCallbackCode(code));
 }
 
 void CapturedAudioInput::OnMutedStateChanged(bool is_muted) {

@@ -1,10 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/cast_channel/cast_channel_enum.h"
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/notreached.h"
 
 namespace cast_channel {
 
@@ -12,7 +14,7 @@ namespace cast_channel {
   case enum:                              \
     return #enum
 
-// TODO(jrw): Replace with EnumTable.
+// TODO(crbug.com/1291730): Replace with EnumTable.
 std::string ReadyStateToString(ReadyState ready_state) {
   switch (ready_state) {
     CAST_CHANNEL_TYPE_TO_STRING(ReadyState::NONE);
@@ -25,7 +27,7 @@ std::string ReadyStateToString(ReadyState ready_state) {
   return "Unknown ready_state";
 }
 
-// TODO(jrw): Replace with EnumTable.
+// TODO(crbug.com/1291730): Replace with EnumTable.
 std::string ChannelErrorToString(ChannelError channel_error) {
   switch (channel_error) {
     CAST_CHANNEL_TYPE_TO_STRING(ChannelError::NONE);

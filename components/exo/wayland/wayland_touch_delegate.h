@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,17 @@ struct wl_resource;
 
 namespace exo {
 namespace wayland {
+class SerialTracker;
 
 // Touch delegate class that accepts events for surfaces owned by the same
 // client as a touch resource.
 class WaylandTouchDelegate : public WaylandInputDelegate, public TouchDelegate {
  public:
-  explicit WaylandTouchDelegate(wl_resource* touch_resource);
+  explicit WaylandTouchDelegate(wl_resource* touch_resource,
+                                SerialTracker* serial_tracker);
+
+  WaylandTouchDelegate(const WaylandTouchDelegate&) = delete;
+  WaylandTouchDelegate& operator=(const WaylandTouchDelegate&) = delete;
 
   // Overridden from TouchDelegate:
   void OnTouchDestroying(Touch* touch) override;
@@ -39,13 +44,11 @@ class WaylandTouchDelegate : public WaylandInputDelegate, public TouchDelegate {
   // The client who own this touch instance.
   wl_client* client() const;
 
-  // Returns the next serial to use for keyboard events.
-  uint32_t next_serial() const;
-
   // The touch resource associated with the touch.
   wl_resource* const touch_resource_;
 
-  DISALLOW_COPY_AND_ASSIGN(WaylandTouchDelegate);
+  // Owned by Server, which always outlives this delegate.
+  SerialTracker* const serial_tracker_;
 };
 
 }  // namespace wayland

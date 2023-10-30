@@ -1,11 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_RESULT_CODES_H_
 #define CONTENT_PUBLIC_COMMON_RESULT_CODES_H_
-
-#include "services/service_manager/embedder/result_codes.h"
 
 namespace content {
 
@@ -30,10 +28,10 @@ namespace content {
 // TODO(wfh): Break the dependency so it is possible to add more values.
 
 enum ResultCode {
-  RESULT_CODE_CONTENT_START = service_manager::RESULT_CODE_LAST_CODE,
+  RESULT_CODE_NORMAL_EXIT,
 
   // Process was killed by user or system.
-  RESULT_CODE_KILLED = RESULT_CODE_CONTENT_START,
+  RESULT_CODE_KILLED,
 
   // Process hung.
   RESULT_CODE_HUNG,
@@ -47,6 +45,9 @@ enum ResultCode {
   // Last return code (keep this last).
   RESULT_CODE_LAST_CODE
 };
+
+static_assert(RESULT_CODE_KILLED_BAD_MESSAGE == 3,
+              "This enum is frozen - process_posix.cc may spy on this value.");
 
 static_assert(RESULT_CODE_LAST_CODE == 5,
               "This enum is frozen - see the IMPORTANT note above.");

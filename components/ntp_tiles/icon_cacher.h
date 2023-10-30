@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,16 +24,15 @@ class IconCacher {
   // |icon_available| callback will be invoked.
   // If there are preliminary icons (e.g. provided by static resources), the
   // optional |preliminary_icon_available| callback will be invoked in addition.
-  // TODO(fhorschig): In case we keep these, make them OnceClosures.
   virtual void StartFetchPopularSites(
       PopularSites::Site site,
-      const base::Closure& icon_available,
-      const base::Closure& preliminary_icon_available) = 0;
+      base::OnceClosure icon_available,
+      base::OnceClosure preliminary_icon_available) = 0;
 
   // Fetches the icon if necessary, then invokes |done| with true if it was
   // newly fetched (false if it was already cached or could not be fetched).
   virtual void StartFetchMostLikely(const GURL& page_url,
-                                    const base::Closure& icon_available) = 0;
+                                    base::OnceClosure icon_available) = 0;
 };
 
 }  // namespace ntp_tiles

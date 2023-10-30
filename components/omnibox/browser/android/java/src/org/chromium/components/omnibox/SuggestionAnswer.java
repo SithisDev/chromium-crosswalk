@@ -1,11 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.omnibox;
 
-import android.support.v4.util.ObjectsCompat;
 import android.text.TextUtils;
+
+import androidx.annotation.VisibleForTesting;
+import androidx.core.util.ObjectsCompat;
 
 import org.chromium.base.annotations.CalledByNative;
 
@@ -22,7 +24,8 @@ public class SuggestionAnswer {
     private final ImageLine mFirstLine;
     private final ImageLine mSecondLine;
 
-    private SuggestionAnswer(@AnswerType int type, ImageLine firstLine, ImageLine secondLine) {
+    @VisibleForTesting
+    public SuggestionAnswer(@AnswerType int type, ImageLine firstLine, ImageLine secondLine) {
         mType = type;
         mFirstLine = firstLine;
         mSecondLine = secondLine;
@@ -69,8 +72,9 @@ public class SuggestionAnswer {
         private final TextField mStatusText;
         private final String mImage;
 
-        private ImageLine(List<TextField> textFields, TextField additionalText,
-                TextField statusText, String imageUrl) {
+        @VisibleForTesting
+        public ImageLine(List<TextField> textFields, TextField additionalText, TextField statusText,
+                String imageUrl) {
             mTextFields = textFields;
             mAdditionalText = additionalText;
             mStatusText = statusText;
@@ -160,7 +164,8 @@ public class SuggestionAnswer {
         private final int mStyle;
         private final int mNumLines;
 
-        private TextField(
+        @VisibleForTesting
+        public TextField(
                 @AnswerTextType int type, String text, @AnswerTextStyle int style, int numLines) {
             mType = type;
             mText = text;

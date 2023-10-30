@@ -1,10 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.payments;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 
 import java.util.Locale;
 
@@ -33,21 +36,31 @@ public class CurrencyFormatter {
 
         // Note that this pointer could leak the native object. The called must call destroy() to
         // ensure that the native object is destroyed.
-        mCurrencyFormatterAndroid =
-                nativeInitCurrencyFormatterAndroid(currencyCode, userLocale.toString());
+        mCurrencyFormatterAndroid = CurrencyFormatterJni.get().initCurrencyFormatterAndroid(
+                CurrencyFormatter.this, currencyCode, userLocale.toString());
     }
 
     /** Will destroy the native object. This class shouldn't be used afterwards. */
     public void destroy() {
         if (mCurrencyFormatterAndroid != 0) {
-            nativeDestroy(mCurrencyFormatterAndroid);
+            CurrencyFormatterJni.get().destroy(mCurrencyFormatterAndroid, CurrencyFormatter.this);
             mCurrencyFormatterAndroid = 0;
         }
     }
 
+    /**
+     * Set the maximum number of fractional digits in the formatted price.
+     * @param maxFractionalDigits maximum number of fractional digits
+     */
+    public void setMaximumFractionalDigits(int maxFractionalDigits) {
+        CurrencyFormatterJni.get().setMaxFractionalDigits(
+                mCurrencyFormatterAndroid, maxFractionalDigits);
+    }
+
     /** @return The currency code formatted for display. */
     public String getFormattedCurrencyCode() {
-        return nativeGetFormattedCurrencyCode(mCurrencyFormatterAndroid);
+        return CurrencyFormatterJni.get().getFormattedCurrencyCode(
+                mCurrencyFormatterAndroid, CurrencyFormatter.this);
     }
 
     /**
@@ -63,11 +76,20 @@ public class CurrencyFormatter {
     public String format(String amountValue) {
         assert amountValue != null : "amountValue should not be null";
 
-        return nativeFormat(mCurrencyFormatterAndroid, amountValue);
+        return CurrencyFormatterJni.get().format(
+                mCurrencyFormatterAndroid, CurrencyFormatter.this, amountValue);
     }
 
-    private native long nativeInitCurrencyFormatterAndroid(String currencyCode, String localeName);
-    private native void nativeDestroy(long nativeCurrencyFormatterAndroid);
-    private native String nativeFormat(long nativeCurrencyFormatterAndroid, String amountValue);
-    private native String nativeGetFormattedCurrencyCode(long nativeCurrencyFormatterAndroid);
+    @NativeMethods
+    @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
+    public interface Natives {
+        long initCurrencyFormatterAndroid(
+                CurrencyFormatter caller, String currencyCode, String localeName);
+        void destroy(long nativeCurrencyFormatterAndroid, CurrencyFormatter caller);
+        String format(
+                long nativeCurrencyFormatterAndroid, CurrencyFormatter caller, String amountValue);
+        void setMaxFractionalDigits(long nativeCurrencyFormatterAndroid, int maxFractionalDigits);
+        String getFormattedCurrencyCode(
+                long nativeCurrencyFormatterAndroid, CurrencyFormatter caller);
+    }
 }

@@ -1,13 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_HISTORY_CORE_TEST_HISTORY_CLIENT_FAKE_BOOKMARKS_H_
 #define COMPONENTS_HISTORY_CORE_TEST_HISTORY_CLIENT_FAKE_BOOKMARKS_H_
 
-#include "base/macros.h"
+#include <string>
+
 #include "base/memory/ref_counted.h"
-#include "base/strings/string16.h"
 #include "components/history/core/browser/history_client.h"
 
 class GURL;
@@ -22,11 +22,16 @@ class HistoryBackendClient;
 class HistoryClientFakeBookmarks : public HistoryClient {
  public:
   HistoryClientFakeBookmarks();
+
+  HistoryClientFakeBookmarks(const HistoryClientFakeBookmarks&) = delete;
+  HistoryClientFakeBookmarks& operator=(const HistoryClientFakeBookmarks&) =
+      delete;
+
   ~HistoryClientFakeBookmarks() override;
 
   void ClearAllBookmarks();
   void AddBookmark(const GURL& url);
-  void AddBookmarkWithTitle(const GURL& url, const base::string16& title);
+  void AddBookmarkWithTitle(const GURL& url, const std::u16string& title);
   void DelBookmark(const GURL& url);
   bool IsBookmarked(const GURL& url);
 
@@ -37,11 +42,11 @@ class HistoryClientFakeBookmarks : public HistoryClient {
   void NotifyProfileError(sql::InitStatus init_status,
                           const std::string& diagnostics) override;
   std::unique_ptr<HistoryBackendClient> CreateBackendClient() override;
+  void UpdateBookmarkLastUsedTime(int64_t bookmark_node_id,
+                                  base::Time time) override;
 
  private:
   scoped_refptr<FakeBookmarkDatabase> bookmarks_;
-
-  DISALLOW_COPY_AND_ASSIGN(HistoryClientFakeBookmarks);
 };
 
 }  // namespace history

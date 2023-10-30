@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,20 @@
 #include <list>
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/callback_forward.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
+#include "base/time/time.h"
+#include "base/token.h"
+#include "base/unguessable_token.h"
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
 #include "content/browser/renderer_host/media/video_capture_provider.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/video_capture_device_launcher.h"
+#include "media/capture/mojom/video_capture.mojom.h"
+#include "media/capture/mojom/video_capture_types.mojom.h"
 #include "media/capture/video/video_frame_receiver.h"
 #include "media/capture/video_capture_types.h"
 #include "third_party/blink/public/common/media/video_capture.h"
@@ -48,34 +53,44 @@ class CONTENT_EXPORT VideoCaptureController
       std::unique_ptr<VideoCaptureDeviceLauncher> device_launcher,
       base::RepeatingCallback<void(const std::string&)> emit_log_message_cb);
 
+  VideoCaptureController(const VideoCaptureController&) = delete;
+  VideoCaptureController& operator=(const VideoCaptureController&) = delete;
+
   // Warning: This value should not be changed, because doing so would change
   // the meaning of logged UMA events for histograms Media.VideoCapture.Error
   // and Media.VideoCapture.MaxFrameDropExceeded.
   static constexpr int kMaxConsecutiveFrameDropForSameReasonCount = 10;
+
+  // Number of logs for dropped frames to be emitted before suppressing.
+  static constexpr int kMaxEmittedLogsForDroppedFramesBeforeSuppressing = 3;
+
+  // Suppressed logs for dropped frames will still be emitted this often.
+  static constexpr int kFrequencyForSuppressedLogs = 100;
 
   base::WeakPtr<VideoCaptureController> GetWeakPtrForIOThread();
 
   // Start video capturing and try to use the resolution specified in |params|.
   // Buffers will be shared to the client as necessary. The client will continue
   // to receive frames from the device until RemoveClient() is called.
-  void AddClient(VideoCaptureControllerID id,
+  void AddClient(const VideoCaptureControllerID& id,
                  VideoCaptureControllerEventHandler* event_handler,
-                 media::VideoCaptureSessionId session_id,
+                 const media::VideoCaptureSessionId& session_id,
                  const media::VideoCaptureParams& params);
 
-  // Stop video capture. This will take back all buffers held by by
+  // Stop video capture. This will take back all buffers held by
   // |event_handler|, and |event_handler| shouldn't use those buffers any more.
-  // Returns the session_id of the stopped client, or
-  // kInvalidMediaCaptureSessionId if the indicated client was not registered.
-  int RemoveClient(VideoCaptureControllerID id,
-                   VideoCaptureControllerEventHandler* event_handler);
+  // Returns the session_id of the stopped client, or an empty
+  // base::UnguessableToken if the indicated client was not registered.
+  base::UnguessableToken RemoveClient(
+      const VideoCaptureControllerID& id,
+      VideoCaptureControllerEventHandler* event_handler);
 
   // Pause the video capture for specified client.
-  void PauseClient(VideoCaptureControllerID id,
+  void PauseClient(const VideoCaptureControllerID& id,
                    VideoCaptureControllerEventHandler* event_handler);
   // Resume the video capture for specified client.
   // Returns true if the client will be resumed.
-  bool ResumeClient(VideoCaptureControllerID id,
+  bool ResumeClient(const VideoCaptureControllerID& id,
                     VideoCaptureControllerEventHandler* event_handler);
 
   size_t GetClientCount() const;
@@ -88,18 +103,18 @@ class CONTENT_EXPORT VideoCaptureController
 
   // API called directly by VideoCaptureManager in case the device is
   // prematurely closed.
-  void StopSession(int session_id);
+  void StopSession(const base::UnguessableToken& session_id);
 
   // Return a buffer with id |buffer_id| previously given in
   // VideoCaptureControllerEventHandler::OnBufferReady.
   // If the consumer provided resource utilization
   // feedback, this will be passed here (-1.0 indicates no feedback).
-  void ReturnBuffer(VideoCaptureControllerID id,
+  void ReturnBuffer(const VideoCaptureControllerID& id,
                     VideoCaptureControllerEventHandler* event_handler,
                     int buffer_id,
-                    double consumer_resource_utilization);
+                    const media::VideoCaptureFeedback& feedback);
 
-  const base::Optional<media::VideoCaptureFormat> GetVideoCaptureFormat() const;
+  const absl::optional<media::VideoCaptureFormat> GetVideoCaptureFormat() const;
 
   bool has_received_frames() const { return has_received_frames_; }
 
@@ -107,15 +122,13 @@ class CONTENT_EXPORT VideoCaptureController
   void OnNewBuffer(int32_t buffer_id,
                    media::mojom::VideoBufferHandlePtr buffer_handle) override;
   void OnFrameReadyInBuffer(
-      int buffer_id,
-      int frame_feedback_id,
-      std::unique_ptr<
-          media::VideoCaptureDevice::Client::Buffer::ScopedAccessPermission>
-          buffer_read_permission,
-      media::mojom::VideoFrameInfoPtr frame_info) override;
+      media::ReadyFrameInBuffer frame,
+      std::vector<media::ReadyFrameInBuffer> scaled_frames) override;
   void OnBufferRetired(int buffer_id) override;
   void OnError(media::VideoCaptureError error) override;
   void OnFrameDropped(media::VideoCaptureFrameDropReason reason) override;
+  void OnNewCropVersion(uint32_t crop_version) override;
+  void OnFrameWithEmptyRegionCapture() override;
   void OnLog(const std::string& message) override;
   void OnStarted() override;
   void OnStartedUsingGpuDecode() override;
@@ -142,6 +155,9 @@ class CONTENT_EXPORT VideoCaptureController
   void TakePhoto(media::VideoCaptureDevice::TakePhotoCallback callback);
   void MaybeSuspend();
   void Resume();
+  void Crop(const base::Token& crop_id,
+            uint32_t crop_version,
+            base::OnceCallback<void(media::mojom::CropRequestResult)> callback);
   void RequestRefreshFrame();
   void SetDesktopCaptureWindowIdAsync(gfx::NativeViewId window_id,
                                       base::OnceClosure done_cb);
@@ -149,6 +165,7 @@ class CONTENT_EXPORT VideoCaptureController
   const std::string& device_id() const { return device_id_; }
   blink::mojom::MediaStreamType stream_type() const { return stream_type_; }
   const media::VideoCaptureParams& parameters() const { return parameters_; }
+  bool was_crop_ever_called() const { return was_crop_ever_called_; }
 
  private:
   friend class base::RefCountedThreadSafe<VideoCaptureController>;
@@ -183,7 +200,7 @@ class CONTENT_EXPORT VideoCaptureController
             buffer_read_permission) {
       buffer_read_permission_ = std::move(buffer_read_permission);
     }
-    void RecordConsumerUtilization(double utilization);
+    void RecordConsumerUtilization(const media::VideoCaptureFeedback& feedback);
     void IncreaseConsumerCount();
     void DecreaseConsumerCount();
     bool HasConsumers() const { return consumer_hold_count_ > 0; }
@@ -194,9 +211,11 @@ class CONTENT_EXPORT VideoCaptureController
     int buffer_id_;
     bool is_retired_;
     int frame_feedback_id_;
-    media::VideoFrameConsumerFeedbackObserver* consumer_feedback_observer_;
+    raw_ptr<media::VideoFrameConsumerFeedbackObserver>
+        consumer_feedback_observer_;
     media::mojom::VideoBufferHandlePtr buffer_handle_;
-    double max_consumer_utilization_;
+    media::VideoCaptureFeedback combined_consumer_feedback_;
+
     int consumer_hold_count_;
     std::unique_ptr<
         media::VideoCaptureDevice::Client::Buffer::ScopedAccessPermission>
@@ -216,12 +235,12 @@ class CONTENT_EXPORT VideoCaptureController
   ~VideoCaptureController() override;
 
   // Find a client of |id| and |handler| in |clients|.
-  ControllerClient* FindClient(VideoCaptureControllerID id,
+  ControllerClient* FindClient(const VideoCaptureControllerID& id,
                                VideoCaptureControllerEventHandler* handler,
                                const ControllerClients& clients);
 
   // Find a client of |session_id| in |clients|.
-  ControllerClient* FindClient(int session_id,
+  ControllerClient* FindClient(const base::UnguessableToken& session_id,
                                const ControllerClients& clients);
 
   std::vector<BufferContext>::iterator FindBufferContextFromBufferContextId(
@@ -229,18 +248,29 @@ class CONTENT_EXPORT VideoCaptureController
   std::vector<BufferContext>::iterator FindUnretiredBufferContextFromBufferId(
       int buffer_id);
 
-  void OnClientFinishedConsumingBuffer(ControllerClient* client,
-                                       int buffer_id,
-                                       double consumer_resource_utilization);
+  ReadyBuffer MakeReadyBufferAndSetContextFeedbackId(
+      int buffer_id,
+      int frame_feedback_id,
+      media::mojom::VideoFrameInfoPtr frame_info,
+      BufferContext** out_buffer_context);
+  void MakeClientUseBufferContext(BufferContext* frame_context,
+                                  ControllerClient* client);
+
+  void OnClientFinishedConsumingBuffer(
+      ControllerClient* client,
+      int buffer_id,
+      const media::VideoCaptureFeedback& feedback);
   void ReleaseBufferContext(
       const std::vector<BufferContext>::iterator& buffer_state_iter);
 
   using EventHandlerAction =
       base::RepeatingCallback<void(VideoCaptureControllerEventHandler* client,
-                                   VideoCaptureControllerID id)>;
+                                   const VideoCaptureControllerID& id)>;
   void PerformForClientsWithOpenSession(EventHandlerAction action);
 
   void EmitLogMessage(const std::string& message, int verbose_log_level);
+
+  void MaybeEmitFrameDropLogMessage(media::VideoCaptureFrameDropReason reason);
 
   const int serial_id_;
   const std::string device_id_;
@@ -249,7 +279,7 @@ class CONTENT_EXPORT VideoCaptureController
   std::unique_ptr<VideoCaptureDeviceLauncher> device_launcher_;
   base::RepeatingCallback<void(const std::string&)> emit_log_message_cb_;
   std::unique_ptr<LaunchedVideoCaptureDevice> launched_device_;
-  VideoCaptureDeviceLaunchObserver* device_launch_observer_;
+  raw_ptr<VideoCaptureDeviceLaunchObserver> device_launch_observer_;
 
   std::vector<BufferContext> buffer_contexts_;
 
@@ -262,17 +292,25 @@ class CONTENT_EXPORT VideoCaptureController
 
   FrameDropLogState frame_drop_log_state_;
 
+  // Tracks how often each frame-drop reason was encountered.
+  std::map<media::VideoCaptureFrameDropReason, int> frame_drop_log_counters_;
+
   int next_buffer_context_id_ = 0;
 
   // True if the controller has received a video frame from the device.
   bool has_received_frames_;
   base::TimeTicks time_of_start_request_;
 
-  base::Optional<media::VideoCaptureFormat> video_capture_format_;
+  absl::optional<media::VideoCaptureFormat> video_capture_format_;
+
+  // As a work-around to technical limitations, we don't allow multiple
+  // captures of the same tab, by the same capturer, if the first capturer
+  // invoked cropping. (Any capturer but the first one would have been
+  // blocked earlier in the pipeline.) That is because the `crop_version`
+  // would otherwise not line up between the various ControllerClients.
+  bool was_crop_ever_called_ = false;
 
   base::WeakPtrFactory<VideoCaptureController> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(VideoCaptureController);
 };
 
 }  // namespace content

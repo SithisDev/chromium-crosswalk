@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,6 +27,9 @@ class MixerOutputStream {
   // |requested_sample_rate|, e.g. if IsFixedSampleRate() is true, or the device
   // doesn't support |requested_sample_rate|.
   virtual bool Start(int requested_sample_rate, int channels) = 0;
+
+  // Returns number of channels expected to be passed to Write().
+  virtual int GetNumChannels() = 0;
 
   // Returns current sample rate.
   virtual int GetSampleRate() = 0;

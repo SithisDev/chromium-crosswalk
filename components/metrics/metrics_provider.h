@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define COMPONENTS_METRICS_METRICS_PROVIDER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/time/time.h"
 
 namespace base {
 class HistogramSnapshotManager;
@@ -22,17 +22,24 @@ class SystemProfileProto;
 class MetricsProvider {
  public:
   MetricsProvider();
+
+  MetricsProvider(const MetricsProvider&) = delete;
+  MetricsProvider& operator=(const MetricsProvider&) = delete;
+
   virtual ~MetricsProvider();
 
-  // Called after initialiazation of MetricsService and field trials.
+  // Called after initialization of MetricsService and field trials.
   virtual void Init();
 
   // Called during service initialization to allow the provider to start any
   // async initialization tasks.  The service will wait for the provider to
   // call |done_callback| before generating logs for the current session.
-  virtual void AsyncInit(const base::Closure& done_callback);
+  virtual void AsyncInit(base::OnceClosure done_callback);
 
   // Called when a new MetricsLog is created.
+  // This can be used to log a histogram that will appear in the log. Not safe
+  // for some other uses, like user actions.
+  // TODO(crbug.com/1171830): Improve this.
   virtual void OnDidCreateMetricsLog();
 
   // Called when metrics recording has been enabled.
@@ -40,6 +47,14 @@ class MetricsProvider {
 
   // Called when metrics recording has been disabled.
   virtual void OnRecordingDisabled();
+
+  // Called when metrics client identifiers have been reset.
+  //
+  // Metrics providers should clean up any persisted state that could be used to
+  // associate the previous identifier with the new one.
+  //
+  // Currently this method is only invoked in UKM.
+  virtual void OnClientStateCleared();
 
   // Called when the application is going into background mode, on platforms
   // where applications may be killed when going into the background (Android,
@@ -55,7 +70,7 @@ class MetricsProvider {
   // Provides a complete and independent uma proto + metrics for uploading.
   // Called once every time HasIndependentMetrics() returns true. The passed in
   // |uma_proto| is by default filled with current session id and core system
-  // profile infomration. This function is called on main thread, but the
+  // profile information. This function is called on main thread, but the
   // provider can do async work to fill in |uma_proto| and run |done_callback|
   // on calling thread when complete. Ownership of the passed objects remains
   // with the caller and those objects will live until the callback is executed.
@@ -64,8 +79,17 @@ class MetricsProvider {
       ChromeUserMetricsExtension* uma_proto,
       base::HistogramSnapshotManager* snapshot_manager);
 
-  // Provides additional metrics into the system profile.
+  // Provides additional metrics into the system profile. This is a convenience
+  // method over ProvideSystemProfileMetricsWithLogCreationTime() without the
+  // |log_creation_time| param. Should not be called directly by services.
   virtual void ProvideSystemProfileMetrics(
+      SystemProfileProto* system_profile_proto);
+
+  // Provides additional metrics into the system profile. The log creation
+  // time param provides a timestamp of when the log was opened, which is needed
+  // for some metrics providers.
+  virtual void ProvideSystemProfileMetricsWithLogCreationTime(
+      base::TimeTicks log_creation_time,
       SystemProfileProto* system_profile_proto);
 
   // Called once at startup to see whether this provider has critical data
@@ -85,6 +109,11 @@ class MetricsProvider {
   // Called when building a log about the current session, so the provider
   // can provide data about it.
   virtual void ProvideCurrentSessionData(ChromeUserMetricsExtension* uma_proto);
+
+  // Called when building a UKM log about the current session. UKM-specific data
+  // should generally only be emitted through this method, and UMA data should
+  // be emitted through ProvideCurrentSessionData().
+  virtual void ProvideCurrentSessionUKMData();
 
   // Provides additional stability metrics. Stability metrics can be provided
   // directly into |stability_proto| fields or by logging stability histograms
@@ -109,9 +138,6 @@ class MetricsProvider {
   // PrepareDelta(), not PrepareDeltas (plural), should be made.
   virtual void RecordInitialHistogramSnapshots(
       base::HistogramSnapshotManager* snapshot_manager);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MetricsProvider);
 };
 
 }  // namespace metrics

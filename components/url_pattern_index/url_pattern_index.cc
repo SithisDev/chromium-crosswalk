@@ -1,29 +1,31 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/url_pattern_index/url_pattern_index.h"
 
-#include <algorithm>
 #include <limits>
 #include <string>
 #include <utility>
 
+#include "base/callback.h"
+#include "base/check_op.h"
 #include "base/containers/flat_map.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/no_destructor.h"
+#include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/optional.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/trace_event/trace_event.h"
 #include "components/url_pattern_index/ngram_extractor.h"
 #include "components/url_pattern_index/url_pattern.h"
 #include "components/url_pattern_index/url_rule_util.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 #include "url/url_constants.h"
+#include "url/url_util.h"
 
 namespace url_pattern_index {
 
@@ -47,8 +49,7 @@ const ActivationTypeMap& GetActivationTypeMap() {
           {proto::ACTIVATION_TYPE_GENERICHIDE, flat::ActivationType_NONE},
           {proto::ACTIVATION_TYPE_GENERICBLOCK,
            flat::ActivationType_GENERIC_BLOCK},
-      },
-      base::KEEP_FIRST_OF_DUPES);
+      });
   return *activation_type_map;
 }
 
@@ -73,8 +74,9 @@ const ElementTypeMap& GetElementTypeMap() {
           // Filtering popups is not supported.
           {proto::ELEMENT_TYPE_POPUP, flat::ElementType_NONE},
           {proto::ELEMENT_TYPE_WEBSOCKET, flat::ElementType_WEBSOCKET},
-      },
-      base::KEEP_FIRST_OF_DUPES);
+          {proto::ELEMENT_TYPE_WEBTRANSPORT, flat::ElementType_WEBTRANSPORT},
+          {proto::ELEMENT_TYPE_WEBBUNDLE, flat::ElementType_WEBBUNDLE},
+      });
   return *element_type_map;
 }
 
@@ -96,7 +98,7 @@ base::StringPiece ToStringPiece(const flatbuffers::String* string) {
 }
 
 bool HasNoUpperAscii(base::StringPiece string) {
-  return std::none_of(string.begin(), string.end(), base::IsAsciiUpper<char>);
+  return base::ranges::none_of(string, base::IsAsciiUpper<char>);
 }
 
 // Comparator to sort UrlRule. Sorts rules by descending order of rule priority.
@@ -145,38 +147,23 @@ class UrlRuleFlatBufferConverter {
 
     DCHECK_NE(rule_.url_pattern_type(), proto::URL_PATTERN_TYPE_REGEXP);
 
-    FlatDomainsOffset domains_included_offset;
-    FlatDomainsOffset domains_excluded_offset;
-    if (rule_.domains_size()) {
-      std::vector<FlatStringOffset> domains_included;
-      std::vector<FlatStringOffset> domains_excluded;
-      // Reserve only for |domains_included| because it is expected to be the
-      // one used more frequently.
-      domains_included.reserve(rule_.domains_size());
+    FlatDomainsOffset initiator_domains_included_offset;
+    FlatDomainsOffset initiator_domains_excluded_offset;
+    FlatDomainsOffset request_domains_included_offset;
+    FlatDomainsOffset request_domains_excluded_offset;
 
-      for (const auto& domain_list_item : rule_.domains()) {
-        const std::string& domain = domain_list_item.domain();
+    if (!PopulateIncludedAndExcludedDomains(
+            rule_.initiator_domains_size(), rule_.initiator_domains(), builder,
+            domain_map, &initiator_domains_included_offset,
+            &initiator_domains_excluded_offset)) {
+      return UrlRuleOffset();
+    }
 
-        // Non-ascii characters in domains are unsupported.
-        if (!base::IsStringASCII(domain))
-          return UrlRuleOffset();
-
-        // Note: This is not always correct. Chrome's URL parser uses upper-case
-        // for percent encoded hosts. E.g. https://,.com is encoded as
-        // https://%2C.com.
-        auto offset = builder->CreateSharedString(
-            HasNoUpperAscii(domain) ? domain : base::ToLowerASCII(domain));
-
-        if (domain_list_item.exclude())
-          domains_excluded.push_back(offset);
-        else
-          domains_included.push_back(offset);
-      }
-      // The domains are stored in sorted order to support fast matching.
-      domains_included_offset =
-          SerializeDomainList(std::move(domains_included), builder, domain_map);
-      domains_excluded_offset =
-          SerializeDomainList(std::move(domains_excluded), builder, domain_map);
+    if (!PopulateIncludedAndExcludedDomains(
+            rule_.request_domains_size(), rule_.request_domains(), builder,
+            domain_map, &request_domains_included_offset,
+            &request_domains_excluded_offset)) {
+      return UrlRuleOffset();
     }
 
     // Non-ascii characters in patterns are unsupported.
@@ -188,9 +175,11 @@ class UrlRuleFlatBufferConverter {
     auto url_pattern_offset = builder->CreateSharedString(rule_.url_pattern());
 
     return flat::CreateUrlRule(
-        *builder, options_, element_types_, activation_types_,
-        url_pattern_type_, anchor_left_, anchor_right_, domains_included_offset,
-        domains_excluded_offset, url_pattern_offset);
+        *builder, options_, element_types_, flat::RequestMethod_ANY,
+        activation_types_, url_pattern_type_, anchor_left_, anchor_right_,
+        initiator_domains_included_offset, initiator_domains_excluded_offset,
+        request_domains_included_offset, request_domains_excluded_offset,
+        url_pattern_offset);
   }
 
  private:
@@ -220,6 +209,51 @@ class UrlRuleFlatBufferConverter {
     return it->second;
   }
 
+  // Returns true on success, false on an invalid domain entry.
+  bool PopulateIncludedAndExcludedDomains(
+      int domains_size,
+      google::protobuf::RepeatedPtrField<
+          ::url_pattern_index::proto::DomainListItem> domain_list_items,
+      flatbuffers::FlatBufferBuilder* builder,
+      FlatDomainMap* domain_map,
+      FlatDomainsOffset* domains_included_offset,
+      FlatDomainsOffset* domains_excluded_offset) const {
+    if (domains_size == 0)
+      return true;
+
+    std::vector<FlatStringOffset> domains_included;
+    std::vector<FlatStringOffset> domains_excluded;
+    // Reserve only for `domains_included` because it is expected to
+    // be the one used more frequently.
+    domains_included.reserve(domains_size);
+
+    for (const auto& domain_list_item : domain_list_items) {
+      const std::string& domain = domain_list_item.domain();
+
+      // Non-ascii characters in domains are unsupported.
+      if (!base::IsStringASCII(domain))
+        return false;
+
+      // Note: This is not always correct. Chrome's URL parser uses upper-case
+      // for percent encoded hosts. E.g. https://,.com is encoded as
+      // https://%2C.com.
+      auto offset = builder->CreateSharedString(
+          HasNoUpperAscii(domain) ? domain : base::ToLowerASCII(domain));
+
+      if (domain_list_item.exclude())
+        domains_excluded.push_back(offset);
+      else
+        domains_included.push_back(offset);
+    }
+    // The domains are stored in sorted order to support fast matching.
+    *domains_included_offset =
+        SerializeDomainList(std::move(domains_included), builder, domain_map);
+    *domains_excluded_offset =
+        SerializeDomainList(std::move(domains_excluded), builder, domain_map);
+
+    return true;
+  }
+
   static bool ConvertAnchorType(proto::AnchorType anchor_type,
                                 flat::AnchorType* result) {
     switch (anchor_type) {
@@ -241,17 +275,20 @@ class UrlRuleFlatBufferConverter {
   bool InitializeOptions() {
     static_assert(flat::OptionFlag_ANY <= std::numeric_limits<uint8_t>::max(),
                   "Option flags can not be stored in uint8_t.");
+    static_assert(
+        flat::RequestMethod_ANY <= std::numeric_limits<uint16_t>::max(),
+        "Request methods can not be stored in uint16_t.");
 
-    if (rule_.semantics() == proto::RULE_SEMANTICS_WHITELIST) {
-      options_ |= flat::OptionFlag_IS_WHITELIST;
-    } else if (rule_.semantics() != proto::RULE_SEMANTICS_BLACKLIST) {
+    if (rule_.semantics() == proto::RULE_SEMANTICS_ALLOWLIST) {
+      options_ |= flat::OptionFlag_IS_ALLOWLIST;
+    } else if (rule_.semantics() != proto::RULE_SEMANTICS_BLOCKLIST) {
       return false;  // Unsupported semantics.
     }
 
     switch (rule_.source_type()) {
       case proto::SOURCE_TYPE_ANY:
         options_ |= flat::OptionFlag_APPLIES_TO_THIRD_PARTY;
-        FALLTHROUGH;
+        [[fallthrough]];
       case proto::SOURCE_TYPE_FIRST_PARTY:
         options_ |= flat::OptionFlag_APPLIES_TO_FIRST_PARTY;
         break;
@@ -419,12 +456,20 @@ void UrlPatternIndexBuilder::IndexUrlRule(UrlRuleOffset offset) {
 #if DCHECK_IS_ON()
   // Sanity check that the rule does not have fields with non-ascii characters.
   DCHECK(base::IsStringASCII(ToStringPiece(rule->url_pattern())));
-  if (rule->domains_included()) {
-    for (auto* domain : *rule->domains_included())
+  if (rule->initiator_domains_included()) {
+    for (auto* domain : *rule->initiator_domains_included())
       DCHECK(base::IsStringASCII(ToStringPiece(domain)));
   }
-  if (rule->domains_excluded()) {
-    for (auto* domain : *rule->domains_excluded())
+  if (rule->initiator_domains_excluded()) {
+    for (auto* domain : *rule->initiator_domains_excluded())
+      DCHECK(base::IsStringASCII(ToStringPiece(domain)));
+  }
+  if (rule->request_domains_included()) {
+    for (auto* domain : *rule->request_domains_included())
+      DCHECK(base::IsStringASCII(ToStringPiece(domain)));
+  }
+  if (rule->request_domains_excluded()) {
+    for (auto* domain : *rule->request_domains_excluded())
       DCHECK(base::IsStringASCII(ToStringPiece(domain)));
   }
 
@@ -518,39 +563,38 @@ namespace {
 using FlatNGramIndex =
     flatbuffers::Vector<flatbuffers::Offset<flat::NGramToRules>>;
 
-// Returns the size of the longest (sub-)domain of |origin| matching one of the
-// |domains| in the list.
+// Returns the size of the longest (sub-)domain of `host` matching one of the
+// `domains` in the list.
 //
-// The |domains| should be sorted in descending order of their length, and
+// The `domains` should be sorted in descending order of their length, and
 // ascending alphabetical order within the groups of same-length domains.
-size_t GetLongestMatchingSubdomain(const url::Origin& origin,
+size_t GetLongestMatchingSubdomain(base::StringPiece host,
                                    const FlatDomains& domains) {
+  if (host.empty())
+    return 0;
+
   // If the |domains| list is short, then the simple strategy is usually faster.
   if (domains.size() <= 5) {
     for (auto* domain : domains) {
       const base::StringPiece domain_piece = ToStringPiece(domain);
-      if (origin.DomainIs(domain_piece))
+      if (url::DomainIs(host, domain_piece))
         return domain_piece.size();
     }
     return 0;
   }
-  // Otherwise look for each subdomain of the |origin| using binary search.
 
-  DCHECK(!origin.opaque());
-  base::StringPiece canonicalized_host(origin.host());
-  if (canonicalized_host.empty())
-    return 0;
+  // Otherwise look for each subdomain of the `host` using binary search.
 
   // If the host name ends with a dot, then ignore it.
-  if (canonicalized_host.back() == '.')
-    canonicalized_host.remove_suffix(1);
+  if (host.back() == '.')
+    host.remove_suffix(1);
 
   // The |left| bound of the search is shared between iterations, because
   // subdomains are considered in decreasing order of their lengths, therefore
   // each consecutive lower_bound will be at least as far as the previous.
   flatbuffers::uoffset_t left = 0;
   for (size_t position = 0;; ++position) {
-    const base::StringPiece subdomain = canonicalized_host.substr(position);
+    const base::StringPiece subdomain = host.substr(position);
 
     flatbuffers::uoffset_t right = domains.size();
     while (left + 1 < right) {
@@ -566,7 +610,7 @@ size_t GetLongestMatchingSubdomain(const url::Origin& origin,
     if (ToStringPiece(domains[left]) == subdomain)
       return subdomain.size();
 
-    position = canonicalized_host.find('.', position);
+    position = host.find('.', position);
     if (position == base::StringPiece::npos)
       break;
   }
@@ -574,84 +618,23 @@ size_t GetLongestMatchingSubdomain(const url::Origin& origin,
   return 0;
 }
 
-// Returns whether the |origin| matches the domain list of the |rule|. A match
-// means that the longest domain in |domains| that |origin| is a sub-domain of
-// is not an exception OR all the |domains| are exceptions and neither matches
-// the |origin|. Thus, domain filters with more domain components trump filters
-// with fewer domain components, i.e. the more specific a filter is, the higher
-// the priority.
-//
-// A rule whose domain list is empty or contains only negative domains is still
-// considered a "generic" rule. Therefore, if |disable_generic_rules| is set,
-// this function will always return false for such rules.
-bool DoesOriginMatchDomainList(const url::Origin& origin,
-                               const flat::UrlRule& rule,
-                               bool disable_generic_rules) {
-  const bool is_generic = !rule.domains_included();
-  DCHECK(is_generic || rule.domains_included()->size());
-  if (disable_generic_rules && is_generic)
-    return false;
-
-  // Unique |origin| matches lists of exception domains only.
-  if (origin.opaque())
-    return is_generic;
-
-  size_t longest_matching_included_domain_length = 1;
-  if (!is_generic) {
-    longest_matching_included_domain_length =
-        GetLongestMatchingSubdomain(origin, *rule.domains_included());
-  }
-  if (longest_matching_included_domain_length && rule.domains_excluded()) {
-    return GetLongestMatchingSubdomain(origin, *rule.domains_excluded()) <
-           longest_matching_included_domain_length;
-  }
-  return !!longest_matching_included_domain_length;
-}
-
-// Returns whether the request matches flags of the specified URL |rule|. Takes
-// into account:
-//  - |element_type| of the requested resource, if not *_NONE.
-//  - |activation_type| for a subdocument request, if not *_NONE.
-//  - Whether the resource |is_third_party| w.r.t. its embedding document.
-bool DoesRuleFlagsMatch(const flat::UrlRule& rule,
-                        flat::ElementType element_type,
-                        flat::ActivationType activation_type,
-                        bool is_third_party) {
-  DCHECK((element_type == flat::ElementType_NONE) !=
-         (activation_type == flat::ActivationType_NONE));
-
-  if (element_type != flat::ElementType_NONE &&
-      !(rule.element_types() & element_type)) {
-    return false;
-  }
-  if (activation_type != flat::ActivationType_NONE &&
-      !(rule.activation_types() & activation_type)) {
-    return false;
-  }
-
-  if (is_third_party &&
-      !(rule.options() & flat::OptionFlag_APPLIES_TO_THIRD_PARTY)) {
-    return false;
-  }
-  if (!is_third_party &&
-      !(rule.options() & flat::OptionFlag_APPLIES_TO_FIRST_PARTY)) {
-    return false;
-  }
-
-  return true;
-}
-
-// |sorted_candidates| is sorted in descending order by priority. This returns
-// the first matching rule i.e. the rule with the highest priority in
-// |sorted_candidates| or null if no rule matches.
+// |sorted_candidates| is sorted in descending order by priority. If
+// |matched_rules| is specified, then all rule matches in |sorted_candidates|
+// will be added to |matched_rules| and null is returned. If |matched_rules| is
+// not specified, then this returns the first matching rule i.e. the rule with
+// the highest priority in |sorted_candidates| or null if no rule matches.
 const flat::UrlRule* FindMatchAmongCandidates(
     const FlatUrlRuleList* sorted_candidates,
     const UrlPattern::UrlInfo& url,
     const url::Origin& document_origin,
     flat::ElementType element_type,
     flat::ActivationType activation_type,
+    flat::RequestMethod request_method,
     bool is_third_party,
-    bool disable_generic_rules) {
+    bool disable_generic_rules,
+    const UrlPatternIndexMatcher::EmbedderConditionsMatcher&
+        embedder_conditions_matcher,
+    std::vector<const flat::UrlRule*>* matched_rules) {
   if (!sorted_candidates)
     return nullptr;
 
@@ -662,16 +645,27 @@ const flat::UrlRule* FindMatchAmongCandidates(
     DCHECK_NE(rule, nullptr);
     DCHECK_NE(rule->url_pattern_type(), flat::UrlPatternType_REGEXP);
     if (!DoesRuleFlagsMatch(*rule, element_type, activation_type,
-                            is_third_party)) {
+                            request_method, is_third_party,
+                            embedder_conditions_matcher)) {
       continue;
     }
+
+    if (disable_generic_rules && IsRuleGeneric(*rule))
+      continue;
+
     if (!UrlPattern(*rule).MatchesUrl(url))
       continue;
 
-    if (DoesOriginMatchDomainList(document_origin, *rule,
-                                  disable_generic_rules)) {
+    if (!DoesOriginMatchInitiatorDomainList(document_origin, *rule))
+      continue;
+
+    if (!DoesURLMatchRequestDomainList(url, *rule))
+      continue;
+
+    if (matched_rules)
+      matched_rules->push_back(rule);
+    else
       return rule;
-    }
   }
 
   return nullptr;
@@ -679,17 +673,27 @@ const flat::UrlRule* FindMatchAmongCandidates(
 
 // Returns whether the network request matches a UrlPattern |index| represented
 // in its FlatBuffers format. |is_third_party| should reflect the relation
-// between |url| and |document_origin|.
+// between |url| and |document_origin|. If |strategy| is kAll, then
+// |matched_rules| will be populated with all matching UrlRules and nullptr is
+// returned.
 const flat::UrlRule* FindMatchInFlatUrlPatternIndex(
     const flat::UrlPatternIndex& index,
     const UrlPattern::UrlInfo& url,
     const url::Origin& document_origin,
     flat::ElementType element_type,
     flat::ActivationType activation_type,
+    flat::RequestMethod request_method,
     bool is_third_party,
     bool disable_generic_rules,
-    UrlPatternIndexMatcher::FindRuleStrategy strategy) {
+    const UrlPatternIndexMatcher::EmbedderConditionsMatcher&
+        embedder_conditions_matcher,
+    UrlPatternIndexMatcher::FindRuleStrategy strategy,
+    std::vector<const flat::UrlRule*>* matched_rules) {
   using FindRuleStrategy = UrlPatternIndexMatcher::FindRuleStrategy;
+
+  // Check that the outparam |matched_rules| is specified if and only if
+  // |strategy| is kAll.
+  DCHECK_EQ(strategy == FindRuleStrategy::kAll, !!matched_rules);
 
   const FlatNGramIndex* hash_table = index.ngram_index();
   const flat::NGramToRules* empty_slot = index.ngram_index_empty_slot();
@@ -714,9 +718,9 @@ const flat::UrlRule* FindMatchInFlatUrlPatternIndex(
   const flat::UrlRule* max_priority_rule = nullptr;
 
   for (uint64_t ngram : ngrams) {
-    const size_t slot_index = prober.FindSlot(
-        ngram, base::strict_cast<size_t>(hash_table->size()),
-        [hash_table, empty_slot](NGram ngram, size_t slot_index) {
+    const uint32_t slot_index = prober.FindSlot(
+        ngram, hash_table->size(),
+        [hash_table, empty_slot](NGram ngram, uint32_t slot_index) {
           const flat::NGramToRules* entry = hash_table->Get(slot_index);
           DCHECK_NE(entry, nullptr);
           return entry == empty_slot || entry->ngram() == ngram;
@@ -728,7 +732,8 @@ const flat::UrlRule* FindMatchInFlatUrlPatternIndex(
       continue;
     const flat::UrlRule* rule = FindMatchAmongCandidates(
         entry->rule_list(), url, document_origin, element_type, activation_type,
-        is_third_party, disable_generic_rules);
+        request_method, is_third_party, disable_generic_rules,
+        embedder_conditions_matcher, matched_rules);
     if (!rule)
       continue;
 
@@ -740,18 +745,23 @@ const flat::UrlRule* FindMatchInFlatUrlPatternIndex(
       case FindRuleStrategy::kHighestPriority:
         max_priority_rule = get_max_priority_rule(max_priority_rule, rule);
         break;
+      case FindRuleStrategy::kAll:
+        continue;
     }
   }
 
   const flat::UrlRule* rule = FindMatchAmongCandidates(
       index.fallback_rules(), url, document_origin, element_type,
-      activation_type, is_third_party, disable_generic_rules);
+      activation_type, request_method, is_third_party, disable_generic_rules,
+      embedder_conditions_matcher, matched_rules);
 
   switch (strategy) {
     case FindRuleStrategy::kAny:
       return rule;
     case FindRuleStrategy::kHighestPriority:
       return get_max_priority_rule(max_priority_rule, rule);
+    case FindRuleStrategy::kAll:
+      return nullptr;
   }
 
   NOTREACHED();
@@ -760,10 +770,104 @@ const flat::UrlRule* FindMatchInFlatUrlPatternIndex(
 
 }  // namespace
 
+bool IsRuleGeneric(const flat::UrlRule& rule) {
+  return !rule.initiator_domains_included();
+}
+
+// Returns whether the `host` matches the domain conditions. It's considered a
+// match if both:
+//  1. An included domain matches the `host`, or `domains_included` is omitted
+//     entirely (since rules match all domains by default).
+//  2. No excluded domain match the `host`, or the longest matching excluded
+//     domain is shorter than the longest matching included domain (since
+//     longer, more specific domain matches take precedence).
+bool DoesHostMatchDomainLists(
+    base::StringPiece host,
+    const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>*
+        domains_included,
+    const flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>*
+        domains_excluded) {
+  DCHECK(!domains_included || domains_included->size());
+
+  size_t longest_matching_included_domain_length = 1;
+  if (domains_included) {
+    longest_matching_included_domain_length =
+        GetLongestMatchingSubdomain(host, *domains_included);
+  }
+  if (longest_matching_included_domain_length && domains_excluded) {
+    return GetLongestMatchingSubdomain(host, *domains_excluded) <
+           longest_matching_included_domain_length;
+  }
+  return !!longest_matching_included_domain_length;
+}
+
+bool DoesURLMatchRequestDomainList(const UrlPattern::UrlInfo& url,
+                                   const flat::UrlRule& rule) {
+  return DoesHostMatchDomainLists(url.GetStringHost(),
+                                  rule.request_domains_included(),
+                                  rule.request_domains_excluded());
+}
+
+bool DoesOriginMatchInitiatorDomainList(const url::Origin& origin,
+                                        const flat::UrlRule& rule) {
+  // Unique `origin` matches lists of exception domains only.
+  if (origin.opaque())
+    return IsRuleGeneric(rule);
+
+  return DoesHostMatchDomainLists(origin.host(),
+                                  rule.initiator_domains_included(),
+                                  rule.initiator_domains_excluded());
+}
+
+bool DoesRuleFlagsMatch(const flat::UrlRule& rule,
+                        flat::ElementType element_type,
+                        flat::ActivationType activation_type,
+                        flat::RequestMethod request_method,
+                        bool is_third_party,
+                        const UrlPatternIndexMatcher::EmbedderConditionsMatcher&
+                            embedder_conditions_matcher) {
+  DCHECK((element_type == flat::ElementType_NONE) !=
+         (activation_type == flat::ActivationType_NONE));
+
+  if (element_type != flat::ElementType_NONE &&
+      !(rule.element_types() & element_type)) {
+    return false;
+  }
+  if (activation_type != flat::ActivationType_NONE &&
+      !(rule.activation_types() & activation_type)) {
+    return false;
+  }
+  if (request_method != flat::RequestMethod_NONE &&
+      !(rule.request_methods() & request_method)) {
+    return false;
+  }
+
+  if (is_third_party &&
+      !(rule.options() & flat::OptionFlag_APPLIES_TO_THIRD_PARTY)) {
+    return false;
+  }
+  if (!is_third_party &&
+      !(rule.options() & flat::OptionFlag_APPLIES_TO_FIRST_PARTY)) {
+    return false;
+  }
+
+  if (rule.embedder_conditions() && !embedder_conditions_matcher.is_null() &&
+      !embedder_conditions_matcher.Run(*rule.embedder_conditions())) {
+    return false;
+  }
+
+  return true;
+}
+
 UrlPatternIndexMatcher::UrlPatternIndexMatcher(
     const flat::UrlPatternIndex* flat_index)
     : flat_index_(flat_index) {
   DCHECK(!flat_index || flat_index->n() == kNGramSize);
+  // Speculative investigation for crash (see crbug.com/1286207): check that we
+  // can access the ngram_index on each UrlPatternIndexMatcher without failure.
+  if (flat_index) {
+    CHECK_GT(flat_index->ngram_index()->size(), 0u);
+  }
 }
 
 UrlPatternIndexMatcher::~UrlPatternIndexMatcher() = default;
@@ -772,6 +876,28 @@ UrlPatternIndexMatcher::UrlPatternIndexMatcher(UrlPatternIndexMatcher&&) =
 UrlPatternIndexMatcher& UrlPatternIndexMatcher::operator=(
     UrlPatternIndexMatcher&&) = default;
 
+size_t UrlPatternIndexMatcher::GetRulesCount() const {
+  if (rules_count_)
+    return *rules_count_;
+
+  if (!flat_index_) {
+    rules_count_ = 0;
+    return 0;
+  }
+
+  rules_count_ = flat_index_->fallback_rules()->size();
+
+  // Iterate over all ngrams and check their corresponding rules.
+  for (auto* ngram_to_rules : *flat_index_->ngram_index()) {
+    if (ngram_to_rules == flat_index_->ngram_index_empty_slot())
+      continue;
+
+    *rules_count_ += ngram_to_rules->rule_list()->size();
+  }
+
+  return *rules_count_;
+}
+
 const flat::UrlRule* UrlPatternIndexMatcher::FindMatch(
     const GURL& url,
     const url::Origin& first_party_origin,
@@ -779,11 +905,13 @@ const flat::UrlRule* UrlPatternIndexMatcher::FindMatch(
     proto::ActivationType activation_type,
     bool is_third_party,
     bool disable_generic_rules,
+    const EmbedderConditionsMatcher& embedder_conditions_matcher,
     FindRuleStrategy strategy) const {
-  return FindMatch(url, first_party_origin,
-                   ProtoToFlatElementType(element_type),
-                   ProtoToFlatActivationType(activation_type), is_third_party,
-                   disable_generic_rules, strategy);
+  return FindMatch(
+      url, first_party_origin, ProtoToFlatElementType(element_type),
+      ProtoToFlatActivationType(activation_type), flat::RequestMethod_NONE,
+      is_third_party, disable_generic_rules, embedder_conditions_matcher,
+      strategy);
 }
 
 const flat::UrlRule* UrlPatternIndexMatcher::FindMatch(
@@ -791,8 +919,10 @@ const flat::UrlRule* UrlPatternIndexMatcher::FindMatch(
     const url::Origin& first_party_origin,
     flat::ElementType element_type,
     flat::ActivationType activation_type,
+    flat::RequestMethod request_method,
     bool is_third_party,
     bool disable_generic_rules,
+    const EmbedderConditionsMatcher& embedder_conditions_matcher,
     FindRuleStrategy strategy) const {
   // Ignore URLs that are greater than the max URL length. Since those will be
   // disallowed elsewhere in the loading stack, we can save compute time by
@@ -806,15 +936,63 @@ const flat::UrlRule* UrlPatternIndexMatcher::FindMatch(
     return nullptr;
   }
 
+  // FindAllMatches should be used instead to find all matches.
+  DCHECK_NE(strategy, FindRuleStrategy::kAll);
+
   auto* rule = FindMatchInFlatUrlPatternIndex(
       *flat_index_, UrlPattern::UrlInfo(url), first_party_origin, element_type,
-      activation_type, is_third_party, disable_generic_rules, strategy);
+      activation_type, request_method, is_third_party, disable_generic_rules,
+      embedder_conditions_matcher, strategy, nullptr /* matched_rules */);
   if (rule) {
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("loading"),
                  "UrlPatternIndexMatcher::FindMatch", "pattern",
                  FlatUrlRuleToFilterlistString(rule));
   }
   return rule;
+}
+
+std::vector<const flat::UrlRule*> UrlPatternIndexMatcher::FindAllMatches(
+    const GURL& url,
+    const url::Origin& first_party_origin,
+    proto::ElementType element_type,
+    proto::ActivationType activation_type,
+    bool is_third_party,
+    bool disable_generic_rules,
+    const EmbedderConditionsMatcher& embedder_conditions_matcher) const {
+  return FindAllMatches(
+      url, first_party_origin, ProtoToFlatElementType(element_type),
+      ProtoToFlatActivationType(activation_type), flat::RequestMethod_NONE,
+      is_third_party, disable_generic_rules, embedder_conditions_matcher);
+}
+
+std::vector<const flat::UrlRule*> UrlPatternIndexMatcher::FindAllMatches(
+    const GURL& url,
+    const url::Origin& first_party_origin,
+    flat::ElementType element_type,
+    flat::ActivationType activation_type,
+    flat::RequestMethod request_method,
+    bool is_third_party,
+    bool disable_generic_rules,
+    const EmbedderConditionsMatcher& embedder_conditions_matcher) const {
+  // Ignore URLs that are greater than the max URL length. Since those will be
+  // disallowed elsewhere in the loading stack, we can save compute time by
+  // avoiding matching here.
+  if (!flat_index_ || !url.is_valid() ||
+      url.spec().length() > url::kMaxURLChars) {
+    return std::vector<const flat::UrlRule*>();
+  }
+  if ((element_type == flat::ElementType_NONE) ==
+      (activation_type == flat::ActivationType_NONE)) {
+    return std::vector<const flat::UrlRule*>();
+  }
+
+  std::vector<const flat::UrlRule*> rules;
+  FindMatchInFlatUrlPatternIndex(
+      *flat_index_, UrlPattern::UrlInfo(url), first_party_origin, element_type,
+      activation_type, request_method, is_third_party, disable_generic_rules,
+      embedder_conditions_matcher, FindRuleStrategy::kAll, &rules);
+
+  return rules;
 }
 
 }  // namespace url_pattern_index

@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,38 +8,65 @@ static_library("network_config") {
   sources = [
     "cros_network_config.cc",
     "cros_network_config.h",
-    "network_config_service.cc",
-    "network_config_service.h",
   ]
 
   deps = [
+    "//ash/constants",
     "//base",
-    "//chromeos/network",
+    "//chromeos/ash/components/dbus/hermes",
+    "//chromeos/ash/components/dbus/shill",
+    "//chromeos/ash/components/network",
+    "//chromeos/ash/components/sync_wifi:network_eligibility_checker",
+    "//chromeos/login/login_state",
     "//chromeos/services/network_config/public/cpp",
     "//chromeos/services/network_config/public/mojom",
     "//components/device_event_log",
     "//components/onc",
     "//components/proxy_config",
+    "//components/user_manager",
+    "//dbus",
     "//net",
-    "//services/service_manager/public/cpp",
+  ]
+}
+
+component("in_process_instance") {
+  sources = [
+    "in_process_instance.cc",
+    "in_process_instance.h",
+  ]
+
+  defines = [ "IS_IN_PROCESS_NETWORK_CONFIG_IMPL" ]
+
+  public_deps = [
+    "//chromeos/services/network_config/public/mojom",
+    "//mojo/public/cpp/bindings",
+  ]
+
+  deps = [
+    ":network_config",
+    "//chromeos/ash/components/network",
+    "//chromeos/services/network_config/public/mojom",
+    "//mojo/public/cpp/bindings",
   ]
 }
 
 source_set("unit_tests") {
   testonly = true
 
-  sources = [
-    "cros_network_config_unittest.cc",
-    "network_config_service_unittest.cc",
-  ]
+  sources = [ "cros_network_config_unittest.cc" ]
 
   deps = [
     ":network_config",
+    "//ash/constants:constants",
     "//base",
     "//base/test:test_support",
-    "//chromeos/dbus/shill:test_support",
-    "//chromeos/network:test_support",
+    "//chromeos/ash/components/dbus/shill:test_support",
+    "//chromeos/ash/components/network:test_support",
+    "//chromeos/login/login_state",
     "//chromeos/services/network_config/public/cpp:test_support",
+    "//components/onc",
+    "//components/prefs:test_support",
+    "//components/sync_preferences:test_support",
     "//services/network/public/mojom:mojom_ip_address",
     "//testing/gtest",
   ]

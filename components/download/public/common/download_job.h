@@ -1,17 +1,15 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_DOWNLOAD_PUBLIC_COMMON_DOWNLOAD_JOB_H_
 #define COMPONENTS_DOWNLOAD_PUBLIC_COMMON_DOWNLOAD_JOB_H_
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/time/time.h"
 #include "components/download/public/common/download_export.h"
 #include "components/download/public/common/download_file.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
-#include "components/download/public/common/download_request_handle_interface.h"
 
 namespace download {
 
@@ -22,8 +20,17 @@ class DownloadItem;
 // The base class is a friend class of DownloadItem.
 class COMPONENTS_DOWNLOAD_EXPORT DownloadJob {
  public:
+  // Callback to cancel the download request.
+  using CancelRequestCallback =
+      base::OnceCallback<void(bool /* user_cancel */)>;
+  CancelRequestCallback cancel_request_callback;
+
   DownloadJob(DownloadItem* download_item,
-              std::unique_ptr<DownloadRequestHandleInterface> request_handle);
+              CancelRequestCallback cancel_request_callback);
+
+  DownloadJob(const DownloadJob&) = delete;
+  DownloadJob& operator=(const DownloadJob&) = delete;
+
   virtual ~DownloadJob();
 
   // Download operations.
@@ -60,23 +67,18 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadJob {
 
   // Add an input stream to the download sink. Return false if we start to
   // destroy download file.
-  bool AddInputStream(std::unique_ptr<InputStream> stream,
-                      int64_t offset,
-                      int64_t length);
+  bool AddInputStream(std::unique_ptr<InputStream> stream, int64_t offset);
 
-  DownloadItem* download_item_;
+  raw_ptr<DownloadItem> download_item_;
 
-  // Used to perform operations on network request.
-  // Can be null on interrupted download.
-  std::unique_ptr<DownloadRequestHandleInterface> request_handle_;
+  // Callback to cancel the download, can be null.
+  CancelRequestCallback cancel_request_callback_;
 
  private:
   // If the download progress is paused by the user.
   bool is_paused_;
 
   base::WeakPtrFactory<DownloadJob> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(DownloadJob);
 };
 
 }  // namespace download

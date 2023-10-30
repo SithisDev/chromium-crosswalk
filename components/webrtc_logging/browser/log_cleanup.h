@@ -1,9 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_WEBRTC_LOGGING_BROWSER_LOG_CLEANUP_H_
 #define COMPONENTS_WEBRTC_LOGGING_BROWSER_LOG_CLEANUP_H_
+
+#include "base/time/time.h"
 
 namespace base {
 class FilePath;
@@ -11,6 +13,8 @@ class Time;
 }  // namespace base
 
 namespace webrtc_logging {
+
+extern const base::TimeDelta kTimeToKeepLogs;
 
 // Deletes logs files older that 5 days. Updates the log file list.
 // Must be called on a task runner that's allowed to block.

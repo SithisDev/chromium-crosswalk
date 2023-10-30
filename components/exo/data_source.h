@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,9 @@
 
 #include "base/callback.h"
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
+#include "components/exo/surface.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace exo {
 
@@ -21,7 +22,16 @@ enum class DndAction;
 // Object representing transferred data offered by a client.
 class DataSource {
  public:
+  // The maximum number of different data types that will be read by
+  // GetDataForPreferredMimeTypes (plain text, RTF, HTML, image, text/uri-list,
+  // application/octet-stream, chromium/x-web-custom-data).
+  static constexpr int kMaxDataTypes = 7;
+
   explicit DataSource(DataSourceDelegate* delegate);
+
+  DataSource(const DataSource&) = delete;
+  DataSource& operator=(const DataSource&) = delete;
+
   ~DataSource();
 
   void AddObserver(DataSourceObserver* observer);
@@ -34,27 +44,64 @@ class DataSource {
   // DataSource.
   void SetActions(const base::flat_set<DndAction>& dnd_actions);
 
+  const base::flat_set<DndAction>& GetActions() const { return dnd_actions_; }
+
   // Notifies the data source is cancelled. e.g. Replaced with another data
   // source.
   void Cancelled();
 
+  // Notifies the client of the mime type that will be used by the
+  // recipient. Only used during drag drop operations.
+  void Target(const absl::optional<std::string>& mime_type);
+
+  // Notifies the client of the dnd action that will be performed if the
+  // currently running drag operation ends now. Only used during drag drop
+  // operations.
+  void Action(DndAction action);
+
+  // Notifies the client that the user has released the current drag. At this
+  // point the target and action are considered final, but it is still possible
+  // for the recipient to reject the transfer.
+  void DndDropPerformed();
+
+  // Notifies the client that the drag was completed successfully. The data
+  // source must not be used by the client after this point except to delete it.
+  void DndFinished();
+
   // Search the set of offered MIME types for the most preferred of each of the
-  // following categories: text/plain*, text/rtf, text/html*, image/*. If any
-  // usable MIME types in a given category are available, the corresponding
+  // following categories: text/plain*, text/rtf, text/html*, image/*,
+  // text/uri-list, chromium/x-web-custom-data. If any usable MIME types in a
+  // given category are available, the corresponding
   // |*_reader| input callback will be called with the best one and the
   // corresponding data. For any category that has no available MIME types,
   // |failure_callback| is run. |failure_callback| may therefore be run as many
-  // as four times.
+  // as seven times.
   using ReadDataCallback =
       base::OnceCallback<void(const std::string&, const std::vector<uint8_t>&)>;
-  void GetDataForPreferredMimeTypes(ReadDataCallback text_reader,
-                                    ReadDataCallback rtf_reader,
-                                    ReadDataCallback html_reader,
-                                    ReadDataCallback image_reader,
-                                    base::RepeatingClosure failure_callback);
+  using ReadTextDataCallback =
+      base::OnceCallback<void(const std::string&, std::u16string)>;
+  using ReadFileContentsDataCallback =
+      base::OnceCallback<void(const std::string&,
+                              const base::FilePath&,
+                              const std::vector<uint8_t>&)>;
+  using ReadWebCustomDataCallback =
+      base::OnceCallback<void(const std::string&, const std::vector<uint8_t>&)>;
+  void ReadDataTransferEndpoint(ReadTextDataCallback dte_reader,
+                                base::RepeatingClosure failure_callback);
+  void GetDataForPreferredMimeTypes(
+      ReadTextDataCallback text_reader,
+      ReadDataCallback rtf_reader,
+      ReadTextDataCallback html_reader,
+      ReadDataCallback image_reader,
+      ReadDataCallback filenames_reader,
+      ReadFileContentsDataCallback file_contents_reader,
+      ReadDataCallback web_custom_data_reader,
+      base::RepeatingClosure failure_callback);
 
   void ReadDataForTesting(const std::string& mime_type,
                           ReadDataCallback callback);
+
+  bool CanBeDataSourceForCopy(Surface* surface) const;
 
  private:
   // Reads data from the source. Then |callback| is invoked with read data. If
@@ -66,31 +113,42 @@ class DataSource {
 
   void OnDataRead(ReadDataCallback callback,
                   const std::string& mime_type,
-                  const std::vector<uint8_t>&);
+                  base::OnceClosure failure_callback,
+                  const absl::optional<std::vector<uint8_t>>& data);
+
+  void OnTextRead(ReadTextDataCallback callback,
+                  const std::string& mime_type,
+                  const std::vector<uint8_t>& data);
+
+  void OnFileContentsRead(ReadFileContentsDataCallback callback,
+                          const std::string& mime_type,
+                          const std::vector<uint8_t>& data);
 
   DataSourceDelegate* const delegate_;
   base::ObserverList<DataSourceObserver>::Unchecked observers_;
 
   // Mime types which has been offered.
   std::set<std::string> mime_types_;
-  bool cancelled_;
+  bool finished_;
 
-  base::WeakPtrFactory<DataSource> read_data_weak_ptr_factory_;
+  base::flat_set<DndAction> dnd_actions_;
 
-  DISALLOW_COPY_AND_ASSIGN(DataSource);
+  base::WeakPtrFactory<DataSource> read_data_weak_ptr_factory_{this};
 };
 
 class ScopedDataSource {
  public:
   ScopedDataSource(DataSource* data_source, DataSourceObserver* observer);
+
+  ScopedDataSource(const ScopedDataSource&) = delete;
+  ScopedDataSource& operator=(const ScopedDataSource&) = delete;
+
   ~ScopedDataSource();
   DataSource* get() { return data_source_; }
 
  private:
   DataSource* const data_source_;
   DataSourceObserver* const observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedDataSource);
 };
 
 }  // namespace exo

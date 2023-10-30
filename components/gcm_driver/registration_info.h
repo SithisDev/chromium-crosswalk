@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -110,10 +110,9 @@ struct InstanceIDTokenInfo final : public RegistrationInfo {
   // E.g. for sending GCM messages, 'GCM' scope should be used.
   std::string scope;
 
-  // Allows including a small number of string key/value pairs that will be
-  // associated with the token and may be used in processing the request. These
-  // are not serialized/deserialized.
-  std::map<std::string, std::string> options;
+  // Specifies TTL of retrievable token, zero value means unlimited TTL.
+  // Not serialized/deserialized.
+  base::TimeDelta time_to_live;
 
  private:
   ~InstanceIDTokenInfo() override;

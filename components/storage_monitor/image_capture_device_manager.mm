@@ -1,8 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/storage_monitor/image_capture_device_manager.h"
+
+#include "base/memory/raw_ptr.h"
 
 #import <ImageCaptureCore/ImageCaptureCore.h>
 
@@ -25,13 +27,13 @@ storage_monitor::ImageCaptureDeviceManager* g_image_capture_device_manager =
 @interface ImageCaptureDeviceManagerImpl
     : NSObject<ICDeviceBrowserDelegate> {
  @private
-  base::scoped_nsobject<ICDeviceBrowser> deviceBrowser_;
-  base::scoped_nsobject<NSMutableArray> cameras_;
+  base::scoped_nsobject<ICDeviceBrowser> _deviceBrowser;
+  base::scoped_nsobject<NSMutableArray> _cameras;
 
   // Guaranteed to outlive this class.
   // TODO(gbillock): Update when ownership chains go up through
   // a StorageMonitor subclass.
-  storage_monitor::StorageMonitor::Receiver* notifications_;
+  raw_ptr<storage_monitor::StorageMonitor::Receiver> _notifications;
 }
 
 - (void)setNotifications:
@@ -50,33 +52,34 @@ storage_monitor::ImageCaptureDeviceManager* g_image_capture_device_manager =
 
 - (instancetype)init {
   if ((self = [super init])) {
-    cameras_.reset([[NSMutableArray alloc] init]);
-    notifications_ = NULL;
+    _cameras.reset([[NSMutableArray alloc] init]);
+    _notifications = nullptr;
 
-    deviceBrowser_.reset([[ICDeviceBrowser alloc] init]);
-    [deviceBrowser_ setDelegate:self];
-    [deviceBrowser_ setBrowsedDeviceTypeMask:
-        static_cast<ICDeviceTypeMask>(
-            ICDeviceTypeMaskCamera | ICDeviceLocationTypeMaskLocal)];
-    [deviceBrowser_ start];
+    _deviceBrowser.reset([[ICDeviceBrowser alloc] init]);
+    [_deviceBrowser setDelegate:self];
+    [_deviceBrowser
+        setBrowsedDeviceTypeMask:ICDeviceTypeMask{
+                                     ICDeviceTypeMaskCamera |
+                                     UInt{ICDeviceLocationTypeMaskLocal}}];
+    [_deviceBrowser start];
   }
   return self;
 }
 
 - (void)setNotifications:
             (storage_monitor::StorageMonitor::Receiver*)notifications {
-  notifications_ = notifications;
+  _notifications = notifications;
 }
 
 - (void)close {
-  [deviceBrowser_ setDelegate:nil];
-  [deviceBrowser_ stop];
-  deviceBrowser_.reset();
-  cameras_.reset();
+  [_deviceBrowser setDelegate:nil];
+  [_deviceBrowser stop];
+  _deviceBrowser.reset();
+  _cameras.reset();
 }
 
 - (ImageCaptureDevice*) deviceForUUID:(const std::string&)uuid {
-  for (ICCameraDevice* camera in cameras_.get()) {
+  for (ICCameraDevice* camera in _cameras.get()) {
     NSString* camera_id = [camera UUIDString];
     if (base::SysNSStringToUTF8(camera_id) == uuid) {
       return [[[ImageCaptureDevice alloc]
@@ -100,19 +103,16 @@ storage_monitor::ImageCaptureDeviceManager* g_image_capture_device_manager =
   ICCameraDevice* cameraDevice =
       base::mac::ObjCCastStrict<ICCameraDevice>(addedDevice);
 
-  [cameras_ addObject:addedDevice];
+  [_cameras addObject:addedDevice];
 
   // TODO(gbillock): use [cameraDevice mountPoint] here when possible.
   storage_monitor::StorageInfo info(
       storage_monitor::StorageInfo::MakeDeviceId(
           storage_monitor::StorageInfo::MAC_IMAGE_CAPTURE,
           base::SysNSStringToUTF8([cameraDevice UUIDString])),
-      std::string(),
-      base::SysNSStringToUTF16([cameraDevice name]),
-      base::string16(),
-      base::string16(),
-      0);
-  notifications_->ProcessAttach(info);
+      std::string(), base::SysNSStringToUTF16([cameraDevice name]),
+      std::u16string(), std::u16string(), 0);
+  _notifications->ProcessAttach(info);
 }
 
 - (void)deviceBrowser:(ICDeviceBrowser*)browser
@@ -124,14 +124,14 @@ storage_monitor::ImageCaptureDeviceManager* g_image_capture_device_manager =
   std::string uuid = base::SysNSStringToUTF8([device UUIDString]);
 
   // May delete |device|.
-  [cameras_ removeObject:device];
+  [_cameras removeObject:device];
 
-  notifications_->ProcessDetach(storage_monitor::StorageInfo::MakeDeviceId(
+  _notifications->ProcessDetach(storage_monitor::StorageInfo::MakeDeviceId(
       storage_monitor::StorageInfo::MAC_IMAGE_CAPTURE, uuid));
 }
 
 - (ICDeviceBrowser*)deviceBrowserForTest {
-  return deviceBrowser_.get();
+  return _deviceBrowser.get();
 }
 
 @end  // ImageCaptureDeviceManagerImpl
@@ -155,12 +155,12 @@ void ImageCaptureDeviceManager::SetNotifications(
 
 void ImageCaptureDeviceManager::EjectDevice(
     const std::string& uuid,
-    base::Callback<void(StorageMonitor::EjectStatus)> callback) {
+    base::OnceCallback<void(StorageMonitor::EjectStatus)> callback) {
   base::scoped_nsobject<ImageCaptureDevice> camera_device(
       [[device_browser_ deviceForUUID:uuid] retain]);
   [camera_device eject];
   [camera_device close];
-  callback.Run(StorageMonitor::EJECT_OK);
+  std::move(callback).Run(StorageMonitor::EJECT_OK);
 }
 
 // static

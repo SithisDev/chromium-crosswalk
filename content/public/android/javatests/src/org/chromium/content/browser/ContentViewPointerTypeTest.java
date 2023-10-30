@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@ import android.os.SystemClock;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 
+import androidx.test.filters.SmallTest;
+
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -17,6 +19,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.DisabledTest;
+import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content_public.browser.test.ContentJUnit4ClassRunner;
 import org.chromium.content_public.browser.test.util.DOMUtils;
@@ -24,7 +27,7 @@ import org.chromium.content_shell.ShellViewAndroidDelegate;
 import org.chromium.content_shell.ShellViewAndroidDelegate.OnCursorUpdateHelper;
 import org.chromium.content_shell_apk.ContentShellActivity;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
-import org.chromium.ui_base.web.CursorType;
+import org.chromium.ui.mojom.CursorType;
 
 /**
  * Tests that we can move mouse cursor and test cursor icon.
@@ -58,7 +61,7 @@ public class ContentViewPointerTypeTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         ContentShellActivity activity =
                 mActivityTestRule.launchContentShellWithUrlSync(CURSOR_PAGE);
         if (activity != null) {
@@ -109,8 +112,8 @@ public class ContentViewPointerTypeTest {
     }
 
     @Test
-    //@SmallTest
-    //@Feature({"Main"})
+    @SmallTest
+    @Feature({"Main"})
     @DisabledTest(message = "crbug.com/755112")
     public void testPointerType() throws Throwable {
         checkPointerTypeForNode("hand", CursorType.HAND);

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,9 +34,9 @@ class CommandLineConfigPolicy {
 
   // If non-zero, time interval in seconds until the first component
   // update check.
-  virtual int InitialDelay() const;
+  virtual double InitialDelay() const;
 
-  virtual ~CommandLineConfigPolicy() {}
+  virtual ~CommandLineConfigPolicy() = default;
 };
 
 }  // namespace update_client

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,7 @@
 #include <vector>
 
 #include "content/browser/renderer_host/event_with_latency_info.h"
-#include "content/common/content_export.h"
-#include "content/public/common/input_event_ack_state.h"
+#include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
 
 namespace ui {
 class TouchEvent;
@@ -33,14 +32,14 @@ enum TouchEventCoordinateSystem {
 // WebTouchPoint.position or WebTouchPoint.screenPosition.  Is's up to the
 // caller to do any co-ordinate system mapping (typically to get them into
 // the Aura EventDispatcher co-ordinate system).
-CONTENT_EXPORT bool MakeUITouchEventsFromWebTouchEvents(
+bool MakeUITouchEventsFromWebTouchEvents(
     const TouchEventWithLatencyInfo& touch,
     std::vector<std::unique_ptr<ui::TouchEvent>>* list,
     TouchEventCoordinateSystem coordinate_system);
 
 // Utility to map the event ack state from the renderer, returns true if the
 // event could be handled non-blocking.
-bool InputEventAckStateIsSetNonBlocking(InputEventAckState);
+bool InputEventResultStateIsSetNonBlocking(blink::mojom::InputEventResultState);
 
 }  // namespace content
 

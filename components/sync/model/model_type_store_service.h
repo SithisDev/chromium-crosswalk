@@ -1,21 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_SYNC_MODEL_MODEL_TYPE_STORE_SERVICE_H_
 #define COMPONENTS_SYNC_MODEL_MODEL_TYPE_STORE_SERVICE_H_
 
-#include <memory>
-
 #include "base/files/file_path.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/sync/model/model_type_store.h"
 
 namespace syncer {
-
-class BlockingModelTypeStore;
 
 // Handles the shared resources for ModelTypeStore and related classes,
 // including a shared background sequence runner.
@@ -31,12 +27,6 @@ class ModelTypeStoreService : public KeyedService {
   virtual RepeatingModelTypeStoreFactory GetStoreFactory() = 0;
 
   virtual scoped_refptr<base::SequencedTaskRunner> GetBackendTaskRunner() = 0;
-
-  // Creates a BlockingModelTypeStore. Must be called from the backend
-  // sequence as returned in GetBackendTaskRunner(). Can return null if there
-  // was an error.
-  virtual std::unique_ptr<BlockingModelTypeStore>
-  CreateBlockingStoreFromBackendSequence(ModelType type) = 0;
 };
 
 }  // namespace syncer

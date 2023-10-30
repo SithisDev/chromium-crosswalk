@@ -1,17 +1,17 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/zucchini/disassembler.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 
 namespace zucchini {
 
 /******** EmptyReferenceReader ********/
 
-base::Optional<Reference> EmptyReferenceReader::GetNext() {
-  return base::nullopt;
+absl::optional<Reference> EmptyReferenceReader::GetNext() {
+  return absl::nullopt;
 }
 
 /******** EmptyReferenceWriter ********/
@@ -40,6 +40,15 @@ std::unique_ptr<ReferenceWriter> ReferenceGroup::GetWriter(
   DCHECK_EQ(image.begin(), disasm->image().begin());
   DCHECK_EQ(image.size(), disasm->size());
   return (disasm->*writer_factory_)(image);
+}
+
+std::unique_ptr<ReferenceMixer> ReferenceGroup::GetMixer(
+    ConstBufferView old_image,
+    ConstBufferView new_image,
+    Disassembler* disasm) const {
+  if (mixer_factory_)
+    return (disasm->*mixer_factory_)(old_image, new_image);
+  return nullptr;
 }
 
 /******** Disassembler ********/

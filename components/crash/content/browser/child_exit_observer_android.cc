@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,14 @@
 #include <unistd.h>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "components/crash/content/browser/crash_memory_metrics_collector_android.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/child_process_termination_info.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_process_host.h"
 
 using content::BrowserThread;
 
@@ -23,24 +22,14 @@ namespace crash_reporter {
 
 namespace {
 
-base::LazyInstance<ChildExitObserver>::DestructorAtExit g_instance =
-    LAZY_INSTANCE_INITIALIZER;
-
 void PopulateTerminationInfo(
     const content::ChildProcessTerminationInfo& content_info,
     ChildExitObserver::TerminationInfo* info) {
   info->binding_state = content_info.binding_state;
+  info->threw_exception_during_init = content_info.threw_exception_during_init;
   info->was_killed_intentionally_by_browser =
       content_info.was_killed_intentionally_by_browser;
-  info->remaining_process_with_strong_binding =
-      content_info.remaining_process_with_strong_binding;
-  info->remaining_process_with_moderate_binding =
-      content_info.remaining_process_with_moderate_binding;
-  info->remaining_process_with_waived_binding =
-      content_info.remaining_process_with_waived_binding;
   info->best_effort_reverse_rank = content_info.best_effort_reverse_rank;
-  info->was_oom_protected_status =
-      content_info.status == base::TERMINATION_STATUS_OOM_PROTECTED;
   info->renderer_has_visible_clients =
       content_info.renderer_has_visible_clients;
   info->renderer_was_subframe = content_info.renderer_was_subframe;
@@ -54,31 +43,8 @@ ChildExitObserver::TerminationInfo::TerminationInfo(
 ChildExitObserver::TerminationInfo& ChildExitObserver::TerminationInfo::
 operator=(const TerminationInfo& other) = default;
 
-// static
-void ChildExitObserver::Create() {
+ChildExitObserver::ChildExitObserver() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // If this DCHECK fails in a unit test then a previously executing
-  // test that makes use of ChildExitObserver forgot to create a
-  // ShadowingAtExitManager.
-  DCHECK(!g_instance.IsCreated());
-  g_instance.Get();
-}
-
-// static
-ChildExitObserver* ChildExitObserver::GetInstance() {
-  DCHECK(g_instance.IsCreated());
-  return g_instance.Pointer();
-}
-
-ChildExitObserver::ChildExitObserver()
-    : notification_registrar_(),
-      registered_clients_lock_(),
-      registered_clients_(),
-      process_host_id_to_pid_(),
-      browser_child_process_info_(),
-      crash_signals_lock_(),
-      child_pid_to_crash_signal_(),
-      scoped_observer_(this) {
   notification_registrar_.Add(this,
                               content::NOTIFICATION_RENDERER_PROCESS_CREATED,
                               content::NotificationService::AllSources());
@@ -89,10 +55,11 @@ ChildExitObserver::ChildExitObserver()
                               content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
                               content::NotificationService::AllSources());
   BrowserChildProcessObserver::Add(this);
-  scoped_observer_.Add(crashpad::CrashHandlerHost::Get());
+  scoped_observation_.Observe(crashpad::CrashHandlerHost::Get());
 }
 
 ChildExitObserver::~ChildExitObserver() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserChildProcessObserver::Remove(this);
 }
 
@@ -197,12 +164,14 @@ void ChildExitObserver::Observe(int type,
       // NOTIFICATION_RENDERER_PROCESS_TERMINATED is sent when the renderer
       // process is cleanly shutdown.
       info.normal_termination = true;
+      info.renderer_shutdown_requested = rph->ShutdownRequested();
       break;
     }
     case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
       // We do not care about android fast shutdowns as it is a known case where
       // the renderer is intentionally killed when we are done with it.
       info.normal_termination = rph->FastShutdownStarted();
+      info.renderer_shutdown_requested = rph->ShutdownRequested();
       info.app_state = base::android::ApplicationStatusListener::GetState();
       const auto& content_info =
           *content::Details<content::ChildProcessTerminationInfo>(details)

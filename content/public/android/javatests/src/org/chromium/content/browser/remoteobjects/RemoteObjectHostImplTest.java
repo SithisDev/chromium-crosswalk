@@ -1,10 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser.remoteobjects;
 
-import android.support.test.filters.SmallTest;
+import static org.hamcrest.Matchers.isIn;
+import static org.hamcrest.Matchers.not;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -75,7 +78,7 @@ public final class RemoteObjectHostImplTest {
     @Feature({"AndroidWebView", "Android-JavaBridge"})
     public void testClosesPipeIfObjectDoesNotExist() {
         RemoteObjectHostImpl host = new RemoteObjectHostImpl(
-                TestJavascriptInterface.class, /* auditor */ null, mRegistry);
+                /* auditor */ null, mRegistry, /* allowInspection */ true);
 
         Pair<RemoteObject.Proxy, InterfaceRequest<RemoteObject>> result =
                 RemoteObject.MANAGER.getInterfaceRequest(CoreImpl.getInstance());
@@ -92,7 +95,7 @@ public final class RemoteObjectHostImplTest {
      *
      * This verifies that it is working correctly.
      */
-    private static class HasMethodCapture implements RemoteObject.HasMethodResponse {
+    private static class HasMethodCapture implements RemoteObject.HasMethod_Response {
         public Boolean methodExists;
 
         @Override
@@ -109,10 +112,10 @@ public final class RemoteObjectHostImplTest {
             @TestJavascriptInterface
             public void frobnicate() {}
         };
-        int id = mRegistry.getObjectId(o);
+        int id = mRegistry.getObjectId(o, TestJavascriptInterface.class);
 
         RemoteObjectHostImpl host = new RemoteObjectHostImpl(
-                TestJavascriptInterface.class, /* auditor */ null, mRegistry);
+                /* auditor */ null, mRegistry, /* allowInspection */ true);
 
         Pair<RemoteObject.Proxy, InterfaceRequest<RemoteObject>> result =
                 RemoteObject.MANAGER.getInterfaceRequest(CoreImpl.getInstance());
@@ -137,13 +140,47 @@ public final class RemoteObjectHostImplTest {
     @Feature({"AndroidWebView", "Android-JavaBridge"})
     public void testRelease() {
         Object o = new Object();
-        int id = mRegistry.getObjectId(o);
+        int id = mRegistry.getObjectId(o, TestJavascriptInterface.class);
 
         RemoteObjectHostImpl host = new RemoteObjectHostImpl(
-                TestJavascriptInterface.class, /* auditor */ null, mRegistry);
+                /* auditor */ null, mRegistry, /* allowInspection */ true);
 
         Assert.assertSame(o, mRegistry.getObjectById(id));
         host.releaseObject(id);
+        Assert.assertNull(mRegistry.getObjectById(id));
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Android-JavaBridge"})
+    public void testClose() {
+        RemoteObjectHostImpl host = new RemoteObjectHostImpl(
+                /* auditor */ null, mRegistry, /* allowInspection */ true);
+        Assert.assertThat(mRegistry, isIn(mRetainingSet));
+        host.close();
+        Assert.assertThat(mRegistry, not(isIn(mRetainingSet)));
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView", "Android-JavaBridge"})
+    public void testClosePipeAfterHostClosesWithoutRelease() {
+        Object o = new Object();
+        int id = mRegistry.getObjectId(o, TestJavascriptInterface.class);
+
+        RemoteObjectHostImpl host = new RemoteObjectHostImpl(
+                /* auditor */ null, mRegistry, /* allowInspection */ true);
+
+        Pair<RemoteObject.Proxy, InterfaceRequest<RemoteObject>> result =
+                RemoteObject.MANAGER.getInterfaceRequest(CoreImpl.getInstance());
+        RemoteObject.Proxy remoteObject = result.first;
+        host.getObject(id, result.second);
+        host.close();
+
+        Assert.assertSame(o, mRegistry.getObjectById(id));
+        remoteObject.close();
+
+        mMojoTestRule.runLoopUntilIdle();
         Assert.assertNull(mRegistry.getObjectById(id));
     }
 }

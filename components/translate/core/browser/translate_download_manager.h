@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
+#include "base/strings/string_piece.h"
 #include "components/translate/core/browser/translate_language_list.h"
 #include "components/translate/core/browser/translate_script.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace base {
@@ -41,29 +41,29 @@ class TranslateDownloadManager {
   // The application locale.
   // Should be set before this class can be used.
   const std::string& application_locale() {
-    DCHECK(sequence_checker_.CalledOnValidSequence());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     return application_locale_;
   }
   void set_application_locale(const std::string& locale) {
-    DCHECK(sequence_checker_.CalledOnValidSequence());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     application_locale_ = locale;
   }
 
   // The language list.
   TranslateLanguageList* language_list() {
-    DCHECK(sequence_checker_.CalledOnValidSequence());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     return language_list_.get();
   }
 
   // The translate script.
   TranslateScript* script() {
-    DCHECK(sequence_checker_.CalledOnValidSequence());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     return script_.get();
   }
 
-  // Fills |languages| with the list of languages that the translate server can
-  // translate to and from. May cause a language list request unless
-  // |translate_allowed| is false.
+  // Fills |languages| with the alphabetically sorted list of languages that the
+  // translate server can translate to and from. May cause a language list
+  // request unless |translate_allowed| is false.
   static void GetSupportedLanguages(bool translate_allowed,
                                     std::vector<std::string>* languages);
 
@@ -74,10 +74,10 @@ class TranslateDownloadManager {
   // Returns the language code that can be used with the Translate method for a
   // specified |language|. (ex. GetLanguageCode("en-US") will return "en", and
   // GetLanguageCode("zh-CN") returns "zh-CN")
-  static std::string GetLanguageCode(const std::string& language);
+  static std::string GetLanguageCode(base::StringPiece language);
 
   // Returns true if |language| is supported by the translation server.
-  static bool IsSupportedLanguage(const std::string& language);
+  static bool IsSupportedLanguage(base::StringPiece language);
 
   // Must be called to shut Translate down. Cancels any pending fetches.
   void Shutdown();
@@ -100,7 +100,7 @@ class TranslateDownloadManager {
 
   // Validates that accesses to the download manager are performed on the same
   // sequence.
-  base::SequenceChecker sequence_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
   std::unique_ptr<TranslateLanguageList> language_list_;
 

@@ -1,3 +1,9 @@
-ljusten@chromium.org
+# Prefer enterprise-policy-review@ to individual owners. Sending code
+# reviews to the alias allows the owners to distribute code review loads.
+enterprise-policy-review@google.com
 
-# COMPONENT: Enterprise
+# When making changes, also update ToolOwners in the GwsQ config:
+# http://google3/chrome/enterprise/gwsq/enterprise-policy-review.gwsq
+hendrich@chromium.org
+janagrill@google.com
+ydago@chromium.org

@@ -1,13 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/command_line.h"
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/accessibility_notification_waiter.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -36,7 +38,7 @@ class AccessibilityObjectModelBrowserTest : public ContentBrowserTest {
  protected:
   BrowserAccessibility* FindNode(ax::mojom::Role role,
                                  const std::string& name) {
-    BrowserAccessibility* root = GetManager()->GetRoot();
+    BrowserAccessibility* root = GetManager()->GetBrowserAccessibilityRoot();
     CHECK(root);
     return FindNodeInSubtree(*root, role, name);
   }
@@ -66,18 +68,19 @@ class AccessibilityObjectModelBrowserTest : public ContentBrowserTest {
 
 }  // namespace
 
+// TODO(http://crbug.com/1212324): Flaky on various builders.
 IN_PROC_BROWSER_TEST_F(AccessibilityObjectModelBrowserTest,
-                       EventListenerOnVirtualNode) {
+                       DISABLED_EventListenerOnVirtualNode) {
   ASSERT_TRUE(embedded_test_server()->Start());
-  NavigateToURL(shell(), GURL(url::kAboutBlankURL));
+  EXPECT_TRUE(NavigateToURL(shell(), GURL(url::kAboutBlankURL)));
 
   AccessibilityNotificationWaiter waiter(shell()->web_contents(),
                                          ui::kAXModeComplete,
                                          ax::mojom::Event::kLoadComplete);
   GURL url(embedded_test_server()->GetURL(
       "/accessibility/aom/event-listener-on-virtual-node.html"));
-  NavigateToURL(shell(), url);
-  waiter.WaitForNotification();
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+  ASSERT_TRUE(waiter.WaitForNotification());
 
   BrowserAccessibility* button = FindNode(ax::mojom::Role::kButton, "FocusMe");
   ASSERT_NE(nullptr, button);
@@ -88,7 +91,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityObjectModelBrowserTest,
   AccessibilityNotificationWaiter waiter2(
       shell()->web_contents(), ui::kAXModeComplete, ax::mojom::Event::kFocus);
   GetManager()->DoDefaultAction(*link);
-  waiter2.WaitForNotification();
+  ASSERT_TRUE(waiter2.WaitForNotification());
 
   BrowserAccessibility* focus = GetManager()->GetFocus();
   ASSERT_NE(nullptr, focus);

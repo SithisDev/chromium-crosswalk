@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,7 +55,7 @@ void StubOfflinePageModel::GetVisualsAvailability(
 void StubOfflinePageModel::PublishInternalArchive(
     const OfflinePageItem& offline_page,
     PublishPageCallback publish_done_callback) {}
-const base::FilePath& StubOfflinePageModel::GetInternalArchiveDirectory(
+const base::FilePath& StubOfflinePageModel::GetArchiveDirectory(
     const std::string& name_space) const {
   return archive_directory_;
 }

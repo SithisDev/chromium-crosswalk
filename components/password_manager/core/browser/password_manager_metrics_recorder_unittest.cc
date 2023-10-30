@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/metrics/metrics_hashes.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_source.h"
@@ -21,20 +21,18 @@ namespace password_manager {
 
 namespace {
 
-constexpr char kTestUrl[] = "https://www.example.com/";
 constexpr ukm::SourceId kTestSourceId = 0x1234;
 
 using UkmEntry = ukm::builders::PageWithPassword;
 
-// Creates a PasswordManagerMetricsRecorder that reports metrics for kTestUrl.
 PasswordManagerMetricsRecorder CreateMetricsRecorder() {
-  return PasswordManagerMetricsRecorder(kTestSourceId, GURL(kTestUrl));
+  return PasswordManagerMetricsRecorder(kTestSourceId);
 }
 
 }  // namespace
 
 TEST(PasswordManagerMetricsRecorder, UserModifiedPasswordField) {
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
   {
     PasswordManagerMetricsRecorder recorder(CreateMetricsRecorder());
@@ -52,7 +50,7 @@ TEST(PasswordManagerMetricsRecorder, UserModifiedPasswordField) {
 }
 
 TEST(PasswordManagerMetricsRecorder, UserModifiedPasswordFieldMultipleTimes) {
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
   {
     PasswordManagerMetricsRecorder recorder(CreateMetricsRecorder());
@@ -71,7 +69,7 @@ TEST(PasswordManagerMetricsRecorder, UserModifiedPasswordFieldMultipleTimes) {
 }
 
 TEST(PasswordManagerMetricsRecorder, UserModifiedPasswordFieldNotCalled) {
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
   { PasswordManagerMetricsRecorder recorder(CreateMetricsRecorder()); }
   const auto& entries =

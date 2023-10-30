@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/observer_list.h"
 #include "base/values.h"
 
 InMemoryPrefStore::InMemoryPrefStore() {}
@@ -18,8 +19,8 @@ bool InMemoryPrefStore::GetValue(const std::string& key,
   return prefs_.GetValue(key, value);
 }
 
-std::unique_ptr<base::DictionaryValue> InMemoryPrefStore::GetValues() const {
-  return prefs_.AsDictionaryValue();
+base::Value::Dict InMemoryPrefStore::GetValues() const {
+  return prefs_.AsDict();
 }
 
 bool InMemoryPrefStore::GetMutableValue(const std::string& key,
@@ -36,7 +37,7 @@ void InMemoryPrefStore::RemoveObserver(PrefStore::Observer* observer) {
 }
 
 bool InMemoryPrefStore::HasObservers() const {
-  return observers_.might_have_observers();
+  return !observers_.empty();
 }
 
 bool InMemoryPrefStore::IsInitializationComplete() const {
@@ -61,6 +62,11 @@ void InMemoryPrefStore::SetValueSilently(const std::string& key,
 void InMemoryPrefStore::RemoveValue(const std::string& key, uint32_t flags) {
   if (prefs_.RemoveValue(key))
     ReportValueChanged(key, flags);
+}
+
+void InMemoryPrefStore::RemoveValuesByPrefixSilently(
+    const std::string& prefix) {
+  prefs_.ClearWithPrefix(prefix);
 }
 
 bool InMemoryPrefStore::ReadOnly() const {

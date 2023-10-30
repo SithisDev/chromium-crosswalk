@@ -1,8 +1,14 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/common/content_constants.h"
+
+#include <vector>
+
+#include "base/strings/string_util.h"
+#include "build/branding_buildflags.h"
+#include "build/build_config.h"
 
 namespace content {
 
@@ -13,18 +19,9 @@ const base::FilePath::CharType kPepperDataDirname[] =
 
 const char kBrowserPluginMimeType[] = "application/browser-plugin";
 
-const char kFlashPluginName[] = "Shockwave Flash";
-const char kFlashPluginSwfMimeType[] = "application/x-shockwave-flash";
-const char kFlashPluginSwfExtension[] = "swf";
-const char kFlashPluginSwfDescription[] = "Shockwave Flash";
-const char kFlashPluginSplMimeType[] = "application/futuresplash";
-const char kFlashPluginSplExtension[] = "spl";
-const char kFlashPluginSplDescription[] = "FutureSplash Player";
-
-const size_t kMaxTitleChars = 4 * 1024;
 const size_t kMaxURLDisplayChars = 32 * 1024;
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 const char kStatsFilename[] = "ChromeStats2";
 #else
 const char kStatsFilename[] = "ChromiumStats2";
@@ -43,6 +40,33 @@ const int kHistogramSynchronizerReservedSequenceNumber = 0;
 const int kDefaultDetachableCancelDelayMs = 30000;
 
 const char kCorsExemptPurposeHeaderName[] = "Purpose";
-const char kCorsExemptRequestedWithHeaderName[] = "X-Requested-With";
+
+std::string GetCorsExemptRequestedWithHeaderName() {
+  std::vector<std::string> pieces;
+  pieces.push_back("X");
+  pieces.push_back("Requested");
+  pieces.push_back("With");
+  return base::JoinString(pieces, "-");
+}
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+const int kLowestRendererOomScore = 300;
+const int kHighestRendererOomScore = 1000;
+
+// The minimum amount to bump a score by.  This is large enough that
+// even if it's translated into the old values, it will still go up
+// by at least one.
+static const int kOomScoreBump = 100;
+
+// Browsers and zygotes should still be killable, but killed last.
+const int kZygoteOomScore = 0;
+// For "miscellaneous" things, we want them after renderers, but before plugins.
+const int kMiscOomScore = kLowestRendererOomScore - kOomScoreBump;
+// We want plugins to die after the renderers.
+const int kPluginOomScore = kMiscOomScore - kOomScoreBump;
+
+static_assert(kMiscOomScore > 0, "kMiscOomScore should be greater than 0");
+static_assert(kPluginOomScore > 0, "kPluginOomScore should be greater than 0");
+#endif
 
 }  // namespace content

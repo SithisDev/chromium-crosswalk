@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,154 +8,77 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/time/time.h"
+#include "components/services/storage/service_worker/service_worker_storage_control_impl.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
-#include "content/common/renderer.mojom.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/test/fake_network_url_loader_factory.h"
-#include "mojo/public/cpp/bindings/associated_binding_set.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "storage/browser/test/mock_special_storage_policy.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 
 namespace content {
 
-class EmbeddedWorkerTestHelper::MockRendererInterface : public mojom::Renderer {
- public:
-  // |helper| must outlive this.
-  explicit MockRendererInterface(EmbeddedWorkerTestHelper* helper)
-      : helper_(helper) {}
-
-  void AddBinding(mojom::RendererAssociatedRequest request) {
-    bindings_.AddBinding(this, std::move(request));
-  }
-
- private:
-  void CreateEmbedderRendererService(
-      service_manager::mojom::ServiceRequest service_request) override {
-    NOTREACHED();
-  }
-  void CreateView(mojom::CreateViewParamsPtr) override { NOTREACHED(); }
-  void CreateFrame(mojom::CreateFrameParamsPtr) override { NOTREACHED(); }
-  void SetUpEmbeddedWorkerChannelForServiceWorker(
-      blink::mojom::EmbeddedWorkerInstanceClientRequest client_request)
-      override {
-    helper_->OnInstanceClientRequest(std::move(client_request));
-  }
-  void CreateFrameProxy(
-      int32_t routing_id,
-      int32_t render_view_routing_id,
-      int32_t opener_routing_id,
-      int32_t parent_routing_id,
-      const FrameReplicationState& replicated_state,
-      const base::UnguessableToken& devtools_frame_token) override {
-    NOTREACHED();
-  }
-  void OnNetworkConnectionChanged(
-      net::NetworkChangeNotifier::ConnectionType type,
-      double max_bandwidth_mbps) override {
-    NOTREACHED();
-  }
-  void OnNetworkQualityChanged(net::EffectiveConnectionType type,
-                               base::TimeDelta http_rtt,
-                               base::TimeDelta transport_rtt,
-                               double bandwidth_kbps) override {
-    NOTREACHED();
-  }
-  void SetWebKitSharedTimersSuspended(bool suspend) override { NOTREACHED(); }
-  void SetUserAgent(const std::string& user_agent) override { NOTREACHED(); }
-  void SetUserAgentMetadata(const blink::UserAgentMetadata& metadata) override {
-    NOTREACHED();
-  }
-  void UpdateScrollbarTheme(
-      mojom::UpdateScrollbarThemeParamsPtr params) override {
-    NOTREACHED();
-  }
-  void OnSystemColorsChanged(int32_t aqua_color_variant,
-                             const std::string& highlight_text_color,
-                             const std::string& highlight_color) override {
-    NOTREACHED();
-  }
-  void PurgePluginListCache(bool reload_pages) override { NOTREACHED(); }
-  void SetProcessState(mojom::RenderProcessState process_state) override {
-    NOTREACHED();
-  }
-  void SetSchedulerKeepActive(bool keep_active) override { NOTREACHED(); }
-  void SetIsLockedToSite() override { NOTREACHED(); }
-  void EnableV8LowMemoryMode() override { NOTREACHED(); }
-
-  EmbeddedWorkerTestHelper* helper_;
-  mojo::AssociatedBindingSet<mojom::Renderer> bindings_;
-};
-
 EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(
     const base::FilePath& user_data_directory)
+    : EmbeddedWorkerTestHelper(
+          user_data_directory,
+          base::MakeRefCounted<storage::MockSpecialStoragePolicy>()) {}
+
+EmbeddedWorkerTestHelper::EmbeddedWorkerTestHelper(
+    const base::FilePath& user_data_directory,
+    scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy)
     : browser_context_(std::make_unique<TestBrowserContext>()),
       render_process_host_(
           std::make_unique<MockRenderProcessHost>(browser_context_.get())),
       new_render_process_host_(
           std::make_unique<MockRenderProcessHost>(browser_context_.get())),
+      quota_manager_(base::MakeRefCounted<storage::MockQuotaManager>(
+          /*is_incognito=*/false,
+          user_data_directory,
+          base::ThreadTaskRunnerHandle::Get(),
+          special_storage_policy)),
+      quota_manager_proxy_(base::MakeRefCounted<storage::MockQuotaManagerProxy>(
+          quota_manager_.get(),
+          base::SequencedTaskRunnerHandle::Get())),
       wrapper_(base::MakeRefCounted<ServiceWorkerContextWrapper>(
           browser_context_.get())),
+      fake_loader_factory_("HTTP/1.1 200 OK\nContent-Type: text/javascript\n\n",
+                           "/* body */",
+                           /*network_accessed=*/true,
+                           net::OK),
+      user_data_directory_(user_data_directory),
+      database_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       next_thread_id_(0),
       mock_render_process_id_(render_process_host_->GetID()),
       new_mock_render_process_id_(new_render_process_host_->GetID()),
       url_loader_factory_getter_(
           base::MakeRefCounted<URLLoaderFactoryGetter>()) {
-  scoped_refptr<base::SequencedTaskRunner> database_task_runner =
-      base::ThreadTaskRunnerHandle::Get();
-  wrapper_->InitOnIO(
-      user_data_directory, std::move(database_task_runner), nullptr, nullptr,
-      nullptr, url_loader_factory_getter_.get(),
-      blink::ServiceWorkerUtils::IsImportedScriptUpdateCheckEnabled()
-          ? wrapper_->CreateNonNetworkURLLoaderFactoryBundleInfoForUpdateCheck(
-                browser_context_.get())
-          : nullptr);
+  wrapper_->SetStorageControlBinderForTest(base::BindRepeating(
+      &EmbeddedWorkerTestHelper::BindStorageControl, base::Unretained(this)));
+  wrapper_->InitInternal(quota_manager_proxy_.get(),
+                         special_storage_policy.get(),
+                         /*blob_context=*/nullptr, browser_context_.get());
   wrapper_->process_manager()->SetProcessIdForTest(mock_render_process_id());
   wrapper_->process_manager()->SetNewProcessIdForTest(new_render_process_id());
-  wrapper_->InitializeResourceContext(browser_context_->GetResourceContext());
+  fake_loader_factory_wrapper_ =
+      base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+          &fake_loader_factory_);
+  wrapper_->SetLoaderFactoryForUpdateCheckForTest(fake_loader_factory_wrapper_);
 
-  // Install a mocked mojom::Renderer interface to catch requests to
-  // establish Mojo connection for EWInstanceClient.
-  mock_renderer_interface_ = std::make_unique<MockRendererInterface>(this);
-
-  auto renderer_interface_ptr =
-      std::make_unique<mojom::RendererAssociatedPtr>();
-  mock_renderer_interface_->AddBinding(
-      mojo::MakeRequestAssociatedWithDedicatedPipe(
-          renderer_interface_ptr.get()));
-  render_process_host_->OverrideRendererInterfaceForTesting(
-      std::move(renderer_interface_ptr));
-
-  auto new_renderer_interface_ptr =
-      std::make_unique<mojom::RendererAssociatedPtr>();
-  mock_renderer_interface_->AddBinding(
-      mojo::MakeRequestAssociatedWithDedicatedPipe(
-          new_renderer_interface_ptr.get()));
-  new_render_process_host_->OverrideRendererInterfaceForTesting(
-      std::move(new_renderer_interface_ptr));
-
-  default_network_loader_factory_ =
-      std::make_unique<FakeNetworkURLLoaderFactory>();
-  SetNetworkFactory(default_network_loader_factory_.get());
-}
-
-void EmbeddedWorkerTestHelper::SetNetworkFactory(
-    network::mojom::URLLoaderFactory* factory) {
-  if (!factory)
-    factory = default_network_loader_factory_.get();
-
-  // Reset factory in URLLoaderFactoryGetter so that we don't hit DCHECK()
-  // there.
-  url_loader_factory_getter_->SetNetworkFactoryForTesting(nullptr);
-  url_loader_factory_getter_->SetNetworkFactoryForTesting(factory);
-
-  render_process_host_->OverrideURLLoaderFactory(factory);
-  new_render_process_host_->OverrideURLLoaderFactory(factory);
+  render_process_host_->OverrideBinderForTesting(
+      blink::mojom::EmbeddedWorkerInstanceClient::Name_,
+      base::BindRepeating(&EmbeddedWorkerTestHelper::OnInstanceClientRequest,
+                          base::Unretained(this)));
+  new_render_process_host_->OverrideBinderForTesting(
+      blink::mojom::EmbeddedWorkerInstanceClient::Name_,
+      base::BindRepeating(&EmbeddedWorkerTestHelper::OnInstanceClientRequest,
+                          base::Unretained(this)));
 }
 
 void EmbeddedWorkerTestHelper::AddPendingInstanceClient(
@@ -168,8 +91,9 @@ void EmbeddedWorkerTestHelper::AddPendingServiceWorker(
   pending_service_workers_.push(std::move(service_worker));
 }
 
-void EmbeddedWorkerTestHelper::OnInstanceClientRequest(
-    blink::mojom::EmbeddedWorkerInstanceClientRequest request) {
+void EmbeddedWorkerTestHelper::OnInstanceClientReceiver(
+    mojo::PendingReceiver<blink::mojom::EmbeddedWorkerInstanceClient>
+        receiver) {
   std::unique_ptr<FakeEmbeddedWorkerInstanceClient> client;
   if (!pending_embedded_worker_instance_clients_.empty()) {
     // Use the instance client that was registered for this message.
@@ -183,12 +107,24 @@ void EmbeddedWorkerTestHelper::OnInstanceClientRequest(
     client = CreateInstanceClient();
   }
 
-  client->Bind(std::move(request));
+  client->Bind(std::move(receiver));
   instance_clients_.insert(std::move(client));
 }
 
+void EmbeddedWorkerTestHelper::OnInstanceClientRequest(
+    mojo::ScopedMessagePipeHandle request_handle) {
+  mojo::PendingReceiver<blink::mojom::EmbeddedWorkerInstanceClient> receiver(
+      std::move(request_handle));
+  OnInstanceClientReceiver(std::move(receiver));
+}
+
 void EmbeddedWorkerTestHelper::OnServiceWorkerRequest(
-    blink::mojom::ServiceWorkerRequest request) {
+    mojo::PendingReceiver<blink::mojom::ServiceWorker> receiver) {
+  OnServiceWorkerReceiver(std::move(receiver));
+}
+
+void EmbeddedWorkerTestHelper::OnServiceWorkerReceiver(
+    mojo::PendingReceiver<blink::mojom::ServiceWorker> receiver) {
   std::unique_ptr<FakeServiceWorker> service_worker;
   if (!pending_service_workers_.empty()) {
     // Use the service worker that was registered for this message.
@@ -202,7 +138,7 @@ void EmbeddedWorkerTestHelper::OnServiceWorkerRequest(
     service_worker = CreateServiceWorker();
   }
 
-  service_worker->Bind(std::move(request));
+  service_worker->Bind(std::move(receiver));
   service_workers_.insert(std::move(service_worker));
 }
 
@@ -219,6 +155,10 @@ void EmbeddedWorkerTestHelper::RemoveServiceWorker(
 }
 
 EmbeddedWorkerTestHelper::~EmbeddedWorkerTestHelper() {
+  // Call Detach() to invalidate the reference to `fake_loader_factory_` because
+  // some tasks referring to the factory wrapper may use it after its
+  // destruction.
+  fake_loader_factory_wrapper_->Detach();
   if (wrapper_.get())
     wrapper_->Shutdown();
 }
@@ -232,38 +172,55 @@ void EmbeddedWorkerTestHelper::ShutdownContext() {
   wrapper_ = nullptr;
 }
 
+void EmbeddedWorkerTestHelper::SimulateStorageRestartForTesting() {
+  storage_control_.reset();
+}
+
 // static
-net::HttpResponseInfo EmbeddedWorkerTestHelper::CreateHttpResponseInfo() {
-  net::HttpResponseInfo info;
+std::unique_ptr<ServiceWorkerVersion::MainScriptResponse>
+EmbeddedWorkerTestHelper::CreateMainScriptResponse() {
+  network::mojom::URLResponseHead response_head;
   const char data[] =
       "HTTP/1.1 200 OK\0"
       "Content-Type: application/javascript\0"
       "\0";
-  info.headers =
-      new net::HttpResponseHeaders(std::string(data, base::size(data)));
-  return info;
+  response_head.headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+      std::string(data, std::size(data)));
+  return std::make_unique<ServiceWorkerVersion::MainScriptResponse>(
+      response_head);
 }
 
 void EmbeddedWorkerTestHelper::PopulateScriptCacheMap(
     int64_t version_id,
     base::OnceClosure callback) {
-  ServiceWorkerVersion* version = context()->GetLiveVersion(version_id);
+  scoped_refptr<ServiceWorkerVersion> version =
+      context()->GetLiveVersion(version_id);
   if (!version) {
     std::move(callback).Run();
     return;
   }
+  if (!version->GetMainScriptResponse())
+    version->SetMainScriptResponse(CreateMainScriptResponse());
   if (!version->script_cache_map()->size()) {
-    std::vector<ServiceWorkerDatabase::ResourceRecord> records;
     // Add a dummy ResourceRecord for the main script to the script cache map of
     // the ServiceWorkerVersion.
-    records.push_back(WriteToDiskCacheAsync(
-        context()->storage(), version->script_url(),
-        context()->storage()->NewResourceId(), {} /* headers */, "I'm a body",
-        "I'm a meta data", std::move(callback)));
-    version->script_cache_map()->SetResources(records);
+    WriteToDiskCacheAsync(
+        context()->GetStorageControl(), version->script_url(), {} /* headers */,
+        "I'm a body", "I'm a meta data",
+        base::BindOnce(
+            [](scoped_refptr<ServiceWorkerVersion> version,
+               base::OnceClosure callback,
+               storage::mojom::ServiceWorkerResourceRecordPtr record) {
+              std::vector<storage::mojom::ServiceWorkerResourceRecordPtr>
+                  records;
+              records.push_back(std::move(record));
+              version->script_cache_map()->SetResources(records);
+
+              std::move(callback).Run();
+            },
+            version, std::move(callback)));
+    return;
   }
-  if (!version->GetMainScriptHttpResponseInfo())
-    version->SetMainScriptHttpResponseInfo(CreateHttpResponseInfo());
   // Call |callback| if |version| already has ResourceRecords.
   if (!callback.is_null())
     std::move(callback).Run();
@@ -277,6 +234,13 @@ EmbeddedWorkerTestHelper::CreateInstanceClient() {
 std::unique_ptr<FakeServiceWorker>
 EmbeddedWorkerTestHelper::CreateServiceWorker() {
   return std::make_unique<FakeServiceWorker>(this);
+}
+
+void EmbeddedWorkerTestHelper::BindStorageControl(
+    mojo::PendingReceiver<storage::mojom::ServiceWorkerStorageControl>
+        receiver) {
+  storage_control_ = std::make_unique<storage::ServiceWorkerStorageControlImpl>(
+      user_data_directory_, database_task_runner_, std::move(receiver));
 }
 
 }  // namespace content

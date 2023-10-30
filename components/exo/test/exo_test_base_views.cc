@@ -1,14 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/exo/test/exo_test_base_views.h"
 
+#include "base/callback_helpers.h"
+#include "base/notreached.h"
 #include "components/exo/vsync_timing_manager.h"
 #include "components/exo/wm_helper.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "ui/aura/client/drag_drop_delegate.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/base/ime/init/input_method_factory.h"
 #include "ui/display/manager/managed_display_info.h"
-#include "ui/wm/core/default_activation_client.h"
 #include "ui/wm/core/wm_core_switches.h"
 
 namespace exo {
@@ -20,6 +24,10 @@ class WMHelperTester : public WMHelper, public VSyncTimingManager::Delegate {
  public:
   WMHelperTester(aura::Window* root_window)
       : root_window_(root_window), vsync_timing_manager_(this) {}
+
+  WMHelperTester(const WMHelperTester&) = delete;
+  WMHelperTester& operator=(const WMHelperTester&) = delete;
+
   ~WMHelperTester() override {}
 
   // Overridden from WMHelper
@@ -62,6 +70,7 @@ class WMHelperTester : public WMHelper, public VSyncTimingManager::Delegate {
     return root_window_;
   }
   aura::client::CursorClient* GetCursorClient() override { return nullptr; }
+  aura::client::DragDropClient* GetDragDropClient() override { return nullptr; }
   void AddPreTargetHandler(ui::EventHandler* handler) override {}
   void PrependPreTargetHandler(ui::EventHandler* handler) override {}
   void RemovePreTargetHandler(ui::EventHandler* handler) override {}
@@ -69,31 +78,35 @@ class WMHelperTester : public WMHelper, public VSyncTimingManager::Delegate {
   void RemovePostTargetHandler(ui::EventHandler* handler) override {}
   bool InTabletMode() const override { return false; }
   double GetDefaultDeviceScaleFactor() const override { return 1.0; }
-  void SetImeBlocked(aura::Window* window, bool ime_blocked) override {}
-  bool IsImeBlocked(aura::Window* window) const override { return false; }
+  double GetDeviceScaleFactorForWindow(aura::Window* window) const override {
+    return 1.0;
+  }
+  void SetDefaultScaleCancellation(bool default_scale_cancellation) override {}
 
   LifetimeManager* GetLifetimeManager() override { return &lifetime_manager_; }
   aura::client::CaptureClient* GetCaptureClient() override { return nullptr; }
 
   // Overridden from aura::client::DragDropDelegate:
   void OnDragEntered(const ui::DropTargetEvent& event) override {}
-  int OnDragUpdated(const ui::DropTargetEvent& event) override { return 0; }
+  aura::client::DragUpdateInfo OnDragUpdated(
+      const ui::DropTargetEvent& event) override {
+    return aura::client::DragUpdateInfo();
+  }
   void OnDragExited() override {}
-  int OnPerformDrop(const ui::DropTargetEvent& event,
-                    std::unique_ptr<ui::OSExchangeData> data) override {
-    return 0;
+  WMHelper::DropCallback GetDropCallback(
+      const ui::DropTargetEvent& event) override {
+    return base::DoNothing();
   }
 
   // Overridden from VSyncTimingManager::Delegate:
   void AddVSyncParameterObserver(
-      viz::mojom::VSyncParameterObserverPtr observer) override {}
+      mojo::PendingRemote<viz::mojom::VSyncParameterObserver> observer)
+      override {}
 
  private:
   aura::Window* root_window_;
   LifetimeManager lifetime_manager_;
   VSyncTimingManager vsync_timing_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(WMHelperTester);
 };
 
 }  // namespace
@@ -102,17 +115,12 @@ ExoTestBaseViews::ExoTestBaseViews() {}
 ExoTestBaseViews::~ExoTestBaseViews() {}
 
 void ExoTestBaseViews::SetUp() {
-  ui::SetUpInputMethodFactoryForTesting();
   views::ViewsTestBase::SetUp();
-  // Takes care of its own lifetime.
-  new wm::DefaultActivationClient(root_window());
 
   wm_helper_ = std::make_unique<WMHelperTester>(root_window());
-  WMHelper::SetInstance(wm_helper_.get());
 }
 
 void ExoTestBaseViews::TearDown() {
-  WMHelper::SetInstance(nullptr);
   wm_helper_.reset();
 
   views::ViewsTestBase::TearDown();

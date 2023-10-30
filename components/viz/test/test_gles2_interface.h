@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,21 @@
 #define COMPONENTS_VIZ_TEST_TEST_GLES2_INTERFACE_H_
 
 #include <stddef.h>
+
+#include <limits>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/stl_util.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface_stub.h"
 #include "gpu/command_buffer/common/capabilities.h"
@@ -68,12 +73,6 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
 
   void PixelStorei(GLenum pname, GLint param) override;
 
-  GLuint CreateImageCHROMIUM(ClientBuffer buffer,
-                             GLsizei width,
-                             GLsizei height,
-                             GLenum internalformat) override;
-  void DestroyImageCHROMIUM(GLuint image_id) override;
-
   void* MapBufferCHROMIUM(GLuint target, GLenum access) override;
   GLboolean UnmapBufferCHROMIUM(GLuint target) override;
   void BufferData(GLenum target,
@@ -93,7 +92,7 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
   void ResizeCHROMIUM(GLuint width,
                       GLuint height,
                       float device_scale,
-                      GLenum color_space,
+                      GLcolorSpace color_space,
                       GLboolean has_alpha) override;
   void LoseContextCHROMIUM(GLenum current, GLenum other) override;
   GLenum GetGraphicsResetStatusKHR() override;
@@ -145,12 +144,14 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
   void set_msaa_is_slow(bool msaa_is_slow);
   void set_gpu_rasterization(bool gpu_rasterization);
   void set_avoid_stencil_buffers(bool avoid_stencil_buffers);
-  void set_enable_dc_layers(bool support);
   void set_support_multisample_compatibility(bool support);
   void set_support_texture_storage_image(bool support);
   void set_support_texture_npot(bool support);
   void set_supports_oop_raster(bool support);
   void set_max_texture_size(int size);
+  void set_supports_shared_image_swap_chain(bool support);
+  void set_supports_gpu_memory_buffer_format(gfx::BufferFormat format,
+                                             bool support);
   // When set, MapBufferCHROMIUM will return NULL after this many times.
   void set_times_map_buffer_chromium_succeeds(int times) {
     times_map_buffer_chromium_succeeds_ = times;
@@ -171,7 +172,6 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
   virtual GLuint NextRenderbufferId();
   virtual void RetireRenderbufferId(GLuint id);
 
-  void SetMaxSamples(int max_samples);
   void set_context_lost_callback(base::OnceClosure callback) {
     context_lost_callback_ = std::move(callback);
   }
@@ -191,14 +191,15 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
  protected:
   struct Buffer {
     Buffer();
+
+    Buffer(const Buffer&) = delete;
+    Buffer& operator=(const Buffer&) = delete;
+
     ~Buffer();
 
     GLenum target;
     std::unique_ptr<uint8_t[]> pixels;
     size_t size;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Buffer);
   };
 
   unsigned context_id_;
@@ -221,7 +222,7 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
   int width_ = 0;
   int height_ = 0;
   float scale_factor_ = -1.f;
-  TestContextSupport* test_support_ = nullptr;
+  raw_ptr<TestContextSupport> test_support_ = nullptr;
   gfx::Rect update_rect_;
   UpdateType last_update_type_ = NO_UPDATE;
   GLuint64 next_insert_fence_sync_ = 1;
@@ -235,7 +236,6 @@ class TestGLES2Interface : public gpu::gles2::GLES2InterfaceStub {
   unsigned next_texture_id_ = 1;
   unsigned next_renderbuffer_id_ = 1;
   std::unordered_map<unsigned, std::unique_ptr<Buffer>> buffers_;
-  std::unordered_set<unsigned> images_;
   std::unordered_set<unsigned> textures_;
   std::unordered_set<unsigned> renderbuffer_set_;
 

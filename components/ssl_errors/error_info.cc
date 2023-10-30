@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 #include <stddef.h>
 
 #include "base/i18n/message_formatter.h"
-#include "base/stl_util.h"
+#include "base/notreached.h"
+#include "base/strings/escape.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
-#include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/ssl/ssl_info.h"
@@ -21,15 +21,15 @@ using base::UTF8ToUTF16;
 
 namespace ssl_errors {
 
-ErrorInfo::ErrorInfo(const base::string16& details,
-                     const base::string16& short_description)
+ErrorInfo::ErrorInfo(const std::u16string& details,
+                     const std::u16string& short_description)
     : details_(details), short_description_(short_description) {}
 
 // static
 ErrorInfo ErrorInfo::CreateError(ErrorType error_type,
                                  net::X509Certificate* cert,
                                  const GURL& request_url) {
-  base::string16 details, short_description;
+  std::u16string details, short_description;
   switch (error_type) {
     case CERT_COMMON_NAME_INVALID: {
       std::vector<std::string> dns_names;
@@ -58,7 +58,7 @@ ErrorInfo ErrorInfo::CreateError(ErrorType error_type,
         details = l10n_util::GetStringFUTF16(
             IDS_CERT_ERROR_COMMON_NAME_INVALID_DETAILS,
             UTF8ToUTF16(request_url.host()),
-            net::EscapeForHTML(UTF8ToUTF16(dns_names[i])));
+            base::EscapeForHTML(UTF8ToUTF16(dns_names[i])));
       }
 
       short_description = l10n_util::GetStringUTF16(
@@ -95,6 +95,7 @@ ErrorInfo ErrorInfo::CreateError(ErrorType error_type,
             IDS_CERT_ERROR_NOT_VALID_AT_THIS_TIME_DESCRIPTION);
       }
       break;
+    case CERT_KNOWN_INTERCEPTION_BLOCKED:
     case CERT_AUTHORITY_INVALID:
     case CERT_SYMANTEC_LEGACY:
       details =
@@ -111,8 +112,9 @@ ErrorInfo ErrorInfo::CreateError(ErrorType error_type,
           l10n_util::GetStringUTF16(IDS_CERT_ERROR_CONTAINS_ERRORS_DESCRIPTION);
       break;
     case CERT_NO_REVOCATION_MECHANISM:
-      details = l10n_util::GetStringUTF16(
-          IDS_CERT_ERROR_NO_REVOCATION_MECHANISM_DETAILS);
+      details = l10n_util::GetStringFUTF16(
+          IDS_CERT_ERROR_NO_REVOCATION_MECHANISM_DETAILS,
+          UTF8ToUTF16(request_url.host()));
       short_description = l10n_util::GetStringUTF16(
           IDS_CERT_ERROR_NO_REVOCATION_MECHANISM_DESCRIPTION);
       break;
@@ -162,8 +164,9 @@ ErrorInfo ErrorInfo::CreateError(ErrorType error_type,
           IDS_CERT_ERROR_SUMMARY_PINNING_FAILURE_DESCRIPTION);
       break;
     case CERT_UNABLE_TO_CHECK_REVOCATION:
-      details = l10n_util::GetStringUTF16(
-          IDS_CERT_ERROR_UNABLE_TO_CHECK_REVOCATION_DETAILS);
+      details = l10n_util::GetStringFUTF16(
+          IDS_CERT_ERROR_UNABLE_TO_CHECK_REVOCATION_DETAILS,
+          UTF8ToUTF16(request_url.host()));
       short_description = l10n_util::GetStringUTF16(
           IDS_CERT_ERROR_UNABLE_TO_CHECK_REVOCATION_DESCRIPTION);
       break;
@@ -219,6 +222,8 @@ ErrorInfo::ErrorType ErrorInfo::NetErrorToErrorType(int net_error) {
       return CERTIFICATE_TRANSPARENCY_REQUIRED;
     case net::ERR_CERT_SYMANTEC_LEGACY:
       return CERT_SYMANTEC_LEGACY;
+    case net::ERR_CERT_KNOWN_INTERCEPTION_BLOCKED:
+      return CERT_KNOWN_INTERCEPTION_BLOCKED;
     default:
       NOTREACHED();
       return UNKNOWN;
@@ -245,6 +250,7 @@ void ErrorInfo::GetErrorsForCertStatus(
       net::CERT_STATUS_VALIDITY_TOO_LONG,
       net::CERT_STATUS_CERTIFICATE_TRANSPARENCY_REQUIRED,
       net::CERT_STATUS_SYMANTEC_LEGACY,
+      net::CERT_STATUS_KNOWN_INTERCEPTION_BLOCKED,
   };
 
   const ErrorType kErrorTypes[] = {
@@ -261,10 +267,11 @@ void ErrorInfo::GetErrorsForCertStatus(
       CERT_VALIDITY_TOO_LONG,
       CERTIFICATE_TRANSPARENCY_REQUIRED,
       CERT_SYMANTEC_LEGACY,
+      CERT_KNOWN_INTERCEPTION_BLOCKED,
   };
-  DCHECK(base::size(kErrorFlags) == base::size(kErrorTypes));
+  DCHECK(std::size(kErrorFlags) == std::size(kErrorTypes));
 
-  for (size_t i = 0; i < base::size(kErrorFlags); ++i) {
+  for (size_t i = 0; i < std::size(kErrorFlags); ++i) {
     if ((cert_status & kErrorFlags[i]) && errors) {
       errors->push_back(
           ErrorInfo::CreateError(kErrorTypes[i], cert.get(), url));

@@ -1,6 +1,8 @@
+# Primary OWNERS
+kdlee@chromium.org
+pawliczek@chromium.org
 skau@chromium.org
+
+# Backup OWNERS
 thestig@chromium.org
 zentaro@chromium.org
-
-#TEAM: cros-printing-dev@chromium.org
-#COMPONENT: Internals>Printing>CUPS

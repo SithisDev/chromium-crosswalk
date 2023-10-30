@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,28 +8,31 @@
 
 #include <algorithm>
 #include <memory>
+#include <unordered_map>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
+#include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "base/unguessable_token.h"
+#include "chromeos/dbus/constants/dbus_switches.h"
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "chromeos/dbus/power_manager/backlight.pb.h"
 #include "chromeos/dbus/power_manager/idle.pb.h"
 #include "chromeos/dbus/power_manager/input_event.pb.h"
 #include "chromeos/dbus/power_manager/peripheral_battery_status.pb.h"
 #include "chromeos/dbus/power_manager/switch_states.pb.h"
+#include "chromeos/dbus/power_manager/thermal.pb.h"
 #include "components/device_event_log/device_event_log.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -103,12 +106,32 @@ PowerManagerClient::TabletMode GetTabletModeFromProtoEnum(
   return PowerManagerClient::TabletMode::UNSUPPORTED;
 }
 
+// Converts a ThermalState value from a power_manager::ThermalEvent proto to the
+// corresponding base::PowerThermalObserver::DeviceThermalState value.
+base::PowerThermalObserver::DeviceThermalState GetThermalStateFromProtoEnum(
+    power_manager::ThermalEvent::ThermalState state) {
+  switch (state) {
+    case power_manager::ThermalEvent_ThermalState_UNKNOWN:
+      return base::PowerThermalObserver::DeviceThermalState::kUnknown;
+    case power_manager::ThermalEvent_ThermalState_NOMINAL:
+      return base::PowerThermalObserver::DeviceThermalState::kNominal;
+    case power_manager::ThermalEvent_ThermalState_FAIR:
+      return base::PowerThermalObserver::DeviceThermalState::kFair;
+    case power_manager::ThermalEvent_ThermalState_SERIOUS:
+      return base::PowerThermalObserver::DeviceThermalState::kSerious;
+    case power_manager::ThermalEvent_ThermalState_CRITICAL:
+      return base::PowerThermalObserver::DeviceThermalState::kCritical;
+  }
+  NOTREACHED() << "Unhandled thermal state " << state;
+  return base::PowerThermalObserver::DeviceThermalState::kUnknown;
+}
+
 // Callback for D-Bus call made in |CreateArcTimers|.
 void OnCreateArcTimersDBusMethod(
     DBusMethodCallback<std::vector<PowerManagerClient::TimerId>> callback,
     dbus::Response* response) {
   if (response == nullptr) {
-    std::move(callback).Run(base::nullopt);
+    std::move(callback).Run(absl::nullopt);
     return;
   }
 
@@ -116,7 +139,7 @@ void OnCreateArcTimersDBusMethod(
   dbus::MessageReader array_reader(nullptr);
   if (!reader.PopArray(&array_reader)) {
     POWER_LOG(ERROR) << "No timer ids returned";
-    std::move(callback).Run(base::nullopt);
+    std::move(callback).Run(absl::nullopt);
     return;
   }
 
@@ -125,7 +148,7 @@ void OnCreateArcTimersDBusMethod(
     int32_t timer_id;
     if (!array_reader.PopInt32(&timer_id)) {
       POWER_LOG(ERROR) << "Failed to pop timer id";
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
     timer_ids.push_back(timer_id);
@@ -147,6 +170,9 @@ class PowerManagerClientImpl : public PowerManagerClient {
   PowerManagerClientImpl()
       : origin_thread_id_(base::PlatformThread::CurrentId()) {}
 
+  PowerManagerClientImpl(const PowerManagerClientImpl&) = delete;
+  PowerManagerClientImpl& operator=(const PowerManagerClientImpl&) = delete;
+
   ~PowerManagerClientImpl() override {
     // Here we should unregister suspend notifications from powerd,
     // however:
@@ -162,8 +188,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
         dbus::ObjectPath(power_manager::kPowerManagerServicePath));
 
     power_manager_proxy_->SetNameOwnerChangedCallback(
-        base::Bind(&PowerManagerClientImpl::NameOwnerChangedReceived,
-                   weak_ptr_factory_.GetWeakPtr()));
+        base::BindRepeating(&PowerManagerClientImpl::NameOwnerChangedReceived,
+                            weak_ptr_factory_.GetWeakPtr()));
 
     power_manager_proxy_->WaitForServiceToBeAvailable(
         base::BindOnce(&PowerManagerClientImpl::NotifyServiceBecameAvailable,
@@ -171,9 +197,11 @@ class PowerManagerClientImpl : public PowerManagerClient {
 
     // Listen to D-Bus signals emitted by powerd.
     typedef void (PowerManagerClientImpl::*SignalMethod)(dbus::Signal*);
-    const std::map<const char*, SignalMethod> kSignalMethods = {
+    const std::pair<const char*, SignalMethod> kSignalMethods[] = {
         {power_manager::kScreenBrightnessChangedSignal,
          &PowerManagerClientImpl::ScreenBrightnessChangedReceived},
+        {power_manager::kAmbientColorTemperatureChangedSignal,
+         &PowerManagerClientImpl::AmbientColorTemperatureChangedReceived},
         {power_manager::kKeyboardBrightnessChangedSignal,
          &PowerManagerClientImpl::KeyboardBrightnessChangedReceived},
         {power_manager::kScreenIdleStateChangedSignal,
@@ -196,17 +224,23 @@ class PowerManagerClientImpl : public PowerManagerClient {
          &PowerManagerClientImpl::IdleActionImminentReceived},
         {power_manager::kIdleActionDeferredSignal,
          &PowerManagerClientImpl::IdleActionDeferredReceived},
+        {power_manager::kThermalEventSignal,
+         &PowerManagerClientImpl::ThermalEventReceived},
     };
-    for (const auto& it : kSignalMethods) {
+    auto on_connected_callback =
+        base::BindRepeating(&PowerManagerClientImpl::SignalConnected,
+                            weak_ptr_factory_.GetWeakPtr());
+    for (const auto& p : kSignalMethods) {
       power_manager_proxy_->ConnectToSignal(
-          power_manager::kPowerManagerInterface, it.first,
-          base::BindRepeating(it.second, weak_ptr_factory_.GetWeakPtr()),
-          base::BindOnce(&PowerManagerClientImpl::SignalConnected,
-                         weak_ptr_factory_.GetWeakPtr()));
+          power_manager::kPowerManagerInterface, p.first,
+          base::BindRepeating(p.second, weak_ptr_factory_.GetWeakPtr()),
+          on_connected_callback);
     }
 
     RegisterSuspendDelays();
     RequestStatusUpdate();
+    RequestThermalState();
+    CheckAmbientColorSupport();
   }
 
   // PowerManagerClient overrides:
@@ -260,7 +294,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
         power_manager::kIncreaseKeyboardBrightnessMethod);
   }
 
-  const base::Optional<power_manager::PowerSupplyProperties>& GetLastStatus()
+  const absl::optional<power_manager::PowerSupplyProperties>& GetLastStatus()
       override {
     return proto_;
   }
@@ -316,6 +350,28 @@ class PowerManagerClientImpl : public PowerManagerClient {
             weak_ptr_factory_.GetWeakPtr()));
   }
 
+  void RequestAllPeripheralBatteryUpdate() override {
+    POWER_LOG(USER) << "RequestAllPeripheralBatteryUpdate";
+    dbus::MethodCall method_call(
+        power_manager::kPowerManagerInterface,
+        power_manager::kRefreshAllPeripheralBatteryMethod);
+    power_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(
+            &PowerManagerClientImpl::OnRefreshAllPeripheralBatteryMethod,
+            weak_ptr_factory_.GetWeakPtr()));
+  }
+
+  void RequestThermalState() override {
+    POWER_LOG(USER) << "RequestThermalState";
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kGetThermalStateMethod);
+    power_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&PowerManagerClientImpl::OnGetCurrentThermalStateMethod,
+                       weak_ptr_factory_.GetWeakPtr()));
+  }
+
   void RequestSuspend() override {
     POWER_LOG(USER) << "RequestSuspend";
     SimpleMethodCallToPowerManager(power_manager::kRequestSuspendMethod);
@@ -339,6 +395,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
                        const std::string& description) override {
     POWER_LOG(USER) << "RequestShutdown: " << reason << " (" << description
                     << ")";
+    for (auto& observer : observers_)
+      observer.ShutdownRequested(reason);
     dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
                                  power_manager::kRequestShutdownMethod);
     dbus::MessageWriter writer(&method_call);
@@ -431,6 +489,28 @@ class PowerManagerClientImpl : public PowerManagerClient {
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
+  void SetKeyboardBacklightToggledOff(bool toggled_off) override {
+    dbus::MethodCall method_call(
+        power_manager::kPowerManagerInterface,
+        power_manager::kSetKeyboardBacklightToggledOffMethod);
+    dbus::MessageWriter(&method_call).AppendBool(toggled_off);
+    power_manager_proxy_->CallMethod(&method_call,
+                                     dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+                                     base::DoNothing());
+  }
+
+  void GetKeyboardBacklightToggledOff(
+      DBusMethodCallback<bool> callback) override {
+    dbus::MethodCall method_call(
+        power_manager::kPowerManagerInterface,
+        power_manager::kGetKeyboardBacklightToggledOffMethod);
+    power_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(
+            &PowerManagerClientImpl::OnGetKeyboardBacklightToggledOff,
+            weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
   void GetSwitchStates(DBusMethodCallback<SwitchStates> callback) override {
     dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
                                  power_manager::kGetSwitchStatesMethod);
@@ -475,6 +555,10 @@ class PowerManagerClientImpl : public PowerManagerClient {
 
     suspend_readiness_registry_.erase(registration);
     MaybeReportSuspendReadiness();
+  }
+
+  bool SupportsAmbientColor() override {
+    return device_supports_ambient_color_;
   }
 
   void CreateArcTimers(
@@ -537,6 +621,63 @@ class PowerManagerClientImpl : public PowerManagerClient {
         base::BindOnce(&OnVoidDBusMethod, std::move(callback)));
   }
 
+  base::TimeDelta GetDarkSuspendDelayTimeout() override {
+    return max_dark_suspend_delay_timeout_;
+  }
+
+  void RefreshBluetoothBattery(const std::string& address) override {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kRefreshBluetoothBatteryMethod);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendString(address);
+    // This refresh request is best effort, so we don't have to handle errors.
+    power_manager_proxy_->CallMethod(&method_call,
+                                     dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+                                     base::DoNothing());
+  }
+
+  void SetExternalDisplayALSBrightness(bool enabled) override {
+    dbus::MethodCall method_call(
+        power_manager::kPowerManagerInterface,
+        power_manager::kSetExternalDisplayALSBrightnessMethod);
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendBool(enabled);
+    power_manager_proxy_->CallMethod(&method_call,
+                                     dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+                                     base::DoNothing());
+  }
+
+  void GetExternalDisplayALSBrightness(
+      DBusMethodCallback<bool> callback) override {
+    dbus::MethodCall method_call(
+        power_manager::kPowerManagerInterface,
+        power_manager::kGetExternalDisplayALSBrightnessMethod);
+    power_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(
+            &PowerManagerClientImpl::OnGetExternalDisplayALSBrightness,
+            weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
+  void ChargeNowForAdaptiveCharging() override {
+    dbus::MethodCall method_call(
+        power_manager::kPowerManagerInterface,
+        power_manager::kChargeNowForAdaptiveChargingMethod);
+    power_manager_proxy_->CallMethod(&method_call,
+                                     dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+                                     base::DoNothing());
+  }
+
+  void GetChargeHistoryForAdaptiveCharging(
+      DBusMethodCallback<power_manager::ChargeHistoryState> callback) override {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kGetChargeHistoryMethod);
+    power_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&PowerManagerClientImpl::OnGetChargeHistory,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+  }
+
  private:
   // Returns true if the current thread is the origin thread.
   bool OnOriginThread() {
@@ -584,6 +725,11 @@ class PowerManagerClientImpl : public PowerManagerClient {
     }
   }
 
+  void NotifyInitialization() {
+    for (auto& observer : observers_)
+      observer.PowerManagerInitialized();
+  }
+
   void ScreenBrightnessChangedReceived(dbus::Signal* signal) {
     dbus::MessageReader reader(signal);
     power_manager::BacklightBrightnessChange proto;
@@ -597,6 +743,20 @@ class PowerManagerClientImpl : public PowerManagerClient {
                      << ": cause " << proto.cause();
     for (auto& observer : observers_)
       observer.ScreenBrightnessChanged(proto);
+  }
+
+  void AmbientColorTemperatureChangedReceived(dbus::Signal* signal) {
+    dbus::MessageReader reader(signal);
+    int32_t color_temperature = 0;
+    if (!reader.PopInt32(&color_temperature)) {
+      POWER_LOG(ERROR) << "Unable to decode read ambient color from "
+                       << power_manager::kAmbientColorTemperatureChangedSignal
+                       << " signal";
+      return;
+    }
+
+    for (auto& observer : observers_)
+      observer.AmbientColorChanged(color_temperature);
   }
 
   void KeyboardBrightnessChangedReceived(dbus::Signal* signal) {
@@ -653,12 +813,21 @@ class PowerManagerClientImpl : public PowerManagerClient {
     std::string path = protobuf_status.path();
     std::string name = protobuf_status.name();
     int level = protobuf_status.has_level() ? protobuf_status.level() : -1;
-
-    POWER_LOG(DEBUG) << "Device battery status received " << level << " for "
-                     << name << " at " << path;
+    power_manager::PeripheralBatteryStatus_ChargeStatus status =
+        protobuf_status.has_charge_status()
+            ? protobuf_status.charge_status()
+            : power_manager::
+                  PeripheralBatteryStatus_ChargeStatus_CHARGE_STATUS_UNKNOWN;
+    bool active_update = protobuf_status.has_active_update()
+                             ? protobuf_status.active_update()
+                             : false;
+    std::string serial_number = "";
+    if (protobuf_status.has_serial_number())
+      serial_number = protobuf_status.serial_number();
 
     for (auto& observer : observers_)
-      observer.PeripheralBatteryStatusReceived(path, name, level);
+      observer.PeripheralBatteryStatusReceived(path, name, level, status,
+                                               serial_number, active_update);
   }
 
   void PowerSupplyPollReceived(dbus::Signal* signal) {
@@ -673,7 +842,35 @@ class PowerManagerClientImpl : public PowerManagerClient {
     }
   }
 
+  void OnGetCurrentThermalStateMethod(dbus::Response* response) {
+    if (!response) {
+      POWER_LOG(ERROR) << "Error calling "
+                       << power_manager::kGetThermalStateMethod;
+      return;
+    }
+
+    dbus::MessageReader reader(response);
+    power_manager::ThermalEvent protobuf;
+    if (!reader.PopArrayOfBytesAsProto(&protobuf)) {
+      POWER_LOG(ERROR) << "Unable to decode "
+                       << power_manager::kGetThermalStateMethod << " response";
+      return;
+    }
+
+    POWER_LOG(USER) << "Got " << power_manager::kGetThermalStateMethod
+                    << " response:"
+                    << " thermal_state=" << protobuf.thermal_state()
+                    << " timestamp=" << protobuf.timestamp();
+    base::PowerMonitorDeviceSource::ThermalEventReceived(
+        GetThermalStateFromProtoEnum(protobuf.thermal_state()));
+  }
+
   void OnGetPowerSupplyPropertiesMethod(dbus::Response* response) {
+    // This is the last callback to run after all the initialization in |Init|.
+    // Notify all observers that the initialization is complete.
+    base::ScopedClosureRunner notify_runner(base::BindOnce(
+        &PowerManagerClientImpl::NotifyInitialization, base::Unretained(this)));
+
     if (!response) {
       POWER_LOG(ERROR) << "Error calling "
                        << power_manager::kGetPowerSupplyPropertiesMethod;
@@ -691,11 +888,19 @@ class PowerManagerClientImpl : public PowerManagerClient {
     }
   }
 
+  void OnRefreshAllPeripheralBatteryMethod(dbus::Response* response) {
+    if (!response) {
+      POWER_LOG(ERROR) << "Error calling "
+                       << power_manager::kRefreshAllPeripheralBatteryMethod;
+      return;
+    }
+  }
+
   void OnGetScreenOrKeyboardBrightnessPercent(
       DBusMethodCallback<double> callback,
       dbus::Response* response) {
     if (!response) {
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
     dbus::MessageReader reader(response);
@@ -703,7 +908,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
     if (!reader.PopDouble(&percent)) {
       POWER_LOG(ERROR) << "Error reading response from powerd: "
                        << response->ToString();
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
     std::move(callback).Run(percent);
@@ -714,7 +919,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
     if (!response) {
       POWER_LOG(ERROR) << "Error calling "
                        << power_manager::kGetBacklightsForcedOffMethod;
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
     dbus::MessageReader reader(response);
@@ -722,10 +927,54 @@ class PowerManagerClientImpl : public PowerManagerClient {
     if (!reader.PopBool(&state)) {
       POWER_LOG(ERROR) << "Error reading response from powerd: "
                        << response->ToString();
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
     std::move(callback).Run(state);
+  }
+
+  void OnGetKeyboardBacklightToggledOff(DBusMethodCallback<bool> callback,
+                                        dbus::Response* response) {
+    if (!response) {
+      POWER_LOG(ERROR) << "Error calling "
+                       << power_manager::kGetKeyboardBacklightToggledOffMethod;
+      std::move(callback).Run(absl::nullopt);
+      return;
+    }
+    dbus::MessageReader reader(response);
+    bool toggled_off = false;
+    if (!reader.PopBool(&toggled_off)) {
+      POWER_LOG(ERROR) << "Error reading response from powerd: "
+                       << response->ToString();
+      std::move(callback).Run(absl::nullopt);
+      return;
+    }
+    std::move(callback).Run(toggled_off);
+  }
+
+  void CheckAmbientColorSupport() {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kHasAmbientColorDeviceMethod);
+    power_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&PowerManagerClientImpl::OnHasAmbientColorDevice,
+                       weak_ptr_factory_.GetWeakPtr()));
+  }
+
+  void OnHasAmbientColorDevice(dbus::Response* response) {
+    if (!response) {
+      device_supports_ambient_color_ = false;
+      return;
+    }
+    dbus::MessageReader reader(response);
+    bool is_supported = false;
+    if (!reader.PopBool(&is_supported)) {
+      POWER_LOG(ERROR) << "Error reading response from powerd: "
+                       << response->ToString();
+      device_supports_ambient_color_ = false;
+      return;
+    }
+    device_supports_ambient_color_ = is_supported;
   }
 
   void OnGetSwitchStates(DBusMethodCallback<SwitchStates> callback,
@@ -733,7 +982,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
     if (!response) {
       POWER_LOG(ERROR) << "Error calling "
                        << power_manager::kGetSwitchStatesMethod;
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
 
@@ -742,12 +991,44 @@ class PowerManagerClientImpl : public PowerManagerClient {
     if (!reader.PopArrayOfBytesAsProto(&proto)) {
       POWER_LOG(ERROR) << "Error parsing response from "
                        << power_manager::kGetSwitchStatesMethod;
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
     std::move(callback).Run(
         SwitchStates{GetLidStateFromProtoEnum(proto.lid_state()),
                      GetTabletModeFromProtoEnum(proto.tablet_mode())});
+  }
+
+  void OnGetChargeHistory(
+      DBusMethodCallback<power_manager::ChargeHistoryState> callback,
+      dbus::Response* response) {
+    if (!response) {
+      POWER_LOG(ERROR) << "Error calling "
+                       << power_manager::kGetChargeHistoryMethod;
+      std::move(callback).Run(absl::nullopt);
+      return;
+    }
+
+    // powerd returns an error response if the charge history is not
+    // initialized yet.
+    if (response->GetMessageType() ==
+        dbus::ErrorResponse::MessageType::MESSAGE_ERROR) {
+      POWER_LOG(ERROR) << "Cannot get charge history from "
+                       << power_manager::kGetChargeHistoryMethod
+                       << " because it's not initialized yet.";
+      std::move(callback).Run(absl::nullopt);
+      return;
+    }
+
+    dbus::MessageReader reader(response);
+    power_manager::ChargeHistoryState proto;
+    if (!reader.PopArrayOfBytesAsProto(&proto)) {
+      POWER_LOG(ERROR) << "Error parsing response from "
+                       << power_manager::kGetChargeHistoryMethod;
+      std::move(callback).Run(absl::nullopt);
+      return;
+    }
+    std::move(callback).Run(proto);
   }
 
   void OnGetInactivityDelays(
@@ -756,7 +1037,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
     if (!response) {
       POWER_LOG(ERROR) << "Error calling "
                        << power_manager::kGetInactivityDelaysMethod;
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
 
@@ -765,10 +1046,30 @@ class PowerManagerClientImpl : public PowerManagerClient {
     if (!reader.PopArrayOfBytesAsProto(&proto)) {
       POWER_LOG(ERROR) << "Error parsing response from "
                        << power_manager::kGetInactivityDelaysMethod;
-      std::move(callback).Run(base::nullopt);
+      std::move(callback).Run(absl::nullopt);
       return;
     }
     std::move(callback).Run(proto);
+  }
+
+  void OnGetExternalDisplayALSBrightness(DBusMethodCallback<bool> callback,
+                                         dbus::Response* response) {
+    if (!response) {
+      POWER_LOG(ERROR) << "Error calling "
+                       << power_manager::kGetExternalDisplayALSBrightnessMethod;
+      std::move(callback).Run(false);
+      return;
+    }
+
+    dbus::MessageReader reader(response);
+    bool enabled = false;
+    if (!reader.PopBool(&enabled)) {
+      POWER_LOG(ERROR) << "Error parsing response from "
+                       << power_manager::kGetExternalDisplayALSBrightnessMethod;
+      std::move(callback).Run(false);
+      return;
+    }
+    std::move(callback).Run(enabled);
   }
 
   void HandlePowerSupplyProperties(
@@ -800,6 +1101,12 @@ class PowerManagerClientImpl : public PowerManagerClient {
     if (dark_suspend) {
       dark_suspend_delay_id_ = protobuf.delay_id();
       has_dark_suspend_delay_id_ = true;
+
+      // Set |max_dark_suspend_delay_timeout_| to the minimum time power manager
+      // guarantees before resuspending.
+      max_dark_suspend_delay_timeout_ =
+          base::Milliseconds(protobuf.min_delay_timeout_ms());
+
       POWER_LOG(EVENT) << "Registered dark suspend delay "
                        << dark_suspend_delay_id_;
     } else {
@@ -884,7 +1191,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
     POWER_LOG(EVENT) << "Got " << power_manager::kSuspendDoneSignal
                      << " signal:"
                      << " suspend_id=" << proto.suspend_id()
-                     << " duration=" << duration.InSeconds() << " sec";
+                     << " duration=" << duration.InSeconds() << " sec"
+                     << " deepest_state=" << proto.deepest_state();
 
     // RenderProcessManagerDelegate is only notified that suspend is imminent
     // when readiness is being reported to powerd. If the suspend attempt was
@@ -904,14 +1212,14 @@ class PowerManagerClientImpl : public PowerManagerClient {
 
     // powerd gives clients a limited amount of time to report suspend
     // readiness. Log the stragglers within Chrome to aid in debugging.
-    for (const auto it : suspend_readiness_registry_) {
+    for (const auto& it : suspend_readiness_registry_) {
       LOG(WARNING) << "Didn't report suspend readiness due to "
                    << it.second.debug_info;
     }
     suspend_readiness_registry_.clear();
 
     for (auto& observer : observers_)
-      observer.SuspendDone(duration);
+      observer.SuspendDoneEx(proto);
     base::PowerMonitorDeviceSource::HandleSystemResumed();
   }
 
@@ -985,7 +1293,28 @@ class PowerManagerClientImpl : public PowerManagerClient {
         for (auto& observer : observers_)
           observer.TabletModeEventReceived(TabletMode::OFF, timestamp);
         break;
+      default:
+        // TODO(henryhsu): handle the missing cases.
+        break;
     }
+  }
+
+  void ThermalEventReceived(dbus::Signal* signal) {
+    dbus::MessageReader reader(signal);
+    power_manager::ThermalEvent proto;
+    if (!reader.PopArrayOfBytesAsProto(&proto)) {
+      POWER_LOG(ERROR) << "Unable to decode protocol buffer from "
+                       << power_manager::kThermalEventSignal << " signal";
+      return;
+    }
+
+    POWER_LOG(USER) << "Got " << power_manager::kThermalEventSignal
+                    << " signal:"
+                    << " thermal_state=" << proto.thermal_state()
+                    << " timestamp=" << proto.timestamp();
+
+    base::PowerMonitorDeviceSource::ThermalEventReceived(
+        GetThermalStateFromProtoEnum(proto.thermal_state()));
   }
 
   void RegisterSuspendDelayImpl(
@@ -1017,8 +1346,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
     has_dark_suspend_delay_id_ = false;
 
     power_manager::RegisterSuspendDelayRequest protobuf_request;
-    base::TimeDelta timeout =
-        base::TimeDelta::FromMilliseconds(kSuspendDelayTimeoutMs);
+    base::TimeDelta timeout = base::Milliseconds(kSuspendDelayTimeoutMs);
     protobuf_request.set_timeout(timeout.ToInternalValue());
     protobuf_request.set_description(kSuspendDelayDescription);
 
@@ -1027,6 +1355,12 @@ class PowerManagerClientImpl : public PowerManagerClient {
         base::BindOnce(&PowerManagerClientImpl::HandleRegisterSuspendDelayReply,
                        weak_ptr_factory_.GetWeakPtr(), false,
                        power_manager::kRegisterSuspendDelayMethod));
+
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            chromeos::switches::kRegisterMaxDarkSuspendDelay)) {
+      // Negative timeout means request maximum delay.
+      protobuf_request.set_timeout(-1);
+    }
     RegisterSuspendDelayImpl(
         power_manager::kRegisterDarkSuspendDelayMethod, protobuf_request,
         base::BindOnce(&PowerManagerClientImpl::HandleRegisterSuspendDelayReply,
@@ -1088,7 +1422,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
   dbus::ObjectProxy* power_manager_proxy_ = nullptr;
   base::ObserverList<Observer>::Unchecked observers_;
 
-  base::Optional<bool> service_available_;
+  absl::optional<bool> service_available_;
 
   // The delay ID obtained from the RegisterSuspendDelay request.
   int32_t suspend_delay_id_ = -1;
@@ -1097,6 +1431,10 @@ class PowerManagerClientImpl : public PowerManagerClient {
   // The delay ID obtained from the RegisterDarkSuspendDelay request.
   int32_t dark_suspend_delay_id_ = -1;
   bool has_dark_suspend_delay_id_ = false;
+
+  // The maximum time power manager will wait before resuspending from a dark
+  // resume.
+  base::TimeDelta max_dark_suspend_delay_timeout_;
 
   // powerd-supplied ID corresponding to an imminent (either regular or dark)
   // suspend attempt that is currently being delayed.
@@ -1127,8 +1465,12 @@ class PowerManagerClientImpl : public PowerManagerClient {
   // Last state passed to SetIsProjecting().
   bool last_is_projecting_ = false;
 
+  // Whether the device supports ambient color. This value is checked when the
+  // DBUS service starts and is cached.
+  bool device_supports_ambient_color_ = false;
+
   // The last proto received from D-Bus; initially empty.
-  base::Optional<power_manager::PowerSupplyProperties> proto_;
+  absl::optional<power_manager::PowerSupplyProperties> proto_;
 
   // The delegate used to manage the power consumption of Chrome's renderer
   // processes.
@@ -1137,8 +1479,6 @@ class PowerManagerClientImpl : public PowerManagerClient {
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<PowerManagerClientImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PowerManagerClientImpl);
 };
 
 PowerManagerClient::PowerManagerClient() {
@@ -1173,6 +1513,13 @@ void PowerManagerClient::Shutdown() {
 // static
 PowerManagerClient* PowerManagerClient::Get() {
   return g_instance;
+}
+
+void PowerManagerClient::Observer::SuspendDoneEx(
+    const power_manager::SuspendDone& proto) {
+  const base::TimeDelta duration =
+      base::TimeDelta::FromInternalValue(proto.suspend_duration());
+  this->SuspendDone(duration);
 }
 
 }  // namespace chromeos

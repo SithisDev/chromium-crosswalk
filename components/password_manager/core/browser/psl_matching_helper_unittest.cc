@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,9 @@
 #include <stddef.h>
 #include <cctype>
 
-#include "base/macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_form.h"
+#include "components/password_manager/core/browser/password_form_digest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -64,12 +62,13 @@ TEST(PSLMatchingUtilsTest, GetMatchResultNormalCredentials) {
       {"http://www.example.com", "bad url", MatchResult::NO_MATCH}};
 
   for (const TestData& data : cases) {
-    autofill::PasswordForm form;
-    form.origin = GURL(data.form_origin);
-    form.signon_realm = form.origin.GetOrigin().spec();
-    PasswordStore::FormDigest digest(
-        autofill::PasswordForm::Scheme::kHtml,
-        GURL(data.digest_origin).GetOrigin().spec(), GURL(data.digest_origin));
+    PasswordForm form;
+    form.url = GURL(data.form_origin);
+    form.signon_realm = form.url.DeprecatedGetOriginAsURL().spec();
+    PasswordFormDigest digest(
+        PasswordForm::Scheme::kHtml,
+        GURL(data.digest_origin).DeprecatedGetOriginAsURL().spec(),
+        GURL(data.digest_origin));
 
     EXPECT_EQ(data.match_result, GetMatchResult(form, digest))
         << "form_origin = " << data.form_origin << ", digest = " << digest;
@@ -91,8 +90,14 @@ TEST(PSLMatchingUtilsTest, GetMatchResultPSL) {
       {"https://www.facebook.com/", "https://m.facebook.com",
        MatchResult::PSL_MATCH},
 
-      // Don't apply PSL matching to Google domains.
-      {"https://google.com/", "https://maps.google.com/",
+      // Google sign-in and change password pages are PSL matched.
+      {"https://accounts.google.com/", "https://myaccount.google.com/",
+       MatchResult::PSL_MATCH},
+
+      // Don't apply PSL matching to other Google domains.
+      {"https://accounts.google.com/", "https://maps.google.com/",
+       MatchResult::NO_MATCH},
+      {"https://subdomain1.google.com/", "https://maps.google.com/",
        MatchResult::NO_MATCH},
 
       // Scheme mismatch.
@@ -115,12 +120,13 @@ TEST(PSLMatchingUtilsTest, GetMatchResultPSL) {
   };
 
   for (const TestData& data : cases) {
-    autofill::PasswordForm form;
-    form.origin = GURL(data.form_origin);
-    form.signon_realm = form.origin.GetOrigin().spec();
-    PasswordStore::FormDigest digest(
-        autofill::PasswordForm::Scheme::kHtml,
-        GURL(data.digest_origin).GetOrigin().spec(), GURL(data.digest_origin));
+    PasswordForm form;
+    form.url = GURL(data.form_origin);
+    form.signon_realm = form.url.DeprecatedGetOriginAsURL().spec();
+    PasswordFormDigest digest(
+        PasswordForm::Scheme::kHtml,
+        GURL(data.digest_origin).DeprecatedGetOriginAsURL().spec(),
+        GURL(data.digest_origin));
 
     EXPECT_EQ(data.match_result, GetMatchResult(form, digest))
         << "form_origin = " << data.form_origin << ", digest = " << digest;
@@ -175,16 +181,17 @@ TEST(PSLMatchingUtilsTest, GetMatchResultFederated) {
   };
 
   for (const TestData& data : cases) {
-    autofill::PasswordForm form;
-    form.origin = GURL(data.form_origin);
+    PasswordForm form;
+    form.url = GURL(data.form_origin);
     form.federation_origin =
         url::Origin::Create(GURL(data.form_federation_origin));
-    form.signon_realm = "federation://" + form.origin.host() + "/" +
-                        form.federation_origin.host();
+    form.signon_realm =
+        "federation://" + form.url.host() + "/" + form.federation_origin.host();
 
-    PasswordStore::FormDigest digest(
-        autofill::PasswordForm::Scheme::kHtml,
-        GURL(data.digest_origin).GetOrigin().spec(), GURL(data.digest_origin));
+    PasswordFormDigest digest(
+        PasswordForm::Scheme::kHtml,
+        GURL(data.digest_origin).DeprecatedGetOriginAsURL().spec(),
+        GURL(data.digest_origin));
 
     EXPECT_EQ(data.match_result, GetMatchResult(form, digest))
         << "form_origin = " << data.form_origin
@@ -246,16 +253,17 @@ TEST(PSLMatchingUtilsTest, GetMatchResultFederatedPSL) {
   };
 
   for (const TestData& data : cases) {
-    autofill::PasswordForm form;
-    form.origin = GURL(data.form_origin);
+    PasswordForm form;
+    form.url = GURL(data.form_origin);
     form.federation_origin =
         url::Origin::Create(GURL(data.form_federation_origin));
-    form.signon_realm = "federation://" + form.origin.host() + "/" +
-                        form.federation_origin.host();
+    form.signon_realm =
+        "federation://" + form.url.host() + "/" + form.federation_origin.host();
 
-    PasswordStore::FormDigest digest(
-        autofill::PasswordForm::Scheme::kHtml,
-        GURL(data.digest_origin).GetOrigin().spec(), GURL(data.digest_origin));
+    PasswordFormDigest digest(
+        PasswordForm::Scheme::kHtml,
+        GURL(data.digest_origin).DeprecatedGetOriginAsURL().spec(),
+        GURL(data.digest_origin));
 
     EXPECT_EQ(data.match_result, GetMatchResult(form, digest))
         << "form_origin = " << data.form_origin
@@ -298,9 +306,9 @@ TEST(PSLMatchingUtilsTest, IsPublicSuffixDomainMatch) {
   };
 
   for (const TestPair& pair : pairs) {
-    autofill::PasswordForm form1;
+    PasswordForm form1;
     form1.signon_realm = pair.url1;
-    autofill::PasswordForm form2;
+    PasswordForm form2;
     form2.signon_realm = pair.url2;
     EXPECT_EQ(pair.should_match,
               IsPublicSuffixDomainMatch(form1.signon_realm, form2.signon_realm))
@@ -391,102 +399,6 @@ TEST(PSLMatchingUtilsTest, IsFederatedPSLMatch) {
                                   GURL(pair.form_origin), GURL(pair.origin)))
         << "form_signon_realm = " << pair.form_signon_realm
         << "form_origin = " << pair.form_origin << ", origin = " << pair.origin;
-  }
-}
-
-TEST(PSLMatchingUtilsTest, GetOrganizationIdentifyingName) {
-  static constexpr const struct {
-    const char* url;
-    const char* expected_organization_name;
-  } kTestCases[] = {
-      {"http://example.com/login", "example"},
-      {"https://example.com", "example"},
-      {"ftp://example.com/ftp_realm", "example"},
-
-      {"http://foo.bar.example.com", "example"},
-      {"http://example.co.uk", "example"},
-      {"http://bar.example.appspot.com", "example"},
-      {"http://foo.bar", "foo"},
-      {"https://user:pass@www.example.com:80/path?query#ref", "example"},
-
-      {"http://www.foo+bar.com", "foo+bar"},
-      {"http://www.foo-bar.com", "foo-bar"},
-      {"https://foo_bar.com", "foo_bar"},
-      {"http://www.foo%2Bbar.com", "foo+bar"},
-      {"http://www.foo%2Dbar.com", "foo-bar"},
-      {"https://foo%5Fbar.com", "foo_bar"},
-      {"http://www.foo%2Ebar.com", "bar"},
-
-      // Internationalized Domain Names: each dot-separated label of the domain
-      // name is individually Punycode-encoded, so the organization-identifying
-      // name is still well-defined and can be determined as normal.
-      //       , ,
-      //     szotar = sz\xc3\xb3t\xc3\xa1r (UTF-8) = xn--sztr-7na0i (IDN)
-      //       | |
-      //  U+00E1 U+00F3
-      {"https://www.sz\xc3\xb3t\xc3\xa1r.appspot.com", "xn--sztr-7na0i"},
-
-      {"http://www.foo!bar.com", "foo%21bar"},
-      {"http://www.foo%21bar.com", "foo%21bar"},
-      {"http://www.foo$bar.com", "foo%24bar"},
-      {"http://www.foo&bar.com", "foo%26bar"},
-      {"http://www.foo\'bar.com", "foo%27bar"},
-      {"http://www.foo(bar.com", "foo%28bar"},
-      {"http://www.foo)bar.com", "foo%29bar"},
-      {"http://www.foo*bar.com", "foo%2Abar"},
-      {"http://www.foo,bar.com", "foo%2Cbar"},
-      {"http://www.foo=bar.com", "foo%3Dbar"},
-
-      // URLs without host portions, hosts without registry controlled domains
-      // should, or hosts consisting of a registry yield the empty string.
-      {"http://localhost", ""},
-      {"http://co.uk", ""},
-      {"http://google", ""},
-      {"http://127.0.0.1", ""},
-      {"file:///usr/bin/stuff", ""},
-      {"federation://example.com/google.com", ""},
-      {"android://hash@com.example/", ""},
-      {"http://[1080:0:0:0:8:800:200C:417A]/", ""},
-      {"http://[3ffe:2a00:100:7031::1]", ""},
-      {"http://[::192.9.5.5]/", ""},
-
-      // Invalid URLs should yield the empty string.
-      {"", ""},
-      {"http://", ""},
-      {"bad url", ""},
-      {"http://www.example.com/%00", ""},
-      {"http://www.foo;bar.com", ""},
-      {"http://www.foo~bar.com", ""},
-  };
-
-  for (const auto& test_case : kTestCases) {
-    SCOPED_TRACE(test_case.url);
-    GURL url(test_case.url);
-    EXPECT_EQ(test_case.expected_organization_name,
-              GetOrganizationIdentifyingName(url));
-  }
-}
-
-// Apart from alphanumeric characters and '.', only |kExpectedUnescapedChars|
-// are expected to appear without percent-encoding in the domain of a valid,
-// canonicalized URL.
-//
-// The purpose of this test is to ensure that the test cases around unescaped
-// special characters in `GetOrganizationIdentifyingName` are exhaustive.
-TEST(PSLMatchingUtilsTest,
-     GetOrganizationIdentifyingName_UnescapedSpecialChars) {
-  static constexpr const char kExpectedNonAlnumChars[] = {'+', '-', '_', '.'};
-  for (int chr = 0; chr <= 255; ++chr) {
-    const auto percent_encoded = base::StringPrintf("http://a%%%02Xb.hu/", chr);
-    const GURL url(percent_encoded);
-    if (isalnum(chr) || base::Contains(kExpectedNonAlnumChars, chr)) {
-      ASSERT_TRUE(url.is_valid());
-      const auto percent_decoded = base::StringPrintf(
-          "http://a%cb.hu/", base::ToLowerASCII(static_cast<char>(chr)));
-      EXPECT_EQ(percent_decoded, url.spec());
-    } else if (url.is_valid()) {
-      EXPECT_EQ(percent_encoded, url.spec());
-    }
   }
 }
 

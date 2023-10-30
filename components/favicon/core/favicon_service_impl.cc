@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/hash/hash.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "components/favicon/core/favicon_client.h"
@@ -20,46 +20,17 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/favicon_size.h"
-#include "ui/gfx/image/image_skia.h"
 #include "url/gurl.h"
 
 namespace favicon {
-namespace {
-
-// Returns a vector of pixel edge sizes from |size_in_dip| and
-// favicon_base::GetFaviconScales().
-std::vector<int> GetPixelSizesForFaviconScales(int size_in_dip) {
-  std::vector<float> scales = favicon_base::GetFaviconScales();
-  std::vector<int> sizes_in_pixel;
-  for (size_t i = 0; i < scales.size(); ++i) {
-    sizes_in_pixel.push_back(std::ceil(size_in_dip * scales[i]));
-  }
-  return sizes_in_pixel;
-}
-
-std::vector<SkBitmap> ExtractSkBitmapsToStore(const gfx::Image& image) {
-  gfx::ImageSkia image_skia = image.AsImageSkia();
-  image_skia.EnsureRepsForSupportedScales();
-  const std::vector<gfx::ImageSkiaRep>& image_reps = image_skia.image_reps();
-  std::vector<SkBitmap> bitmaps;
-  const std::vector<float> favicon_scales = favicon_base::GetFaviconScales();
-  for (size_t i = 0; i < image_reps.size(); ++i) {
-    // Don't save if the scale isn't one of supported favicon scales.
-    if (!base::Contains(favicon_scales, image_reps[i].scale()))
-      continue;
-    bitmaps.push_back(image_reps[i].GetBitmap());
-  }
-  return bitmaps;
-}
-
-}  // namespace
 
 FaviconServiceImpl::FaviconServiceImpl(
     std::unique_ptr<FaviconClient> favicon_client,
     history::HistoryService* history_service)
     : favicon_client_(std::move(favicon_client)),
       history_service_(history_service) {
-  DCHECK(history_service_);
+  // TODO(https://crbug.com/1024959): convert to DCHECK once crash is resolved.
+  CHECK(history_service_);
 }
 
 FaviconServiceImpl::~FaviconServiceImpl() {}
@@ -104,8 +75,6 @@ base::CancelableTaskTracker::TaskId FaviconServiceImpl::GetFavicon(
     favicon_base::FaviconResultsCallback callback,
     base::CancelableTaskTracker* tracker) {
   TRACE_EVENT0("browser", "FaviconServiceImpl::GetFavicon");
-  std::vector<GURL> icon_urls;
-  icon_urls.push_back(icon_url);
   return history_service_->GetFavicon(
       icon_url, icon_type, GetPixelSizesForFaviconScales(desired_size_in_dip),
       std::move(callback), tracker);
@@ -163,8 +132,12 @@ FaviconServiceImpl::GetLargestRawFaviconForPageURL(
             base::Unretained(this), std::move(callback), 0),
         tracker);
   }
+  const GURL fetched_url(
+      (favicon_client_ && favicon_client_->IsReaderModeURL(page_url))
+          ? favicon_client_->GetOriginalUrlFromReaderModeUrl(page_url)
+          : page_url);
   return history_service_->GetLargestFaviconForURL(
-      page_url, icon_types, minimum_size_in_pixels, std::move(callback),
+      fetched_url, icon_types, minimum_size_in_pixels, std::move(callback),
       tracker);
 }
 
@@ -232,7 +205,7 @@ void FaviconServiceImpl::SetImportedFavicons(
 
 void FaviconServiceImpl::AddPageNoVisitForBookmark(
     const GURL& url,
-    const base::string16& title) {
+    const std::u16string& title) {
   history_service_->AddPageNoVisitForBookmark(url, title);
 }
 
@@ -282,13 +255,13 @@ void FaviconServiceImpl::SetOnDemandFavicons(
 }
 
 void FaviconServiceImpl::UnableToDownloadFavicon(const GURL& icon_url) {
-  MissingFaviconURLHash url_hash = base::Hash(icon_url.spec());
+  MissingFaviconURLHash url_hash = base::FastHash(icon_url.spec());
   missing_favicon_urls_.insert(url_hash);
 }
 
 bool FaviconServiceImpl::WasUnableToDownloadFavicon(
     const GURL& icon_url) const {
-  MissingFaviconURLHash url_hash = base::Hash(icon_url.spec());
+  MissingFaviconURLHash url_hash = base::FastHash(icon_url.spec());
   return missing_favicon_urls_.find(url_hash) != missing_favicon_urls_.end();
 }
 
@@ -308,8 +281,12 @@ FaviconServiceImpl::GetFaviconForPageURLImpl(
     return favicon_client_->GetFaviconForNativeApplicationURL(
         page_url, desired_sizes_in_pixel, std::move(callback), tracker);
   }
+  const GURL fetched_url(
+      (favicon_client_ && favicon_client_->IsReaderModeURL(page_url))
+          ? favicon_client_->GetOriginalUrlFromReaderModeUrl(page_url)
+          : page_url);
   return history_service_->GetFaviconsForURL(
-      page_url, icon_types, desired_sizes_in_pixel, fallback_to_host,
+      fetched_url, icon_types, desired_sizes_in_pixel, fallback_to_host,
       std::move(callback), tracker);
 }
 

@@ -1,12 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/feature_list.h"
-#include "base/logging.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
+#include "content/public/browser/client_certificate_delegate.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -14,11 +16,11 @@
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "net/base/net_errors.h"
+#include "net/ssl/client_cert_identity.h"
 #include "net/ssl/ssl_server_config.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "services/network/public/cpp/features.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -59,7 +61,14 @@ class ServiceWorkerTlsTest : public ContentBrowserTest {
   }
 
  private:
-  void OnSelectClientCertificate() { select_certificate_count_++; }
+  base::OnceClosure OnSelectClientCertificate(
+      content::WebContents* web_contents,
+      net::SSLCertRequestInfo* cert_request_info,
+      net::ClientCertIdentityList client_certs,
+      std::unique_ptr<content::ClientCertificateDelegate> delegate) {
+    select_certificate_count_++;
+    return base::OnceClosure();
+  }
 
   int select_certificate_count_ = 0;
   base::test::ScopedFeatureList scoped_feature_list_;
@@ -142,9 +151,9 @@ class ServiceWorkerBasicAuthTest : public ContentBrowserTest {
     // such a dialog is difficult to control programmatically and doesn't work
     // on all platforms.
     ShellContentBrowserClient::Get()->set_login_request_callback(
-        base::BindLambdaForTesting([&](bool is_main_frame) {
-          login_requested_ = is_main_frame ? LoginRequested::kMainFrame
-                                           : LoginRequested::kSubFrame;
+        base::BindLambdaForTesting([&](bool is_primary_main_frame) {
+          login_requested_ = is_primary_main_frame ? LoginRequested::kMainFrame
+                                                   : LoginRequested::kSubFrame;
         }));
   }
 
@@ -159,9 +168,6 @@ class ServiceWorkerBasicAuthTest : public ContentBrowserTest {
 // worker, when the service worker calls fetch() for the main resource.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerBasicAuthTest,
                        BasicAuthPromptFetchMainResourceMainFrame) {
-  // The test should run only when Network Service is enabled.
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
-    return;
   // Load a page that installs the service worker.
   EXPECT_TRUE(NavigateToURL(
       shell(), ssl_server_.GetURL("/workers/service_worker_setup.html")));
@@ -180,9 +186,6 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerBasicAuthTest,
 // subframe.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerBasicAuthTest,
                        BasicAuthPromptFetchMainResourceSubframe) {
-  // The test should run only when Network Service is enabled.
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
-    return;
   // Load a page that installs the service worker.
   EXPECT_TRUE(NavigateToURL(
       shell(), ssl_server_.GetURL("/workers/service_worker_setup.html")));
@@ -199,9 +202,6 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerBasicAuthTest,
 // worker, when the service worker calls fetch() for a subresource.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerBasicAuthTest,
                        BasicAuthPromptFetchSubResource) {
-  // The test should run only when Network Service is enabled.
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
-    return;
   // Load a page that installs the service worker.
   EXPECT_TRUE(NavigateToURL(
       shell(), ssl_server_.GetURL("/workers/service_worker_setup.html")));

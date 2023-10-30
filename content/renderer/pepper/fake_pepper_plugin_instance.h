@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,29 +34,13 @@ class FakePepperPluginInstance : public PepperPluginInstance {
       int plugin_child_id) override;
   void SetAlwaysOnTop(bool on_top) override;
   bool IsFullPagePlugin() override;
-  bool FlashSetFullscreen(bool fullscreen, bool delay_report) override;
   bool IsRectTopmost(const gfx::Rect& rect) override;
-  int32_t Navigate(const ppapi::URLRequestInfoData& request,
-                   const char* target,
-                   bool from_user_action) override;
   int MakePendingFileRefRendererHost(const base::FilePath& path) override;
   void SetEmbedProperty(PP_Var key, PP_Var value) override;
-  void SetSelectedText(const base::string16& selected_text) override;
+  void SetSelectedText(const std::u16string& selected_text) override;
   void SetLinkUnderCursor(const std::string& url) override;
   void SetTextInputType(ui::TextInputType type) override;
   void PostMessageToJavaScript(PP_Var message) override;
-  void SetCaretPosition(const gfx::PointF& position) override;
-  void MoveRangeSelectionExtent(const gfx::PointF& extent) override;
-  void SetSelectionBounds(const gfx::PointF& base,
-                          const gfx::PointF& extent) override;
-  bool CanEditText() override;
-  bool HasEditableText() override;
-  void ReplaceSelection(const std::string& text) override;
-  void SelectAll() override;
-  bool CanUndo() override;
-  bool CanRedo() override;
-  void Undo() override;
-  void Redo() override;
 
  private:
   GURL gurl_;

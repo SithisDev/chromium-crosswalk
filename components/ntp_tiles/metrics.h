@@ -1,15 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_NTP_TILES_METRICS_H_
 #define COMPONENTS_NTP_TILES_METRICS_H_
 
+#include "components/ntp_tiles/deleted_tile_type.h"
 #include "components/ntp_tiles/ntp_tile_impression.h"
-
-namespace rappor {
-class RapporService;
-}  // namespace rappor
 
 namespace ntp_tiles {
 namespace metrics {
@@ -18,13 +15,15 @@ namespace metrics {
 void RecordPageImpression(int number_of_tiles);
 
 // Records an individual tile impression, which should be called only after the
-// visual type of the tile has been determined. If |rappor_service| is null, no
-// rappor metrics will be reported.
-void RecordTileImpression(const NTPTileImpression& impression,
-                          rappor::RapporService* rappor_service);
+// visual type of the tile has been determined.
+void RecordTileImpression(const NTPTileImpression& impression);
 
 // Records a click on a tile.
 void RecordTileClick(const NTPTileImpression& impression);
+
+// Records when a default app tile is deleted with the type of tile.
+void RecordsMigratedDefaultAppDeleted(
+    const DeletedTileType& most_visited_app_type);
 
 }  // namespace metrics
 }  // namespace ntp_tiles

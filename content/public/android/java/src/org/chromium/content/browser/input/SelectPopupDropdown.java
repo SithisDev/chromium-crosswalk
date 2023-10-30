@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.PopupWindow;
 
+import org.chromium.base.Callback;
 import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.GestureStateListener;
 import org.chromium.content_public.browser.WebContents;
@@ -21,15 +22,15 @@ import java.util.List;
  * Handles the dropdown popup for the <select> HTML tag support.
  */
 public class SelectPopupDropdown implements SelectPopup.Ui {
-    private final SelectPopup mSelectPopup;
+    private final Callback<int[]> mSelectionChangedCallback;
     private final DropdownPopupWindow mDropdownPopupWindow;
 
     private boolean mSelectionNotified;
 
-    public SelectPopupDropdown(SelectPopup selectPopup, Context context, View anchorView,
-            List<SelectPopupItem> items, int[] selected, boolean rightAligned,
+    public SelectPopupDropdown(Context context, Callback<int[]> selectionChangedCallback,
+            View anchorView, List<SelectPopupItem> items, int[] selected, boolean rightAligned,
             WebContents webContents) {
-        mSelectPopup = selectPopup;
+        mSelectionChangedCallback = selectionChangedCallback;
         mDropdownPopupWindow = new DropdownPopupWindow(context, anchorView);
         mDropdownPopupWindow.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -55,7 +56,8 @@ public class SelectPopupDropdown implements SelectPopup.Ui {
                 });
         GestureListenerManager.fromWebContents(webContents).addListener(new GestureStateListener() {
             @Override
-            public void onScrollStarted(int scrollOffsetY, int scrollExtentY) {
+            public void onScrollStarted(
+                    int scrollOffsetY, int scrollExtentY, boolean isDirectionUp) {
                 hide(true);
             }
         });
@@ -63,7 +65,7 @@ public class SelectPopupDropdown implements SelectPopup.Ui {
 
     private void notifySelection(int[] indicies) {
         if (mSelectionNotified) return;
-        mSelectPopup.selectMenuItems(indicies);
+        mSelectionChangedCallback.onResult(indicies);
         mSelectionNotified = true;
     }
 

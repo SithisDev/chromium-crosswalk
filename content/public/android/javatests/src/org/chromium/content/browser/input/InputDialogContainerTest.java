@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@ package org.chromium.content.browser.input;
 
 import android.content.Context;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -14,6 +15,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.Feature;
 import org.chromium.content.browser.picker.InputDialogContainer;
 import org.chromium.ui.base.ime.TextInputType;
@@ -22,6 +24,7 @@ import org.chromium.ui.base.ime.TextInputType;
  * Unittests for the {@link org.chromium.content.browser.picker.InputDialogContainer} class.
  */
 @RunWith(BaseJUnit4ClassRunner.class)
+@Batch(Batch.UNIT_TESTS)
 public class InputDialogContainerTest {
     // Defined in third_party/WebKit/Source/platform/DateComponents.h
     private static final double DATE_DIALOG_DEFAULT_MIN = -62135596800000.0;
@@ -41,7 +44,7 @@ public class InputDialogContainerTest {
     InputDialogContainerForTests mInputDialogContainer;
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mInputActionDelegate = new InputActionDelegateForTests();
         mInputDialogContainer = new InputDialogContainerForTests(
                 InstrumentationRegistry.getContext(), mInputActionDelegate);

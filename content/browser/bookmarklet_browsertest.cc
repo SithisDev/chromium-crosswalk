@@ -1,9 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -20,27 +22,23 @@ class BookmarkletTest : public ContentBrowserTest {
   }
 
   void NavigateToStartPage() {
-    NavigateToURL(shell(), GURL("data:text/html,start page"));
+    EXPECT_TRUE(NavigateToURL(shell(), GURL("data:text/html,start page")));
     EXPECT_EQ("start page", GetBodyText());
   }
 
-  std::string GetBodyText() {
-    std::string body_text;
-    EXPECT_TRUE(ExecuteScriptAndExtractString(
-        shell(),
-        "window.domAutomationController.send(document.body.innerText);",
-        &body_text));
-    return body_text;
+  content::EvalJsResult GetBodyText() {
+    return EvalJs(shell(), "document.body.innerText");
   }
 };
 
 IN_PROC_BROWSER_TEST_F(BookmarkletTest, Redirect) {
   NavigateToStartPage();
 
-  const GURL url(base::StringPrintf(
-      "javascript:location.href='%s'",
-      embedded_test_server()->GetURL("/simple_page.html").spec().c_str()));
-  NavigateToURL(shell(), url);
+  const GURL redirect_url(embedded_test_server()->GetURL("/simple_page.html"));
+  const GURL url(base::StringPrintf("javascript:location.href='%s'",
+                                    redirect_url.spec().c_str()));
+  EXPECT_TRUE(
+      NavigateToURL(shell(), url, redirect_url /* expected_commit_url */));
   EXPECT_EQ("Basic html test.", GetBodyText());
 }
 
@@ -51,10 +49,11 @@ IN_PROC_BROWSER_TEST_F(BookmarkletTest, RedirectVoided) {
   // here is to emphasize that in either case the assignment to location during
   // the evaluation of the script should suppress loading the script result.
   // Here, because of the void() wrapping there is no script result.
-  const GURL url(base::StringPrintf(
-      "javascript:void(location.href='%s')",
-      embedded_test_server()->GetURL("/simple_page.html").spec().c_str()));
-  NavigateToURL(shell(), url);
+  const GURL redirect_url(embedded_test_server()->GetURL("/simple_page.html"));
+  const GURL url(base::StringPrintf("javascript:void(location.href='%s')",
+                                    redirect_url.spec().c_str()));
+  EXPECT_TRUE(
+      NavigateToURL(shell(), url, redirect_url /* expected_commit_url */));
   EXPECT_EQ("Basic html test.", GetBodyText());
 }
 

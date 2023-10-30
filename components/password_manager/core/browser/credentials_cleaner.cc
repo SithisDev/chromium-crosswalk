@@ -1,19 +1,19 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/password_manager/core/browser/credentials_cleaner.h"
 
-#include "base/stl_util.h"
-#include "components/autofill/core/common/password_form.h"
+#include "base/containers/cxx20_erase.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "url/gurl.h"
 
 namespace password_manager {
 
 // static
-std::vector<std::unique_ptr<autofill::PasswordForm>>
+std::vector<std::unique_ptr<PasswordForm>>
 CredentialsCleaner::RemoveNonHTTPOrHTTPSForms(
-    std::vector<std::unique_ptr<autofill::PasswordForm>> forms) {
+    std::vector<std::unique_ptr<PasswordForm>> forms) {
   base::EraseIf(forms, [](const auto& form) {
     return !GURL(form->signon_realm).SchemeIsHTTPOrHTTPS();
   });

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
 #include "components/autofill_assistant/browser/actions/mock_action_delegate.h"
-#include "components/autofill_assistant/browser/mock_web_controller.h"
+#include "components/autofill_assistant/browser/web/mock_web_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace autofill_assistant {
@@ -20,16 +20,11 @@ namespace {
 using ::testing::_;
 using ::testing::Eq;
 using ::testing::Invoke;
-using ::testing::IsEmpty;
-using ::testing::IsNull;
-using ::testing::Pointee;
-using ::testing::Property;
-using ::testing::SizeIs;
 
 class ConfigureBottomSheetActionTest : public testing::Test {
  public:
   ConfigureBottomSheetActionTest()
-      : task_env_(base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME) {}
+      : task_env_(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
 
   void SetUp() override {
     ON_CALL(mock_action_delegate_, GetViewportMode())
@@ -44,9 +39,9 @@ class ConfigureBottomSheetActionTest : public testing::Test {
             Invoke([this](ConfigureBottomSheetProto::PeekMode peek_mode) {
               peek_mode_ = peek_mode;
             }));
-    ON_CALL(mock_action_delegate_, OnWaitForWindowHeightChange(_))
+    ON_CALL(mock_action_delegate_, WaitForWindowHeightChange(_))
         .WillByDefault(Invoke(
-            [this](base::OnceCallback<void(const ClientStatus&)>& callback) {
+            [this](base::OnceCallback<void(const ClientStatus&)> callback) {
               on_resize_cb_ = std::move(callback);
             }));
   }
@@ -62,11 +57,10 @@ class ConfigureBottomSheetActionTest : public testing::Test {
     *action_proto.mutable_configure_bottom_sheet() = proto_;
     action_ = std::make_unique<ConfigureBottomSheetAction>(
         &mock_action_delegate_, action_proto);
-    action_->ProcessAction(
-        base::BindOnce(base::BindLambdaForTesting(
-            [&](std::unique_ptr<ProcessedActionProto> result) {
-              processed_action_ = *result;
-            })));
+    action_->ProcessAction(base::BindLambdaForTesting(
+        [&](std::unique_ptr<ProcessedActionProto> result) {
+          processed_action_ = *result;
+        }));
   }
 
   // Runs an action that waits for a resize.
@@ -78,13 +72,13 @@ class ConfigureBottomSheetActionTest : public testing::Test {
   // Fast forward time enough for an action created by RunWithTimeout() to time
   // out.
   void ForceTimeout() {
-    task_env_.FastForwardBy(base::TimeDelta::FromMilliseconds(100));
-    task_env_.FastForwardBy(base::TimeDelta::FromMilliseconds(100));
+    task_env_.FastForwardBy(base::Milliseconds(100));
+    task_env_.FastForwardBy(base::Milliseconds(100));
   }
 
   // task_env_ must be first to guarantee other field
   // creation run in that environment.
-  base::test::ScopedTaskEnvironment task_env_;
+  base::test::TaskEnvironment task_env_;
 
   MockActionDelegate mock_action_delegate_;
   MockWebController mock_web_controller_;
@@ -296,6 +290,26 @@ TEST_F(ConfigureBottomSheetActionTest, WaitIfResizeLayoutAfterVisualViewport) {
   RunWithTimeout();
 
   ASSERT_TRUE(on_resize_cb_);
+}
+
+TEST_F(ConfigureBottomSheetActionTest, ExpandOrCollapseSheetNotSet) {
+  EXPECT_CALL(mock_action_delegate_, ExpandBottomSheet()).Times(0);
+  EXPECT_CALL(mock_action_delegate_, CollapseBottomSheet()).Times(0);
+  Run();
+}
+
+TEST_F(ConfigureBottomSheetActionTest, ExpectExpand) {
+  proto_.set_expand(true);
+  EXPECT_CALL(mock_action_delegate_, ExpandBottomSheet()).Times(1);
+  EXPECT_CALL(mock_action_delegate_, CollapseBottomSheet()).Times(0);
+  Run();
+}
+
+TEST_F(ConfigureBottomSheetActionTest, ExpectCollapse) {
+  proto_.set_collapse(true);
+  EXPECT_CALL(mock_action_delegate_, ExpandBottomSheet()).Times(0);
+  EXPECT_CALL(mock_action_delegate_, CollapseBottomSheet()).Times(1);
+  Run();
 }
 
 }  // namespace

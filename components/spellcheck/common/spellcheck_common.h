@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,16 @@
 #include <vector>
 
 #include "base/strings/string_piece.h"
+#include "components/spellcheck/common/spellcheck_result.h"
 
 namespace base {
 class FilePath;
 }
 
 namespace spellcheck {
+
+// Short type for holding word replacements per individual language.
+using PerLanguageSuggestions = std::vector<std::vector<std::u16string>>;
 
 // Max number of dictionary suggestions.
 static const int kMaxSuggestions = 5;
@@ -53,6 +57,14 @@ std::vector<std::string> SpellCheckLanguages();
 void GetISOLanguageCountryCodeFromLocale(const std::string& locale,
                                          std::string* language_code,
                                          std::string* country_code);
+
+// Evenly fill |optional_suggestions| with a maximum of |kMaxSuggestions|
+// suggestions from |suggestions_list|. suggestions_list[i][j] is the j-th
+// suggestion from the i-th language's suggestions. |optional_suggestions|
+// cannot be null.
+void FillSuggestions(
+    const std::vector<std::vector<std::u16string>>& suggestions_list,
+    std::vector<std::u16string>* optional_suggestions);
 
 }  // namespace spellcheck
 

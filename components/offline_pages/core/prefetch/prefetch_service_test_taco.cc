@@ -1,18 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/offline_pages/core/prefetch/prefetch_service_test_taco.h"
 
+#include <memory>
 #include <utility>
 
-#include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/image_fetcher/core/image_fetcher.h"
 #include "components/image_fetcher/core/mock_image_fetcher.h"
 #include "components/offline_pages/core/offline_page_model.h"
-#include "components/offline_pages/core/prefetch/mock_thumbnail_fetcher.h"
 #include "components/offline_pages/core/prefetch/offline_metrics_collector.h"
 #include "components/offline_pages/core/prefetch/prefetch_background_task_handler.h"
 #include "components/offline_pages/core/prefetch/prefetch_dispatcher.h"
@@ -23,7 +21,6 @@
 #include "components/offline_pages/core/prefetch/prefetch_prefs.h"
 #include "components/offline_pages/core/prefetch/prefetch_service_impl.h"
 #include "components/offline_pages/core/prefetch/store/prefetch_store.h"
-#include "components/offline_pages/core/prefetch/suggested_articles_observer.h"
 #include "components/offline_pages/core/prefetch/test_download_client.h"
 #include "components/offline_pages/core/prefetch/test_download_service.h"
 #include "components/offline_pages/core/prefetch/test_offline_metrics_collector.h"
@@ -44,6 +41,12 @@ const version_info::Channel kTestChannel = version_info::Channel::UNKNOWN;
 class StubPrefetchBackgroundTaskHandler : public PrefetchBackgroundTaskHandler {
  public:
   StubPrefetchBackgroundTaskHandler() = default;
+
+  StubPrefetchBackgroundTaskHandler(const StubPrefetchBackgroundTaskHandler&) =
+      delete;
+  StubPrefetchBackgroundTaskHandler& operator=(
+      const StubPrefetchBackgroundTaskHandler&) = delete;
+
   ~StubPrefetchBackgroundTaskHandler() override = default;
   void CancelBackgroundTask() override {}
   void EnsureTaskScheduled() override {}
@@ -53,14 +56,11 @@ class StubPrefetchBackgroundTaskHandler : public PrefetchBackgroundTaskHandler {
   void Suspend() override {}
   void RemoveSuspension() override {}
   int GetAdditionalBackoffSeconds() const override { return 0; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StubPrefetchBackgroundTaskHandler);
 };
 
 }  // namespace
 
-PrefetchServiceTestTaco::PrefetchServiceTestTaco(SuggestionSource source) {
+PrefetchServiceTestTaco::PrefetchServiceTestTaco() {
   dispatcher_ = std::make_unique<TestPrefetchDispatcher>();
   gcm_handler_ = std::make_unique<TestPrefetchGCMHandler>();
 
@@ -78,24 +78,15 @@ PrefetchServiceTestTaco::PrefetchServiceTestTaco(SuggestionSource source) {
       std::make_unique<PrefetchStore>(base::ThreadTaskRunnerHandle::Get());
 
   download_service_ = std::make_unique<TestDownloadService>();
-  prefetch_downloader_ = base::WrapUnique(new PrefetchDownloaderImpl(
-      download_service_.get(), kTestChannel, pref_service_.get()));
+  prefetch_downloader_ = std::make_unique<PrefetchDownloaderImpl>(
+      download_service_.get(), kTestChannel, pref_service_.get());
   download_client_ =
       std::make_unique<TestDownloadClient>(prefetch_downloader_.get());
   download_service_->SetClient(download_client_.get());
   prefetch_importer_ = std::make_unique<TestPrefetchImporter>();
 
-  if (source == kContentSuggestions) {
-    suggested_articles_observer_ =
-        std::make_unique<SuggestedArticlesObserver>();
-    // This sets up the testing articles as an empty vector, we can ignore the
-    // result here.  This allows us to not create a ContentSuggestionsService.
-    suggested_articles_observer_->GetTestingArticles();
-    thumbnail_fetcher_ = std::make_unique<MockThumbnailFetcher>();
-  } else {
-    thumbnail_image_fetcher_ =
-        std::make_unique<image_fetcher::MockImageFetcher>();
-  }
+  thumbnail_image_fetcher_ =
+      std::make_unique<image_fetcher::MockImageFetcher>();
 
   prefetch_background_task_handler_ =
       std::make_unique<StubPrefetchBackgroundTaskHandler>();
@@ -121,7 +112,6 @@ void PrefetchServiceTestTaco::SetPrefetchDispatcher(
 void PrefetchServiceTestTaco::SetPrefetchGCMHandler(
     std::unique_ptr<PrefetchGCMHandler> gcm_handler) {
   CHECK(!prefetch_service_);
-  CHECK(gcm_handler);
   gcm_handler_ = std::move(gcm_handler);
 }
 
@@ -137,12 +127,6 @@ void PrefetchServiceTestTaco::SetPrefetchStore(
   CHECK(!prefetch_service_);
   CHECK(prefetch_store);
   prefetch_store_ = std::move(prefetch_store);
-}
-
-void PrefetchServiceTestTaco::SetSuggestedArticlesObserver(
-    std::unique_ptr<SuggestedArticlesObserver> suggested_articles_observer) {
-  CHECK(!prefetch_service_);
-  suggested_articles_observer_ = std::move(suggested_articles_observer);
 }
 
 void PrefetchServiceTestTaco::SetPrefetchDownloader(
@@ -164,12 +148,6 @@ void PrefetchServiceTestTaco::SetPrefetchBackgroundTaskHandler(
   CHECK(!prefetch_service_);
   prefetch_background_task_handler_ =
       std::move(prefetch_background_task_handler);
-}
-
-void PrefetchServiceTestTaco::SetThumbnailFetcher(
-    std::unique_ptr<ThumbnailFetcher> thumbnail_fetcher) {
-  CHECK(!prefetch_service_);
-  thumbnail_fetcher_ = std::move(thumbnail_fetcher);
 }
 
 void PrefetchServiceTestTaco::SetThumbnailImageFetcher(
@@ -197,12 +175,10 @@ void PrefetchServiceTestTaco::CreatePrefetchService() {
   auto service = std::make_unique<PrefetchServiceImpl>(
       std::move(metrics_collector_), std::move(dispatcher_),
       std::move(network_request_factory_), offline_page_model_.get(),
-      std::move(prefetch_store_), std::move(suggested_articles_observer_),
-      std::move(prefetch_downloader_), std::move(prefetch_importer_),
+      std::move(prefetch_store_), std::move(prefetch_downloader_),
+      std::move(prefetch_importer_), std::move(gcm_handler_),
       std::move(prefetch_background_task_handler_),
-      std::move(thumbnail_fetcher_), thumbnail_image_fetcher_.get(),
-      pref_service_.get());
-  service->SetPrefetchGCMHandler(std::move(gcm_handler_));
+      thumbnail_image_fetcher_.get(), pref_service_.get());
   prefetch_service_ = std::move(service);
 }
 

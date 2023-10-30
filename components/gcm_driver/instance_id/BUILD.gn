@@ -1,8 +1,12 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//components/gcm_driver/config.gni")
+
+if (is_android) {
+  import("//build/config/android/rules.gni")
+}
 
 static_library("instance_id") {
   sources = [
@@ -10,8 +14,6 @@ static_library("instance_id") {
     "instance_id.h",
     "instance_id_driver.cc",
     "instance_id_driver.h",
-    "instance_id_impl.cc",
-    "instance_id_impl.h",
     "instance_id_profile_service.cc",
     "instance_id_profile_service.h",
   ]
@@ -26,15 +28,17 @@ static_library("instance_id") {
   ]
 
   if (use_gcm_from_platform) {
-    sources -= [
-      "instance_id_impl.cc",
-      "instance_id_impl.h",
-    ]
+    assert(is_android)
     sources += [
       "instance_id_android.cc",
       "instance_id_android.h",
     ]
     deps += [ "android:jni_headers" ]
+  } else {
+    sources += [
+      "instance_id_impl.cc",
+      "instance_id_impl.h",
+    ]
   }
 }
 
@@ -43,13 +47,9 @@ static_library("test_support") {
   sources = [
     "fake_gcm_driver_for_instance_id.cc",
     "fake_gcm_driver_for_instance_id.h",
-    "scoped_use_fake_instance_id_android.cc",
-    "scoped_use_fake_instance_id_android.h",
   ]
 
-  public_deps = [
-    ":instance_id",
-  ]
+  public_deps = [ ":instance_id" ]
   deps = [
     "//base",
     "//components/gcm_driver",
@@ -57,15 +57,17 @@ static_library("test_support") {
   ]
 
   if (is_android) {
+    sources += [
+      "scoped_use_fake_instance_id_android.cc",
+      "scoped_use_fake_instance_id_android.h",
+    ]
     deps += [ "android:test_support_jni_headers" ]
   }
 }
 
 source_set("unit_tests") {
   testonly = true
-  sources = [
-    "instance_id_driver_unittest.cc",
-  ]
+  sources = [ "instance_id_driver_unittest.cc" ]
 
   deps = [
     ":instance_id",
@@ -76,4 +78,10 @@ source_set("unit_tests") {
     "//net:test_support",
     "//testing/gtest",
   ]
+}
+
+if (is_android) {
+  java_cpp_enum("instance_id_java_enums_srcjar") {
+    sources = [ "instance_id.h" ]
+  }
 }

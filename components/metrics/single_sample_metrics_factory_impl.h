@@ -1,16 +1,17 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_METRICS_SINGLE_VALUE_HISTOGRAM_FACTORY_IMPL_H_
-#define COMPONENTS_METRICS_SINGLE_VALUE_HISTOGRAM_FACTORY_IMPL_H_
+#ifndef COMPONENTS_METRICS_SINGLE_SAMPLE_METRICS_FACTORY_IMPL_H_
+#define COMPONENTS_METRICS_SINGLE_SAMPLE_METRICS_FACTORY_IMPL_H_
 
 #include <string>
 
 #include "base/metrics/single_sample_metrics.h"
 #include "base/threading/thread_local.h"
-#include "components/metrics/public/interfaces/single_sample_metrics.mojom.h"
+#include "components/metrics/public/mojom/single_sample_metrics.mojom.h"
 #include "components/metrics/single_sample_metrics.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace metrics {
 
@@ -31,6 +32,12 @@ class SingleSampleMetricsFactoryImpl : public base::SingleSampleMetricsFactory {
   // service_manager::Connector() for simplicitly and to avoid the need for
   // using the service test harness just for instantiating this class.
   explicit SingleSampleMetricsFactoryImpl(CreateProviderCB create_provider_cb);
+
+  SingleSampleMetricsFactoryImpl(const SingleSampleMetricsFactoryImpl&) =
+      delete;
+  SingleSampleMetricsFactoryImpl& operator=(
+      const SingleSampleMetricsFactoryImpl&) = delete;
+
   ~SingleSampleMetricsFactoryImpl() override;
 
   // base::SingleSampleMetricsFactory:
@@ -61,11 +68,10 @@ class SingleSampleMetricsFactoryImpl : public base::SingleSampleMetricsFactory {
   CreateProviderCB create_provider_cb_;
 
   // Per thread storage slot for the mojo provider.
-  base::ThreadLocalPointer<mojom::SingleSampleMetricsProviderPtr> provider_tls_;
-
-  DISALLOW_COPY_AND_ASSIGN(SingleSampleMetricsFactoryImpl);
+  base::ThreadLocalPointer<mojo::Remote<mojom::SingleSampleMetricsProvider>>
+      provider_tls_;
 };
 
 }  // namespace metrics
 
-#endif  // COMPONENTS_METRICS_SINGLE_VALUE_HISTOGRAM_FACTORY_IMPL_H_
+#endif  // COMPONENTS_METRICS_SINGLE_SAMPLE_METRICS_FACTORY_IMPL_H_

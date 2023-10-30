@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "components/discardable_memory/service/discardable_shared_memory_manager.h"
@@ -7,8 +7,12 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "base/test/scoped_task_environment.h"
+#include <memory>
+
+#include "base/memory/raw_ptr.h"
+#include "base/test/task_environment.h"
 #include "base/threading/simple_thread.h"
+#include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace discardable_memory {
@@ -62,11 +66,11 @@ class DiscardableSharedMemoryManagerTest : public testing::Test {
  protected:
   // Overridden from testing::Test:
   void SetUp() override {
-    manager_.reset(new TestDiscardableSharedMemoryManager);
+    manager_ = std::make_unique<TestDiscardableSharedMemoryManager>();
   }
 
   // DiscardableSharedMemoryManager requires a message loop.
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<TestDiscardableSharedMemoryManager> manager_;
 };
 
@@ -237,10 +241,12 @@ class DiscardableSharedMemoryManagerScheduleEnforceMemoryPolicyTest
     : public testing::Test {
  protected:
   // Overridden from testing::Test:
-  void SetUp() override { manager_.reset(new DiscardableSharedMemoryManager); }
+  void SetUp() override {
+    manager_ = std::make_unique<DiscardableSharedMemoryManager>();
+  }
 
   // DiscardableSharedMemoryManager requires a message loop.
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<DiscardableSharedMemoryManager> manager_;
 };
 
@@ -253,7 +259,7 @@ class SetMemoryLimitRunner : public base::DelegateSimpleThread::Delegate {
   void Run() override { manager_->SetMemoryLimit(limit_); }
 
  private:
-  DiscardableSharedMemoryManager* const manager_;
+  const raw_ptr<DiscardableSharedMemoryManager> manager_;
   const size_t limit_;
 };
 

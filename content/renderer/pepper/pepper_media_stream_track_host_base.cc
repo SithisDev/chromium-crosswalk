@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/numerics/safe_math.h"
 #include "content/common/pepper_file_util.h"
 #include "content/public/renderer/render_thread.h"
@@ -51,21 +52,19 @@ bool PepperMediaStreamTrackHostBase::InitBuffers(int32_t number_of_buffers,
   if (!size.IsValid())
     return false;
 
-  content::RenderThread* render_thread = content::RenderThread::Get();
-  std::unique_ptr<base::SharedMemory> shm(
-      render_thread->HostAllocateSharedMemoryBuffer(size.ValueOrDie()));
-  if (!shm)
+  base::UnsafeSharedMemoryRegion region =
+      base::UnsafeSharedMemoryRegion::Create(size.ValueOrDie());
+  if (!region.IsValid())
     return false;
 
-  base::SharedMemoryHandle shm_handle = shm->handle();
+  SerializedHandle handle(
+      host_->ShareUnsafeSharedMemoryRegionWithRemote(region));
   if (!buffer_manager_.SetBuffers(number_of_buffers,
                                   buffer_size_aligned.ValueOrDie(),
-                                  std::move(shm), true)) {
+                                  std::move(region), true)) {
     return false;
   }
 
-  SerializedHandle handle(host_->ShareSharedMemoryHandleWithRemote(shm_handle),
-                          size.ValueOrDie());
   bool readonly = (track_type == kRead);
   std::vector<SerializedHandle> handles;
   handles.push_back(std::move(handle));

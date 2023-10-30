@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,15 +14,15 @@ namespace mojo {
 
 template <>
 struct CONTENT_EXPORT TypeConverter<content::mojom::ResourceTypeStatsPtr,
-                                    blink::WebCache::ResourceTypeStats> {
+                                    blink::WebCacheResourceTypeStats> {
   static content::mojom::ResourceTypeStatsPtr Convert(
-      const blink::WebCache::ResourceTypeStats& obj);
+      const blink::WebCacheResourceTypeStats& obj);
 };
 
 template <>
-struct CONTENT_EXPORT TypeConverter<blink::WebCache::ResourceTypeStats,
+struct CONTENT_EXPORT TypeConverter<blink::WebCacheResourceTypeStats,
                                     content::mojom::ResourceTypeStats> {
-  static blink::WebCache::ResourceTypeStats Convert(
+  static blink::WebCacheResourceTypeStats Convert(
       const content::mojom::ResourceTypeStats& obj);
 };
 

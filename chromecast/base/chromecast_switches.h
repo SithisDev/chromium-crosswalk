@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,11 @@ extern const char kCrashServerUrl[];
 // Disable Crash Reporting
 extern const char kDisableCrashReporter[];
 
+// Path to dumpstate binary to be used for crash reporting.
+// This gives Chromium's crash reporter the flexibility to switch
+// between multiple implementations of dumpstate tool.
+extern const char kDumpstateBinPath[];
+
 // Content-implementation switches
 extern const char kEnableLocalFileAccesses[];
 
@@ -29,7 +34,6 @@ extern const char kEnableLocalFileAccesses[];
 extern const char kOverrideMetricsUploadUrl[];
 
 // Network switches
-extern const char kNoWifi[];
 extern const char kRequireWlan[];
 
 // Switches to communicate app state information
@@ -59,6 +63,7 @@ extern const char kAlsaVolumeElementName[];
 extern const char kAudioOutputChannels[];
 extern const char kAudioOutputSampleRate[];
 extern const char kMaxOutputVolumeDba1m[];
+extern const char kMixerEnableDynamicChannelCount[];
 extern const char kMixerSourceAudioReadyThresholdMs[];
 extern const char kMixerSourceInputQueueMs[];
 
@@ -83,15 +88,28 @@ extern const char kSystemGestureStartHeight[];
 extern const char kBottomSystemGestureStartHeight[];
 extern const char kBackGestureHorizontalThreshold[];
 extern const char kEnableTopDragGesture[];
+extern const char kManagedMode[];
 
 // Background color used when Chromium hasn't rendered anything yet.
 extern const char kCastAppBackgroundColor[];
 
 extern const char kMixerServiceEndpoint[];
+extern const char kMixerServicePort[];
+
 extern const char kCastMemoryPressureCriticalFraction[];
 extern const char kCastMemoryPressureModerateFraction[];
 
 extern const char kDisableMojoRenderer[];
+
+// OTA update related switches.
+extern const char kForceUpdateRemoteUrl[];
+
+extern const char kSysInfoFilePath[];
+
+// Switches for Cast browser decoupling.
+extern const char kDeferFeatureList[];
+extern const char kUseCastBrowserPrefConfig[];
+extern const char kInProcessBroker[];
 
 }  // namespace switches
 

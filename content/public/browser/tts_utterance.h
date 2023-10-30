@@ -1,22 +1,22 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_BROWSER_TTS_UTTERANCE_H_
 #define CONTENT_PUBLIC_BROWSER_TTS_UTTERANCE_H_
 
+#include <memory>
 #include <set>
 
+#include "base/unguessable_token.h"
+#include "base/values.h"
 #include "content/common/content_export.h"
 #include "url/gurl.h"
-
-namespace base {
-class Value;
-}
 
 namespace content {
 class BrowserContext;
 class TtsUtterance;
+class WebContents;
 
 // Events sent back from the TTS engine indicating the progress.
 enum TtsEventType {
@@ -58,10 +58,18 @@ class CONTENT_EXPORT UtteranceEventDelegate {
 // One speech utterance.
 class CONTENT_EXPORT TtsUtterance {
  public:
-  // Construct an utterance given a profile and a completion task to call
-  // when the utterance is done speaking. Before speaking this utterance,
-  // its other parameters like text, rate, pitch, etc. should all be set.
-  static TtsUtterance* Create(BrowserContext* browser_context);
+  // Construct an utterance given a WebContents, BrowserContext, or no backing
+  // context. Prefer the more specific WebContents variant if possible. The
+  // utterance's speaking lifetime is tied to their lifetime.
+  // Before speaking this utterance, its other parameters like text, rate,
+  // pitch, etc. should all be set.
+  static std::unique_ptr<TtsUtterance> Create(WebContents* web_contents);
+  // |should_always_be_spoken|: See comment for ShouldAlwaysBeSpoken().
+  static std::unique_ptr<TtsUtterance> Create(
+      BrowserContext* browser_context,
+      bool should_always_be_spoken = false);
+  static std::unique_ptr<TtsUtterance> Create();
+
   virtual ~TtsUtterance() = default;
 
   // Sends an event to the delegate. If the event type is TTS_EVENT_END
@@ -80,8 +88,8 @@ class CONTENT_EXPORT TtsUtterance {
   virtual void SetText(const std::string& text) = 0;
   virtual const std::string& GetText() = 0;
 
-  virtual void SetOptions(const base::Value* options) = 0;
-  virtual const base::Value* GetOptions() = 0;
+  virtual void SetOptions(base::Value::Dict options) = 0;
+  virtual const base::Value::Dict* GetOptions() = 0;
 
   virtual void SetSrcId(int src_id) = 0;
   virtual int GetSrcId() = 0;
@@ -100,8 +108,10 @@ class CONTENT_EXPORT TtsUtterance {
                                        const double volume) = 0;
   virtual const UtteranceContinuousParameters& GetContinuousParameters() = 0;
 
-  virtual void SetCanEnqueue(bool can_enqueue) = 0;
-  virtual bool GetCanEnqueue() = 0;
+  // Prior to processing this utterance, determines whether the utterance queue
+  // gets cleared.
+  virtual void SetShouldClearQueue(bool value) = 0;
+  virtual bool GetShouldClearQueue() = 0;
 
   virtual void SetRequiredEventTypes(const std::set<TtsEventType>& types) = 0;
   virtual const std::set<TtsEventType>& GetRequiredEventTypes() = 0;
@@ -117,8 +127,17 @@ class CONTENT_EXPORT TtsUtterance {
 
   // Getters and setters for internal state.
   virtual BrowserContext* GetBrowserContext() = 0;
+  virtual void ClearBrowserContext() = 0;
   virtual int GetId() = 0;
   virtual bool IsFinished() = 0;
+  virtual WebContents* GetWebContents() = 0;
+
+  // An utterance could become invalid (for example, its associated WebContents
+  // has been destroyed) and therefore should not be spoken when it is
+  // processed by TtsController from the utterance queue. If this function
+  // returns true, it guarantees that the utterance must be a valid one and
+  // should be spoken.
+  virtual bool ShouldAlwaysBeSpoken() = 0;
 };
 
 }  // namespace content

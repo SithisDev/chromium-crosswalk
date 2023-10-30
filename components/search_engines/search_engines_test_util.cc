@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/search_engines/default_search_manager.h"
 #include "components/search_engines/template_url.h"
@@ -53,6 +52,7 @@ void ExpectSimilar(const TemplateURLData* expected,
   EXPECT_EQ(expected->safe_for_autoreplace, actual->safe_for_autoreplace);
   EXPECT_EQ(expected->input_encodings, actual->input_encodings);
   EXPECT_EQ(expected->alternate_urls, actual->alternate_urls);
+  EXPECT_EQ(expected->created_from_play_api, actual->created_from_play_api);
 }
 
 void SetExtensionDefaultSearchInPrefs(

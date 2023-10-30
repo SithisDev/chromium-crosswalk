@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright 2017 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Unittests for writers.chromeos_adml_writer."""
@@ -35,17 +35,17 @@ class ChromeOsAdmlWriterUnittest(adml_writer_unittest.AdmlWriterUnittest):
     self.assertTrue(
         self.writer.IsPolicySupported({
             'supported_on': [{
-                'platforms': ['chrome_os', 'zzz']
+                'platform': 'chrome_os'
             }, {
-                'platforms': ['aaa']
+                'platform': 'aaa'
             }]
         }))
     self.assertFalse(
         self.writer.IsPolicySupported({
             'supported_on': [{
-                'platforms': ['win', 'mac', 'linux']
+                'platform': 'win'
             }, {
-                'platforms': ['aaa']
+                'platform': 'aaa'
             }]
         }))
 
@@ -54,10 +54,10 @@ class ChromeOsAdmlWriterUnittest(adml_writer_unittest.AdmlWriterUnittest):
     # cloud only managed polices are not put in the ADMX file).
     policy = {
         'name':
-            'PolicyName',
+        'PolicyName',
         'supported_on': [{
             'product': 'chrome_os',
-            'platforms': ['chrome_os'],
+            'platform': 'chrome_os',
             'since_version': '8',
             'until_version': '',
         }],
@@ -87,7 +87,7 @@ class ChromeOsAdmlWriterUnittest(adml_writer_unittest.AdmlWriterUnittest):
         '<string id="DictionaryPolicyStub">Dictionary policy caption</string>\n'
         '<string id="DictionaryPolicyStub_Explain">'
         'This is a test description.\n'
-        'See https://www.chromium.org/administrators/policy-list-3#'
+        'See https://cloud.google.com/docs/chrome-enterprise/policies/?policy='
         'DictionaryPolicyStub\n</string>\n'
         '<string id="DictionaryPolicyStub_Legacy">'
         'Dictionary policy label (deprecated)</string>')

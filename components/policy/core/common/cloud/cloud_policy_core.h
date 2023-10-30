@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,10 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "components/policy/core/common/cloud/policy_invalidation_scope.h"
 #include "components/policy/policy_export.h"
 #include "components/prefs/pref_member.h"
 #include "services/network/public/cpp/network_connection_tracker.h"
@@ -55,6 +56,9 @@ class POLICY_EXPORT CloudPolicyCore {
     // Called after the remote commands service is started. Defaults to be
     // empty.
     virtual void OnRemoteCommandsServiceStarted(CloudPolicyCore* core);
+
+    // Called upon core destruction. Defaults to be empty.
+    virtual void OnCoreDestruction(CloudPolicyCore* core);
   };
 
   // |task_runner| is the runner for policy refresh tasks.
@@ -64,6 +68,8 @@ class POLICY_EXPORT CloudPolicyCore {
                   const scoped_refptr<base::SequencedTaskRunner>& task_runner,
                   network::NetworkConnectionTrackerGetter
                       network_connection_tracker_getter);
+  CloudPolicyCore(const CloudPolicyCore&) = delete;
+  CloudPolicyCore& operator=(const CloudPolicyCore&) = delete;
   ~CloudPolicyCore();
 
   CloudPolicyClient* client() { return client_.get(); }
@@ -99,7 +105,8 @@ class POLICY_EXPORT CloudPolicyCore {
   // to fetch commands immediately, thus requiring the cloud policy client to
   // be registered.
   void StartRemoteCommandsService(
-      std::unique_ptr<RemoteCommandsFactory> factory);
+      std::unique_ptr<RemoteCommandsFactory> factory,
+      PolicyInvalidationScope scope);
 
   // Requests a policy refresh to be performed soon. This may apply throttling,
   // and the request may not be immediately sent.
@@ -129,7 +136,7 @@ class POLICY_EXPORT CloudPolicyCore {
 
   std::string policy_type_;
   std::string settings_entity_id_;
-  CloudPolicyStore* store_;
+  raw_ptr<CloudPolicyStore> store_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   network::NetworkConnectionTrackerGetter network_connection_tracker_getter_;
   std::unique_ptr<CloudPolicyClient> client_;
@@ -138,8 +145,6 @@ class POLICY_EXPORT CloudPolicyCore {
   std::unique_ptr<RemoteCommandsService> remote_commands_service_;
   std::unique_ptr<IntegerPrefMember> refresh_delay_;
   base::ObserverList<Observer, true>::Unchecked observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(CloudPolicyCore);
 };
 
 }  // namespace policy

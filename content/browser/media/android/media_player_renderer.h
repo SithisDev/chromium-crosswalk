@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 #define CONTENT_BROWSER_MEDIA_ANDROID_MEDIA_PLAYER_RENDERER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/render_frame_host.h"
@@ -16,8 +17,11 @@
 #include "media/base/media_resource.h"
 #include "media/base/renderer.h"
 #include "media/base/renderer_client.h"
-#include "media/mojo/interfaces/renderer_extensions.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "media/mojo/mojom/renderer_extensions.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -36,30 +40,31 @@ class CONTENT_EXPORT MediaPlayerRenderer
       public media::mojom::MediaPlayerRendererExtension,
       public media::MediaPlayerBridge::Client {
  public:
-  using RendererExtensionRequest =
-      media::mojom::MediaPlayerRendererExtensionRequest;
-  using ClientExtensionPtr =
-      media::mojom::MediaPlayerRendererClientExtensionPtr;
+  using RendererExtension = media::mojom::MediaPlayerRendererExtension;
+  using ClientExtension = media::mojom::MediaPlayerRendererClientExtension;
 
   // Permits embedders to handle custom urls.
   static void RegisterMediaUrlInterceptor(
       media::MediaUrlInterceptor* media_url_interceptor);
 
-  MediaPlayerRenderer(int process_id,
-                      int routing_id,
-                      WebContents* web_contents,
-                      RendererExtensionRequest renderer_extension_request,
-                      ClientExtensionPtr client_extension_ptr);
+  MediaPlayerRenderer(
+      int process_id,
+      int routing_id,
+      WebContents* web_contents,
+      mojo::PendingReceiver<RendererExtension> renderer_extension_receiver,
+      mojo::PendingRemote<ClientExtension> client_extension_remote);
+
+  MediaPlayerRenderer(const MediaPlayerRenderer&) = delete;
+  MediaPlayerRenderer& operator=(const MediaPlayerRenderer&) = delete;
 
   ~MediaPlayerRenderer() override;
 
   // media::Renderer implementation
   void Initialize(media::MediaResource* media_resource,
                   media::RendererClient* client,
-                  const media::PipelineStatusCB& init_cb) override;
-  void SetCdm(media::CdmContext* cdm_context,
-              const media::CdmAttachedCB& cdm_attached_cb) override;
-  void Flush(const base::Closure& flush_cb) override;
+                  media::PipelineStatusCallback init_cb) override;
+  void SetLatencyHint(absl::optional<base::TimeDelta> latency_hint) override;
+  void Flush(base::OnceClosure flush_cb) override;
   void StartPlayingFrom(base::TimeDelta time) override;
 
   // N.B: MediaPlayerBridge doesn't support variable playback rates (but it
@@ -97,7 +102,7 @@ class CONTENT_EXPORT MediaPlayerRenderer
 
  private:
   void CreateMediaPlayer(const media::MediaUrlParams& params,
-                         const media::PipelineStatusCB& init_cb);
+                         media::PipelineStatusCallback init_cb);
 
   // Cancels the pending request started by InitiateScopedSurfaceRequest(), if
   // it exists. No-ops otherwise.
@@ -105,7 +110,7 @@ class CONTENT_EXPORT MediaPlayerRenderer
 
   void UpdateVolume();
 
-  ClientExtensionPtr client_extension_;
+  mojo::Remote<ClientExtension> client_extension_;
 
   // Identifiers to find the RenderFrameHost that created |this|.
   // NOTE: We store these IDs rather than a RenderFrameHost* because we do not
@@ -113,7 +118,7 @@ class CONTENT_EXPORT MediaPlayerRenderer
   int render_process_id_;
   int routing_id_;
 
-  media::RendererClient* renderer_client_;
+  raw_ptr<media::RendererClient> renderer_client_;
 
   std::unique_ptr<media::MediaPlayerBridge> media_player_;
 
@@ -130,15 +135,13 @@ class CONTENT_EXPORT MediaPlayerRenderer
   std::unique_ptr<media::MediaResourceGetter> media_resource_getter_;
 
   bool web_contents_muted_;
-  MediaPlayerRendererWebContentsObserver* web_contents_observer_;
+  raw_ptr<MediaPlayerRendererWebContentsObserver> web_contents_observer_;
   float volume_;
 
-  mojo::Binding<MediaPlayerRendererExtension> renderer_extension_binding_;
+  mojo::Receiver<MediaPlayerRendererExtension> renderer_extension_receiver_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
-  base::WeakPtrFactory<MediaPlayerRenderer> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaPlayerRenderer);
+  base::WeakPtrFactory<MediaPlayerRenderer> weak_factory_{this};
 };
 
 }  // namespace content

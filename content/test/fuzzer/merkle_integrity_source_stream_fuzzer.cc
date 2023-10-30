@@ -1,17 +1,17 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/loader/merkle_integrity_source_stream.h"  // nogncheck
 
+#include <fuzzer/FuzzedDataProvider.h>
+
 #include <string>
 
-#include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "net/base/io_buffer.h"
 #include "net/base/test_completion_callback.h"
 #include "net/filter/fuzzed_source_stream.h"
-#include "third_party/libFuzzer/src/utils/FuzzedDataProvider.h"
 
 // Fuzzer for MerkleIntegritySourceStream
 //

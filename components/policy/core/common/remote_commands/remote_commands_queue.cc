@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/observer_list.h"
+#include "base/time/clock.h"
+#include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/tick_clock.h"
 #include "components/policy/core/common/remote_commands/remote_command_job.h"
@@ -17,7 +20,8 @@
 namespace policy {
 
 RemoteCommandsQueue::RemoteCommandsQueue()
-    : clock_(base::DefaultTickClock::GetInstance()) {}
+    : clock_(base::DefaultClock::GetInstance()),
+      tick_clock_(base::DefaultTickClock::GetInstance()) {}
 
 RemoteCommandsQueue::~RemoteCommandsQueue() {
   while (!incoming_commands_.empty())
@@ -41,12 +45,15 @@ void RemoteCommandsQueue::AddJob(std::unique_ptr<RemoteCommandJob> job) {
     ScheduleNextJob();
 }
 
-void RemoteCommandsQueue::SetClockForTesting(const base::TickClock* clock) {
+void RemoteCommandsQueue::SetClocksForTesting(
+    const base::Clock* clock,
+    const base::TickClock* tick_clock) {
   clock_ = clock;
+  tick_clock_ = tick_clock;
 }
 
 base::TimeTicks RemoteCommandsQueue::GetNowTicks() {
-  return clock_->NowTicks();
+  return tick_clock_->NowTicks();
 }
 
 void RemoteCommandsQueue::OnCommandTimeout() {
@@ -82,7 +89,7 @@ void RemoteCommandsQueue::ScheduleNextJob() {
                                  &RemoteCommandsQueue::OnCommandTimeout);
 
   if (running_command_->Run(
-          clock_->NowTicks(),
+          clock_->Now(), tick_clock_->NowTicks(),
           base::BindOnce(&RemoteCommandsQueue::CurrentJobFinished,
                          base::Unretained(this)))) {
     for (auto& observer : observer_list_)

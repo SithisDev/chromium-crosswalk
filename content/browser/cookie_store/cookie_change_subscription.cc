@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,12 @@
 #include <utility>
 
 #include "content/browser/cookie_store/cookie_change_subscriptions.pb.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/common/content_client.h"
+#include "net/cookies/cookie_constants.h"
+#include "net/cookies/cookie_util.h"
+#include "net/first_party_sets/same_party_context.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
 
 namespace content {
 
@@ -40,98 +46,91 @@ network::mojom::CookieMatchType CookieMatchTypeFromProto(
       return network::mojom::CookieMatchType::EQUALS;
     case proto::CookieMatchType::STARTS_WITH:
       return ::network::mojom::CookieMatchType::STARTS_WITH;
+    default:
+      // The on-disk value was corrupted.
+      return network::mojom::CookieMatchType::EQUALS;
   }
-  NOTREACHED();
-  return network::mojom::CookieMatchType::EQUALS;
 }
 
 }  // namespace
 
 // static
-base::Optional<std::vector<CookieChangeSubscription>>
+std::vector<std::unique_ptr<CookieChangeSubscription>>
 CookieChangeSubscription::DeserializeVector(
     const std::string& proto_string,
     int64_t service_worker_registration_id) {
+  std::vector<std::unique_ptr<CookieChangeSubscription>> subscriptions;
+
   proto::CookieChangeSubscriptionsProto subscriptions_proto;
   if (!subscriptions_proto.ParseFromString(proto_string))
-    return base::nullopt;
+    return subscriptions;
 
-  std::vector<CookieChangeSubscription> subscriptions;
   int subscription_count = subscriptions_proto.subscriptions_size();
   subscriptions.reserve(subscription_count);
   for (int i = 0; i < subscription_count; ++i) {
-    base::Optional<CookieChangeSubscription> subscription_opt =
+    std::unique_ptr<CookieChangeSubscription> subscription =
         CookieChangeSubscription::Create(subscriptions_proto.subscriptions(i),
                                          service_worker_registration_id);
-    if (!subscription_opt.has_value())
+    if (!subscription)
       continue;
-    subscriptions.emplace_back(std::move(subscription_opt).value());
+    subscriptions.push_back(std::move(subscription));
   }
 
-  return base::make_optional(
-      std::vector<CookieChangeSubscription>(std::move(subscriptions)));
-}
-
-// static
-std::vector<CookieChangeSubscription> CookieChangeSubscription::FromMojoVector(
-    std::vector<blink::mojom::CookieChangeSubscriptionPtr> mojo_subscriptions,
-    int64_t service_worker_registration_id) {
-  std::vector<CookieChangeSubscription> subscriptions;
-  subscriptions.reserve(mojo_subscriptions.size());
-  for (const auto& mojo_subscription : mojo_subscriptions) {
-    subscriptions.emplace_back(
-        std::move(mojo_subscription->url), std::move(mojo_subscription->name),
-        mojo_subscription->match_type, service_worker_registration_id);
-  }
   return subscriptions;
 }
 
 // static
 std::string CookieChangeSubscription::SerializeVector(
-    const std::vector<CookieChangeSubscription>& subscriptions) {
+    const std::vector<std::unique_ptr<CookieChangeSubscription>>&
+        subscriptions) {
+  DCHECK(!subscriptions.empty());
   proto::CookieChangeSubscriptionsProto subscriptions_proto;
   for (const auto& subscription : subscriptions)
-    subscription.Serialize(subscriptions_proto.add_subscriptions());
+    subscription->Serialize(subscriptions_proto.add_subscriptions());
   return subscriptions_proto.SerializeAsString();
 }
 
 // static
 std::vector<blink::mojom::CookieChangeSubscriptionPtr>
 CookieChangeSubscription::ToMojoVector(
-    const std::vector<CookieChangeSubscription>& subscriptions) {
+    const std::vector<std::unique_ptr<CookieChangeSubscription>>&
+        subscriptions) {
   std::vector<blink::mojom::CookieChangeSubscriptionPtr> mojo_subscriptions;
   mojo_subscriptions.reserve(subscriptions.size());
   for (const auto& subscription : subscriptions) {
     auto mojo_subscription = blink::mojom::CookieChangeSubscription::New();
-    subscription.Serialize(mojo_subscription.get());
-    mojo_subscriptions.emplace_back(std::move(mojo_subscription));
+    subscription->Serialize(mojo_subscription.get());
+    mojo_subscriptions.push_back(std::move(mojo_subscription));
   }
   return mojo_subscriptions;
 }
 
 // static
-base::Optional<CookieChangeSubscription> CookieChangeSubscription::Create(
+std::unique_ptr<CookieChangeSubscription> CookieChangeSubscription::Create(
     proto::CookieChangeSubscriptionProto proto,
     int64_t service_worker_registration_id) {
-  if (!proto.has_url())
-    return base::nullopt;
-  GURL url = GURL(proto.url());
+  GURL url(proto.url());
   if (!url.is_valid())
-    return base::nullopt;
+    return nullptr;
 
-  std::string name = proto.has_name() ? proto.name() : "";
+  std::string name = proto.name();
   ::network::mojom::CookieMatchType match_type =
-      proto.has_match_type() ? CookieMatchTypeFromProto(proto.match_type())
-                             : ::network::mojom::CookieMatchType::EQUALS;
+      CookieMatchTypeFromProto(proto.match_type());
 
-  return CookieChangeSubscription(std::move(url), std::move(name), match_type,
-                                  service_worker_registration_id);
+  return std::make_unique<CookieChangeSubscription>(
+      std::move(url), std::move(name), match_type,
+      service_worker_registration_id);
 }
 
-CookieChangeSubscription::CookieChangeSubscription(CookieChangeSubscription&&) =
-    default;
-
 CookieChangeSubscription::~CookieChangeSubscription() = default;
+
+CookieChangeSubscription::CookieChangeSubscription(
+    blink::mojom::CookieChangeSubscriptionPtr mojo_subscription,
+    int64_t service_worker_registration_id)
+    : url_(std::move(mojo_subscription->url)),
+      name_(std::move(mojo_subscription->name)),
+      match_type_(mojo_subscription->match_type),
+      service_worker_registration_id_(service_worker_registration_id) {}
 
 CookieChangeSubscription::CookieChangeSubscription(
     GURL url,
@@ -158,7 +157,8 @@ void CookieChangeSubscription::Serialize(
 }
 
 bool CookieChangeSubscription::ShouldObserveChangeTo(
-    const net::CanonicalCookie& cookie) const {
+    const net::CanonicalCookie& cookie,
+    net::CookieAccessSemantics access_semantics) const {
   switch (match_type_) {
     case ::network::mojom::CookieMatchType::EQUALS:
       if (cookie.Name() != name_)
@@ -170,12 +170,32 @@ bool CookieChangeSubscription::ShouldObserveChangeTo(
       break;
   }
 
+  // We assume that this is a same-site, same-party context.
   net::CookieOptions net_options;
   net_options.set_same_site_cookie_context(
-      net::CookieOptions::SameSiteCookieContext::SAME_SITE_STRICT);
+      net::CookieOptions::SameSiteCookieContext::MakeInclusive());
+  net_options.set_same_party_context(net::SamePartyContext::MakeInclusive());
+  // It doesn't matter which we choose here, since both SameParty and SameSite
+  // semantics should allow this access. But we make a choice to be explicit.
+  net_options.set_is_in_nontrivial_first_party_set(true);
 
-  return cookie.IncludeForRequestURL(url_, net_options) ==
-         net::CanonicalCookie::CookieInclusionStatus::INCLUDE;
+  return cookie
+      .IncludeForRequestURL(
+          url_, net_options,
+          net::CookieAccessParams{
+              access_semantics,
+              network::IsUrlPotentiallyTrustworthy(url_),
+              net::cookie_util::GetSamePartyStatus(
+                  cookie, net_options,
+                  GetContentClient()->browser()->IsFirstPartySetsEnabled()),
+          })
+      .status.IsInclude();
+}
+
+bool operator==(const CookieChangeSubscription& lhs,
+                const CookieChangeSubscription& rhs) {
+  return (lhs.match_type() == rhs.match_type()) && (lhs.name() == rhs.name()) &&
+         (lhs.url() == rhs.url());
 }
 
 }  // namespace content

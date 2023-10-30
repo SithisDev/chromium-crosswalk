@@ -4,12 +4,13 @@ include_rules = [
   "+components/keyed_service",
   "+components/prefs",
   "+components/safe_search_api",
+  "+components/url_matcher",
   "+components/user_prefs",
   "+net/base",
 ]
 
 specific_include_rules = {
-  "policy_blacklist_navigation_throttle_unittest\.cc": [
+  "policy_blocklist_navigation_throttle_unittest\.cc": [
     "+components/sync_preferences/testing_pref_service_syncable.h",
     "+content/public/test",
   ],

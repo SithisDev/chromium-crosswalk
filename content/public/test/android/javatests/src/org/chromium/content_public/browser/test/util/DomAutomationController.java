@@ -1,9 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content_public.browser.test.util;
 
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.concurrent.TimeoutException;
@@ -19,7 +20,7 @@ public class DomAutomationController {
      * Enables domAutomationController on the given webContents. Must be called after every
      * page load.
      */
-    public void inject(WebContents webContents) throws TimeoutException, InterruptedException {
+    public void inject(WebContents webContents) throws TimeoutException {
         mWebContents = webContents;
         JavaScriptUtils.executeJavaScriptAndWaitForResult(mWebContents,
                 "window.domAutomationController = {"
@@ -34,8 +35,7 @@ public class DomAutomationController {
      * Waits until domAutomationController.send(value) has been called and returns value in JSON
      * format.
      */
-    public String waitForResult(String failureReason)
-            throws TimeoutException, InterruptedException {
+    public String waitForResult(String failureReason) throws TimeoutException {
         assert mWebContents != null;
         CriteriaHelper.pollInstrumentationThread(() -> {
             String result = JavaScriptUtils.executeJavaScriptAndWaitForResult(

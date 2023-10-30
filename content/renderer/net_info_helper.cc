@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,8 @@ NetConnectionTypeToWebConnectionType(
     case net::NetworkChangeNotifier::CONNECTION_3G:
       return blink::kWebConnectionTypeCellular3G;
     case net::NetworkChangeNotifier::CONNECTION_4G:
+    // TODO(crbug.com/1127134): Introduce a new WebConnectionType for 5G.
+    case net::NetworkChangeNotifier::CONNECTION_5G:
       return blink::kWebConnectionTypeCellular4G;
     case net::NetworkChangeNotifier::CONNECTION_BLUETOOTH:
       return blink::kWebConnectionTypeBluetooth;

@@ -1,10 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/translate/core/browser/translate_download_manager.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/memory/singleton.h"
 #include "components/translate/core/browser/translate_pref_names.h"
 #include "components/translate/core/common/translate_switches.h"
@@ -17,13 +17,13 @@ TranslateDownloadManager* TranslateDownloadManager::GetInstance() {
 }
 
 TranslateDownloadManager::TranslateDownloadManager()
-    : language_list_(new TranslateLanguageList),
-      script_(new TranslateScript) {}
+    : language_list_(std::make_unique<TranslateLanguageList>()),
+      script_(std::make_unique<TranslateScript>()) {}
 
 TranslateDownloadManager::~TranslateDownloadManager() {}
 
 void TranslateDownloadManager::Shutdown() {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   language_list_.reset();
   script_.reset();
   url_loader_factory_ = nullptr;
@@ -49,7 +49,7 @@ base::Time TranslateDownloadManager::GetSupportedLanguagesLastUpdated() {
 
 // static
 std::string TranslateDownloadManager::GetLanguageCode(
-    const std::string& language) {
+    base::StringPiece language) {
   TranslateLanguageList* language_list = GetInstance()->language_list();
   DCHECK(language_list);
 
@@ -57,8 +57,7 @@ std::string TranslateDownloadManager::GetLanguageCode(
 }
 
 // static
-bool TranslateDownloadManager::IsSupportedLanguage(
-    const std::string& language) {
+bool TranslateDownloadManager::IsSupportedLanguage(base::StringPiece language) {
   TranslateLanguageList* language_list = GetInstance()->language_list();
   DCHECK(language_list);
 
@@ -71,14 +70,14 @@ void TranslateDownloadManager::ClearTranslateScriptForTesting() {
 }
 
 void TranslateDownloadManager::ResetForTesting() {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
-  language_list_.reset(new TranslateLanguageList);
-  script_.reset(new TranslateScript);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  language_list_ = std::make_unique<TranslateLanguageList>();
+  script_ = std::make_unique<TranslateScript>();
   url_loader_factory_ = nullptr;
 }
 
 void TranslateDownloadManager::SetTranslateScriptExpirationDelay(int delay_ms) {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(script_);
   script_->set_expiration_delay(delay_ms);
 }

@@ -1,10 +1,14 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/shell/browser/shell_web_contents_view_delegate.h"
 
+#include <memory>
+
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
+#include "content/public/browser/context_menu_params.h"
 #include "content/public/browser/web_contents.h"
 #include "content/shell/browser/shell_devtools_frontend.h"
 #include "content/shell/common/shell_switches.h"
@@ -25,8 +29,12 @@ class ContextMenuModel : public ui::SimpleMenuModel,
       : ui::SimpleMenuModel(this),
         web_contents_(web_contents),
         params_(params) {
-    AddItem(COMMAND_OPEN_DEVTOOLS, base::ASCIIToUTF16("Inspect Element"));
+    AddItem(COMMAND_OPEN_DEVTOOLS, u"Inspect Element");
   }
+
+  ContextMenuModel(const ContextMenuModel&) = delete;
+  ContextMenuModel& operator=(const ContextMenuModel&) = delete;
+
   ~ContextMenuModel() override {}
 
   // ui::SimpleMenuModel::Delegate:
@@ -38,7 +46,6 @@ class ContextMenuModel : public ui::SimpleMenuModel,
         ShellDevToolsFrontend* devtools_frontend =
             ShellDevToolsFrontend::Show(web_contents_);
         devtools_frontend->Activate();
-        devtools_frontend->Focus();
         devtools_frontend->InspectElementAt(params_.x, params_.y);
         break;
     };
@@ -47,17 +54,15 @@ class ContextMenuModel : public ui::SimpleMenuModel,
  private:
   enum CommandID { COMMAND_OPEN_DEVTOOLS };
 
-  WebContents* web_contents_;
+  raw_ptr<WebContents> web_contents_;
   ContextMenuParams params_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContextMenuModel);
 };
 
 }  // namespace
 
-WebContentsViewDelegate* CreateShellWebContentsViewDelegate(
+std::unique_ptr<WebContentsViewDelegate> CreateShellWebContentsViewDelegate(
     WebContents* web_contents) {
-  return new ShellWebContentsViewDelegate(web_contents);
+  return std::make_unique<ShellWebContentsViewDelegate>(web_contents);
 }
 
 ShellWebContentsViewDelegate::ShellWebContentsViewDelegate(
@@ -67,7 +72,7 @@ ShellWebContentsViewDelegate::ShellWebContentsViewDelegate(
 ShellWebContentsViewDelegate::~ShellWebContentsViewDelegate() {}
 
 void ShellWebContentsViewDelegate::ShowContextMenu(
-    RenderFrameHost* render_frame_host,
+    RenderFrameHost& render_frame_host,
     const ContextMenuParams& params) {
   if (switches::IsRunWebTestsSwitchPresent())
     return;
@@ -85,9 +90,10 @@ void ShellWebContentsViewDelegate::ShowContextMenu(
                                                  &screen_point);
   }
 
-  context_menu_model_.reset(new ContextMenuModel(web_contents_, params));
-  context_menu_runner_.reset(new views::MenuRunner(
-      context_menu_model_.get(), views::MenuRunner::CONTEXT_MENU));
+  context_menu_model_ =
+      std::make_unique<ContextMenuModel>(web_contents_, params);
+  context_menu_runner_ = std::make_unique<views::MenuRunner>(
+      context_menu_model_.get(), views::MenuRunner::CONTEXT_MENU);
 
   views::Widget* widget = views::Widget::GetWidgetForNativeView(
       web_contents_->GetTopLevelNativeWindow());

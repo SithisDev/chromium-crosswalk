@@ -1,10 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/nacl/loader/nacl_main_platform_delegate.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "content/public/common/main_function_params.h"
 #include "sandbox/win/src/sandbox.h"
 

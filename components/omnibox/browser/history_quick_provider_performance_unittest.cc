@@ -1,27 +1,28 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-#include "components/omnibox/browser/history_quick_provider.h"
 
 #include <memory>
 #include <random>
 #include <string>
 
-#include "base/no_destructor.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/thread_pool/thread_pool_instance.h"
+#include "base/test/task_environment.h"
+#include "base/time/time.h"
+#include "components/bookmarks/test/test_bookmark_client.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/test/history_service_test_util.h"
 #include "components/omnibox/browser/fake_autocomplete_provider_client.h"
+#include "components/omnibox/browser/history_quick_provider.h"
 #include "components/omnibox/browser/history_test_util.h"
 #include "components/omnibox/browser/in_memory_url_index_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 
 namespace history {
 
@@ -31,15 +32,15 @@ namespace {
 std::string GenerateFakeHashedString(size_t sym_count) {
   static constexpr char kSyms[] =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,/=+?#";
-  static base::NoDestructor<std::mt19937> engine;
+  static std::mt19937 engine;
   std::uniform_int_distribution<size_t> index_distribution(
-      0, base::size(kSyms) - 2 /* trailing \0 */);
+      0, std::size(kSyms) - 2 /* trailing \0 */);
 
   std::string res;
   res.reserve(sym_count);
 
   std::generate_n(std::back_inserter(res), sym_count, [&index_distribution] {
-    return kSyms[index_distribution(*engine)];
+    return kSyms[index_distribution(engine)];
   });
 
   return res;
@@ -57,7 +58,7 @@ URLRow GeneratePopularURLRow() {
   row.set_title(base::UTF8ToUTF16("Page " + fake_hash));
   row.set_visit_count(1);
   row.set_typed_count(1);
-  row.set_last_visit(base::Time::Now() - base::TimeDelta::FromDays(1));
+  row.set_last_visit(base::Time::Now() - base::Days(1));
   return row;
 }
 
@@ -67,7 +68,7 @@ StringPieces AllPrefixes(const std::string& str) {
   std::vector<base::StringPiece> res;
   res.reserve(str.size());
   for (auto char_it = str.begin(); char_it != str.end(); ++char_it)
-    res.push_back({str.begin(), char_it});
+    res.push_back(base::MakeStringPiece(str.begin(), char_it));
   return res;
 }
 
@@ -76,6 +77,8 @@ StringPieces AllPrefixes(const std::string& str) {
 class HQPPerfTestOnePopularURL : public testing::Test {
  protected:
   HQPPerfTestOnePopularURL() = default;
+  HQPPerfTestOnePopularURL(const HQPPerfTestOnePopularURL&) = delete;
+  HQPPerfTestOnePopularURL& operator=(const HQPPerfTestOnePopularURL&) = delete;
 
   void SetUp() override;
   void TearDown() override;
@@ -97,28 +100,44 @@ class HQPPerfTestOnePopularURL : public testing::Test {
   }
 
  private:
-  base::TimeDelta RunTest(const base::string16& text);
+  base::TimeDelta RunTest(const std::u16string& text);
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::ScopedTempDir history_dir_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<FakeAutocompleteProviderClient> client_;
-
   scoped_refptr<HistoryQuickProvider> provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(HQPPerfTestOnePopularURL);
 };
 
 void HQPPerfTestOnePopularURL::SetUp() {
   if (base::ThreadTicks::IsSupported())
     base::ThreadTicks::WaitUntilInitialized();
   client_ = std::make_unique<FakeAutocompleteProviderClient>();
+
+  CHECK(history_dir_.CreateUniqueTempDir());
+  client_->set_history_service(
+      history::CreateHistoryService(history_dir_.GetPath(), true));
+  client_->set_bookmark_model(bookmarks::TestBookmarkClient::CreateModel());
+  client_->set_in_memory_url_index(std::make_unique<InMemoryURLIndex>(
+      client_->GetBookmarkModel(), client_->GetHistoryService(), nullptr,
+      history_dir_.GetPath(), SchemeSet()));
+  client_->GetInMemoryURLIndex()->Init();
+  // First make sure the automatic initialization completes to avoid a race
+  // between that and our manual indexing below.
+  BlockUntilInMemoryURLIndexIsRefreshed(client_->GetInMemoryURLIndex());
+
   ASSERT_TRUE(client_->GetHistoryService());
   ASSERT_NO_FATAL_FAILURE(PrepareData());
 }
 
 void HQPPerfTestOnePopularURL::TearDown() {
+  base::RunLoop run_loop;
+  auto* history_service = client_->GetHistoryService();
+  history_service->SetOnBackendDestroyTask(run_loop.QuitClosure());
   provider_ = nullptr;
   client_.reset();
-  scoped_task_environment_.RunUntilIdle();
+  run_loop.Run();
+  base::ThreadPoolInstance::Get()->FlushForTesting();
+  task_environment_.RunUntilIdle();
 }
 
 void HQPPerfTestOnePopularURL::PrepareData() {
@@ -139,7 +158,6 @@ void HQPPerfTestOnePopularURL::PrepareData() {
   InMemoryURLIndex* url_index = client_->GetInMemoryURLIndex();
   url_index->RebuildFromHistory(
       client_->GetHistoryService()->history_backend_->db());
-  BlockUntilInMemoryURLIndexIsRefreshed(url_index);
 
   // History index refresh creates rebuilt tasks to run on history thread.
   // Block here to make sure that all of them are complete.
@@ -150,19 +168,24 @@ void HQPPerfTestOnePopularURL::PrepareData() {
 }
 
 void HQPPerfTestOnePopularURL::PrintMeasurements(
-    const std::string& trace_name,
+    const std::string& story_name,
     const std::vector<base::TimeDelta>& measurements) {
   auto* test_info = ::testing::UnitTest::GetInstance()->current_test_info();
 
   std::string durations;
   for (const auto& measurement : measurements)
     durations += std::to_string(measurement.InMillisecondsRoundedUp()) + ',';
+  // Strip off trailing comma.
+  durations.pop_back();
 
-  perf_test::PrintResultList(test_info->test_case_name(), test_info->name(),
-                             trace_name, durations, "ms", true);
+  auto metric_prefix = std::string(test_info->test_case_name()) + "_" +
+                       std::string(test_info->name());
+  perf_test::PerfResultReporter reporter(metric_prefix, story_name);
+  reporter.RegisterImportantMetric(".duration", "ms");
+  reporter.AddResultList(".duration", durations);
 }
 
-base::TimeDelta HQPPerfTestOnePopularURL::RunTest(const base::string16& text) {
+base::TimeDelta HQPPerfTestOnePopularURL::RunTest(const std::u16string& text) {
   base::RunLoop().RunUntilIdle();
   AutocompleteInput input(text, metrics::OmniboxEventProto::OTHER,
                           TestSchemeClassifier());

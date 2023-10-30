@@ -1,13 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_NET_BROWSER_ONLINE_STATE_OBSERVER_H_
 #define CONTENT_BROWSER_NET_BROWSER_ONLINE_STATE_OBSERVER_H_
 
-#include "base/macros.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_process_host_creation_observer.h"
 #include "net/base/network_change_notifier.h"
 
 namespace content {
@@ -16,9 +14,14 @@ namespace content {
 // updates to each RenderProcess via RenderProcessHost IPC.
 class BrowserOnlineStateObserver
     : public net::NetworkChangeNotifier::MaxBandwidthObserver,
-      public content::NotificationObserver {
+      public content::RenderProcessHostCreationObserver {
  public:
   BrowserOnlineStateObserver();
+
+  BrowserOnlineStateObserver(const BrowserOnlineStateObserver&) = delete;
+  BrowserOnlineStateObserver& operator=(const BrowserOnlineStateObserver&) =
+      delete;
+
   ~BrowserOnlineStateObserver() override;
 
   // MaxBandwidthObserver implementation
@@ -26,15 +29,8 @@ class BrowserOnlineStateObserver
       double max_bandwidth_mbps,
       net::NetworkChangeNotifier::ConnectionType type) override;
 
-  // NotificationObserver implementation
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
-
- private:
-  content::NotificationRegistrar registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserOnlineStateObserver);
+  // content::RenderProcessHostCreationObserver implementation
+  void OnRenderProcessHostCreated(content::RenderProcessHost* rph) override;
 };
 
 }  // namespace content

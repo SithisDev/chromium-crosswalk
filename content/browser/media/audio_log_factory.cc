@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,10 +16,10 @@ AudioLogFactory::~AudioLogFactory() = default;
 void AudioLogFactory::CreateAudioLog(
     media::mojom::AudioLogComponent component,
     int32_t component_id,
-    media::mojom::AudioLogRequest audio_log_request) {
+    mojo::PendingReceiver<media::mojom::AudioLog> audio_log_receiver) {
   MediaInternals::GetInstance()->CreateMojoAudioLog(
       static_cast<media::AudioLogFactory::AudioComponent>(component),
-      component_id, std::move(audio_log_request));
+      component_id, std::move(audio_log_receiver));
 }
 
 }  // namespace content

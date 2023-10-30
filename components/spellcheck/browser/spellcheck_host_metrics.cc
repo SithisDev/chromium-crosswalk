@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "base/hash/md5.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "build/build_config.h"
@@ -24,8 +25,8 @@ SpellCheckHostMetrics::SpellCheckHostMetrics()
       start_time_(base::TimeTicks::Now()) {
   const uint64_t kHistogramTimerDurationInMinutes = 30;
   recording_timer_.Start(FROM_HERE,
-      base::TimeDelta::FromMinutes(kHistogramTimerDurationInMinutes),
-      this, &SpellCheckHostMetrics::OnHistogramTimerExpired);
+                         base::Minutes(kHistogramTimerDurationInMinutes), this,
+                         &SpellCheckHostMetrics::OnHistogramTimerExpired);
   RecordWordCounts();
 }
 
@@ -39,7 +40,7 @@ void SpellCheckHostMetrics::RecordCustomWordCountStats(size_t count) {
 }
 
 void SpellCheckHostMetrics::RecordEnabledStats(bool enabled) {
-  UMA_HISTOGRAM_BOOLEAN("SpellCheck.Enabled", enabled);
+  base::UmaHistogramBoolean("SpellCheck.Enabled", enabled);
   // Because SpellCheckHost is instantiated lazily, the size of
   // custom dictionary is unknown at this time. We mark it as -1 and
   // record actual value later. See SpellCheckHost for more detail.
@@ -47,7 +48,7 @@ void SpellCheckHostMetrics::RecordEnabledStats(bool enabled) {
     RecordCustomWordCountStats(static_cast<size_t>(-1));
 }
 
-void SpellCheckHostMetrics::RecordCheckedWordStats(const base::string16& word,
+void SpellCheckHostMetrics::RecordCheckedWordStats(const std::u16string& word,
                                                    bool misspell) {
   spellchecked_word_count_++;
   if (misspell) {
@@ -59,13 +60,10 @@ void SpellCheckHostMetrics::RecordCheckedWordStats(const base::string16& word,
       RecordReplacedWordStats(0);
   }
 
-  int percentage = (100 * misspelled_word_count_) / spellchecked_word_count_;
-  UMA_HISTOGRAM_PERCENTAGE("SpellCheck.MisspellRatio", percentage);
-
   // Collects actual number of checked words, excluding duplication.
   base::MD5Digest digest;
   base::MD5Sum(reinterpret_cast<const unsigned char*>(word.c_str()),
-         word.size() * sizeof(base::char16), &digest);
+               word.size() * sizeof(char16_t), &digest);
   checked_word_hashes_.insert(base::MD5DigestToBase16(digest));
 
   RecordWordCounts();
@@ -80,14 +78,16 @@ void SpellCheckHostMetrics::OnHistogramTimerExpired() {
     // a 30 minute interval. If the time was 0 we will end up dividing by zero.
     CHECK_NE(0, since_start.InSeconds());
     size_t checked_words_per_hour = spellchecked_word_count_ *
-        base::TimeDelta::FromHours(1).InSeconds() / since_start.InSeconds();
-    UMA_HISTOGRAM_COUNTS_1M("SpellCheck.CheckedWordsPerHour",
-                            base::saturated_cast<int>(checked_words_per_hour));
+                                    base::Hours(1).InSeconds() /
+                                    since_start.InSeconds();
+    base::UmaHistogramCounts1M(
+        "SpellCheck.CheckedWordsPerHour",
+        base::saturated_cast<int>(checked_words_per_hour));
   }
 }
 
 void SpellCheckHostMetrics::RecordDictionaryCorruptionStats(bool corrupted) {
-  UMA_HISTOGRAM_BOOLEAN("SpellCheck.DictionaryCorrupted", corrupted);
+  base::UmaHistogramBoolean("SpellCheck.DictionaryCorrupted", corrupted);
 }
 
 void SpellCheckHostMetrics::RecordSuggestionStats(int delta) {
@@ -98,14 +98,6 @@ void SpellCheckHostMetrics::RecordSuggestionStats(int delta) {
 
 void SpellCheckHostMetrics::RecordReplacedWordStats(int delta) {
   replaced_word_count_ += delta;
-
-  if (misspelled_word_count_) {
-    // zero |misspelled_word_count_| is possible when an extension
-    // gives the misspelling, which is not recorded as a part of this
-    // metrics.
-    int percentage = (100 * replaced_word_count_) / misspelled_word_count_;
-    UMA_HISTOGRAM_PERCENTAGE("SpellCheck.ReplaceRatio", percentage);
-  }
 
   if (suggestion_show_count_) {
     int percentage = (100 * replaced_word_count_) / suggestion_show_count_;
@@ -153,17 +145,46 @@ void SpellCheckHostMetrics::RecordWordCounts() {
 }
 
 void SpellCheckHostMetrics::RecordSpellingServiceStats(bool enabled) {
-  UMA_HISTOGRAM_BOOLEAN("SpellCheck.SpellingService.Enabled", enabled);
+  base::UmaHistogramBoolean("SpellCheck.SpellingService.Enabled", enabled);
 }
 
-#if defined(OS_WIN)
-void SpellCheckHostMetrics::RecordMissingLanguagePacksCount(int count) {
-  UMA_HISTOGRAM_EXACT_LINEAR("Spellcheck.Windows.MissingLanguagePacksCount",
-                             count, 20);
+#if BUILDFLAG(IS_WIN)
+void SpellCheckHostMetrics::RecordAcceptLanguageStats(
+    const LocalesSupportInfo& locales_info) {
+  base::UmaHistogramExactLinear(
+      "Spellcheck.Windows.ChromeLocalesSupport.Both",
+      base::saturated_cast<int>(
+          locales_info.locales_supported_by_hunspell_and_native),
+      20);
+  base::UmaHistogramExactLinear(
+      "Spellcheck.Windows.ChromeLocalesSupport.HunspellOnly",
+      base::saturated_cast<int>(
+          locales_info.locales_supported_by_hunspell_only),
+      20);
+  base::UmaHistogramExactLinear(
+      "Spellcheck.Windows.ChromeLocalesSupport.NativeOnly",
+      base::saturated_cast<int>(locales_info.locales_supported_by_native_only),
+      20);
+  base::UmaHistogramExactLinear(
+      "Spellcheck.Windows.ChromeLocalesSupport.NoSupport",
+      base::saturated_cast<int>(locales_info.unsupported_locales), 20);
 }
 
-void SpellCheckHostMetrics::RecordHunspellUnsupportedLanguageCount(int count) {
-  UMA_HISTOGRAM_EXACT_LINEAR(
-      "Spellcheck.Windows.HunspellUnsupportedLanguageCount", count, 20);
+void SpellCheckHostMetrics::RecordSpellcheckLanguageStats(
+    const LocalesSupportInfo& locales_info) {
+  base::UmaHistogramExactLinear(
+      "Spellcheck.Windows.SpellcheckLocalesSupport.Both",
+      base::saturated_cast<int>(
+          locales_info.locales_supported_by_hunspell_and_native),
+      20);
+  base::UmaHistogramExactLinear(
+      "Spellcheck.Windows.SpellcheckLocalesSupport.HunspellOnly",
+      base::saturated_cast<int>(
+          locales_info.locales_supported_by_hunspell_only),
+      20);
+  base::UmaHistogramExactLinear(
+      "Spellcheck.Windows.SpellcheckLocalesSupport.NativeOnly",
+      base::saturated_cast<int>(locales_info.locales_supported_by_native_only),
+      20);
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)

@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,10 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/time/time.h"
+#include "base/unguessable_token.h"
 #include "media/audio/audio_output_ipc.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/output_device_info.h"
@@ -35,6 +37,10 @@ class PepperPlatformAudioOutputDev
                                               int sample_rate,
                                               int frames_per_buffer,
                                               PepperAudioOutputHost* client);
+
+  PepperPlatformAudioOutputDev(const PepperPlatformAudioOutputDev&) = delete;
+  PepperPlatformAudioOutputDev& operator=(const PepperPlatformAudioOutputDev&) =
+      delete;
 
   // The following three methods are all called on main thread.
 
@@ -63,7 +69,7 @@ class PepperPlatformAudioOutputDev
                           const media::AudioParameters& output_params,
                           const std::string& matched_device_id) override;
   void OnStreamCreated(base::UnsafeSharedMemoryRegion shared_memory_region,
-                       base::SyncSocket::Handle socket_handle,
+                       base::SyncSocket::ScopedHandle socket_handle,
                        bool playing_automatically) override;
   void OnIPCClosed() override;
 
@@ -128,7 +134,7 @@ class PepperPlatformAudioOutputDev
   bool play_on_start_;
 
   // The media session ID used to identify which output device to be started.
-  int session_id_;
+  base::UnguessableToken session_id_;
 
   // ID of hardware output device to be used (provided session_id_ is zero)
   const std::string device_id_;
@@ -143,8 +149,6 @@ class PepperPlatformAudioOutputDev
 
   const base::TimeDelta auth_timeout_;
   std::unique_ptr<base::OneShotTimer> auth_timeout_action_;
-
-  DISALLOW_COPY_AND_ASSIGN(PepperPlatformAudioOutputDev);
 };
 
 }  // namespace content

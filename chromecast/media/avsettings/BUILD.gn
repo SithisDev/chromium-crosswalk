@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -19,17 +19,13 @@ cast_source_set("avsettings_dummy") {
     "avsettings_dummy.h",
   ]
 
-  deps = [
-    "//chromecast/public",
-  ]
+  deps = [ "//chromecast/public" ]
 }
 
 # Target for OEM partners to override avsettings shared library, i.e.
 # libcast_avsettings_1.0.so.
 cast_shared_library("libcast_avsettings_1.0") {
-  sources = [
-    "avsettings_shlib.cc",
-  ]
+  sources = [ "avsettings_shlib.cc" ]
 
   deps = [
     ":avsettings_buildflags",

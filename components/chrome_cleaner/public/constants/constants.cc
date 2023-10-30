@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@ namespace chrome_cleaner {
 // Command line switches.
 const char kChromeChannelSwitch[] = "chrome-channel";
 const char kChromeExePathSwitch[] = "chrome-exe-path";
-const char kChromeMojoPipeTokenSwitch[] = "chrome-mojo-pipe-token";
 const char kChromePromptSwitch[] = "chrome-prompt";
 const char kChromeReadHandleSwitch[] = "chrome-read-handle";
 const char kChromeWriteHandleSwitch[] = "chrome-write-handle";
@@ -22,8 +21,8 @@ const char kExecutionModeSwitch[] = "execution-mode";
 const char kExtendedSafeBrowsingEnabledSwitch[] =
     "extended-safebrowsing-enabled";
 const char kRegistrySuffixSwitch[] = "registry-suffix";
+const char kResetShortcutsSwitch[] = "reset-shortcuts";
 const char kSessionIdSwitch[] = "session-id";
-const char kSRTPromptFieldTrialGroupNameSwitch[] = "srt-field-trial-group-name";
 const char kUmaUserSwitch[] = "uma-user";
 
 // Registry paths and subkeys.

@@ -98,10 +98,13 @@
       // Call is up, now mute the remote track and check we stop playing out
       // audio (after a small delay, we don't expect it to happen instantly).
       enableRemoteAudio(gSecondConnection, false);
-      return ensureSilence(gSecondConnection)
-          .then(reportTestSuccess);
-    })
-    .catch(failTest);
+
+      setTimeout( function() {
+       ensureSilence(gSecondConnection)
+          .then(reportTestSuccess)
+          .catch(failTest);
+      }, 250 );
+    }).catch(failTest);
   }
 
   function callAndEnsureLocalAudioTrackMutingWorks(constraints) {
@@ -109,10 +112,13 @@
       // Call is up, now mute the local track of the sending side and ensure
       // the receiving side stops receiving audio.
       enableLocalAudio(gFirstConnection, false);
-      return ensureSilence(gSecondConnection)
-          .then(reportTestSuccess);
-    })
-    .catch(failTest);
+
+      setTimeout( function() {
+       ensureSilence(gSecondConnection)
+          .then(reportTestSuccess)
+          .catch(failTest);
+      }, 250 );
+    }).catch(failTest);
   }
 
   function callAndEnsureAudioTrackUnmutingWorks(constraints) {
@@ -148,6 +154,56 @@
       return ensureAudioPlaying(gSecondConnection)
           .then(reportTestSuccess);
     });
+  }
+
+  // TODO(crbug.com/988432): This test is a temporary replacement for:
+  // external/wpt/webrtc/RTCRtpReceiver-getSynchronizationSources.https.html
+  async function testEstablishAudioOnlyCallAndVerifyGetSynchronizationSourcesWorks() {
+    const startTime = performance.timeOrigin + performance.now();
+
+    await setupCallAndPromiseAudioPlaying({audio: true});
+
+    const peerConnection = gSecondConnection;
+
+    const receivers = peerConnection.getReceivers();
+    assertEquals(receivers.length, 1);
+    const receiver = receivers[0];
+    assertEquals(receiver.track.kind, 'audio');
+
+    const results = receiver.getSynchronizationSources();
+    assertEquals(results.length, 1);
+    const result = results[0];
+
+    const endTime = performance.timeOrigin + performance.now();
+
+    console.log('getSynchronizationSources() = ' + JSON.stringify(result));
+
+    // timestamp
+    assertEquals(typeof result.timestamp, 'number');
+    assertTrue(result.timestamp >= startTime);
+    assertTrue(result.timestamp <= endTime);
+
+    // source
+    assertEquals(typeof result.source, 'number');
+    assertTrue(result.source >= 0);
+    assertTrue(result.source <= 0xffffffff);
+
+    // rtpTimestamp
+    assertEquals(typeof result.rtpTimestamp, 'number');
+    assertTrue(result.rtpTimestamp >= 0);
+    assertTrue(result.rtpTimestamp <= 0xffffffff);
+
+    // audioLevel
+    assertEquals(typeof result.audioLevel, 'number');
+    assertTrue(result.audioLevel >= 0);
+    assertTrue(result.audioLevel <= 1);
+
+    // voiceActivityFlag
+    if (result.voiceActivityFlag != undefined) {
+      assertEquals(typeof result.voiceActivityFlag, 'boolean');
+    }
+
+    reportTestSuccess();
   }
 
   function createConnections(constraints) {

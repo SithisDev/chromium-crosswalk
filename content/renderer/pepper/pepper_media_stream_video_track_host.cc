@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,11 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/video_util.h"
 #include "ppapi/c/pp_errors.h"
@@ -22,9 +23,11 @@
 #include "ppapi/host/host_message_context.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/media_stream_buffer.h"
+#include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
-#include "third_party/blink/public/web/modules/mediastream/media_stream_video_track.h"
+#include "third_party/blink/public/web/modules/mediastream/web_media_stream_utils.h"
 #include "third_party/libyuv/include/libyuv.h"
+#include "ui/gfx/gpu_memory_buffer.h"
 
 using media::VideoFrame;
 using ppapi::host::HostMessageContext;
@@ -167,6 +170,9 @@ class PepperMediaStreamVideoTrackHost::FrameDeliverer
   FrameDeliverer(scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
                  const blink::VideoCaptureDeliverFrameCB& new_frame_callback);
 
+  FrameDeliverer(const FrameDeliverer&) = delete;
+  FrameDeliverer& operator=(const FrameDeliverer&) = delete;
+
   void DeliverVideoFrame(scoped_refptr<media::VideoFrame> frame);
 
  private:
@@ -177,8 +183,6 @@ class PepperMediaStreamVideoTrackHost::FrameDeliverer
 
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   blink::VideoCaptureDeliverFrameCB new_frame_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameDeliverer);
 };
 
 PepperMediaStreamVideoTrackHost::FrameDeliverer::FrameDeliverer(
@@ -202,7 +206,7 @@ void PepperMediaStreamVideoTrackHost::FrameDeliverer::DeliverFrameOnIO(
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   // The time when this frame is generated is unknown so give a null value to
   // |estimated_capture_time|.
-  new_frame_callback_.Run(std::move(frame), base::TimeTicks());
+  new_frame_callback_.Run(std::move(frame), {}, base::TimeTicks());
 }
 
 PepperMediaStreamVideoTrackHost::PepperMediaStreamVideoTrackHost(
@@ -322,17 +326,9 @@ int32_t PepperMediaStreamVideoTrackHost::SendFrameToTrack(int32_t index) {
     int64_t ts_ms = static_cast<int64_t>(pp_frame->timestamp *
                                          base::Time::kMillisecondsPerSecond);
     scoped_refptr<VideoFrame> frame = media::VideoFrame::WrapExternalYuvData(
-        FromPpapiFormat(plugin_frame_format_),
-        plugin_frame_size_,
-        gfx::Rect(plugin_frame_size_),
-        plugin_frame_size_,
-        y_stride,
-        uv_stride,
-        uv_stride,
-        y_data,
-        u_data,
-        v_data,
-        base::TimeDelta::FromMilliseconds(ts_ms));
+        FromPpapiFormat(plugin_frame_format_), plugin_frame_size_,
+        gfx::Rect(plugin_frame_size_), plugin_frame_size_, y_stride, uv_stride,
+        uv_stride, y_data, u_data, v_data, base::Milliseconds(ts_ms));
     if (!frame)
       return PP_ERROR_FAILED;
 
@@ -346,14 +342,46 @@ int32_t PepperMediaStreamVideoTrackHost::SendFrameToTrack(int32_t index) {
 
 void PepperMediaStreamVideoTrackHost::OnVideoFrame(
     scoped_refptr<VideoFrame> video_frame,
+    std::vector<scoped_refptr<media::VideoFrame>> scaled_video_frames,
     base::TimeTicks estimated_capture_time) {
   DCHECK(video_frame);
   // TODO(penghuang): Check |frame->end_of_stream()| and close the track.
+  // Scaled video frames are currently ignored.
   scoped_refptr<media::VideoFrame> frame = video_frame;
   // Drop alpha channel since we do not support it yet.
   if (frame->format() == media::PIXEL_FORMAT_I420A)
-    frame = media::WrapAsI420VideoFrame(std::move(video_frame));
+    frame = media::WrapAsI420VideoFrame(video_frame);
   PP_VideoFrame_Format ppformat = ToPpapiFormat(frame->format());
+  if (frame->storage_type() == media::VideoFrame::STORAGE_GPU_MEMORY_BUFFER) {
+    // NV12 is the only supported GMB pixel format at the moment, and there is
+    // no corresponding PP_VideoFrame_Format. Convert the video frame to I420.
+    DCHECK_EQ(frame->format(), media::PIXEL_FORMAT_NV12);
+    ppformat = PP_VIDEOFRAME_FORMAT_I420;
+    auto* gmb = video_frame->GetGpuMemoryBuffer();
+    if (!gmb->Map()) {
+      DLOG(WARNING) << "Failed to map GpuMemoryBuffer";
+      return;
+    }
+    frame = media::VideoFrame::CreateFrame(
+        media::PIXEL_FORMAT_I420, video_frame->coded_size(),
+        video_frame->visible_rect(), video_frame->natural_size(),
+        video_frame->timestamp());
+    int ret = libyuv::NV12ToI420(
+        static_cast<const uint8_t*>(gmb->memory(0)), gmb->stride(0),
+        static_cast<const uint8_t*>(gmb->memory(1)), gmb->stride(1),
+        frame->writable_data(media::VideoFrame::kYPlane),
+        frame->stride(media::VideoFrame::kYPlane),
+        frame->writable_data(media::VideoFrame::kUPlane),
+        frame->stride(media::VideoFrame::kUPlane),
+        frame->writable_data(media::VideoFrame::kVPlane),
+        frame->stride(media::VideoFrame::kVPlane),
+        video_frame->coded_size().width(), video_frame->coded_size().height());
+    gmb->Unmap();
+    if (ret != 0) {
+      DLOG(WARNING) << "Failed to convert NV12 to I420";
+      return;
+    }
+  }
   if (ppformat == PP_VIDEOFRAME_FORMAT_UNKNOWN)
     return;
 
@@ -393,15 +421,21 @@ class PepperMediaStreamVideoTrackHost::VideoSource final
     : public blink::MediaStreamVideoSource {
  public:
   explicit VideoSource(base::WeakPtr<PepperMediaStreamVideoTrackHost> host)
-      : host_(std::move(host)) {}
+      : blink::MediaStreamVideoSource(base::ThreadTaskRunnerHandle::Get()),
+        host_(std::move(host)) {}
+
+  VideoSource(const VideoSource&) = delete;
+  VideoSource& operator=(const VideoSource&) = delete;
 
   ~VideoSource() final { StopSourceImpl(); }
 
   void StartSourceImpl(
-      const blink::VideoCaptureDeliverFrameCB& frame_callback) final {
+      blink::VideoCaptureDeliverFrameCB frame_callback,
+      blink::EncodedVideoFrameCB encoded_frame_callback,
+      blink::VideoCaptureCropVersionCB crop_version_callback) final {
     if (host_) {
       host_->frame_deliverer_ =
-          new FrameDeliverer(io_task_runner(), frame_callback);
+          new FrameDeliverer(io_task_runner(), std::move(frame_callback));
     }
   }
 
@@ -410,20 +444,23 @@ class PepperMediaStreamVideoTrackHost::VideoSource final
       host_->frame_deliverer_ = nullptr;
   }
 
+  base::WeakPtr<MediaStreamVideoSource> GetWeakPtr() const final {
+    return weak_factory_.GetWeakPtr();
+  }
+
  private:
-  base::Optional<media::VideoCaptureFormat> GetCurrentFormat() const override {
+  absl::optional<media::VideoCaptureFormat> GetCurrentFormat() const override {
     if (host_) {
-      return base::Optional<media::VideoCaptureFormat>(
+      return absl::optional<media::VideoCaptureFormat>(
           media::VideoCaptureFormat(
               host_->plugin_frame_size_, kDefaultOutputFrameRate,
               ToPixelFormat(host_->plugin_frame_format_)));
     }
-    return base::Optional<media::VideoCaptureFormat>();
+    return absl::optional<media::VideoCaptureFormat>();
   }
 
   const base::WeakPtr<PepperMediaStreamVideoTrackHost> host_;
-
-  DISALLOW_COPY_AND_ASSIGN(VideoSource);
+  base::WeakPtrFactory<MediaStreamVideoSource> weak_factory_{this};
 };
 
 void PepperMediaStreamVideoTrackHost::DidConnectPendingHostToResource() {
@@ -434,7 +471,8 @@ void PepperMediaStreamVideoTrackHost::DidConnectPendingHostToResource() {
       media::BindToCurrentLoop(
           base::BindRepeating(&PepperMediaStreamVideoTrackHost::OnVideoFrame,
                               weak_factory_.GetWeakPtr())),
-      false);
+      MediaStreamVideoSink::IsSecure::kNo,
+      MediaStreamVideoSink::UsesAlpha::kDefault);
 }
 
 int32_t PepperMediaStreamVideoTrackHost::OnResourceMessageReceived(
@@ -492,20 +530,19 @@ void PepperMediaStreamVideoTrackHost::InitBlinkTrack() {
   std::string source_id;
   base::Base64Encode(base::RandBytesAsString(64), &source_id);
   blink::WebMediaStreamSource webkit_source;
+  auto source = std::make_unique<VideoSource>(weak_factory_.GetWeakPtr());
+  blink::MediaStreamVideoSource* const source_ptr = source.get();
   webkit_source.Initialize(blink::WebString::FromASCII(source_id),
                            blink::WebMediaStreamSource::kTypeVideo,
                            blink::WebString::FromASCII(kPepperVideoSourceName),
-                           false /* remote */);
-  blink::MediaStreamVideoSource* const source =
-      new VideoSource(weak_factory_.GetWeakPtr());
-  webkit_source.SetPlatformSource(
-      base::WrapUnique(source));  // Takes ownership of |source|.
+                           false /* remote */,
+                           std::move(source));  // Takes ownership of |source|.
 
   const bool enabled = true;
-  track_ = blink::MediaStreamVideoTrack::CreateVideoTrack(
-      source,
-      base::BindRepeating(&PepperMediaStreamVideoTrackHost::OnTrackStarted,
-                          base::Unretained(this)),
+  track_ = blink::CreateWebMediaStreamVideoTrack(
+      source_ptr,
+      base::BindOnce(&PepperMediaStreamVideoTrackHost::OnTrackStarted,
+                     base::Unretained(this)),
       enabled);
   // Note: The call to CreateVideoTrack() returned a track that holds a
   // ref-counted reference to |webkit_source| (and, implicitly, |source|).

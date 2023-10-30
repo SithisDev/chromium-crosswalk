@@ -1,10 +1,10 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content_shell_apk;
 
-import android.support.test.filters.SmallTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -28,13 +28,14 @@ public class ContentShellUrlTest {
     @Test
     @SmallTest
     @Feature({"Main"})
-    public void testBaseStartup() throws Exception {
+    public void testBaseStartup() {
         ContentShellActivity activity = mActivityTestRule.launchContentShellWithUrl(URL);
 
         // Make sure the activity was created as expected.
         Assert.assertNotNull(activity);
 
         // Make sure that the URL is set as expected.
-        Assert.assertEquals(URL, activity.getActiveShell().getWebContents().getVisibleUrl());
+        Assert.assertEquals(
+                URL, activity.getActiveShell().getWebContents().getVisibleUrl().getSpec());
     }
 }

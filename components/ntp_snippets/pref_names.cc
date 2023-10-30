@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,6 @@
 
 namespace ntp_snippets {
 namespace prefs {
-
-const char kEnableSnippets[] = "ntp_snippets.enable";
-
-const char kArticlesListVisible[] = "ntp_snippets.list_visible";
 
 const char kRemoteSuggestionCategories[] = "ntp_snippets.remote_categories";
 

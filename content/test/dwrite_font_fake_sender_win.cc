@@ -1,50 +1,56 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/test/dwrite_font_fake_sender_win.h"
-#include "base/bind.h"
 
 #include <dwrite.h>
 #include <shlobj.h>
 
+#include <memory>
+
+#include "base/bind.h"
+#include "base/strings/string_util.h"
+#include "third_party/abseil-cpp/absl/utility/utility.h"
+
 namespace content {
 
 void AddFamily(const base::FilePath& font_path,
-               const base::string16& family_name,
-               const base::string16& base_family_name,
+               const std::u16string& family_name,
+               const std::wstring& base_family_name,
                FakeFontCollection* collection) {
   collection->AddFont(family_name)
-      .AddFamilyName(L"en-us", family_name)
+      .AddFamilyName(u"en-us", family_name)
       .AddFilePath(font_path.Append(L"\\" + base_family_name + L".ttf"))
       .AddFilePath(font_path.Append(L"\\" + base_family_name + L"bd.ttf"))
       .AddFilePath(font_path.Append(L"\\" + base_family_name + L"bi.ttf"))
       .AddFilePath(font_path.Append(L"\\" + base_family_name + L"i.ttf"));
 }
 
-blink::mojom::DWriteFontProxyPtrInfo CreateFakeCollectionPtr(
+mojo::PendingRemote<blink::mojom::DWriteFontProxy> CreateFakeCollectionRemote(
     const std::unique_ptr<FakeFontCollection>& collection) {
-  return collection->CreatePtr();
+  return collection->CreateRemote();
 }
 
-base::RepeatingCallback<blink::mojom::DWriteFontProxyPtrInfo(void)>
+base::RepeatingCallback<
+    mojo::PendingRemote<blink::mojom::DWriteFontProxy>(void)>
 CreateFakeCollectionSender() {
-  std::vector<base::char16> font_path_chars;
+  std::vector<wchar_t> font_path_chars;
   font_path_chars.resize(MAX_PATH);
   SHGetSpecialFolderPath(nullptr /*hwndOwner - reserved*/,
                          font_path_chars.data(), CSIDL_FONTS,
                          FALSE /*fCreate*/);
-  base::FilePath font_path(base::string16(font_path_chars.data()));
+  base::FilePath font_path(std::wstring(font_path_chars.data()));
   std::unique_ptr<FakeFontCollection> fake_collection =
       std::make_unique<FakeFontCollection>();
-  AddFamily(font_path, L"Arial", L"arial", fake_collection.get());
-  AddFamily(font_path, L"Courier New", L"cour", fake_collection.get());
-  AddFamily(font_path, L"Times New Roman", L"times", fake_collection.get());
-  return base::BindRepeating(&CreateFakeCollectionPtr,
+  AddFamily(font_path, u"Arial", L"arial", fake_collection.get());
+  AddFamily(font_path, u"Courier New", L"cour", fake_collection.get());
+  AddFamily(font_path, u"Times New Roman", L"times", fake_collection.get());
+  return base::BindRepeating(&CreateFakeCollectionRemote,
                              std::move(fake_collection));
 }
 
-FakeFont::FakeFont(const base::string16& name) : font_name_(name) {}
+FakeFont::FakeFont(const std::u16string& name) : font_name_(name) {}
 
 FakeFont::FakeFont(FakeFont&& other) = default;
 
@@ -52,15 +58,16 @@ FakeFont::~FakeFont() = default;
 
 FakeFontCollection::FakeFontCollection() = default;
 
-FakeFont& FakeFontCollection::AddFont(const base::string16& font_name) {
+FakeFont& FakeFontCollection::AddFont(const std::u16string& font_name) {
   fonts_.emplace_back(font_name);
   return fonts_.back();
 }
 
-blink::mojom::DWriteFontProxyPtrInfo FakeFontCollection::CreatePtr() {
-  blink::mojom::DWriteFontProxyPtrInfo ptr;
-  bindings_.AddBinding(this, mojo::MakeRequest(&ptr));
-  return ptr;
+mojo::PendingRemote<blink::mojom::DWriteFontProxy>
+FakeFontCollection::CreateRemote() {
+  mojo::PendingRemote<blink::mojom::DWriteFontProxy> proxy;
+  receivers_.Add(this, proxy.InitWithNewPipeAndPassReceiver());
+  return proxy;
 }
 
 size_t FakeFontCollection::MessageCount() {
@@ -71,11 +78,12 @@ FakeFontCollection::MessageType FakeFontCollection::GetMessageType(size_t id) {
   return message_types_[id];
 }
 
-void FakeFontCollection::FindFamily(const base::string16& family_name,
+void FakeFontCollection::FindFamily(const std::u16string& family_name,
                                     FindFamilyCallback callback) {
   message_types_.push_back(MessageType::kFindFamily);
   for (size_t n = 0; n < fonts_.size(); n++) {
-    if (_wcsicmp(family_name.data(), fonts_[n].font_name_.data()) == 0) {
+    if (base::EqualsCaseInsensitiveASCII(family_name.data(),
+                                         fonts_[n].font_name_.data())) {
       std::move(callback).Run(n);
       return;
     }
@@ -94,7 +102,7 @@ void FakeFontCollection::GetFamilyNames(uint32_t family_index,
   std::vector<blink::mojom::DWriteStringPairPtr> family_names;
   if (family_index < fonts_.size()) {
     for (const auto& name : fonts_[family_index].family_names_) {
-      family_names.emplace_back(base::in_place, name.first, name.second);
+      family_names.emplace_back(absl::in_place, name.first, name.second);
     }
   }
   std::move(callback).Run(std::move(family_names));
@@ -114,11 +122,11 @@ void FakeFontCollection::GetFontFiles(uint32_t family_index,
 }
 
 void FakeFontCollection::MapCharacters(
-    const base::string16& text,
+    const std::u16string& text,
     blink::mojom::DWriteFontStylePtr font_style,
-    const base::string16& locale_name,
+    const std::u16string& locale_name,
     uint32_t reading_direction,
-    const base::string16& base_family_name,
+    const std::u16string& base_family_name,
     MapCharactersCallback callback) {
   message_types_.push_back(MessageType::kMapCharacters);
   std::move(callback).Run(blink::mojom::MapCharactersResult::New(
@@ -128,7 +136,7 @@ void FakeFontCollection::MapCharacters(
                                          DWRITE_FONT_STRETCH_NORMAL)));
 }
 
-void FakeFontCollection::MatchUniqueFont(const base::string16& unique_font_name,
+void FakeFontCollection::MatchUniqueFont(const std::u16string& unique_font_name,
                                          MatchUniqueFontCallback callback) {}
 
 void FakeFontCollection::GetUniqueFontLookupMode(
@@ -140,11 +148,11 @@ void FakeFontCollection::GetUniqueNameLookupTable(
 void FakeFontCollection::GetUniqueNameLookupTableIfAvailable(
     GetUniqueNameLookupTableIfAvailableCallback callback) {}
 
-void FakeFontCollection::FallbackFamilyNameForCodepoint(
+void FakeFontCollection::FallbackFamilyAndStyleForCodepoint(
     const std::string& base_family_name,
     const std::string& locale_name,
     uint32_t codepoint,
-    FallbackFamilyNameForCodepointCallback callback) {}
+    FallbackFamilyAndStyleForCodepointCallback callback) {}
 
 FakeFontCollection::~FakeFontCollection() = default;
 

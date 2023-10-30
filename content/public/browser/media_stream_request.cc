@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,8 @@ MediaStreamRequest::MediaStreamRequest(
     const std::string& requested_video_device_id,
     blink::mojom::MediaStreamType audio_type,
     blink::mojom::MediaStreamType video_type,
-    bool disable_local_echo)
+    bool disable_local_echo,
+    bool request_pan_tilt_zoom_permission)
     : render_process_id(render_process_id),
       render_frame_id(render_frame_id),
       page_request_id(page_request_id),
@@ -29,11 +30,11 @@ MediaStreamRequest::MediaStreamRequest(
       audio_type(audio_type),
       video_type(video_type),
       disable_local_echo(disable_local_echo),
-      all_ancestors_have_same_origin(false) {}
+      request_pan_tilt_zoom_permission(request_pan_tilt_zoom_permission) {}
 
 MediaStreamRequest::MediaStreamRequest(const MediaStreamRequest& other) =
     default;
 
-MediaStreamRequest::~MediaStreamRequest() {}
+MediaStreamRequest::~MediaStreamRequest() = default;
 
 }  // namespace content

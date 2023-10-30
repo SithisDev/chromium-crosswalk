@@ -1,10 +1,14 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/public/test/browser_test.h"
 #include "ui/accessibility/platform/ax_platform_node_textprovider_win.h"
 #include "ui/accessibility/platform/ax_platform_node_textrangeprovider_win.h"
 
+#include "base/command_line.h"
+#include "base/strings/escape.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_safearray.h"
 #include "base/win/scoped_variant.h"
@@ -15,27 +19,26 @@
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
-#include "net/base/escape.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
+#include "ui/accessibility/accessibility_switches.h"
 
 using Microsoft::WRL::ComPtr;
 
 namespace content {
 
-#define ASSERT_UIA_SAFEARRAY_OF_TEXTRANGEPROVIDER(safearray, expected_size) \
-  {                                                                         \
-    EXPECT_EQ(sizeof(CComPtr<ITextRangeProvider>),                          \
-              ::SafeArrayGetElemsize(safearray));                           \
-    ASSERT_EQ(1u, SafeArrayGetDim(safearray));                              \
-    LONG array_lower_bound;                                                 \
-    ASSERT_HRESULT_SUCCEEDED(                                               \
-        SafeArrayGetLBound(safearray, 1, &array_lower_bound));              \
-    LONG array_upper_bound;                                                 \
-    ASSERT_HRESULT_SUCCEEDED(                                               \
-        SafeArrayGetUBound(safearray, 1, &array_upper_bound));              \
-    size_t count = array_upper_bound - array_lower_bound + 1;               \
-    ASSERT_EQ(expected_size, count);                                        \
+#define ASSERT_UIA_SAFEARRAY_OF_TEXTRANGEPROVIDER(safearray, expected_size)    \
+  {                                                                            \
+    EXPECT_EQ(sizeof(ITextRangeProvider*), ::SafeArrayGetElemsize(safearray)); \
+    ASSERT_EQ(1u, SafeArrayGetDim(safearray));                                 \
+    LONG array_lower_bound;                                                    \
+    ASSERT_HRESULT_SUCCEEDED(                                                  \
+        SafeArrayGetLBound(safearray, 1, &array_lower_bound));                 \
+    LONG array_upper_bound;                                                    \
+    ASSERT_HRESULT_SUCCEEDED(                                                  \
+        SafeArrayGetUBound(safearray, 1, &array_upper_bound));                 \
+    size_t count = array_upper_bound - array_lower_bound + 1;                  \
+    ASSERT_EQ(expected_size, count);                                           \
   }
 
 #define EXPECT_UIA_TEXTRANGE_EQ(provider, expected_content) \
@@ -43,19 +46,24 @@ namespace content {
     base::win::ScopedBstr provider_content;                 \
     ASSERT_HRESULT_SUCCEEDED(                               \
         provider->GetText(-1, provider_content.Receive())); \
-    EXPECT_STREQ(expected_content, provider_content);       \
+    EXPECT_STREQ(expected_content, provider_content.Get()); \
   }
 
 class AXPlatformNodeTextProviderWinBrowserTest : public ContentBrowserTest {
  protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        ::switches::kEnableExperimentalUIAutomation);
+  }
+
   void LoadInitialAccessibilityTreeFromUrl(
       const GURL& url,
       ui::AXMode accessibility_mode = ui::kAXModeComplete) {
     AccessibilityNotificationWaiter waiter(shell()->web_contents(),
                                            accessibility_mode,
                                            ax::mojom::Event::kLoadComplete);
-    NavigateToURL(shell(), url);
-    waiter.WaitForNotification();
+    EXPECT_TRUE(NavigateToURL(shell(), url));
+    ASSERT_TRUE(waiter.WaitForNotification());
   }
 
   void LoadInitialAccessibilityTreeFromHtmlFilePath(
@@ -72,7 +80,7 @@ class AXPlatformNodeTextProviderWinBrowserTest : public ContentBrowserTest {
       const std::string& html,
       ui::AXMode accessibility_mode = ui::kAXModeComplete) {
     LoadInitialAccessibilityTreeFromUrl(
-        GURL("data:text/html," + net::EscapeQueryParamValue(html, false)),
+        GURL("data:text/html," + base::EscapeQueryParamValue(html, false)),
         accessibility_mode);
   }
 
@@ -96,7 +104,7 @@ class AXPlatformNodeTextProviderWinBrowserTest : public ContentBrowserTest {
   BrowserAccessibility* GetRootAndAssertNonNull() {
     auto GetRootAndAssertNonNull = [this](BrowserAccessibility** result) {
       BrowserAccessibility* root_browser_accessibility =
-          GetManagerAndAssertNonNull()->GetRoot();
+          GetManagerAndAssertNonNull()->GetBrowserAccessibilityRoot();
       ASSERT_NE(nullptr, result);
       *result = root_browser_accessibility;
     };
@@ -127,10 +135,16 @@ class AXPlatformNodeTextProviderWinBrowserTest : public ContentBrowserTest {
   BrowserAccessibility* FindNodeInSubtree(BrowserAccessibility& node,
                                           ax::mojom::Role role,
                                           const std::string& name_or_value) {
-    const auto& name =
+    const std::string& name =
         node.GetStringAttribute(ax::mojom::StringAttribute::kName);
-    const auto& value =
-        node.GetStringAttribute(ax::mojom::StringAttribute::kValue);
+    // Note that in the case of a text field,
+    // "BrowserAccessibility::GetValueForControl" has the added functionality
+    // of computing the value of an ARIA text box from its inner text.
+    //
+    // <div contenteditable="true" role="textbox">Hello world.</div>
+    // Will expose no HTML value attribute, but some screen readers, such as
+    // Jaws, VoiceOver and Talkback, require one to be computed.
+    const std::string value = base::UTF16ToUTF8(node.GetValueForControl());
     if (node.GetRole() == role &&
         (name == name_or_value || value == name_or_value)) {
       return &node;
@@ -165,18 +179,18 @@ IN_PROC_BROWSER_TEST_F(AXPlatformNodeTextProviderWinBrowserTest,
   auto* node =
       FindNode(ax::mojom::Role::kStaticText, "AAA BBB\nCCCCCC\nDDDDDD");
   ASSERT_NE(nullptr, node);
-  EXPECT_TRUE(node->PlatformIsLeaf());
+  EXPECT_TRUE(node->IsLeaf());
   EXPECT_EQ(0u, node->PlatformChildCount());
 
   ComPtr<ITextProvider> text_provider;
   GetTextProviderFromTextNode(text_provider, node);
 
   base::win::ScopedSafearray text_provider_ranges;
-  CComPtr<ITextRangeProvider>* array_data;
   EXPECT_HRESULT_SUCCEEDED(
       text_provider->GetVisibleRanges(text_provider_ranges.Receive()));
   ASSERT_UIA_SAFEARRAY_OF_TEXTRANGEPROVIDER(text_provider_ranges.Get(), 2U);
 
+  ITextRangeProvider** array_data;
   ASSERT_HRESULT_SUCCEEDED(::SafeArrayAccessData(
       text_provider_ranges.Get(), reinterpret_cast<void**>(&array_data)));
 

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,8 @@ class NotificationSurface;
 
 class NotificationSurfaceManager {
  public:
+  virtual ~NotificationSurfaceManager() = default;
+
   // Gets the NotificationSurface associated with the given notification id.
   // Returns nullptr if no NotificationSurface is associated with the id.
   virtual NotificationSurface* GetSurface(
@@ -23,9 +25,6 @@ class NotificationSurfaceManager {
 
   // Removes a NotificationSurface from the manager.
   virtual void RemoveSurface(NotificationSurface* surface) = 0;
-
- protected:
-  virtual ~NotificationSurfaceManager() {}
 };
 
 }  // namespace exo

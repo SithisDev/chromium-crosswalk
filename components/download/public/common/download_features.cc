@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,12 @@ namespace download {
 namespace features {
 
 const base::Feature kUseDownloadOfflineContentProvider{
-    "UseDownloadOfflineContentProvider", base::FEATURE_DISABLED_BY_DEFAULT};
+    "UseDownloadOfflineContentProvider", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kDownloadAutoResumptionNative {
   "DownloadsAutoResumptionNative",
-#if defined(OS_ANDROID)
-      base::FEATURE_DISABLED_BY_DEFAULT
+#if BUILDFLAG(IS_ANDROID)
+      base::FEATURE_ENABLED_BY_DEFAULT
 #else
       base::FEATURE_DISABLED_BY_DEFAULT
 #endif
@@ -23,41 +23,61 @@ const base::Feature kDownloadAutoResumptionNative {
 
 const base::Feature kParallelDownloading {
   "ParallelDownloading",
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
       base::FEATURE_ENABLED_BY_DEFAULT
 #else
       base::FEATURE_DISABLED_BY_DEFAULT
 #endif
 };
 
-const base::Feature kDownloadDBForNewDownloads{
-    "DownloadDBForNewDownloads", base::FEATURE_ENABLED_BY_DEFAULT};
+const base::Feature kDownloadLater{"DownloadLater",
+                                   base::FEATURE_DISABLED_BY_DEFAULT};
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
+const base::Feature kSmartSuggestionForLargeDownloads{
+    "SmartSuggestionForLargeDownloads", base::FEATURE_DISABLED_BY_DEFAULT};
+
 const base::Feature kRefreshExpirationDate{"RefreshExpirationDate",
                                            base::FEATURE_ENABLED_BY_DEFAULT};
 #endif
-
-const base::Feature kPreventDownloadsWithSamePath{
-    "PreventDownloadsWithSamePath", base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kUseInProgressDownloadManagerForDownloadService{
     "UseInProgressDownloadManagerForDownloadService",
     base::FEATURE_DISABLED_BY_DEFAULT};
 
 const base::Feature kAllowDownloadResumptionWithoutStrongValidators{
-    "AllowDownloadResumptionWithoutStrongValidators",
-    base::FEATURE_DISABLED_BY_DEFAULT};
-
-const base::Feature kUseParallelRequestsForUnknwonRangeSupport{
-    "UseParallelRequestForUnknownRangeSupport",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+  "AllowDownloadResumptionWithoutStrongValidators",
+#if BUILDFLAG(IS_ANDROID)
+      base::FEATURE_ENABLED_BY_DEFAULT
+#else
+      base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+};
 
 const base::Feature kUseParallelRequestsForHTTP2{
-    "kUseParallelRequestsForHTTP2", base::FEATURE_DISABLED_BY_DEFAULT};
+    "UseParallelRequestsForHTTP2", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kUseParallelRequestsForQUIC{
-    "kUseParallelRequestsForQUIC", base::FEATURE_DISABLED_BY_DEFAULT};
+    "UseParallelRequestsForQUIC", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kDeleteExpiredDownloads{"DeleteExpiredDownloads",
+                                            base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kDeleteOverwrittenDownloads{
+    "DeleteOverwrittenDownloads", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kAllowFileBufferSizeControl{
+    "AllowFileBufferSizeControl", base::FEATURE_ENABLED_BY_DEFAULT};
+
+const base::Feature kDownloadRange{"DownloadRange",
+                                   base::FEATURE_ENABLED_BY_DEFAULT};
+
 }  // namespace features
+
+namespace switches {
+
+const char kDownloadLaterDebugOnWifi[] = "download-later-debug-on-wifi";
+
+}  // namespace switches
 
 }  // namespace download

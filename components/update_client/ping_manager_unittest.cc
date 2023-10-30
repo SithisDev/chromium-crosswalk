@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <string>
@@ -16,14 +17,18 @@
 #include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/version.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/update_client/component.h"
 #include "components/update_client/net/url_loader_post_interceptor.h"
+#include "components/update_client/persisted_data.h"
 #include "components/update_client/protocol_definition.h"
 #include "components/update_client/protocol_serializer.h"
+#include "components/update_client/test_activity_data_service.h"
 #include "components/update_client/test_configurator.h"
+#include "components/update_client/update_client.h"
 #include "components/update_client/update_engine.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -36,7 +41,7 @@ class PingManagerTest : public testing::Test,
                         public testing::WithParamInterface<bool> {
  public:
   PingManagerTest();
-  ~PingManagerTest() override {}
+  ~PingManagerTest() override = default;
 
   PingManager::Callback MakePingCallback();
   scoped_refptr<UpdateContext> MakeMockUpdateContext() const;
@@ -53,29 +58,36 @@ class PingManagerTest : public testing::Test,
 
   scoped_refptr<TestConfigurator> config_;
   scoped_refptr<PingManager> ping_manager_;
+  std::unique_ptr<PersistedData> metadata_;
 
   int error_ = -1;
   std::string response_;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::OnceClosure quit_closure_;
+  std::unique_ptr<TestActivityDataService> activity_data_service_;
+  std::unique_ptr<TestingPrefServiceSimple> pref_;
 };
 
 PingManagerTest::PingManagerTest()
-    : scoped_task_environment_(
-          base::test::ScopedTaskEnvironment::MainThreadType::IO) {
+    : task_environment_(base::test::TaskEnvironment::MainThreadType::IO) {
   config_ = base::MakeRefCounted<TestConfigurator>();
 }
 
 void PingManagerTest::SetUp() {
   ping_manager_ = base::MakeRefCounted<PingManager>(config_);
+  pref_ = std::make_unique<TestingPrefServiceSimple>();
+  activity_data_service_ = std::make_unique<TestActivityDataService>();
+  PersistedData::RegisterPrefs(pref_->registry());
+  metadata_ = std::make_unique<PersistedData>(pref_.get(),
+                                              activity_data_service_.get());
 }
 
 void PingManagerTest::TearDown() {
   // Run the threads until they are idle to allow the clean up
   // of the network interceptors on the IO thread.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
   ping_manager_ = nullptr;
 }
 
@@ -103,9 +115,10 @@ void PingManagerTest::PingSentCallback(int error, const std::string& response) {
 
 scoped_refptr<UpdateContext> PingManagerTest::MakeMockUpdateContext() const {
   return base::MakeRefCounted<UpdateContext>(
-      config_, false, std::vector<std::string>(),
-      UpdateClient::CrxDataCallback(), UpdateEngine::NotifyObserversCallback(),
-      UpdateEngine::Callback(), nullptr);
+      config_, false, false, std::vector<std::string>(),
+      UpdateClient::CrxStateChangeCallback(),
+      UpdateEngine::NotifyObserversCallback(), UpdateEngine::Callback(),
+      nullptr);
 }
 
 // This test is parameterized for using JSON or XML serialization. |true| means
@@ -123,52 +136,64 @@ TEST_P(PingManagerTest, SendPing) {
     Component component(*update_context, "abc");
     component.crx_component_ = CrxComponent();
     component.crx_component_->version = base::Version("1.0");
+    component.crx_component_->ap = "ap1";
+    component.crx_component_->brand = "BRND";
     component.state_ = std::make_unique<Component::StateUpdated>(&component);
     component.previous_version_ = base::Version("1.0");
     component.next_version_ = base::Version("2.0");
     component.AppendEvent(component.MakeEventUpdateComplete());
 
+    metadata_->SetCohort("abc", "c1");
+    metadata_->SetCohortName("abc", "cn1");
+    metadata_->SetCohortHint("abc", "ch1");
+
     EXPECT_TRUE(interceptor->ExpectRequest(std::make_unique<AnyMatch>()));
-    ping_manager_->SendPing(component, MakePingCallback());
+    ping_manager_->SendPing(component, *metadata_, MakePingCallback());
     RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
     const auto msg = interceptor->GetRequestBody(0);
-      const auto root = base::JSONReader::Read(msg);
-      ASSERT_TRUE(root);
-      const auto* request = root->FindKey("request");
-      ASSERT_TRUE(request);
-      EXPECT_TRUE(request->FindKey("@os"));
-      EXPECT_EQ("fake_prodid", request->FindKey("@updater")->GetString());
-      EXPECT_EQ("crx2,crx3", request->FindKey("acceptformat")->GetString());
-      EXPECT_TRUE(request->FindKey("arch"));
-      EXPECT_EQ("cr", request->FindKey("dedup")->GetString());
-      EXPECT_LT(0, request->FindPath({"hw", "physmemory"})->GetInt());
-      EXPECT_EQ("fake_lang", request->FindKey("lang")->GetString());
-      EXPECT_TRUE(request->FindKey("nacl_arch"));
-      EXPECT_EQ("fake_channel_string",
-                request->FindKey("prodchannel")->GetString());
-      EXPECT_EQ("30.0", request->FindKey("prodversion")->GetString());
-      EXPECT_EQ("3.1", request->FindKey("protocol")->GetString());
-      EXPECT_TRUE(request->FindKey("requestid"));
-      EXPECT_TRUE(request->FindKey("sessionid"));
-      EXPECT_EQ("fake_channel_string",
-                request->FindKey("updaterchannel")->GetString());
-      EXPECT_EQ("30.0", request->FindKey("updaterversion")->GetString());
+    const auto root = base::JSONReader::Read(msg);
+    ASSERT_TRUE(root);
+    const auto* request = root->FindKey("request");
+    ASSERT_TRUE(request);
+    EXPECT_TRUE(request->FindKey("@os"));
+    EXPECT_EQ("fake_prodid", request->FindKey("@updater")->GetString());
+    EXPECT_EQ("crx3", request->FindKey("acceptformat")->GetString());
+    EXPECT_TRUE(request->FindKey("arch"));
+    EXPECT_EQ("cr", request->FindKey("dedup")->GetString());
+    EXPECT_LT(0, request->FindPath({"hw", "physmemory"})->GetInt());
+    EXPECT_TRUE(request->FindKey("nacl_arch"));
+    EXPECT_EQ("fake_channel_string",
+              request->FindKey("prodchannel")->GetString());
+    EXPECT_EQ("30.0", request->FindKey("prodversion")->GetString());
+    EXPECT_EQ("3.1", request->FindKey("protocol")->GetString());
+    EXPECT_TRUE(request->FindKey("requestid"));
+    EXPECT_TRUE(request->FindKey("sessionid"));
+    EXPECT_EQ("fake_channel_string",
+              request->FindKey("updaterchannel")->GetString());
+    EXPECT_EQ("30.0", request->FindKey("updaterversion")->GetString());
 
-      EXPECT_TRUE(request->FindPath({"os", "arch"})->is_string());
-      EXPECT_EQ("Fake Operating System",
-                request->FindPath({"os", "platform"})->GetString());
-      EXPECT_TRUE(request->FindPath({"os", "version"})->is_string());
+    EXPECT_TRUE(request->FindPath({"os", "arch"})->is_string());
+    EXPECT_EQ("Fake Operating System",
+              request->FindPath({"os", "platform"})->GetString());
+    EXPECT_TRUE(request->FindPath({"os", "version"})->is_string());
 
-      const auto& app = request->FindKey("app")->GetList()[0];
-      EXPECT_EQ("abc", app.FindKey("appid")->GetString());
-      EXPECT_EQ("1.0", app.FindKey("version")->GetString());
-      const auto& event = app.FindKey("event")->GetList()[0];
-      EXPECT_EQ(1, event.FindKey("eventresult")->GetInt());
-      EXPECT_EQ(3, event.FindKey("eventtype")->GetInt());
-      EXPECT_EQ("2.0", event.FindKey("nextversion")->GetString());
-      EXPECT_EQ("1.0", event.FindKey("previousversion")->GetString());
+    const auto& app = request->FindKey("app")->GetListDeprecated()[0];
+    EXPECT_EQ("abc", app.FindKey("appid")->GetString());
+    EXPECT_EQ("ap1", app.FindKey("ap")->GetString());
+    EXPECT_EQ("BRND", app.FindKey("brand")->GetString());
+    EXPECT_EQ("fake_lang", app.FindKey("lang")->GetString());
+    EXPECT_EQ(-1, app.FindKey("installdate")->GetInt());
+    EXPECT_EQ("1.0", app.FindKey("version")->GetString());
+    EXPECT_EQ("c1", app.FindKey("cohort")->GetString());
+    EXPECT_EQ("cn1", app.FindKey("cohortname")->GetString());
+    EXPECT_EQ("ch1", app.FindKey("cohorthint")->GetString());
+    const auto& event = app.FindKey("event")->GetListDeprecated()[0];
+    EXPECT_EQ(1, event.FindKey("eventresult")->GetInt());
+    EXPECT_EQ(3, event.FindKey("eventtype")->GetInt());
+    EXPECT_EQ("2.0", event.FindKey("nextversion")->GetString());
+    EXPECT_EQ("1.0", event.FindKey("previousversion")->GetString());
 
     // Check the ping request does not carry the specific extra request headers.
     const auto headers = std::get<1>(interceptor->GetRequests()[0]);
@@ -190,7 +215,7 @@ TEST_P(PingManagerTest, SendPing) {
     component.AppendEvent(component.MakeEventUpdateComplete());
 
     EXPECT_TRUE(interceptor->ExpectRequest(std::make_unique<AnyMatch>()));
-    ping_manager_->SendPing(component, MakePingCallback());
+    ping_manager_->SendPing(component, *metadata_, MakePingCallback());
     RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
@@ -198,10 +223,10 @@ TEST_P(PingManagerTest, SendPing) {
       const auto root = base::JSONReader::Read(msg);
       ASSERT_TRUE(root);
       const auto* request = root->FindKey("request");
-      const auto& app = request->FindKey("app")->GetList()[0];
+      const auto& app = request->FindKey("app")->GetListDeprecated()[0];
       EXPECT_EQ("abc", app.FindKey("appid")->GetString());
       EXPECT_EQ("1.0", app.FindKey("version")->GetString());
-      const auto& event = app.FindKey("event")->GetList()[0];
+      const auto& event = app.FindKey("event")->GetListDeprecated()[0];
       EXPECT_EQ(0, event.FindKey("eventresult")->GetInt());
       EXPECT_EQ(3, event.FindKey("eventtype")->GetInt());
       EXPECT_EQ("2.0", event.FindKey("nextversion")->GetString());
@@ -230,7 +255,7 @@ TEST_P(PingManagerTest, SendPing) {
     component.AppendEvent(component.MakeEventUpdateComplete());
 
     EXPECT_TRUE(interceptor->ExpectRequest(std::make_unique<AnyMatch>()));
-    ping_manager_->SendPing(component, MakePingCallback());
+    ping_manager_->SendPing(component, *metadata_, MakePingCallback());
     RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
@@ -238,10 +263,10 @@ TEST_P(PingManagerTest, SendPing) {
       const auto root = base::JSONReader::Read(msg);
       ASSERT_TRUE(root);
       const auto* request = root->FindKey("request");
-      const auto& app = request->FindKey("app")->GetList()[0];
+      const auto& app = request->FindKey("app")->GetListDeprecated()[0];
       EXPECT_EQ("abc", app.FindKey("appid")->GetString());
       EXPECT_EQ("1.0", app.FindKey("version")->GetString());
-      const auto& event = app.FindKey("event")->GetList()[0];
+      const auto& event = app.FindKey("event")->GetListDeprecated()[0];
       EXPECT_EQ(0, event.FindKey("eventresult")->GetInt());
       EXPECT_EQ(3, event.FindKey("eventtype")->GetInt());
       EXPECT_EQ("2.0", event.FindKey("nextversion")->GetString());
@@ -270,7 +295,7 @@ TEST_P(PingManagerTest, SendPing) {
     component.AppendEvent(component.MakeEventUpdateComplete());
 
     EXPECT_TRUE(interceptor->ExpectRequest(std::make_unique<AnyMatch>()));
-    ping_manager_->SendPing(component, MakePingCallback());
+    ping_manager_->SendPing(component, *metadata_, MakePingCallback());
     RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
@@ -278,10 +303,10 @@ TEST_P(PingManagerTest, SendPing) {
       const auto root = base::JSONReader::Read(msg);
       ASSERT_TRUE(root);
       const auto* request = root->FindKey("request");
-      const auto& app = request->FindKey("app")->GetList()[0];
+      const auto& app = request->FindKey("app")->GetListDeprecated()[0];
       EXPECT_EQ("abc", app.FindKey("appid")->GetString());
       EXPECT_EQ("1.0", app.FindKey("version")->GetString());
-      const auto& event = app.FindKey("event")->GetList()[0];
+      const auto& event = app.FindKey("event")->GetListDeprecated()[0];
       EXPECT_EQ(0, event.FindKey("eventresult")->GetInt());
       EXPECT_EQ(3, event.FindKey("eventtype")->GetInt());
       EXPECT_EQ("1.0", event.FindKey("previousversion")->GetString());
@@ -292,12 +317,13 @@ TEST_P(PingManagerTest, SendPing) {
     // Test a valid |previouversion| and |next_version| = base::Version("0")
     // are serialized correctly under <event...> for uninstall.
     Component component(*update_context, "abc");
-    component.crx_component_ = CrxComponent();
-    component.Uninstall(base::Version("1.2.3.4"), 0);
+    CrxComponent crx_component;
+    crx_component.version = base::Version("1.2.3.4");
+    component.Uninstall(crx_component, 0);
     component.AppendEvent(component.MakeEventUninstalled());
 
     EXPECT_TRUE(interceptor->ExpectRequest(std::make_unique<AnyMatch>()));
-    ping_manager_->SendPing(component, MakePingCallback());
+    ping_manager_->SendPing(component, *metadata_, MakePingCallback());
     RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
@@ -305,14 +331,42 @@ TEST_P(PingManagerTest, SendPing) {
       const auto root = base::JSONReader::Read(msg);
       ASSERT_TRUE(root);
       const auto* request = root->FindKey("request");
-      const auto& app = request->FindKey("app")->GetList()[0];
+      const auto& app = request->FindKey("app")->GetListDeprecated()[0];
       EXPECT_EQ("abc", app.FindKey("appid")->GetString());
       EXPECT_EQ("1.2.3.4", app.FindKey("version")->GetString());
-      const auto& event = app.FindKey("event")->GetList()[0];
+      const auto& event = app.FindKey("event")->GetListDeprecated()[0];
       EXPECT_EQ(1, event.FindKey("eventresult")->GetInt());
       EXPECT_EQ(4, event.FindKey("eventtype")->GetInt());
       EXPECT_EQ("1.2.3.4", event.FindKey("previousversion")->GetString());
       EXPECT_EQ("0", event.FindKey("nextversion")->GetString());
+    interceptor->Reset();
+  }
+
+  {
+    // Test registrationEvent.
+    Component component(*update_context, "abc");
+    CrxComponent crx_component;
+    crx_component.version = base::Version("1.2.3.4");
+    component.Registration(crx_component);
+    component.AppendEvent(component.MakeEventRegistration());
+
+    EXPECT_TRUE(interceptor->ExpectRequest(std::make_unique<AnyMatch>()));
+    ping_manager_->SendPing(component, *metadata_, MakePingCallback());
+    RunThreads();
+
+    EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
+    const auto msg = interceptor->GetRequestBody(0);
+
+    const auto root = base::JSONReader::Read(msg);
+    ASSERT_TRUE(root);
+    const auto* request = root->FindKey("request");
+    const auto& app = request->FindKey("app")->GetListDeprecated()[0];
+    EXPECT_EQ("abc", app.FindKey("appid")->GetString());
+    EXPECT_EQ("1.2.3.4", app.FindKey("version")->GetString());
+    const auto& event = app.FindKey("event")->GetListDeprecated()[0];
+    EXPECT_EQ(1, event.FindKey("eventresult")->GetInt());
+    EXPECT_EQ(2, event.FindKey("eventtype")->GetInt());
+    EXPECT_EQ("1.2.3.4", event.FindKey("nextversion")->GetString());
     interceptor->Reset();
   }
 
@@ -354,7 +408,7 @@ TEST_P(PingManagerTest, SendPing) {
     component.AppendEvent(component.MakeEventDownloadMetrics(download_metrics));
 
     EXPECT_TRUE(interceptor->ExpectRequest(std::make_unique<AnyMatch>()));
-    ping_manager_->SendPing(component, MakePingCallback());
+    ping_manager_->SendPing(component, *metadata_, MakePingCallback());
     RunThreads();
 
     EXPECT_EQ(1, interceptor->GetCount()) << interceptor->GetRequestsAsString();
@@ -362,19 +416,19 @@ TEST_P(PingManagerTest, SendPing) {
       const auto root = base::JSONReader::Read(msg);
       ASSERT_TRUE(root);
       const auto* request = root->FindKey("request");
-      const auto& app = request->FindKey("app")->GetList()[0];
+      const auto& app = request->FindKey("app")->GetListDeprecated()[0];
       EXPECT_EQ("abc", app.FindKey("appid")->GetString());
       EXPECT_EQ("1.0", app.FindKey("version")->GetString());
-      EXPECT_EQ(4u, app.FindKey("event")->GetList().size());
+      EXPECT_EQ(4u, app.FindKey("event")->GetListDeprecated().size());
       {
-        const auto& event = app.FindKey("event")->GetList()[0];
+        const auto& event = app.FindKey("event")->GetListDeprecated()[0];
         EXPECT_EQ(1, event.FindKey("eventresult")->GetInt());
         EXPECT_EQ(3, event.FindKey("eventtype")->GetInt());
         EXPECT_EQ("2.0", event.FindKey("nextversion")->GetString());
         EXPECT_EQ("1.0", event.FindKey("previousversion")->GetString());
       }
       {
-        const auto& event = app.FindKey("event")->GetList()[1];
+        const auto& event = app.FindKey("event")->GetListDeprecated()[1];
         EXPECT_EQ(0, event.FindKey("eventresult")->GetInt());
         EXPECT_EQ(14, event.FindKey("eventtype")->GetInt());
         EXPECT_EQ(987, event.FindKey("download_time_ms")->GetDouble());
@@ -387,7 +441,7 @@ TEST_P(PingManagerTest, SendPing) {
         EXPECT_EQ("http://host1/path1", event.FindKey("url")->GetString());
       }
       {
-        const auto& event = app.FindKey("event")->GetList()[2];
+        const auto& event = app.FindKey("event")->GetListDeprecated()[2];
         EXPECT_EQ(1, event.FindKey("eventresult")->GetInt());
         EXPECT_EQ(14, event.FindKey("eventtype")->GetInt());
         EXPECT_EQ(9870, event.FindKey("download_time_ms")->GetDouble());
@@ -399,7 +453,7 @@ TEST_P(PingManagerTest, SendPing) {
         EXPECT_EQ("http://host2/path2", event.FindKey("url")->GetString());
       }
       {
-        const auto& event = app.FindKey("event")->GetList()[3];
+        const auto& event = app.FindKey("event")->GetListDeprecated()[3];
         EXPECT_EQ(1, event.FindKey("eventresult")->GetInt());
         EXPECT_EQ(14, event.FindKey("eventtype")->GetInt());
         EXPECT_EQ(9007199254740990,
@@ -413,6 +467,30 @@ TEST_P(PingManagerTest, SendPing) {
       }
     interceptor->Reset();
   }
+
+  // Tests the presence of the `domain joined` in the ping request.
+  {
+    for (const auto is_managed : std::initializer_list<absl::optional<bool>>{
+             absl::nullopt, false, true}) {
+      config_->SetIsMachineExternallyManaged(is_managed);
+      EXPECT_TRUE(interceptor->ExpectRequest(std::make_unique<AnyMatch>()));
+      Component component(*update_context, "abc");
+      component.crx_component_ = CrxComponent();
+      component.previous_version_ = base::Version("1.0");
+      component.AppendEvent(component.MakeEventUpdateComplete());
+      ping_manager_->SendPing(component, *metadata_, MakePingCallback());
+
+      RunThreads();
+
+      ASSERT_EQ(interceptor->GetCount(), 1);
+      const auto root = base::JSONReader::Read(interceptor->GetRequestBody(0));
+      interceptor->Reset();
+
+      ASSERT_TRUE(root);
+      EXPECT_EQ(is_managed, root->FindBoolPath("request.domainjoined"));
+    }
+  }
+  config_->SetIsMachineExternallyManaged(absl::nullopt);
 }
 
 // Tests that sending the ping fails when the component requires encryption but
@@ -434,7 +512,7 @@ TEST_P(PingManagerTest, RequiresEncryption) {
   component.next_version_ = base::Version("2.0");
   component.AppendEvent(component.MakeEventUpdateComplete());
 
-  ping_manager_->SendPing(component, MakePingCallback());
+  ping_manager_->SendPing(component, *metadata_, MakePingCallback());
   RunThreads();
 
   EXPECT_EQ(-2, error_);

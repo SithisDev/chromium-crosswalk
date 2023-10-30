@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,10 +19,8 @@ typedef autofill::SavePasswordProgressLogger Logger;
 namespace password_manager {
 
 PasswordManagerMetricsRecorder::PasswordManagerMetricsRecorder(
-    ukm::SourceId source_id,
-    const GURL& main_frame_url)
-    : main_frame_url_(main_frame_url),
-      ukm_entry_builder_(
+    ukm::SourceId source_id)
+    : ukm_entry_builder_(
           std::make_unique<ukm::builders::PageWithPassword>(source_id)) {}
 
 PasswordManagerMetricsRecorder::PasswordManagerMetricsRecorder(
@@ -67,9 +65,6 @@ void PasswordManagerMetricsRecorder::RecordProvisionalSaveFailure(
       case NO_MATCHING_FORM:
         logger->LogMessage(Logger::STRING_NO_MATCHING_FORM);
         break;
-      case FORM_BLACKLISTED:
-        logger->LogMessage(Logger::STRING_FORM_BLACKLISTED);
-        break;
       case INVALID_FORM:
         logger->LogMessage(Logger::STRING_INVALID_FORM);
         break;
@@ -79,7 +74,8 @@ void PasswordManagerMetricsRecorder::RecordProvisionalSaveFailure(
       case SAVING_ON_HTTP_AFTER_HTTPS:
         logger->LogSuccessiveOrigins(
             Logger::STRING_BLOCK_PASSWORD_SAME_ORIGIN_INSECURE_SCHEME,
-            main_frame_url.GetOrigin(), form_origin.GetOrigin());
+            main_frame_url.DeprecatedGetOriginAsURL(),
+            form_origin.DeprecatedGetOriginAsURL());
         break;
       case MAX_FAILURE_VALUE:
         NOTREACHED();

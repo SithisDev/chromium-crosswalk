@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ FieldTypeGroup GroupTypeOfHtmlFieldType(HtmlFieldType field_type,
 // and for associating form fields with form values in the Web Database.
 class AutofillType {
  public:
-  explicit AutofillType(ServerFieldType field_type);
+  explicit AutofillType(ServerFieldType field_type = NO_SERVER_DATA);
   AutofillType(HtmlFieldType field_type, HtmlFieldMode mode);
   AutofillType(const AutofillType& autofill_type) = default;
   AutofillType& operator=(const AutofillType& autofill_type) = default;
@@ -48,22 +48,16 @@ class AutofillType {
   // Serializes |this| type to a string.
   std::string ToString() const;
 
-  // Maps |field_type| to the corresponding billing field type if the field type
-  // is an address, name, or phone number type.
-  static ServerFieldType GetEquivalentBillingFieldType(
-      ServerFieldType field_type);
-
   // Translates the ServerFieldType values into the corresponding strings.
   static std::string ServerFieldTypeToString(ServerFieldType type);
 
  private:
   // The server-native field type, or UNKNOWN_TYPE if unset.
-  ServerFieldType server_type_;
+  ServerFieldType server_type_ = UNKNOWN_TYPE;
 
-  // The HTML autocomplete field type and mode hints, or HTML_TYPE_UNKNOWN and
-  // HTML_MODE_NONE if unset.
-  HtmlFieldType html_type_;
-  HtmlFieldMode html_mode_;
+  // The HTML autocomplete field type and mode hints, if set.
+  HtmlFieldType html_type_ = HtmlFieldType::kUnspecified;
+  HtmlFieldMode html_mode_ = HtmlFieldMode::kNone;
 };
 
 }  // namespace autofill

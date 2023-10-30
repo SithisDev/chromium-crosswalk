@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,26 @@
 
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
 #include "components/password_manager/core/browser/android_affiliation/fake_affiliation_fetcher.h"
 
 namespace password_manager {
 
-// Intercepts all AffiliationFetcher requests while in scope, and manufactures
-// API responses based on a set of equivalence classes predefined by the tests.
-class ScopedFakeAffiliationAPI {
+// Wraps the fake factory. Manufactures API responses to AffiliationFetcher
+// requests based on a set of equivalence classes predefined by the tests.
+class FakeAffiliationAPI {
  public:
-  ScopedFakeAffiliationAPI();
-  ~ScopedFakeAffiliationAPI();
+  FakeAffiliationAPI();
+  ~FakeAffiliationAPI();
 
   // Adds |affiliated_facets| to the set of equivalence classes that will form
   // the basis for calculating the fake API responses.
   void AddTestEquivalenceClass(const AffiliatedFacets& affiliated_facets);
+
+  // Adds |group| to the array of |groups_| that will form
+  // the basis for calculating the fake API responses.
+  void AddTestGrouping(const GroupedFacets& group);
 
   // Returns whether or not there is at least one pending fetch.
   bool HasPendingRequest();
@@ -41,11 +45,16 @@ class ScopedFakeAffiliationAPI {
   // Ignores the next pending request, if any, without completing it.
   void IgnoreNextRequest();
 
- private:
-  ScopedFakeAffiliationFetcherFactory fake_fetcher_factory_;
-  std::vector<AffiliatedFacets> preset_equivalence_relation_;
+  // Sets the fetcher factory through which the affiliation fetchers are
+  // accessed.
+  void SetFetcherFactory(FakeAffiliationFetcherFactory* fake_fetcher_factory) {
+    fake_fetcher_factory_ = fake_fetcher_factory;
+  }
 
-  DISALLOW_COPY_AND_ASSIGN(ScopedFakeAffiliationAPI);
+ private:
+  raw_ptr<FakeAffiliationFetcherFactory> fake_fetcher_factory_ = nullptr;
+  std::vector<AffiliatedFacets> preset_equivalence_relation_;
+  std::vector<GroupedFacets> groups_;
 };
 
 }  // namespace password_manager

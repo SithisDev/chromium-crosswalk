@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@ namespace subresource_filter {
 enum class ActivationScope {
   NO_SITES,
   // Allows to activate Safe Browsing Subresource Filter only on web sites from
-  // the Safe Browsing blacklist.
+  // the Safe Browsing blocklist.
   ACTIVATION_LIST,
   // Testing only. Allows to send activation signal to the RenderFrame for each
   // load.

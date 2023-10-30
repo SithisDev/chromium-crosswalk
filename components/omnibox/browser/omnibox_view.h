@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,18 +17,19 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_client.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/models/image_model.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/range/range.h"
 
+class AutocompleteInput;
 class GURL;
 class OmniboxEditController;
 class OmniboxViewMacTest;
@@ -43,8 +44,8 @@ class OmniboxView {
   // state changes.  See OmniboxEditModel::OnAfterPossibleChange().
   struct StateChanges {
     // |old_text| and |new_text| are not owned.
-    const base::string16* old_text;
-    const base::string16* new_text;
+    const std::u16string* old_text;
+    const std::u16string* new_text;
     size_t new_sel_start;
     size_t new_sel_end;
     bool selection_differs;
@@ -54,6 +55,8 @@ class OmniboxView {
   };
 
   virtual ~OmniboxView();
+  OmniboxView(const OmniboxView&) = delete;
+  OmniboxView& operator=(const OmniboxView&) = delete;
 
   // Used by the automation system for getting at the model from the view.
   OmniboxEditModel* model() { return model_.get(); }
@@ -76,14 +79,14 @@ class OmniboxView {
   virtual void OpenMatch(const AutocompleteMatch& match,
                          WindowOpenDisposition disposition,
                          const GURL& alternate_nav_url,
-                         const base::string16& pasted_text,
+                         const std::u16string& pasted_text,
                          size_t selected_line,
                          base::TimeTicks match_selection_timestamp);
 
   // Returns the current text of the edit control, which could be the
   // "temporary" text set by the popup, the "permanent" text set by the
   // browser, or just whatever the user has currently typed.
-  virtual base::string16 GetText() const = 0;
+  virtual std::u16string GetText() const = 0;
 
   // |true| if the user is in the process of editing the field, or if
   // the field is empty.
@@ -91,20 +94,19 @@ class OmniboxView {
 
   // Returns the icon to display as the location icon. If a favicon is
   // available, |on_icon_fetched| may be called later asynchronously.
-  gfx::ImageSkia GetIcon(int dip_size,
+  ui::ImageModel GetIcon(int dip_size,
                          SkColor color,
                          IconFetchedCallback on_icon_fetched) const;
 
   // The user text is the text the user has manually keyed in.  When present,
   // this is shown in preference to the permanent text; hitting escape will
   // revert to the permanent text.
-  void SetUserText(const base::string16& text);
-  virtual void SetUserText(const base::string16& text,
-                           bool update_popup);
+  void SetUserText(const std::u16string& text);
+  virtual void SetUserText(const std::u16string& text, bool update_popup);
 
   // Sets the window text and the caret position. |notify_text_changed| is true
-  // if the model should be notified of the change.
-  virtual void SetWindowTextAndCaretPos(const base::string16& text,
+  // if the model should be notified of the change. Clears the additional text.
+  virtual void SetWindowTextAndCaretPos(const std::u16string& text,
                                         size_t caret_pos,
                                         bool update_popup,
                                         bool notify_text_changed) = 0;
@@ -112,6 +114,9 @@ class OmniboxView {
   // Sets the caret position. Removes any selection. Clamps the requested caret
   // position to the length of the current text.
   virtual void SetCaretPos(size_t caret_pos) = 0;
+
+  // Sets the omnibox adjacent additional text label in the location bar view.
+  virtual void SetAdditionalText(const std::u16string& text) = 0;
 
   // Transitions the user into keyword mode with their default search provider,
   // preserving and selecting the user's text if they already typed in a query.
@@ -125,6 +130,11 @@ class OmniboxView {
   // directed.  If there is no selection, |start| and |end| will both be equal
   // to the current cursor position.
   virtual void GetSelectionBounds(size_t* start, size_t* end) const = 0;
+
+  // Returns the sum of all selections' lengths. This is used to detect when
+  // the user has deleted text, and therefore, their input should not be
+  // autocompleted.
+  virtual size_t GetAllSelectionsLength() const = 0;
 
   // Selects all the text in the edit.  Use this in place of SetSelAll() to
   // avoid selecting the "phantom newline" at the end of the edit.
@@ -143,12 +153,23 @@ class OmniboxView {
   // defines a method with that name.
   virtual void CloseOmniboxPopup();
 
-  // Sets the focus to the omnibox.
-  virtual void SetFocus() = 0;
+  // Starts an autocomplete prefetch query so those providers that benefit from
+  // it could perform a prefetch request and populate their caches.
+  virtual void StartPrefetch(const AutocompleteInput& input);
+
+  // Sets the focus to the omnibox. |is_user_initiated| is true when the user
+  // explicitly focused the omnibox, and false when the omnibox was
+  // automatically focused (like for browser startup or NTP load).
+  virtual void SetFocus(bool is_user_initiated) = 0;
 
   // Shows or hides the caret based on whether the model's is_caret_visible() is
   // true.
   virtual void ApplyCaretVisibility() = 0;
+
+  // Updates the accessibility state by enunciating any on-focus text.
+  virtual void SetAccessibilityLabel(const std::u16string& display_text,
+                                     const AutocompleteMatch& match,
+                                     bool notify_text_changed) {}
 
   // Called when the temporary text in the model may have changed.
   // |display_text| is the new text to show; |match_type| is the type of the
@@ -156,24 +177,31 @@ class OmniboxView {
   // wasn't previously a temporary text and thus we need to save off the user's
   // existing selection. |notify_text_changed| is true if the model should be
   // notified of the change.
-  virtual void OnTemporaryTextMaybeChanged(const base::string16& display_text,
+  virtual void OnTemporaryTextMaybeChanged(const std::u16string& display_text,
                                            const AutocompleteMatch& match,
                                            bool save_original_selection,
                                            bool notify_text_changed) = 0;
 
   // Called when the inline autocomplete text in the model may have changed.
-  // |display_text| is the new text to show; |user_text_length| is the length of
-  // the user input portion of that (so, up to but not including the inline
-  // autocompletion).  Returns whether the display text actually changed.
-  virtual bool OnInlineAutocompleteTextMaybeChanged(
-      const base::string16& display_text, size_t user_text_length) = 0;
+  // `display_text` is the new text to show. `selection` indicates the
+  // autocompleted portions which should be selected. `*_autocompletion`
+  // represents the appropriate autocompletion.
+  // TODO(manukh) The last 3 parameters are redundant except when split
+  //  autocompletion is enabled. Once we've cleaned up split autocompletion
+  //  (it's unlikely to launch but still useful for experimenting), `selections`
+  //  should be removed.
+  virtual void OnInlineAutocompleteTextMaybeChanged(
+      const std::u16string& display_text,
+      std::vector<gfx::Range> selections,
+      const std::u16string& prefix_autocompletion,
+      const std::u16string& inline_autocompletion) = 0;
 
   // Called when the inline autocomplete text in the model has been cleared.
   virtual void OnInlineAutocompleteTextCleared() = 0;
 
   // Called when the temporary text has been reverted by the user.  This will
   // reset the user's original selection.
-  virtual void OnRevertTemporaryText(const base::string16& display_text,
+  virtual void OnRevertTemporaryText(const std::u16string& display_text,
                                      const AutocompleteMatch& match) = 0;
 
   // Checkpoints the current edit state before an operation that might trigger
@@ -216,27 +244,39 @@ class OmniboxView {
   virtual bool IsIndicatingQueryRefinement() const;
 
   // Returns |text| with any leading javascript schemas stripped.
-  static base::string16 StripJavascriptSchemas(const base::string16& text);
+  static std::u16string StripJavascriptSchemas(const std::u16string& text);
 
   // Automatically collapses internal whitespace as follows:
-  // * If the only whitespace in |text| is newlines, users are most likely
-  // pasting in URLs split into multiple lines by terminals, email programs,
-  // etc. So all newlines are removed.
-  // * Otherwise, users may be pasting in search data, e.g. street addresses. In
-  // this case, runs of whitespace are collapsed down to single spaces.
+  // * Leading and trailing whitespace are often copied accidentally and rarely
+  //   affect behavior, so they are stripped.  If this collapses the whole
+  //   string, returns a space, since pasting nothing feels broken.
+  // * Internal whitespace sequences not containing CR/LF may be integral to the
+  //   meaning of the string and are preserved exactly.  The presence of any of
+  //   these also suggests the input is more likely a search than a navigation,
+  //   which affects the next bullet.
+  // * Internal whitespace sequences containing CR/LF have likely been split
+  //   across lines by terminals, email programs, etc., and are collapsed.  If
+  //   there are any internal non-CR/LF whitespace sequences, the input is more
+  //   likely search data (e.g. street addresses), so collapse these to a single
+  //   space.  If not, the input might be a navigation (e.g. a line-broken URL),
+  //   so collapse these away entirely.
   //
   // Finally, calls StripJavascriptSchemas() on the resulting string.
-  static base::string16 SanitizeTextForPaste(const base::string16& text);
+  static std::u16string SanitizeTextForPaste(const std::u16string& text);
 
  protected:
   // Tracks important state that may change between OnBeforePossibleChange() and
   // OnAfterPossibleChange().
   struct State {
-    base::string16 text;
-    base::string16 keyword;
+    std::u16string text;
+    std::u16string keyword;
     bool is_keyword_selected;
     size_t sel_start;
     size_t sel_end;
+    size_t all_sel_length;
+
+    State();
+    State(const State& state);
   };
 
   OmniboxView(OmniboxEditController* controller,
@@ -277,8 +317,8 @@ class OmniboxView {
   // everything is emphasized equally, whereas for URLs the scheme may be styled
   // based on the current security state, with parts of the URL de-emphasized to
   // draw attention to whatever best represents the "identity" of the current
-  // URL. Returns true if the path component is eligible for fadeout.
-  bool UpdateTextStyle(const base::string16& display_text,
+  // URL.
+  void UpdateTextStyle(const std::u16string& display_text,
                        const bool text_is_url,
                        const AutocompleteSchemeClassifier& classifier);
 
@@ -288,9 +328,7 @@ class OmniboxView {
 
   // |model_| can be NULL in tests.
   std::unique_ptr<OmniboxEditModel> model_;
-  OmniboxEditController* controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(OmniboxView);
+  raw_ptr<OmniboxEditController> controller_;
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_VIEW_H_

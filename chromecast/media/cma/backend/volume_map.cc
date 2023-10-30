@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,25 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "base/values.h"
 #include "chromecast/media/cma/backend/cast_audio_json.h"
+#include "chromecast/public/volume_control.h"
 
 namespace chromecast {
 namespace media {
 
 namespace {
+
 constexpr char kKeyVolumeMap[] = "volume_map";
 constexpr char kKeyLevel[] = "level";
 constexpr char kKeyDb[] = "db";
 constexpr float kMinDbFS = -120.0f;
+
+VolumeMap& GetVolumeMap() {
+  static base::NoDestructor<VolumeMap> volume_map;
+  return *volume_map;
+}
 
 }  // namespace
 
@@ -28,14 +36,17 @@ VolumeMap::VolumeMap()
 VolumeMap::VolumeMap(std::unique_ptr<CastAudioJsonProvider> config_provider)
     : config_provider_(std::move(config_provider)) {
   DCHECK(config_provider_);
-
   // base::Unretained is safe because VolumeMap outlives |config_provider_|.
   config_provider_->SetTuningChangedCallback(
       base::BindRepeating(&VolumeMap::LoadVolumeMap, base::Unretained(this)));
-  LoadVolumeMap(config_provider_->GetCastAudioConfig());
+  LoadFromFile();
 }
 
 VolumeMap::~VolumeMap() = default;
+
+void VolumeMap::LoadFromFile() {
+  LoadVolumeMap(config_provider_->GetCastAudioConfig());
+}
 
 void VolumeMap::LoadVolumeMap(std::unique_ptr<base::Value> cast_audio_config) {
   const base::DictionaryValue* cast_audio_dict;
@@ -55,22 +66,22 @@ void VolumeMap::LoadVolumeMap(std::unique_ptr<base::Value> cast_audio_config) {
 
   double prev_level = -1.0;
   std::vector<LevelToDb> new_map;
-  for (size_t i = 0; i < volume_map_list->GetSize(); ++i) {
-    const base::DictionaryValue* volume_map_entry;
-    CHECK(volume_map_list->GetDictionary(i, &volume_map_entry));
 
-    double level;
-    CHECK(volume_map_entry->GetDouble(kKeyLevel, &level));
-    CHECK_GE(level, 0.0);
-    CHECK_LE(level, 1.0);
-    CHECK_GT(level, prev_level);
-    prev_level = level;
+  for (const auto& value : volume_map_list->GetList()) {
+    const base::Value::Dict& volume_map_entry = value.GetDict();
 
-    double db;
-    CHECK(volume_map_entry->GetDouble(kKeyDb, &db));
-    CHECK_LE(db, 0.0);
+    absl::optional<double> level = volume_map_entry.FindDouble(kKeyLevel);
+    CHECK(level);
+    CHECK_GE(*level, 0.0);
+    CHECK_LE(*level, 1.0);
+    CHECK_GT(*level, prev_level);
+    prev_level = *level;
 
-    new_map.push_back({level, db});
+    absl::optional<double> db = volume_map_entry.FindDouble(kKeyDb);
+    CHECK(db);
+    CHECK_LE(*db, 0.0);
+
+    new_map.push_back({static_cast<float>(*level), static_cast<float>(*db)});
   }
 
   if (new_map.empty()) {
@@ -131,6 +142,21 @@ void VolumeMap::UseDefaultVolumeMap() {
                                     {1.0f, 0.0f}};
   base::AutoLock lock(lock_);
   volume_map_ = std::move(new_map);
+}
+
+// static
+float VolumeControl::VolumeToDbFS(float volume) {
+  return GetVolumeMap().VolumeToDbFS(volume);
+}
+
+// static
+float VolumeControl::DbFSToVolume(float db) {
+  return GetVolumeMap().DbFSToVolume(db);
+}
+
+// static
+void VolumeMap::Reload() {
+  return GetVolumeMap().LoadFromFile();
 }
 
 }  // namespace media

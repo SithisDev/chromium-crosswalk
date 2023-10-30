@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,8 @@
 
 #include <stdint.h>
 
-#include <memory>
-
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/upload_data_stream.h"
 
@@ -28,6 +27,9 @@ class CronetUploadDataStream : public net::UploadDataStream {
  public:
   class Delegate {
    public:
+    Delegate(const Delegate&) = delete;
+    Delegate& operator=(const Delegate&) = delete;
+
     // Called once during initial setup on the network thread, called before
     // all other methods.
     virtual void InitializeOnNetworkThread(
@@ -36,7 +38,7 @@ class CronetUploadDataStream : public net::UploadDataStream {
     // Called for each read request. Delegate must respond by calling
     // OnReadSuccess on the network thread asynchronous, or failing the request.
     // Only called when there's no other pending read or rewind operation.
-    virtual void Read(net::IOBuffer* buffer, int buf_len) = 0;
+    virtual void Read(scoped_refptr<net::IOBuffer> buffer, int buf_len) = 0;
 
     // Called to rewind the stream. Not called when already at the start of the
     // stream. The delegate must respond by calling OnRewindSuccess
@@ -52,12 +54,13 @@ class CronetUploadDataStream : public net::UploadDataStream {
    protected:
     Delegate() {}
     virtual ~Delegate() {}
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Delegate);
   };
 
   CronetUploadDataStream(Delegate* delegate, int64_t size);
+
+  CronetUploadDataStream(const CronetUploadDataStream&) = delete;
+  CronetUploadDataStream& operator=(const CronetUploadDataStream&) = delete;
+
   ~CronetUploadDataStream() override;
 
   // Failure is handled at the Java layer. These two success callbacks are
@@ -100,12 +103,10 @@ class CronetUploadDataStream : public net::UploadDataStream {
   // Set to false when a read starts, true when a rewind completes.
   bool at_front_of_stream_;
 
-  Delegate* const delegate_;
+  const raw_ptr<Delegate> delegate_;
 
   // Vends pointers on the network thread, though created on a client thread.
   base::WeakPtrFactory<CronetUploadDataStream> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(CronetUploadDataStream);
 };
 
 }  // namespace cronet

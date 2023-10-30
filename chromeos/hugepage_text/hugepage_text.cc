@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 // Author: Ken Chen <kenchen@google.com> Tiancong Wang <tcwang@google.com>
@@ -14,14 +14,10 @@
 
 #include "base/bit_cast.h"
 #include "base/logging.h"
+#include "base/posix/eintr_wrapper.h"
 
 // CHROMEOS_ORDERFILE_USE is a flag intended to use orderfile
-// to link Chrome. The else part of macro check in this code is to
-// make sure when the flag is turned off, the code works the same
-// as before.
-// We plan to turn it on in the future for Chrome OS.
-// Therefore, before it's deployed, by default, we turn it off until
-// the testing is done.
+// to link Chrome. Only when orderfile is used, we will use hugepages.
 
 // These function are here to delimit the start and end of the symbols
 // ordered by orderfile.
@@ -55,6 +51,15 @@ namespace chromeos {
 #ifndef MADV_HUGEPAGE
 #define MADV_HUGEPAGE 14
 #endif
+
+#ifdef CHROMEOS_ORDERFILE_USE
+constexpr static bool kIsOrderfileEnabled = true;
+#else
+constexpr static bool kIsOrderfileEnabled = false;
+#endif
+
+const base::Feature kCrOSHugepageRemapAndLockZygote{
+    "CrOSHugepageRemapAndLockInZygote", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const int kHpageShift = 21;
 const int kHpageSize = (1 << kHpageShift);
@@ -130,7 +135,7 @@ static void MremapHugetlbText(void* vaddr, const size_t hsize) {
   NoAsanAlignedMemcpy(haddr, vaddr, hsize);
 
   // change mapping protection to read only now that it has done the copy
-  if (mprotect(haddr, hsize, PROT_READ | PROT_EXEC)) {
+  if (HANDLE_EINTR(mprotect(haddr, hsize, PROT_READ | PROT_EXEC))) {
     PLOG(INFO) << "can not change protection to r-x, fall back to small page";
     munmap(haddr, hsize);
     return;
@@ -216,39 +221,6 @@ static void RemapHugetlbTextWithOrderfileLayout(void* vaddr,
   MremapHugetlbText(reinterpret_cast<void*>(mapping_start), hsize);
 }
 
-// Top level text remapping function, without orderfile (old code).
-//
-// Inputs: vaddr, the starting virtual address to remap to hugepage
-//         segsize, size of the memory segment to remap in bytes
-// Return: none
-// Effect: physical backing page changed from small page to hugepage. If there
-//         are error condition, the remaping operation is aborted.
-static void RemapHugetlbTextWithoutOrderfileLayout(void* vaddr,
-                                                   const size_t segsize) {
-  // The number of hugepages to use if no orderfile is specified
-  const int kNumHugePages = 15;
-
-  // remove unaligned head regions
-  uintptr_t head_gap =
-      (kHpageSize - reinterpret_cast<uintptr_t>(vaddr) % kHpageSize) %
-      kHpageSize;
-  uintptr_t addr = reinterpret_cast<uintptr_t>(vaddr) + head_gap;
-
-  if (segsize < head_gap)
-    return;
-
-  size_t hsize = segsize - head_gap;
-  hsize = hsize & kHpageMask;
-
-  if (hsize > kHpageSize * kNumHugePages)
-    hsize = kHpageSize * kNumHugePages;
-
-  if (hsize == 0)
-    return;
-
-  MremapHugetlbText(reinterpret_cast<void*>(addr), hsize);
-}
-
 // For a given ELF program header descriptor, iterates over all segments within
 // it and find the first segment that has PT_LOAD and is executable, call
 // RemapHugetlbText().
@@ -272,18 +244,10 @@ static int FilterElfHeader(struct dl_phdr_info* info, size_t size, void* data) {
   for (int i = 0; i < info->dlpi_phnum; i++) {
     if (info->dlpi_phdr[i].p_type == PT_LOAD &&
         info->dlpi_phdr[i].p_flags == (PF_R | PF_X)) {
-      vaddr = bit_cast<void*>(info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
+      vaddr =
+          base::bit_cast<void*>(info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
       segsize = info->dlpi_phdr[i].p_filesz;
-      // The following function is conditionally compiled, so use
-      // the statements to avoid compiler warnings of unused functions
-      (void)RemapHugetlbTextWithOrderfileLayout;
-      (void)RemapHugetlbTextWithoutOrderfileLayout;
-#ifdef CHROMEOS_ORDERFILE_USE
       RemapHugetlbTextWithOrderfileLayout(vaddr, segsize);
-#else
-      RemapHugetlbTextWithoutOrderfileLayout(vaddr, segsize);
-#endif
-      // Only re-map the first text segment.
       return 1;
     }
   }
@@ -296,7 +260,12 @@ static int FilterElfHeader(struct dl_phdr_info* info, size_t size, void* data) {
 // the hugepages. Any errors will cause the failing piece of this to be rolled
 // back, so nothing world-ending can come from this function (hopefully ;) ).
 void InitHugepagesAndMlockSelf(void) {
-  dl_iterate_phdr(FilterElfHeader, 0);
+  // The following function is conditionally compiled, so use
+  // the statements to avoid compiler warnings of unused functions
+  if (kIsOrderfileEnabled &&
+      base::FeatureList::IsEnabled(chromeos::kCrOSHugepageRemapAndLockZygote)) {
+    dl_iterate_phdr(FilterElfHeader, 0);
+  }
 }
 
 }  // namespace chromeos

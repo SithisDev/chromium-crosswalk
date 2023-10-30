@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -19,12 +19,14 @@ mojom("mojo") {
 
   public_deps = [
     "//mojo/public/mojom/base",
-    "//ui/base/accelerators/mojo:interfaces",
+    "//services/network/public/mojom",
+    "//ui/base/accelerators/mojom",
+    "//ui/base/cursor/mojom",
     "//ui/base/mojom",
     "//ui/display/mojom",
-    "//ui/events/mojo:interfaces",
-    "//ui/gfx/geometry/mojo",
-    "//ui/gfx/mojo",
-    "//ui/gfx/range/mojo",
+    "//ui/events/mojom",
+    "//ui/gfx/geometry/mojom",
+    "//ui/gfx/mojom",
+    "//ui/gfx/range/mojom",
   ]
 }

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,12 @@
 #include <memory>
 
 #include "base/threading/thread.h"
-#include "services/viz/privileged/interfaces/compositing/frame_sink_manager.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/viz/privileged/mojom/compositing/frame_sink_manager.mojom.h"
 
 namespace viz {
-class VizCompositorThreadRunner;
+class VizCompositorThreadRunnerImpl;
 }  // namespace viz
 
 namespace demo {
@@ -22,14 +24,16 @@ namespace demo {
 // the host over the mojom.FrameSinkManagerClient API.
 class DemoService {
  public:
-  DemoService(viz::mojom::FrameSinkManagerRequest request,
-              viz::mojom::FrameSinkManagerClientPtr client);
+  DemoService(mojo::PendingReceiver<viz::mojom::FrameSinkManager> receiver,
+              mojo::PendingRemote<viz::mojom::FrameSinkManagerClient> client);
+
+  DemoService(const DemoService&) = delete;
+  DemoService& operator=(const DemoService&) = delete;
+
   ~DemoService();
 
  private:
-  std::unique_ptr<viz::VizCompositorThreadRunner> runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(DemoService);
+  std::unique_ptr<viz::VizCompositorThreadRunnerImpl> runner_;
 };
 
 }  // namespace demo

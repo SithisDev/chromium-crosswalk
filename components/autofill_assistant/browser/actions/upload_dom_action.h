@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/macros.h"
+#include "base/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill_assistant/browser/actions/action.h"
 
@@ -16,22 +16,28 @@ namespace autofill_assistant {
 class UploadDomAction : public Action {
  public:
   explicit UploadDomAction(ActionDelegate* delegate, const ActionProto& proto);
+
+  UploadDomAction(const UploadDomAction&) = delete;
+  UploadDomAction& operator=(const UploadDomAction&) = delete;
+
   ~UploadDomAction() override;
 
  private:
   // Overrides Action:
   void InternalProcessAction(ProcessActionCallback callback) override;
 
-  void OnWaitForElement(ProcessActionCallback callback,
-                        const Selector& selector,
-                        bool element_found);
-  void OnGetOuterHtml(ProcessActionCallback callback,
-                      const ClientStatus& status,
+  void OnWaitForElement(const Selector& selector,
+                        bool can_match_multiple_elements,
+                        bool include_all_inner_text,
+                        const ClientStatus& element_status);
+  void OnGetOuterHtml(const ClientStatus& status,
                       const std::string& outer_html);
+  void OnGetOuterHtmls(const ClientStatus& status,
+                       const std::vector<std::string>& outer_htmls);
+  void EndAction(const ClientStatus& status);
 
-  base::WeakPtrFactory<UploadDomAction> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(UploadDomAction);
+  ProcessActionCallback process_action_callback_;
+  base::WeakPtrFactory<UploadDomAction> weak_ptr_factory_{this};
 };
 
 }  // namespace autofill_assistant

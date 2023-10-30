@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@ module.exports = {
     'es6': true,
   },
   'rules': {
+    'no-var': 'off',
+    'prefer-const': 'off',
     'no-restricted-properties': 0,
     'no-irregular-whitespace': 2,
     'no-unexpected-multiline': 2,

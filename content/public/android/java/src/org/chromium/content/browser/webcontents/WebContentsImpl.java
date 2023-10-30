@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,36 +14,46 @@ import android.os.Message;
 import android.os.Parcel;
 import android.os.ParcelUuid;
 import android.os.Parcelable;
-import android.support.annotation.Nullable;
+import android.view.MotionEvent;
 import android.view.Surface;
+import android.view.ViewStructure;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.UserData;
 import org.chromium.base.UserDataHost;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.blink_public.input.SelectionGranularity;
 import org.chromium.content.browser.AppWebMessagePort;
+import org.chromium.content.browser.GestureListenerManagerImpl;
 import org.chromium.content.browser.MediaSessionImpl;
 import org.chromium.content.browser.RenderCoordinatesImpl;
 import org.chromium.content.browser.RenderWidgetHostViewImpl;
 import org.chromium.content.browser.ViewEventSinkImpl;
 import org.chromium.content.browser.WindowEventObserver;
 import org.chromium.content.browser.WindowEventObserverManager;
+import org.chromium.content.browser.accessibility.ViewStructureBuilder;
 import org.chromium.content.browser.accessibility.WebContentsAccessibilityImpl;
 import org.chromium.content.browser.framehost.RenderFrameHostDelegate;
 import org.chromium.content.browser.framehost.RenderFrameHostImpl;
 import org.chromium.content.browser.selection.SelectionPopupControllerImpl;
-import org.chromium.content_public.browser.AccessibilitySnapshotCallback;
-import org.chromium.content_public.browser.AccessibilitySnapshotNode;
 import org.chromium.content_public.browser.ChildProcessImportance;
+import org.chromium.content_public.browser.ContentFeatureList;
+import org.chromium.content_public.browser.GlobalRenderFrameHostId;
 import org.chromium.content_public.browser.ImageDownloadCallback;
 import org.chromium.content_public.browser.JavaScriptCallback;
+import org.chromium.content_public.browser.MessagePayload;
 import org.chromium.content_public.browser.MessagePort;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.RenderFrameHost;
+import org.chromium.content_public.browser.StylusWritingHandler;
 import org.chromium.content_public.browser.ViewEventSink.InternalAccessDelegate;
+import org.chromium.content_public.browser.Visibility;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsInternals;
 import org.chromium.content_public.browser.WebContentsObserver;
@@ -51,8 +61,11 @@ import org.chromium.ui.OverscrollRefreshHandler;
 import org.chromium.ui.base.EventForwarder;
 import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.url.GURL;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -62,7 +75,7 @@ import java.util.UUID;
  */
 @JNINamespace("content")
 public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, WindowEventObserver {
-    private static final String TAG = "cr_WebContentsImpl";
+    private static final String TAG = "WebContentsImpl";
 
     private static final String PARCEL_VERSION_KEY = "version";
     private static final String PARCEL_WEBCONTENTS_KEY = "webcontents";
@@ -101,7 +114,8 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
                     if (sParcelableUUID.compareTo(parcelUuid.getUuid()) != 0) return null;
 
                     // Attempt to retrieve the WebContents object from the native pointer.
-                    return nativeFromNativePtr(bundle.getLong(PARCEL_WEBCONTENTS_KEY));
+                    return WebContentsImplJni.get().fromNativePtr(
+                            bundle.getLong(PARCEL_WEBCONTENTS_KEY));
                 }
 
                 @Override
@@ -149,7 +163,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     // the same life time as native MediaSession.
     private MediaSessionImpl mMediaSession;
 
-    private class SmartClipCallback {
+    class SmartClipCallback {
         public SmartClipCallback(final Handler smartClipHandler) {
             mHandler = smartClipHandler;
         }
@@ -161,7 +175,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
                     (int) (coordinateSpace.getContentOffsetYPix()
                             / coordinateSpace.getDeviceScaleFactor()));
             Bundle bundle = new Bundle();
-            bundle.putString("url", getVisibleUrl());
+            bundle.putString("url", getVisibleUrl().getSpec());
             bundle.putString("title", getTitle());
             bundle.putString("text", text);
             bundle.putString("html", html);
@@ -177,6 +191,8 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     private SmartClipCallback mSmartClipCallback;
 
     private EventForwarder mEventForwarder;
+
+    private StylusWritingHandler mStylusWritingHandler;
 
     // Cached copy of all positions and scales as reported by the renderer.
     private RenderCoordinatesImpl mRenderCoordinates;
@@ -203,7 +219,8 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     }
 
     @CalledByNative
-    private static WebContentsImpl create(
+    @VisibleForTesting
+    static WebContentsImpl create(
             long nativeWebContentsAndroid, NavigationController navigationController) {
         return new WebContentsImpl(nativeWebContentsAndroid, navigationController);
     }
@@ -212,27 +229,49 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     public void initialize(String productVersion, ViewAndroidDelegate viewDelegate,
             InternalAccessDelegate accessDelegate, WindowAndroid windowAndroid,
             InternalsHolder internalsHolder) {
-        // Makes sure |initialize| is not called more than once.
-        assert !mInitialized;
         assert internalsHolder != null;
 
         mProductVersion = productVersion;
 
+        WebContentsInternalsImpl internals;
+        if (mInternalsHolder != null) {
+            internals = (WebContentsInternalsImpl) mInternalsHolder.get();
+        } else {
+            internals = new WebContentsInternalsImpl();
+            internals.userDataHost = new UserDataHost();
+        }
         mInternalsHolder = internalsHolder;
-        WebContentsInternalsImpl internals = new WebContentsInternalsImpl();
-        internals.userDataHost = new UserDataHost();
         mInternalsHolder.set(internals);
 
-        mRenderCoordinates = new RenderCoordinatesImpl();
-        mRenderCoordinates.reset();
+        if (mRenderCoordinates == null) {
+            mRenderCoordinates = new RenderCoordinatesImpl();
+        }
 
         mInitialized = true;
 
         setViewAndroidDelegate(viewDelegate);
         setTopLevelNativeWindow(windowAndroid);
 
+        if (accessDelegate == null) {
+            accessDelegate = new EmptyInternalAccessDelegate();
+        }
         ViewEventSinkImpl.from(this).setAccessDelegate(accessDelegate);
-        getRenderCoordinates().setDeviceScaleFactor(windowAndroid.getDisplay().getDipScale());
+
+        if (windowAndroid != null) {
+            getRenderCoordinates().setDeviceScaleFactor(windowAndroid.getDisplay().getDipScale());
+        }
+
+        // Create GestureListenerManagerImpl so it updates `mRenderCoordinates`.
+        GestureListenerManagerImpl.fromWebContents(this);
+    }
+
+    @Override
+    public void clearJavaWebContentsObservers() {
+        // Clear all the Android specific observers.
+        if (mObserverProxy != null) {
+            mObserverProxy.destroy();
+            mObserverProxy = null;
+        }
     }
 
     @Nullable
@@ -249,7 +288,8 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     }
 
     @CalledByNative
-    private void clearNativePtr() {
+    @VisibleForTesting
+    void clearNativePtr() {
         mNativeDestroyThrowable = new RuntimeException("clearNativePtr");
         mNativeWebContentsAndroid = 0;
         mNavigationController = null;
@@ -298,14 +338,15 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     @Override
     public WindowAndroid getTopLevelNativeWindow() {
         checkNotDestroyed();
-        return nativeGetTopLevelNativeWindow(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getTopLevelNativeWindow(mNativeWebContentsAndroid);
     }
 
     @Override
     public void setTopLevelNativeWindow(WindowAndroid windowAndroid) {
         checkNotDestroyed();
-        nativeSetTopLevelNativeWindow(mNativeWebContentsAndroid, windowAndroid);
+        WebContentsImplJni.get().setTopLevelNativeWindow(mNativeWebContentsAndroid, windowAndroid);
         WindowEventObserverManager.from(this).onWindowAndroidChanged(windowAndroid);
+        if (mObserverProxy != null) mObserverProxy.onTopLevelNativeWindowChanged(windowAndroid);
     }
 
     @Override
@@ -315,14 +356,13 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
         return ((WebContentsInternalsImpl) internals).viewAndroidDelegate;
     }
 
-    public void setViewAndroidDelegate(ViewAndroidDelegate viewDelegate) {
+    private void setViewAndroidDelegate(ViewAndroidDelegate viewDelegate) {
         checkNotDestroyed();
         WebContentsInternals internals = mInternalsHolder.get();
         assert internals != null;
         WebContentsInternalsImpl impl = (WebContentsInternalsImpl) internals;
-        assert impl.viewAndroidDelegate == null;
         impl.viewAndroidDelegate = viewDelegate;
-        nativeSetViewAndroidDelegate(mNativeWebContentsAndroid, viewDelegate);
+        WebContentsImplJni.get().setViewAndroidDelegate(mNativeWebContentsAndroid, viewDelegate);
     }
 
     @Override
@@ -334,17 +374,27 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
             throw new IllegalStateException("Attempting to destroy WebContents on non-UI thread");
         }
 
-        if (mNativeWebContentsAndroid != 0) nativeDestroyWebContents(mNativeWebContentsAndroid);
+        if (mObserverProxy != null && mObserverProxy.isHandlingObserverCall()) {
+            throw new RuntimeException(
+                    "Attempting to destroy WebContents while handling observer calls");
+        }
+
+        if (mNativeWebContentsAndroid != 0) {
+            WebContentsImplJni.get().destroyWebContents(mNativeWebContentsAndroid);
+        }
     }
 
     @Override
     public boolean isDestroyed() {
-        return mNativeWebContentsAndroid == 0 || nativeIsBeingDestroyed(mNativeWebContentsAndroid);
+        return mNativeWebContentsAndroid == 0
+                || WebContentsImplJni.get().isBeingDestroyed(mNativeWebContentsAndroid);
     }
 
     @Override
     public void clearNativeReference() {
-        if (mNativeWebContentsAndroid != 0) nativeClearNativeReference(mNativeWebContentsAndroid);
+        if (mNativeWebContentsAndroid != 0) {
+            WebContentsImplJni.get().clearNativeReference(mNativeWebContentsAndroid);
+        }
     }
 
     @Override
@@ -355,58 +405,106 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     @Override
     public RenderFrameHost getMainFrame() {
         checkNotDestroyed();
-        return nativeGetMainFrame(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getMainFrame(mNativeWebContentsAndroid);
     }
 
     @Override
     public RenderFrameHost getFocusedFrame() {
         checkNotDestroyed();
-        return nativeGetFocusedFrame(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getFocusedFrame(mNativeWebContentsAndroid);
+    }
+
+    @Override
+    public RenderFrameHost getRenderFrameHostFromId(GlobalRenderFrameHostId id) {
+        checkNotDestroyed();
+        return WebContentsImplJni.get().getRenderFrameHostFromId(
+                mNativeWebContentsAndroid, id.childId(), id.frameRoutingId());
+    }
+
+    // The RenderFrameHosts that are every RenderFrameHost in this WebContents.
+    // See C++'s WebContents::ForEachRenderFrameHost for details.
+    public List<RenderFrameHost> getAllRenderFrameHosts() {
+        checkNotDestroyed();
+        RenderFrameHost[] frames =
+                WebContentsImplJni.get().getAllRenderFrameHosts(mNativeWebContentsAndroid);
+        return Collections.unmodifiableList(Arrays.asList(frames));
+    }
+
+    @CalledByNative
+    private static RenderFrameHost[] createRenderFrameHostArray(int size) {
+        return new RenderFrameHost[size];
+    }
+
+    @CalledByNative
+    private static void addRenderFrameHostToArray(
+            RenderFrameHost[] frames, int index, RenderFrameHost frame) {
+        frames[index] = frame;
     }
 
     @Override
     public @Nullable RenderWidgetHostViewImpl getRenderWidgetHostView() {
         if (mNativeWebContentsAndroid == 0) return null;
-        RenderWidgetHostViewImpl rwhvi = nativeGetRenderWidgetHostView(mNativeWebContentsAndroid);
+        RenderWidgetHostViewImpl rwhvi =
+                WebContentsImplJni.get().getRenderWidgetHostView(mNativeWebContentsAndroid);
         if (rwhvi == null || rwhvi.isDestroyed()) return null;
 
         return rwhvi;
     }
 
     @Override
-    public String getTitle() {
+    public List<WebContentsImpl> getInnerWebContents() {
         checkNotDestroyed();
-        return nativeGetTitle(mNativeWebContentsAndroid);
+        WebContentsImpl[] innerWebContents =
+                WebContentsImplJni.get().getInnerWebContents(mNativeWebContentsAndroid);
+        return Collections.unmodifiableList(Arrays.asList(innerWebContents));
     }
 
     @Override
-    public String getVisibleUrl() {
+    public @Visibility int getVisibility() {
         checkNotDestroyed();
-        return nativeGetVisibleURL(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getVisibility(mNativeWebContentsAndroid);
+    }
+
+    @Override
+    public String getTitle() {
+        checkNotDestroyed();
+        return WebContentsImplJni.get().getTitle(mNativeWebContentsAndroid);
+    }
+
+    @Override
+    public GURL getVisibleUrl() {
+        checkNotDestroyed();
+        return WebContentsImplJni.get().getVisibleURL(mNativeWebContentsAndroid);
     }
 
     @Override
     public String getEncoding() {
         checkNotDestroyed();
-        return nativeGetEncoding(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getEncoding(mNativeWebContentsAndroid);
     }
 
     @Override
     public boolean isLoading() {
         checkNotDestroyed();
-        return nativeIsLoading(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().isLoading(mNativeWebContentsAndroid);
     }
 
     @Override
-    public boolean isLoadingToDifferentDocument() {
+    public boolean shouldShowLoadingUI() {
         checkNotDestroyed();
-        return nativeIsLoadingToDifferentDocument(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().shouldShowLoadingUI(mNativeWebContentsAndroid);
+    }
+
+    @Override
+    public void dispatchBeforeUnload(boolean autoCancel) {
+        if (mNativeWebContentsAndroid == 0) return;
+        WebContentsImplJni.get().dispatchBeforeUnload(mNativeWebContentsAndroid, autoCancel);
     }
 
     @Override
     public void stop() {
         checkNotDestroyed();
-        nativeStop(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().stop(mNativeWebContentsAndroid);
     }
 
     /**
@@ -414,7 +512,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
      */
     public void cut() {
         checkNotDestroyed();
-        nativeCut(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().cut(mNativeWebContentsAndroid);
     }
 
     /**
@@ -422,7 +520,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
      */
     public void copy() {
         checkNotDestroyed();
-        nativeCopy(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().copy(mNativeWebContentsAndroid);
     }
 
     /**
@@ -430,7 +528,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
      */
     public void paste() {
         checkNotDestroyed();
-        nativePaste(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().paste(mNativeWebContentsAndroid);
     }
 
     /**
@@ -438,7 +536,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
      */
     public void pasteAsPlainText() {
         checkNotDestroyed();
-        nativePasteAsPlainText(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().pasteAsPlainText(mNativeWebContentsAndroid);
     }
 
     /**
@@ -446,7 +544,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
      */
     public void replace(String word) {
         checkNotDestroyed();
-        nativeReplace(mNativeWebContentsAndroid, word);
+        WebContentsImplJni.get().replace(mNativeWebContentsAndroid, word);
     }
 
     /**
@@ -454,7 +552,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
      */
     public void selectAll() {
         checkNotDestroyed();
-        nativeSelectAll(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().selectAll(mNativeWebContentsAndroid);
     }
 
     /**
@@ -465,7 +563,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
         // are destroyed. As the timing for such destruction is unpredictable,
         // safely guard against this case.
         if (isDestroyed()) return;
-        nativeCollapseSelection(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().collapseSelection(mNativeWebContentsAndroid);
     }
 
     @Override
@@ -473,17 +571,22 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
         checkNotDestroyed();
         SelectionPopupControllerImpl controller = getSelectionPopupController();
         if (controller != null) controller.hidePopupsAndPreserveSelection();
-        nativeOnHide(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().onHide(mNativeWebContentsAndroid);
     }
 
     @Override
     public void onShow() {
         checkNotDestroyed();
         WebContentsAccessibilityImpl wcax = WebContentsAccessibilityImpl.fromWebContents(this);
-        if (wcax != null) wcax.refreshState();
+        if (wcax != null) {
+            wcax.refreshState();
+            if (ContentFeatureList.isEnabled(ContentFeatureList.AUTO_DISABLE_ACCESSIBILITY)) {
+                wcax.updateAXModeFromNativeAccessibilityState();
+            }
+        }
         SelectionPopupControllerImpl controller = getSelectionPopupController();
         if (controller != null) controller.restoreSelectionPopupsIfNecessary();
-        nativeOnShow(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().onShow(mNativeWebContentsAndroid);
     }
 
     private SelectionPopupControllerImpl getSelectionPopupController() {
@@ -491,40 +594,40 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     }
 
     @Override
-    public void setImportance(@ChildProcessImportance int mainFrameImportance) {
+    public void setImportance(@ChildProcessImportance int primaryMainFrameImportance) {
         checkNotDestroyed();
-        nativeSetImportance(mNativeWebContentsAndroid, mainFrameImportance);
+        WebContentsImplJni.get().setImportance(
+                mNativeWebContentsAndroid, primaryMainFrameImportance);
     }
 
     @Override
     public void suspendAllMediaPlayers() {
         checkNotDestroyed();
-        nativeSuspendAllMediaPlayers(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().suspendAllMediaPlayers(mNativeWebContentsAndroid);
     }
 
     @Override
     public void setAudioMuted(boolean mute) {
         checkNotDestroyed();
-        nativeSetAudioMuted(mNativeWebContentsAndroid, mute);
-    }
-
-    @Override
-    public boolean isShowingInterstitialPage() {
-        checkNotDestroyed();
-        return nativeIsShowingInterstitialPage(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().setAudioMuted(mNativeWebContentsAndroid, mute);
     }
 
     @Override
     public boolean focusLocationBarByDefault() {
         checkNotDestroyed();
-        return nativeFocusLocationBarByDefault(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().focusLocationBarByDefault(mNativeWebContentsAndroid);
     }
 
+    @Override
+    public boolean isFullscreenForCurrentTab() {
+        checkNotDestroyed();
+        return WebContentsImplJni.get().isFullscreenForCurrentTab(mNativeWebContentsAndroid);
+    }
 
     @Override
     public void exitFullscreen() {
         checkNotDestroyed();
-        nativeExitFullscreen(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().exitFullscreen(mNativeWebContentsAndroid);
     }
 
     @Override
@@ -533,45 +636,47 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
         // The native side keeps track of whether the zoom and scroll actually occurred. It is
         // more efficient to do it this way and sometimes fire an unnecessary message rather
         // than synchronize with the renderer and always have an additional message.
-        nativeScrollFocusedEditableNodeIntoView(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().scrollFocusedEditableNodeIntoView(mNativeWebContentsAndroid);
     }
 
     @Override
-    public void selectWordAroundCaret() {
+    public void selectAroundCaret(@SelectionGranularity int granularity, boolean shouldShowHandle,
+            boolean shouldShowContextMenu) {
         checkNotDestroyed();
-        nativeSelectWordAroundCaret(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().selectAroundCaret(
+                mNativeWebContentsAndroid, granularity, shouldShowHandle, shouldShowContextMenu);
     }
 
     @Override
     public void adjustSelectionByCharacterOffset(
             int startAdjust, int endAdjust, boolean showSelectionMenu) {
-        nativeAdjustSelectionByCharacterOffset(
+        WebContentsImplJni.get().adjustSelectionByCharacterOffset(
                 mNativeWebContentsAndroid, startAdjust, endAdjust, showSelectionMenu);
     }
 
     @Override
-    public String getLastCommittedUrl() {
+    public GURL getLastCommittedUrl() {
         checkNotDestroyed();
-        return nativeGetLastCommittedURL(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getLastCommittedURL(mNativeWebContentsAndroid);
     }
 
     @Override
     public boolean isIncognito() {
         checkNotDestroyed();
-        return nativeIsIncognito(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().isIncognito(mNativeWebContentsAndroid);
     }
 
     @Override
     public void resumeLoadingCreatedWebContents() {
         checkNotDestroyed();
-        nativeResumeLoadingCreatedWebContents(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().resumeLoadingCreatedWebContents(mNativeWebContentsAndroid);
     }
 
     @Override
     public void evaluateJavaScript(String script, JavaScriptCallback callback) {
         ThreadUtils.assertOnUiThread();
         if (isDestroyed() || script == null) return;
-        nativeEvaluateJavaScript(mNativeWebContentsAndroid, script, callback);
+        WebContentsImplJni.get().evaluateJavaScript(mNativeWebContentsAndroid, script, callback);
     }
 
     @Override
@@ -580,18 +685,20 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
         ThreadUtils.assertOnUiThread();
         if (script == null) return;
         checkNotDestroyed();
-        nativeEvaluateJavaScriptForTests(mNativeWebContentsAndroid, script, callback);
+        WebContentsImplJni.get().evaluateJavaScriptForTests(
+                mNativeWebContentsAndroid, script, callback);
     }
 
     @Override
     public void addMessageToDevToolsConsole(int level, String message) {
         checkNotDestroyed();
-        nativeAddMessageToDevToolsConsole(mNativeWebContentsAndroid, level, message);
+        WebContentsImplJni.get().addMessageToDevToolsConsole(
+                mNativeWebContentsAndroid, level, message);
     }
 
     @Override
-    public void postMessageToMainFrame(
-            String message, String sourceOrigin, String targetOrigin, MessagePort[] ports) {
+    public void postMessageToMainFrame(MessagePayload messagePayload, String sourceOrigin,
+            String targetOrigin, MessagePort[] ports) {
         if (ports != null) {
             for (MessagePort port : ports) {
                 if (port.isClosed() || port.isTransferred()) {
@@ -606,8 +713,8 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
         if (targetOrigin.equals("*")) {
             targetOrigin = "";
         }
-        nativePostMessageToMainFrame(
-                mNativeWebContentsAndroid, message, sourceOrigin, targetOrigin, ports);
+        WebContentsImplJni.get().postMessageToMainFrame(
+                mNativeWebContentsAndroid, messagePayload, sourceOrigin, targetOrigin, ports);
     }
 
     @Override
@@ -619,7 +726,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     @Override
     public boolean hasAccessedInitialDocument() {
         checkNotDestroyed();
-        return nativeHasAccessedInitialDocument(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().hasAccessedInitialDocument(mNativeWebContentsAndroid);
     }
 
     @CalledByNative
@@ -631,13 +738,13 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     @Override
     public int getThemeColor() {
         checkNotDestroyed();
-        return nativeGetThemeColor(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getThemeColor(mNativeWebContentsAndroid);
     }
 
     @Override
-    public int getLoadProgress() {
+    public float getLoadProgress() {
         checkNotDestroyed();
-        return nativeGetLoadProgress(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getLoadProgress(mNativeWebContentsAndroid);
     }
 
     @Override
@@ -647,8 +754,9 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
         RenderCoordinatesImpl coordinateSpace = getRenderCoordinates();
         float dpi = coordinateSpace.getDeviceScaleFactor();
         y = y - (int) coordinateSpace.getContentOffsetYPix();
-        nativeRequestSmartClipExtract(mNativeWebContentsAndroid, mSmartClipCallback,
-                (int) (x / dpi), (int) (y / dpi), (int) (width / dpi), (int) (height / dpi));
+        WebContentsImplJni.get().requestSmartClipExtract(mNativeWebContentsAndroid,
+                mSmartClipCallback, (int) (x / dpi), (int) (y / dpi), (int) (width / dpi),
+                (int) (height / dpi));
     }
 
     @Override
@@ -666,51 +774,37 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
         callback.onSmartClipDataExtracted(text, html, new Rect(left, top, right, bottom));
     }
 
-    @Override
-    public void requestAccessibilitySnapshot(AccessibilitySnapshotCallback callback) {
+    /**
+     * Requests a snapshop of accessibility tree. The result is provided asynchronously
+     * using the callback
+     * @param callback The callback to be called when the snapshot is ready. The callback
+     *                 cannot be null.
+     */
+    public void requestAccessibilitySnapshot(ViewStructure root, Runnable doneCallback) {
         checkNotDestroyed();
-        nativeRequestAccessibilitySnapshot(mNativeWebContentsAndroid, callback);
+        ViewStructureBuilder builder = ViewStructureBuilder.create(mRenderCoordinates);
+
+        WebContentsImplJni.get().requestAccessibilitySnapshot(
+                mNativeWebContentsAndroid, root, builder, doneCallback);
     }
 
     @VisibleForTesting
-    public void simulateRendererKilledForTesting(boolean wasOomProtected) {
+    public void simulateRendererKilledForTesting() {
         if (mObserverProxy != null) {
-            mObserverProxy.renderProcessGone(wasOomProtected);
+            mObserverProxy.renderProcessGone();
         }
     }
 
-    // root node can be null if parsing fails.
-    @CalledByNative
-    private static void onAccessibilitySnapshot(AccessibilitySnapshotNode root,
-            AccessibilitySnapshotCallback callback) {
-        callback.onAccessibilitySnapshot(root);
+    @Override
+    public void setStylusWritingHandler(StylusWritingHandler stylusWritingHandler) {
+        mStylusWritingHandler = stylusWritingHandler;
+        if (mNativeWebContentsAndroid == 0) return;
+        WebContentsImplJni.get().setStylusHandwritingEnabled(
+                mNativeWebContentsAndroid, mStylusWritingHandler != null);
     }
 
-    @CalledByNative
-    private static void addAccessibilityNodeAsChild(AccessibilitySnapshotNode parent,
-            AccessibilitySnapshotNode child) {
-        parent.addChild(child);
-    }
-
-    @CalledByNative
-    private static AccessibilitySnapshotNode createAccessibilitySnapshotNode(int parentRelativeLeft,
-            int parentRelativeTop, int width, int height, boolean isRootNode, String text,
-            int color, int bgcolor, float size, boolean bold, boolean italic, boolean underline,
-            boolean lineThrough, String className) {
-        AccessibilitySnapshotNode node = new AccessibilitySnapshotNode(text, className);
-
-        // if size is smaller than 0, then style information does not exist.
-        if (size >= 0.0) {
-            node.setStyle(color, bgcolor, size, bold, italic, underline, lineThrough);
-        }
-        node.setLocationInfo(parentRelativeLeft, parentRelativeTop, width, height, isRootNode);
-        return node;
-    }
-
-    @CalledByNative
-    private static void setAccessibilitySnapshotSelection(
-            AccessibilitySnapshotNode node, int start, int end) {
-        node.setSelection(start, end);
+    public StylusWritingHandler getStylusWritingHandler() {
+        return mStylusWritingHandler;
     }
 
     @Override
@@ -718,7 +812,24 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
         assert mNativeWebContentsAndroid != 0;
         if (mEventForwarder == null) {
             checkNotDestroyed();
-            mEventForwarder = nativeGetOrCreateEventForwarder(mNativeWebContentsAndroid);
+            mEventForwarder =
+                    WebContentsImplJni.get().getOrCreateEventForwarder(mNativeWebContentsAndroid);
+            mEventForwarder.setStylusWritingDelegate(new EventForwarder.StylusWritingDelegate() {
+                @Override
+                public boolean handleTouchEvent(MotionEvent motionEvent) {
+                    return mStylusWritingHandler != null
+                            && mStylusWritingHandler.handleTouchEvent(
+                                    motionEvent, getViewAndroidDelegate().getContainerView());
+                }
+
+                @Override
+                public void handleHoverEvent(MotionEvent motionEvent) {
+                    if (mStylusWritingHandler != null) {
+                        mStylusWritingHandler.handleHoverEvent(
+                                motionEvent, getViewAndroidDelegate().getContainerView());
+                    }
+                }
+            });
         }
         return mEventForwarder;
     }
@@ -739,75 +850,71 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
     @Override
     public void setOverscrollRefreshHandler(OverscrollRefreshHandler handler) {
         checkNotDestroyed();
-        nativeSetOverscrollRefreshHandler(mNativeWebContentsAndroid, handler);
+        WebContentsImplJni.get().setOverscrollRefreshHandler(mNativeWebContentsAndroid, handler);
     }
 
     @Override
     public void setSpatialNavigationDisabled(boolean disabled) {
         checkNotDestroyed();
-        nativeSetSpatialNavigationDisabled(mNativeWebContentsAndroid, disabled);
+        WebContentsImplJni.get().setSpatialNavigationDisabled(mNativeWebContentsAndroid, disabled);
     }
 
     @Override
-    public void reloadLoFiImages() {
+    public int downloadImage(GURL url, boolean isFavicon, int maxBitmapSize, boolean bypassCache,
+            ImageDownloadCallback callback) {
         checkNotDestroyed();
-        nativeReloadLoFiImages(mNativeWebContentsAndroid);
-    }
-
-    @Override
-    public int downloadImage(String url, boolean isFavicon, int maxBitmapSize,
-            boolean bypassCache, ImageDownloadCallback callback) {
-        checkNotDestroyed();
-        return nativeDownloadImage(mNativeWebContentsAndroid,
-                url, isFavicon, maxBitmapSize, bypassCache, callback);
+        return WebContentsImplJni.get().downloadImage(
+                mNativeWebContentsAndroid, url, isFavicon, maxBitmapSize, bypassCache, callback);
     }
 
     @CalledByNative
     private void onDownloadImageFinished(ImageDownloadCallback callback, int id, int httpStatusCode,
-            String imageUrl, List<Bitmap> bitmaps, List<Rect> sizes) {
+            GURL imageUrl, List<Bitmap> bitmaps, List<Rect> sizes) {
         callback.onFinishDownloadImage(id, httpStatusCode, imageUrl, bitmaps, sizes);
     }
 
     @Override
     public void setHasPersistentVideo(boolean value) {
         checkNotDestroyed();
-        nativeSetHasPersistentVideo(mNativeWebContentsAndroid, value);
+        WebContentsImplJni.get().setHasPersistentVideo(mNativeWebContentsAndroid, value);
     }
 
     @Override
     public boolean hasActiveEffectivelyFullscreenVideo() {
         checkNotDestroyed();
-        return nativeHasActiveEffectivelyFullscreenVideo(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().hasActiveEffectivelyFullscreenVideo(
+                mNativeWebContentsAndroid);
     }
 
     @Override
     public boolean isPictureInPictureAllowedForFullscreenVideo() {
         checkNotDestroyed();
-        return nativeIsPictureInPictureAllowedForFullscreenVideo(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().isPictureInPictureAllowedForFullscreenVideo(
+                mNativeWebContentsAndroid);
     }
 
     @Override
     public @Nullable Rect getFullscreenVideoSize() {
         checkNotDestroyed();
-        return nativeGetFullscreenVideoSize(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getFullscreenVideoSize(mNativeWebContentsAndroid);
     }
 
     @Override
     public void setSize(int width, int height) {
         checkNotDestroyed();
-        nativeSetSize(mNativeWebContentsAndroid, width, height);
+        WebContentsImplJni.get().setSize(mNativeWebContentsAndroid, width, height);
     }
 
     @Override
     public int getWidth() {
         checkNotDestroyed();
-        return nativeGetWidth(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getWidth(mNativeWebContentsAndroid);
     }
 
     @Override
     public int getHeight() {
         checkNotDestroyed();
-        return nativeGetHeight(mNativeWebContentsAndroid);
+        return WebContentsImplJni.get().getHeight(mNativeWebContentsAndroid);
     }
 
     @CalledByNative
@@ -865,7 +972,7 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
 
         // Map can be null after WebView gets gc'ed on its way to destruction.
         if (userDataHost == null) {
-            Log.e(TAG, "UserDataHost can't be found");
+            Log.d(TAG, "UserDataHost can't be found");
             return null;
         }
 
@@ -881,6 +988,12 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
             data = userDataHost.setUserData(key, object);
         }
         return key.cast(data);
+    }
+
+    public <T extends UserData> void removeUserData(Class<T> key) {
+        UserDataHost userDataHost = getUserDataHost();
+        if (userDataHost == null) return;
+        userDataHost.removeUserData(key);
     }
 
     /**
@@ -917,32 +1030,40 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
                 throw new IllegalStateException(
                         "Display.getRotation() shouldn't return that value");
         }
-        nativeSendOrientationChangeEvent(mNativeWebContentsAndroid, rotationDegrees);
+        WebContentsImplJni.get().sendOrientationChangeEvent(
+                mNativeWebContentsAndroid, rotationDegrees);
     }
 
     @Override
     public void onDIPScaleChanged(float dipScale) {
         if (mNativeWebContentsAndroid == 0) return;
         mRenderCoordinates.setDeviceScaleFactor(dipScale);
-        nativeOnScaleFactorChanged(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().onScaleFactorChanged(mNativeWebContentsAndroid);
     }
 
+    @Override
     public void setFocus(boolean hasFocus) {
         if (mNativeWebContentsAndroid == 0) return;
-        nativeSetFocus(mNativeWebContentsAndroid, hasFocus);
+        WebContentsImplJni.get().setFocus(mNativeWebContentsAndroid, hasFocus);
     }
 
     @Override
     public void setDisplayCutoutSafeArea(Rect insets) {
         if (mNativeWebContentsAndroid == 0) return;
-        nativeSetDisplayCutoutSafeArea(
+        WebContentsImplJni.get().setDisplayCutoutSafeArea(
                 mNativeWebContentsAndroid, insets.top, insets.left, insets.bottom, insets.right);
     }
 
     @Override
     public void notifyRendererPreferenceUpdate() {
         if (mNativeWebContentsAndroid == 0) return;
-        nativeNotifyRendererPreferenceUpdate(mNativeWebContentsAndroid);
+        WebContentsImplJni.get().notifyRendererPreferenceUpdate(mNativeWebContentsAndroid);
+    }
+
+    @Override
+    public void notifyBrowserControlsHeightChanged() {
+        if (mNativeWebContentsAndroid == 0) return;
+        WebContentsImplJni.get().notifyBrowserControlsHeightChanged(mNativeWebContentsAndroid);
     }
 
     private void checkNotDestroyed() {
@@ -951,89 +1072,93 @@ public class WebContentsImpl implements WebContents, RenderFrameHostDelegate, Wi
                 "Native WebContents already destroyed", mNativeDestroyThrowable);
     }
 
-    // This is static to avoid exposing a public destroy method on the native side of this class.
-    private static native void nativeDestroyWebContents(long webContentsAndroidPtr);
+    @NativeMethods
+    interface Natives {
+        // This is static to avoid exposing a public destroy method on the native side of this
+        // class.
+        void destroyWebContents(long webContentsAndroidPtr);
 
-    private static native WebContents nativeFromNativePtr(long webContentsAndroidPtr);
-
-    private native void nativeClearNativeReference(long nativeWebContentsAndroid);
-
-    private native WindowAndroid nativeGetTopLevelNativeWindow(long nativeWebContentsAndroid);
-    private native void nativeSetTopLevelNativeWindow(
-            long nativeWebContentsAndroid, WindowAndroid windowAndroid);
-    private native RenderFrameHost nativeGetMainFrame(long nativeWebContentsAndroid);
-    private native RenderFrameHost nativeGetFocusedFrame(long nativeWebContentsAndroid);
-    private native RenderWidgetHostViewImpl nativeGetRenderWidgetHostView(
-            long nativeWebContentsAndroid);
-    private native String nativeGetTitle(long nativeWebContentsAndroid);
-    private native String nativeGetVisibleURL(long nativeWebContentsAndroid);
-    private native String nativeGetEncoding(long nativeWebContentsAndroid);
-    private native boolean nativeIsLoading(long nativeWebContentsAndroid);
-    private native boolean nativeIsLoadingToDifferentDocument(long nativeWebContentsAndroid);
-    private native void nativeStop(long nativeWebContentsAndroid);
-    private native void nativeCut(long nativeWebContentsAndroid);
-    private native void nativeCopy(long nativeWebContentsAndroid);
-    private native void nativePaste(long nativeWebContentsAndroid);
-    private native void nativePasteAsPlainText(long nativeWebContentsAndroid);
-    private native void nativeReplace(long nativeWebContentsAndroid, String word);
-    private native void nativeSelectAll(long nativeWebContentsAndroid);
-    private native void nativeCollapseSelection(long nativeWebContentsAndroid);
-    private native void nativeOnHide(long nativeWebContentsAndroid);
-    private native void nativeOnShow(long nativeWebContentsAndroid);
-    private native void nativeSetImportance(long nativeWebContentsAndroid, int importance);
-    private native void nativeSuspendAllMediaPlayers(long nativeWebContentsAndroid);
-    private native void nativeSetAudioMuted(long nativeWebContentsAndroid, boolean mute);
-    private native boolean nativeIsShowingInterstitialPage(long nativeWebContentsAndroid);
-    private native boolean nativeFocusLocationBarByDefault(long nativeWebContentsAndroid);
-    private native void nativeExitFullscreen(long nativeWebContentsAndroid);
-    private native void nativeScrollFocusedEditableNodeIntoView(long nativeWebContentsAndroid);
-    private native void nativeSelectWordAroundCaret(long nativeWebContentsAndroid);
-    private native void nativeAdjustSelectionByCharacterOffset(long nativeWebContentsAndroid,
-            int startAdjust, int endAdjust, boolean showSelectionMenu);
-    private native String nativeGetLastCommittedURL(long nativeWebContentsAndroid);
-    private native boolean nativeIsIncognito(long nativeWebContentsAndroid);
-    private native void nativeResumeLoadingCreatedWebContents(long nativeWebContentsAndroid);
-    private native void nativeEvaluateJavaScript(long nativeWebContentsAndroid,
-            String script, JavaScriptCallback callback);
-    private native void nativeEvaluateJavaScriptForTests(long nativeWebContentsAndroid,
-            String script, JavaScriptCallback callback);
-    private native void nativeAddMessageToDevToolsConsole(
-            long nativeWebContentsAndroid, int level, String message);
-    private native void nativePostMessageToMainFrame(long nativeWebContentsAndroid, String message,
-            String sourceOrigin, String targetOrigin, MessagePort[] ports);
-    private native boolean nativeHasAccessedInitialDocument(
-            long nativeWebContentsAndroid);
-    private native int nativeGetThemeColor(long nativeWebContentsAndroid);
-    private native int nativeGetLoadProgress(long nativeWebContentsAndroid);
-    private native void nativeRequestSmartClipExtract(long nativeWebContentsAndroid,
-            SmartClipCallback callback, int x, int y, int width, int height);
-    private native void nativeRequestAccessibilitySnapshot(
-            long nativeWebContentsAndroid, AccessibilitySnapshotCallback callback);
-    private native void nativeSetOverscrollRefreshHandler(
-            long nativeWebContentsAndroid, OverscrollRefreshHandler nativeOverscrollRefreshHandler);
-    private native void nativeSetSpatialNavigationDisabled(
-            long nativeWebContentsAndroid, boolean disabled);
-    private native void nativeReloadLoFiImages(long nativeWebContentsAndroid);
-    private native int nativeDownloadImage(long nativeWebContentsAndroid,
-            String url, boolean isFavicon, int maxBitmapSize,
-            boolean bypassCache, ImageDownloadCallback callback);
-    private native void nativeSetHasPersistentVideo(long nativeWebContentsAndroid, boolean value);
-    private native boolean nativeHasActiveEffectivelyFullscreenVideo(long nativeWebContentsAndroid);
-    private native boolean nativeIsPictureInPictureAllowedForFullscreenVideo(
-            long nativeWebContentsAndroid);
-    private native Rect nativeGetFullscreenVideoSize(long nativeWebContentsAndroid);
-    private native void nativeSetSize(long nativeWebContentsAndroid, int width, int height);
-    private native int nativeGetWidth(long nativeWebContentsAndroid);
-    private native int nativeGetHeight(long nativeWebContentsAndroid);
-    private native EventForwarder nativeGetOrCreateEventForwarder(long nativeWebContentsAndroid);
-    private native void nativeSetViewAndroidDelegate(
-            long nativeWebContentsAndroid, ViewAndroidDelegate viewDelegate);
-    private native void nativeSendOrientationChangeEvent(
-            long nativeWebContentsAndroid, int orientation);
-    private native void nativeOnScaleFactorChanged(long nativeWebContentsAndroid);
-    private native void nativeSetFocus(long nativeWebContentsAndroid, boolean focused);
-    private native void nativeSetDisplayCutoutSafeArea(
-            long nativeWebContentsAndroid, int top, int left, int bottom, int right);
-    private native void nativeNotifyRendererPreferenceUpdate(long nativeWebContentsAndroid);
-    private native boolean nativeIsBeingDestroyed(long nativeWebContentsAndroid);
+        WebContents fromNativePtr(long webContentsAndroidPtr);
+        void clearNativeReference(long nativeWebContentsAndroid);
+        WindowAndroid getTopLevelNativeWindow(long nativeWebContentsAndroid);
+        void setTopLevelNativeWindow(long nativeWebContentsAndroid, WindowAndroid windowAndroid);
+        RenderFrameHost getMainFrame(long nativeWebContentsAndroid);
+        RenderFrameHost getFocusedFrame(long nativeWebContentsAndroid);
+        RenderFrameHost getRenderFrameHostFromId(
+                long nativeWebContentsAndroid, int renderProcessId, int renderFrameId);
+        RenderFrameHost[] getAllRenderFrameHosts(long nativeWebContentsAndroid);
+        RenderWidgetHostViewImpl getRenderWidgetHostView(long nativeWebContentsAndroid);
+        WebContentsImpl[] getInnerWebContents(long nativeWebContentsAndroid);
+        @Visibility
+        int getVisibility(long nativeWebContentsAndroid);
+        String getTitle(long nativeWebContentsAndroid);
+        GURL getVisibleURL(long nativeWebContentsAndroid);
+        String getEncoding(long nativeWebContentsAndroid);
+        boolean isLoading(long nativeWebContentsAndroid);
+        boolean shouldShowLoadingUI(long nativeWebContentsAndroid);
+        void dispatchBeforeUnload(long nativeWebContentsAndroid, boolean autoCancel);
+        void stop(long nativeWebContentsAndroid);
+        void cut(long nativeWebContentsAndroid);
+        void copy(long nativeWebContentsAndroid);
+        void paste(long nativeWebContentsAndroid);
+        void pasteAsPlainText(long nativeWebContentsAndroid);
+        void replace(long nativeWebContentsAndroid, String word);
+        void selectAll(long nativeWebContentsAndroid);
+        void collapseSelection(long nativeWebContentsAndroid);
+        void onHide(long nativeWebContentsAndroid);
+        void onShow(long nativeWebContentsAndroid);
+        void setImportance(long nativeWebContentsAndroid, int importance);
+        void suspendAllMediaPlayers(long nativeWebContentsAndroid);
+        void setAudioMuted(long nativeWebContentsAndroid, boolean mute);
+        boolean focusLocationBarByDefault(long nativeWebContentsAndroid);
+        boolean isFullscreenForCurrentTab(long nativeWebContentsAndroid);
+        void exitFullscreen(long nativeWebContentsAndroid);
+        void scrollFocusedEditableNodeIntoView(long nativeWebContentsAndroid);
+        void selectAroundCaret(long nativeWebContentsAndroid, int granularity,
+                boolean shouldShowHandle, boolean shouldShowContextMenu);
+        void adjustSelectionByCharacterOffset(long nativeWebContentsAndroid, int startAdjust,
+                int endAdjust, boolean showSelectionMenu);
+        GURL getLastCommittedURL(long nativeWebContentsAndroid);
+        boolean isIncognito(long nativeWebContentsAndroid);
+        void resumeLoadingCreatedWebContents(long nativeWebContentsAndroid);
+        void evaluateJavaScript(
+                long nativeWebContentsAndroid, String script, JavaScriptCallback callback);
+        void evaluateJavaScriptForTests(
+                long nativeWebContentsAndroid, String script, JavaScriptCallback callback);
+        void addMessageToDevToolsConsole(long nativeWebContentsAndroid, int level, String message);
+        void postMessageToMainFrame(long nativeWebContentsAndroid, MessagePayload payload,
+                String sourceOrigin, String targetOrigin, MessagePort[] ports);
+        boolean hasAccessedInitialDocument(long nativeWebContentsAndroid);
+        int getThemeColor(long nativeWebContentsAndroid);
+        float getLoadProgress(long nativeWebContentsAndroid);
+        void requestSmartClipExtract(long nativeWebContentsAndroid, SmartClipCallback callback,
+                int x, int y, int width, int height);
+        void requestAccessibilitySnapshot(long nativeWebContentsAndroid,
+                ViewStructure viewStructureRoot, ViewStructureBuilder viewStructureBuilder,
+                Runnable doneCallback);
+        void setOverscrollRefreshHandler(long nativeWebContentsAndroid,
+                OverscrollRefreshHandler nativeOverscrollRefreshHandler);
+        void setSpatialNavigationDisabled(long nativeWebContentsAndroid, boolean disabled);
+        void setStylusHandwritingEnabled(long nativeWebContentsAndroid, boolean enabled);
+        int downloadImage(long nativeWebContentsAndroid, GURL url, boolean isFavicon,
+                int maxBitmapSize, boolean bypassCache, ImageDownloadCallback callback);
+        void setHasPersistentVideo(long nativeWebContentsAndroid, boolean value);
+        boolean hasActiveEffectivelyFullscreenVideo(long nativeWebContentsAndroid);
+        boolean isPictureInPictureAllowedForFullscreenVideo(long nativeWebContentsAndroid);
+        Rect getFullscreenVideoSize(long nativeWebContentsAndroid);
+        void setSize(long nativeWebContentsAndroid, int width, int height);
+        int getWidth(long nativeWebContentsAndroid);
+        int getHeight(long nativeWebContentsAndroid);
+        EventForwarder getOrCreateEventForwarder(long nativeWebContentsAndroid);
+        void setViewAndroidDelegate(
+                long nativeWebContentsAndroid, ViewAndroidDelegate viewDelegate);
+        void sendOrientationChangeEvent(long nativeWebContentsAndroid, int orientation);
+        void onScaleFactorChanged(long nativeWebContentsAndroid);
+        void setFocus(long nativeWebContentsAndroid, boolean focused);
+        void setDisplayCutoutSafeArea(
+                long nativeWebContentsAndroid, int top, int left, int bottom, int right);
+        void notifyRendererPreferenceUpdate(long nativeWebContentsAndroid);
+        void notifyBrowserControlsHeightChanged(long nativeWebContentsAndroid);
+        boolean isBeingDestroyed(long nativeWebContentsAndroid);
+    }
 }

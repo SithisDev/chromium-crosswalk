@@ -1,18 +1,20 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/byte_stream.h"
 
+#include <memory>
 #include <set>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
 #include "base/location.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/time/time.h"
 
 namespace content {
 namespace {
@@ -31,14 +33,15 @@ class ByteStreamReaderImpl;
 struct LifetimeFlag : public base::RefCountedThreadSafe<LifetimeFlag> {
  public:
   LifetimeFlag() : is_alive(true) { }
+
+  LifetimeFlag(const LifetimeFlag&) = delete;
+  LifetimeFlag& operator=(const LifetimeFlag&) = delete;
+
   bool is_alive;
 
  protected:
   friend class base::RefCountedThreadSafe<LifetimeFlag>;
-  virtual ~LifetimeFlag() { }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(LifetimeFlag);
+  virtual ~LifetimeFlag() {}
 };
 
 // For both ByteStreamWriterImpl and ByteStreamReaderImpl, Construction and
@@ -60,7 +63,7 @@ class ByteStreamWriterImpl : public ByteStreamWriter {
   bool Write(scoped_refptr<net::IOBuffer> buffer, size_t byte_count) override;
   void Flush() override;
   void Close(int status) override;
-  void RegisterCallback(const base::RepeatingClosure& source_callback) override;
+  void RegisterCallback(base::RepeatingClosure source_callback) override;
   size_t GetTotalBufferedBytes() const override;
 
   // PostTask target from |ByteStreamReaderImpl::MaybeUpdateInput|.
@@ -100,7 +103,7 @@ class ByteStreamWriterImpl : public ByteStreamWriter {
 
   // Only valid to access on peer_task_runner_ if
   // |*peer_lifetime_flag_ == true|
-  ByteStreamReaderImpl* peer_;
+  raw_ptr<ByteStreamReaderImpl> peer_;
 };
 
 class ByteStreamReaderImpl : public ByteStreamReader {
@@ -118,7 +121,7 @@ class ByteStreamReaderImpl : public ByteStreamReader {
   // Overridden from ByteStreamReader.
   StreamState Read(scoped_refptr<net::IOBuffer>* data, size_t* length) override;
   int GetStatus() const override;
-  void RegisterCallback(const base::RepeatingClosure& sink_callback) override;
+  void RegisterCallback(base::RepeatingClosure sink_callback) override;
 
   // PostTask target from |ByteStreamWriterImpl::Write| and
   // |ByteStreamWriterImpl::Close|.
@@ -173,7 +176,7 @@ class ByteStreamReaderImpl : public ByteStreamReader {
 
   // Only valid to access on peer_task_runner_ if
   // |*peer_lifetime_flag_ == true|
-  ByteStreamWriterImpl* peer_;
+  raw_ptr<ByteStreamWriterImpl> peer_;
 };
 
 ByteStreamWriterImpl::ByteStreamWriterImpl(
@@ -244,9 +247,9 @@ void ByteStreamWriterImpl::Close(int status) {
 }
 
 void ByteStreamWriterImpl::RegisterCallback(
-    const base::Closure& source_callback) {
+    base::RepeatingClosure source_callback) {
   DCHECK(my_task_runner_->RunsTasksInCurrentSequence());
-  space_available_callback_ = source_callback;
+  space_available_callback_ = std::move(source_callback);
 }
 
 size_t ByteStreamWriterImpl::GetTotalBufferedBytes() const {
@@ -290,7 +293,7 @@ void ByteStreamWriterImpl::PostToPeer(bool complete, int status) {
   std::unique_ptr<ContentVector> transfer_buffer;
   size_t buffer_size = 0;
   if (0 != input_contents_size_) {
-    transfer_buffer.reset(new ContentVector);
+    transfer_buffer = std::make_unique<ContentVector>();
     transfer_buffer->swap(input_contents_);
     buffer_size = input_contents_size_;
     output_size_used_ += input_contents_size_;
@@ -361,10 +364,10 @@ int ByteStreamReaderImpl::GetStatus() const {
 }
 
 void ByteStreamReaderImpl::RegisterCallback(
-    const base::Closure& sink_callback) {
+    base::RepeatingClosure sink_callback) {
   DCHECK(my_task_runner_->RunsTasksInCurrentSequence());
 
-  data_available_callback_ = sink_callback;
+  data_available_callback_ = std::move(sink_callback);
 }
 
 // static

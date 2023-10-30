@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/shortcuts_backend.h"
 
@@ -34,7 +35,6 @@ class ShortcutsProvider : public AutocompleteProvider,
   friend class ClassifyTest;
   friend class ShortcutsProviderExtensionTest;
   friend class ShortcutsProviderTest;
-  FRIEND_TEST_ALL_PREFIXES(ShortcutsProviderTest, CalculateScore);
 
   ~ShortcutsProvider() override;
 
@@ -53,23 +53,32 @@ class ShortcutsProvider : public AutocompleteProvider,
       const ShortcutsDatabase::Shortcut& shortcut,
       int relevance,
       const AutocompleteInput& input,
-      const base::string16& fixed_up_input_text,
-      const base::string16 term_string);
+      const std::u16string& fixed_up_input_text,
+      const std::u16string term_string);
 
   // Returns iterator to first item in |shortcuts_map_| matching |keyword|.
   // Returns shortcuts_map_.end() if there are no matches.
   ShortcutsBackend::ShortcutMap::const_iterator FindFirstMatch(
-      const base::string16& keyword,
+      const std::u16string& keyword,
       ShortcutsBackend* backend);
 
-  int CalculateScore(const base::string16& terms,
+  int CalculateScore(const std::u16string& terms,
                      const ShortcutsDatabase::Shortcut& shortcut,
                      int max_relevance);
+
+  // Like `CalculateScore`, but aggregates the factors from a vector of
+  // `shortcuts`. I.e., considers the shortest shortcut when computing fraction
+  // typed, considers the most recent shortcut when considering last visit, and
+  // considers the sum of visit counts.
+  int CalculateAggregateScore(
+      const std::u16string& terms,
+      const std::vector<const ShortcutsDatabase::Shortcut*>& shortcuts,
+      int max_relevance);
 
   // The default max relevance unless overridden by a field trial.
   static const int kShortcutsProviderDefaultMaxRelevance;
 
-  AutocompleteProviderClient* client_;
+  raw_ptr<AutocompleteProviderClient> client_;
   bool initialized_;
 };
 

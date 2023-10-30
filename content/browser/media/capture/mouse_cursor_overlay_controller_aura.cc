@@ -1,32 +1,24 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/media/capture/mouse_cursor_overlay_controller.h"
 
+#include "base/memory/raw_ptr.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/cursor/cursor.h"
-#include "ui/base/cursor/cursor_loader.h"
+#include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/events/event.h"
 #include "ui/events/event_handler.h"
+#include "ui/wm/core/cursor_lookup.h"
 #include "ui/wm/public/activation_client.h"
 
 namespace content {
 
-namespace {
-
-ui::Cursor CreateDefaultPointerCursor() {
-  ui::Cursor cursor(ui::CursorType::kPointer);
-  std::unique_ptr<ui::CursorLoader> loader(ui::CursorLoader::Create());
-  loader->SetPlatformCursor(&cursor);
-  return cursor;
-}
-
-}  // namespace
-
-class MouseCursorOverlayController::Observer : public ui::EventHandler,
-                                               public aura::WindowObserver {
+class MouseCursorOverlayController::Observer final
+    : public ui::EventHandler,
+      public aura::WindowObserver {
  public:
   explicit Observer(MouseCursorOverlayController* controller,
                     aura::Window* window)
@@ -37,6 +29,9 @@ class MouseCursorOverlayController::Observer : public ui::EventHandler,
     window_->AddObserver(this);
     window_->AddPreTargetHandler(this);
   }
+
+  Observer(const Observer&) = delete;
+  Observer& operator=(const Observer&) = delete;
 
   ~Observer() final {
     if (window_) {
@@ -120,14 +115,17 @@ class MouseCursorOverlayController::Observer : public ui::EventHandler,
     window_ = nullptr;
   }
 
-  MouseCursorOverlayController* const controller_;
-  aura::Window* window_;
-
-  DISALLOW_COPY_AND_ASSIGN(Observer);
+  const raw_ptr<MouseCursorOverlayController> controller_;
+  raw_ptr<aura::Window> window_;
 };
 
 MouseCursorOverlayController::MouseCursorOverlayController()
-    : mouse_move_behavior_atomic_(kNotMoving) {
+    : mouse_activity_ended_timer_(
+          FROM_HERE,
+          kIdleTimeout,
+          base::BindRepeating(&MouseCursorOverlayController::OnMouseHasGoneIdle,
+                              base::Unretained(this))),
+      mouse_move_behavior_atomic_(kNotMoving) {
   // MouseCursorOverlayController can be constructed on any thread, but
   // thereafter must be used according to class-level comments.
   DETACH_FROM_SEQUENCE(ui_sequence_checker_);
@@ -155,14 +153,13 @@ gfx::NativeCursor MouseCursorOverlayController::GetCurrentCursorOrDefault()
 
   if (auto* window = Observer::GetTargetWindow(observer_)) {
     if (auto* host = window->GetHost()) {
-      const gfx::NativeCursor cursor = host->last_cursor();
-      if (cursor != ui::CursorType::kNull) {
+      gfx::NativeCursor cursor = host->last_cursor();
+      if (cursor != ui::mojom::CursorType::kNull)
         return cursor;
-      }
     }
   }
 
-  return CreateDefaultPointerCursor();
+  return ui::mojom::CursorType::kPointer;
 }
 
 gfx::RectF MouseCursorOverlayController::ComputeRelativeBoundsForOverlay(
@@ -170,36 +167,31 @@ gfx::RectF MouseCursorOverlayController::ComputeRelativeBoundsForOverlay(
     const gfx::PointF& location) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(ui_sequence_checker_);
 
-  if (auto* window = Observer::GetTargetWindow(observer_)) {
-    const gfx::Size window_size = window->bounds().size();
-    if (!window_size.IsEmpty()) {
-      if (auto* root_window = window->GetRootWindow()) {
-        // Compute the cursor size in terms of DIP coordinates.
-        const SkBitmap& bitmap = cursor.GetBitmap();
-        const float scale_factor = cursor.device_scale_factor();
-        const gfx::SizeF size =
-            scale_factor > 0.0f
-                ? gfx::ScaleSize(gfx::SizeF(bitmap.width(), bitmap.height()),
-                                 1.0f / scale_factor)
-                : gfx::SizeF(bitmap.width(), bitmap.height());
+  auto* window = Observer::GetTargetWindow(observer_);
+  if (!window)
+    return gfx::RectF();
 
-        // Compute the hotspot in terms of DIP coordinates.
-        const gfx::PointF hotspot =
-            scale_factor > 0.0f
-                ? gfx::ScalePoint(gfx::PointF(cursor.GetHotspot()),
-                                  1.0f / scale_factor)
-                : gfx::PointF(cursor.GetHotspot());
+  const gfx::Size& window_size = window->bounds().size();
+  if (window_size.IsEmpty() || !window->GetRootWindow())
+    return gfx::RectF();
 
-        // Finally, put it all together: Scale the absolute bounds of the
-        // overlay by the window size to produce relative coordinates.
-        return gfx::ScaleRect(
-            gfx::RectF(location - hotspot.OffsetFromOrigin(), size),
-            1.0f / window_size.width(), 1.0f / window_size.height());
-      }
-    }
-  }
+  const SkBitmap& bitmap = wm::GetCursorBitmap(cursor);
+  const float scale_factor = cursor.image_scale_factor();
+  DCHECK_GT(scale_factor, 0.0f);
 
-  return gfx::RectF();
+  // Compute the cursor size in terms of DIP coordinates.
+  const gfx::SizeF size = gfx::ScaleSize(
+      gfx::SizeF(bitmap.width(), bitmap.height()), 1.0f / scale_factor);
+
+  // Compute the hotspot in terms of DIP coordinates.
+  const gfx::PointF hotspot = gfx::ScalePoint(
+      gfx::PointF(wm::GetCursorHotspot(cursor)), 1.0f / scale_factor);
+
+  // Finally, put it all together: Scale the absolute bounds of the
+  // overlay by the window size to produce relative coordinates.
+  return gfx::ScaleRect(gfx::RectF(location - hotspot.OffsetFromOrigin(), size),
+                        1.0f / window_size.width(),
+                        1.0f / window_size.height());
 }
 
 void MouseCursorOverlayController::DisconnectFromToolkitForTesting() {
@@ -207,19 +199,15 @@ void MouseCursorOverlayController::DisconnectFromToolkitForTesting() {
 
   observer_->StopTracking();
 
-  // The default cursor is ui::CursorType::kNone. Make it kPointer
-  // so the tests have a non-empty cursor bitmap to work with.
-  auto* const window = Observer::GetTargetWindow(observer_);
-  CHECK(window);
-  auto* const host = window->GetHost();
-  CHECK(host);
-  host->SetCursor(CreateDefaultPointerCursor());
+  // Note: Not overriding the mouse cursor since the default is already
+  // ui::mojom::CursorType::kPointer, which provides the tests a bitmap they can
+  // work with.
 }
 
 // static
 SkBitmap MouseCursorOverlayController::GetCursorImage(
     const gfx::NativeCursor& cursor) {
-  return cursor.GetBitmap();
+  return wm::GetCursorBitmap(cursor);
 }
 
 }  // namespace content

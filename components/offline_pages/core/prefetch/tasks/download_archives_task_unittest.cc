@@ -1,16 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/offline_pages/core/prefetch/tasks/download_archives_task.h"
 
-#include <algorithm>
 #include <set>
 
 #include "base/guid.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/ranges/algorithm.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_feature_list.h"
+#include "base/time/time.h"
 #include "components/offline_pages/core/offline_page_feature.h"
 #include "components/offline_pages/core/prefetch/prefetch_prefs.h"
 #include "components/offline_pages/core/prefetch/store/prefetch_downloader_quota.h"
@@ -32,10 +32,8 @@ const int64_t kLargeArchiveSize =
 const PrefetchItem* FindPrefetchItemByOfflineId(
     const std::set<PrefetchItem>& items,
     int64_t offline_id) {
-  auto found_it = std::find_if(items.begin(), items.end(),
-                               [&offline_id](const PrefetchItem& i) -> bool {
-                                 return i.offline_id == offline_id;
-                               });
+  auto found_it =
+      base::ranges::find(items, offline_id, &PrefetchItem::offline_id);
   if (found_it != items.end())
     return &(*found_it);
   return nullptr;
@@ -103,8 +101,11 @@ TEST_F(DownloadArchivesTaskTest, NoArchivesToDownload) {
 }
 
 TEST_F(DownloadArchivesTaskTest, SingleArchiveToDownload) {
+  constexpr auto kFreshnessDelta = base::Milliseconds(123);
+
   int64_t dummy_item_id = InsertDummyItem();
   int64_t download_item_id = InsertItemToDownload(kLargeArchiveSize);
+  FastForwardBy(kFreshnessDelta);
 
   std::set<PrefetchItem> items_before_run;
   EXPECT_EQ(2U, store_util()->GetAllItems(&items_before_run));
@@ -133,10 +134,8 @@ TEST_F(DownloadArchivesTaskTest, SingleArchiveToDownload) {
   ASSERT_TRUE(download_item);
   EXPECT_EQ(PrefetchItemState::DOWNLOADING, download_item->state);
   EXPECT_EQ(1, download_item->download_initiation_attempts);
-  // These times are created using base::Time::Now() in short distance from each
-  // other, therefore putting *_LE was considered too.
-  EXPECT_LT(download_item_before->freshness_time,
-            download_item->freshness_time);
+  EXPECT_EQ(kFreshnessDelta, download_item->freshness_time -
+                                 download_item_before->freshness_time);
 
   const TestPrefetchDownloader::RequestMap& requested_downloads =
       prefetch_downloader()->requested_downloads();
@@ -203,6 +202,7 @@ TEST_F(DownloadArchivesTaskTest, MultipleLargeArchivesToDownload) {
   int64_t dummy_item_id = InsertDummyItem();
   // download_item_1 is expected to be fresher, therefore we create it second.
   int64_t download_item_id_2 = InsertItemToDownload(kLargeArchiveSize);
+  FastForwardBy(base::Milliseconds(1));
   int64_t download_item_id_1 = InsertItemToDownload(kLargeArchiveSize);
 
   std::set<PrefetchItem> items_before_run;
@@ -252,8 +252,12 @@ TEST_F(DownloadArchivesTaskTest, TooManyArchivesToDownload) {
   const int total_items = DownloadArchivesTask::kMaxConcurrentDownloads + 2;
   // Create more than we allow to download in parallel and put then in the
   // |item_ids| in front.
-  for (int i = 0; i < total_items; ++i)
+  for (int i = 0; i < total_items; ++i) {
     item_ids.insert(item_ids.begin(), InsertItemToDownload(kSmallArchiveSize));
+    // Add some time in between them so that the download order is deterministic
+    // and the checks further down work.
+    FastForwardBy(base::Milliseconds(1));
+  }
 
   std::set<PrefetchItem> items_before_run;
   EXPECT_EQ(static_cast<size_t>(total_items),
@@ -317,8 +321,12 @@ TEST_F(DownloadArchivesTaskTest,
   // and put them in the fresher |item_ids| in front.
   const size_t total_items = limitless_max_concurrent_downloads + 1;
   std::vector<int64_t> item_ids;
-  for (size_t i = 0; i < total_items; ++i)
+  for (size_t i = 0; i < total_items; ++i) {
     item_ids.insert(item_ids.begin(), InsertItemToDownload(kLargeArchiveSize));
+    // Add some time in between them so that the download order is deterministic
+    // and the checks further down work.
+    FastForwardBy(base::Milliseconds(1));
+  }
 
   std::set<PrefetchItem> items_before_run;
   EXPECT_EQ(total_items, store_util()->GetAllItems(&items_before_run));

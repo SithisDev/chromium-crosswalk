@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,52 +9,54 @@
 #include <set>
 #include <string>
 
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "base/strings/string_piece.h"
+#include "base/synchronization/lock.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_request_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
 
 // Helper class to intercept URLLoaderFactory calls for tests.
 // This intercepts:
-//   -frame requests (which start from the browser, with PlzNavigate)
-//   -subresource requests from pages and dedicad workers and shared workers.
-//     -at ResourceMessageFilter for non network-service code path
-//     -by sending renderer an intermediate URLLoaderFactory for network-service
-//      code path, as that normally routes directly to the network process
+//   -frame requests (which start from the browser)
+//   -subresource requests from pages, dedicated workers, and shared workers
+//     -by sending the renderer an intermediate URLLoaderFactory
 //   -subresource requests from service workers and requests of non-installed
 //    service worker scripts
-//     -at ResourceMessageFilter for non network-service code path
-//     -at EmbeddedWorkerInstance for network-service code path.
+//     -at EmbeddedWorkerInstance
 //   -requests by the browser
-//
 //   -http(s)://mock.failed.request/foo URLs internally, copying the behavior
 //    of net::URLRequestFailedJob
 //
 // Prefer not to use this class. In order of ease of use & simplicity:
 //  -if you need to serve static data, use net::test::EmbeddedTestServer and
-//   serve data from the source tree (e.g. in content/test/data)
+//   serve data from the source tree (e.g. in content/test/data).
 //  -if you need to control the response data at runtime, then use
-//   net::test_server::EmbeddedTestServer::RegisterRequestHandler
+//   net::test_server::EmbeddedTestServer::RegisterRequestHandler.
 //  -if you need to delay when the server sends the response, use
-//   net::test_server::ControllableHttpResponse
+//   net::test_server::ControllableHttpResponse.
 //  -otherwise, if you need full control over the net::Error and/or want to
-//   inspect and/or modify the C++ structs used by URLoader interface, then use
-//   this helper class
+//   inspect and/or modify the C++ structs used by URLLoader interface, then use
+//   this helper class.
 //
 // Notes:
 //  -the callback is called on the UI or IO threads depending on the factory
 //   that was hooked
 //    -this is done to avoid changing message order
-//  -intercepting resource requests for subresources when the network service is
-//   enabled changes message order by definition (since they would normally go
-//   directly from renderer->network process, but now they're routed through the
-//   browser).
+//  -intercepting resource requests for subresources changes message order by
+//   definition (since they would normally go directly from renderer->network
+//   service, but now they're routed through the browser).
 class URLLoaderInterceptor {
  public:
   struct RequestParams {
@@ -66,18 +68,18 @@ class URLLoaderInterceptor {
     // browser process).
     int process_id;
     // The following are the parameters to CreateLoaderAndStart.
-    network::mojom::URLLoaderRequest request;
-    int32_t routing_id;
+    mojo::PendingReceiver<network::mojom::URLLoader> receiver;
     int32_t request_id;
     uint32_t options;
     network::ResourceRequest url_request;
-    network::mojom::URLLoaderClientPtr client;
+    mojo::Remote<network::mojom::URLLoaderClient> client;
     net::MutableNetworkTrafficAnnotationTag traffic_annotation;
   };
   // Function signature for intercept method.
   // Return true if the request was intercepted. Otherwise this class will
   // forward the request to the original URLLoaderFactory.
-  using InterceptCallback = base::Callback<bool(RequestParams* params)>;
+  using InterceptCallback =
+      base::RepeatingCallback<bool(RequestParams* params)>;
 
   // Function signature for a loading completion method.
   // This class will listen on loading completion responses from the network,
@@ -92,21 +94,37 @@ class URLLoaderInterceptor {
   // and instead |ready_callback| is called after the interceptor is installed.
   // If provided, |completion_status_callback| is called when the load
   // completes.
-  explicit URLLoaderInterceptor(const InterceptCallback& callback);
-  URLLoaderInterceptor(
-      const InterceptCallback& callback,
-      const URLLoaderCompletionStatusCallback& completion_status_callback,
-      base::OnceClosure ready_callback);
+  //
+  // In order to hook up `completion_status_callback`, the interceptor wraps all
+  // requests that the `intercept_callback` does not intercept, so destroying
+  // the URLLoaderInterceptor aborts all non-intercepted requests.
+  explicit URLLoaderInterceptor(
+      InterceptCallback intercept_callback,
+      const URLLoaderCompletionStatusCallback& completion_status_callback = {},
+      base::OnceClosure ready_callback = {});
+
+  URLLoaderInterceptor(const URLLoaderInterceptor&) = delete;
+  URLLoaderInterceptor& operator=(const URLLoaderInterceptor&) = delete;
 
   ~URLLoaderInterceptor();
 
+  // Serves static data, similar to net::test::EmbeddedTestServer, for
+  // cases where you need a static origin, such as tests with origin trials.
+  // Optional callback will notify callers for any accessed urls.
+  static std::unique_ptr<URLLoaderInterceptor> ServeFilesFromDirectoryAtOrigin(
+      const std::string& relative_base_path,
+      const GURL& origin,
+      base::RepeatingCallback<void(const GURL&)> callback = base::DoNothing());
+
   // Helper methods for use when intercepting.
-  // Writes the given response body, header, and SSL Info to |client|.
+  // Writes the given response body, header, and SSL Info to `client`.
+  // If `url` is present, also computes the ParsedHeaders for the response.
   static void WriteResponse(
-      const std::string& headers,
-      const std::string& body,
+      base::StringPiece headers,
+      base::StringPiece body,
       network::mojom::URLLoaderClient* client,
-      base::Optional<net::SSLInfo> ssl_info = base::nullopt);
+      absl::optional<net::SSLInfo> ssl_info = absl::nullopt,
+      absl::optional<GURL> url = absl::nullopt);
 
   // Reads the given path, relative to the root source directory, and writes it
   // to |client|. For headers:
@@ -116,18 +134,21 @@ class URLLoaderInterceptor {
   //   3) otherwise a simple 200 response will be used, with a Content-Type
   //      guessed from the file extension
   // For SSL info, if |ssl_info| is specified, then it is added to the response.
+  // If `url` is present, also computes the ParsedHeaders for the response.
   static void WriteResponse(
       const std::string& relative_path,
       network::mojom::URLLoaderClient* client,
       const std::string* headers = nullptr,
-      base::Optional<net::SSLInfo> ssl_info = base::nullopt);
+      absl::optional<net::SSLInfo> ssl_info = absl::nullopt,
+      absl::optional<GURL> url = absl::nullopt);
 
   // Like above, but uses an absolute file path.
   static void WriteResponse(
       const base::FilePath& file_path,
       network::mojom::URLLoaderClient* client,
       const std::string* headers = nullptr,
-      base::Optional<net::SSLInfo> ssl_info = base::nullopt);
+      absl::optional<net::SSLInfo> ssl_info = absl::nullopt,
+      absl::optional<GURL> url = absl::nullopt);
 
   // Returns an interceptor that (as long as it says alive) will intercept
   // requests to |url| and fail them using the provided |error|.
@@ -138,43 +159,48 @@ class URLLoaderInterceptor {
       net::Error error,
       base::OnceClosure ready_callback = {});
 
+  // Returns the URL of the last request processed by this interceptor.
+  //
+  // Use this function instead of creating a WebContentsObserver to observe
+  // request headers, if you need the last request url sent in the event of
+  // resends or redirects, as the NavigationHandle::GetRequestHeaders() function
+  // only returns the initial request's request headers.
+  const GURL& GetLastRequestURL();
+
+  // Returns the request headers of the last request processed by this
+  // interceptor.
+  //
+  // Use this function instead of creating a WebContentsObserver to observe
+  // request headers, if you need the last request headers sent in the event of
+  // resends or redirects, as the NavigationHandle::GetRequestHeaders() function
+  // only returns the initial request's request headers.
+  const net::HttpRequestHeaders& GetLastRequestHeaders();
+
  private:
   class BrowserProcessWrapper;
   class Interceptor;
   class IOState;
-  class SubresourceWrapper;
+  class RenderProcessHostWrapper;
   class URLLoaderFactoryGetterWrapper;
   class URLLoaderFactoryNavigationWrapper;
 
-  // Used to create a factory for subresources in the network service case.
-  void CreateURLLoaderFactoryForSubresources(
-      network::mojom::URLLoaderFactoryRequest request,
+  // Used to create a factory associated with a specific RenderProcessHost.
+  void CreateURLLoaderFactoryForRenderProcessHost(
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
       int process_id,
-      network::mojom::URLLoaderFactoryPtrInfo original_factory);
+      mojo::PendingRemote<network::mojom::URLLoaderFactory> original_factory);
 
   // Callback on UI thread whenever a
   // StoragePartition::GetURLLoaderFactoryForBrowserProcess is called on an
   // object that doesn't have a test factory set up.
-  network::mojom::URLLoaderFactoryPtr GetURLLoaderFactoryForBrowserProcess(
-      network::mojom::URLLoaderFactoryPtr original_factory);
-
-  // Callback on IO thread whenever a NavigationURLLoaderImpl is loading a frame
-  // request through ResourceDispatcherHost (i.e. when the network service is
-  // disabled).
-  bool BeginNavigationCallback(
-      network::mojom::URLLoaderRequest* request,
-      int32_t routing_id,
-      int32_t request_id,
-      uint32_t options,
-      const network::ResourceRequest& url_request,
-      network::mojom::URLLoaderClientPtr* client,
-      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation);
+  mojo::PendingRemote<network::mojom::URLLoaderFactory>
+  GetURLLoaderFactoryForBrowserProcess(
+      mojo::PendingRemote<network::mojom::URLLoaderFactory> original_factory);
 
   // Callback on UI thread whenever NavigationURLLoaderImpl needs a
-  // URLLoaderFactory with a network::mojom::TrustedURLLoaderHeaderClient or
-  // for a non-network-service scheme.
+  // URLLoaderFactory with a network::mojom::TrustedURLLoaderHeaderClient.
   void InterceptNavigationRequestCallback(
-      network::mojom::URLLoaderFactoryRequest* request);
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory>* receiver);
 
   // Attempts to intercept the given request, returning true if it was
   // intercepted.
@@ -182,6 +208,12 @@ class URLLoaderInterceptor {
 
   // Called on IO thread at initialization and shutdown.
   void InitializeOnIOThread(base::OnceClosure closure);
+
+  // Sets the request URL of the last request processed by this interceptor.
+  void SetLastRequestURL(const GURL& url);
+
+  // Sets the request headers of the last request processed by this interceptor.
+  void SetLastRequestHeaders(const net::HttpRequestHeaders& headers);
 
   bool use_runloop_;
   base::OnceClosure ready_callback_;
@@ -195,7 +227,9 @@ class URLLoaderInterceptor {
   std::set<std::unique_ptr<URLLoaderFactoryNavigationWrapper>>
       navigation_wrappers_;
 
-  DISALLOW_COPY_AND_ASSIGN(URLLoaderInterceptor);
+  base::Lock last_request_lock_;
+  GURL last_request_url_ GUARDED_BY(last_request_lock_);
+  net::HttpRequestHeaders last_request_headers_ GUARDED_BY(last_request_lock_);
 };
 
 }  // namespace content

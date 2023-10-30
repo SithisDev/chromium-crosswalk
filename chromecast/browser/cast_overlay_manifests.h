@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,6 @@ namespace shell {
 // manifest. This allows Cast to extend the capabilities exposed and/or
 // required by content_browser service instances.
 const service_manager::Manifest& GetCastContentBrowserOverlayManifest();
-
-// Returns the manifest Cast amends to Content's content_renderer service
-// manifest. This allows Cast to extend the capabilities exposed and/or
-// required by content_renderer service instances.
-const service_manager::Manifest& GetCastContentRendererOverlayManifest();
 
 // Returns the manifest Cast amends to Content's content_packaged_services
 // service manifest. This allows Cast to extend the set of in- and out-of-

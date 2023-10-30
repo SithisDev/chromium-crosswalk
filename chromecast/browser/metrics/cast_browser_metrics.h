@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <memory>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "chromecast/metrics/cast_metrics_service_client.h"
 
@@ -21,6 +20,10 @@ class CastBrowserMetrics {
  public:
   explicit CastBrowserMetrics(
       std::unique_ptr<CastMetricsServiceClient> metrics_service_client);
+
+  CastBrowserMetrics(const CastBrowserMetrics&) = delete;
+  CastBrowserMetrics& operator=(const CastBrowserMetrics&) = delete;
+
   ~CastBrowserMetrics();
   void Initialize();
   void Finalize();
@@ -28,8 +31,8 @@ class CastBrowserMetrics {
   // Processes all events from shared file. This should be used to consume all
   // events in the file before shutdown. This function is safe to call from any
   // thread.
-  void ProcessExternalEvents(const base::Closure& cb);
-  void CollectFinalMetricsForLog(const base::Closure& done_callback);
+  void ProcessExternalEvents(base::OnceClosure cb);
+  void CollectFinalMetricsForLog(base::OnceClosure done_callback);
 
   metrics::CastMetricsServiceClient* metrics_service_client() const {
     return metrics_service_client_.get();
@@ -38,12 +41,10 @@ class CastBrowserMetrics {
  private:
   std::unique_ptr<CastMetricsServiceClient> metrics_service_client_;
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   ExternalMetrics* external_metrics_ = nullptr;
   ExternalMetrics* platform_metrics_ = nullptr;
-#endif  // defined(OS_LINUX)
-
-  DISALLOW_COPY_AND_ASSIGN(CastBrowserMetrics);
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 };
 
 }  // namespace metrics

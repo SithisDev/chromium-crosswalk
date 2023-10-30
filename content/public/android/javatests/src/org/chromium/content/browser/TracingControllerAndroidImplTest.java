@@ -1,14 +1,12 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser;
 
-import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
-
-import android.os.ConditionVariable;
-import android.support.test.filters.MediumTest;
 import android.util.Pair;
+
+import androidx.test.filters.MediumTest;
 
 import org.hamcrest.CoreMatchers;
 import org.junit.Assert;
@@ -18,9 +16,10 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_shell_apk.ContentShellActivity;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
@@ -28,6 +27,7 @@ import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 import java.io.File;
 import java.io.FileInputStream;
 import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Test suite for TracingControllerAndroidImpl.
@@ -37,13 +37,13 @@ public class TracingControllerAndroidImplTest {
     @Rule
     public ContentShellActivityTestRule mActivityTestRule = new ContentShellActivityTestRule();
 
-    private static final long TIMEOUT_MILLIS = scaleTimeout(30 * 1000);
+    private static final long TIMEOUT_MILLIS = (long) (30 * 1000);
 
     @Test
     @MediumTest
     @Feature({"GPU"})
     @DisableIf.Build(sdk_is_less_than = 21, message = "crbug.com/899894")
-    public void testTraceFileCreation() throws Exception {
+    public void testTraceFileCreation() {
         ContentShellActivity activity = mActivityTestRule.launchContentShellWithUrl("about:blank");
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
 
@@ -73,15 +73,14 @@ public class TracingControllerAndroidImplTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> tracingController.destroy());
     }
 
-    private class TestCallback<T> implements Callback<T> {
+    private class TestCallback<T> extends CallbackHelper implements Callback<T> {
+        public T mResult;
+
         @Override
         public void onResult(T result) {
             mResult = result;
-            mWasCalled.open();
+            notifyCalled();
         }
-
-        public ConditionVariable mWasCalled = new ConditionVariable();
-        public T mResult;
     }
 
     @Test
@@ -99,7 +98,7 @@ public class TracingControllerAndroidImplTest {
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { Assert.assertTrue(tracingController.getKnownCategories(callback)); });
 
-        Assert.assertTrue(callback.mWasCalled.block(TIMEOUT_MILLIS));
+        callback.waitForFirst(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
         Assert.assertThat(Arrays.asList(callback.mResult), CoreMatchers.hasItem("toplevel"));
         TestThreadUtils.runOnUiThreadBlocking(() -> tracingController.destroy());
     }
@@ -120,7 +119,7 @@ public class TracingControllerAndroidImplTest {
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> { Assert.assertTrue(tracingController.getTraceBufferUsage(callback)); });
 
-        Assert.assertTrue(callback.mWasCalled.block(TIMEOUT_MILLIS));
+        callback.waitForFirst(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
         Assert.assertEquals(0f, (double) callback.mResult.first, 0.5f);
         Assert.assertEquals(0, (long) callback.mResult.second);
         TestThreadUtils.runOnUiThreadBlocking(() -> tracingController.destroy());
@@ -140,8 +139,8 @@ public class TracingControllerAndroidImplTest {
         Assert.assertNull(tracingController.getOutputPath());
 
         TestThreadUtils.runOnUiThreadBlocking(() -> {
-            Assert.assertTrue(
-                    tracingController.startTracing(null, true, "*", "record-until-full", true));
+            Assert.assertTrue(tracingController.startTracing(null, true, "*", "record-until-full",
+                    /*compressFile=*/true, /*useProtobuf=*/false));
         });
 
         Assert.assertTrue(tracingController.isTracing());
@@ -151,7 +150,7 @@ public class TracingControllerAndroidImplTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> tracingController.stopTracing(callback));
 
         // Callback should be run once stopped.
-        Assert.assertTrue(callback.mWasCalled.block(TIMEOUT_MILLIS));
+        callback.waitForFirst(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
 
         // Should have written the output file, which should start with the gzip header.
         Assert.assertTrue(file.exists());
@@ -160,6 +159,44 @@ public class TracingControllerAndroidImplTest {
         Assert.assertEquals(2, stream.read(bytes));
         Assert.assertEquals((byte) 0x1f, bytes[0]);
         Assert.assertEquals((byte) 0x8b, bytes[1]);
+        Assert.assertTrue(file.delete());
+        TestThreadUtils.runOnUiThreadBlocking(() -> tracingController.destroy());
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"GPU"})
+    @DisableIf.Build(sdk_is_less_than = 21, message = "crbug.com/899894")
+    public void testProtobufTracing() throws Exception {
+        ContentShellActivity activity = mActivityTestRule.launchContentShellWithUrl("about:blank");
+        mActivityTestRule.waitForActiveShellToBeDoneLoading();
+
+        final TracingControllerAndroidImpl tracingController =
+                new TracingControllerAndroidImpl(activity);
+        Assert.assertFalse(tracingController.isTracing());
+        Assert.assertNull(tracingController.getOutputPath());
+
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            Assert.assertTrue(tracingController.startTracing(null, true, "*", "record-until-full",
+                    /*compressFile=*/false, /*useProtobuf=*/true));
+        });
+
+        Assert.assertTrue(tracingController.isTracing());
+        File file = new File(tracingController.getOutputPath());
+
+        TestCallback<Void> callback = new TestCallback<>();
+        TestThreadUtils.runOnUiThreadBlocking(() -> tracingController.stopTracing(callback));
+
+        // Callback should be run once stopped.
+        callback.waitForFirst(TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+
+        // Should have written the output file, which should start with the
+        // trace packet field descriptor (0x0a).
+        Assert.assertTrue(file.exists());
+        FileInputStream stream = new FileInputStream(file);
+        byte[] bytes = new byte[1];
+        Assert.assertEquals(1, stream.read(bytes));
+        Assert.assertEquals((byte) 0x0a, bytes[0]);
         Assert.assertTrue(file.delete());
         TestThreadUtils.runOnUiThreadBlocking(() -> tracingController.destroy());
     }

@@ -1,14 +1,17 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/host/host_display_client.h"
 
-#if defined(OS_MACOSX)
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+
+#if BUILDFLAG(IS_APPLE)
 #include "ui/accelerated_widget_mac/ca_layer_frame_sink.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 
 #include "components/viz/common/display/use_layered_window.h"
@@ -18,23 +21,20 @@
 
 namespace viz {
 
-HostDisplayClient::HostDisplayClient(gfx::AcceleratedWidget widget)
-    : binding_(this) {
-#if defined(OS_MACOSX) || defined(OS_WIN)
+HostDisplayClient::HostDisplayClient(gfx::AcceleratedWidget widget) {
+#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_WIN)
   widget_ = widget;
 #endif
 }
 
 HostDisplayClient::~HostDisplayClient() = default;
 
-mojom::DisplayClientPtr HostDisplayClient::GetBoundPtr(
+mojo::PendingRemote<mojom::DisplayClient> HostDisplayClient::GetBoundRemote(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  mojom::DisplayClientPtr ptr;
-  binding_.Bind(mojo::MakeRequest(&ptr), task_runner);
-  return ptr;
+  return receiver_.BindNewPipeAndPassRemote(task_runner);
 }
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
 void HostDisplayClient::OnDisplayReceivedCALayerParams(
     const gfx::CALayerParams& ca_layer_params) {
   ui::CALayerFrameSink* ca_layer_frame_sink =
@@ -46,20 +46,22 @@ void HostDisplayClient::OnDisplayReceivedCALayerParams(
 }
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 void HostDisplayClient::CreateLayeredWindowUpdater(
-    mojom::LayeredWindowUpdaterRequest request) {
+    mojo::PendingReceiver<mojom::LayeredWindowUpdater> receiver) {
   if (!NeedsToUseLayerWindow(widget_)) {
     DLOG(ERROR) << "HWND shouldn't be using a layered window";
     return;
   }
 
   layered_window_updater_ =
-      std::make_unique<LayeredWindowUpdaterImpl>(widget_, std::move(request));
+      std::make_unique<LayeredWindowUpdaterImpl>(widget_, std::move(receiver));
 }
 #endif
 
-#if defined(USE_X11)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 void HostDisplayClient::DidCompleteSwapWithNewSize(const gfx::Size& size) {
   NOTIMPLEMENTED();
 }

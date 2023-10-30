@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,11 @@
 #include <memory>
 
 #include "content/child/child_thread_impl.h"
-#include "content/common/content_export.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "third_party/blink/public/common/privacy_preferences.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/public/mojom/service_worker/embedded_worker.mojom.h"
-#include "third_party/blink/public/mojom/service_worker/service_worker_installed_scripts_manager.mojom.h"
-#include "third_party/blink/public/mojom/worker/worker_content_settings_proxy.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_installed_scripts_manager.mojom-forward.h"
+#include "third_party/blink/public/mojom/worker/worker_content_settings_proxy.mojom-forward.h"
 #include "third_party/blink/public/web/web_embedded_worker_start_data.h"
 
 namespace content {
@@ -26,8 +25,8 @@ class ServiceWorkerContextClient;
 // the Mojo connection to the browser breaks first, the instance waits for the
 // service worker to stop and then deletes itself.
 //
-// All methods are called on the main thread.
-class CONTENT_EXPORT EmbeddedWorkerInstanceClientImpl
+// Created and lives on a ThreadPool background thread.
+class EmbeddedWorkerInstanceClientImpl
     : public blink::mojom::EmbeddedWorkerInstanceClient {
  public:
   // Enum for UMA to record when StartWorker is received.
@@ -38,11 +37,20 @@ class CONTENT_EXPORT EmbeddedWorkerInstanceClientImpl
   };
 
   // Creates a new EmbeddedWorkerInstanceClientImpl instance bound to
-  // |request|. The instance destroys itself when needed, see the class
+  // |receiver|. The instance destroys itself when needed, see the class
   // documentation.
   // TODO(shimazu): Create a service worker's execution context by this method
   // instead of just creating an instance of EmbeddedWorkerInstanceClient.
-  static void Create(blink::mojom::EmbeddedWorkerInstanceClientRequest request);
+  static void Create(
+      scoped_refptr<base::SingleThreadTaskRunner> initiator_task_runner,
+      const std::vector<std::string>& cors_exempt_header_list,
+      mojo::PendingReceiver<blink::mojom::EmbeddedWorkerInstanceClient>
+          receiver);
+
+  EmbeddedWorkerInstanceClientImpl(const EmbeddedWorkerInstanceClientImpl&) =
+      delete;
+  EmbeddedWorkerInstanceClientImpl& operator=(
+      const EmbeddedWorkerInstanceClientImpl&) = delete;
 
   ~EmbeddedWorkerInstanceClientImpl() override;
 
@@ -56,30 +64,31 @@ class CONTENT_EXPORT EmbeddedWorkerInstanceClientImpl
  private:
   friend class ServiceWorkerContextClientTest;
 
-  explicit EmbeddedWorkerInstanceClientImpl(
-      blink::mojom::EmbeddedWorkerInstanceClientRequest request);
+  EmbeddedWorkerInstanceClientImpl(
+      mojo::PendingReceiver<blink::mojom::EmbeddedWorkerInstanceClient>
+          receiver,
+      scoped_refptr<base::SingleThreadTaskRunner> initiator_thread_task_runner,
+      const std::vector<std::string>& cors_exempt_header_list);
 
   // blink::mojom::EmbeddedWorkerInstanceClient implementation
   void StartWorker(blink::mojom::EmbeddedWorkerStartParamsPtr params) override;
-  void ResumeAfterDownload() override;
-  void AddMessageToConsole(blink::mojom::ConsoleMessageLevel level,
-                           const std::string& message) override;
-  void BindDevToolsAgent(
-      blink::mojom::DevToolsAgentHostAssociatedPtrInfo host,
-      blink::mojom::DevToolsAgentAssociatedRequest request) override;
 
-  // Handler of connection error bound to |binding_|.
+  // Handler of connection error bound to |receiver_|.
   void OnError();
 
-  blink::WebEmbeddedWorkerStartData BuildStartData(
+  std::unique_ptr<blink::WebEmbeddedWorkerStartData> BuildStartData(
       const blink::mojom::EmbeddedWorkerStartParams& params);
 
-  mojo::Binding<blink::mojom::EmbeddedWorkerInstanceClient> binding_;
+  mojo::Receiver<blink::mojom::EmbeddedWorkerInstanceClient> receiver_;
+
+  // A copy of this runner is also passed to ServiceWorkerContextClient in
+  // StartWorker().
+  scoped_refptr<base::SingleThreadTaskRunner> initiator_thread_task_runner_;
+
+  std::vector<std::string> cors_exempt_header_list_;
 
   // nullptr means worker is not running.
   std::unique_ptr<ServiceWorkerContextClient> service_worker_context_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(EmbeddedWorkerInstanceClientImpl);
 };
 
 }  // namespace content

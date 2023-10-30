@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,16 @@
 
 #include <memory>
 
-#include "base/callback_forward.h"
-#include "base/memory/scoped_refptr.h"
-#include "base/metrics/field_trial.h"
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "content/browser/startup_data_impl.h"
+#include "content/common/content_export.h"
 #include "content/public/app/content_main.h"
 #include "content/public/app/content_main_runner.h"
-#include "content/public/common/content_client.h"
 #include "content/public/common/main_function_params.h"
 #include "mojo/core/embedder/scoped_ipc_support.h"
-
-#if defined(OS_WIN)
-#include "sandbox/win/src/sandbox_types.h"
-#elif defined(OS_MACOSX)
-#include "base/mac/scoped_nsautorelease_pool.h"
-#endif  // OS_WIN
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace base {
 class AtExitManager;
@@ -33,36 +27,41 @@ class DiscardableSharedMemoryManager;
 }
 
 namespace content {
-class ContentMainDelegate;
-struct ContentMainParams;
-class ServiceManagerEnvironment;
+class MojoIpcSupport;
 
 class ContentMainRunnerImpl : public ContentMainRunner {
  public:
-  static ContentMainRunnerImpl* Create();
+  static std::unique_ptr<ContentMainRunnerImpl> Create();
 
   ContentMainRunnerImpl();
+
+  ContentMainRunnerImpl(const ContentMainRunnerImpl&) = delete;
+  ContentMainRunnerImpl& operator=(const ContentMainRunnerImpl&) = delete;
+
   ~ContentMainRunnerImpl() override;
 
   int TerminateForFatalInitializationError();
 
   // ContentMainRunner:
-  int Initialize(const ContentMainParams& params) override;
-  int Run(bool start_service_manager_only) override;
+  int Initialize(ContentMainParams params) override;
+  void ReInitializeParams(ContentMainParams new_params) override;
+  int Run() override;
   void Shutdown() override;
 
  private:
-#if !defined(CHROME_MULTIPLE_DLL_CHILD)
-  int RunServiceManager(MainFunctionParams& main_function_params,
-                        bool start_service_manager_only);
+  int RunBrowser(MainFunctionParams main_function_params,
+                 bool start_minimal_browser);
 
   bool is_browser_main_loop_started_ = false;
 
+  // Unregisters UI thread from hang watching on destruction.
+  // NOTE: The thread should be unregistered before HangWatcher stops so this
+  // member must be after |hang_watcher|.
+  base::ScopedClosureRunner unregister_thread_closure_;
+
   std::unique_ptr<discardable_memory::DiscardableSharedMemoryManager>
       discardable_shared_memory_manager_;
-  std::unique_ptr<StartupDataImpl> startup_data_;
-  std::unique_ptr<ServiceManagerEnvironment> service_manager_environment_;
-#endif  // !defined(CHROME_MULTIPLE_DLL_CHILD)
+  std::unique_ptr<MojoIpcSupport> mojo_ipc_support_;
 
   // True if the runner has been initialized.
   bool is_initialized_ = false;
@@ -73,26 +72,23 @@ class ContentMainRunnerImpl : public ContentMainRunner {
   // True if basic startup was completed.
   bool completed_basic_startup_ = false;
 
-  // Used if the embedder doesn't set one.
-  ContentClient empty_content_client_;
-
   // The delegate will outlive this object.
-  ContentMainDelegate* delegate_ = nullptr;
+  raw_ptr<ContentMainDelegate> delegate_ = nullptr;
 
   std::unique_ptr<base::AtExitManager> exit_manager_;
 
-#if defined(OS_WIN)
-  sandbox::SandboxInterfaceInfo sandbox_info_;
-#elif defined(OS_MACOSX)
-  base::mac::ScopedNSAutoreleasePool* autorelease_pool_ = nullptr;
-#endif
-
-  base::Closure* ui_task_ = nullptr;
-
-  CreatedMainPartsClosure* created_main_parts_closure_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentMainRunnerImpl);
+  // Received in Initialize(), handed-off in Run().
+  absl::optional<ContentMainParams> content_main_params_;
 };
+
+// The BrowserTestBase on Android does not call ContentMain(). It tries instead
+// to reproduce it more or less accurately. This requires to use
+// GetContentMainDelegateForTesting() and GetContentClientForTesting().
+// BrowserTestBase is implemented in content/public and GetContentClient() is
+// only available to the implementation of content. Hence these functions.
+#if BUILDFLAG(IS_ANDROID)
+CONTENT_EXPORT ContentMainDelegate* GetContentMainDelegateForTesting();
+#endif
 
 }  // namespace content
 

@@ -1,14 +1,15 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/metrics/version_utils.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "components/version_info/version_info.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/build_info.h"
 #endif
 
@@ -20,7 +21,7 @@ std::string GetVersionString() {
   version += "-64";
 #endif  // defined(ARCH_CPU_64_BITS)
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   bool is_chrome_branded = true;
 #else
   bool is_chrome_branded = false;
@@ -48,10 +49,11 @@ SystemProfileProto::Channel AsProtobufChannel(version_info::Channel channel) {
 }
 
 std::string GetAppPackageName() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return base::android::BuildInfo::GetInstance()->package_name();
-#endif
+#else
   return std::string();
+#endif
 }
 
 }  // namespace metrics

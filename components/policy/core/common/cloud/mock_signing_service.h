@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "components/policy/core/common/cloud/signing_service.h"
 
+#include "base/callback.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -17,8 +18,7 @@ class FakeSigningService : public SigningService {
   FakeSigningService();
   ~FakeSigningService() override;
 
-  void SignData(const std::string& data, const SigningCallback& callback)
-      override;
+  void SignData(const std::string& data, SigningCallback callback) override;
 
   // Useful for test setups without having to deal with callbacks.
   void SignDataSynchronously(const std::string& data,
@@ -40,8 +40,7 @@ class MockSigningService : public FakeSigningService {
       void(const enterprise_management::
                CertificateBasedDeviceRegistrationData*,
                enterprise_management::SignedData*));
-  MOCK_METHOD2(SignData, void(const std::string&,
-                              const SigningCallback&));
+  MOCK_METHOD2(SignData, void(const std::string&, SigningCallback));
 };
 
 }

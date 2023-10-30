@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,33 +11,39 @@ namespace content {
 
 BrowserAccessibilityAuraLinux* ToBrowserAccessibilityAuraLinux(
     BrowserAccessibility* obj) {
-  DCHECK(!obj || obj->IsNative());
   return static_cast<BrowserAccessibilityAuraLinux*>(obj);
 }
 
 // static
-BrowserAccessibility* BrowserAccessibility::Create() {
-  return new BrowserAccessibilityAuraLinux();
+std::unique_ptr<BrowserAccessibility> BrowserAccessibility::Create(
+    BrowserAccessibilityManager* manager,
+    ui::AXNode* node) {
+  return std::make_unique<BrowserAccessibilityAuraLinux>(manager, node);
 }
 
-BrowserAccessibilityAuraLinux::BrowserAccessibilityAuraLinux() {
-  node_ = static_cast<ui::AXPlatformNodeAuraLinux*>(
+BrowserAccessibilityAuraLinux::BrowserAccessibilityAuraLinux(
+    BrowserAccessibilityManager* manager,
+    ui::AXNode* node)
+    : BrowserAccessibility(manager, node) {
+  platform_node_ = static_cast<ui::AXPlatformNodeAuraLinux*>(
       ui::AXPlatformNode::Create(this));
 }
 
 BrowserAccessibilityAuraLinux::~BrowserAccessibilityAuraLinux() {
-  DCHECK(node_);
-  node_->Destroy();
+  DCHECK(platform_node_);
+  // Clear platform_node_ and return another raw_ptr instance
+  // that is allowed to dangle.
+  platform_node_.ExtractAsDangling()->Destroy();
 }
 
 ui::AXPlatformNodeAuraLinux* BrowserAccessibilityAuraLinux::GetNode() const {
-  return node_;
+  return platform_node_;
 }
 
 gfx::NativeViewAccessible
 BrowserAccessibilityAuraLinux::GetNativeViewAccessible() {
-  DCHECK(node_);
-  return node_->GetNativeViewAccessible();
+  DCHECK(platform_node_);
+  return platform_node_->GetNativeViewAccessible();
 }
 
 void BrowserAccessibilityAuraLinux::UpdatePlatformAttributes() {
@@ -46,31 +52,21 @@ void BrowserAccessibilityAuraLinux::UpdatePlatformAttributes() {
 
 void BrowserAccessibilityAuraLinux::OnDataChanged() {
   BrowserAccessibility::OnDataChanged();
-  DCHECK(node_);
-  node_->EnsureAtkObjectIsValid();
+  DCHECK(platform_node_);
+  platform_node_->EnsureAtkObjectIsValid();
 }
 
-bool BrowserAccessibilityAuraLinux::IsNative() const {
-  return true;
+ui::AXPlatformNode* BrowserAccessibilityAuraLinux::GetAXPlatformNode() const {
+  return GetNode();
 }
 
-base::string16 BrowserAccessibilityAuraLinux::GetText() const {
-  return GetHypertext();
-}
-
-base::string16 BrowserAccessibilityAuraLinux::GetHypertext() const {
+std::u16string BrowserAccessibilityAuraLinux::GetHypertext() const {
   return GetNode()->AXPlatformNodeAuraLinux::GetHypertext();
 }
 
-ui::AXPlatformNode* BrowserAccessibilityAuraLinux::GetFromNodeID(int32_t id) {
-  if (!instance_active())
-    return nullptr;
-
-  BrowserAccessibility* accessibility = manager_->GetFromID(id);
-  if (!accessibility)
-    return nullptr;
-
-  return ToBrowserAccessibilityAuraLinux(accessibility)->GetNode();
+ui::TextAttributeList BrowserAccessibilityAuraLinux::ComputeTextAttributes()
+    const {
+  return GetNode()->ComputeTextAttributes();
 }
 
 }  // namespace content

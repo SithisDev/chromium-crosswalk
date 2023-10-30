@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,7 +7,7 @@ from writers import gpo_editor_writer
 import re
 
 NEWLINE = '\r\n'
-POLICY_LIST_URL = '''https://www.chromium.org/administrators/policy-list-3'''
+POLICY_LIST_URL = '''https://cloud.google.com/docs/chrome-enterprise/policies/?policy='''
 
 
 def GetWriter(config):
@@ -124,15 +124,15 @@ class AdmWriter(gpo_editor_writer.GpoEditorWriter):
       builder.AddLine('VALUENAME "%s"' % policy['name'])
     if policy['type'] == 'int':
       # The default max for NUMERIC values is 9999 which is too small for us.
-      max = '2000000000'
-      min = '0'
+      max = 2000000000
+      min = 0
       if self.PolicyHasRestrictions(policy):
         schema = policy['schema']
         if 'minimum' in schema:
           min = schema['minimum']
         if 'maximum' in schema:
           max = schema['maximum']
-      builder.AddLine('MIN ' + str(min) + ' MAX ' + max)
+      builder.AddLine('MIN %d MAX %d' % (min, max))
     if policy['type'] in ('string', 'dict', 'external'):
       # The default max for EDITTEXT values is 1023, which is too small for
       # big JSON blobs and other string policies.
@@ -144,7 +144,8 @@ class AdmWriter(gpo_editor_writer.GpoEditorWriter):
           value_text = 'NUMERIC ' + str(item['value'])
         else:
           value_text = '"' + item['value'] + '"'
-        string_id = self._Escape(item['name'] + '_DropDown')
+        string_id = self._Escape(policy['name'] + '_' + item['name'] +
+                                 '_DropDown')
         builder.AddLine('NAME !!%s VALUE %s' % (string_id, value_text))
         self._AddGuiString(string_id, item['caption'])
       builder.AddLine('END ITEMLIST', -1)
@@ -181,13 +182,14 @@ class AdmWriter(gpo_editor_writer.GpoEditorWriter):
     Includes a link to the relevant documentation on chromium.org.
     '''
     policy_desc = policy.get('desc')
-    reference_url = POLICY_LIST_URL + '#' + policy['name']
+    reference_url = POLICY_LIST_URL + policy['name']
     reference_link_text = self.GetLocalizedMessage('reference_link')
     reference_link_text = reference_link_text.replace('$6', reference_url)
 
     if policy_desc is not None:
       policy_desc += '\n\n'
-      if not policy.get('deprecated', False):
+      if (not policy.get('deprecated', False) and
+          not self._IsRemovedPolicy(policy)):
         policy_desc += reference_link_text
       return policy_desc
     else:

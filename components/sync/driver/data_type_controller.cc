@@ -1,27 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/sync/driver/data_type_controller.h"
 
-#include "components/sync/base/data_type_histogram.h"
-#include "components/sync/syncable/user_share.h"
+#include "base/notreached.h"
 
 namespace syncer {
 
 DataTypeController::DataTypeController(ModelType type) : type_(type) {}
 
-DataTypeController::~DataTypeController() {}
-
-// static
-bool DataTypeController::IsUnrecoverableResult(ConfigureResult result) {
-  return (result == UNRECOVERABLE_ERROR);
-}
-
-// static
-bool DataTypeController::IsSuccessfulResult(ConfigureResult result) {
-  return (result == OK || result == OK_FIRST_RUN);
-}
+DataTypeController::~DataTypeController() = default;
 
 // static
 std::string DataTypeController::StateToString(State state) {
@@ -32,8 +21,6 @@ std::string DataTypeController::StateToString(State state) {
       return "Model Starting";
     case MODEL_LOADED:
       return "Model Loaded";
-    case ASSOCIATING:
-      return "Associating";
     case RUNNING:
       return "Running";
     case STOPPING:
@@ -45,8 +32,9 @@ std::string DataTypeController::StateToString(State state) {
   return "Invalid";
 }
 
-bool DataTypeController::ReadyForStart() const {
-  return true;
+DataTypeController::PreconditionState DataTypeController::GetPreconditionState()
+    const {
+  return PreconditionState::kPreconditionsMet;
 }
 
 bool DataTypeController::CalledOnValidThread() const {

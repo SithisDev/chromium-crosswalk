@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@
 #include <shlobj.h>
 #include <wrl.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "content/child/dwrite_font_proxy/dwrite_font_proxy_win.h"
 #include "content/test/dwrite_font_fake_sender_win.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -33,23 +34,23 @@ class FontFallbackUnitTest : public testing::Test {
                                        L"en-us", true /* ignoreUserOverride */,
                                        &number_substitution_);
 
-    std::vector<base::char16> font_path;
+    std::vector<wchar_t> font_path;
     font_path.resize(MAX_PATH);
     SHGetSpecialFolderPath(nullptr /* hwndOwner - reserved */, font_path.data(),
                            CSIDL_FONTS, FALSE /* fCreate*/);
-    base::FilePath segoe_path = base::FilePath(base::string16(font_path.data()))
+    base::FilePath segoe_path = base::FilePath(std::wstring(font_path.data()))
                                     .Append(L"\\seguisym.ttf");
 
     fake_collection_ = std::make_unique<FakeFontCollection>();
-    fake_collection_->AddFont(L"Segoe UI Symbol")
-        .AddFamilyName(L"en-us", L"Segoe UI Symbol")
+    fake_collection_->AddFont(u"Segoe UI Symbol")
+        .AddFamilyName(u"en-us", u"Segoe UI Symbol")
         .AddFilePath(segoe_path);
 
     DWriteFontCollectionProxy::Create(&collection_, factory_.Get(),
-                                      fake_collection_->CreatePtr());
+                                      fake_collection_->CreateRemote());
   }
 
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::TaskEnvironment task_environment;
   std::unique_ptr<FakeFontCollection> fake_collection_;
   mswr::ComPtr<IDWriteFactory> factory_;
   mswr::ComPtr<DWriteFontCollectionProxy> collection_;

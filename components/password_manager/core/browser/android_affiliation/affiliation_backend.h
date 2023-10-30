@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,18 @@
 #include <map>
 #include <memory>
 #include <unordered_map>
-#include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
+#include "base/time/time.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_fetch_throttler_delegate.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_fetcher_delegate.h"
-#include "components/password_manager/core/browser/android_affiliation/affiliation_service.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
 #include "components/password_manager/core/browser/android_affiliation/facet_manager_host.h"
+#include "components/password_manager/core/browser/site_affiliation/affiliation_service.h"
 
 namespace base {
 class Clock;
@@ -34,20 +34,23 @@ class Time;
 
 namespace network {
 class NetworkConnectionTracker;
-class SharedURLLoaderFactoryInfo;
+class PendingSharedURLLoaderFactory;
+class SharedURLLoaderFactory;
 }  // namespace network
 
 namespace password_manager {
 
 class AffiliationDatabase;
-class AffiliationFetcher;
+class AffiliationFetcherInterface;
+class AffiliationFetcherFactory;
 class AffiliationFetchThrottler;
 class FacetManager;
 
-// The AffiliationBackend is the part of the AffiliationService that lives on a
-// background thread suitable for performing blocking I/O. As most tasks require
-// I/O, the backend ends up doing most of the work for the AffiliationService;
-// the latter being just a thin layer that delegates most tasks to the backend.
+// The AffiliationBackend is the part of the AffiliationService that
+// lives on a background thread suitable for performing blocking I/O. As most
+// tasks require I/O, the backend ends up doing most of the work for the
+// AffiliationService; the latter being just a thin layer that delegates
+// most tasks to the backend.
 //
 // This class is not thread-safe, but it is fine to construct it on one thread
 // and then transfer it to the background thread for the rest of its life.
@@ -66,17 +69,20 @@ class AffiliationBackend : public FacetManagerHost,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
       base::Clock* time_source,
       const base::TickClock* time_tick_source);
+  AffiliationBackend(const AffiliationBackend&) = delete;
+  AffiliationBackend& operator=(const AffiliationBackend&) = delete;
   ~AffiliationBackend() override;
 
   // Performs the I/O-heavy part of initialization. The database used to cache
   // affiliation information locally will be opened/created at |db_path|.
-  void Initialize(std::unique_ptr<network::SharedURLLoaderFactoryInfo>
-                      url_loader_factory_info,
+  void Initialize(std::unique_ptr<network::PendingSharedURLLoaderFactory>
+                      pending_url_loader_factory,
                   network::NetworkConnectionTracker* network_connection_tracker,
                   const base::FilePath& db_path);
 
-  // Implementations for methods of the same name in AffiliationService. They
-  // are not documented here again. See affiliation_service.h for details:
+  // Implementations for methods of the same name in AffiliationService.
+  // They are not documented here again. See android_affiliation_service.h for
+  // details:
   void GetAffiliationsAndBranding(
       const FacetURI& facet_uri,
       StrategyOnCacheMiss cache_miss_strategy,
@@ -85,11 +91,20 @@ class AffiliationBackend : public FacetManagerHost,
   void Prefetch(const FacetURI& facet_uri, const base::Time& keep_fresh_until);
   void CancelPrefetch(const FacetURI& facet_uri,
                       const base::Time& keep_fresh_until);
+  void KeepPrefetchForFacets(std::vector<FacetURI> facet_uris);
   void TrimCacheForFacetURI(const FacetURI& facet_uri);
+  void TrimUnusedCache(std::vector<FacetURI> facet_uris);
+  std::vector<GroupedFacets> GetAllGroups() const;
 
   // Deletes the cache database file at |db_path|, and all auxiliary files. The
   // database must be closed before calling this.
   static void DeleteCache(const base::FilePath& db_path);
+
+  // Replaces already initialized |fetcher_factory_| implemented by
+  // AffiliationFetcherFactoryImpl with a new instance of
+  // AffilationFetcherInterface.
+  void SetFetcherFactoryForTesting(
+      std::unique_ptr<AffiliationFetcherFactory> fetcher_factory);
 
  private:
   friend class AffiliationBackendTest;
@@ -120,9 +135,10 @@ class AffiliationBackend : public FacetManagerHost,
 
   // AffiliationFetcherDelegate:
   void OnFetchSucceeded(
+      AffiliationFetcherInterface* fetcher,
       std::unique_ptr<AffiliationFetcherDelegate::Result> result) override;
-  void OnFetchFailed() override;
-  void OnMalformedResponse() override;
+  void OnFetchFailed(AffiliationFetcherInterface* fetcher) override;
+  void OnMalformedResponse(AffiliationFetcherInterface* fetcher) override;
 
   // AffiliationFetchThrottlerDelegate:
   bool OnCanSendNetworkRequest() override;
@@ -145,11 +161,12 @@ class AffiliationBackend : public FacetManagerHost,
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
-  base::Clock* clock_;
-  const base::TickClock* tick_clock_;
+  raw_ptr<base::Clock> clock_;
+  raw_ptr<const base::TickClock> tick_clock_;
 
+  std::unique_ptr<AffiliationFetcherFactory> fetcher_factory_;
   std::unique_ptr<AffiliationDatabase> cache_;
-  std::unique_ptr<AffiliationFetcher> fetcher_;
+  std::unique_ptr<AffiliationFetcherInterface> fetcher_;
   std::unique_ptr<AffiliationFetchThrottler> throttler_;
 
   base::Time construction_time_;
@@ -161,8 +178,6 @@ class AffiliationBackend : public FacetManagerHost,
       facet_managers_;
 
   base::WeakPtrFactory<AffiliationBackend> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(AffiliationBackend);
 };
 
 }  // namespace password_manager

@@ -1,13 +1,11 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_BROWSER_DEVTOOLS_EXTERNAL_AGENT_PROXY_H_
 #define CONTENT_PUBLIC_BROWSER_DEVTOOLS_EXTERNAL_AGENT_PROXY_H_
 
-#include <string>
-
-#include "content/common/content_export.h"
+#include "base/containers/span.h"
 
 namespace content {
 
@@ -15,7 +13,7 @@ namespace content {
 class DevToolsExternalAgentProxy {
  public:
   // Sends the message to the client host.
-  virtual void DispatchOnClientHost(const std::string& message) = 0;
+  virtual void DispatchOnClientHost(base::span<const uint8_t> message) = 0;
 
   // Informs the client that the connection has closed.
   virtual void ConnectionClosed() = 0;

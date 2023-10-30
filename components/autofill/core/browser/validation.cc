@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,11 @@
 
 #include <stddef.h>
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/check.h"
+#include "base/containers/adapters.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -49,8 +53,8 @@ bool IsValidCreditCardExpirationYear(int year, const base::Time& now) {
   return year >= now_exploded.year;
 }
 
-bool IsValidCreditCardNumber(const base::string16& text) {
-  const base::string16 number = CreditCard::StripSeparators(text);
+bool IsValidCreditCardNumber(const std::u16string& text) {
+  const std::u16string number = CreditCard::StripSeparators(text);
 
   if (!HasCorrectLength(number))
     return false;
@@ -58,7 +62,7 @@ bool IsValidCreditCardNumber(const base::string16& text) {
   return PassesLuhnCheck(number);
 }
 
-bool HasCorrectLength(const base::string16& number) {
+bool HasCorrectLength(const std::u16string& number) {
   // Credit card numbers are at most 19 digits in length, 12 digits seems to
   // be a fairly safe lower-bound [1].  Specific card issuers have more rigidly
   // defined sizes.
@@ -80,6 +84,8 @@ bool HasCorrectLength(const base::string16& number) {
     return false;
   if (type == kMirCard && number.size() != 16)
     return false;
+  if (type == kTroyCard && number.size() != 16)
+    return false;
   if (type == kUnionPay && (number.size() < 16 || number.size() > 19))
     return false;
   if (type == kVisaCard && number.size() != 13 && number.size() != 16 &&
@@ -91,18 +97,17 @@ bool HasCorrectLength(const base::string16& number) {
   return true;
 }
 
-// TODO (crbug.com/927767): Add unit tests for this function.
-bool PassesLuhnCheck(const base::string16& number) {
+// TODO(crbug.com/927767): Add unit tests for this function.
+bool PassesLuhnCheck(const std::u16string& number) {
   // Use the Luhn formula [3] to validate the number.
   // [3] http://en.wikipedia.org/wiki/Luhn_algorithm
   int sum = 0;
   bool odd = false;
-  for (base::string16::const_reverse_iterator iter = number.rbegin();
-       iter != number.rend(); ++iter) {
-    if (!base::IsAsciiDigit(*iter))
+  for (char c : base::Reversed(number)) {
+    if (!base::IsAsciiDigit(c))
       return false;
 
-    int digit = *iter - '0';
+    int digit = c - '0';
     if (odd) {
       digit *= 2;
       sum += digit / 10 + digit % 10;
@@ -115,22 +120,21 @@ bool PassesLuhnCheck(const base::string16& number) {
   return (sum % 10) == 0;
 }
 
-bool IsValidCreditCardSecurityCode(const base::string16& code,
-                                   const base::StringPiece card_type) {
-  return code.length() == GetCvcLengthForCardType(card_type) &&
-         base::ContainsOnlyChars(code, base::ASCIIToUTF16("0123456789"));
+bool IsValidCreditCardSecurityCode(const std::u16string& code,
+                                   const base::StringPiece card_network) {
+  return code.length() == GetCvcLengthForCardNetwork(card_network) &&
+         base::ContainsOnlyChars(code, u"0123456789");
 }
 
 bool IsValidCreditCardNumberForBasicCardNetworks(
-    const base::string16& text,
+    const std::u16string& text,
     const std::set<std::string>& supported_basic_card_networks,
-    base::string16* error_message) {
+    std::u16string* error_message) {
   DCHECK(error_message);
 
   // The type check is cheaper than the credit card number check.
   const std::string basic_card_issuer_network =
-      autofill::data_util::GetPaymentRequestData(
-          CreditCard::GetCardNetwork(text))
+      data_util::GetPaymentRequestData(CreditCard::GetCardNetwork(text))
           .basic_card_issuer_network;
   if (!supported_basic_card_networks.count(basic_card_issuer_network)) {
     *error_message = l10n_util::GetStringUTF16(
@@ -146,32 +150,31 @@ bool IsValidCreditCardNumberForBasicCardNetworks(
   return false;
 }
 
-bool IsValidEmailAddress(const base::string16& text) {
+bool IsValidEmailAddress(const std::u16string& text) {
   // E-Mail pattern as defined by the WhatWG. (4.10.7.1.5 E-Mail state)
-  const base::string16 kEmailPattern = base::ASCIIToUTF16(
-      "^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@"
-      "[a-zA-Z0-9-]+(?:\\.[a-zA-Z0-9-]+)*$");
-  return MatchesPattern(text, kEmailPattern);
+  static constexpr char16_t kEmailPattern[] =
+      u"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\\.[a-zA-Z0-9-]+)*$";
+  return MatchesRegex<kEmailPattern>(text);
 }
 
-bool IsValidState(const base::string16& text) {
+bool IsValidState(const std::u16string& text) {
   return !state_names::GetAbbreviationForName(text).empty() ||
          !state_names::GetNameForAbbreviation(text).empty();
 }
 
-bool IsPossiblePhoneNumber(const base::string16& text,
+bool IsPossiblePhoneNumber(const std::u16string& text,
                            const std::string& country_code) {
   return i18n::IsPossiblePhoneNumber(base::UTF16ToUTF8(text), country_code);
 }
 
-bool IsValidZip(const base::string16& text) {
-  const base::string16 kZipPattern = base::ASCIIToUTF16("^\\d{5}(-\\d{4})?$");
-  return MatchesPattern(text, kZipPattern);
+bool IsValidZip(const std::u16string& text) {
+  static constexpr char16_t kZipPattern[] = u"^\\d{5}(-\\d{4})?$";
+  return MatchesRegex<kZipPattern>(text);
 }
 
-bool IsSSN(const base::string16& text) {
-  base::string16 number_string;
-  base::RemoveChars(text, base::ASCIIToUTF16("- "), &number_string);
+bool IsSSN(const std::u16string& text) {
+  std::u16string number_string;
+  base::RemoveChars(text, u"- ", &number_string);
 
   // A SSN is of the form AAA-GG-SSSS (A = area number, G = group number, S =
   // serial number). The validation we do here is simply checking if the area,
@@ -201,9 +204,9 @@ bool IsSSN(const base::string16& text) {
     return false;
 
   int area;
-  if (!base::StringToInt(
-          base::StringPiece16(number_string.begin(), number_string.begin() + 3),
-          &area)) {
+  if (!base::StringToInt(base::MakeStringPiece16(number_string.begin(),
+                                                 number_string.begin() + 3),
+                         &area)) {
     return false;
   }
   if (area < 1 || area == 666 || area >= 900) {
@@ -211,16 +214,16 @@ bool IsSSN(const base::string16& text) {
   }
 
   int group;
-  if (!base::StringToInt(base::StringPiece16(number_string.begin() + 3,
-                                             number_string.begin() + 5),
+  if (!base::StringToInt(base::MakeStringPiece16(number_string.begin() + 3,
+                                                 number_string.begin() + 5),
                          &group) ||
       group == 0) {
     return false;
   }
 
   int serial;
-  if (!base::StringToInt(base::StringPiece16(number_string.begin() + 5,
-                                             number_string.begin() + 9),
+  if (!base::StringToInt(base::MakeStringPiece16(number_string.begin() + 5,
+                                                 number_string.begin() + 9),
                          &serial) ||
       serial == 0) {
     return false;
@@ -229,9 +232,9 @@ bool IsSSN(const base::string16& text) {
   return true;
 }
 
-bool IsValidForType(const base::string16& value,
+bool IsValidForType(const std::u16string& value,
                     ServerFieldType type,
-                    base::string16* error_message) {
+                    std::u16string* error_message) {
   switch (type) {
     case CREDIT_CARD_NAME_FULL:
       if (!value.empty())
@@ -287,17 +290,17 @@ bool IsValidForType(const base::string16& value,
 
     case CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR:
     case CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR: {
-      const base::string16 pattern =
-          type == CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR
-              ? base::UTF8ToUTF16("^[0-9]{1,2}[-/|]?[0-9]{2}$")
-              : base::UTF8ToUTF16("^[0-9]{1,2}[-/|]?[0-9]{4}$");
+      static constexpr char16_t kDateYY[] = u"^[0-9]{1,2}[-/|]?[0-9]{2}$";
+      static constexpr char16_t kDateYYYY[] = u"^[0-9]{1,2}[-/|]?[0-9]{4}$";
 
       CreditCard temp;
       temp.SetExpirationDateFromString(value);
 
       // Expiration date was in an invalid format.
       if (temp.expiration_month() == 0 || temp.expiration_year() == 0 ||
-          !MatchesPattern(value, pattern)) {
+          (type == CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR
+               ? !MatchesRegex<kDateYY>(value)
+               : !MatchesRegex<kDateYYYY>(value))) {
         if (error_message) {
           *error_message = l10n_util::GetStringUTF16(
               IDS_PAYMENTS_CARD_EXPIRATION_INVALID_VALIDATION_MESSAGE);
@@ -333,22 +336,28 @@ bool IsValidForType(const base::string16& value,
   return false;
 }
 
-size_t GetCvcLengthForCardType(const base::StringPiece card_type) {
-  if (card_type == kAmericanExpressCard)
+size_t GetCvcLengthForCardNetwork(const base::StringPiece card_network) {
+  if (card_network == kAmericanExpressCard)
     return AMEX_CVC_LENGTH;
 
   return GENERAL_CVC_LENGTH;
 }
 
-bool IsUPIVirtualPaymentAddress(const base::string16& value) {
-  return MatchesPattern(value, base::ASCIIToUTF16(kUPIVirtualPaymentAddressRe));
+bool IsUPIVirtualPaymentAddress(const std::u16string& value) {
+  return MatchesRegex<kUPIVirtualPaymentAddressRe>(value);
 }
 
-bool IsInternationalBankAccountNumber(const base::string16& value) {
-  base::string16 no_spaces;
-  base::RemoveChars(value, base::ASCIIToUTF16(" "), &no_spaces);
-  return MatchesPattern(no_spaces,
-                        base::ASCIIToUTF16(kInternationalBankAccountNumberRe));
+bool IsInternationalBankAccountNumber(const std::u16string& value) {
+  std::u16string no_spaces;
+  base::RemoveChars(value, u" ", &no_spaces);
+  return MatchesRegex<kInternationalBankAccountNumberValueRe>(no_spaces);
 }
 
+bool IsPlausibleCreditCardCVCNumber(const std::u16string& value) {
+  return MatchesRegex<kCreditCardCVCPattern>(value);
+}
+
+bool IsPlausible4DigitExpirationYear(const std::u16string& value) {
+  return MatchesRegex<kCreditCard4DigitExpYearPattern>(value);
+}
 }  // namespace autofill

@@ -1,10 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/notification_service_impl.h"
 
 #include "base/lazy_instance.h"
+#include "base/logging.h"
+#include "base/observer_list.h"
 #include "base/threading/thread_local.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_types.h"
@@ -83,7 +85,7 @@ void NotificationServiceImpl::RemoveObserver(NotificationObserver* observer,
       observers_[type][source.map_key()];
   if (observer_list) {
     observer_list->RemoveObserver(observer);
-    if (!observer_list->might_have_observers()) {
+    if (observer_list->empty()) {
       observers_[type].erase(source.map_key());
       delete observer_list;
     }

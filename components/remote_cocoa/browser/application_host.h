@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include "base/observer_list_types.h"
 #include "components/remote_cocoa/browser/remote_cocoa_browser_export.h"
 #include "components/remote_cocoa/common/application.mojom.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace remote_cocoa {
@@ -26,7 +28,8 @@ class REMOTE_COCOA_BROWSER_EXPORT ApplicationHost {
     ~Observer() override {}
   };
 
-  ApplicationHost(mojom::ApplicationAssociatedRequest* request);
+  ApplicationHost(
+      mojo::PendingAssociatedReceiver<mojom::Application>* receiver);
   ~ApplicationHost();
 
   mojom::Application* GetApplication();
@@ -37,7 +40,7 @@ class REMOTE_COCOA_BROWSER_EXPORT ApplicationHost {
   static ApplicationHost* GetForNativeView(gfx::NativeView view);
 
  private:
-  mojom::ApplicationAssociatedPtr application_ptr_;
+  mojo::AssociatedRemote<mojom::Application> application_remote_;
   base::ObserverList<Observer> observers_;
 };
 

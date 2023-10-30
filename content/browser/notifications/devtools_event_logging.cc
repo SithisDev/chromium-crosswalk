@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/callback.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time_to_iso8601.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/devtools_background_services_context.h"
 #include "content/public/browser/notification_database_data.h"
@@ -31,8 +32,7 @@ using DevToolsCallback =
 DevToolsBackgroundServicesContext* GetDevToolsContext(
     BrowserContext* browser_context,
     const GURL& origin) {
-  auto* storage_partition =
-      BrowserContext::GetStoragePartitionForSite(browser_context, origin);
+  auto* storage_partition = browser_context->GetStoragePartitionForUrl(origin);
   if (!storage_partition)
     return nullptr;
 
@@ -65,7 +65,6 @@ DevToolsCallback GetDevToolsCallback(BrowserContext* browser_context,
       url::Origin::Create(data.origin),
       DevToolsBackgroundService::kNotifications);
 
-  // TODO(knollr): Reorder parameters of LogBackgroundServiceEvent instead.
   return base::BindOnce(
       [](DevToolsBaseCallback callback, const std::string& notification_id,
          const std::string& event_name, const EventMetadata& metadata) {
@@ -115,8 +114,7 @@ void LogNotificationScheduledEventToDevTools(
 
   std::move(callback).Run(
       /* event_name= */ "Notification scheduled",
-      {{"Show Trigger Timestamp",
-        base::NumberToString(show_trigger_timestamp.ToJsTime())},
+      {{"Show Trigger Timestamp", base::TimeToISO8601(show_trigger_timestamp)},
        {"Title", base::UTF16ToUTF8(data.notification_data.title)},
        {"Body", base::UTF16ToUTF8(data.notification_data.body)}});
 }
@@ -124,8 +122,8 @@ void LogNotificationScheduledEventToDevTools(
 void LogNotificationClickedEventToDevTools(
     BrowserContext* browser_context,
     const NotificationDatabaseData& data,
-    const base::Optional<int>& action_index,
-    const base::Optional<base::string16>& reply) {
+    const absl::optional<int>& action_index,
+    const absl::optional<std::u16string>& reply) {
   DevToolsCallback callback = GetDevToolsCallback(browser_context, data);
   if (!callback)
     return;

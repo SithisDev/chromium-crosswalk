@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/files/file_path.h"
 #include "base/time/time.h"
 #include "components/download/public/background_service/client.h"
 #include "components/download/public/background_service/clients.h"
@@ -72,6 +73,10 @@ struct Entry {
   // The parameters that define the actual download request to make.
   RequestParams request_params;
 
+  // Custom key value pair provided by client and will sent back to client. See
+  // |custom_data| in DownloadParams for more details.
+  DownloadParams::CustomData custom_data;
+
   // The state of the download to help the scheduler and loggers make the right
   // decisions about the download object.
   State state = State::NEW;
@@ -101,9 +106,6 @@ struct Entry {
 
   // Stores the number of resumptions for this download.
   uint32_t resumption_count;
-
-  // Stores the number of times the service tried to delete the download file.
-  uint32_t cleanup_attempt_count;
 
   // Stores whether this request has some data to be uploaded. This is set to
   // true only when the client has provided with the upload data and is not

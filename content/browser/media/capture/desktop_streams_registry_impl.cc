@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,7 @@
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/no_destructor.h"
-#include "base/stl_util.h"
-#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -24,9 +21,9 @@ const int kApprovedStreamTimeToLiveSeconds = 10;
 
 std::string GenerateRandomStreamId() {
   char buffer[kStreamIdLengthBytes];
-  crypto::RandBytes(buffer, base::size(buffer));
+  crypto::RandBytes(buffer, std::size(buffer));
   std::string result;
-  base::Base64Encode(base::StringPiece(buffer, base::size(buffer)), &result);
+  base::Base64Encode(base::StringPiece(buffer, std::size(buffer)), &result);
   return result;
 }
 
@@ -51,7 +48,7 @@ DesktopStreamsRegistryImpl::~DesktopStreamsRegistryImpl() {}
 std::string DesktopStreamsRegistryImpl::RegisterStream(
     int render_process_id,
     int render_frame_id,
-    const GURL& origin,
+    const url::Origin& origin,
     const DesktopMediaID& source,
     const std::string& extension_name,
     const DesktopStreamRegistryType type) {
@@ -67,11 +64,11 @@ std::string DesktopStreamsRegistryImpl::RegisterStream(
   stream.extension_name = extension_name;
   stream.type = type;
 
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
+  GetUIThreadTaskRunner({})->PostDelayedTask(
+      FROM_HERE,
       base::BindOnce(&DesktopStreamsRegistryImpl::CleanupStream,
                      base::Unretained(this), id),
-      base::TimeDelta::FromSeconds(kApprovedStreamTimeToLiveSeconds));
+      base::Seconds(kApprovedStreamTimeToLiveSeconds));
 
   return id;
 }
@@ -80,7 +77,7 @@ DesktopMediaID DesktopStreamsRegistryImpl::RequestMediaForStreamId(
     const std::string& id,
     int render_process_id,
     int render_frame_id,
-    const GURL& origin,
+    const url::Origin& origin,
     std::string* extension_name,
     const DesktopStreamRegistryType type) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);

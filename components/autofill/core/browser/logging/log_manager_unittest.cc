@@ -1,12 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/core/browser/logging/log_manager.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "components/autofill/core/browser/logging/log_receiver.h"
 #include "components/autofill/core/browser/logging/log_router.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -23,19 +22,21 @@ const char kTestText[] = "abcd1234";
 class MockLogReceiver : public autofill::LogReceiver {
  public:
   MockLogReceiver() = default;
-  MOCK_METHOD1(LogEntry, void(const base::Value&));
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockLogReceiver);
+  MockLogReceiver(const MockLogReceiver&) = delete;
+  MockLogReceiver& operator=(const MockLogReceiver&) = delete;
+
+  MOCK_METHOD(void, LogEntry, (const base::Value::Dict&), (override));
 };
 
 class MockNotifiedObject {
  public:
   MockNotifiedObject() = default;
-  MOCK_METHOD0(NotifyAboutLoggingActivity, void());
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockNotifiedObject);
+  MockNotifiedObject(const MockNotifiedObject&) = delete;
+  MockNotifiedObject& operator=(const MockNotifiedObject&) = delete;
+
+  MOCK_METHOD(void, NotifyAboutLoggingActivity, (), ());
 };
 
 }  // namespace
@@ -44,8 +45,9 @@ class LogManagerTest : public testing::Test {
  protected:
   void SetUp() override {
     manager_ = LogManager::Create(
-        &router_, base::Bind(&MockNotifiedObject::NotifyAboutLoggingActivity,
-                             base::Unretained(&notified_object_)));
+        &router_,
+        base::BindRepeating(&MockNotifiedObject::NotifyAboutLoggingActivity,
+                            base::Unretained(&notified_object_)));
   }
 
   void TearDown() override {
@@ -70,10 +72,10 @@ TEST_F(LogManagerTest, LogTextMessageAttachReceiver) {
   EXPECT_FALSE(manager_->IsLoggingActive());
 
   EXPECT_CALL(notified_object_, NotifyAboutLoggingActivity());
-  EXPECT_EQ(std::vector<base::Value>(), router_.RegisterReceiver(&receiver_));
+  router_.RegisterReceiver(&receiver_);
   EXPECT_TRUE(manager_->IsLoggingActive());
   // After attaching the logger, text should be passed.
-  base::Value log_entry = LogRouter::CreateEntryForText(kTestText);
+  base::Value::Dict log_entry = LogRouter::CreateEntryForText(kTestText);
   EXPECT_CALL(receiver_, LogEntry(testing::Eq(testing::ByRef(log_entry))));
   manager_->LogTextMessage(kTestText);
   EXPECT_CALL(notified_object_, NotifyAboutLoggingActivity());
@@ -83,7 +85,7 @@ TEST_F(LogManagerTest, LogTextMessageAttachReceiver) {
 
 TEST_F(LogManagerTest, LogTextMessageDetachReceiver) {
   EXPECT_CALL(notified_object_, NotifyAboutLoggingActivity());
-  EXPECT_EQ(std::vector<base::Value>(), router_.RegisterReceiver(&receiver_));
+  router_.RegisterReceiver(&receiver_);
   EXPECT_TRUE(manager_->IsLoggingActive());
   EXPECT_CALL(notified_object_, NotifyAboutLoggingActivity());
   router_.UnregisterReceiver(&receiver_);
@@ -95,14 +97,14 @@ TEST_F(LogManagerTest, LogTextMessageDetachReceiver) {
 }
 
 TEST_F(LogManagerTest, NullCallbackWillNotCrash) {
-  manager_ = LogManager::Create(&router_, base::Closure());
-  EXPECT_EQ(std::vector<base::Value>(), router_.RegisterReceiver(&receiver_));
+  manager_ = LogManager::Create(&router_, base::NullCallback());
+  router_.RegisterReceiver(&receiver_);
   router_.UnregisterReceiver(&receiver_);
 }
 
 TEST_F(LogManagerTest, SetSuspended_WithActiveLogging) {
   EXPECT_CALL(notified_object_, NotifyAboutLoggingActivity());
-  EXPECT_EQ(std::vector<base::Value>(), router_.RegisterReceiver(&receiver_));
+  router_.RegisterReceiver(&receiver_);
   EXPECT_TRUE(manager_->IsLoggingActive());
 
   EXPECT_CALL(notified_object_, NotifyAboutLoggingActivity());
@@ -132,7 +134,7 @@ TEST_F(LogManagerTest, InterleaveSuspendAndLoggingActivation_SuspendFirst) {
   manager_->SetSuspended(true);
   EXPECT_FALSE(manager_->IsLoggingActive());
 
-  EXPECT_EQ(std::vector<base::Value>(), router_.RegisterReceiver(&receiver_));
+  router_.RegisterReceiver(&receiver_);
   EXPECT_FALSE(manager_->IsLoggingActive());
 
   EXPECT_CALL(notified_object_, NotifyAboutLoggingActivity());
@@ -148,7 +150,7 @@ TEST_F(LogManagerTest, InterleaveSuspendAndLoggingActivation_ActiveFirst) {
   EXPECT_FALSE(manager_->IsLoggingActive());
 
   EXPECT_CALL(notified_object_, NotifyAboutLoggingActivity());
-  EXPECT_EQ(std::vector<base::Value>(), router_.RegisterReceiver(&receiver_));
+  router_.RegisterReceiver(&receiver_);
   EXPECT_TRUE(manager_->IsLoggingActive());
 
   EXPECT_CALL(notified_object_, NotifyAboutLoggingActivity());

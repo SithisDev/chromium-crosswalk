@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #define CONTENT_PUBLIC_BROWSER_HISTOGRAM_FETCHER_H_
 
 #include "base/callback.h"
-#include "base/task_runner.h"
+#include "base/task/task_runner.h"
 #include "base/time/time.h"
 #include "content/common/content_export.h"
 
@@ -21,7 +21,7 @@ namespace content {
 // once.
 CONTENT_EXPORT void FetchHistogramsAsynchronously(
     scoped_refptr<base::TaskRunner> task_runner,
-    const base::Closure& callback,
+    base::OnceClosure callback,
     base::TimeDelta wait_time);
 
 }  // namespace content

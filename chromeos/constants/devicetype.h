@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2022 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,16 @@
 
 namespace chromeos {
 
+// The form factor of the device.
 enum class DeviceType {
+  kChromebook,
   kChromebase,
   kChromebit,
-  kChromebook,
   kChromebox,
   kUnknown,  // Unknown fallback device.
 };
 
-// Returns the current device type, eg, Chromebook, Chromebox.
+// Returns the current device type, e.g. Chromebook, Chromebox.
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS) DeviceType GetDeviceType();
 
 }  // namespace chromeos

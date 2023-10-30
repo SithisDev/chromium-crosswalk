@@ -1,9 +1,13 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_NAVIGATION_METRICS_NAVIGATION_METRICS_H_
 #define COMPONENTS_NAVIGATION_METRICS_NAVIGATION_METRICS_H_
+
+#include <string>
+
+#include "components/url_formatter/spoof_checks/idna_metrics.h"
 
 class GURL;
 
@@ -12,6 +16,15 @@ enum class BrowserProfileType;
 }
 
 namespace navigation_metrics {
+
+// Names of the metrics logged by RecordPrimaryMainFrameNavigation() function.
+extern const char kMainFrameScheme[];
+extern const char kMainFrameSchemeDifferentPage[];
+extern const char kMainFrameSchemeOTR[];
+extern const char kMainFrameSchemeDifferentPageOTR[];
+extern const char kMainFrameHasRTLDomain[];
+extern const char kMainFrameHasRTLDomainDifferentPage[];
+extern const char kMainFrameProfileType[];
 
 // A Scheme is an C++ enum type loggable in UMA for a histogram of UMA enum type
 // NavigationScheme.
@@ -43,13 +56,18 @@ enum class Scheme {
 
 Scheme GetScheme(const GURL& url);
 
-void RecordMainFrameNavigation(
+void RecordPrimaryMainFrameNavigation(
     const GURL& url,
     bool is_same_document,
     bool is_off_the_record,
     profile_metrics::BrowserProfileType profile_type);
 
 void RecordOmniboxURLNavigation(const GURL& url);
+
+// Records metrics about deviation characters in `hostname`. `hostname` can
+// be punycode or unicode and can have subdomains.
+IDNA2008DeviationCharacter RecordIDNA2008Metrics(
+    const std::u16string& hostname);
 
 }  // namespace navigation_metrics
 

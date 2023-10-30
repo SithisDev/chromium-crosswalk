@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,22 +8,11 @@
 #include <iosfwd>
 #include <string>
 
-#include "components/password_manager/core/browser/password_store.h"
+#include "components/password_manager/core/browser/password_store_interface.h"
 
 class GURL;
 
 namespace password_manager {
-
-// Enum used for histogram tracking PSL Domain triggering.
-// New entries should only be added to the end of the enum (before *_COUNT) so
-// as to not disrupt existing data.
-enum PSLDomainMatchMetric {
-  PSL_DOMAIN_MATCH_NOT_USED = 0,
-  PSL_DOMAIN_MATCH_NONE,
-  PSL_DOMAIN_MATCH_FOUND,
-  PSL_DOMAIN_MATCH_FOUND_FEDERATED,
-  PSL_DOMAIN_MATCH_COUNT
-};
 
 enum class MatchResult {
   NO_MATCH,
@@ -51,20 +40,8 @@ bool IsFederatedPSLMatch(const std::string& form_signon_realm,
 #endif
 
 // Returns what type of match applies to |form| and |form_digest|.
-MatchResult GetMatchResult(const autofill::PasswordForm& form,
-                           const PasswordStore::FormDigest& form_digest);
-
-// Using the public suffix list for matching the origin is only needed for
-// websites that do not have a single hostname for entering credentials. It
-// would be better for their users if they did, but until then we help them find
-// credentials across different hostnames. We know that accounts.google.com is
-// the only hostname we should be accepting credentials on for any domain under
-// google.com, so we can apply a tighter policy for that domain. For owners of
-// domains where a single hostname is always used when your users are entering
-// their credentials, please contact palmer@chromium.org, nyquist@chromium.org
-// or file a bug at http://crbug.com/ to be added here.
-bool ShouldPSLDomainMatchingApply(
-    const std::string& registry_controlled_domain);
+MatchResult GetMatchResult(const PasswordForm& form,
+                           const PasswordFormDigest& form_digest);
 
 // Two URLs are considered a Public Suffix Domain match if they have the same
 // scheme, ports, and their registry controlled domains are equal. If one or
@@ -76,10 +53,23 @@ bool IsPublicSuffixDomainMatch(const std::string& url1,
 // registry-controlled domain part.
 std::string GetRegistryControlledDomain(const GURL& signon_realm);
 
-// Returns the organization-identifying name of the host of |url|, that is, the
-// first domain name label below the effective TLD. Returns the empty string for
-// URLs where these concepts are ill-defined, as well as for invalid URLs.
-std::string GetOrganizationIdentifyingName(const GURL& url);
+// Returns the regular expression to match |signon_realm| when Public Suffix
+// Domain matching is enabled. Used to retrieve logins from LoginsDatabase with
+// 'WHERE signon_realm REGEX x' query and to verify logins retrieved from the
+// downstream PasswordStoreBackend implementation with C++ Regex matcher.
+std::string GetRegexForPSLMatching(const std::string& signon_realm);
+
+// Returns the regular expression to match |form| when Public Suffix Domain &
+// federated matching is enabled. Used to retrieve logins from LoginsDatabase
+// with 'WHERE signon_realm REGEX x' query and to verify logins retrieved from
+// the downstream PasswordStoreBackend implementation with C++ Regex matcher.
+std::string GetRegexForPSLFederatedMatching(const std::string& signon_realm);
+
+// Returns the expression to match |url| when federated matching is enabled.
+// Used to retrieve logins from LoginsDatabase with 'WHERE signon_realm LIKE x'
+// query and to verify logins retrieved from the downstream PasswordStoreBackend
+// implementation with C++ Regex matcher.
+std::string GetExpressionForFederatedMatching(const GURL& url);
 
 }  // namespace password_manager
 

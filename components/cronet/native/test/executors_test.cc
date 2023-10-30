@@ -1,13 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cronet_c.h"
 
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/check.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/cronet/native/test/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -16,6 +15,10 @@ namespace {
 class ExecutorsTest : public ::testing::Test {
  public:
   ExecutorsTest() = default;
+
+  ExecutorsTest(const ExecutorsTest&) = delete;
+  ExecutorsTest& operator=(const ExecutorsTest&) = delete;
+
   ~ExecutorsTest() override = default;
 
  protected:
@@ -24,14 +27,12 @@ class ExecutorsTest : public ::testing::Test {
 
   // Provide a task environment for use by TestExecutor instances. Do not
   // initialize the ThreadPool as this is done by the Cronet_Engine
-  base::test::ScopedTaskEnvironment scoped_task_environment_{
-      base::test::ScopedTaskEnvironment::ThreadingMode::MAIN_THREAD_ONLY};
+  base::test::SingleThreadTaskEnvironment task_environment_;
 
  private:
   void set_runnable_called(bool value) { runnable_called_ = value; }
 
   bool runnable_called_ = false;
-  DISALLOW_COPY_AND_ASSIGN(ExecutorsTest);
 };
 
 // App implementation of Cronet_Executor methods.

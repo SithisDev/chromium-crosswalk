@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "components/search_engines/search_engine_type.h"
+#include "build/build_config.h"
 
-class GURL;
 class PrefService;
 struct TemplateURLData;
 
@@ -45,7 +44,7 @@ std::vector<std::unique_ptr<TemplateURLData>> GetPrepopulatedEngines(
 std::unique_ptr<TemplateURLData> GetPrepopulatedEngine(PrefService* prefs,
                                                        int prepopulated_id);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 // Returns the prepopulated URLs associated with |locale|.  |locale| should be a
 // two-character uppercase ISO 3166-1 country code.
 std::vector<std::unique_ptr<TemplateURLData>> GetLocalPrepopulatedEngines(
@@ -64,10 +63,6 @@ void ClearPrepopulatedEnginesInPrefs(PrefService* prefs);
 // not used.
 std::unique_ptr<TemplateURLData> GetPrepopulatedDefaultSearch(
     PrefService* prefs);
-
-// Like the above, but takes a GURL which is expected to represent a search URL.
-// This may be called on any thread.
-SearchEngineType GetEngineType(const GURL& url);
 
 }  // namespace TemplateURLPrepopulateData
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,8 +58,8 @@ void NavigationMonitorImpl::OnNavigationEvent(NavigationEvent event) {
 void NavigationMonitorImpl::NotifyNavigationFinished() {
   backup_navigation_finished_callback_.Cancel();
   navigation_finished_callback_.Reset(
-      base::Bind(&NavigationMonitorImpl::OnNavigationFinished,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&NavigationMonitorImpl::OnNavigationFinished,
+                     weak_ptr_factory_.GetWeakPtr()));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, navigation_finished_callback_.callback(),
       navigation_completion_delay_);
@@ -74,8 +74,8 @@ void NavigationMonitorImpl::OnNavigationFinished() {
 
 void NavigationMonitorImpl::ScheduleBackupTask() {
   backup_navigation_finished_callback_.Reset(
-      base::Bind(&NavigationMonitorImpl::OnNavigationFinished,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&NavigationMonitorImpl::OnNavigationFinished,
+                     weak_ptr_factory_.GetWeakPtr()));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, backup_navigation_finished_callback_.callback(),
       navigation_timeout_delay_);

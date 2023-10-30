@@ -1,15 +1,23 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/service/frame_sinks/video_detector.h"
 
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "base/time/time.h"
+#include "components/viz/common/features.h"
 #include "components/viz/common/quads/compositor_frame.h"
+#include "components/viz/common/quads/draw_quad.h"
+#include "components/viz/common/quads/texture_draw_quad.h"
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
-#include "ui/gfx/geometry/dip_util.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace viz {
 
@@ -20,7 +28,12 @@ constexpr base::TimeDelta VideoDetector::kMinVideoDuration;
 // likely that a video is playing in it.
 class VideoDetector::ClientInfo {
  public:
-  ClientInfo() = default;
+  ClientInfo()
+      : should_ignore_non_video_frames_(
+            features::ShouldVideoDetectorIgnoreNonVideoFrames()) {}
+
+  ClientInfo(const ClientInfo&) = delete;
+  ClientInfo& operator=(const ClientInfo&) = delete;
 
   // Called when a Surface belonging to this client is drawn. Returns true if we
   // determine that video is playing in this client.
@@ -36,9 +49,26 @@ class VideoDetector::ClientInfo {
 
     const CompositorFrame& frame = surface->GetActiveFrame();
 
-    gfx::Rect damage =
-        gfx::ConvertRectToDIP(frame.device_scale_factor(),
-                              frame.render_pass_list.back()->damage_rect);
+    if (should_ignore_non_video_frames_ && !frame.metadata.may_contain_video) {
+      return false;
+    }
+
+    gfx::Rect damage = frame.render_pass_list.back()->damage_rect;
+    if (frame.render_pass_list.back()->has_per_quad_damage) {
+      for (auto* quad : frame.render_pass_list.back()->quad_list) {
+        if (quad->material != DrawQuad::Material::kTextureContent)
+          continue;
+
+        auto* texture_quad = TextureDrawQuad::MaterialCast(quad);
+        if (!texture_quad->damage_rect)
+          continue;
+
+        damage.Union(*texture_quad->damage_rect);
+      }
+    }
+
+    damage =
+        gfx::ScaleToEnclosingRect(damage, 1.f / frame.device_scale_factor());
 
     if (damage.width() < kMinDamageWidth || damage.height() < kMinDamageHeight)
       return false;
@@ -54,7 +84,7 @@ class VideoDetector::ClientInfo {
 
     const bool in_video =
         (buffer_size_ == kMinFramesPerSecond) &&
-        (now - update_times_[buffer_start_] <= base::TimeDelta::FromSeconds(1));
+        (now - update_times_[buffer_start_] <= base::Seconds(1));
 
     if (in_video && video_start_time_.is_null())
       video_start_time_ = update_times_[buffer_start_];
@@ -66,6 +96,10 @@ class VideoDetector::ClientInfo {
   }
 
  private:
+  // If true, we'll only process frames that may contain videos, as determined
+  // by the frame's may_contain_video metadata.
+  bool should_ignore_non_video_frames_;
+
   // Circular buffer containing update times of the last (up to
   // |kMinFramesPerSecond|) video-sized updates to this client.
   base::TimeTicks update_times_[kMinFramesPerSecond];
@@ -84,8 +118,6 @@ class VideoDetector::ClientInfo {
   // whether a new frame was submitted since the last time the Surface was
   // drawn.
   uint64_t last_drawn_frame_index_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(ClientInfo);
 };
 
 VideoDetector::VideoDetector(
@@ -110,15 +142,18 @@ VideoDetector::~VideoDetector() {
 void VideoDetector::OnVideoActivityEnded() {
   DCHECK(video_is_playing_);
   video_is_playing_ = false;
-  observers_.ForAllPtrs([](mojom::VideoDetectorObserver* observer) {
+  for (auto& observer : observers_) {
     observer->OnVideoActivityEnded();
-  });
+  }
 }
 
-void VideoDetector::AddObserver(mojom::VideoDetectorObserverPtr observer) {
+void VideoDetector::AddObserver(
+    mojo::PendingRemote<mojom::VideoDetectorObserver> pending_observer) {
+  mojo::Remote<mojom::VideoDetectorObserver> observer(
+      std::move(pending_observer));
   if (video_is_playing_)
     observer->OnVideoActivityStarted();
-  observers_.AddPtr(std::move(observer));
+  observers_.Add(std::move(observer));
 }
 
 void VideoDetector::OnFrameSinkIdRegistered(const FrameSinkId& frame_sink_id) {
@@ -159,9 +194,9 @@ void VideoDetector::OnSurfaceWillBeDrawn(Surface* surface) {
                                 &VideoDetector::OnVideoActivityEnded);
     if (!video_is_playing_) {
       video_is_playing_ = true;
-      observers_.ForAllPtrs([](mojom::VideoDetectorObserver* observer) {
+      for (auto& observer : observers_) {
         observer->OnVideoActivityStarted();
-      });
+      }
     }
   }
 }

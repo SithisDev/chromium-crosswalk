@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,20 @@
 #include "base/callback.h"
 #include "base/component_export.h"
 #include "base/containers/flat_map.h"
-#include "base/memory/read_only_shared_memory_region.h"
+#include "base/memory/shared_memory_mapping.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "media/capture/mojom/video_capture.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/system/buffer.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
 
 namespace media {
 class VideoFrame;
-class VideoFrameMetadata;
+class VideoFramePool;
+struct VideoCaptureFeedback;
 }  // namespace media
 
 namespace mirroring {
@@ -31,7 +34,11 @@ class COMPONENT_EXPORT(MIRRORING_SERVICE) VideoCaptureClient
     : public media::mojom::VideoCaptureObserver {
  public:
   VideoCaptureClient(const media::VideoCaptureParams& params,
-                     media::mojom::VideoCaptureHostPtr host);
+                     mojo::PendingRemote<media::mojom::VideoCaptureHost> host);
+
+  VideoCaptureClient(const VideoCaptureClient&) = delete;
+  VideoCaptureClient& operator=(const VideoCaptureClient&) = delete;
+
   ~VideoCaptureClient() override;
 
   using FrameDeliverCallback = base::RepeatingCallback<void(
@@ -46,41 +53,46 @@ class COMPONENT_EXPORT(MIRRORING_SERVICE) VideoCaptureClient
 
   void Resume(FrameDeliverCallback deliver_callback);
 
+  // Feedback callback.
+  void ProcessFeedback(const media::VideoCaptureFeedback& feedback);
+
   // Requests to receive a refreshed captured video frame. Do nothing if the
   // capturing device is not started or the capturing is paused.
   void RequestRefreshFrame();
 
   // media::mojom::VideoCaptureObserver implementations.
-  void OnStateChanged(media::mojom::VideoCaptureState state) override;
+  void OnStateChanged(media::mojom::VideoCaptureResultPtr result) override;
   void OnNewBuffer(int32_t buffer_id,
                    media::mojom::VideoBufferHandlePtr buffer_handle) override;
-  void OnBufferReady(int32_t buffer_id,
-                     media::mojom::VideoFrameInfoPtr info) override;
+  void OnBufferReady(
+      media::mojom::ReadyBufferPtr buffer,
+      std::vector<media::mojom::ReadyBufferPtr> scaled_buffers) override;
   void OnBufferDestroyed(int32_t buffer_id) override;
+  void OnNewCropVersion(uint32_t crop_version) override;
 
  private:
-  using BufferFinishedCallback =
-      base::OnceCallback<void(double consumer_resource_utilization)>;
+  using BufferFinishedCallback = base::OnceCallback<void()>;
   // Called by the VideoFrame destructor.
-  static void DidFinishConsumingFrame(const media::VideoFrameMetadata* metadata,
-                                      BufferFinishedCallback callback);
+  static void DidFinishConsumingFrame(BufferFinishedCallback callback);
 
-  // Reports the utilization, unmaps the shared memory, and returns the buffer.
+  // Reports the utilization to release the buffer for potential reuse.
+  using MappingKeepAlive = absl::variant<absl::monostate,
+                                         base::WritableSharedMemoryMapping,
+                                         base::ReadOnlySharedMemoryMapping>;
   void OnClientBufferFinished(int buffer_id,
-                              base::ReadOnlySharedMemoryMapping mapping,
-                              double consumer_resource_utilization);
+                              MappingKeepAlive mapping_keep_alive);
 
   const media::VideoCaptureParams params_;
-  const media::mojom::VideoCaptureHostPtr video_capture_host_;
+  const mojo::Remote<media::mojom::VideoCaptureHost> video_capture_host_;
 
   // Called when capturing failed to start.
   base::OnceClosure error_callback_;
 
-  mojo::Binding<media::mojom::VideoCaptureObserver> binding_;
+  mojo::Receiver<media::mojom::VideoCaptureObserver> receiver_{this};
 
-  // TODO(https://crbug.com/843117): Store the
-  // base::ReadOnlySharedMemoryRegion instead after migrating the
-  // media::VideoCaptureDeviceClient to the new shared memory API.
+  // TODO(crbug.com/843117): Store the base::ReadOnlySharedMemoryRegion instead
+  // after migrating the media::VideoCaptureDeviceClient to the new shared
+  // memory API.
   using ClientBufferMap =
       base::flat_map<int32_t, media::mojom::VideoBufferHandlePtr>;
   // Stores the buffer handler on OnBufferCreated(). |buffer_id| is the key.
@@ -93,20 +105,18 @@ class COMPONENT_EXPORT(MIRRORING_SERVICE) VideoCaptureClient
   // The callback to deliver the received frame.
   FrameDeliverCallback frame_deliver_callback_;
 
-  // TODO(https://crbug.com/843117): Remove the MappingMap after migrating
-  // media::VideoCaptureDeviceClient to the new shared memory API.
-  using MappingAndSize = std::pair<mojo::ScopedSharedBufferMapping, uint32_t>;
-  using MappingMap = base::flat_map<int32_t, MappingAndSize>;
-  // Stores the mapped buffers and their size. Each buffer is added the first
-  // time the mapping is done or a larger size is requested.
-  // |buffer_id| is the key to this map.
-  MappingMap mapped_buffers_;
+  // Latest received feedback.
+  media::VideoCaptureFeedback feedback_;
+
+  // Cast Streaming does not support NV12 frames. When NV12 frames are received,
+  // these structures are used to convert them to I420 on the CPU.
+  // https://crbug.com/1206325
+  std::unique_ptr<media::VideoFramePool> nv12_to_i420_pool_;
+  std::vector<uint8_t> nv12_to_i420_tmp_buf_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<VideoCaptureClient> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(VideoCaptureClient);
 };
 
 }  // namespace mirroring

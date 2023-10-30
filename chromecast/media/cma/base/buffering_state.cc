@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ BufferingConfig::~BufferingConfig() {
 
 BufferingState::BufferingState(const std::string& stream_id,
                                const scoped_refptr<BufferingConfig>& config,
-                               const base::Closure& state_changed_cb,
+                               const base::RepeatingClosure& state_changed_cb,
                                const HighLevelBufferCB& high_level_buffer_cb)
     : stream_id_(stream_id),
       config_(config),

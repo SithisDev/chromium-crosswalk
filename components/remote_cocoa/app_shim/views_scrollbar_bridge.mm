@@ -1,10 +1,8 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "components/remote_cocoa/app_shim/views_scrollbar_bridge.h"
-
-#import "base/mac/sdk_forward_declarations.h"
 
 @interface ViewsScrollbarBridge ()
 
@@ -17,7 +15,7 @@
 
 - (instancetype)initWithDelegate:(ViewsScrollbarBridgeDelegate*)delegate {
   if ((self = [super init])) {
-    delegate_ = delegate;
+    _delegate = delegate;
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(onScrollerStyleChanged:)
@@ -28,18 +26,18 @@
 }
 
 - (void)dealloc {
-  DCHECK(!delegate_);
+  DCHECK(!_delegate);
   [super dealloc];
 }
 
 - (void)clearDelegate {
-  delegate_ = nullptr;
+  _delegate = nullptr;
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)onScrollerStyleChanged:(NSNotification*)notification {
-  if (delegate_)
-    delegate_->OnScrollerStyleChanged();
+  if (_delegate)
+    _delegate->OnScrollerStyleChanged();
 }
 
 + (NSScrollerStyle)getPreferredScrollerStyle {

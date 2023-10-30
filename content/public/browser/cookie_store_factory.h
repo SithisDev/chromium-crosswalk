@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 
@@ -21,10 +22,6 @@ namespace net {
 class CookieCryptoDelegate;
 class CookieStore;
 class NetLog;
-}
-
-namespace storage {
-class SpecialStoragePolicy;
 }
 
 namespace content {
@@ -42,14 +39,13 @@ struct CONTENT_EXPORT CookieStoreConfig {
   CookieStoreConfig(const base::FilePath& path,
                     bool restore_old_session_cookies,
                     bool persist_session_cookies,
-                    storage::SpecialStoragePolicy* storage_policy);
+                    bool first_party_sets_enabled);
   ~CookieStoreConfig();
 
   const base::FilePath path;
   const bool restore_old_session_cookies;
   const bool persist_session_cookies;
-  const scoped_refptr<storage::SpecialStoragePolicy> storage_policy;
-
+  const bool first_party_sets_enabled;
   // The following are infrequently used cookie store parameters.
   // Rather than clutter the constructor API, these are assigned a default
   // value on CookieStoreConfig construction. Clients should then override
@@ -58,7 +54,7 @@ struct CONTENT_EXPORT CookieStoreConfig {
   // Used to provide encryption hooks for the cookie store. The
   // CookieCryptoDelegate must outlive any cookie store created with this
   // config.
-  net::CookieCryptoDelegate* crypto_delegate;
+  raw_ptr<net::CookieCryptoDelegate> crypto_delegate;
 
   // Callbacks for data load events will be performed on |client_task_runner|.
   // If nullptr, uses the task runner for BrowserThread::IO.

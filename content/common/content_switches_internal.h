@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,15 @@
 
 #include "build/build_config.h"
 #include "content/common/content_export.h"
-#include "content/public/common/web_preferences.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
 
 namespace base {
 class CommandLine;
 }
 
 namespace content {
+
+extern const char kFirstRendererProcess[];
 
 bool IsPinchToZoomEnabled();
 

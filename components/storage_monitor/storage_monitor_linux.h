@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,9 @@
 #ifndef COMPONENTS_STORAGE_MONITOR_STORAGE_MONITOR_LINUX_H_
 #define COMPONENTS_STORAGE_MONITOR_STORAGE_MONITOR_LINUX_H_
 
-#if defined(OS_CHROMEOS)
+#include "build/chromeos_buildflags.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #error "Use the ChromeOS-specific implementation instead."
 #endif
 
@@ -20,8 +22,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
-#include "base/files/file_path_watcher.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
@@ -41,6 +41,10 @@ class StorageMonitorLinux : public StorageMonitor {
   // Use StorageMonitor::GetInstance() instead.
   // |mtab_file_path| is the path to a mtab file to watch for mount points.
   explicit StorageMonitorLinux(const base::FilePath& mtab_file_path);
+
+  StorageMonitorLinux(const StorageMonitorLinux&) = delete;
+  StorageMonitorLinux& operator=(const StorageMonitorLinux&) = delete;
+
   ~StorageMonitorLinux() override;
 
   // Must be called for StorageMonitorLinux to work.
@@ -48,9 +52,10 @@ class StorageMonitorLinux : public StorageMonitor {
 
  protected:
   // Gets device information given a |device_path| and |mount_point|.
-  using GetDeviceInfoCallback = base::Callback<std::unique_ptr<StorageInfo>(
-      const base::FilePath& device_path,
-      const base::FilePath& mount_point)>;
+  using GetDeviceInfoCallback =
+      base::RepeatingCallback<std::unique_ptr<StorageInfo>(
+          const base::FilePath& device_path,
+          const base::FilePath& mount_point)>;
 
   void SetGetDeviceInfoCallbackForTest(
       const GetDeviceInfoCallback& get_device_info_callback);
@@ -68,26 +73,26 @@ class StorageMonitorLinux : public StorageMonitor {
   };
 
   // Mapping of mount points to MountPointInfo.
-  typedef std::map<base::FilePath, MountPointInfo> MountMap;
+  using MountMap = std::map<base::FilePath, MountPointInfo>;
 
   // (mount point, priority)
   // For devices that are mounted to multiple mount points, this helps us track
   // which one we've notified system monitor about.
-  typedef std::map<base::FilePath, bool> ReferencedMountPoint;
+  using ReferencedMountPoint = std::map<base::FilePath, bool>;
 
   // (mount device, map of known mount points)
   // For each mount device, track the places it is mounted and which one (if
   // any) we have notified system monitor about.
-  typedef std::map<base::FilePath, ReferencedMountPoint> MountPriorityMap;
+  using MountPriorityMap = std::map<base::FilePath, ReferencedMountPoint>;
 
   // StorageMonitor implementation.
   bool GetStorageInfoForPath(const base::FilePath& path,
                              StorageInfo* device_info) const override;
   void EjectDevice(const std::string& device_id,
-                   base::Callback<void(EjectStatus)> callback) override;
+                   base::OnceCallback<void(EjectStatus)> callback) override;
 
   // Called when the MtabWatcher has been created.
-  void OnMtabWatcherCreated(MtabWatcherLinux* watcher);
+  void OnMtabWatcherCreated(std::unique_ptr<MtabWatcherLinux> watcher);
 
   bool IsDeviceAlreadyMounted(const base::FilePath& mount_device) const;
 
@@ -126,8 +131,6 @@ class StorageMonitorLinux : public StorageMonitor {
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<StorageMonitorLinux> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(StorageMonitorLinux);
 };
 
 }  // namespace storage_monitor

@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <algorithm>
 
 #include "base/guid.h"
+#include "base/memory/values_equivalent.h"
 #include "components/download/internal/background_service/test/entry_utils.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 
@@ -12,10 +13,7 @@ namespace download {
 namespace test {
 
 bool CompareEntry(const Entry* const& expected, const Entry* const& actual) {
-  if (expected == nullptr || actual == nullptr)
-    return expected == actual;
-
-  return *expected == *actual;
+  return base::ValuesEquivalent(expected, actual);
 }
 
 bool CompareEntryList(const std::vector<Entry*>& expected,
@@ -83,8 +81,7 @@ Entry BuildEntry(DownloadClient client,
                  base::Time last_cleanup_check_time,
                  uint64_t bytes_downloaded,
                  int attempt_count,
-                 int resumption_count,
-                 int cleanup_attempt_count) {
+                 int resumption_count) {
   Entry entry = BuildEntry(client, guid);
   entry.scheduling_params.cancel_time = cancel_time;
   entry.scheduling_params.network_requirements = network_requirements;
@@ -100,7 +97,6 @@ Entry BuildEntry(DownloadClient client,
   entry.bytes_downloaded = bytes_downloaded;
   entry.attempt_count = attempt_count;
   entry.resumption_count = resumption_count;
-  entry.cleanup_attempt_count = cleanup_attempt_count;
   entry.url_chain = {url, url};
   entry.response_headers = base::MakeRefCounted<const net::HttpResponseHeaders>(
       "HTTP/1.1 200 OK\nContent-type: text/html\n\n");

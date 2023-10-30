@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,54 +6,50 @@
 #define COMPONENTS_MIRRORING_SERVICE_MIRRORING_SERVICE_H_
 
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "components/mirroring/mojom/mirroring_service.mojom.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
-#include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/cpp/service_binding.h"
-#include "services/service_manager/public/cpp/service_keepalive.h"
-#include "services/service_manager/public/mojom/service.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace mirroring {
 
 class Session;
+class OpenscreenSessionHost;
 
 class COMPONENT_EXPORT(MIRRORING_SERVICE) MirroringService final
-    : public service_manager::Service,
-      public mojom::MirroringService {
+    : public mojom::MirroringService {
  public:
-  MirroringService(service_manager::mojom::ServiceRequest request,
+  MirroringService(mojo::PendingReceiver<mojom::MirroringService> receiver,
                    scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);
+
+  MirroringService(const MirroringService&) = delete;
+  MirroringService& operator=(const MirroringService&) = delete;
+
   ~MirroringService() override;
 
  private:
-  // service_manager::Service implementation.
-  void OnBindInterface(const service_manager::BindSourceInfo& source_info,
-                       const std::string& interface_name,
-                       mojo::ScopedMessagePipeHandle interface_pipe) override;
-  bool OnServiceManagerConnectionLost() override;
-
-  // Handles the request to connect to this service.
-  void Create(mojom::MirroringServiceRequest request);
-
   // mojom::MirroringService implementation.
   void Start(mojom::SessionParametersPtr params,
              const gfx::Size& max_resolution,
-             mojom::SessionObserverPtr observer,
-             mojom::ResourceProviderPtr resource_provider,
-             mojom::CastMessageChannelPtr outbound_channel,
-             mojom::CastMessageChannelRequest inbound_channel) override;
+             mojo::PendingRemote<mojom::SessionObserver> observer,
+             mojo::PendingRemote<mojom::ResourceProvider> resource_provider,
+             mojo::PendingRemote<mojom::CastMessageChannel> outbound_channel,
+             mojo::PendingReceiver<mojom::CastMessageChannel> inbound_channel)
+      override;
 
-  service_manager::ServiceBinding service_binding_;
-  service_manager::ServiceKeepalive service_keepalive_;
+  void OnDisconnect();
 
+  // The receiver for the mirroring service API.
+  mojo::Receiver<mojom::MirroringService> receiver_;
+
+  // The IO task runner for this utility process.
   const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
-  service_manager::BinderRegistry registry_;
-  mojo::BindingSet<mojom::MirroringService> bindings_;
-  std::unique_ptr<Session> session_;  // Current mirroring session.
 
-  DISALLOW_COPY_AND_ASSIGN(MirroringService);
+  // The current legacy mirroring session, if any.
+  std::unique_ptr<Session> session_;
+
+  // The current Open Screen session host, if any.
+  std::unique_ptr<OpenscreenSessionHost> session_host_;
 };
 
 }  // namespace mirroring

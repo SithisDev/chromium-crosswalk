@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@ package org.chromium.content.browser.selection;
 import android.animation.Animator;
 import android.animation.Animator.AnimatorListener;
 import android.animation.AnimatorListenerAdapter;
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.os.Build;
 import android.view.ActionMode;
@@ -17,6 +16,8 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.PopupWindow;
+
+import androidx.annotation.RequiresApi;
 
 import org.chromium.base.Log;
 import org.chromium.base.PackageUtils;
@@ -35,7 +36,7 @@ import java.lang.reflect.Method;
  * This is a version code limited workaround to avoid crashes in the app.
  */
 public final class LGEmailActionModeWorkaroundImpl {
-    private static final String TAG = "cr_Ime";
+    private static final String TAG = "Ime";
 
     // This is the last broken version shipped on LG V20/NRD90M.
     public static final int LGEmailWorkaroundMaxVersion = 67502100;
@@ -78,7 +79,7 @@ public final class LGEmailActionModeWorkaroundImpl {
         return true;
     }
 
-    @TargetApi(Build.VERSION_CODES.M)
+    @RequiresApi(Build.VERSION_CODES.M)
     private static void allowActionModeDestroyOnNonUiThread(ActionMode actionMode) {
         // LG Email app dismisses ActionMode whenever InputConnection#setComposingText() or
         // InputConnection#commitText() occurs. But they do on ImeThread, not on UI thread and

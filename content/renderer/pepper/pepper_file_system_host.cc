@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,25 +7,42 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "content/common/pepper_file_util.h"
-#include "content/public/common/service_names.mojom.h"
-#include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
-#include "content/renderer/render_thread_impl.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/host/dispatch_host_message.h"
 #include "ppapi/host/ppapi_host.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/file_system_util.h"
 #include "ppapi/shared_impl/file_type_conversion.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "storage/common/fileapi/file_system_type_converters.h"
-#include "storage/common/fileapi/file_system_util.h"
+#include "storage/common/file_system/file_system_util.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/mojom/filesystem/file_system.mojom.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_view.h"
 
 namespace content {
+
+namespace {
+
+absl::optional<blink::mojom::FileSystemType>
+PepperFileSystemTypeToMojoFileSystemType(PP_FileSystemType type) {
+  switch (type) {
+    case PP_FILESYSTEMTYPE_LOCALTEMPORARY:
+      return blink::mojom::FileSystemType::kTemporary;
+    case PP_FILESYSTEMTYPE_LOCALPERSISTENT:
+      return blink::mojom::FileSystemType::kPersistent;
+    case PP_FILESYSTEMTYPE_EXTERNAL:
+      return blink::mojom::FileSystemType::kExternal;
+    default:
+      return absl::nullopt;
+  }
+}
+
+}  // namespace
 
 PepperFileSystemHost::PepperFileSystemHost(RendererPpapiHost* host,
                                            PP_Instance instance,
@@ -97,9 +114,9 @@ int32_t PepperFileSystemHost::OnHostMsgOpen(
     return PP_ERROR_INPROGRESS;
   called_open_ = true;
 
-  storage::FileSystemType file_system_type =
-      PepperFileSystemTypeToFileSystemType(type_);
-  if (file_system_type == storage::kFileSystemTypeUnknown)
+  absl::optional<blink::mojom::FileSystemType> file_system_type =
+      PepperFileSystemTypeToMojoFileSystemType(type_);
+  if (!file_system_type.has_value())
     return PP_ERROR_FAILED;
 
   GURL document_url = renderer_ppapi_host_->GetDocumentURL(pp_instance());
@@ -107,9 +124,12 @@ int32_t PepperFileSystemHost::OnHostMsgOpen(
     return PP_ERROR_FAILED;
 
   reply_context_ = context->MakeReplyMessageContext();
-  GetFileSystemManager().Open(
-      url::Origin::Create(document_url),
-      mojo::ConvertTo<blink::mojom::FileSystemType>(file_system_type),
+  blink::mojom::FileSystemManager* file_system_manager = GetFileSystemManager();
+  if (file_system_manager == nullptr)
+    return PP_ERROR_FAILED;
+
+  file_system_manager->Open(
+      url::Origin::Create(document_url), file_system_type.value(),
       base::BindOnce(&PepperFileSystemHost::DidOpenFileSystem, AsWeakPtr()));
   return PP_OK_COMPLETIONPENDING;
 }
@@ -127,13 +147,13 @@ int32_t PepperFileSystemHost::OnHostMsgInitIsolatedFileSystem(
   if (!storage::ValidateIsolatedFileSystemId(fsid))
     return PP_ERROR_BADARGUMENT;
 
-  RenderView* view =
-      renderer_ppapi_host_->GetRenderViewForInstance(pp_instance());
-  if (!view)
+  RenderFrame* frame =
+      renderer_ppapi_host_->GetRenderFrameForInstance(pp_instance());
+  if (!frame)
     return PP_ERROR_FAILED;
 
   url::Origin main_frame_origin(
-      view->GetWebView()->MainFrame()->GetSecurityOrigin());
+      frame->GetWebView()->MainFrame()->GetSecurityOrigin());
   const std::string root_name = ppapi::IsolatedFileSystemTypeToRootName(type);
   if (root_name.empty())
     return PP_ERROR_BADARGUMENT;
@@ -143,12 +163,16 @@ int32_t PepperFileSystemHost::OnHostMsgInitIsolatedFileSystem(
   return PP_OK;
 }
 
-blink::mojom::FileSystemManager& PepperFileSystemHost::GetFileSystemManager() {
-  if (!file_system_manager_) {
-    ChildThreadImpl::current()->GetConnector()->BindInterface(
-        mojom::kBrowserServiceName, mojo::MakeRequest(&file_system_manager_));
+blink::mojom::FileSystemManager* PepperFileSystemHost::GetFileSystemManager() {
+  if (!file_system_manager_remote_) {
+    RenderFrame* frame =
+        renderer_ppapi_host_->GetRenderFrameForInstance(pp_instance());
+    if (!frame)
+      return nullptr;
+    frame->GetBrowserInterfaceBroker()->GetInterface(
+        file_system_manager_remote_.BindNewPipeAndPassReceiver());
   }
-  return *file_system_manager_;
+  return file_system_manager_remote_.get();
 }
 
 }  // namespace content

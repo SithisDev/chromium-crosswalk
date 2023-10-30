@@ -1,16 +1,17 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/component_updater/configurator_impl.h"
 
-#include <stddef.h>
-
 #include <algorithm>
+#include <string>
+#include <vector>
 
 #include "base/callback.h"
+#include "base/containers/flat_map.h"
+#include "base/enterprise_util.h"
 #include "base/feature_list.h"
-#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/version.h"
@@ -21,10 +22,12 @@
 #include "components/update_client/protocol_handler.h"
 #include "components/update_client/utils.h"
 #include "components/version_info/version_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/gurl.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/win_util.h"
-#endif  // OS_WIN
+#endif
 
 namespace component_updater {
 
@@ -52,12 +55,12 @@ ConfiguratorImpl::ConfiguratorImpl(
   }
 }
 
-ConfiguratorImpl::~ConfiguratorImpl() {}
+ConfiguratorImpl::~ConfiguratorImpl() = default;
 
-int ConfiguratorImpl::InitialDelay() const {
+double ConfiguratorImpl::InitialDelay() const {
   if (initial_delay_)
     return initial_delay_;
-  return fast_update_ ? 10 : (6 * kDelayOneMinute);
+  return fast_update_ ? 10 : kDelayOneMinute;
 }
 
 int ConfiguratorImpl::NextCheckDelay() const {
@@ -121,13 +124,6 @@ bool ConfiguratorImpl::EnabledCupSigning() const {
   return true;
 }
 
-std::vector<uint8_t> ConfiguratorImpl::GetRunActionKeyHash() const {
-  return std::vector<uint8_t>{0x5f, 0x94, 0xe0, 0x3c, 0x64, 0x30, 0x9f, 0xbc,
-                              0xfe, 0x00, 0x9a, 0x27, 0x3e, 0x52, 0xbf, 0xa5,
-                              0x84, 0xb9, 0xb3, 0x75, 0x07, 0x29, 0xde, 0xfa,
-                              0x32, 0x76, 0xd9, 0x93, 0xb5, 0xa3, 0xce, 0x02};
-}
-
 // The default implementation for most embedders returns an empty string.
 // Desktop embedders, such as the Windows component updater can provide a
 // meaningful implementation for this function.
@@ -140,9 +136,26 @@ ConfiguratorImpl::GetProtocolHandlerFactory() const {
   return std::make_unique<update_client::ProtocolHandlerFactoryJSON>();
 }
 
-update_client::RecoveryCRXElevator ConfiguratorImpl::GetRecoveryCRXElevator()
+// Returns a "do nothing" callback which returns an empty updater state.
+// This is the correct default for all the embedders except the component
+// updater for Chrome on macOS and Windows, which includes a recovery
+// component.
+update_client::UpdaterStateProvider ConfiguratorImpl::GetUpdaterStateProvider()
     const {
-  return {};
+  return base::BindRepeating([](bool /*is_machine*/) {
+    return base::flat_map<std::string, std::string>();
+  });
+}
+
+absl::optional<bool> ConfiguratorImpl::IsMachineExternallyManaged() const {
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+  // TODO (crbug.com/1320776): For legacy compatibility, this uses
+  // IsEnterpriseDevice() which effectively equates to a domain join check.
+  // Consider whether this should use IsManagedDevice() instead.
+  return base::IsEnterpriseDevice();
+#else
+  return absl::nullopt;
+#endif
 }
 
 }  // namespace component_updater

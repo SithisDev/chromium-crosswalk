@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,18 +8,15 @@
 #include <stdint.h>
 
 #include "base/bind.h"
-#include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "content/common/content_export.h"
 #include "ppapi/c/dev/pp_print_settings_dev.h"
 
 namespace content {
 
 // A class for getting the default print settings for the default printer.
-class CONTENT_EXPORT PepperPrintSettingsManager {
+class PepperPrintSettingsManager {
  public:
-  typedef std::pair<PP_PrintSettings_Dev, int32_t> Result;
-  typedef base::Callback<void(Result)> Callback;
+  using Result = std::pair<PP_PrintSettings_Dev, int32_t>;
+  using Callback = base::OnceCallback<void(Result)>;
 
   // The default print settings are obtained asynchronously and |callback|
   // is called with the the print settings when they are available. |callback|
@@ -31,10 +28,15 @@ class CONTENT_EXPORT PepperPrintSettingsManager {
 };
 
 // Real implementation for getting the default print settings.
-class CONTENT_EXPORT PepperPrintSettingsManagerImpl
-    : public PepperPrintSettingsManager {
+class PepperPrintSettingsManagerImpl : public PepperPrintSettingsManager {
  public:
   PepperPrintSettingsManagerImpl() {}
+
+  PepperPrintSettingsManagerImpl(const PepperPrintSettingsManagerImpl&) =
+      delete;
+  PepperPrintSettingsManagerImpl& operator=(
+      const PepperPrintSettingsManagerImpl&) = delete;
+
   ~PepperPrintSettingsManagerImpl() override {}
 
   // PepperPrintSettingsManager implementation.
@@ -42,7 +44,7 @@ class CONTENT_EXPORT PepperPrintSettingsManagerImpl
       PepperPrintSettingsManager::Callback callback) override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PepperPrintSettingsManagerImpl);
+  static PepperPrintSettingsManager::Result ComputeDefaultPrintSettings();
 };
 
 }  // namespace content

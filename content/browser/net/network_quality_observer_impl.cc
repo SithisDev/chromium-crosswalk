@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,8 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "content/common/renderer.mojom.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/network_quality_observer_factory.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 
 namespace {
@@ -62,8 +58,6 @@ NetworkQualityObserverImpl::NetworkQualityObserverImpl(
       last_notified_type_(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  registrar_.Add(this, NOTIFICATION_RENDERER_PROCESS_CREATED,
-                 NotificationService::AllSources());
   network_quality_tracker_->AddRTTAndThroughputEstimatesObserver(this);
   network_quality_tracker_->AddEffectiveConnectionTypeObserver(this);
 }
@@ -95,13 +89,9 @@ void NetworkQualityObserverImpl::OnEffectiveConnectionTypeChanged(
   }
 }
 
-void NetworkQualityObserverImpl::Observe(int type,
-                                         const NotificationSource& source,
-                                         const NotificationDetails& details) {
+void NetworkQualityObserverImpl::OnRenderProcessHostCreated(
+    content::RenderProcessHost* rph) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK_EQ(NOTIFICATION_RENDERER_PROCESS_CREATED, type);
-
-  RenderProcessHost* rph = Source<RenderProcessHost>(source).ptr();
 
   // Notify the newly created renderer of the current network quality.
   rph->GetRendererInterface()->OnNetworkQualityChanged(
@@ -130,8 +120,9 @@ void NetworkQualityObserverImpl::OnRTTOrThroughputEstimatesComputed(
 
   bool network_quality_meaningfully_changed =
       http_rtt_changed || transport_rtt_changed || kbps_changed;
-  UMA_HISTOGRAM_BOOLEAN("NQE.ContentObserver.NetworkQualityMeaningfullyChanged",
-                        network_quality_meaningfully_changed);
+  LOCAL_HISTOGRAM_BOOLEAN(
+      "NQE.ContentObserver.NetworkQualityMeaningfullyChanged",
+      network_quality_meaningfully_changed);
 
   if (!network_quality_meaningfully_changed) {
     // Return since none of the metrics changed meaningfully. This reduces

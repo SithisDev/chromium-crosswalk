@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,30 @@ constexpr int kBitstreamAudioCodecDtsHd = 0b000100;
 constexpr int kBitstreamAudioCodecEac3 = 0b001000;
 constexpr int kBitstreamAudioCodecPcmSurround = 0b010000;
 constexpr int kBitstreamAudioCodecMpegHAudio = 0b100000;
-constexpr int kBitstreamAudioCodecAll = 0b111111;
+constexpr int kBitstreamAudioCodecDtsXP2 = 0b1000000;
+constexpr int kBitstreamAudioCodecAll = 0b1111111;
+
+// Supported bitstream audio codecs and their associated properties.
+struct BitstreamAudioCodecsInfo {
+  // Bitmap of supported bitstream audio codecs.
+  int codecs = kBitstreamAudioCodecNone;
+
+  // Bitmap specifying which of the corresponding codecs in |codecs| support
+  // spatial rendering.
+  int spatial_rendering = kBitstreamAudioCodecNone;
+
+  BitstreamAudioCodecsInfo operator&(
+      const BitstreamAudioCodecsInfo& other) const;
+
+  bool operator==(const BitstreamAudioCodecsInfo& other) const;
+  bool operator!=(const BitstreamAudioCodecsInfo& other) const;
+
+  BitstreamAudioCodecsInfo ApplyCodecMask(int mask) const;
+};
 
 std::string BitstreamAudioCodecsToString(int codecs);
+std::string BitstreamAudioCodecsInfoToString(
+    const BitstreamAudioCodecsInfo& info);
 
 }  // namespace chromecast
 

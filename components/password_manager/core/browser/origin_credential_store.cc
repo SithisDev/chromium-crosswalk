@@ -1,50 +1,72 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/password_manager/core/browser/origin_credential_store.h"
 
+#include <ios>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
+#include "components/password_manager/core/browser/password_form.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace password_manager {
-namespace {
 
-GURL GetAndroidOrOriginURL(const GURL& url) {
-  if (IsValidAndroidFacetURI(url.spec()))
-    return url;  // Pass android origins as they are.
-  return url.GetOrigin();
+using BlocklistedStatus = OriginCredentialStore::BlocklistedStatus;
+
+UiCredential::UiCredential(std::u16string username,
+                           std::u16string password,
+                           url::Origin origin,
+                           IsPublicSuffixMatch is_public_suffix_match,
+                           IsAffiliationBasedMatch is_affiliation_based_match,
+                           base::Time last_used)
+    : username_(std::move(username)),
+      password_(std::move(password)),
+      origin_(std::move(origin)),
+      is_public_suffix_match_(is_public_suffix_match),
+      is_affiliation_based_match_(is_affiliation_based_match),
+      last_used_(last_used) {}
+
+UiCredential::UiCredential(const PasswordForm& form,
+                           const url::Origin& affiliated_origin)
+    : username_(form.username_value),
+      password_(form.password_value),
+      origin_(form.is_affiliation_based_match ? affiliated_origin
+                                              : url::Origin::Create(form.url)),
+      is_public_suffix_match_(form.is_public_suffix_match),
+      is_affiliation_based_match_(form.is_affiliation_based_match),
+      last_used_(form.date_last_used) {}
+
+UiCredential::UiCredential(UiCredential&&) = default;
+UiCredential::UiCredential(const UiCredential&) = default;
+UiCredential& UiCredential::operator=(UiCredential&&) = default;
+UiCredential& UiCredential::operator=(const UiCredential&) = default;
+UiCredential::~UiCredential() = default;
+
+bool operator==(const UiCredential& lhs, const UiCredential& rhs) {
+  auto tie = [](const UiCredential& cred) {
+    return std::make_tuple(std::cref(cred.username()),
+                           std::cref(cred.password()), std::cref(cred.origin()),
+                           cred.is_public_suffix_match(),
+                           cred.is_affiliation_based_match(), cred.last_used());
+  };
+
+  return tie(lhs) == tie(rhs);
 }
 
-}  // namespace
-
-CredentialPair::CredentialPair(base::string16 username,
-                               base::string16 password,
-                               const GURL& origin_url,
-                               bool is_public_suffix_match)
-    : username(std::move(username)),
-      password(std::move(password)),
-      origin_url(GetAndroidOrOriginURL(origin_url)),
-      is_public_suffix_match(is_public_suffix_match) {}
-CredentialPair::CredentialPair(CredentialPair&&) = default;
-CredentialPair::CredentialPair(const CredentialPair&) = default;
-CredentialPair& CredentialPair::operator=(CredentialPair&&) = default;
-CredentialPair& CredentialPair::operator=(const CredentialPair&) = default;
-
-bool operator==(const CredentialPair& lhs, const CredentialPair& rhs) {
-  return lhs.username == rhs.username && lhs.password == rhs.password &&
-         lhs.origin_url == rhs.origin_url &&
-         lhs.is_public_suffix_match == rhs.is_public_suffix_match;
-}
-
-std::ostream& operator<<(std::ostream& os, const CredentialPair& pair) {
-  os << "(user: \"" << pair.username << "\", "
-     << "pwd: \"" << pair.password << "\", "
-     << "origin: \"" << pair.origin_url << "\", "
-     << (pair.is_public_suffix_match ? "PSL-" : "exact origin ") << "match)";
-  return os;
+std::ostream& operator<<(std::ostream& os, const UiCredential& credential) {
+  return os << "(user: \"" << credential.username() << "\", "
+            << "pwd: \"" << credential.password() << "\", "
+            << "origin: \"" << credential.origin() << "\", "
+            << (credential.is_public_suffix_match() ? "PSL-" : "exact origin ")
+            << "match, "
+            << "affiliation based match: " << std::boolalpha
+            << credential.is_affiliation_based_match()
+            << ", last_used: " << credential.last_used();
 }
 
 OriginCredentialStore::OriginCredentialStore(url::Origin origin)
@@ -52,12 +74,27 @@ OriginCredentialStore::OriginCredentialStore(url::Origin origin)
 OriginCredentialStore::~OriginCredentialStore() = default;
 
 void OriginCredentialStore::SaveCredentials(
-    std::vector<CredentialPair> credentials) {
+    std::vector<UiCredential> credentials) {
   credentials_ = std::move(credentials);
 }
 
-base::span<const CredentialPair> OriginCredentialStore::GetCredentials() const {
+base::span<const UiCredential> OriginCredentialStore::GetCredentials() const {
   return credentials_;
+}
+
+void OriginCredentialStore::SetBlocklistedStatus(bool is_blocklisted) {
+  if (is_blocklisted) {
+    blocklisted_status_ = BlocklistedStatus::kIsBlocklisted;
+    return;
+  }
+
+  if (blocklisted_status_ == BlocklistedStatus::kIsBlocklisted) {
+    blocklisted_status_ = BlocklistedStatus::kWasBlocklisted;
+  }
+}
+
+BlocklistedStatus OriginCredentialStore::GetBlocklistedStatus() const {
+  return blocklisted_status_;
 }
 
 void OriginCredentialStore::ClearCredentials() {

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@ package org.chromium.components.gcm_driver;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
-import android.os.Build;
 import android.os.Bundle;
 
 import org.json.JSONException;
@@ -17,7 +16,6 @@ import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.util.MinAndroidSdkLevel;
 
 /**
  * Unit tests for GCMMessage.
@@ -109,7 +107,6 @@ public class GCMMessageTest {
      * because it depends on PersistableBundle.
      */
     @Test
-    @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP)
     public void testSerializationToPersistableBundle() {
         Bundle extras = new Bundle();
 
@@ -141,7 +138,6 @@ public class GCMMessageTest {
      * on PersistableBundle.
      */
     @Test
-    @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP)
     public void testRawDataSerializationBehaviour() {
         Bundle extras = new Bundle();
         extras.putString("subtype", "MyAppId");
@@ -219,7 +215,7 @@ public class GCMMessageTest {
      * filled byte array when data has been provided.
      */
     @Test
-    public void testRawDataSerializationToJSON() throws JSONException {
+    public void testRawDataSerializationToJSON() {
         Bundle extras = new Bundle();
         extras.putString("subtype", "MyAppId");
 
@@ -259,7 +255,7 @@ public class GCMMessageTest {
      * Tests that getOriginalPriority returns Priority.NONE if it was not set in the bundle.
      */
     @Test
-    public void testNullOriginalPriority() throws JSONException {
+    public void testNullOriginalPriority() {
         Bundle extras = new Bundle();
 
         // Compose a simple message that lacks all optional fields.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,11 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/resource_request_info.h"
+#include "content/public/browser/web_contents.h"
 #include "net/ssl/client_cert_identity.h"
 #include "net/ssl/ssl_cert_request_info.h"
 
@@ -26,16 +25,19 @@ class X509Certificate;
 namespace content {
 
 // This class handles the approval and selection of a certificate for SSL client
-// authentication by the user. Should only be used on the IO thread. If the
+// authentication by the user. Should only be used on the UI thread. If the
 // SSLClientAuthHandler is destroyed before the certificate is selected, the
 // selection is canceled and the delegate never called.
 class SSLClientAuthHandler {
  public:
   // Delegate interface for SSLClientAuthHandler. Method implementations may
   // delete the handler when called.
-  class CONTENT_EXPORT Delegate {
+  class Delegate {
    public:
     Delegate() {}
+
+    Delegate(const Delegate&) = delete;
+    Delegate& operator=(const Delegate&) = delete;
 
     // Called to continue the request with |cert|. |cert| may be nullptr.
     virtual void ContinueWithCertificate(
@@ -47,41 +49,25 @@ class SSLClientAuthHandler {
 
    protected:
     virtual ~Delegate() {}
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Delegate);
   };
 
   // Creates a new SSLClientAuthHandler. The caller ensures that the handler
   // does not outlive |delegate|.
-  SSLClientAuthHandler(
-      std::unique_ptr<net::ClientCertStore> client_cert_store,
-      ResourceRequestInfo::WebContentsGetter web_contents_getter,
-      net::SSLCertRequestInfo* cert_request_info,
-      Delegate* delegate);
+  SSLClientAuthHandler(std::unique_ptr<net::ClientCertStore> client_cert_store,
+                       WebContents::Getter web_contents_getter,
+                       net::SSLCertRequestInfo* cert_request_info,
+                       Delegate* delegate);
+
+  SSLClientAuthHandler(const SSLClientAuthHandler&) = delete;
+  SSLClientAuthHandler& operator=(const SSLClientAuthHandler&) = delete;
+
   ~SSLClientAuthHandler();
 
   // Selects a certificate and resumes the URL request with that certificate.
   void SelectCertificate();
 
-  // Sets a UI-thread callback that can be used to close the UI associated with
-  // this certificate selection. The callback is run when SSLClientAuthHandler
-  // is destroyed.
-  void SetCancellationCallback(base::OnceClosure callback);
-
-  // Called to continue the request associated with |handler| using |cert|. This
-  // is static to avoid deleting |handler| while it is on the stack.
-  static void ContinueWithCertificate(
-      const base::WeakPtr<SSLClientAuthHandler>& handler,
-      scoped_refptr<net::X509Certificate> cert,
-      scoped_refptr<net::SSLPrivateKey> key);
-
-  // Called to abort the request associated with |handler|. This is static to
-  // avoid deleting |handler| while it is on the stack.
-  static void CancelCertificateSelection(
-      const base::WeakPtr<SSLClientAuthHandler>& handler);
-
  private:
+  class ClientCertificateDelegateImpl;
   class Core;
 
   // Called when |core_| is done retrieving the cert list.
@@ -96,17 +82,15 @@ class SSLClientAuthHandler {
   // will cancel the dialog corresponding to this certificate request.
   base::OnceClosure cancellation_callback_;
 
-  ResourceRequestInfo::WebContentsGetter web_contents_getter_;
+  WebContents::Getter web_contents_getter_;
 
   // The certs to choose from.
   scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;
 
   // The delegate to call back with the result.
-  Delegate* delegate_;
+  raw_ptr<Delegate> delegate_;
 
   base::WeakPtrFactory<SSLClientAuthHandler> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SSLClientAuthHandler);
 };
 
 }  // namespace content

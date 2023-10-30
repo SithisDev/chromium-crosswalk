@@ -1,8 +1,10 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/service/surfaces/surface_allocation_group.h"
+
+#include <utility>
 
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
@@ -150,8 +152,8 @@ void SurfaceAllocationGroup::TakeAggregatedLatencyInfoUpTo(
   surface->TakeActiveLatencyInfo(out);
   auto it = FindLatestSurfaceUpTo(surface->surface_id());
   DCHECK_EQ(*it, surface);
-  while (it > surfaces_.begin() && !(*it)->is_latency_info_taken())
-    (*--it)->TakeActiveAndPendingLatencyInfo(out);
+  while (it > surfaces_.begin() && !(*--it)->is_latency_info_taken())
+    (*it)->TakeActiveAndPendingLatencyInfo(out);
 }
 
 void SurfaceAllocationGroup::OnFirstSurfaceActivation(Surface* surface) {
@@ -176,6 +178,18 @@ void SurfaceAllocationGroup::WillNotRegisterNewSurfaces() {
   }
 }
 
+void SurfaceAllocationGroup::AckLastestActiveUnAckedFrame() {
+  if (!last_active_reference_.is_valid())
+    return;
+  SurfaceRange range(last_active_reference_);
+  auto* lastest_active = FindLatestActiveSurfaceInRange(range);
+  // If this group is blocking another Surface, and our latest frame is unacked,
+  // we send the Ack now. This will allow frame production to continue for our
+  // client, leading to this group unblocking the other.
+  if (lastest_active && lastest_active->HasUnackedActiveFrame())
+    lastest_active->SendAckToClient();
+}
+
 std::vector<Surface*>::const_iterator
 SurfaceAllocationGroup::FindLatestSurfaceUpTo(
     const SurfaceId& surface_id) const {
@@ -188,7 +202,7 @@ SurfaceAllocationGroup::FindLatestSurfaceUpTo(
 
   // If even the first surface is newer than |surface_id|, we can't find a
   // surface that is older than or equal to |surface_id|.
-  if (surfaces_[0]->surface_id().IsNewerThan(surface_id))
+  if (!surface_id.IsSameOrNewerThan(surfaces_[0]->surface_id()))
     return surfaces_.end();
 
   // Perform a binary search the find the latest surface that is older than or
@@ -197,12 +211,13 @@ SurfaceAllocationGroup::FindLatestSurfaceUpTo(
   int end = surfaces_.size();
   while (end - begin > 1) {
     int avg = (begin + end) / 2;
-    if (surfaces_[avg]->surface_id().IsNewerThan(surface_id))
+    if (!surface_id.IsSameOrNewerThan(surfaces_[avg]->surface_id()))
       end = avg;
     else
       begin = avg;
   }
 
+  DCHECK(surface_id.IsSameOrNewerThan(surfaces_[begin]->surface_id()));
   return surfaces_.begin() + begin;
 }
 

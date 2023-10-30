@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <string>
 
-namespace syncer {
+namespace invalidation {
 
 // Status of the message arrived from FCM.
 // Used by UMA histogram, so entries shouldn't be reordered or removed.
@@ -16,7 +16,8 @@ enum class InvalidationParsingStatus {
   kPublicTopicEmpty = 1,
   kPrivateTopicEmpty = 2,
   kVersionEmpty = 3,
-  kMaxValue = kVersionEmpty,
+  kVersionInvalid = 4,
+  kMaxValue = kVersionInvalid,
 };
 
 // This enum indicates how an operation was completed. These values are written
@@ -45,7 +46,7 @@ struct Status {
 
   bool IsSuccess() const { return code == StatusCode::SUCCESS; }
   bool IsAuthFailure() const { return code == StatusCode::AUTH_FAILURE; }
-  bool ShouldRetry() const { return code != StatusCode::FAILED_NON_RETRIABLE; }
+  bool ShouldRetry() const { return code == StatusCode::FAILED; }
 
   StatusCode code;
   // The message is not meant to be displayed to the user.
@@ -54,6 +55,6 @@ struct Status {
   // Copy and assignment allowed.
 };
 
-}  // namespace syncer
+}  // namespace invalidation
 
 #endif  // COMPONENTS_INVALIDATION_IMPL_STATUS_H_

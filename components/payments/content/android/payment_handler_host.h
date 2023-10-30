@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include <jni.h>
 
 #include "base/android/scoped_java_ref.h"
-#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
+#include "components/payments/content/android/payment_request_update_event_listener.h"
 #include "components/payments/content/payment_handler_host.h"
 
 namespace payments {
@@ -17,66 +18,69 @@ namespace android {
 // The native bridge for Java to interact with the payment handler host.
 // Object relationship diagram:
 //
-// PaymentRequestImpl.java ---- implements ----> PaymentHandlerHostDelegate
+// ChromePaymentRequestService.java --- implements --->
+// PaymentRequestUpdateEventListener
 //       |        ^
-//      owns      |_________
-//       |                  |
-//       v                  |
-// PaymentHandlerHost.java  |
-//       |                  |
-//      owns                |
-//       |               delegate
-//       v                  |
-// android/payment_handler_host.h -- implements -> PaymentHandlerHost::Delegate
-//       |        ^
-//      owns      |
+//      owns      |________________________
+//       |                                |
+//       v                                |
+// PaymentHandlerHost.java                |
+//       |                                |
+//      owns                              |
+//       |                             listener
+//       v                                |
+// android/payment_handler_host.h         |
+//       |        |                       |
+//      owns      |                       |
+//       |       owns                     |
+//       |        |                       |
+//       |        v                       |
+//       |    android/payment_request_update_event_listener.h
+//       |        ^        \ ---- implements ---> PaymentHandlerHost::Delegate
+//       |        |
 //       |     delegate
 //       v        |
 // payment_handler_host.h
-class PaymentHandlerHost : public payments::PaymentHandlerHost::Delegate {
+class PaymentHandlerHost {
  public:
-  // The |delegate| must implement PaymentHandlerHostDelegate from
-  // PaymentHandlerHost.java.
-  explicit PaymentHandlerHost(
-      const base::android::JavaParamRef<jobject>& delegate);
-  ~PaymentHandlerHost() override;
-
-  // Checks whether the payment method change is currently in progress.
-  jboolean IsChangingPaymentMethod(
+  // Converts a Java PaymentHandlerHost object into a C++ cross-platform
+  // payments::PaymentHandlerHost object. The returned object is ultimately
+  // owned by the Java PaymentHandlerHost.
+  static base::WeakPtr<payments::PaymentHandlerHost> FromJavaPaymentHandlerHost(
       JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& caller) const;
+      const base::android::JavaParamRef<jobject>& payment_handler_host);
 
-  // Returns the pointer to the payments::PaymentHandlerHost for binding to its
-  // IPC endpoint in service_worker_payment_app_bridge.cc.
-  jlong GetNativePaymentHandlerHost(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& caller);
+  // The |listener| must implement PaymentRequestUpdateEventListener. The
+  // |web_contents| should be from the same browser context as the payment
+  // handler and are used for logging in developr tools.
+  PaymentHandlerHost(const base::android::JavaParamRef<jobject>& web_contents,
+                     const base::android::JavaParamRef<jobject>& listener);
+
+  PaymentHandlerHost(const PaymentHandlerHost&) = delete;
+  PaymentHandlerHost& operator=(const PaymentHandlerHost&) = delete;
+
+  ~PaymentHandlerHost();
+
+  // Checks whether any payment method, shipping address or shipping option
+  // change is currently in progress.
+  jboolean IsWaitingForPaymentDetailsUpdate(JNIEnv* env) const;
 
   // Destroys this object.
-  void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& caller);
+  void Destroy(JNIEnv* env);
 
   // Notifies the payment handler that the merchant has updated the payment
   // details. The |response_buffer| should be a serialization of a valid
-  // PaymentMethodChangeResponse.java object.
+  // PaymentRequestDetailsUpdate.java object.
   void UpdateWith(JNIEnv* env,
-                  const base::android::JavaParamRef<jobject>& caller,
                   const base::android::JavaParamRef<jobject>& response_buffer);
 
   // Notifies the payment handler that the merchant ignored the payment
   // method change event.
-  void NoUpdatedPaymentDetails(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& caller);
+  void OnPaymentDetailsNotUpdated(JNIEnv* env);
 
  private:
-  // PaymentHandlerHost::Delegate implementation:
-  bool ChangePaymentMethod(const std::string& method_name,
-                           const std::string& stringified_data) override;
-
-  base::android::ScopedJavaGlobalRef<jobject> delegate_;
+  PaymentRequestUpdateEventListener listener_;
   payments::PaymentHandlerHost payment_handler_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(PaymentHandlerHost);
 };
 
 }  // namespace android

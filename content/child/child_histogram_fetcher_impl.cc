@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,16 @@
 
 #include <ctype.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram_delta_serialization.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/persistent_histogram_allocator.h"
-#include "base/single_thread_task_runner.h"
 #include "content/child/child_process.h"
 #include "ipc/ipc_sender.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 
 namespace content {
@@ -24,14 +25,16 @@ ChildHistogramFetcherFactoryImpl::ChildHistogramFetcherFactoryImpl() {}
 ChildHistogramFetcherFactoryImpl::~ChildHistogramFetcherFactoryImpl() {}
 
 void ChildHistogramFetcherFactoryImpl::Create(
-    content::mojom::ChildHistogramFetcherFactoryRequest request) {
-  mojo::MakeStrongBinding(std::make_unique<ChildHistogramFetcherFactoryImpl>(),
-                          std::move(request));
+    mojo::PendingReceiver<content::mojom::ChildHistogramFetcherFactory>
+        receiver) {
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<ChildHistogramFetcherFactoryImpl>(),
+      std::move(receiver));
 }
 
 void ChildHistogramFetcherFactoryImpl::CreateFetcher(
     base::WritableSharedMemoryRegion shared_memory,
-    content::mojom::ChildHistogramFetcherRequest request) {
+    mojo::PendingReceiver<content::mojom::ChildHistogramFetcher> receiver) {
   if (shared_memory.IsValid()) {
     // This message must be received only once. Multiple calls to create a
     // global allocator will cause a CHECK() failure.
@@ -43,9 +46,8 @@ void ChildHistogramFetcherFactoryImpl::CreateFetcher(
   if (global_allocator)
     global_allocator->CreateTrackingHistograms(global_allocator->Name());
 
-  content::mojom::ChildHistogramFetcherPtr child_histogram_interface;
-  mojo::MakeStrongBinding(std::make_unique<ChildHistogramFetcherImpl>(),
-                          std::move(request));
+  mojo::MakeSelfOwnedReceiver(std::make_unique<ChildHistogramFetcherImpl>(),
+                              std::move(receiver));
 }
 
 ChildHistogramFetcherImpl::ChildHistogramFetcherImpl() {}
@@ -64,8 +66,8 @@ void ChildHistogramFetcherImpl::GetChildNonPersistentHistogramData(
     global_allocator->UpdateTrackingHistograms();
 
   if (!histogram_delta_serialization_) {
-    histogram_delta_serialization_.reset(
-        new base::HistogramDeltaSerialization("ChildProcess"));
+    histogram_delta_serialization_ =
+        std::make_unique<base::HistogramDeltaSerialization>("ChildProcess");
   }
 
   std::vector<std::string> deltas;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 #include <map>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "base/values.h"
 #include "components/prefs/persistent_pref_store.h"
 #include "components/prefs/pref_value_map.h"
 #include "components/prefs/prefs_export.h"
@@ -30,6 +30,9 @@ class COMPONENTS_PREFS_EXPORT OverlayUserPrefStore
   OverlayUserPrefStore(PersistentPrefStore* ephemeral,
                        PersistentPrefStore* persistent);
 
+  OverlayUserPrefStore(const OverlayUserPrefStore&) = delete;
+  OverlayUserPrefStore& operator=(const OverlayUserPrefStore&) = delete;
+
   // Returns true if a value has been set for the |key| in this
   // OverlayUserPrefStore, i.e. if it potentially overrides a value
   // from the |persistent_user_pref_store_|.
@@ -42,7 +45,7 @@ class COMPONENTS_PREFS_EXPORT OverlayUserPrefStore
   bool IsInitializationComplete() const override;
   bool GetValue(const std::string& key,
                 const base::Value** result) const override;
-  std::unique_ptr<base::DictionaryValue> GetValues() const override;
+  base::Value::Dict GetValues() const override;
 
   // Methods of PersistentPrefStore.
   bool GetMutableValue(const std::string& key, base::Value** result) override;
@@ -53,6 +56,7 @@ class COMPONENTS_PREFS_EXPORT OverlayUserPrefStore
                         std::unique_ptr<base::Value> value,
                         uint32_t flags) override;
   void RemoveValue(const std::string& key, uint32_t flags) override;
+  void RemoveValuesByPrefixSilently(const std::string& prefix) override;
   bool ReadOnly() const override;
   PrefReadError GetReadError() const override;
   PrefReadError ReadPrefs() override;
@@ -90,8 +94,6 @@ class COMPONENTS_PREFS_EXPORT OverlayUserPrefStore
   scoped_refptr<PersistentPrefStore> persistent_user_pref_store_;
   NamesSet persistent_names_set_;
   NamesSet written_ephemeral_names_;
-
-  DISALLOW_COPY_AND_ASSIGN(OverlayUserPrefStore);
 };
 
 #endif  // COMPONENTS_PREFS_OVERLAY_USER_PREF_STORE_H_

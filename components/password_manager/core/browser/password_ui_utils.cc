@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,16 @@
 #include <vector>
 
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_utils.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_form_manager_for_ui.h"
 #include "components/password_manager/core/browser/password_form_metrics_recorder.h"
+#include "components/password_manager/core/browser/ui/credential_ui_entry.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/elide_url.h"
 
 namespace password_manager {
@@ -28,6 +31,26 @@ const char* const kRemovedPrefixes[] = {"m.", "mobile.", "www."};
 constexpr char kPlayStoreAppPrefix[] =
     "https://play.google.com/store/apps/details?id=";
 
+std::string GetShownOrigin(const FacetURI& facet_uri,
+                           const std::string& app_display_name,
+                           const GURL& url) {
+  if (facet_uri.IsValidAndroidFacetURI()) {
+    return app_display_name.empty()
+               ? SplitByDotAndReverse(facet_uri.android_package_name())
+               : app_display_name;
+  } else {
+    return password_manager::GetShownOrigin(url::Origin::Create(url));
+  }
+}
+
+GURL GetShownURL(const FacetURI& facet_uri, const GURL& url) {
+  if (facet_uri.IsValidAndroidFacetURI()) {
+    return GURL(kPlayStoreAppPrefix + facet_uri.android_package_name());
+  } else {
+    return url;
+  }
+}
+
 }  // namespace
 
 std::string SplitByDotAndReverse(base::StringPiece host) {
@@ -38,28 +61,30 @@ std::string SplitByDotAndReverse(base::StringPiece host) {
 }
 
 std::pair<std::string, GURL> GetShownOriginAndLinkUrl(
-    const autofill::PasswordForm& password_form) {
-  std::string shown_origin;
-  GURL link_url;
-
+    const PasswordForm& password_form) {
   FacetURI facet_uri =
       FacetURI::FromPotentiallyInvalidSpec(password_form.signon_realm);
-  if (facet_uri.IsValidAndroidFacetURI()) {
-    shown_origin = password_form.app_display_name.empty()
-                       ? SplitByDotAndReverse(facet_uri.android_package_name())
-                       : password_form.app_display_name;
-    link_url = GURL(kPlayStoreAppPrefix + facet_uri.android_package_name());
-  } else {
-    shown_origin = GetShownOrigin(password_form.origin);
-    link_url = password_form.origin;
-  }
-
-  return {std::move(shown_origin), std::move(link_url)};
+  return {GetShownOrigin(facet_uri, password_form.app_display_name,
+                         password_form.url),
+          GetShownURL(facet_uri, password_form.url)};
 }
 
-std::string GetShownOrigin(const GURL& origin) {
+std::string GetShownOrigin(const CredentialUIEntry& credential) {
+  FacetURI facet_uri =
+      FacetURI::FromPotentiallyInvalidSpec(credential.signon_realm);
+  return GetShownOrigin(facet_uri, credential.GetDisplayName(),
+                        credential.GetURL());
+}
+
+GURL GetShownUrl(const CredentialUIEntry& credential) {
+  FacetURI facet_uri =
+      FacetURI::FromPotentiallyInvalidSpec(credential.signon_realm);
+  return GetShownURL(facet_uri, credential.GetURL());
+}
+
+std::string GetShownOrigin(const url::Origin& origin) {
   std::string original =
-      base::UTF16ToUTF8(url_formatter::FormatUrlForSecurityDisplay(
+      base::UTF16ToUTF8(url_formatter::FormatOriginForSecurityDisplay(
           origin, url_formatter::SchemeDisplay::OMIT_HTTP_AND_HTTPS));
   base::StringPiece result = original;
   for (base::StringPiece prefix : kRemovedPrefixes) {
@@ -70,19 +95,19 @@ std::string GetShownOrigin(const GURL& origin) {
     }
   }
 
-  return result.find('.') != base::StringPiece::npos ? result.as_string()
+  return result.find('.') != base::StringPiece::npos ? std::string(result)
                                                      : original;
 }
 
 void UpdatePasswordFormUsernameAndPassword(
-    const base::string16& username,
-    const base::string16& password,
+    const std::u16string& username,
+    const std::u16string& password,
     PasswordFormManagerForUI* form_manager) {
   const auto& pending_credentials = form_manager->GetPendingCredentials();
   bool username_edited = pending_credentials.username_value != username;
   bool password_changed = pending_credentials.password_value != password;
   if (username_edited) {
-    form_manager->UpdateUsername(username);
+    form_manager->OnUpdateUsernameFromPrompt(username);
     if (form_manager->GetMetricsRecorder()) {
       form_manager->GetMetricsRecorder()->RecordDetailedUserAction(
           password_manager::PasswordFormMetricsRecorder::DetailedUserAction::
@@ -90,7 +115,7 @@ void UpdatePasswordFormUsernameAndPassword(
     }
   }
   if (password_changed) {
-    form_manager->UpdatePasswordValue(password);
+    form_manager->OnUpdatePasswordFromPrompt(password);
     if (form_manager->GetMetricsRecorder()) {
       form_manager->GetMetricsRecorder()->RecordDetailedUserAction(
           password_manager::PasswordFormMetricsRecorder::DetailedUserAction::
@@ -106,6 +131,33 @@ void UpdatePasswordFormUsernameAndPassword(
   // The maximum possible value is defined by OR-ing these values.
   UMA_HISTOGRAM_ENUMERATION("PasswordManager.EditsInSaveBubble",
                             username_edited + 2 * password_changed, 4);
+}
+
+std::vector<std::u16string> GetUsernamesForRealm(
+    const std::vector<password_manager::CredentialUIEntry>& credentials,
+    const std::string& signon_realm,
+    bool is_using_account_store) {
+  std::vector<std::u16string> usernames;
+  PasswordForm::Store store = is_using_account_store
+                                  ? PasswordForm::Store::kAccountStore
+                                  : PasswordForm::Store::kProfileStore;
+  for (const auto& credential : credentials) {
+    if (credential.signon_realm == signon_realm &&
+        credential.stored_in.contains(store)) {
+      usernames.push_back(credential.username);
+    }
+  }
+  return usernames;
+}
+
+int GetPlatformAuthenticatorLabel() {
+#if BUILDFLAG(IS_WIN)
+  return IDS_PASSWORD_MANAGER_USE_WINDOWS_HELLO;
+#elif BUILDFLAG(IS_MAC)
+  return IDS_PASSWORD_MANAGER_USE_TOUCH_ID;
+#else
+  return IDS_PASSWORD_MANAGER_USE_GENERIC_DEVICE;
+#endif
 }
 
 }  // namespace password_manager

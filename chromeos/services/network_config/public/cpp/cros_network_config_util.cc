@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,19 +15,16 @@ bool NetworkTypeMatchesType(mojom::NetworkType network_type,
       return true;
     case mojom::NetworkType::kMobile:
       return network_type == mojom::NetworkType::kCellular ||
-             network_type == mojom::NetworkType::kTether ||
-             network_type == mojom::NetworkType::kWiMAX;
+             network_type == mojom::NetworkType::kTether;
     case mojom::NetworkType::kWireless:
       return network_type == mojom::NetworkType::kCellular ||
              network_type == mojom::NetworkType::kTether ||
-             network_type == mojom::NetworkType::kWiFi ||
-             network_type == mojom::NetworkType::kWiMAX;
+             network_type == mojom::NetworkType::kWiFi;
     case mojom::NetworkType::kCellular:
     case mojom::NetworkType::kEthernet:
     case mojom::NetworkType::kTether:
     case mojom::NetworkType::kVPN:
     case mojom::NetworkType::kWiFi:
-    case mojom::NetworkType::kWiMAX:
       return network_type == match_type;
   }
   NOTREACHED();
@@ -56,17 +53,15 @@ bool StateIsConnected(mojom::ConnectionStateType connection_state) {
 int GetWirelessSignalStrength(const mojom::NetworkStateProperties* network) {
   switch (network->type) {
     case mojom::NetworkType::kCellular:
-      return network->cellular->signal_strength;
+      return network->type_state->get_cellular()->signal_strength;
     case mojom::NetworkType::kEthernet:
       return 0;
     case mojom::NetworkType::kTether:
-      return network->tether->signal_strength;
+      return network->type_state->get_tether()->signal_strength;
     case mojom::NetworkType::kVPN:
       return 0;
     case mojom::NetworkType::kWiFi:
-      return network->wifi->signal_strength;
-    case mojom::NetworkType::kWiMAX:
-      return network->wimax->signal_strength;
+      return network->type_state->get_wifi()->signal_strength;
     case mojom::NetworkType::kAll:
     case mojom::NetworkType::kMobile:
     case mojom::NetworkType::kWireless:
@@ -74,6 +69,10 @@ int GetWirelessSignalStrength(const mojom::NetworkStateProperties* network) {
   }
   NOTREACHED();
   return 0;
+}
+
+bool IsInhibited(const mojom::DeviceStateProperties* device) {
+  return device->inhibit_reason != mojom::InhibitReason::kNotInhibited;
 }
 
 }  // namespace network_config

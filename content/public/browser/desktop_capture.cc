@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,25 @@
 
 #include "base/feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/common/content_features.h"
 
-namespace content {
-namespace desktop_capture {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "content/browser/media/capture/desktop_capturer_lacros.h"
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "content/browser/media/capture/aura_window_to_mojo_device_adapter.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#endif
+
+namespace content::desktop_capture {
 
 webrtc::DesktopCaptureOptions CreateDesktopCaptureOptions() {
   auto options = webrtc::DesktopCaptureOptions::CreateDefault();
   // Leave desktop effects enabled during WebRTC captures.
   options.set_disable_effects(false);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   static constexpr base::Feature kDirectXCapturer{
       "DirectXCapturer",
       base::FEATURE_ENABLED_BY_DEFAULT};
@@ -25,7 +34,10 @@ webrtc::DesktopCaptureOptions CreateDesktopCaptureOptions() {
   } else {
     options.set_allow_use_magnification_api(true);
   }
-#elif defined(OS_MACOSX)
+  options.set_enumerate_current_process_windows(
+      ShouldEnumerateCurrentProcessWindows());
+
+#elif BUILDFLAG(IS_MAC)
   if (base::FeatureList::IsEnabled(features::kIOSurfaceCapturer)) {
     options.set_allow_iosurface(true);
   }
@@ -39,14 +51,54 @@ webrtc::DesktopCaptureOptions CreateDesktopCaptureOptions() {
 }
 
 std::unique_ptr<webrtc::DesktopCapturer> CreateScreenCapturer() {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  return std::make_unique<DesktopCapturerLacros>(
+      DesktopCapturerLacros::CaptureType::kScreen,
+      webrtc::DesktopCaptureOptions());
+#else
   return webrtc::DesktopCapturer::CreateScreenCapturer(
       CreateDesktopCaptureOptions());
+#endif
 }
 
 std::unique_ptr<webrtc::DesktopCapturer> CreateWindowCapturer() {
-  return webrtc::DesktopCapturer::CreateWindowCapturer(
-      CreateDesktopCaptureOptions());
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  return std::make_unique<DesktopCapturerLacros>(
+      DesktopCapturerLacros::CaptureType::kWindow,
+      webrtc::DesktopCaptureOptions());
+#else
+  auto options = desktop_capture::CreateDesktopCaptureOptions();
+#if defined(RTC_ENABLE_WIN_WGC)
+  options.set_allow_wgc_capturer_fallback(true);
+#endif
+  return webrtc::DesktopCapturer::CreateWindowCapturer(options);
+#endif
 }
 
-}  // namespace desktop_capture
-}  // namespace content
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+void BindAuraWindowCapturer(
+    mojo::PendingReceiver<video_capture::mojom::Device> receiver,
+    const content::DesktopMediaID& id) {
+  mojo::MakeSelfOwnedReceiver(
+      std::make_unique<AuraWindowToMojoDeviceAdapter>(id), std::move(receiver));
+}
+#endif
+
+bool CanUsePipeWire() {
+#if defined(WEBRTC_USE_PIPEWIRE)
+  return webrtc::DesktopCapturer::IsRunningUnderWayland() &&
+         base::FeatureList::IsEnabled(features::kWebRtcPipeWireCapturer);
+#else
+  return false;
+#endif
+}
+
+bool ShouldEnumerateCurrentProcessWindows() {
+#if BUILDFLAG(IS_WIN)
+  return false;
+#else
+  return true;
+#endif
+}
+
+}  // namespace content::desktop_capture

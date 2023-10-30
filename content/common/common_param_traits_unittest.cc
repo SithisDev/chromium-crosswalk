@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,9 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
 #include "base/values.h"
 #include "components/viz/common/surfaces/surface_info.h"
 #include "content/common/content_param_traits.h"
-#include "content/common/resource_messages.h"
 #include "content/public/common/content_constants.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_utils.h"
@@ -73,7 +71,7 @@ TEST(IPCMessageTest, Bitmap) {
   IPC::Message bad_msg(1, 2, IPC::Message::PRIORITY_NORMAL);
   // Copy the first message block over to |bad_msg|.
   const char* fixed_data;
-  int fixed_data_size;
+  size_t fixed_data_size;
   iter = base::PickleIterator(msg);
   EXPECT_TRUE(iter.ReadData(&fixed_data, &fixed_data_size));
   bad_msg.WriteData(fixed_data, fixed_data_size);
@@ -90,9 +88,9 @@ TEST(IPCMessageTest, Bitmap) {
 
 TEST(IPCMessageTest, ListValue) {
   base::ListValue input;
-  input.AppendDouble(42.42);
-  input.AppendString("forty");
-  input.Append(std::make_unique<base::Value>());
+  input.GetList().Append(42.42);
+  input.GetList().Append("forty");
+  input.GetList().Append(base::Value());
 
   IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
   IPC::WriteParam(&msg, input);
@@ -101,7 +99,7 @@ TEST(IPCMessageTest, ListValue) {
   base::PickleIterator iter(msg);
   EXPECT_TRUE(IPC::ReadParam(&msg, &iter, &output));
 
-  EXPECT_TRUE(input.Equals(&output));
+  EXPECT_EQ(input, output);
 
   // Also test the corrupt case.
   IPC::Message bad_msg(1, 2, IPC::Message::PRIORITY_NORMAL);
@@ -112,21 +110,21 @@ TEST(IPCMessageTest, ListValue) {
 
 TEST(IPCMessageTest, DictionaryValue) {
   base::DictionaryValue input;
-  input.Set("null", std::make_unique<base::Value>());
+  input.SetKey("null", base::Value());
   input.SetBoolean("bool", true);
-  input.SetInteger("int", 42);
+  input.GetDict().Set("int", 42);
 
-  auto subdict = std::make_unique<base::DictionaryValue>();
-  subdict->SetString("str", "forty two");
-  subdict->SetBoolean("bool", false);
+  base::DictionaryValue subdict;
+  subdict.SetString("str", "forty two");
+  subdict.SetBoolean("bool", false);
 
-  auto sublist = std::make_unique<base::ListValue>();
-  sublist->AppendDouble(42.42);
-  sublist->AppendString("forty");
-  sublist->AppendString("two");
-  subdict->Set("list", std::move(sublist));
+  base::ListValue sublist;
+  sublist.Append(42.42);
+  sublist.Append("forty");
+  sublist.Append("two");
+  subdict.SetKey("list", std::move(sublist));
 
-  input.Set("dict", std::move(subdict));
+  input.SetKey("dict", std::move(subdict));
 
   IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
   IPC::WriteParam(&msg, input);
@@ -135,7 +133,7 @@ TEST(IPCMessageTest, DictionaryValue) {
   base::PickleIterator iter(msg);
   EXPECT_TRUE(IPC::ReadParam(&msg, &iter, &output));
 
-  EXPECT_TRUE(input.Equals(&output));
+  EXPECT_EQ(input, output);
 
   // Also test the corrupt case.
   IPC::Message bad_msg(1, 2, IPC::Message::PRIORITY_NORMAL);
@@ -177,6 +175,7 @@ TEST(IPCMessageTest, SSLInfo) {
   const net::SHA256HashValue kCertPublicKeyHashValue = {{0x01, 0x02}};
   in.public_key_hashes.push_back(net::HashValue(kCertPublicKeyHashValue));
   in.pinning_failure_log = "foo";
+  in.encrypted_client_hello = true;
 
   scoped_refptr<net::ct::SignedCertificateTimestamp> sct(
       new net::ct::SignedCertificateTimestamp());
@@ -218,6 +217,7 @@ TEST(IPCMessageTest, SSLInfo) {
   ASSERT_EQ(in.handshake_type, out.handshake_type);
   ASSERT_EQ(in.public_key_hashes, out.public_key_hashes);
   ASSERT_EQ(in.pinning_failure_log, out.pinning_failure_log);
+  ASSERT_EQ(in.encrypted_client_hello, out.encrypted_client_hello);
 
   ASSERT_EQ(in.signed_certificate_timestamps.size(),
             out.signed_certificate_timestamps.size());
@@ -247,41 +247,6 @@ TEST(IPCMessageTest, SSLInfo) {
   ASSERT_EQ(in.ocsp_result, out.ocsp_result);
 }
 
-TEST(IPCMessageTest, RenderWidgetSurfaceProperties) {
-  content::RenderWidgetSurfaceProperties input;
-  input.size = gfx::Size(23, 45);
-  input.device_scale_factor = 0.8;
-  input.top_controls_height = 16.5;
-  input.top_controls_shown_ratio = 0.4;
-#ifdef OS_ANDROID
-  input.bottom_controls_height = 23.4;
-  input.bottom_controls_shown_ratio = 0.8;
-  input.selection.start.set_type(gfx::SelectionBound::Type::CENTER);
-  input.has_transparent_background = true;
-#endif
-
-  IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
-  IPC::ParamTraits<content::RenderWidgetSurfaceProperties>::Write(&msg, input);
-
-  content::RenderWidgetSurfaceProperties output;
-  base::PickleIterator iter(msg);
-  EXPECT_TRUE(IPC::ParamTraits<content::RenderWidgetSurfaceProperties>::Read(
-      &msg, &iter, &output));
-
-  EXPECT_EQ(input.size, output.size);
-  EXPECT_EQ(input.device_scale_factor, output.device_scale_factor);
-  EXPECT_EQ(input.top_controls_height, output.top_controls_height);
-  EXPECT_EQ(input.top_controls_shown_ratio, output.top_controls_shown_ratio);
-#ifdef OS_ANDROID
-  EXPECT_EQ(input.bottom_controls_height, output.bottom_controls_height);
-  EXPECT_EQ(input.bottom_controls_shown_ratio,
-            output.bottom_controls_shown_ratio);
-  EXPECT_EQ(input.selection, output.selection);
-  EXPECT_EQ(input.has_transparent_background,
-            output.has_transparent_background);
-#endif
-}
-
 static constexpr viz::FrameSinkId kArbitraryFrameSinkId(1, 1);
 
 TEST(IPCMessageTest, SurfaceInfo) {
@@ -301,19 +266,4 @@ TEST(IPCMessageTest, SurfaceInfo) {
       IPC::ParamTraits<viz::SurfaceInfo>::Read(&msg, &iter, &surface_info_out));
 
   ASSERT_EQ(surface_info_in, surface_info_out);
-}
-
-TEST(IPCMessageTest, WebCursor) {
-  content::CursorInfo info(ui::CursorType::kCustom);
-  info.custom_image.allocN32Pixels(32, 32);
-  info.hotspot = gfx::Point(10, 20);
-  info.image_scale_factor = 1.5f;
-  content::WebCursor input(info);
-  IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
-  IPC::ParamTraits<content::WebCursor>::Write(&msg, input);
-
-  content::WebCursor output;
-  base::PickleIterator iter(msg);
-  ASSERT_TRUE(IPC::ParamTraits<content::WebCursor>::Read(&msg, &iter, &output));
-  EXPECT_EQ(output, input);
 }

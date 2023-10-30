@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,9 @@
 
 #include <iostream>
 
-#include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "components/metrics/system_session_analyzer_win.h"
+#include "components/metrics/system_session_analyzer/system_session_analyzer_win.h"
 
 namespace {
 

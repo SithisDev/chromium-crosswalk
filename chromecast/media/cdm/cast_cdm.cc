@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,14 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromecast/media/base/decrypt_context_impl.h"
 #include "chromecast/media/base/media_caps.h"
-#include "chromecast/media/base/media_resource_tracker.h"
+#include "chromecast/media/common/media_resource_tracker.h"
 #include "media/base/cdm_key_information.h"
 #include "media/base/cdm_promise.h"
 #include "media/base/decryptor.h"
-#include "media/cdm/player_tracker_impl.h"
 #include "url/gurl.h"
 
 namespace chromecast {
@@ -34,16 +33,15 @@ class CastCdmContextImpl : public CastCdmContext {
   explicit CastCdmContextImpl(CastCdm* cast_cdm) : cast_cdm_(cast_cdm) {
     DCHECK(cast_cdm_);
   }
-  ~CastCdmContextImpl() override {}
 
-  // CastCdmContext implementation:
-  int RegisterPlayer(const base::Closure& new_key_cb,
-                     const base::Closure& cdm_unset_cb) override {
-    return cast_cdm_->RegisterPlayer(new_key_cb, cdm_unset_cb);
-  }
+  CastCdmContextImpl(const CastCdmContextImpl&) = delete;
+  CastCdmContextImpl& operator=(const CastCdmContextImpl&) = delete;
 
-  void UnregisterPlayer(int registration_id) override {
-    cast_cdm_->UnregisterPlayer(registration_id);
+  ~CastCdmContextImpl() override = default;
+
+  std::unique_ptr<::media::CallbackRegistration> RegisterEventCB(
+      EventCB event_cb) override {
+    return cast_cdm_->RegisterEventCB(std::move(event_cb));
   }
 
   std::unique_ptr<DecryptContextImpl> GetDecryptContext(
@@ -65,8 +63,6 @@ class CastCdmContextImpl : public CastCdmContext {
  private:
   // The CastCdm object which owns |this|.
   CastCdm* const cast_cdm_;
-
-  DISALLOW_COPY_AND_ASSIGN(CastCdmContextImpl);
 };
 
 // Returns the HDCP version multiplied by ten.
@@ -104,15 +100,11 @@ int HdcpVersionX10(::media::HdcpVersion hdcp_version) {
 CastCdm::CastCdm(MediaResourceTracker* media_resource_tracker)
     : media_resource_tracker_(media_resource_tracker),
       cast_cdm_context_(new CastCdmContextImpl(this)) {
-  DCHECK(media_resource_tracker);
   thread_checker_.DetachFromThread();
 }
 
 CastCdm::~CastCdm() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(player_tracker_impl_.get());
-  player_tracker_impl_->NotifyCdmUnset();
-  media_resource_tracker_->DecrementUsageCount();
 }
 
 void CastCdm::Initialize(
@@ -122,8 +114,10 @@ void CastCdm::Initialize(
     const ::media::SessionExpirationUpdateCB& session_expiration_update_cb) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  media_resource_tracker_->IncrementUsageCount();
-  player_tracker_impl_.reset(new ::media::PlayerTrackerImpl());
+  if (media_resource_tracker_) {
+    media_resource_usage_ = std::make_unique<MediaResourceTracker::ScopedUsage>(
+        media_resource_tracker_);
+  }
 
   session_message_cb_ = session_message_cb;
   session_closed_cb_ = session_closed_cb;
@@ -133,15 +127,9 @@ void CastCdm::Initialize(
   InitializeInternal();
 }
 
-int CastCdm::RegisterPlayer(const base::Closure& new_key_cb,
-                            const base::Closure& cdm_unset_cb) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return player_tracker_impl_->RegisterPlayer(new_key_cb, cdm_unset_cb);
-}
-
-void CastCdm::UnregisterPlayer(int registration_id) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  player_tracker_impl_->UnregisterPlayer(registration_id);
+std::unique_ptr<::media::CallbackRegistration> CastCdm::RegisterEventCB(
+    ::media::CdmContext::EventCB event_cb) {
+  return event_callbacks_.Register(std::move(event_cb));
 }
 
 ::media::CdmContext* CastCdm::GetCdmContext() {
@@ -163,8 +151,9 @@ void CastCdm::OnSessionMessage(const std::string& session_id,
   session_message_cb_.Run(session_id, message_type, message);
 }
 
-void CastCdm::OnSessionClosed(const std::string& session_id) {
-  session_closed_cb_.Run(session_id);
+void CastCdm::OnSessionClosed(const std::string& session_id,
+                              ::media::CdmSessionClosedReason reason) {
+  session_closed_cb_.Run(session_id, reason);
 }
 
 void CastCdm::OnSessionKeysChange(const std::string& session_id,
@@ -186,8 +175,10 @@ void CastCdm::OnSessionKeysChange(const std::string& session_id,
   session_keys_change_cb_.Run(session_id, newly_usable_keys,
                               std::move(keys_info));
 
-  if (newly_usable_keys)
-    player_tracker_impl_->NotifyNewKey();
+  if (newly_usable_keys) {
+    event_callbacks_.Notify(
+        ::media::CdmContext::Event::kHasAdditionalUsableKey);
+  }
 }
 
 void CastCdm::OnSessionExpirationUpdate(const std::string& session_id,

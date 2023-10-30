@@ -1,19 +1,28 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_SURFACE_DEPENDENCY_H_
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_SURFACE_DEPENDENCY_H_
 
-#include <vector>
+#include <memory>
+#include <utility>
 
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "components/viz/service/display/display_compositor_memory_and_task_controller.h"
 #include "components/viz/service/viz_service_export.h"
+#include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/service/sequence_id.h"
+#include "gpu/config/gpu_preferences.h"
 #include "gpu/ipc/common/surface_handle.h"
+#include "third_party/skia/include/core/SkSurfaceCharacterization.h"
+#include "ui/gl/gl_surface_format.h"
+
+class GURL;
 
 namespace gl {
 class GLSurface;
@@ -22,6 +31,7 @@ class GLSurface;
 namespace gpu {
 
 class GpuDriverBugWorkarounds;
+class ImageFactory;
 class ImageTransportSurfaceDelegate;
 class MailboxManager;
 class SharedContextState;
@@ -29,7 +39,6 @@ class SharedImageManager;
 class SingleTaskSequence;
 class SyncPointManager;
 struct GpuFeatureInfo;
-struct GpuPreferences;
 
 namespace raster {
 class GrShaderCache;
@@ -39,6 +48,7 @@ class GrShaderCache;
 
 namespace viz {
 
+class DawnContextProvider;
 class VulkanContextProvider;
 
 // This class exists to allow SkiaOutputSurfaceImpl to ignore differences
@@ -51,9 +61,6 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependency {
  public:
   virtual ~SkiaOutputSurfaceDependency() = default;
 
-  // These are client thread methods. All other methods should be called on
-  // the GPU thread only.
-  virtual bool IsUsingVulkan() = 0;
   // Returns a new task execution sequence. Sequences should not outlive the
   // task executor.
   virtual std::unique_ptr<gpu::SingleTaskSequence> CreateSequence() = 0;
@@ -66,23 +73,60 @@ class VIZ_SERVICE_EXPORT SkiaOutputSurfaceDependency {
   virtual gpu::raster::GrShaderCache* GetGrShaderCache() = 0;
   // May return null.
   virtual VulkanContextProvider* GetVulkanContextProvider() = 0;
-  virtual const gpu::GpuPreferences& GetGpuPreferences() = 0;
+  // May return null.
+  virtual DawnContextProvider* GetDawnContextProvider() = 0;
+  virtual const gpu::GpuPreferences& GetGpuPreferences() const = 0;
   virtual const gpu::GpuFeatureInfo& GetGpuFeatureInfo() = 0;
   virtual gpu::MailboxManager* GetMailboxManager() = 0;
+  // May return null.
+  virtual gpu::ImageFactory* GetGpuImageFactory() = 0;
   // Note it is possible for IsOffscreen to be false and GetSurfaceHandle to
   // return kNullSurfaceHandle.
   virtual bool IsOffscreen() = 0;
   virtual gpu::SurfaceHandle GetSurfaceHandle() = 0;
   virtual scoped_refptr<gl::GLSurface> CreateGLSurface(
-      base::WeakPtr<gpu::ImageTransportSurfaceDelegate> stub) = 0;
-  virtual void PostTaskToClientThread(base::OnceClosure closure) = 0;
+      base::WeakPtr<gpu::ImageTransportSurfaceDelegate> stub,
+      gl::GLSurfaceFormat format) = 0;
+  // Hold a ref of the given surface until the returned closure is fired.
+  virtual base::ScopedClosureRunner CacheGLSurface(gl::GLSurface* surface) = 0;
   virtual void ScheduleGrContextCleanup() = 0;
 
-#if defined(OS_WIN)
+  void PostTaskToClientThread(base::OnceClosure closure) {
+    GetClientTaskRunner()->PostTask(FROM_HERE, std::move(closure));
+  }
+  virtual scoped_refptr<base::TaskRunner> GetClientTaskRunner() = 0;
+
+  // This function schedules delayed task to be run on GPUThread. It can be
+  // called only from GPU Thread.
+  virtual void ScheduleDelayedGPUTaskFromGPUThread(base::OnceClosure task) = 0;
+
+#if BUILDFLAG(IS_WIN)
   virtual void DidCreateAcceleratedSurfaceChildWindow(
       gpu::SurfaceHandle parent_window,
       gpu::SurfaceHandle child_window) = 0;
 #endif
+
+  virtual void DidLoseContext(gpu::error::ContextLostReason reason,
+                              const GURL& active_url) = 0;
+
+  virtual base::TimeDelta GetGpuBlockedTimeSinceLastSwap() = 0;
+  virtual bool NeedsSupportForExternalStencil() = 0;
+
+  gpu::GrContextType gr_context_type() const {
+    return GetGpuPreferences().gr_context_type;
+  }
+
+  bool IsUsingVulkan() const {
+    return gr_context_type() == gpu::GrContextType::kVulkan;
+  }
+
+  bool IsUsingDawn() const {
+    return gr_context_type() == gpu::GrContextType::kDawn;
+  }
+
+  bool IsUsingMetal() const {
+    return gr_context_type() == gpu::GrContextType::kMetal;
+  }
 };
 
 }  // namespace viz

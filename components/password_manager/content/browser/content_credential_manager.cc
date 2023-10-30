@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@ ContentCredentialManager::ContentCredentialManager(
     PasswordManagerClient* client)
     : impl_(client) {}
 
-ContentCredentialManager::~ContentCredentialManager() {}
+ContentCredentialManager::~ContentCredentialManager() = default;
 
 void ContentCredentialManager::BindRequest(
     mojo::PendingReceiver<blink::mojom::CredentialManager> receiver) {

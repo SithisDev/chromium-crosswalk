@@ -1,8 +1,9 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/core/browser/payments/local_card_migration_strike_database.h"
+#include <limits>
 
 #include "components/autofill/core/browser/proto/strike_data.pb.h"
 
@@ -10,10 +11,8 @@ namespace autofill {
 
 const int LocalCardMigrationStrikeDatabase::kStrikesToRemoveWhenLocalCardAdded =
     2;
-const int LocalCardMigrationStrikeDatabase::kStrikesToAddWhenBubbleClosed = 2;
-const int LocalCardMigrationStrikeDatabase::kStrikesToAddWhenDialogClosed = 3;
-const int LocalCardMigrationStrikeDatabase::
-    kStrikesToAddWhenCardsDeselectedAtMigration = 3;
+const int LocalCardMigrationStrikeDatabase::kStrikesToAddWhenBubbleClosed = 3;
+const int LocalCardMigrationStrikeDatabase::kStrikesToAddWhenDialogClosed = 6;
 
 LocalCardMigrationStrikeDatabase::LocalCardMigrationStrikeDatabase(
     StrikeDatabase* strike_database)
@@ -21,22 +20,25 @@ LocalCardMigrationStrikeDatabase::LocalCardMigrationStrikeDatabase(
   RemoveExpiredStrikes();
 }
 
-LocalCardMigrationStrikeDatabase::~LocalCardMigrationStrikeDatabase() {}
+LocalCardMigrationStrikeDatabase::~LocalCardMigrationStrikeDatabase() = default;
 
-std::string LocalCardMigrationStrikeDatabase::GetProjectPrefix() {
+std::string LocalCardMigrationStrikeDatabase::GetProjectPrefix() const {
   return "LocalCardMigration";
 }
 
-int LocalCardMigrationStrikeDatabase::GetMaxStrikesLimit() {
+int LocalCardMigrationStrikeDatabase::GetMaxStrikesLimit() const {
   return 6;
 }
 
-long long LocalCardMigrationStrikeDatabase::GetExpiryTimeMicros() {
-  // Expiry time is 1 year.
-  return (long long)1000000 * 60 * 60 * 24 * 365;
+absl::optional<base::TimeDelta>
+LocalCardMigrationStrikeDatabase::GetExpiryTimeDelta() const {
+  // Ideally, we should be able to annotate cards deselected at migration time
+  // as cards the user is not interested in uploading.  Until then, we have been
+  // asked to not expire local card migration strikes.
+  return absl::nullopt;
 }
 
-bool LocalCardMigrationStrikeDatabase::UniqueIdsRequired() {
+bool LocalCardMigrationStrikeDatabase::UniqueIdsRequired() const {
   return false;
 }
 

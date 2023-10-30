@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,7 +31,7 @@ void PolicyScheduler::ScheduleDelayedTask(base::TimeDelta delay) {
   if (job_) {
     job_->Cancel();
   }
-  job_ = std::make_unique<base::CancelableClosure>(base::Bind(
+  job_ = std::make_unique<base::CancelableOnceClosure>(base::BindOnce(
       &PolicyScheduler::RunScheduledTask, weak_ptr_factory_.GetWeakPtr()));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(FROM_HERE,
                                                        job_->callback(), delay);
@@ -58,6 +58,7 @@ void PolicyScheduler::RunScheduledTask() {
 
   overlap_ = false;
   task_in_progress_ = true;
+  last_refresh_attempt_ = base::Time::Now();
   task_.Run(base::BindOnce(&PolicyScheduler::OnTaskDone,
                            weak_ptr_factory_.GetWeakPtr()));
 }

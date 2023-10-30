@@ -1,14 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/renderer/pepper/v8object_var.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "content/public/renderer/pepper_plugin_instance.h"
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
 #include "ppapi/c/pp_var.h"
+#include "v8/include/v8-object.h"
 
 namespace ppapi {
 

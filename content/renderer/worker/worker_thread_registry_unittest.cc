@@ -1,11 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/renderer/worker/worker_thread_registry.h"
 
-#include "base/logging.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "content/public/renderer/worker_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -20,7 +19,7 @@ class WorkerThreadRegistryTest : public testing::Test {
   WorkerThreadRegistry task_runner_;
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
 };
 
 class MockObserver : public WorkerThread::Observer {

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/time/time.h"
 #include "components/exo/wayland/server_util.h"
 #include "ui/gfx/presentation_feedback.h"
 
@@ -70,10 +71,10 @@ void presentation_feedback(wl_client* client,
                          wl_resource_get_version(resource), id);
 
   // base::Unretained is safe as the resource owns the callback.
-  auto cancelable_callback = std::make_unique<
-      base::CancelableCallback<void(const gfx::PresentationFeedback&)>>(
-      base::Bind(&HandleSurfacePresentationCallback,
-                 base::Unretained(presentation_feedback_resource)));
+  auto cancelable_callback = std::make_unique<base::CancelableRepeatingCallback<
+      void(const gfx::PresentationFeedback&)>>(
+      base::BindRepeating(&HandleSurfacePresentationCallback,
+                          base::Unretained(presentation_feedback_resource)));
 
   GetUserDataAs<Surface>(surface_resource)
       ->RequestPresentationCallback(cancelable_callback->callback());

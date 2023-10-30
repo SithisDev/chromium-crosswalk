@@ -1,9 +1,10 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/renderer/pepper/pepper_proxy_channel_delegate_impl.h"
 
+#include "base/synchronization/waitable_event.h"
 #include "build/build_config.h"
 #include "content/child/child_process.h"
 #include "ipc/ipc_platform_file.h"
@@ -30,13 +31,6 @@ PepperProxyChannelDelegateImpl::ShareHandleWithRemote(
     base::ProcessId remote_pid,
     bool should_close_source) {
   return IPC::GetPlatformFileForTransit(handle, should_close_source);
-}
-
-base::SharedMemoryHandle
-PepperProxyChannelDelegateImpl::ShareSharedMemoryHandleWithRemote(
-    const base::SharedMemoryHandle& handle,
-    base::ProcessId remote_pid) {
-  return base::SharedMemory::DuplicateHandle(handle);
 }
 
 base::UnsafeSharedMemoryRegion

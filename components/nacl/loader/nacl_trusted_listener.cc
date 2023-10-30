@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "native_client/src/public/chrome_main.h"
 
 namespace {
@@ -29,31 +30,31 @@ class NaClExitControlImpl : public nacl::mojom::NaClExitControl {
     // element was removed (perhaps implicitly if the tab was closed) or because
     // the renderer crashed.  The NaCl loader process should therefore exit.
     //
-    // For SFI NaCl, trusted code does this exit voluntarily, but untrusted
-    // code cannot disable it.  However, for Non-SFI NaCl, the following exit
-    // call could be disabled by untrusted code.
+    // Trusted code does this exit voluntarily, but untrusted code cannot
+    // disable it.
     NaClExit(0);
   }
 };
 
-void CreateExitControl(nacl::mojom::NaClExitControlRequest request) {
-  mojo::MakeStrongBinding(std::make_unique<NaClExitControlImpl>(),
-                          std::move(request));
+void CreateExitControl(
+    mojo::PendingReceiver<nacl::mojom::NaClExitControl> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<NaClExitControlImpl>(),
+                              std::move(receiver));
 }
 
 }  // namespace
 
 NaClTrustedListener::NaClTrustedListener(
-    nacl::mojom::NaClRendererHostPtr renderer_host,
+    mojo::PendingRemote<nacl::mojom::NaClRendererHost> renderer_host,
     base::SingleThreadTaskRunner* io_task_runner)
     : renderer_host_(std::move(renderer_host)) {
-  nacl::mojom::NaClExitControlPtr exit_control;
+  mojo::PendingRemote<nacl::mojom::NaClExitControl> exit_control;
   // The exit control binding must run on the IO thread. The main thread used
   // by NaClListener is busy in NaClChromeMainAppStart(), so it can't be used
   // for servicing messages.
   io_task_runner->PostTask(
-      FROM_HERE,
-      base::BindOnce(&CreateExitControl, mojo::MakeRequest(&exit_control)));
+      FROM_HERE, base::BindOnce(&CreateExitControl,
+                                exit_control.InitWithNewPipeAndPassReceiver()));
   renderer_host_->ProvideExitControl(std::move(exit_control));
 }
 

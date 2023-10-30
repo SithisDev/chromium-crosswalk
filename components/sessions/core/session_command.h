@@ -1,4 +1,4 @@
-// Copyright 2006 The Chromium Authors. All rights reserved.
+// Copyright 2006 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/strings/string_piece.h"
 #include "components/sessions/core/sessions_export.h"
 
 namespace base {
@@ -46,31 +47,37 @@ class SESSIONS_EXPORT SessionCommand {
   // id whose contents is populated from the contents of pickle.
   SessionCommand(id_type id, const base::Pickle& pickle);
 
+  SessionCommand(const SessionCommand&) = delete;
+  SessionCommand& operator=(const SessionCommand&) = delete;
+
   // The contents of the command.
   char* contents() { return const_cast<char*>(contents_.c_str()); }
   const char* contents() const { return contents_.c_str(); }
-
+  base::StringPiece contents_as_string_piece() const {
+    return base::StringPiece(contents_);
+  }
   // Identifier for the command.
   id_type id() const { return id_; }
 
   // Size of data.
   size_type size() const { return static_cast<size_type>(contents_.size()); }
 
+  // The serialized format has overhead (the serialized format includes the
+  // id). This returns the size to use when serializing.
+  size_type GetSerializedSize() const;
+
   // Convenience for extracting the data to a target. Returns false if
   // count is not equal to the size of data this command contains.
   bool GetPayload(void* dest, size_t count) const;
 
-  // Returns the contents as a pickle. It is up to the caller to delete the
-  // returned Pickle. The returned Pickle references the underlying data of
-  // this SessionCommand. If you need it to outlive the command, copy the
-  // pickle.
-  base::Pickle* PayloadAsPickle() const;
+  // Returns the contents as a pickle. The returned Pickle references the
+  // underlying data of this SessionCommand. If you need it to outlive the
+  // command, copy the pickle.
+  std::unique_ptr<base::Pickle> PayloadAsPickle() const;
 
  private:
   const id_type id_;
   std::string contents_;
-
-  DISALLOW_COPY_AND_ASSIGN(SessionCommand);
 };
 
 }  // namespace sessions

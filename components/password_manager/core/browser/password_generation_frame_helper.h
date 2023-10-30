@@ -1,15 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_GENERATION_FRAME_HELPER_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_GENERATION_FRAME_HELPER_H_
 
+#include <string>
 #include <vector>
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
-#include "components/autofill/core/common/signatures_util.h"
+#include "base/memory/raw_ptr.h"
+#include "components/autofill/core/common/signatures.h"
 #include "url/gurl.h"
 
 namespace autofill {
@@ -33,6 +33,11 @@ class PasswordGenerationFrameHelper {
  public:
   PasswordGenerationFrameHelper(PasswordManagerClient* client,
                                 PasswordManagerDriver* driver);
+
+  PasswordGenerationFrameHelper(const PasswordGenerationFrameHelper&) = delete;
+  PasswordGenerationFrameHelper& operator=(
+      const PasswordGenerationFrameHelper&) = delete;
+
   virtual ~PasswordGenerationFrameHelper();
 
   // Instructs the PasswordRequirementsService to fetch requirements for
@@ -48,7 +53,9 @@ class PasswordGenerationFrameHelper {
   // Determines current state of password generation
   // |log_debug_data| determines whether log entries are sent to the
   // autofill::SavePasswordProgressLogger.
-  bool IsGenerationEnabled(bool log_debug_data) const;
+  //
+  // Virtual for testing
+  virtual bool IsGenerationEnabled(bool log_debug_data) const;
 
   // Returns a randomly generated password that should (but is not guaranteed
   // to) match the requirements of the site.
@@ -62,25 +69,22 @@ class PasswordGenerationFrameHelper {
   // Virtual for testing
   //
   // TODO(crbug.com/855595): Add a stub for this class to facilitate testing.
-  virtual base::string16 GeneratePassword(
+  virtual std::u16string GeneratePassword(
       const GURL& last_committed_url,
       autofill::FormSignature form_signature,
       autofill::FieldSignature field_signature,
-      uint32_t max_length,
-      uint32_t* spec_priority);
+      uint32_t max_length);
 
  private:
   friend class PasswordGenerationFrameHelperTest;
 
   // The PasswordManagerClient instance associated with this instance. Must
   // outlive this instance.
-  PasswordManagerClient* client_;
+  raw_ptr<PasswordManagerClient> client_;
 
   // The PasswordManagerDriver instance associated with this instance. Must
   // outlive this instance.
-  PasswordManagerDriver* driver_;
-
-  DISALLOW_COPY_AND_ASSIGN(PasswordGenerationFrameHelper);
+  raw_ptr<PasswordManagerDriver> driver_;
 };
 
 }  // namespace password_manager

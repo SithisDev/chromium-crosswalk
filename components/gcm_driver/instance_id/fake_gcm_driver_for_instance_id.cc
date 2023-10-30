@@ -1,29 +1,31 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/gcm_driver/instance_id/fake_gcm_driver_for_instance_id.h"
 
 #include "base/bind.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/rand_util.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/gcm_driver/gcm_client.h"
 
 namespace instance_id {
 
 FakeGCMDriverForInstanceID::FakeGCMDriverForInstanceID()
-    : gcm::FakeGCMDriver(base::ThreadTaskRunnerHandle::Get()) {}
+    : gcm::FakeGCMDriver(base::FilePath(),
+                         base::ThreadTaskRunnerHandle::Get()) {}
 
 FakeGCMDriverForInstanceID::FakeGCMDriverForInstanceID(
+    const base::FilePath& store_path,
     const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner)
-    : FakeGCMDriver(blocking_task_runner) {}
+    : FakeGCMDriver(store_path, blocking_task_runner) {}
 
-FakeGCMDriverForInstanceID::~FakeGCMDriverForInstanceID() {
-}
+FakeGCMDriverForInstanceID::~FakeGCMDriverForInstanceID() = default;
 
 gcm::InstanceIDHandler*
 FakeGCMDriverForInstanceID::GetInstanceIDHandlerInternal() {
@@ -44,7 +46,7 @@ void FakeGCMDriverForInstanceID::RemoveInstanceIDData(
 
 void FakeGCMDriverForInstanceID::GetInstanceIDData(
     const std::string& app_id,
-    const GetInstanceIDDataCallback& callback) {
+    GetInstanceIDDataCallback callback) {
   auto iter = instance_id_data_.find(app_id);
   std::string instance_id;
   std::string extra_data;
@@ -53,14 +55,14 @@ void FakeGCMDriverForInstanceID::GetInstanceIDData(
     extra_data = iter->second.second;
   }
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback, instance_id, extra_data));
+      FROM_HERE, base::BindOnce(std::move(callback), instance_id, extra_data));
 }
 
 void FakeGCMDriverForInstanceID::GetToken(
     const std::string& app_id,
     const std::string& authorized_entity,
     const std::string& scope,
-    const std::map<std::string, std::string>& options,
+    base::TimeDelta time_to_live,
     GetTokenCallback callback) {
   std::string key = app_id + authorized_entity + scope;
   auto iter = tokens_.find(key);
@@ -68,7 +70,7 @@ void FakeGCMDriverForInstanceID::GetToken(
   if (iter != tokens_.end()) {
     token = iter->second;
   } else {
-    token = base::NumberToString(base::RandUint64());
+    token = GenerateTokenImpl(app_id, authorized_entity, scope);
     tokens_[key] = token;
   }
 
@@ -85,9 +87,9 @@ void FakeGCMDriverForInstanceID::ValidateToken(
     const std::string& authorized_entity,
     const std::string& scope,
     const std::string& token,
-    const ValidateTokenCallback& callback) {
+    ValidateTokenCallback callback) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback, true /* is_valid */));
+      FROM_HERE, base::BindOnce(std::move(callback), true /* is_valid */));
 }
 
 void FakeGCMDriverForInstanceID::DeleteToken(
@@ -116,6 +118,13 @@ void FakeGCMDriverForInstanceID::DeleteToken(
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(std::move(callback), gcm::GCMClient::SUCCESS));
+}
+
+std::string FakeGCMDriverForInstanceID::GenerateTokenImpl(
+    const std::string& app_id,
+    const std::string& authorized_entity,
+    const std::string& scope) {
+  return base::NumberToString(base::RandUint64());
 }
 
 }  // namespace instance_id

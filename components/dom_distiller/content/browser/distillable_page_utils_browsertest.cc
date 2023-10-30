@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
@@ -17,6 +18,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/isolated_world_ids.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -48,7 +50,7 @@ class DomDistillerDistillablePageUtilsTest : public content::ContentBrowserTest,
         embedded_test_server()->GetURL(url), content::Referrer(),
         ui::PAGE_TRANSITION_TYPED, std::string());
     url_loaded_runner.Run();
-    main_frame_loaded_callback_ = base::Closure();
+    main_frame_loaded_callback_.Reset();
     Observe(nullptr);
   }
 
@@ -56,16 +58,18 @@ class DomDistillerDistillablePageUtilsTest : public content::ContentBrowserTest,
   void AddComponentsResources() {
     base::FilePath pak_file;
     base::FilePath pak_dir;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     CHECK(base::PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_dir));
     pak_dir = pak_dir.Append(FILE_PATH_LITERAL("paks"));
-#else
+#elif BUILDFLAG(IS_MAC)
     base::PathService::Get(base::DIR_MODULE, &pak_dir);
-#endif  // OS_ANDROID
+#else
+    base::PathService::Get(base::DIR_ASSETS, &pak_dir);
+#endif  // BUILDFLAG(IS_ANDROID)
     pak_file =
         pak_dir.Append(FILE_PATH_LITERAL("components_tests_resources.pak"));
     ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-        pak_file, ui::SCALE_FACTOR_NONE);
+        pak_file, ui::kScaleFactorNone);
   }
 
   void SetUpTestServer() {
@@ -76,44 +80,38 @@ class DomDistillerDistillablePageUtilsTest : public content::ContentBrowserTest,
     ASSERT_TRUE(embedded_test_server()->Start());
   }
 
-  void DocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) override {
+  void DOMContentLoaded(content::RenderFrameHost* render_frame_host) override {
     if (!render_frame_host->GetParent())
-      main_frame_loaded_callback_.Run();
+      std::move(main_frame_loaded_callback_).Run();
   }
 
-  base::Closure main_frame_loaded_callback_;
+  base::OnceClosure main_frame_loaded_callback_;
 };
 
 class ResultHolder {
  public:
-  ResultHolder(base::Closure callback) : callback_(callback) {}
+  ResultHolder(base::OnceClosure callback) : callback_(std::move(callback)) {}
 
   void OnResult(bool result) {
     result_ = result;
-    callback_.Run();
+    std::move(callback_).Run();
   }
 
   bool GetResult() { return result_; }
 
-  base::Callback<void(bool)> GetCallback() {
-    return base::Bind(&ResultHolder::OnResult, base::Unretained(this));
+  base::OnceCallback<void(bool)> GetCallback() {
+    return base::BindOnce(&ResultHolder::OnResult, base::Unretained(this));
   }
 
  private:
-  base::Closure callback_;
+  base::OnceClosure callback_;
   bool result_;
 };
 
 }  // namespace
 
-#if defined(OS_WIN)
-#define MAYBE_TestIsDistillablePage DISABLED_TestIsDistillablePage
-#else
-#define MAYBE_TestIsDistillablePage TestIsDistillablePage
-#endif
 IN_PROC_BROWSER_TEST_F(DomDistillerDistillablePageUtilsTest,
-                       MAYBE_TestIsDistillablePage) {
+                       TestIsDistillablePage) {
   std::unique_ptr<AdaBoostProto> proto(new AdaBoostProto);
   proto->set_num_features(kDerivedFeaturesCount);
   proto->set_num_stumps(1);
@@ -137,13 +135,8 @@ IN_PROC_BROWSER_TEST_F(DomDistillerDistillablePageUtilsTest,
   ASSERT_TRUE(holder.GetResult());
 }
 
-#if defined(OS_WIN)
-#define MAYBE_TestIsNotDistillablePage DISABLED_TestIsNotDistillablePage
-#else
-#define MAYBE_TestIsNotDistillablePage TestIsNotDistillablePage
-#endif
 IN_PROC_BROWSER_TEST_F(DomDistillerDistillablePageUtilsTest,
-                       MAYBE_TestIsNotDistillablePage) {
+                       TestIsNotDistillablePage) {
   std::unique_ptr<AdaBoostProto> proto(new AdaBoostProto);
   proto->set_num_features(kDerivedFeaturesCount);
   proto->set_num_stumps(1);

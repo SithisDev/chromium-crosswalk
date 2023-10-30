@@ -1,11 +1,8 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chromecast.base;
-
-import static android.Manifest.permission.WRITE_SECURE_SETTINGS;
-import static android.content.pm.PackageManager.PERMISSION_GRANTED;
 
 import android.annotation.SuppressLint;
 import android.content.ContentResolver;
@@ -14,19 +11,16 @@ import android.database.ContentObserver;
 import android.os.Build;
 import android.os.Handler;
 import android.provider.Settings;
-import android.support.annotation.VisibleForTesting;
 
-import org.chromium.base.ContextUtils;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.Log;
-import org.chromium.base.annotations.CalledByNative;
-import org.chromium.base.annotations.JNINamespace;
 
 /**
  * Manager for Cast settings.
  */
-@JNINamespace("chromecast")
 public final class CastSettingsManager {
-    private static final String TAG = "cr_CastSettingsManager";
+    private static final String TAG = "CastSettingsManager";
 
     private static final String PREFS_FILE_NAME = "CastSettings";
 
@@ -39,9 +33,9 @@ public final class CastSettingsManager {
     private final ContentResolver mContentResolver;
 
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
-    protected ContentObserver mDeviceNameObserver;
+    ContentObserver mDeviceNameObserver;
     @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
-    protected ContentObserver mIsDeviceProvisionedObserver;
+    ContentObserver mIsDeviceProvisionedObserver;
 
     /**
      * Can be implemented to receive notifications from a CastSettingsManager instance when
@@ -120,38 +114,4 @@ public final class CastSettingsManager {
         return (deviceName != null) ? deviceName : DEFAULT_DEVICE_NAME;
     }
 
-    /**
-     * Updates Settings.Global DEVICE_NAME to desired string. Returns true if
-     * successful, false otherwise. Requires the application to have
-     * android.permission.WRITE_SECURE_SETTINGS permission
-     */
-    @CalledByNative
-    public static boolean updateGlobalDeviceName(String deviceName) {
-        if (deviceName == null || deviceName.isEmpty()) {
-            Log.e(TAG, "deviceName must not be null or empty");
-            return false;
-        }
-        Context context = ContextUtils.getApplicationContext();
-        if (!hasWriteSecureSettingsPermission()) {
-            Log.e(TAG, "PERMISSION DENIED while attempting to update deviceName");
-            return false;
-        }
-        return Settings.Global.putString(
-                context.getContentResolver(), DEVICE_NAME_SETTING_KEY, deviceName);
-    }
-
-    /**
-     * Indicates whether or not the application has the necessary permission
-     * to update the deviceName.
-     */
-    @CalledByNative
-    private static boolean hasWriteSecureSettingsPermission() {
-        // checkSelfPermission only available in API Version >= 23
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Context context = ContextUtils.getApplicationContext();
-            return context.checkSelfPermission(WRITE_SECURE_SETTINGS) == PERMISSION_GRANTED;
-        } else {
-            return false;
-        }
-    }
 }

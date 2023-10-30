@@ -1,34 +1,34 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/subresource_filter/content/common/ruleset_dealer.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "components/subresource_filter/core/common/memory_mapped_ruleset.h"
 
 namespace subresource_filter {
 
 RulesetDealer::RulesetDealer() {
-  sequence_checker_.DetachFromSequence();
+  DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
 RulesetDealer::~RulesetDealer() = default;
 
 void RulesetDealer::SetRulesetFile(base::File ruleset_file) {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(ruleset_file.IsValid());
   ruleset_file_ = std::move(ruleset_file);
   weak_cached_ruleset_.reset();
 }
 
 bool RulesetDealer::IsRulesetFileAvailable() const {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return ruleset_file_.IsValid();
 }
 
 scoped_refptr<const MemoryMappedRuleset> RulesetDealer::GetRuleset() {
-  DCHECK(sequence_checker_.CalledOnValidSequence());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!ruleset_file_.IsValid())
     return nullptr;
 

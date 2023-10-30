@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,21 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/task/post_task.h"
+#include "base/callback_helpers.h"
+#include "base/unguessable_token.h"
 #include "content/browser/browser_main_loop.h"
+#include "content/browser/media/media_devices_permission_checker.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_features.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/capture/mojom/image_capture_types.h"
 #include "media/capture/video/video_capture_device.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 
 namespace content {
@@ -31,11 +33,11 @@ void GetPhotoStateOnIOThread(const std::string& source_id,
                              ImageCaptureImpl::GetPhotoStateCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  const int session_id =
+  const base::UnguessableToken session_id =
       media_stream_manager->VideoDeviceIdToSessionId(source_id);
-
-  if (session_id == blink::MediaStreamDevice::kNoId)
+  if (session_id.is_empty())
     return;
+
   media_stream_manager->video_capture_manager()->GetPhotoState(
       session_id, std::move(callback));
 }
@@ -46,10 +48,9 @@ void SetOptionsOnIOThread(const std::string& source_id,
                           ImageCaptureImpl::SetOptionsCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  const int session_id =
+  const base::UnguessableToken session_id =
       media_stream_manager->VideoDeviceIdToSessionId(source_id);
-
-  if (session_id == blink::MediaStreamDevice::kNoId)
+  if (session_id.is_empty())
     return;
   media_stream_manager->video_capture_manager()->SetPhotoOptions(
       session_id, std::move(settings), std::move(callback));
@@ -63,26 +64,26 @@ void TakePhotoOnIOThread(const std::string& source_id,
                        "image_capture_impl.cc::TakePhotoOnIOThread",
                        TRACE_EVENT_SCOPE_PROCESS);
 
-  const int session_id =
+  const base::UnguessableToken session_id =
       media_stream_manager->VideoDeviceIdToSessionId(source_id);
-
-  if (session_id == blink::MediaStreamDevice::kNoId)
+  if (session_id.is_empty())
     return;
+
   media_stream_manager->video_capture_manager()->TakePhoto(session_id,
                                                            std::move(callback));
 }
 
 }  // anonymous namespace
 
-ImageCaptureImpl::ImageCaptureImpl() {}
-
-ImageCaptureImpl::~ImageCaptureImpl() {}
-
 // static
 void ImageCaptureImpl::Create(
-    media::mojom::ImageCaptureRequest request) {
-  mojo::MakeStrongBinding(std::make_unique<ImageCaptureImpl>(),
-                          std::move(request));
+    RenderFrameHost* render_frame_host,
+    mojo::PendingReceiver<media::mojom::ImageCapture> receiver) {
+  CHECK(render_frame_host);
+  // ImageCaptureImpl owns itself. It will self-destruct when a Mojo interface
+  // error occurs, the render frame host is deleted, or the render frame host
+  // navigates to a new document.
+  new ImageCaptureImpl(*render_frame_host, std::move(receiver));
 }
 
 void ImageCaptureImpl::GetPhotoState(const std::string& source_id,
@@ -94,10 +95,12 @@ void ImageCaptureImpl::GetPhotoState(const std::string& source_id,
 
   GetPhotoStateCallback scoped_callback =
       mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-          media::BindToCurrentLoop(std::move(callback)),
+          media::BindToCurrentLoop(
+              base::BindOnce(&ImageCaptureImpl::OnGetPhotoState,
+                             weak_factory_.GetWeakPtr(), std::move(callback))),
           mojo::CreateEmptyPhotoState());
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&GetPhotoStateOnIOThread, source_id,
                      BrowserMainLoop::GetInstance()->media_stream_manager(),
                      std::move(scoped_callback)));
@@ -111,11 +114,17 @@ void ImageCaptureImpl::SetOptions(const std::string& source_id,
                        "ImageCaptureImpl::SetOptions",
                        TRACE_EVENT_SCOPE_PROCESS);
 
+  if ((settings->has_pan || settings->has_tilt || settings->has_zoom) &&
+      !HasPanTiltZoomPermissionGranted()) {
+    std::move(callback).Run(false);
+    return;
+  }
+
   SetOptionsCallback scoped_callback =
       mojo::WrapCallbackWithDefaultInvokeIfNotRun(
           media::BindToCurrentLoop(std::move(callback)), false);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&SetOptionsOnIOThread, source_id,
                      BrowserMainLoop::GetInstance()->media_stream_manager(),
                      std::move(settings), std::move(scoped_callback)));
@@ -132,11 +141,37 @@ void ImageCaptureImpl::TakePhoto(const std::string& source_id,
       mojo::WrapCallbackWithDefaultInvokeIfNotRun(
           media::BindToCurrentLoop(std::move(callback)),
           media::mojom::Blob::New());
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&TakePhotoOnIOThread, source_id,
                      BrowserMainLoop::GetInstance()->media_stream_manager(),
                      std::move(scoped_callback)));
 }
 
+ImageCaptureImpl::ImageCaptureImpl(
+    RenderFrameHost& render_frame_host,
+    mojo::PendingReceiver<media::mojom::ImageCapture> receiver)
+    : DocumentService(render_frame_host, std::move(receiver)) {}
+
+ImageCaptureImpl::~ImageCaptureImpl() = default;
+
+void ImageCaptureImpl::OnGetPhotoState(GetPhotoStateCallback callback,
+                                       media::mojom::PhotoStatePtr state) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (!HasPanTiltZoomPermissionGranted()) {
+    state->pan = media::mojom::Range::New();
+    state->tilt = media::mojom::Range::New();
+    state->zoom = media::mojom::Range::New();
+  }
+  std::move(callback).Run(std::move(state));
+}
+
+bool ImageCaptureImpl::HasPanTiltZoomPermissionGranted() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  return MediaDevicesPermissionChecker::
+      HasPanTiltZoomPermissionGrantedOnUIThread(
+          render_frame_host().GetProcess()->GetID(),
+          render_frame_host().GetRoutingID());
+}
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/sequence_checker.h"
 #include "third_party/blink/public/mojom/cookie_store/cookie_store.mojom.h"
 #include "url/origin.h"
@@ -21,27 +21,35 @@ class CookieStoreManager;
 // The bulk of the CookieStore implementation is in the CookieStoreManager
 // class. Each StoragePartition has a single associated CookieStoreManager
 // instance. By contrast, each CookieStore mojo connection has an associated
-// CoookieStoreHost instance, which stores the per-connection state.
+// CookieStoreHost instance, which stores the per-connection state.
 //
 // Instances of this class must be accessed exclusively on the IO thread,
 // because they call into CookieStoreManager directly.
 class CookieStoreHost : public blink::mojom::CookieStore {
  public:
   CookieStoreHost(CookieStoreManager* manager, const url::Origin& origin);
+
+  CookieStoreHost(const CookieStoreHost&) = delete;
+  CookieStoreHost& operator=(const CookieStoreHost&) = delete;
+
   ~CookieStoreHost() override;
 
   // content::mojom::CookieStore
-  void AppendSubscriptions(
+  void AddSubscriptions(
       int64_t service_worker_registration_id,
-      std::vector<blink::mojom::CookieChangeSubscriptionPtr>,
-      AppendSubscriptionsCallback callback) override;
+      std::vector<blink::mojom::CookieChangeSubscriptionPtr> subscriptions,
+      AddSubscriptionsCallback callback) override;
+  void RemoveSubscriptions(
+      int64_t service_worker_registration_id,
+      std::vector<blink::mojom::CookieChangeSubscriptionPtr> subscriptions,
+      RemoveSubscriptionsCallback callback) override;
   void GetSubscriptions(int64_t service_worker_registration_id,
                         GetSubscriptionsCallback callback) override;
 
  private:
   // The raw pointer is safe because CookieStoreManager owns this instance via a
-  // mojo::BindingSet.
-  CookieStoreManager* const manager_;
+  // mojo::UniqueReceiverSet.
+  const raw_ptr<CookieStoreManager> manager_;
 
   const url::Origin origin_;
 
@@ -50,8 +58,6 @@ class CookieStoreHost : public blink::mojom::CookieStore {
   // thread. However, the class implementation itself is thread-friendly, so it
   // only checks that methods are called on the same sequence.
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(CookieStoreHost);
 };
 
 }  // namespace content

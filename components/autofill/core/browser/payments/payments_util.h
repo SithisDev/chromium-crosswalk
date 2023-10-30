@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,8 @@ namespace payments {
 
 // Returns the billing customer ID (a.k.a. the customer number) for the Google
 // Payments account for this user. Obtains it from the synced data. Returns 0
-// if the customer ID was not found. If |should_log_validity| is true, will
-// report on the validity state of the customer ID in PaymentsCustomerData.
-int64_t GetBillingCustomerId(PersonalDataManager* personal_data_manager,
-                             bool should_log_validity = false);
+// if the customer ID was not found.
+int64_t GetBillingCustomerId(PersonalDataManager* personal_data_manager);
 
 // Returns if the customer has an existing Google payments account.
 bool HasGooglePaymentsAccount(PersonalDataManager* personal_data_manager);
@@ -31,7 +29,7 @@ bool HasGooglePaymentsAccount(PersonalDataManager* personal_data_manager);
 // For example, if the range consists of std::pair<34, 36>, then all cards
 // with first two digits of 34, 35 and 36 are supported.
 bool IsCreditCardNumberSupported(
-    const base::string16& card_number,
+    const std::u16string& card_number,
     const std::vector<std::pair<int, int>>& supported_card_bin_ranges);
 
 }  // namespace payments

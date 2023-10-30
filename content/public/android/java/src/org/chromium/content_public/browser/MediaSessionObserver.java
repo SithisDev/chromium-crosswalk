@@ -1,14 +1,15 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content_public.browser;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import org.chromium.content.browser.MediaSessionImpl;
 import org.chromium.services.media_session.MediaImage;
 import org.chromium.services.media_session.MediaMetadata;
+import org.chromium.services.media_session.MediaPosition;
 
 import java.util.List;
 import java.util.Set;
@@ -77,6 +78,12 @@ public abstract class MediaSessionObserver {
      * @param images The list of artwork images after the changed.
      */
     public void mediaSessionArtworkChanged(List<MediaImage> images) {}
+
+    /**
+     * Called when the observed {@link MediaSession} position has changed.
+     * @param position The new MediaPosition after change.
+     */
+    public void mediaSessionPositionChanged(@Nullable MediaPosition position) {}
 
     /**
      * Stop observing the media session. Users must explicitly call this before dereferencing the

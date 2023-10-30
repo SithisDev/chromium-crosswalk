@@ -1,8 +1,11 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/indexed_db/indexed_db_return_value.h"
+
+#include <stdint.h>
+#include <vector>
 
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
 
@@ -26,8 +29,8 @@ blink::mojom::IDBReturnValuePtr IndexedDBReturnValue::ConvertReturnValue(
     // Release value->bits std::string.
     value->bits.clear();
   }
-  IndexedDBBlobInfo::ConvertBlobInfo(value->blob_info,
-                                     &mojo_value->value->blob_or_file_info);
+  IndexedDBExternalObject::ConvertToMojo(value->external_objects,
+                                         &mojo_value->value->external_objects);
   return mojo_value;
 }
 

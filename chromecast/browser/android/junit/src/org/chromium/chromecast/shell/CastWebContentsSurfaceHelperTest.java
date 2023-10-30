@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.net.Uri;
-import android.os.PatternMatcher;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -28,17 +26,14 @@ import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLooper;
 
+import org.chromium.base.Consumer;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.chromecast.base.Consumer;
 import org.chromium.chromecast.base.Observer;
 import org.chromium.chromecast.base.Scope;
 import org.chromium.chromecast.shell.CastWebContentsSurfaceHelper.MediaSessionGetter;
 import org.chromium.chromecast.shell.CastWebContentsSurfaceHelper.StartParams;
 import org.chromium.content.browser.MediaSessionImpl;
 import org.chromium.content_public.browser.WebContents;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Tests for CastWebContentsSurfaceHelper.
@@ -81,31 +76,6 @@ public class CastWebContentsSurfaceHelperTest {
         public StartParams build() {
             return new StartParams(CastWebContentsIntentUtils.getInstanceUri(mId), mWebContents,
                     mIsRemoteControlMode, mIsTouchInputEnabled);
-        }
-    }
-
-    private static class BroadcastAsserter {
-        private final Intent mExpectedIntent;
-        private final List<Intent> mReceivedIntents = new ArrayList<>();
-        private final LocalBroadcastReceiverScope mReceiver;
-
-        public BroadcastAsserter(Intent looksLike) {
-            mExpectedIntent = looksLike;
-            IntentFilter filter = new IntentFilter();
-            Uri instanceUri = looksLike.getData();
-            filter.addDataScheme(instanceUri.getScheme());
-            filter.addDataAuthority(instanceUri.getAuthority(), null);
-            filter.addDataPath(instanceUri.getPath(), PatternMatcher.PATTERN_LITERAL);
-            filter.addAction(looksLike.getAction());
-            mReceiver = new LocalBroadcastReceiverScope(filter, mReceivedIntents::add);
-        }
-
-        public void verify() {
-            assertEquals(1, mReceivedIntents.size());
-            Intent receivedIntent = mReceivedIntents.get(0);
-            assertEquals(mExpectedIntent.getAction(), receivedIntent.getAction());
-            assertEquals(mExpectedIntent.getData(), receivedIntent.getData());
-            mReceiver.close();
         }
     }
 
@@ -285,18 +255,6 @@ public class CastWebContentsSurfaceHelperTest {
     }
 
     @Test
-    public void testSendsComponentClosedBroadcastWhenWebContentsViewIsClosedAlt() {
-        StartParams params1 = new StartParamsBuilder().withId("1").build();
-        StartParams params2 = new StartParamsBuilder().withId("2").build();
-        mSurfaceHelper.onNewStartParams(params1);
-        // Listen for notification from surface helper that web contents closed.
-        BroadcastAsserter intentWasSent =
-                new BroadcastAsserter(CastWebContentsIntentUtils.onActivityStopped("1"));
-        mSurfaceHelper.onNewStartParams(params2);
-        intentWasSent.verify();
-    }
-
-    @Test
     public void testFinishLaterCallbackIsRunAfterStopWebContents() {
         StartParams params = new StartParamsBuilder().withId("0").build();
         mSurfaceHelper.onNewStartParams(params);
@@ -334,15 +292,5 @@ public class CastWebContentsSurfaceHelperTest {
         mSurfaceHelper.onNewStartParams(params);
         mSurfaceHelper.onDestroy();
         verify(scope).close();
-    }
-
-    @Test
-    public void testOnDestroyNotifiesComponent() {
-        StartParams params = new StartParamsBuilder().withId("2").build();
-        mSurfaceHelper.onNewStartParams(params);
-        BroadcastAsserter intentWasSent =
-                new BroadcastAsserter(CastWebContentsIntentUtils.onActivityStopped("2"));
-        mSurfaceHelper.onDestroy();
-        intentWasSent.verify();
     }
 }

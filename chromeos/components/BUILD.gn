@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,21 +10,29 @@ assert(is_chromeos, "Non-ChromeOS builds cannot depend on //chromeos")
 # component and add a reference here.
 test("chromeos_components_unittests") {
   sources = [
+    "chromeos_components_test_suite.cc",
+    "chromeos_components_test_suite.h",
     "run_all_unittests.cc",
   ]
 
+  # TODO(https://crbug.com/1164001): unit_tests deps should be moved to
+  # the appropriate place during the code migration project.
   deps = [
     "//base",
     "//base/test:test_support",
-    "//chromeos:chromeos_buildflags",
-    "//chromeos/components/account_manager:unit_tests",
-    "//chromeos/components/drivefs:unit_tests",
-    "//chromeos/components/multidevice:unit_tests",
-    "//chromeos/components/nearby:unit_tests",
-    "//chromeos/components/power:unit_tests",
-    "//chromeos/components/proximity_auth:unit_tests",
-    "//chromeos/components/sync_wifi:unit_tests",
-    "//chromeos/components/tether:unit_tests",
+    "//build:chromeos_buildflags",
+    "//chromeos/components/cdm_factory_daemon:unit_tests",
+    "//chromeos/components/mojo_bootstrap:unit_tests",
+    "//chromeos/components/onc:unit_tests",
+    "//chromeos/components/quick_answers:unit_tests",
+    "//chromeos/components/security_token_pin:unit_tests",
+    "//chromeos/components/sensors:unit_tests",
     "//mojo/core/embedder",
+    "//ui/base:base",
+  ]
+
+  data_deps = [
+    "//chromeos/strings:chromeos_test_strings",
+    "//ui/resources:ui_test_pak_data",
   ]
 }

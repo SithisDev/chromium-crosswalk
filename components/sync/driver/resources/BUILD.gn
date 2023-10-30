@@ -1,106 +1,98 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//third_party/closure_compiler/compile_js.gni")
+import("//tools/grit/grit_rule.gni")
+import("//tools/grit/preprocess_if_expr.gni")
+import("//tools/typescript/ts_library.gni")
+import("//ui/webui/resources/tools/generate_grd.gni")
 
-js_type_check("closure_compile") {
-  deps = [
-    #TODO(crbug.com/986001): Fix compilation errors and enable all targets.
+grd_file = "$target_gen_dir/resources.grd"
 
-    #":about",
-    ":chrome_sync",
-
-    #":data",
-    ":events",
-    ":search",
-    ":sync_index",
-    ":sync_log",
-
-    #":sync_node_browser",
-    #":sync_search",
-    ":traffic_log",
-
-    #":types",
-    ":user_events",
+preprocess_if_expr("preprocess_css") {
+  in_folder = "./"
+  out_folder = "$target_gen_dir/preprocess"
+  out_manifest = "$target_gen_dir/css_manifest.json"
+  in_files = [
+    "sync_node_browser.css",
+    "sync_search.css",
   ]
 }
 
-js_library("about") {
-  deps = [
-    "//third_party/jstemplate:jstemplate",
-    "//ui/webui/resources/js:util",
+preprocessed_files = [ "sync_index.ts" ]
+non_preprocessed_files = [
+  "about.ts",
+  "chrome_sync.ts",
+  "data.ts",
+  "invalidations.ts",
+  "search.ts",
+  "sync_log.ts",
+  "sync_node_browser.ts",
+  "sync_search.ts",
+  "traffic_log.ts",
+  "user_events.ts",
+]
+
+preprocess_if_expr("preprocess") {
+  in_folder = "./"
+  out_folder = "$target_gen_dir/preprocess"
+  in_files = preprocessed_files
+}
+
+copy("copy_files") {
+  sources = non_preprocessed_files
+  outputs = [ "$target_gen_dir/preprocess/{{source_file_part}}" ]
+}
+
+ts_library("build_ts") {
+  root_dir = "$target_gen_dir/preprocess"
+  in_files = non_preprocessed_files + preprocessed_files
+  out_dir = "$target_gen_dir/tsc"
+  tsconfig_base = "tsconfig_base.json"
+  definitions = [
+    "//tools/typescript/definitions/chrome_send.d.ts",
+    "//tools/typescript/definitions/pending.d.ts",
+    "jstemplate.d.ts",
+  ]
+  deps = [ "//ui/webui/resources:library" ]
+  extra_deps = [
+    ":copy_files",
+    ":preprocess",
   ]
 }
 
-js_library("chrome_sync") {
+generate_grd("build_grd") {
   deps = [
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:util",
+    ":build_ts",
+    ":preprocess_css",
   ]
+  grd_prefix = "sync_driver_sync_internals"
+  out_grd = grd_file
+  input_files = [
+    "about.css",
+    "index.html",
+    "invalidations.css",
+    "star_small.png",
+    "traffic_log.css",
+  ]
+  input_files_base_dir = rebase_path("./", "//")
+  manifest_files =
+      [ "$target_gen_dir/css_manifest.json" ] +
+      filter_include(get_target_outputs(":build_ts"), [ "*.manifest" ])
 }
 
-js_library("data") {
-}
+grit("resources") {
+  source = grd_file
 
-js_library("events") {
-  deps = [
-    "//third_party/jstemplate:jstemplate",
-    "//ui/webui/resources/js:cr",
-  ]
-}
+  # Required because the .grd is generated.
+  enable_input_discovery_for_gn_analyze = false
 
-js_library("search") {
-  deps = [
-    "//ui/webui/resources/js:util",
-    "//ui/webui/resources/js/cr/ui:splitter",
+  outputs = [
+    "grit/sync_driver_sync_internals_resources.h",
+    "grit/sync_driver_sync_internals_resources_map.cc",
+    "grit/sync_driver_sync_internals_resources_map.h",
+    "sync_driver_sync_internals_resources.pak",
   ]
-}
-
-js_library("sync_index") {
-  deps = [
-    "//ui/webui/resources/js:util",
-    "//ui/webui/resources/js/cr/ui:tabs",
-  ]
-}
-
-js_library("sync_log") {
-  deps = [
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js/cr:event_target",
-  ]
-}
-
-js_library("sync_node_browser") {
-  deps = [
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js/cr/ui:tree",
-  ]
-}
-
-js_library("sync_search") {
-  deps = [
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js/cr/ui:array_data_model",
-    "//ui/webui/resources/js/cr/ui:list",
-  ]
-}
-
-js_library("traffic_log") {
-  deps = [
-    "//ui/webui/resources/js:cr",
-  ]
-}
-
-js_library("types") {
-  deps = [
-    "//ui/webui/resources/js:cr",
-  ]
-}
-
-js_library("user_events") {
-  deps = [
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:util",
-  ]
+  output_dir = "$root_gen_dir/components"
+  deps = [ ":build_grd" ]
 }

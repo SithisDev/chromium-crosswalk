@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,28 +10,35 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
+#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "components/download/public/common/download_task_runner.h"
+#include "content/browser/download/mhtml_generation_manager.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/common/download/mhtml_file_writer.mojom.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/mhtml_extra_parts.h"
+#include "content/public/browser/mhtml_generation_result.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_paths.h"
 #include "content/public/common/mhtml_generation_params.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "crypto/secure_hash.h"
+#include "crypto/sha2.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "net/base/filename_util.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -53,6 +60,9 @@ class FindTrackingDelegate : public WebContentsDelegate {
  public:
   explicit FindTrackingDelegate(const std::string& search)
       : search_(search), matches_(-1) {}
+
+  FindTrackingDelegate(const FindTrackingDelegate&) = delete;
+  FindTrackingDelegate& operator=(const FindTrackingDelegate&) = delete;
 
   // Returns number of results.
   int Wait(WebContents* web_contents) {
@@ -90,8 +100,6 @@ class FindTrackingDelegate : public WebContentsDelegate {
   std::string search_;
   int matches_;
   base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(FindTrackingDelegate);
 };
 
 // static
@@ -104,17 +112,22 @@ const char kTestData[] =
 
 class MockWriterBase : public mojom::MhtmlFileWriter {
  public:
-  MockWriterBase() : binding_(this) {}
-  ~MockWriterBase() override {}
+  MockWriterBase() = default;
 
-  void BindRequest(mojo::ScopedInterfaceEndpointHandle handle) {
-    binding_.Bind(mojom::MhtmlFileWriterAssociatedRequest(std::move(handle)));
+  MockWriterBase(const MockWriterBase&) = delete;
+  MockWriterBase& operator=(const MockWriterBase&) = delete;
+
+  ~MockWriterBase() override = default;
+
+  void BindReceiver(mojo::ScopedInterfaceEndpointHandle handle) {
+    receiver_.Bind(mojo::PendingAssociatedReceiver<mojom::MhtmlFileWriter>(
+        std::move(handle)));
   }
 
  protected:
   void SendResponse(SerializeAsMHTMLCallback callback) {
     std::vector<std::string> dummy_digests;
-    base::TimeDelta dummy_time_delta = base::TimeDelta::FromMilliseconds(100);
+    base::TimeDelta dummy_time_delta = base::Milliseconds(100);
     std::move(callback).Run(mojom::MhtmlSaveStatus::kSuccess, dummy_digests,
                             dummy_time_delta);
   }
@@ -133,10 +146,7 @@ class MockWriterBase : public mojom::MhtmlFileWriter {
     producer_pipe.reset();
   }
 
-  mojo::AssociatedBinding<mojom::MhtmlFileWriter> binding_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockWriterBase);
+  mojo::AssociatedReceiver<mojom::MhtmlFileWriter> receiver_{this};
 };
 
 // This Mock injects our overwritten interface, running the callback
@@ -146,6 +156,11 @@ class RespondAndDisconnectMockWriter
       public base::RefCountedThreadSafe<RespondAndDisconnectMockWriter> {
  public:
   RespondAndDisconnectMockWriter() {}
+
+  RespondAndDisconnectMockWriter(const RespondAndDisconnectMockWriter&) =
+      delete;
+  RespondAndDisconnectMockWriter& operator=(
+      const RespondAndDisconnectMockWriter&) = delete;
 
   void SerializeAsMHTML(mojom::SerializeAsMHTMLParamsPtr params,
                         SerializeAsMHTMLCallback callback) override {
@@ -215,13 +230,13 @@ class RespondAndDisconnectMockWriter
 
     SendResponse(std::move(callback));
 
-    // Close the message pipe connection to invoke the connection error
-    // callback. The connection error handler from here will finalize
-    // the Job and attempt to call MHTMLGenerationManager::Job::CloseFile
-    // a second time. If this situation is handled correctly, the
-    // browser file should be invalidated and idempotent.
+    // Reset the message pipe connection to invoke the disconnect callback. The
+    // disconnect handler from here will finalize the Job and attempt to call
+    // MHTMLGenerationManager::Job::CloseFile a second time. If this situation
+    // is handled correctly, the browser file should be invalidated and
+    // idempotent.
     if (!compute_contents_hash) {
-      binding_.Unbind();
+      receiver_.reset();
       return;
     }
 
@@ -247,20 +262,18 @@ class RespondAndDisconnectMockWriter
   }
 
   void TaskY() {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&RespondAndDisconnectMockWriter::TaskZ,
                        scoped_refptr<RespondAndDisconnectMockWriter>(this)));
   }
 
-  void TaskZ() { binding_.Unbind(); }
+  void TaskZ() { receiver_.reset(); }
 
  private:
   friend base::RefCountedThreadSafe<RespondAndDisconnectMockWriter>;
 
   ~RespondAndDisconnectMockWriter() override = default;
-
-  DISALLOW_COPY_AND_ASSIGN(RespondAndDisconnectMockWriter);
 };
 
 }  // namespace
@@ -271,6 +284,7 @@ class MHTMLGenerationTest : public ContentBrowserTest,
   MHTMLGenerationTest()
       : has_mhtml_callback_run_(false),
         file_size_(0),
+        file_digest_(absl::nullopt),
         well_formedness_check_(true) {}
 
   enum TaskOrder { WriteThenRespond, RespondThenWrite };
@@ -286,11 +300,11 @@ class MHTMLGenerationTest : public ContentBrowserTest,
     blink::AssociatedInterfaceProvider* remote_interfaces =
         shell()
             ->web_contents()
-            ->GetMainFrame()
+            ->GetPrimaryMainFrame()
             ->GetRemoteAssociatedInterfaces();
     remote_interfaces->OverrideBinderForTesting(
         mojom::MhtmlFileWriter::Name_,
-        base::BindRepeating(&MockWriterBase::BindRequest,
+        base::BindRepeating(&MockWriterBase::BindReceiver,
                             base::Unretained(mock_writer)));
   }
 
@@ -300,19 +314,27 @@ class MHTMLGenerationTest : public ContentBrowserTest,
   }
 
   void GenerateMHTML(MHTMLGenerationParams& params, const GURL& url) {
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
     GenerateMHTMLForCurrentPage(params);
   }
 
   void GenerateMHTMLForCurrentPage(MHTMLGenerationParams& params) {
     base::RunLoop run_loop;
-    histogram_tester_.reset(new base::HistogramTester());
+    histogram_tester_ = std::make_unique<base::HistogramTester>();
 
-    params.compute_contents_hash = GetParam();
+    bool use_result_callback = GetParam();
 
-    shell()->web_contents()->GenerateMHTML(
-        params, base::BindOnce(&MHTMLGenerationTest::MHTMLGenerated,
-                               base::Unretained(this), run_loop.QuitClosure()));
+    if (use_result_callback) {
+      shell()->web_contents()->GenerateMHTMLWithResult(
+          params,
+          base::BindOnce(&MHTMLGenerationTest::MHTMLGeneratedWithResult,
+                         base::Unretained(this), run_loop.QuitClosure()));
+    } else {
+      shell()->web_contents()->GenerateMHTML(
+          params,
+          base::BindOnce(&MHTMLGenerationTest::MHTMLGenerated,
+                         base::Unretained(this), run_loop.QuitClosure()));
+    }
 
     // Block until the MHTML is generated.
     run_loop.Run();
@@ -320,24 +342,26 @@ class MHTMLGenerationTest : public ContentBrowserTest,
     ASSERT_TRUE(has_mhtml_callback_run())
         << "Unexpected error generating MHTML file";
 
+    // TODO(crbug.com/997408): Add tests which will let MHTMLGeneration manager
+    // fail during file write operation. This will allow us to actually test if
+    // we receive a bogus hash instead of a absl::nullopt.
+    EXPECT_EQ(absl::nullopt, file_digest());
+
     // Skip well formedness check if explicitly disabled or there was a
     // generation error.
-    if (!well_formedness_check_ || file_size() == -1)
+    bool generation_failed = file_size() == -1;
+    if (!well_formedness_check_ || generation_failed)
       return;
 
     // Loads the generated file to check if it is well formed.
-    WebContentsDelegate* old_delegate = shell()->web_contents()->GetDelegate();
-    ConsoleObserverDelegate console_delegate(shell()->web_contents(),
-                                             "Malformed multipart archive: *");
-    shell()->web_contents()->SetDelegate(&console_delegate);
+    WebContentsConsoleObserver console_observer(shell()->web_contents());
+    console_observer.SetPattern("Malformed multipart archive: *");
 
     EXPECT_TRUE(
         NavigateToURL(shell(), net::FilePathToFileURL(params.file_path)))
         << "Error navigating to the generated MHTML file";
-    EXPECT_EQ(0U, console_delegate.message().length())
+    EXPECT_TRUE(console_observer.messages().empty())
         << "The generated MHTML file is malformed";
-
-    shell()->web_contents()->SetDelegate(old_delegate);
   }
 
   void TwoStepSyncTestFor(const TaskOrder order);
@@ -360,7 +384,7 @@ class MHTMLGenerationTest : public ContentBrowserTest,
     // are met (this is mostly a sanity check - a failure to meet
     // expectations would probably mean that there is a test bug
     // (i.e. that we got called with wrong expected_foo argument).
-    NavigateToURL(shell(), url);
+    EXPECT_TRUE(NavigateToURL(shell(), url));
     if (!skip_verification_of_original_page) {
       AssertExpectationsAboutCurrentTab(expected_number_of_frames,
                                         expected_substrings,
@@ -377,7 +401,8 @@ class MHTMLGenerationTest : public ContentBrowserTest,
     // met (i.e. if the same expectations are met for "after"
     // [saved version of the page] as for the "before"
     // [the original version of the page].
-    NavigateToURL(shell(), net::FilePathToFileURL(params.file_path));
+    EXPECT_TRUE(
+        NavigateToURL(shell(), net::FilePathToFileURL(params.file_path)));
     AssertExpectationsAboutCurrentTab(expected_number_of_frames,
                                       expected_substrings,
                                       forbidden_substrings_in_saved_page);
@@ -388,7 +413,8 @@ class MHTMLGenerationTest : public ContentBrowserTest,
       const std::vector<std::string>& expected_substrings,
       const std::vector<std::string>& forbidden_substrings) {
     int actual_number_of_frames =
-        shell()->web_contents()->GetAllFrames().size();
+        CollectAllRenderFrameHosts(shell()->web_contents()->GetPrimaryPage())
+            .size();
     EXPECT_EQ(expected_number_of_frames, actual_number_of_frames);
 
     for (const auto& expected_substring : expected_substrings) {
@@ -397,7 +423,7 @@ class MHTMLGenerationTest : public ContentBrowserTest,
       EXPECT_EQ(1, actual_number_of_matches)
           << "Verifying that \"" << expected_substring << "\" appears "
           << "exactly once in the text of web contents of "
-          << shell()->web_contents()->GetURL().spec();
+          << shell()->web_contents()->GetLastCommittedURL().spec();
     }
 
     for (const auto& forbidden_substring : forbidden_substrings) {
@@ -406,8 +432,34 @@ class MHTMLGenerationTest : public ContentBrowserTest,
       EXPECT_EQ(0, actual_number_of_matches)
           << "Verifying that \"" << forbidden_substring << "\" doesn't "
           << "appear in the text of web contents of "
-          << shell()->web_contents()->GetURL().spec();
+          << shell()->web_contents()->GetLastCommittedURL().spec();
     }
+  }
+
+  // Tests that the result of setting compute_contents_hash is the same as
+  // manually hashing the file. Because MHTMLGenerationManager depends on
+  // net::GenerateMimeMultipartBoundary() to write the boundary, we cannot
+  // compute the digest in advance. Therefore, we must compute the hash of the
+  // whole file and assert that the computed hash is the same as the hash
+  // produced here.
+  void TestComputeContentsHash(base::FilePath& path) {
+    base::ScopedAllowBlockingForTesting allow_blocking;
+
+    // Reload the file to an mhtml string for hashing
+    std::string test_mhtml;
+    ASSERT_TRUE(base::ReadFileToString(path, &test_mhtml));
+
+    // Hash the file in one big step. This is not recommended to do outside of
+    // tests because the files being hashed could be too large.
+    std::unique_ptr<crypto::SecureHash> secure_hash =
+        crypto::SecureHash::Create(crypto::SecureHash::Algorithm::SHA256);
+    secure_hash->Update(test_mhtml.c_str(), test_mhtml.size());
+    std::string expected_digest(secure_hash->GetHashLength(), 0);
+    secure_hash->Finish(&(expected_digest[0]), expected_digest.size());
+    secure_hash.reset();
+
+    ASSERT_TRUE(file_digest());
+    EXPECT_EQ(file_digest().value(), expected_digest);
   }
 
   // In the case that we are using a pre-generated .mhtml file, we do
@@ -419,19 +471,28 @@ class MHTMLGenerationTest : public ContentBrowserTest,
 
   bool has_mhtml_callback_run() const { return has_mhtml_callback_run_; }
   int64_t file_size() const { return file_size_; }
+  absl::optional<std::string> file_digest() const { return file_digest_; }
   base::HistogramTester* histogram_tester() { return histogram_tester_.get(); }
 
   base::ScopedTempDir temp_dir_;
 
  private:
-  void MHTMLGenerated(base::Closure quit_closure, int64_t size) {
+  void MHTMLGenerated(base::OnceClosure quit_closure, int64_t size) {
     has_mhtml_callback_run_ = true;
     file_size_ = size;
+    std::move(quit_closure).Run();
+  }
+  void MHTMLGeneratedWithResult(base::OnceClosure quit_closure,
+                                const MHTMLGenerationResult& result) {
+    has_mhtml_callback_run_ = true;
+    file_size_ = result.file_size;
+    file_digest_ = result.file_digest;
     std::move(quit_closure).Run();
   }
 
   bool has_mhtml_callback_run_;
   int64_t file_size_;
+  absl::optional<std::string> file_digest_;
   bool well_formedness_check_;
   std::unique_ptr<base::HistogramTester> histogram_tester_;
 };
@@ -467,7 +528,7 @@ IN_PROC_BROWSER_TEST_P(MHTMLGenerationTest, GenerateMHTML) {
 // Regression test for the crash/race from https://crbug.com/612098.
 //
 // TODO(crbug.com/959435): Flaky on Android.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #define MAYBE_GenerateMHTMLAndCloseConnection \
   DISABLED_GenerateMHTMLAndCloseConnection
 #else
@@ -478,7 +539,8 @@ IN_PROC_BROWSER_TEST_P(MHTMLGenerationTest,
   scoped_refptr<RespondAndDisconnectMockWriter> mock_writer =
       base::MakeRefCounted<RespondAndDisconnectMockWriter>();
 
-  NavigateToURL(shell(), embedded_test_server()->GetURL("/simple_page.html"));
+  EXPECT_TRUE(NavigateToURL(
+      shell(), embedded_test_server()->GetURL("/simple_page.html")));
   base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
 
@@ -495,7 +557,7 @@ IN_PROC_BROWSER_TEST_P(MHTMLGenerationTest,
 }
 
 // TODO(crbug.com/672313): Flaky on Windows.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_InvalidPath DISABLED_InvalidPath
 #else
 #define MAYBE_InvalidPath InvalidPath
@@ -503,8 +565,7 @@ IN_PROC_BROWSER_TEST_P(MHTMLGenerationTest,
 IN_PROC_BROWSER_TEST_P(MHTMLGenerationTest, MAYBE_InvalidPath) {
   base::FilePath path(FILE_PATH_LITERAL("/invalid/file/path"));
 
-  GenerateMHTML(path, embedded_test_server()->GetURL(
-                          "/download/local-about-blank-subframes.html"));
+  GenerateMHTML(path, embedded_test_server()->GetURL("/page_with_image.html"));
 
   EXPECT_EQ(file_size(), -1);  // Expecting that the callback reported failure.
 
@@ -588,7 +649,7 @@ IN_PROC_BROWSER_TEST_P(MHTMLGenerationTest, GenerateMHTMLIgnoreNoStore) {
 }
 
 // TODO(crbug.com/615291): These fail on Android under some circumstances.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #define MAYBE_ViewedMHTMLContainsNoStoreContent \
   DISABLED_ViewedMHTMLContainsNoStoreContent
 #else
@@ -619,6 +680,11 @@ class MHTMLGenerationSitePerProcessTest : public MHTMLGenerationTest {
  public:
   MHTMLGenerationSitePerProcessTest() {}
 
+  MHTMLGenerationSitePerProcessTest(const MHTMLGenerationSitePerProcessTest&) =
+      delete;
+  MHTMLGenerationSitePerProcessTest& operator=(
+      const MHTMLGenerationSitePerProcessTest&) = delete;
+
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     MHTMLGenerationTest::SetUpCommandLine(command_line);
@@ -633,9 +699,6 @@ class MHTMLGenerationSitePerProcessTest : public MHTMLGenerationTest {
 
     MHTMLGenerationTest::SetUpOnMainThread();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MHTMLGenerationSitePerProcessTest);
 };
 
 // Test for crbug.com/538766.
@@ -759,115 +822,13 @@ IN_PROC_BROWSER_TEST_P(MHTMLGenerationTest, GenerateMHTMLWithMultipleFrames) {
     EXPECT_THAT(mhtml, ContainsRegex(regex));
 }
 
-// Tests for the synchronization logic that waits for both the Mojo
-// response and the data pipe closure to consider a frame serialization done.
-// This is only relevant when a Mojo data pipe is being used (hash computation
-// case) and is skipped if writing directly to file.
-namespace {
-class OrderedTaskMockWriter : public MockWriterBase {
- public:
-  explicit OrderedTaskMockWriter(MHTMLGenerationTest::TaskOrder order)
-      : order_(order) {}
-
-  void SerializeAsMHTML(mojom::SerializeAsMHTMLParamsPtr params,
-                        SerializeAsMHTMLCallback callback) override {
-    DCHECK(params->output_handle->is_producer_handle());
-    DCHECK(params->output_handle->get_producer_handle()->is_valid());
-
-    switch (order_) {
-      case MHTMLGenerationTest::TaskOrder::RespondThenWrite:
-        delayed_callback_ = base::BindOnce(
-            &OrderedTaskMockWriter::WriteDataToProducerPipe,
-            base::Unretained(this),
-            std::move(params->output_handle->get_producer_handle()));
-        SendResponse(std::move(callback));
-        PostClosure();
-        break;
-      case MHTMLGenerationTest::TaskOrder::WriteThenRespond:
-        delayed_callback_ =
-            base::BindOnce(&OrderedTaskMockWriter::SendResponse,
-                           base::Unretained(this), std::move(callback));
-        WriteDataToProducerPipe(
-            std::move(params->output_handle->get_producer_handle()));
-        // For this case, we must post to the download sequence first to
-        // ensure we run the closure after the write operation completes.
-        download::GetDownloadTaskRunner()->PostTask(
-            FROM_HERE, base::BindOnce(&OrderedTaskMockWriter::PostClosure,
-                                      base::Unretained(this)));
-        break;
-    }
-  }
-
-  // Posts the quit closure to the UI thread to unblock the serialization Job
-  // after receiving the first task complete notification.
-  void PostClosure() {
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                             std::move(first_run_loop_closure_));
-  }
-
-  base::OnceClosure first_run_loop_closure_;
-  base::OnceClosure delayed_callback_;
-
- private:
-  MHTMLGenerationTest::TaskOrder order_;
-
-  DISALLOW_COPY_AND_ASSIGN(OrderedTaskMockWriter);
-};
-}  // namespace
-
-void MHTMLGenerationTest::TwoStepSyncTestFor(
-    const MHTMLGenerationTest::TaskOrder order) {
-  OrderedTaskMockWriter mock_writer(order);
-
-  base::FilePath path(temp_dir_.GetPath());
-  path = path.Append(FILE_PATH_LITERAL("test.mht"));
-
-  MHTMLGenerationParams params(path);
-
-  OverrideInterface(&mock_writer);
-
-  base::RunLoop first_run_loop;
-  base::RunLoop second_run_loop;
-
-  params.compute_contents_hash = true;
-  mock_writer.first_run_loop_closure_ = first_run_loop.QuitWhenIdleClosure();
-
-  shell()->web_contents()->GenerateMHTML(
-      params,
-      base::BindOnce(&MHTMLGenerationTest::MHTMLGenerated,
-                     base::Unretained(this), second_run_loop.QuitClosure()));
-
-  // Run serialization pipeline until stalled.
-  first_run_loop.Run();
-  ASSERT_FALSE(has_mhtml_callback_run())
-      << "MHTML generation complete but should be waiting on operation.";
-
-  // Run stalled task and block until MHTML generation completes.
-  DCHECK(mock_writer.delayed_callback_);
-  std::move(mock_writer.delayed_callback_).Run();
-  second_run_loop.Run();
-
-  ASSERT_TRUE(has_mhtml_callback_run())
-      << "MHTML generation has not been complete despite unblocking the Job.";
-
-  // Verify the file has some contents written to it.
-  EXPECT_GT(ReadFileSizeFromDisk(path), 100);
-  // Verify the reported file size matches the file written to disk.
-  EXPECT_EQ(ReadFileSizeFromDisk(path), file_size_);
-}
-
-// These tests do not depend on the parameter declared by the
-// MHTMLGenerationTest test suite, so we only want to run them once.
-IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTMLButDelayWrite) {
-  TwoStepSyncTestFor(TaskOrder::RespondThenWrite);
-}
-
-IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTMLButDelayResponse) {
-  TwoStepSyncTestFor(TaskOrder::WriteThenRespond);
-}
-
+// We instantiate the MHTML Generation Tests both using and not using the
+// GenerateMHTMLWithResults callback.
 INSTANTIATE_TEST_SUITE_P(MHTMLGenerationTest,
                          MHTMLGenerationTest,
-                         ::testing::Bool());
+                         testing::Bool());
+INSTANTIATE_TEST_SUITE_P(MHTMLGenerationSitePerProcessTest,
+                         MHTMLGenerationSitePerProcessTest,
+                         testing::Bool());
 
 }  // namespace content

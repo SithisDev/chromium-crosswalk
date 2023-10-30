@@ -1,19 +1,17 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_COMPONENT_UPDATER_CONFIGURATOR_IMPL_H_
 #define COMPONENTS_COMPONENT_UPDATER_CONFIGURATOR_IMPL_H_
 
-#include <stdint.h>
-
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
 #include "components/update_client/configurator.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -34,10 +32,13 @@ class ConfiguratorImpl {
   ConfiguratorImpl(const update_client::CommandLineConfigPolicy& config_policy,
                    bool require_encryption);
 
+  ConfiguratorImpl(const ConfiguratorImpl&) = delete;
+  ConfiguratorImpl& operator=(const ConfiguratorImpl&) = delete;
+
   ~ConfiguratorImpl();
 
   // Delay in seconds from calling Start() to the first update check.
-  int InitialDelay() const;
+  double InitialDelay() const;
 
   // Delay in seconds to every subsequent update check. 0 means don't check.
   int NextCheckDelay() const;
@@ -85,9 +86,6 @@ class ConfiguratorImpl {
   // True if signing of update checks is enabled.
   bool EnabledCupSigning() const;
 
-  // Returns the key hash corresponding to a CRX trusted by ActionRun.
-  std::vector<uint8_t> GetRunActionKeyHash() const;
-
   // Returns the app GUID with which Chrome is registered with Google Update, or
   // an empty string if this brand does not integrate with Google Update.
   std::string GetAppGuid() const;
@@ -97,7 +95,9 @@ class ConfiguratorImpl {
   std::unique_ptr<update_client::ProtocolHandlerFactory>
   GetProtocolHandlerFactory() const;
 
-  update_client::RecoveryCRXElevator GetRecoveryCRXElevator() const;
+  absl::optional<bool> IsMachineExternallyManaged() const;
+
+  update_client::UpdaterStateProvider GetUpdaterStateProvider() const;
 
  private:
   base::flat_map<std::string, std::string> extra_info_;
@@ -107,9 +107,7 @@ class ConfiguratorImpl {
   const bool pings_enabled_;
   const bool require_encryption_;
   const GURL url_source_override_;
-  const int initial_delay_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConfiguratorImpl);
+  const double initial_delay_;
 };
 
 }  // namespace component_updater

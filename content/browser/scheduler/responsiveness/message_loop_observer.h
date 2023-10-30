@@ -1,13 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_SCHEDULER_RESPONSIVENESS_MESSAGE_LOOP_OBSERVER_H_
 #define CONTENT_BROWSER_SCHEDULER_RESPONSIVENESS_MESSAGE_LOOP_OBSERVER_H_
 
-#include "base/macros.h"
-#include "base/message_loop/message_loop_current.h"
-#include "content/common/content_export.h"
+#include "base/task/task_observer.h"
 
 namespace base {
 struct PendingTask;
@@ -19,26 +17,31 @@ namespace responsiveness {
 // This object is not thread safe. It must be constructed and destroyed on the
 // same thread. The callbacks will occur synchronously from WillProcessTask()
 // and DidProcessTask().
-class CONTENT_EXPORT MessageLoopObserver
-    : base::MessageLoopCurrent::TaskObserver {
+class MessageLoopObserver : base::TaskObserver {
  public:
-  using TaskCallback =
+  using WillProcessTaskCallback =
+      base::RepeatingCallback<void(const base::PendingTask* task,
+                                   bool was_blocked_or_low_priority)>;
+  using DidProcessTaskCallback =
       base::RepeatingCallback<void(const base::PendingTask* task)>;
 
   // The constructor will register the object as an observer of the current
   // MessageLoop. The destructor will unregister the object.
-  MessageLoopObserver(TaskCallback will_run_task_callback,
-                      TaskCallback did_run_task_callback);
+  MessageLoopObserver(WillProcessTaskCallback will_process_task_callback,
+                      DidProcessTaskCallback did_process_task_callback);
+
+  MessageLoopObserver(const MessageLoopObserver&) = delete;
+  MessageLoopObserver& operator=(const MessageLoopObserver&) = delete;
+
   ~MessageLoopObserver() override;
 
  private:
-  void WillProcessTask(const base::PendingTask& pending_task) override;
+  void WillProcessTask(const base::PendingTask& pending_task,
+                       bool was_blocked_or_low_priority) override;
   void DidProcessTask(const base::PendingTask& pending_task) override;
 
-  TaskCallback will_run_task_callback_;
-  TaskCallback did_run_task_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(MessageLoopObserver);
+  const WillProcessTaskCallback will_process_task_callback_;
+  const DidProcessTaskCallback did_process_task_callback_;
 };
 
 }  // namespace responsiveness

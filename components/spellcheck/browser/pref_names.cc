@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,10 +22,10 @@ const char kSpellCheckDictionaries[] = "spellcheck.dictionaries";
 const char kSpellCheckForcedDictionaries[] = "spellcheck.forced_dictionaries";
 
 // List of strings representing the dictionary names for languages that are
-// force-disabled in our spell-checker due to the SpellcheckLanguageBlacklist
+// force-disabled in our spell-checker due to the SpellcheckLanguageBlocklist
 // policy.
-const char kSpellCheckBlacklistedDictionaries[] =
-    "spellcheck.blacklisted_dictionaries";
+const char kSpellCheckBlocklistedDictionaries[] =
+    "spellcheck.blocked_dictionaries";
 
 // String which represents whether we use the spelling service.
 const char kSpellCheckUseSpellingService[] = "spellcheck.use_spelling_service";

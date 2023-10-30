@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,7 +8,5 @@ source_set("base") {
     "session_manager_types.h",
   ]
 
-  public_deps = [
-    "//components/account_id",
-  ]
+  public_deps = [ "//components/account_id" ]
 }

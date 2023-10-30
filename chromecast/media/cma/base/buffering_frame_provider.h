@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <list>
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
@@ -26,7 +25,8 @@ class DecoderBufferBase;
 // Fetch some data from another CodedFrameProvider up to a certain size limit.
 class BufferingFrameProvider : public CodedFrameProvider {
  public:
-  typedef base::Callback<void(const scoped_refptr<DecoderBufferBase>&, bool)>
+  typedef base::RepeatingCallback<void(const scoped_refptr<DecoderBufferBase>&,
+                                       bool)>
       FrameBufferedCB;
 
   // Creates a frame provider that buffers coded frames up to the
@@ -43,11 +43,15 @@ class BufferingFrameProvider : public CodedFrameProvider {
       size_t max_buffer_size,
       size_t max_frame_size,
       const FrameBufferedCB& frame_buffered_cb);
+
+  BufferingFrameProvider(const BufferingFrameProvider&) = delete;
+  BufferingFrameProvider& operator=(const BufferingFrameProvider&) = delete;
+
   ~BufferingFrameProvider() override;
 
   // CodedFrameProvider implementation.
-  void Read(const ReadCB& read_cb) override;
-  void Flush(const base::Closure& flush_cb) override;
+  void Read(ReadCB read_cb) override;
+  void Flush(base::OnceClosure flush_cb) override;
 
  private:
   class BufferWithConfig {
@@ -111,8 +115,6 @@ class BufferingFrameProvider : public CodedFrameProvider {
 
   base::WeakPtr<BufferingFrameProvider> weak_this_;
   base::WeakPtrFactory<BufferingFrameProvider> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(BufferingFrameProvider);
 };
 
 }  // namespace media

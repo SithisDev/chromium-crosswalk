@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,8 @@ MockCloudPolicyService::MockCloudPolicyService(CloudPolicyClient* client,
 MockCloudPolicyService::~MockCloudPolicyService() = default;
 
 void MockCloudPolicyService::InvokeRefreshPolicy(
-    const RefreshPolicyCallback& callback) {
-  CloudPolicyService::RefreshPolicy(callback);
+    RefreshPolicyCallback callback) {
+  CloudPolicyService::RefreshPolicy(std::move(callback));
 }
 
 MockCloudPolicyServiceObserver::MockCloudPolicyServiceObserver() = default;

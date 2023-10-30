@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,25 +11,27 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/data_url_loader_factory.h"
-#include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader/single_request_url_loader_factory.h"
 #include "content/browser/web_package/signed_exchange_consts.h"
 #include "content/browser/web_package/signed_exchange_devtools_proxy.h"
-#include "content/browser/web_package/signed_exchange_reporter.h"
 #include "content/browser/web_package/signed_exchange_utils.h"
-#include "content/common/throttling_url_loader.h"
-#include "content/public/common/resource_type.h"
-#include "content/public/common/url_loader_throttle.h"
 #include "ipc/ipc_message.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/load_flags.h"
+#include "net/http/http_request_headers.h"
 #include "net/http/http_status_code.h"
-#include "services/network/loader_util.h"
-#include "services/network/public/cpp/features.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
+#include "third_party/blink/public/common/loader/throttling_url_loader.h"
+#include "third_party/blink/public/common/loader/url_loader_throttle.h"
+#include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
 
 namespace content {
 
@@ -77,20 +79,20 @@ const net::NetworkTrafficAnnotationTag kCertFetcherTrafficAnnotation =
 std::unique_ptr<SignedExchangeCertFetcher>
 SignedExchangeCertFetcher::CreateAndStart(
     scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
-    std::vector<std::unique_ptr<URLLoaderThrottle>> throttles,
+    std::vector<std::unique_ptr<blink::URLLoaderThrottle>> throttles,
     const GURL& cert_url,
     bool force_fetch,
     CertificateCallback callback,
     SignedExchangeDevToolsProxy* devtools_proxy,
-    SignedExchangeReporter* reporter,
-    const base::Optional<base::UnguessableToken>& throttling_profile_id) {
+    const absl::optional<base::UnguessableToken>& throttling_profile_id,
+    net::IsolationInfo isolation_info) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
                "SignedExchangeCertFetcher::CreateAndStart");
   std::unique_ptr<SignedExchangeCertFetcher> cert_fetcher(
-      new SignedExchangeCertFetcher(std::move(shared_url_loader_factory),
-                                    std::move(throttles), cert_url, force_fetch,
-                                    std::move(callback), devtools_proxy,
-                                    reporter, throttling_profile_id));
+      new SignedExchangeCertFetcher(
+          std::move(shared_url_loader_factory), std::move(throttles), cert_url,
+          force_fetch, std::move(callback), devtools_proxy,
+          throttling_profile_id, std::move(isolation_info)));
   cert_fetcher->Start();
   return cert_fetcher;
 }
@@ -98,41 +100,45 @@ SignedExchangeCertFetcher::CreateAndStart(
 // https://wicg.github.io/webpackage/loading.html#handling-cert-url
 SignedExchangeCertFetcher::SignedExchangeCertFetcher(
     scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
-    std::vector<std::unique_ptr<URLLoaderThrottle>> throttles,
+    std::vector<std::unique_ptr<blink::URLLoaderThrottle>> throttles,
     const GURL& cert_url,
     bool force_fetch,
     CertificateCallback callback,
     SignedExchangeDevToolsProxy* devtools_proxy,
-    SignedExchangeReporter* reporter,
-    const base::Optional<base::UnguessableToken>& throttling_profile_id)
+    const absl::optional<base::UnguessableToken>& throttling_profile_id,
+    net::IsolationInfo isolation_info)
     : shared_url_loader_factory_(std::move(shared_url_loader_factory)),
       throttles_(std::move(throttles)),
       resource_request_(std::make_unique<network::ResourceRequest>()),
       callback_(std::move(callback)),
-      devtools_proxy_(devtools_proxy),
-      reporter_(reporter) {
+      devtools_proxy_(devtools_proxy) {
   // TODO(https://crbug.com/803774): Revisit more ResourceRequest flags.
   resource_request_->url = cert_url;
   // |request_initiator| is used for cookie checks, but cert requests don't use
   // cookies. So just set an opaque Origin.
   resource_request_->request_initiator = url::Origin();
   resource_request_->resource_type =
-      static_cast<int>(ResourceType::kSubResource);
+      static_cast<int>(blink::mojom::ResourceType::kSubResource);
+  resource_request_->destination = network::mojom::RequestDestination::kEmpty;
   // Cert requests should not send credential informartion, because the default
   // credentials mode of Fetch is "omit".
-  resource_request_->allow_credentials = false;
-  resource_request_->headers.SetHeader(network::kAcceptHeader,
+  resource_request_->credentials_mode = network::mojom::CredentialsMode::kOmit;
+  resource_request_->headers.SetHeader(net::HttpRequestHeaders::kAccept,
                                        kCertChainMimeType);
   if (force_fetch) {
     resource_request_->load_flags |=
         net::LOAD_DISABLE_CACHE | net::LOAD_BYPASS_CACHE;
   }
-  resource_request_->render_frame_id = MSG_ROUTING_NONE;
   if (devtools_proxy_) {
     cert_request_id_ = base::UnguessableToken::Create();
     resource_request_->enable_load_timing = true;
   }
   resource_request_->throttling_profile_id = throttling_profile_id;
+  if (!isolation_info.IsEmpty()) {
+    resource_request_->trusted_params =
+        network::ResourceRequest::TrustedParams();
+    resource_request_->trusted_params->isolation_info = isolation_info;
+  }
 }
 
 SignedExchangeCertFetcher::~SignedExchangeCertFetcher() = default;
@@ -145,17 +151,15 @@ void SignedExchangeCertFetcher::Start() {
   }
   // When NetworkService enabled, data URL is not handled by the passed
   // URLRequestContext's SharedURLLoaderFactory.
-  if (base::FeatureList::IsEnabled(network::features::kNetworkService) &&
-      resource_request_->url.SchemeIs(url::kDataScheme)) {
+  if (resource_request_->url.SchemeIs(url::kDataScheme)) {
     shared_url_loader_factory_ =
         base::MakeRefCounted<SingleRequestURLLoaderFactory>(
             base::BindOnce(&SignedExchangeCertFetcher::OnDataURLRequest,
                            base::Unretained(this)));
   }
-  url_loader_ = ThrottlingURLLoader::CreateLoaderAndStart(
+  url_loader_ = blink::ThrottlingURLLoader::CreateLoaderAndStart(
       std::move(shared_url_loader_factory_), std::move(throttles_),
-      0 /* routing_id */,
-      ResourceDispatcherHostImpl::Get()->MakeRequestID() /* request_id */,
+      signed_exchange_utils::MakeRequestID() /* request_id */,
       network::mojom::kURLLoadOptionNone, resource_request_.get(), this,
       kCertFetcherTrafficAnnotation, base::ThreadTaskRunnerHandle::Get());
 }
@@ -171,7 +175,8 @@ void SignedExchangeCertFetcher::Abort() {
   handle_watcher_ = nullptr;
   body_string_.clear();
   devtools_proxy_ = nullptr;
-  std::move(callback_).Run(SignedExchangeLoadResult::kCertFetchError, nullptr);
+  std::move(callback_).Run(SignedExchangeLoadResult::kCertFetchError, nullptr,
+                           net::IPAddress());
 }
 
 void SignedExchangeCertFetcher::OnHandleReady(MojoResult result) {
@@ -218,33 +223,37 @@ void SignedExchangeCertFetcher::OnDataComplete() {
   if (!cert_chain) {
     signed_exchange_utils::ReportErrorAndTraceEvent(
         devtools_proxy_, "Failed to get certificate chain from message.");
-    std::move(callback_).Run(SignedExchangeLoadResult::kCertParseError,
-                             nullptr);
+    std::move(callback_).Run(SignedExchangeLoadResult::kCertParseError, nullptr,
+                             cert_server_ip_address_);
     return;
   }
   std::move(callback_).Run(SignedExchangeLoadResult::kSuccess,
-                           std::move(cert_chain));
+                           std::move(cert_chain), cert_server_ip_address_);
 }
 
 // network::mojom::URLLoaderClient
+void SignedExchangeCertFetcher::OnReceiveEarlyHints(
+    network::mojom::EarlyHintsPtr early_hints) {}
+
 void SignedExchangeCertFetcher::OnReceiveResponse(
-    const network::ResourceResponseHead& head) {
+    network::mojom::URLResponseHeadPtr head,
+    mojo::ScopedDataPipeConsumerHandle body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
                "SignedExchangeCertFetcher::OnReceiveResponse");
   if (devtools_proxy_) {
     DCHECK(cert_request_id_);
     devtools_proxy_->CertificateResponseReceived(*cert_request_id_,
-                                                 resource_request_->url, head);
+                                                 resource_request_->url, *head);
   }
 
-  if (reporter_)
-    reporter_->set_cert_server_ip_address(head.remote_endpoint.address());
+  cert_server_ip_address_ = head->remote_endpoint.address();
 
   // |headers| is null when loading data URL.
-  if (head.headers && head.headers->response_code() != net::HTTP_OK) {
+  if (head->headers && head->headers->response_code() != net::HTTP_OK) {
     signed_exchange_utils::ReportErrorAndTraceEvent(
         devtools_proxy_, base::StringPrintf("Invalid reponse code: %d",
-                                            head.headers->response_code()));
+                                            head->headers->response_code()));
     Abort();
     return;
   }
@@ -252,37 +261,49 @@ void SignedExchangeCertFetcher::OnReceiveResponse(
   // https://wicg.github.io/webpackage/draft-yasskin-http-origin-signed-responses.html#cert-chain-format
   // "The resource at a signature's cert-url MUST have the
   // application/cert-chain+cbor content type" [spec text]
-  if (head.mime_type != kCertChainMimeType) {
+  if (head->mime_type != kCertChainMimeType) {
     signed_exchange_utils::ReportErrorAndTraceEvent(
         devtools_proxy_,
         base::StringPrintf(
             "Content type of cert-url must be application/cert-chain+cbor. "
             "Actual content type: %s",
-            head.mime_type.c_str()));
+            head->mime_type.c_str()));
     Abort();
     return;
   }
 
-  if (head.content_length > 0) {
-    if (base::checked_cast<size_t>(head.content_length) >
+  if (head->content_length > 0) {
+    if (base::checked_cast<size_t>(head->content_length) >
         g_max_cert_size_for_signed_exchange) {
       signed_exchange_utils::ReportErrorAndTraceEvent(
           devtools_proxy_,
           base::StringPrintf("Invalid content length: %" PRIu64,
-                             head.content_length));
+                             head->content_length));
       Abort();
       return;
     }
-    body_string_.reserve(head.content_length);
+    body_string_.reserve(head->content_length);
   }
 
   UMA_HISTOGRAM_BOOLEAN("SignedExchange.CertificateFetch.CacheHit",
-                        head.was_fetched_via_cache);
+                        head->was_fetched_via_cache);
+
+  if (!body)
+    return;
+
+  body_ = std::move(body);
+  handle_watcher_ = std::make_unique<mojo::SimpleWatcher>(
+      FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::AUTOMATIC,
+      base::SequencedTaskRunnerHandle::Get());
+  handle_watcher_->Watch(
+      body_.get(), MOJO_HANDLE_SIGNAL_READABLE,
+      base::BindRepeating(&SignedExchangeCertFetcher::OnHandleReady,
+                          base::Unretained(this)));
 }
 
 void SignedExchangeCertFetcher::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
-    const network::ResourceResponseHead& head) {
+    network::mojom::URLResponseHeadPtr head) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
                "SignedExchangeCertFetcher::OnReceiveRedirect");
   // Currently the cert fetcher doesn't allow any redirects.
@@ -297,29 +318,9 @@ void SignedExchangeCertFetcher::OnUploadProgress(
   NOTREACHED();
 }
 
-void SignedExchangeCertFetcher::OnReceiveCachedMetadata(
-    mojo_base::BigBuffer data) {
-  // Cert fetching doesn't use cached metadata.
-  NOTREACHED();
-}
-
 void SignedExchangeCertFetcher::OnTransferSizeUpdated(
     int32_t transfer_size_diff) {
   // Do nothing.
-}
-
-void SignedExchangeCertFetcher::OnStartLoadingResponseBody(
-    mojo::ScopedDataPipeConsumerHandle body) {
-  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
-               "SignedExchangeCertFetcher::OnStartLoadingResponseBody");
-  body_ = std::move(body);
-  handle_watcher_ = std::make_unique<mojo::SimpleWatcher>(
-      FROM_HERE, mojo::SimpleWatcher::ArmingPolicy::AUTOMATIC,
-      base::SequencedTaskRunnerHandle::Get());
-  handle_watcher_->Watch(
-      body_.get(), MOJO_HANDLE_SIGNAL_READABLE,
-      base::BindRepeating(&SignedExchangeCertFetcher::OnHandleReady,
-                          base::Unretained(this)));
 }
 
 void SignedExchangeCertFetcher::OnComplete(
@@ -333,12 +334,14 @@ void SignedExchangeCertFetcher::OnComplete(
 
 void SignedExchangeCertFetcher::OnDataURLRequest(
     const network::ResourceRequest& resource_request,
-    network::mojom::URLLoaderRequest url_loader_request,
-    network::mojom::URLLoaderClientPtr url_loader_client_ptr) {
-  data_url_loader_factory_ = std::make_unique<DataURLLoaderFactory>();
-  data_url_loader_factory_->CreateLoaderAndStart(
-      std::move(url_loader_request), 0, 0, 0, resource_request,
-      std::move(url_loader_client_ptr),
+    mojo::PendingReceiver<network::mojom::URLLoader> url_loader_receiver,
+    mojo::PendingRemote<network::mojom::URLLoaderClient>
+        url_loader_client_remote) {
+  mojo::Remote<network::mojom::URLLoaderFactory> factory(
+      DataURLLoaderFactory::Create());
+  factory->CreateLoaderAndStart(
+      std::move(url_loader_receiver), 0, 0, resource_request,
+      std::move(url_loader_client_remote),
       net::MutableNetworkTrafficAnnotationTag(kCertFetcherTrafficAnnotation));
 }
 

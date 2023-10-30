@@ -1,30 +1,21 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 
 namespace content {
-namespace {
 
-const float kDefaultSpeedInPixelsS = 800;
-
-}  // namespace
-
-SyntheticSmoothScrollGestureParams::SyntheticSmoothScrollGestureParams()
-    : prevent_fling(true),
-      speed_in_pixels_s(kDefaultSpeedInPixelsS),
-      fling_velocity_x(0),
-      fling_velocity_y(0),
-      precise_scrolling_deltas(false),
-      scroll_by_page(false) {}
+SyntheticSmoothScrollGestureParams::SyntheticSmoothScrollGestureParams() =
+    default;
 
 SyntheticSmoothScrollGestureParams::SyntheticSmoothScrollGestureParams(
     const SyntheticSmoothScrollGestureParams& other) = default;
 
-SyntheticSmoothScrollGestureParams::~SyntheticSmoothScrollGestureParams() {}
+SyntheticSmoothScrollGestureParams::~SyntheticSmoothScrollGestureParams() =
+    default;
 
 SyntheticGestureParams::GestureType
 SyntheticSmoothScrollGestureParams::GetGestureType() const {

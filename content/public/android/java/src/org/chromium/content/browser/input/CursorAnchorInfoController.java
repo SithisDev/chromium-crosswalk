@@ -1,17 +1,16 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser.input;
 
-import android.annotation.TargetApi;
 import android.graphics.Matrix;
-import android.os.Build;
-import android.support.annotation.Nullable;
 import android.view.View;
 import android.view.inputmethod.CursorAnchorInfo;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.content_public.browser.InputMethodManagerWrapper;
 
 import java.util.Arrays;
@@ -21,10 +20,8 @@ import javax.annotation.Nonnull;
 /**
  * A state machine interface which receives Chromium internal events to determines when to call
  * {@link InputMethodManager#updateCursorAnchorInfo(View, CursorAnchorInfo)}. This interface is
- * also used in unit tests to mock out {@link CursorAnchorInfo}, which is available only in
- * Android 5.0 (Lollipop) and later.
+ * also used in unit tests to mock out {@link CursorAnchorInfo}.
  */
-@TargetApi(Build.VERSION_CODES.LOLLIPOP)
 final class CursorAnchorInfoController {
     /**
      * An interface to mock out {@link View#getLocationOnScreen(int[])} for testing.
@@ -100,7 +97,6 @@ final class CursorAnchorInfoController {
                 });
     }
 
-    @VisibleForTesting
     public void setInputMethodManagerWrapper(InputMethodManagerWrapper inputMethodManagerWrapper) {
         mInputMethodManagerWrapper = inputMethodManagerWrapper;
     }

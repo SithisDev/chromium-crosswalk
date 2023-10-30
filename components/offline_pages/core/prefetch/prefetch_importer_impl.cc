@@ -1,15 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/offline_pages/core/prefetch/prefetch_importer_impl.h"
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/files/file_util.h"
 #include "base/guid.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/task_runner.h"
+#include "base/notreached.h"
+#include "base/task/task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/offline_pages/core/offline_page_model.h"
@@ -76,8 +77,7 @@ void PrefetchImporterImpl::ImportArchive(const PrefetchArchiveInfo& archive) {
   // The target file name will be auto generated based on GUID to prevent any
   // name collision.
   base::FilePath archives_dir =
-      offline_page_model_->GetInternalArchiveDirectory(
-          archive.client_id.name_space);
+      offline_page_model_->GetArchiveDirectory(archive.client_id.name_space);
   base::FilePath dest_path = archives_dir.AppendASCII(base::GenerateGUID())
                                  .AddExtension(FILE_PATH_LITERAL("mhtml"));
 

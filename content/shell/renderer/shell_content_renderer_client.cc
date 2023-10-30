@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,24 +7,25 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
-#include "components/cdm/renderer/external_clear_key_key_system_properties.h"
+#include "components/cdm/renderer/external_clear_key_key_system_info.h"
+#include "components/network_hints/renderer/web_prescient_networking_impl.h"
 #include "components/web_cache/renderer/web_cache_impl.h"
-#include "content/public/child/child_thread.h"
-#include "content/public/common/service_manager_connection.h"
-#include "content/public/common/simple_connection_filter.h"
 #include "content/public/test/test_service.mojom.h"
+#include "content/shell/common/main_frame_counter_test_impl.h"
 #include "content/shell/common/power_monitor_test_impl.h"
 #include "content/shell/common/shell_switches.h"
-#include "content/shell/renderer/shell_render_view_observer.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "content/shell/renderer/shell_render_frame_observer.h"
+#include "mojo/public/cpp/bindings/binder_map.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "net/base/net_errors.h"
 #include "ppapi/buildflags/buildflags.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
+#include "sandbox/policy/sandbox.h"
 #include "third_party/blink/public/platform/web_url_error.h"
 #include "third_party/blink/public/web/web_testing_support.h"
 #include "third_party/blink/public/web/web_view.h"
@@ -46,11 +47,15 @@ namespace {
 // A test service which can be driven by browser tests for various reasons.
 class TestRendererServiceImpl : public mojom::TestService {
  public:
-  explicit TestRendererServiceImpl(mojom::TestServiceRequest request)
-      : binding_(this, std::move(request)) {
-    binding_.set_connection_error_handler(base::BindOnce(
+  explicit TestRendererServiceImpl(
+      mojo::PendingReceiver<mojom::TestService> receiver)
+      : receiver_(this, std::move(receiver)) {
+    receiver_.set_disconnect_handler(base::BindOnce(
         &TestRendererServiceImpl::OnConnectionError, base::Unretained(this)));
   }
+
+  TestRendererServiceImpl(const TestRendererServiceImpl&) = delete;
+  TestRendererServiceImpl& operator=(const TestRendererServiceImpl&) = delete;
 
   ~TestRendererServiceImpl() override {}
 
@@ -62,7 +67,7 @@ class TestRendererServiceImpl : public mojom::TestService {
     // Instead of responding normally, unbind the pipe, write some garbage,
     // and go away.
     const std::string kBadMessage = "This is definitely not a valid response!";
-    mojo::ScopedMessagePipeHandle pipe = binding_.Unbind().PassMessagePipe();
+    mojo::ScopedMessagePipeHandle pipe = receiver_.Unbind().PassPipe();
     MojoResult rv = mojo::WriteMessageRaw(
         pipe.get(), kBadMessage.data(), kBadMessage.size(), nullptr, 0,
         MOJO_WRITE_MESSAGE_FLAG_NONE);
@@ -77,7 +82,10 @@ class TestRendererServiceImpl : public mojom::TestService {
   }
 
   void DoCrashImmediately(DoCrashImmediatelyCallback callback) override {
-    NOTREACHED();
+    // This intentionally crashes the process and needs to be fatal regardless
+    // of DCHECK level. It's intended to get called. This is unlike the other
+    // NOTREACHED()s which are not expected to get called at all.
+    CHECK(false);
   }
 
   void CreateFolder(CreateFolderCallback callback) override { NOTREACHED(); }
@@ -86,19 +94,35 @@ class TestRendererServiceImpl : public mojom::TestService {
     std::move(callback).Run("Not implemented.");
   }
 
-  void CreateSharedBuffer(const std::string& message,
-                          CreateSharedBufferCallback callback) override {
+  void CreateReadOnlySharedMemoryRegion(
+      const std::string& message,
+      CreateReadOnlySharedMemoryRegionCallback callback) override {
     NOTREACHED();
   }
 
-  mojo::Binding<mojom::TestService> binding_;
+  void CreateWritableSharedMemoryRegion(
+      const std::string& message,
+      CreateWritableSharedMemoryRegionCallback callback) override {
+    NOTREACHED();
+  }
 
-  DISALLOW_COPY_AND_ASSIGN(TestRendererServiceImpl);
+  void CreateUnsafeSharedMemoryRegion(
+      const std::string& message,
+      CreateUnsafeSharedMemoryRegionCallback callback) override {
+    NOTREACHED();
+  }
+
+  void IsProcessSandboxed(IsProcessSandboxedCallback callback) override {
+    std::move(callback).Run(sandbox::policy::Sandbox::IsProcessSandboxed());
+  }
+
+  mojo::Receiver<mojom::TestService> receiver_;
 };
 
-void CreateRendererTestService(mojom::TestServiceRequest request) {
+void CreateRendererTestService(
+    mojo::PendingReceiver<mojom::TestService> receiver) {
   // Owns itself.
-  new TestRendererServiceImpl(std::move(request));
+  new TestRendererServiceImpl(std::move(receiver));
 }
 
 }  // namespace
@@ -109,34 +133,39 @@ ShellContentRendererClient::~ShellContentRendererClient() {
 }
 
 void ShellContentRendererClient::RenderThreadStarted() {
-  web_cache_impl_.reset(new web_cache::WebCacheImpl());
+  web_cache_impl_ = std::make_unique<web_cache::WebCacheImpl>();
+}
 
-  auto registry = std::make_unique<service_manager::BinderRegistry>();
-  registry->AddInterface<mojom::TestService>(
+void ShellContentRendererClient::ExposeInterfacesToBrowser(
+    mojo::BinderMap* binders) {
+  binders->Add<mojom::TestService>(
       base::BindRepeating(&CreateRendererTestService),
       base::ThreadTaskRunnerHandle::Get());
-  registry->AddInterface<mojom::PowerMonitorTest>(
-      base::BindRepeating(&PowerMonitorTestImpl::MakeStrongBinding),
+  binders->Add<mojom::PowerMonitorTest>(
+      base::BindRepeating(&PowerMonitorTestImpl::MakeSelfOwnedReceiver),
       base::ThreadTaskRunnerHandle::Get());
-  content::ChildThread::Get()
-      ->GetServiceManagerConnection()
-      ->AddConnectionFilter(
-          std::make_unique<SimpleConnectionFilter>(std::move(registry)));
+  binders->Add<mojom::MainFrameCounterTest>(
+      base::BindRepeating(&MainFrameCounterTestImpl::Bind),
+      base::ThreadTaskRunnerHandle::Get());
+  binders->Add<web_cache::mojom::WebCache>(
+      base::BindRepeating(&web_cache::WebCacheImpl::BindReceiver,
+                          base::Unretained(web_cache_impl_.get())),
+      base::ThreadTaskRunnerHandle::Get());
 }
 
-void ShellContentRendererClient::RenderViewCreated(RenderView* render_view) {
-  new ShellRenderViewObserver(render_view);
-}
-
-bool ShellContentRendererClient::HasErrorPage(int http_status_code) {
-  return http_status_code >= 400 && http_status_code < 600;
+void ShellContentRendererClient::RenderFrameCreated(RenderFrame* render_frame) {
+  // TODO(danakj): The ShellRenderFrameObserver is doing stuff only for
+  // browser tests. If we only create that for browser tests then the override
+  // of this method in WebTestContentRendererClient would not be needed.
+  new ShellRenderFrameObserver(render_frame);
 }
 
 void ShellContentRendererClient::PrepareErrorPage(
     RenderFrame* render_frame,
     const blink::WebURLError& error,
     const std::string& http_method,
-    bool ignoring_cache,
+    content::mojom::AlternativeErrorPageOverrideInfoPtr
+        alternative_error_page_info,
     std::string* error_html) {
   if (error_html && error_html->empty()) {
     *error_html =
@@ -151,25 +180,17 @@ void ShellContentRendererClient::PrepareErrorPage(
 
 void ShellContentRendererClient::PrepareErrorPageForHttpStatusError(
     content::RenderFrame* render_frame,
-    const GURL& unreachable_url,
+    const blink::WebURLError& error,
     const std::string& http_method,
-    bool ignoring_cache,
     int http_status,
+    content::mojom::AlternativeErrorPageOverrideInfoPtr
+        alternative_error_page_info,
     std::string* error_html) {
   if (error_html) {
     *error_html =
         "<head><title>Error</title></head><body>Server returned HTTP status " +
         base::NumberToString(http_status) + "</body>";
   }
-}
-
-bool ShellContentRendererClient::IsPluginAllowedToUseDevChannelAPIs() {
-#if BUILDFLAG(ENABLE_PLUGINS)
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnablePepperTesting);
-#else
-  return false;
-#endif
 }
 
 void ShellContentRendererClient::DidInitializeWorkerContextOnWorkerThread(
@@ -181,16 +202,20 @@ void ShellContentRendererClient::DidInitializeWorkerContextOnWorkerThread(
 }
 
 #if BUILDFLAG(ENABLE_MOJO_CDM)
-void ShellContentRendererClient::AddSupportedKeySystems(
-    std::vector<std::unique_ptr<media::KeySystemProperties>>* key_systems) {
-  if (!base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting))
-    return;
-
-  static const char kExternalClearKeyKeySystem[] =
-      "org.chromium.externalclearkey";
-  key_systems->emplace_back(
-      new cdm::ExternalClearKeyProperties(kExternalClearKeyKeySystem));
+void ShellContentRendererClient::GetSupportedKeySystems(
+    media::GetSupportedKeySystemsCB cb) {
+  media::KeySystemInfoVector key_systems;
+  if (base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting))
+    key_systems.push_back(std::make_unique<cdm::ExternalClearKeyProperties>());
+  std::move(cb).Run(std::move(key_systems));
 }
 #endif
+
+std::unique_ptr<blink::WebPrescientNetworking>
+ShellContentRendererClient::CreatePrescientNetworking(
+    RenderFrame* render_frame) {
+  return std::make_unique<network_hints::WebPrescientNetworkingImpl>(
+      render_frame);
+}
 
 }  // namespace content

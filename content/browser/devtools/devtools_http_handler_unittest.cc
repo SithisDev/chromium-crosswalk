@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,23 +15,32 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/task/post_task.h"
+#include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_manager_delegate.h"
 #include "content/public/browser/devtools_socket_factory.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/common/content_client.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/socket/server_socket.h"
+#include "net/socket/tcp_server_socket.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
+#include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -61,26 +70,23 @@ class DummyServerSocket : public net::ServerSocket {
   }
 };
 
-void QuitFromHandlerThread(const base::Closure& quit_closure) {
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI}, quit_closure);
-}
-
 class DummyServerSocketFactory : public DevToolsSocketFactory {
  public:
-  DummyServerSocketFactory(base::Closure quit_closure_1,
-                           base::Closure quit_closure_2)
-      : quit_closure_1_(quit_closure_1),
-        quit_closure_2_(quit_closure_2) {}
+  DummyServerSocketFactory(base::OnceClosure create_socket_callback,
+                           base::OnceClosure shutdown_callback)
+      : create_socket_callback_(std::move(create_socket_callback)),
+        shutdown_callback_(std::move(shutdown_callback)) {}
 
   ~DummyServerSocketFactory() override {
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI}, quit_closure_2_);
+    GetUIThreadTaskRunner({})->PostTask(FROM_HERE,
+                                        std::move(shutdown_callback_));
   }
 
  protected:
   std::unique_ptr<net::ServerSocket> CreateForHttpServer() override {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(&QuitFromHandlerThread, quit_closure_1_));
-    return base::WrapUnique(new DummyServerSocket());
+    GetUIThreadTaskRunner({})->PostTask(FROM_HERE,
+                                        std::move(create_socket_callback_));
+    return std::make_unique<DummyServerSocket>();
   }
 
   std::unique_ptr<net::ServerSocket> CreateForTethering(
@@ -88,22 +94,43 @@ class DummyServerSocketFactory : public DevToolsSocketFactory {
     return nullptr;
   }
 
-  base::Closure quit_closure_1_;
-  base::Closure quit_closure_2_;
+  base::OnceClosure create_socket_callback_;
+  base::OnceClosure shutdown_callback_;
 };
 
 class FailingServerSocketFactory : public DummyServerSocketFactory {
  public:
-  FailingServerSocketFactory(const base::Closure& quit_closure_1,
-                             const base::Closure& quit_closure_2)
-      : DummyServerSocketFactory(quit_closure_1, quit_closure_2) {
-  }
+  FailingServerSocketFactory(base::OnceClosure create_socket_callback,
+                             base::OnceClosure shutdown_callback)
+      : DummyServerSocketFactory(std::move(create_socket_callback),
+                                 std::move(shutdown_callback)) {}
 
  private:
   std::unique_ptr<net::ServerSocket> CreateForHttpServer() override {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(&QuitFromHandlerThread, quit_closure_1_));
+    GetUIThreadTaskRunner({})->PostTask(FROM_HERE,
+                                        std::move(create_socket_callback_));
     return nullptr;
+  }
+};
+
+class TCPServerSocketFactory : public DummyServerSocketFactory {
+ public:
+  TCPServerSocketFactory(base::OnceClosure create_socket_callback,
+                         base::OnceClosure shutdown_callback)
+      : DummyServerSocketFactory(std::move(create_socket_callback),
+                                 std::move(shutdown_callback)) {}
+
+ private:
+  std::unique_ptr<net::ServerSocket> CreateForHttpServer() override {
+    std::unique_ptr<net::ServerSocket> socket(
+        new net::TCPServerSocket(nullptr, net::NetLogSource()));
+    if (socket->ListenWithAddressAndPort("127.0.0.1", kDummyPort, 10) !=
+        net::OK) {
+      return nullptr;
+    }
+    GetUIThreadTaskRunner({})->PostTask(FROM_HERE,
+                                        std::move(create_socket_callback_));
+    return socket;
   }
 };
 
@@ -111,8 +138,9 @@ class BrowserClient : public ContentBrowserClient {
  public:
   BrowserClient() {}
   ~BrowserClient() override {}
-  DevToolsManagerDelegate* GetDevToolsManagerDelegate() override {
-    return new DevToolsManagerDelegate();
+  std::unique_ptr<content::DevToolsManagerDelegate>
+  CreateDevToolsManagerDelegate() override {
+    return std::make_unique<DevToolsManagerDelegate>();
   }
 };
 
@@ -120,25 +148,25 @@ class BrowserClient : public ContentBrowserClient {
 
 class DevToolsHttpHandlerTest : public testing::Test {
  public:
-  DevToolsHttpHandlerTest() : testing::Test() { }
+  DevToolsHttpHandlerTest()
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP) {}
 
   void SetUp() override {
-    content_client_.reset(new ContentClient());
-    browser_content_client_.reset(new BrowserClient());
+    content_client_ = std::make_unique<ContentClient>();
+    browser_content_client_ = std::make_unique<BrowserClient>();
     SetBrowserClientForTesting(browser_content_client_.get());
   }
 
  private:
   std::unique_ptr<ContentClient> content_client_;
   std::unique_ptr<ContentBrowserClient> browser_content_client_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 };
 
 TEST_F(DevToolsHttpHandlerTest, TestStartStop) {
   base::RunLoop run_loop, run_loop_2;
-  std::unique_ptr<DevToolsSocketFactory> factory(
-      new DummyServerSocketFactory(run_loop.QuitClosure(),
-                                   run_loop_2.QuitClosure()));
+  auto factory = std::make_unique<DummyServerSocketFactory>(
+      run_loop.QuitClosure(), run_loop_2.QuitClosure());
   DevToolsAgentHost::StartRemoteDebuggingServer(
       std::move(factory), base::FilePath(), base::FilePath());
   // Our dummy socket factory will post a quit message once the server will
@@ -151,9 +179,8 @@ TEST_F(DevToolsHttpHandlerTest, TestStartStop) {
 
 TEST_F(DevToolsHttpHandlerTest, TestServerSocketFailed) {
   base::RunLoop run_loop, run_loop_2;
-  std::unique_ptr<DevToolsSocketFactory> factory(
-      new FailingServerSocketFactory(run_loop.QuitClosure(),
-                                     run_loop_2.QuitClosure()));
+  auto factory = std::make_unique<FailingServerSocketFactory>(
+      run_loop.QuitClosure(), run_loop_2.QuitClosure());
   LOG(INFO) << "Following error message is expected:";
   DevToolsAgentHost::StartRemoteDebuggingServer(
       std::move(factory), base::FilePath(), base::FilePath());
@@ -172,9 +199,8 @@ TEST_F(DevToolsHttpHandlerTest, TestDevToolsActivePort) {
   base::RunLoop run_loop, run_loop_2;
   base::ScopedTempDir temp_dir;
   EXPECT_TRUE(temp_dir.CreateUniqueTempDir());
-  std::unique_ptr<DevToolsSocketFactory> factory(
-      new DummyServerSocketFactory(run_loop.QuitClosure(),
-                                   run_loop_2.QuitClosure()));
+  auto factory = std::make_unique<DummyServerSocketFactory>(
+      run_loop.QuitClosure(), run_loop_2.QuitClosure());
 
   DevToolsAgentHost::StartRemoteDebuggingServer(
       std::move(factory), temp_dir.GetPath(), base::FilePath());
@@ -197,6 +223,48 @@ TEST_F(DevToolsHttpHandlerTest, TestDevToolsActivePort) {
   int port = 0;
   EXPECT_TRUE(base::StringToInt(tokens[0], &port));
   EXPECT_EQ(static_cast<int>(kDummyPort), port);
+}
+
+TEST_F(DevToolsHttpHandlerTest, TestMutatingActionsMetrics) {
+  base::RunLoop run_loop, run_loop_2;
+  auto factory = std::make_unique<TCPServerSocketFactory>(
+      run_loop.QuitClosure(), run_loop_2.QuitClosure());
+  DevToolsAgentHost::StartRemoteDebuggingServer(
+      std::move(factory), base::FilePath(), base::FilePath());
+  // Our dummy socket factory will post a quit message once the server will
+  // become ready.
+  run_loop.Run();
+  base::HistogramTester histogram_tester;
+
+  net::TestDelegate delegate;
+  GURL url(base::StringPrintf("http://127.0.0.1:%d/json/new", kDummyPort));
+  auto request_context = net::CreateTestURLRequestContextBuilder()->Build();
+  auto request = request_context->CreateRequest(
+      url, net::DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS);
+  request->Start();
+  delegate.RunUntilComplete();
+  EXPECT_GE(delegate.request_status(), 0);
+  histogram_tester.ExpectBucketCount("DevTools.MutatingHttpAction", 0, 1);
+
+  request = request_context->CreateRequest(
+      url, net::DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS);
+  request->set_method("POST");
+  request->Start();
+  delegate.RunUntilComplete();
+  EXPECT_GE(delegate.request_status(), 0);
+  histogram_tester.ExpectBucketCount("DevTools.MutatingHttpAction", 1, 1);
+
+  request = request_context->CreateRequest(
+      url, net::DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS);
+  request->set_method("PUT");
+  request->Start();
+  delegate.RunUntilComplete();
+  EXPECT_GE(delegate.request_status(), 0);
+  histogram_tester.ExpectBucketCount("DevTools.MutatingHttpAction", 2, 1);
+
+  DevToolsAgentHost::StopRemoteDebuggingServer();
+  // Make sure the handler actually stops.
+  run_loop_2.Run();
 }
 
 }  // namespace content

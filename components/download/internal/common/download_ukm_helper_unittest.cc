@@ -1,11 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/download/public/common/download_ukm_helper.h"
 
+#include <memory>
+
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -22,10 +24,14 @@ namespace download {
 class DownloadUkmHelperTest : public testing::Test {
  public:
   DownloadUkmHelperTest() : download_id_(123) { ResetUkmRecorder(); }
+
+  DownloadUkmHelperTest(const DownloadUkmHelperTest&) = delete;
+  DownloadUkmHelperTest& operator=(const DownloadUkmHelperTest&) = delete;
+
   ~DownloadUkmHelperTest() override = default;
 
   void ResetUkmRecorder() {
-    test_recorder_.reset(new ukm::TestAutoSetUkmRecorder);
+    test_recorder_ = std::make_unique<ukm::TestAutoSetUkmRecorder>();
   }
 
   void ExpectUkmMetrics(const base::StringPiece entry_name,
@@ -45,10 +51,8 @@ class DownloadUkmHelperTest : public testing::Test {
  protected:
   int download_id_;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<ukm::TestAutoSetUkmRecorder> test_recorder_;
-
-  DISALLOW_COPY_AND_ASSIGN(DownloadUkmHelperTest);
 };
 
 TEST_F(DownloadUkmHelperTest, TestBasicReporting) {
@@ -81,7 +85,7 @@ TEST_F(DownloadUkmHelperTest, TestBasicReporting) {
   int bytes_wasted = 1234;
   DownloadUkmHelper::RecordDownloadInterrupted(
       download_id_, change_in_file_size, reason, resulting_file_size,
-      base::TimeDelta::FromMilliseconds(time_since_start), bytes_wasted);
+      base::Milliseconds(time_since_start), bytes_wasted);
 
   ExpectUkmMetrics(
       UkmDownloadInterrupted::kEntryName,
@@ -101,8 +105,7 @@ TEST_F(DownloadUkmHelperTest, TestBasicReporting) {
   ResumeMode mode = ResumeMode::IMMEDIATE_RESTART;
   int time_since_start_resume = 300;
   DownloadUkmHelper::RecordDownloadResumed(
-      download_id_, mode,
-      base::TimeDelta::FromMilliseconds(time_since_start_resume));
+      download_id_, mode, base::Milliseconds(time_since_start_resume));
 
   ExpectUkmMetrics(
       UkmDownloadResumed::kEntryName,
@@ -116,8 +119,7 @@ TEST_F(DownloadUkmHelperTest, TestBasicReporting) {
   int bytes_wasted_completed = 2345;
   DownloadUkmHelper::RecordDownloadCompleted(
       download_id_, resulting_file_size_completed,
-      base::TimeDelta::FromMilliseconds(time_since_start_completed),
-      bytes_wasted_completed);
+      base::Milliseconds(time_since_start_completed), bytes_wasted_completed);
 
   ExpectUkmMetrics(
       UkmDownloadCompleted::kEntryName,

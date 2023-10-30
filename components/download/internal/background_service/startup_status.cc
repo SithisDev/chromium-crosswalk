@@ -1,10 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/download/internal/background_service/startup_status.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 
 namespace download {
 
@@ -25,6 +25,11 @@ bool StartupStatus::Complete() const {
 bool StartupStatus::Ok() const {
   DCHECK(Complete());
   return driver_ok.value() && model_ok.value() && file_monitor_ok.value();
+}
+
+bool StartupStatus::Failed() const {
+  return (driver_ok && !driver_ok.value()) || (model_ok && !model_ok.value()) ||
+         (file_monitor_ok && !file_monitor_ok.value());
 }
 
 }  // namespace download

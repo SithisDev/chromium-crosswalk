@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,14 @@
 
 #include <map>
 
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
+#include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node_data.h"
 #include "components/bookmarks/browser/bookmark_undo_delegate.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/undo/undo_manager.h"
-
-namespace bookmarks {
-class BookmarkModel;
-class BookmarkModelObserver;
-}
 
 // BookmarkUndoService --------------------------------------------------------
 
@@ -29,6 +25,10 @@ class BookmarkUndoService : public bookmarks::BaseBookmarkModelObserver,
                             public KeyedService {
  public:
   BookmarkUndoService();
+
+  BookmarkUndoService(const BookmarkUndoService&) = delete;
+  BookmarkUndoService& operator=(const BookmarkUndoService&) = delete;
+
   ~BookmarkUndoService() override;
 
   // Starts the BookmarkUndoService and register it as a BookmarkModelObserver.
@@ -54,7 +54,8 @@ class BookmarkUndoService : public bookmarks::BaseBookmarkModelObserver,
                          size_t new_index) override;
   void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
                          const bookmarks::BookmarkNode* parent,
-                         size_t index) override;
+                         size_t index,
+                         bool added_by_user) override;
   void OnWillChangeBookmarkNode(bookmarks::BookmarkModel* model,
                                 const bookmarks::BookmarkNode* node) override;
   void OnWillReorderBookmarkNode(bookmarks::BookmarkModel* model,
@@ -71,13 +72,12 @@ class BookmarkUndoService : public bookmarks::BaseBookmarkModelObserver,
       size_t index,
       std::unique_ptr<bookmarks::BookmarkNode> node) override;
 
-  bookmarks::BookmarkModel* model_;
-  bookmarks::BookmarkUndoProvider* undo_provider_;
+  raw_ptr<bookmarks::BookmarkModel> model_;
+  raw_ptr<bookmarks::BookmarkUndoProvider> undo_provider_;
   UndoManager undo_manager_;
-  ScopedObserver<bookmarks::BookmarkModel, bookmarks::BookmarkModelObserver>
-      scoped_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(BookmarkUndoService);
+  base::ScopedObservation<bookmarks::BookmarkModel,
+                          bookmarks::BookmarkModelObserver>
+      scoped_observation_{this};
 };
 
 #endif  // COMPONENTS_UNDO_BOOKMARK_UNDO_SERVICE_H_

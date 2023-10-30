@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,7 @@ GURL AppendFingerprintParamToDoodleURL(const GURL& logo_url,
 // will have to be processed again to add the fingerprint before making the
 // request to the server, see AppendFingerprintParamToDoodleURL().
 GURL AppendPreliminaryParamsToDoodleURL(bool gray_background,
+                                        bool for_webui_ntp,
                                         const GURL& logo_url);
 
 // Implements ParseLogoResponse, defined in logo_common.h, for Google or

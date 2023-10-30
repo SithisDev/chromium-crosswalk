@@ -1,9 +1,9 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_SEARCH_PROVIDER_LOGOS_ANDROID_LOGO_SERVICE_IMPL_H_
-#define COMPONENTS_SEARCH_PROVIDER_LOGOS_ANDROID_LOGO_SERVICE_IMPL_H_
+#ifndef COMPONENTS_SEARCH_PROVIDER_LOGOS_LOGO_SERVICE_IMPL_H_
+#define COMPONENTS_SEARCH_PROVIDER_LOGOS_LOGO_SERVICE_IMPL_H_
 
 #include <memory>
 #include <string>
@@ -11,10 +11,10 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
 #include "components/search_provider_logos/logo_common.h"
@@ -52,6 +52,9 @@ class LogoServiceImpl : public LogoService,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       base::RepeatingCallback<bool()> want_gray_logo_getter);
 
+  LogoServiceImpl(const LogoServiceImpl&) = delete;
+  LogoServiceImpl& operator=(const LogoServiceImpl&) = delete;
+
   ~LogoServiceImpl() override;
 
   // KeyedService implementation.
@@ -78,7 +81,7 @@ class LogoServiceImpl : public LogoService,
   // At least one callback must be non-null. All non-null callbacks will be
   // invoked exactly once.
   void GetLogo(LogoObserver* observer) override;
-  void GetLogo(LogoCallbacks callbacks) override;
+  void GetLogo(LogoCallbacks callbacks, bool for_webui_ntp) override;
 
   // Overrides the cache used to store logos.
   void SetLogoCacheForTests(std::unique_ptr<LogoCache> cache);
@@ -171,8 +174,8 @@ class LogoServiceImpl : public LogoService,
 
   // Constructor arguments.
   const base::FilePath cache_directory_;
-  signin::IdentityManager* const identity_manager_;
-  TemplateURLService* const template_url_service_;
+  const raw_ptr<signin::IdentityManager> identity_manager_;
+  const raw_ptr<TemplateURLService> template_url_service_;
   const scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
   // Callback to get the type of logo to fetch. Returns whether we want a logo
@@ -226,13 +229,11 @@ class LogoServiceImpl : public LogoService,
   std::unique_ptr<LogoCache, base::OnTaskRunnerDeleter> logo_cache_;
 
   // Clock used to determine current time. Can be overridden in tests.
-  base::Clock* clock_ = nullptr;
+  raw_ptr<base::Clock> clock_ = nullptr;
 
   base::WeakPtrFactory<LogoServiceImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(LogoServiceImpl);
 };
 
 }  // namespace search_provider_logos
 
-#endif  // COMPONENTS_SEARCH_PROVIDER_LOGOS_ANDROID_LOGO_SERVICE_IMPL_H_
+#endif  // COMPONENTS_SEARCH_PROVIDER_LOGOS_LOGO_SERVICE_IMPL_H_

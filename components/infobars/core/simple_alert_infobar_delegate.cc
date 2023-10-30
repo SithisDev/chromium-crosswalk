@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,34 +6,21 @@
 
 #include <memory>
 
-#include "components/infobars/core/infobar.h"
-#include "components/infobars/core/infobar_manager.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-
-// static
-void SimpleAlertInfoBarDelegate::Create(
-    infobars::InfoBarManager* infobar_manager,
-    infobars::InfoBarDelegate::InfoBarIdentifier infobar_identifier,
-    const gfx::VectorIcon* vector_icon,
-    const base::string16& message,
-    bool auto_expire) {
-  infobar_manager->AddInfoBar(infobar_manager->CreateConfirmInfoBar(
-      std::unique_ptr<ConfirmInfoBarDelegate>(new SimpleAlertInfoBarDelegate(
-          infobar_identifier, vector_icon, message, auto_expire))));
-}
 
 SimpleAlertInfoBarDelegate::SimpleAlertInfoBarDelegate(
     infobars::InfoBarDelegate::InfoBarIdentifier infobar_identifier,
     const gfx::VectorIcon* vector_icon,
-    const base::string16& message,
-    bool auto_expire)
+    const std::u16string& message,
+    bool auto_expire,
+    bool should_animate)
     : infobar_identifier_(infobar_identifier),
       vector_icon_(vector_icon),
       message_(message),
-      auto_expire_(auto_expire) {}
+      auto_expire_(auto_expire),
+      should_animate_(should_animate) {}
 
-SimpleAlertInfoBarDelegate::~SimpleAlertInfoBarDelegate() {
-}
+SimpleAlertInfoBarDelegate::~SimpleAlertInfoBarDelegate() = default;
 
 infobars::InfoBarDelegate::InfoBarIdentifier
 SimpleAlertInfoBarDelegate::GetIdentifier() const {
@@ -49,7 +36,11 @@ bool SimpleAlertInfoBarDelegate::ShouldExpire(
   return auto_expire_ && ConfirmInfoBarDelegate::ShouldExpire(details);
 }
 
-base::string16 SimpleAlertInfoBarDelegate::GetMessageText() const {
+bool SimpleAlertInfoBarDelegate::ShouldAnimate() const {
+  return should_animate_ && ConfirmInfoBarDelegate::ShouldAnimate();
+}
+
+std::u16string SimpleAlertInfoBarDelegate::GetMessageText() const {
   return message_;
 }
 

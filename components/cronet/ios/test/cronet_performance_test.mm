@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,10 @@
 #include <stdint.h>
 
 #include "base/logging.h"
-#include "base/mac/scoped_nsobject.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/cronet/ios/test/cronet_test_base.h"
-#include "components/cronet/test/test_server.h"
+#include "components/cronet/testing/test_server/test_server.h"
 #include "net/base/mac/url_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/cert/mock_cert_verifier.h"
@@ -20,6 +19,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
 #include "url/gurl.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 

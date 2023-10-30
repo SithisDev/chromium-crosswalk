@@ -1,15 +1,16 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.gcm_driver.instance_id;
 
-import android.os.Bundle;
-
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.base.task.AsyncTask;
+import org.chromium.components.gcm_driver.InstanceIDFlags;
 import org.chromium.components.gcm_driver.LazySubscriptionsManager;
+import org.chromium.components.gcm_driver.SubscriptionFlagManager;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutionException;
@@ -75,7 +76,8 @@ public class InstanceIDBridge {
             }
             @Override
             protected void sendResultToNative(String id) {
-                nativeDidGetID(mNativeInstanceIDAndroid, requestId, id);
+                InstanceIDBridgeJni.get().didGetID(
+                        mNativeInstanceIDAndroid, InstanceIDBridge.this, requestId, id);
             }
         }.execute();
     }
@@ -90,40 +92,44 @@ public class InstanceIDBridge {
             }
             @Override
             protected void sendResultToNative(Long creationTime) {
-                nativeDidGetCreationTime(mNativeInstanceIDAndroid, requestId, creationTime);
+                InstanceIDBridgeJni.get().didGetCreationTime(
+                        mNativeInstanceIDAndroid, InstanceIDBridge.this, requestId, creationTime);
             }
         }.execute();
     }
 
-    /** Async wrapper for {@link InstanceID#getToken(String, String, Bundle)}.
+    /**
+     * Async wrapper for {@link InstanceID#getToken(String, String)}.
      * |isLazy| isn't part of the InstanceID.getToken() call and not sent to the
      * FCM server. It's used to mark the subscription as lazy such that incoming
-     * messages are deferred until there are visible activities.*/
+     * messages are deferred until there are visible activities.
+     */
     @CalledByNative
-    private void getToken(final int requestId, final String authorizedEntity, final String scope,
-            String[] extrasStrings, boolean isLazy) {
-        final Bundle extras = new Bundle();
-        assert extrasStrings.length % 2 == 0;
-        for (int i = 0; i < extrasStrings.length; i += 2) {
-            extras.putString(extrasStrings[i], extrasStrings[i + 1]);
-        }
-
+    private void getToken(
+            final int requestId, final String authorizedEntity, final String scope, int flags) {
         new BridgeAsyncTask<String>() {
             @Override
             protected String doBackgroundWork() {
                 try {
+                    // TODO(crbug.com/1247170): Migrate stored LazySubscriptionsManager data to
+                    // SubscriptionFlagManager.
                     LazySubscriptionsManager.storeLazinessInformation(
                             LazySubscriptionsManager.buildSubscriptionUniqueId(
                                     mSubtype, authorizedEntity),
-                            isLazy);
-                    return mInstanceID.getToken(authorizedEntity, scope, extras);
+                            (flags & InstanceIDFlags.IS_LAZY) == InstanceIDFlags.IS_LAZY);
+                    SubscriptionFlagManager.setFlags(
+                            SubscriptionFlagManager.buildSubscriptionUniqueId(
+                                    mSubtype, authorizedEntity),
+                            flags);
+                    return mInstanceID.getToken(authorizedEntity, scope);
                 } catch (IOException ex) {
                     return "";
                 }
             }
             @Override
             protected void sendResultToNative(String token) {
-                nativeDidGetToken(mNativeInstanceIDAndroid, requestId, token);
+                InstanceIDBridgeJni.get().didGetToken(
+                        mNativeInstanceIDAndroid, InstanceIDBridge.this, requestId, token);
             }
         }.execute();
     }
@@ -143,6 +149,9 @@ public class InstanceIDBridge {
                         LazySubscriptionsManager.deletePersistedMessagesForSubscriptionId(
                                 subscriptionId);
                     }
+                    SubscriptionFlagManager.clearFlags(
+                            SubscriptionFlagManager.buildSubscriptionUniqueId(
+                                    mSubtype, authorizedEntity));
                     return true;
                 } catch (IOException ex) {
                     return false;
@@ -150,7 +159,8 @@ public class InstanceIDBridge {
             }
             @Override
             protected void sendResultToNative(Boolean success) {
-                nativeDidDeleteToken(mNativeInstanceIDAndroid, requestId, success);
+                InstanceIDBridgeJni.get().didDeleteToken(
+                        mNativeInstanceIDAndroid, InstanceIDBridge.this, requestId, success);
             }
         }.execute();
     }
@@ -170,20 +180,11 @@ public class InstanceIDBridge {
             }
             @Override
             protected void sendResultToNative(Boolean success) {
-                nativeDidDeleteID(mNativeInstanceIDAndroid, requestId, success);
+                InstanceIDBridgeJni.get().didDeleteID(
+                        mNativeInstanceIDAndroid, InstanceIDBridge.this, requestId, success);
             }
         }.execute();
     }
-
-    private native void nativeDidGetID(long nativeInstanceIDAndroid, int requestId, String id);
-    private native void nativeDidGetCreationTime(
-            long nativeInstanceIDAndroid, int requestId, long creationTime);
-    private native void nativeDidGetToken(
-            long nativeInstanceIDAndroid, int requestId, String token);
-    private native void nativeDidDeleteToken(
-            long nativeInstanceIDAndroid, int requestId, boolean success);
-    private native void nativeDidDeleteID(
-            long nativeInstanceIDAndroid, int requestId, boolean success);
 
     /**
      * Custom {@link AsyncTask} wrapper. As usual, this performs work on a background thread, then
@@ -231,5 +232,19 @@ public class InstanceIDBridge {
                 sendResultToNative(result);
             }
         }
+    }
+
+    @NativeMethods
+    interface Natives {
+        void didGetID(
+                long nativeInstanceIDAndroid, InstanceIDBridge caller, int requestId, String id);
+        void didGetCreationTime(long nativeInstanceIDAndroid, InstanceIDBridge caller,
+                int requestId, long creationTime);
+        void didGetToken(
+                long nativeInstanceIDAndroid, InstanceIDBridge caller, int requestId, String token);
+        void didDeleteToken(long nativeInstanceIDAndroid, InstanceIDBridge caller, int requestId,
+                boolean success);
+        void didDeleteID(long nativeInstanceIDAndroid, InstanceIDBridge caller, int requestId,
+                boolean success);
     }
 }

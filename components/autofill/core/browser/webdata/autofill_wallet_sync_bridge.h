@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <string>
 #include <unordered_set>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/supports_user_data.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
@@ -25,6 +25,7 @@ class AutofillTable;
 class AutofillWebDataBackend;
 class AutofillWebDataService;
 class CreditCard;
+struct CreditCardCloudTokenData;
 struct PaymentsCustomerData;
 
 // Sync bridge responsible for propagating local changes to the processor and
@@ -35,11 +36,8 @@ class AutofillWalletSyncBridge : public base::SupportsUserData::Data,
   // Factory method that hides dealing with change_processor and also stores the
   // created bridge within |web_data_service|. This method should only be
   // called on |web_data_service|'s DB thread.
-  // |active_callback| will be called with a boolean describing whether Wallet
-  // data is actively sync whenever the state changes.
   static void CreateForWebDataServiceAndBackend(
       const std::string& app_locale,
-      const base::RepeatingCallback<void(bool)>& active_callback,
       AutofillWebDataBackend* webdata_backend,
       AutofillWebDataService* web_data_service);
 
@@ -47,18 +45,21 @@ class AutofillWalletSyncBridge : public base::SupportsUserData::Data,
       AutofillWebDataService* web_data_service);
 
   explicit AutofillWalletSyncBridge(
-      const base::RepeatingCallback<void(bool)>& active_callback,
       std::unique_ptr<syncer::ModelTypeChangeProcessor> change_processor,
       AutofillWebDataBackend* web_data_backend);
+
+  AutofillWalletSyncBridge(const AutofillWalletSyncBridge&) = delete;
+  AutofillWalletSyncBridge& operator=(const AutofillWalletSyncBridge&) = delete;
+
   ~AutofillWalletSyncBridge() override;
 
   // ModelTypeSyncBridge implementation.
   std::unique_ptr<syncer::MetadataChangeList> CreateMetadataChangeList()
       override;
-  base::Optional<syncer::ModelError> MergeSyncData(
+  absl::optional<syncer::ModelError> MergeSyncData(
       std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
       syncer::EntityChangeList entity_data) override;
-  base::Optional<syncer::ModelError> ApplySyncChanges(
+  absl::optional<syncer::ModelError> ApplySyncChanges(
       std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
       syncer::EntityChangeList entity_changes) override;
   void GetData(StorageKeyList storage_keys, DataCallback callback) override;
@@ -69,7 +70,8 @@ class AutofillWalletSyncBridge : public base::SupportsUserData::Data,
   void ApplyStopSyncChanges(std::unique_ptr<syncer::MetadataChangeList>
                                 delete_metadata_change_list) override;
 
-  // Sends all Wallet Data to the |callback| and keeps all the strings in their
+  // Retrieves all Wallet Data from local table, converts to EntityData and
+  // sends all Wallet Data to the |callback| and keeps all the strings in their
   // original format (whereas GetAllDataForDebugging() has to make them UTF-8).
   void GetAllDataForTesting(DataCallback callback);
 
@@ -111,6 +113,12 @@ class AutofillWalletSyncBridge : public base::SupportsUserData::Data,
   bool SetWalletAddresses(std::vector<AutofillProfile> wallet_addresses,
                           bool notify_metadata_bridge);
 
+  // Sets |cloud_token_data| to this client and returns whether any change has
+  // been applied (i.e., whether |cloud_token_data| was different from the local
+  // data).
+  bool SetCreditCardCloudTokenData(
+      const std::vector<CreditCardCloudTokenData>& cloud_token_data);
+
   // Computes a "diff" (items added, items removed) of two vectors of items,
   // which should be either CreditCard or AutofillProfile. This is used for
   // three purposes:
@@ -130,21 +138,17 @@ class AutofillWalletSyncBridge : public base::SupportsUserData::Data,
   // processor so that it can start tracking changes.
   void LoadMetadata();
 
-  // Callback to let the metadata bridge know that whether the card data
-  // is actively syncing.
-  const base::RepeatingCallback<void(bool)> active_callback_;
-
-  // Stores whether initial sync has been done.
-  bool initial_sync_done_;
+  // Logs virtual card metadata changes.
+  void LogVirtualCardMetadataChanges(
+      const std::vector<std::unique_ptr<CreditCard>>& old_data,
+      const std::vector<CreditCard>& new_data);
 
   // AutofillProfileSyncBridge is owned by |web_data_backend_| through
   // SupportsUserData, so it's guaranteed to outlive |this|.
-  AutofillWebDataBackend* const web_data_backend_;
+  const raw_ptr<AutofillWebDataBackend> web_data_backend_;
 
   // The bridge should be used on the same sequence where it is constructed.
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(AutofillWalletSyncBridge);
 };
 
 }  // namespace autofill

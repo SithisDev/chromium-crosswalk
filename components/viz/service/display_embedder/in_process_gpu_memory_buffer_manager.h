@@ -1,14 +1,25 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_IN_PROCESS_GPU_MEMORY_BUFFER_MANAGER_H_
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_IN_PROCESS_GPU_MEMORY_BUFFER_MANAGER_H_
 
+#include <memory>
+
+#include "base/containers/flat_map.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/memory/unsafe_shared_memory_pool.h"
 #include "base/memory/weak_ptr.h"
+#include "base/trace_event/memory_dump_provider.h"
 #include "components/viz/service/viz_service_export.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace gpu {
 class GpuMemoryBufferFactory;
@@ -20,12 +31,19 @@ namespace viz {
 // GpuMemoryBufferManager implementation usable from any thread in the GPU
 // process. Must be created and destroyed on the same thread.
 class VIZ_SERVICE_EXPORT InProcessGpuMemoryBufferManager
-    : public gpu::GpuMemoryBufferManager {
+    : public gpu::GpuMemoryBufferManager,
+      public base::trace_event::MemoryDumpProvider {
  public:
   // |gpu_memory_buffer_factory| and |sync_point_manager| must outlive |this|.
   InProcessGpuMemoryBufferManager(
       gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory,
       gpu::SyncPointManager* sync_point_manager);
+
+  InProcessGpuMemoryBufferManager(const InProcessGpuMemoryBufferManager&) =
+      delete;
+  InProcessGpuMemoryBufferManager& operator=(
+      const InProcessGpuMemoryBufferManager&) = delete;
+
   // Note: Any GpuMemoryBuffers that haven't been destroyed yet will be leaked
   // until the GpuMemoryBufferFactory is destroyed.
   ~InProcessGpuMemoryBufferManager() override;
@@ -35,9 +53,21 @@ class VIZ_SERVICE_EXPORT InProcessGpuMemoryBufferManager
       const gfx::Size& size,
       gfx::BufferFormat format,
       gfx::BufferUsage usage,
-      gpu::SurfaceHandle surface_handle) override;
+      gpu::SurfaceHandle surface_handle,
+      base::WaitableEvent* shutdown_event) override;
   void SetDestructionSyncToken(gfx::GpuMemoryBuffer* buffer,
                                const gpu::SyncToken& sync_token) override;
+  void CopyGpuMemoryBufferAsync(
+      gfx::GpuMemoryBufferHandle buffer_handle,
+      base::UnsafeSharedMemoryRegion memory_region,
+      base::OnceCallback<void(bool)> callback) override;
+  bool CopyGpuMemoryBufferSync(
+      gfx::GpuMemoryBufferHandle buffer_handle,
+      base::UnsafeSharedMemoryRegion memory_region) override;
+
+  // base::trace_event::MemoryDumpProvider:
+  bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
+                    base::trace_event::ProcessMemoryDump* pmd) override;
 
  private:
   // Provided as callback when a GpuMemoryBuffer should be destroyed.
@@ -49,14 +79,17 @@ class VIZ_SERVICE_EXPORT InProcessGpuMemoryBufferManager
   const int client_id_;
   int next_gpu_memory_id_ = 1;
 
-  gpu::GpuMemoryBufferFactory* const gpu_memory_buffer_factory_;
-  gpu::SyncPointManager* const sync_point_manager_;
+  scoped_refptr<base::UnsafeSharedMemoryPool> pool_;
+
+  const raw_ptr<gpu::GpuMemoryBufferFactory> gpu_memory_buffer_factory_;
+  const raw_ptr<gpu::SyncPointManager> sync_point_manager_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  base::flat_map<gfx::GpuMemoryBufferId, AllocatedBufferInfo>
+      allocated_buffers_;
+
   base::WeakPtr<InProcessGpuMemoryBufferManager> weak_ptr_;
-
   base::WeakPtrFactory<InProcessGpuMemoryBufferManager> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(InProcessGpuMemoryBufferManager);
 };
 
 }  // namespace viz

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,18 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "components/dom_distiller/content/browser/web_contents_main_frame_observer.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -30,22 +30,21 @@
 namespace {
 
 // Helper class to know how far in the loading process the current WebContents
-// has come. It will call the callback after DocumentLoadedInFrame is called for
+// has come. It will call the callback after DOMContentLoaded is called for
 // the main frame.
 class WebContentsMainFrameHelper : public content::WebContentsObserver {
  public:
   WebContentsMainFrameHelper(content::WebContents* web_contents,
-                             const base::Closure& callback)
-      : WebContentsObserver(web_contents), callback_(callback) {}
+                             base::OnceClosure callback)
+      : WebContentsObserver(web_contents), callback_(std::move(callback)) {}
 
-  void DocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) override {
-    if (!render_frame_host->GetParent())
-      callback_.Run();
+  void DOMContentLoaded(content::RenderFrameHost* render_frame_host) override {
+    if (!render_frame_host->GetParent() && callback_)
+      std::move(callback_).Run();
   }
 
  private:
-  base::Closure callback_;
+  base::OnceClosure callback_;
 };
 
 }  // namespace
@@ -79,27 +78,29 @@ class DomDistillerJsTest : public content::ContentBrowserTest {
 
   void OnJsTestExecutionDone(base::Value value) {
     result_ = std::move(value);
-    js_test_execution_done_callback_.Run();
+    std::move(js_test_execution_done_callback_).Run();
   }
 
  protected:
-  base::Closure js_test_execution_done_callback_;
+  base::OnceClosure js_test_execution_done_callback_;
   base::Value result_;
 
  private:
   void AddComponentsResources() {
     base::FilePath pak_file;
     base::FilePath pak_dir;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     CHECK(base::PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_dir));
     pak_dir = pak_dir.Append(FILE_PATH_LITERAL("paks"));
-#else
+#elif BUILDFLAG(IS_MAC)
     base::PathService::Get(base::DIR_MODULE, &pak_dir);
-#endif  // OS_ANDROID
+#else
+    base::PathService::Get(base::DIR_ASSETS, &pak_dir);
+#endif  // BUILDFLAG(IS_ANDROID)
     pak_file =
         pak_dir.Append(FILE_PATH_LITERAL("components_tests_resources.pak"));
     ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-        pak_file, ui::SCALE_FACTOR_NONE);
+        pak_file, ui::kScaleFactorNone);
   }
 
   void SetUpTestServer() {
@@ -114,30 +115,23 @@ class DomDistillerJsTest : public content::ContentBrowserTest {
 // Disabled on MSan as well as Android and Linux CFI bots.
 // https://crbug.com/845180
 // Then disabled more generally on Android: https://crbug.com/979685
-#if defined(MEMORY_SANITIZER) || defined(OS_WIN) || defined(OS_ANDROID) || \
-    (defined(OS_LINUX) &&                                                  \
-     (BUILDFLAG(CFI_CAST_CHECK) || BUILDFLAG(CFI_ICALL_CHECK) ||           \
-      BUILDFLAG(CFI_ENFORCEMENT_DIAGNOSTIC) ||                             \
+// TODO(jaebaek):  HTMLImageElement::LayoutBoxWidth() returns a value that has
+// a small error from the real one (i.e., the real is 38, but it returns 37)
+// and it results in the failure of
+// EmbedExtractorTest.testImageExtractorWithAttributesCSSHeightCM (See
+// crrev.com/c/916021). We must solve this precision issue.
+#if defined(MEMORY_SANITIZER) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ANDROID) || \
+    ((BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) &&                        \
+     (BUILDFLAG(CFI_CAST_CHECK) || BUILDFLAG(CFI_ICALL_CHECK) ||               \
+      BUILDFLAG(CFI_ENFORCEMENT_DIAGNOSTIC) ||                                 \
       BUILDFLAG(CFI_ENFORCEMENT_TRAP)))
 #define MAYBE_RunJsTests DISABLED_RunJsTests
 #else
 #define MAYBE_RunJsTests RunJsTests
 #endif
 IN_PROC_BROWSER_TEST_F(DomDistillerJsTest, MAYBE_RunJsTests) {
-  // TODO(jaebaek): Revisit this code when the --use-zoom-for-dsf feature on
-  // Android is done. If we remove this code (i.e., enable --use-zoom-for-dsf),
-  // HTMLImageElement::LayoutBoxWidth() returns a value that has a small error
-  // from the real one (i.e., the real is 38, but it returns 37) and it results
-  // in the failure of
-  // EmbedExtractorTest.testImageExtractorWithAttributesCSSHeightCM (See
-  // crrev.com/c/916021). We must solve this precision issue.
-  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kEnableUseZoomForDSF, "false");
-
   // Load the test file in content shell and wait until it has fully loaded.
   content::WebContents* web_contents = shell()->web_contents();
-  dom_distiller::WebContentsMainFrameObserver::CreateForWebContents(
-      web_contents);
   base::RunLoop url_loaded_runner;
   WebContentsMainFrameHelper main_frame_loaded(web_contents,
                                                url_loaded_runner.QuitClosure());
@@ -155,22 +149,22 @@ IN_PROC_BROWSER_TEST_F(DomDistillerJsTest, MAYBE_RunJsTests) {
   // QuitClosure multiple times.
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(), TestTimeouts::action_max_timeout());
-  web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
+  web_contents->GetPrimaryMainFrame()->ExecuteJavaScriptForTests(
       base::UTF8ToUTF16(kRunJsTestsJs),
       base::BindOnce(&DomDistillerJsTest::OnJsTestExecutionDone,
                      base::Unretained(this)));
   run_loop.Run();
 
   // Convert to dictionary and parse the results.
-  ASSERT_TRUE(result_.is_dict());
+  ASSERT_TRUE(result_.is_dict()) << "Result is not a dictionary: " << result_;
 
-  base::Optional<bool> success = result_.FindBoolKey("success");
+  absl::optional<bool> success = result_.FindBoolKey("success");
   ASSERT_TRUE(success.has_value());
-  base::Optional<int> num_tests = result_.FindIntKey("numTests");
+  absl::optional<int> num_tests = result_.FindIntKey("numTests");
   ASSERT_TRUE(num_tests.has_value());
-  base::Optional<int> failed = result_.FindIntKey("failed");
+  absl::optional<int> failed = result_.FindIntKey("failed");
   ASSERT_TRUE(failed.has_value());
-  base::Optional<int> skipped = result_.FindIntKey("skipped");
+  absl::optional<int> skipped = result_.FindIntKey("skipped");
   ASSERT_TRUE(skipped.has_value());
 
   VLOG(0) << "Ran " << num_tests.value()

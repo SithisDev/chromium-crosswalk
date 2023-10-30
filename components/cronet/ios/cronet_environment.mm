@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,32 +14,33 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/mac/foundation_util.h"
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/path_service.h"
-#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_restrictions.h"
 #include "components/cronet/cronet_buildflags.h"
 #include "components/cronet/cronet_global_state.h"
 #include "components/cronet/cronet_prefs_manager.h"
-#include "components/cronet/histogram_manager.h"
+#include "components/metrics/library_support/histogram_manager.h"
 #include "components/prefs/pref_filter.h"
 #include "ios/net/cookies/cookie_store_ios.h"
 #include "ios/net/cookies/cookie_store_ios_client.h"
+#include "ios/web/common/user_agent.h"
 #include "ios/web/public/init/ios_global_state.h"
 #include "ios/web/public/init/ios_global_state_configuration.h"
-#include "ios/web/public/user_agent.h"
 #include "net/base/http_user_agent_settings.h"
 #include "net/base/network_change_notifier.h"
+#include "net/base/network_isolation_key.h"
 #include "net/base/url_util.h"
 #include "net/cert/cert_verifier.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mapped_host_resolver.h"
-#include "net/http/http_server_properties_impl.h"
-#include "net/http/http_stream_factory.h"
+#include "net/http/http_network_session.h"
+#include "net/http/http_server_properties.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
+#include "net/http/transport_security_state.h"
 #include "net/log/file_net_log_observer.h"
 #include "net/log/net_log.h"
 #include "net/log/net_log_capture_mode.h"
@@ -47,11 +48,9 @@
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_key_logger_impl.h"
-#include "net/third_party/quiche/src/quic/core/quic_versions.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
-#include "net/url_request/url_request_context_storage.h"
-#include "net/url_request/url_request_job_factory_impl.h"
 #include "url/scheme_host_port.h"
 #include "url/url_util.h"
 
@@ -69,6 +68,10 @@ class CronetURLRequestContextGetter : public net::URLRequestContextGetter {
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner)
       : environment_(environment), task_runner_(task_runner) {}
 
+  CronetURLRequestContextGetter(const CronetURLRequestContextGetter&) = delete;
+  CronetURLRequestContextGetter& operator=(
+      const CronetURLRequestContextGetter&) = delete;
+
   net::URLRequestContext* GetURLRequestContext() override {
     DCHECK(environment_);
     return environment_->GetURLRequestContext();
@@ -85,7 +88,6 @@ class CronetURLRequestContextGetter : public net::URLRequestContextGetter {
 
   cronet::CronetEnvironment* environment_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  DISALLOW_COPY_AND_ASSIGN(CronetURLRequestContextGetter);
 };
 
 // Cronet implementation of net::CookieStoreIOSClient.
@@ -96,6 +98,10 @@ class CronetCookieStoreIOSClient : public net::CookieStoreIOSClient {
       const scoped_refptr<base::SequencedTaskRunner>& task_runner)
       : task_runner_(task_runner) {}
 
+  CronetCookieStoreIOSClient(const CronetCookieStoreIOSClient&) = delete;
+  CronetCookieStoreIOSClient& operator=(const CronetCookieStoreIOSClient&) =
+      delete;
+
   scoped_refptr<base::SequencedTaskRunner> GetTaskRunner() const override {
     return task_runner_;
   }
@@ -104,7 +110,6 @@ class CronetCookieStoreIOSClient : public net::CookieStoreIOSClient {
   ~CronetCookieStoreIOSClient() override {}
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
-  DISALLOW_COPY_AND_ASSIGN(CronetCookieStoreIOSClient);
 };
 
 void SignalEvent(base::WaitableEvent* event) {
@@ -134,8 +139,8 @@ base::SingleThreadTaskRunner* CronetEnvironment::GetNetworkThreadTaskRunner()
 }
 
 void CronetEnvironment::PostToNetworkThread(const base::Location& from_here,
-                                            const base::Closure& task) {
-  GetNetworkThreadTaskRunner()->PostTask(from_here, task);
+                                            base::OnceClosure task) {
+  GetNetworkThreadTaskRunner()->PostTask(from_here, std::move(task));
 }
 
 net::URLRequestContext* CronetEnvironment::GetURLRequestContext() const {
@@ -160,9 +165,9 @@ bool CronetEnvironment::StartNetLog(base::FilePath::StringType file_name,
   }
 
   LOG(WARNING) << "Starting NetLog to " << path.value();
-  PostToNetworkThread(FROM_HERE,
-                      base::Bind(&CronetEnvironment::StartNetLogOnNetworkThread,
-                                 base::Unretained(this), path, log_bytes));
+  PostToNetworkThread(
+      FROM_HERE, base::BindOnce(&CronetEnvironment::StartNetLogOnNetworkThread,
+                                base::Unretained(this), path, log_bytes));
 
   return true;
 }
@@ -179,9 +184,8 @@ void CronetEnvironment::StartNetLogOnNetworkThread(const base::FilePath& path,
                 : net::NetLogCaptureMode::kDefault;
 
   file_net_log_observer_ =
-      net::FileNetLogObserver::CreateUnbounded(path, nullptr);
-  file_net_log_observer_->StartObserving(main_context_->net_log(),
-                                         capture_mode);
+      net::FileNetLogObserver::CreateUnbounded(path, capture_mode, nullptr);
+  file_net_log_observer_->StartObserving(main_context_->net_log());
   LOG(WARNING) << "Started NetLog";
 }
 
@@ -189,9 +193,9 @@ void CronetEnvironment::StopNetLog() {
   base::WaitableEvent log_stopped_event(
       base::WaitableEvent::ResetPolicy::MANUAL,
       base::WaitableEvent::InitialState::NOT_SIGNALED);
-  PostToNetworkThread(FROM_HERE,
-                      base::Bind(&CronetEnvironment::StopNetLogOnNetworkThread,
-                                 base::Unretained(this), &log_stopped_event));
+  PostToNetworkThread(
+      FROM_HERE, base::BindOnce(&CronetEnvironment::StopNetLogOnNetworkThread,
+                                base::Unretained(this), &log_stopped_event));
   log_stopped_event.Wait();
 }
 
@@ -200,22 +204,21 @@ void CronetEnvironment::StopNetLogOnNetworkThread(
   if (file_net_log_observer_) {
     DLOG(WARNING) << "Stopped NetLog.";
     file_net_log_observer_->StopObserving(
-        GetNetLogInfo(), base::BindOnce(&SignalEvent, log_stopped_event));
+        base::Value::ToUniquePtrValue(GetNetLogInfo()),
+        base::BindOnce(&SignalEvent, log_stopped_event));
     file_net_log_observer_.reset();
   } else {
     log_stopped_event->Signal();
   }
 }
 
-std::unique_ptr<base::DictionaryValue> CronetEnvironment::GetNetLogInfo()
-    const {
-  std::unique_ptr<base::DictionaryValue> net_info =
-      net::GetNetInfo(main_context_.get(), net::NET_INFO_ALL_SOURCES);
-  if (effective_experimental_options_) {
-    net_info->Set("cronetExperimentalParams",
-                  effective_experimental_options_->CreateDeepCopy());
+base::Value CronetEnvironment::GetNetLogInfo() const {
+  base::Value::Dict net_info = net::GetNetInfo(main_context_.get());
+  if (!effective_experimental_options_.empty()) {
+    net_info.Set("cronetExperimentalParams",
+                 effective_experimental_options_.Clone());
   }
-  return net_info;
+  return base::Value(std::move(net_info));
 }
 
 net::HttpNetworkSession* CronetEnvironment::GetHttpNetworkSession(
@@ -237,12 +240,12 @@ void CronetEnvironment::AddQuicHint(const std::string& host,
 CronetEnvironment::CronetEnvironment(const std::string& user_agent,
                                      bool user_agent_partial)
     : http2_enabled_(false),
-      quic_enabled_(false),
+      quic_enabled_(true),
       brotli_enabled_(false),
       http_cache_(URLRequestContextConfig::HttpCacheType::DISK),
       user_agent_(user_agent),
       user_agent_partial_(user_agent_partial),
-      net_log_(new net::NetLog),
+      net_log_(net::NetLog::Get()),
       enable_pkp_bypass_for_local_trust_anchors_(true),
       network_thread_priority_(kKeepDefaultThreadPriority) {}
 
@@ -250,7 +253,7 @@ void CronetEnvironment::Start() {
   // Threads setup.
   file_thread_.reset(new base::Thread("Chrome File Thread"));
   file_thread_->StartWithOptions(
-      base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+      base::Thread::Options(base::MessagePumpType::IO, 0));
   // Fetching the task_runner will create the shared thread if necessary.
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       ios_global_state::GetSharedNetworkIOThreadTaskRunner();
@@ -258,7 +261,7 @@ void CronetEnvironment::Start() {
     network_io_thread_.reset(
         new CronetNetworkThread("Chrome Network IO Thread", this));
     network_io_thread_->StartWithOptions(
-        base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+        base::Thread::Options(base::MessagePumpType::IO, 0));
   }
 
   net::SetCookieStoreIOSClient(new CronetCookieStoreIOSClient(
@@ -267,9 +270,9 @@ void CronetEnvironment::Start() {
   main_context_getter_ = new CronetURLRequestContextGetter(
       this, CronetEnvironment::GetNetworkThreadTaskRunner());
   std::atomic_thread_fence(std::memory_order_seq_cst);
-  PostToNetworkThread(FROM_HERE,
-                      base::Bind(&CronetEnvironment::InitializeOnNetworkThread,
-                                 base::Unretained(this)));
+  PostToNetworkThread(
+      FROM_HERE, base::BindOnce(&CronetEnvironment::InitializeOnNetworkThread,
+                                base::Unretained(this)));
 }
 
 void CronetEnvironment::CleanUpOnNetworkThread() {
@@ -314,7 +317,7 @@ void CronetEnvironment::InitializeOnNetworkThread() {
   }
 
   if (user_agent_partial_)
-    user_agent_ = web::BuildUserAgentFromProduct(user_agent_);
+    user_agent_ = web::BuildMobileUserAgent(user_agent_);
 
   // Cache
   base::FilePath storage_path;
@@ -349,14 +352,14 @@ void CronetEnvironment::InitializeOnNetworkThread() {
 
   // Explicitly disable the persister for Cronet to avoid persistence of dynamic
   // HPKP.  This is a safety measure ensuring that nobody enables the
-  // persistence of HPKP by specifying transport_security_persister_path in the
-  // future.
-  context_builder.set_transport_security_persister_path(base::FilePath());
+  // persistence of HPKP by specifying transport_security_persister_file_path in
+  // the future.
+  context_builder.set_transport_security_persister_file_path(base::FilePath());
 
-  config->ConfigureURLRequestContextBuilder(&context_builder, net_log_.get());
+  config->ConfigureURLRequestContextBuilder(&context_builder);
 
   effective_experimental_options_ =
-      std::move(config->effective_experimental_options);
+      config->effective_experimental_options.Clone();
 
   // TODO(crbug.com/934402): Use a shared HostResolverManager instead of a
   // global HostResolver.
@@ -368,7 +371,7 @@ void CronetEnvironment::InitializeOnNetworkThread() {
     cronet_prefs_manager_ = std::make_unique<CronetPrefsManager>(
         config->storage_path, GetNetworkThreadTaskRunner(),
         file_thread_->task_runner(), false /* nqe */, false /* host_cache */,
-        net_log_.get(), &context_builder);
+        net_log_, &context_builder);
   }
 
   context_builder.set_host_resolver(std::move(mapped_host_resolver));
@@ -400,8 +403,8 @@ void CronetEnvironment::InitializeOnNetworkThread() {
     url::SchemeHostPort quic_hint_server("https", quic_hint.host(),
                                          quic_hint.port());
     main_context_->http_server_properties()->SetQuicAlternativeService(
-        quic_hint_server, alternative_service, base::Time::Max(),
-        quic::ParsedQuicVersionVector());
+        quic_hint_server, net::NetworkAnonymizationKey(), alternative_service,
+        base::Time::Max(), quic::ParsedQuicVersionVector());
   }
 
   main_context_->transport_security_state()
@@ -445,7 +448,7 @@ std::vector<uint8_t> CronetEnvironment::GetHistogramDeltas() {
 #if BUILDFLAG(DISABLE_HISTOGRAM_SUPPORT)
   NOTREACHED() << "Histogram support is disabled";
 #else   // BUILDFLAG(DISABLE_HISTOGRAM_SUPPORT)
-  if (!HistogramManager::GetInstance()->GetDeltas(&data))
+  if (!metrics::HistogramManager::GetInstance()->GetDeltas(&data))
     return std::vector<uint8_t>();
 #endif  // BUILDFLAG(DISABLE_HISTOGRAM_SUPPORT)
   return data;
@@ -456,8 +459,8 @@ void CronetEnvironment::SetHostResolverRules(const std::string& rules) {
                             base::WaitableEvent::InitialState::NOT_SIGNALED);
   PostToNetworkThread(
       FROM_HERE,
-      base::Bind(&CronetEnvironment::SetHostResolverRulesOnNetworkThread,
-                 base::Unretained(this), rules, &event));
+      base::BindOnce(&CronetEnvironment::SetHostResolverRulesOnNetworkThread,
+                     base::Unretained(this), rules, &event));
   event.Wait();
 }
 

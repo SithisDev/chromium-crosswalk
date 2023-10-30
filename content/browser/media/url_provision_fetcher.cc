@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace content {
 
@@ -29,20 +30,20 @@ URLProvisionFetcher::URLProvisionFetcher(
 URLProvisionFetcher::~URLProvisionFetcher() {}
 
 void URLProvisionFetcher::Retrieve(
-    const std::string& default_url,
+    const GURL& default_url,
     const std::string& request_data,
-    const media::ProvisionFetcher::ResponseCB& response_cb) {
+    media::ProvisionFetcher::ResponseCB response_cb) {
   // For testing, don't actually do provisioning if the feature is enabled,
   // just indicate that the request failed.
   if (base::FeatureList::IsEnabled(media::kFailUrlProvisionFetcherForTesting)) {
-    response_cb.Run(false, std::string());
+    std::move(response_cb).Run(false, std::string());
     return;
   }
 
-  response_cb_ = response_cb;
+  response_cb_ = std::move(response_cb);
 
   const std::string request_string =
-      default_url + "&signedRequest=" + request_data;
+      default_url.spec() + "&signedRequest=" + request_data;
   DVLOG(1) << __func__ << ": request:" << request_string;
 
   DCHECK(!simple_url_loader_);
@@ -77,8 +78,7 @@ void URLProvisionFetcher::Retrieve(
         })");
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = GURL(request_string);
-  resource_request->load_flags =
-      net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
   resource_request->method = "POST";
   resource_request->headers.SetHeader("User-Agent", "Widevine CDM v1.0");
   simple_url_loader_ = network::SimpleURLLoader::Create(
@@ -115,7 +115,7 @@ void URLProvisionFetcher::OnSimpleLoaderComplete(
   simple_url_loader_.reset();
   base::UmaHistogramSparse("Media.EME.UrlProvisionFetcher.ResponseCode",
                            response_code);
-  response_cb_.Run(success, response);
+  std::move(response_cb_).Run(success, response);
 }
 
 // Implementation of content public method CreateProvisionFetcher().

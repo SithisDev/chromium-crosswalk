@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,8 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "chromecast/browser/cast_web_view.h"
-#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_base.h"
 
 namespace content {
@@ -18,8 +17,7 @@ class WebContents;
 
 namespace chromecast {
 
-class CastWebContentsManager;
-class CastWebViewFactory;
+class CastWebService;
 
 namespace shell {
 
@@ -28,10 +26,16 @@ namespace shell {
 // case, then shuts down the entire shell.
 // Note that this process takes 7-10 seconds per test case on Chromecast, so
 // fewer test cases with more assertions are preferable.
-class CastBrowserTest : public content::BrowserTestBase, CastWebView::Delegate {
+class CastBrowserTest : public content::BrowserTestBase {
+ public:
+  CastBrowserTest(const CastBrowserTest&) = delete;
+  CastBrowserTest& operator=(const CastBrowserTest&) = delete;
+
  protected:
   CastBrowserTest();
   ~CastBrowserTest() override;
+
+  CastWebView* cast_web_view() const { return cast_web_view_.get(); }
 
   // content::BrowserTestBase implementation:
   void SetUp() final;
@@ -43,19 +47,10 @@ class CastBrowserTest : public content::BrowserTestBase, CastWebView::Delegate {
   content::WebContents* NavigateToURL(const GURL& url);
 
  private:
-  // CastWebView::Delegate implementation:
-  void OnWindowDestroyed() override;
-  void OnKeyEvent(const ui::KeyEvent& key_event) override;
-  void OnVisibilityChange(VisibilityType visibility_type) override;
-  bool CanHandleGesture(GestureType gesture_type) override;
-  bool ConsumeGesture(GestureType gesture_type) override;
-  std::string GetId() override;
+  std::unique_ptr<CastWebService> web_service_;
+  CastWebView::Scoped cast_web_view_;
 
-  std::unique_ptr<CastWebViewFactory> web_view_factory_;
-  std::unique_ptr<CastWebContentsManager> web_contents_manager_;
-  std::unique_ptr<CastWebView> cast_web_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(CastBrowserTest);
+  base::WeakPtrFactory<CastBrowserTest> weak_factory_{this};
 };
 
 }  // namespace shell

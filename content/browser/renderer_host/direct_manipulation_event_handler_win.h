@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,8 @@
 #include <directmanipulation.h>
 #include <wrl.h>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace ui {
 
@@ -21,6 +22,7 @@ class WindowEventTarget;
 namespace content {
 
 class DirectManipulationHelper;
+class DirectManipulationBrowserTestBase;
 class DirectManipulationUnitTest;
 
 // DirectManipulationEventHandler receives status update and gesture events from
@@ -33,17 +35,25 @@ class DirectManipulationEventHandler
               Microsoft::WRL::RuntimeClassFlags<
                   Microsoft::WRL::RuntimeClassType::ClassicCom>,
               Microsoft::WRL::FtmBase,
-              IDirectManipulationViewportEventHandler>> {
+              IDirectManipulationViewportEventHandler,
+              IDirectManipulationInteractionEventHandler>> {
  public:
-  explicit DirectManipulationEventHandler(DirectManipulationHelper* helper);
+  DirectManipulationEventHandler(ui::WindowEventTarget* event_target);
 
-  // WindowEventTarget updates for every DM_POINTERHITTEST in case window
-  // hierarchy changed.
-  void SetWindowEventTarget(ui::WindowEventTarget* event_target);
+  DirectManipulationEventHandler(const DirectManipulationEventHandler&) =
+      delete;
+  DirectManipulationEventHandler& operator=(
+      const DirectManipulationEventHandler&) = delete;
+
+  // Return true if viewport_size_in_pixels_ changed.
+  bool SetViewportSizeInPixels(const gfx::Size& viewport_size_in_pixels);
 
   void SetDeviceScaleFactor(float device_scale_factor);
 
+  void SetDirectManipulationHelper(DirectManipulationHelper* helper);
+
  private:
+  friend class DirectManipulationBrowserTestBase;
   friend DirectManipulationUnitTest;
 
   // DirectManipulationEventHandler();
@@ -65,19 +75,22 @@ class DirectManipulationEventHandler
   OnContentUpdated(_In_ IDirectManipulationViewport* viewport,
                    _In_ IDirectManipulationContent* content) override;
 
-  DirectManipulationHelper* helper_ = nullptr;
-  ui::WindowEventTarget* event_target_ = nullptr;
+  HRESULT STDMETHODCALLTYPE
+  OnInteraction(_In_ IDirectManipulationViewport2* viewport,
+                _In_ DIRECTMANIPULATION_INTERACTION_TYPE interaction) override;
+
+  raw_ptr<DirectManipulationHelper> helper_ = nullptr;
+  raw_ptr<ui::WindowEventTarget> event_target_ = nullptr;
   float device_scale_factor_ = 1.0f;
   float last_scale_ = 1.0f;
   int last_x_offset_ = 0;
   int last_y_offset_ = 0;
-  bool first_ready_ = false;
   bool should_send_scroll_begin_ = false;
 
   // Current recognized gesture from Direct Manipulation.
   GestureState gesture_state_ = GestureState::kNone;
 
-  DISALLOW_COPY_AND_ASSIGN(DirectManipulationEventHandler);
+  gfx::Size viewport_size_in_pixels_;
 };
 
 }  // namespace content

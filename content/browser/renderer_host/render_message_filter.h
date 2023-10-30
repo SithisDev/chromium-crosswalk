@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <list>
-#include <string>
 #include <vector>
 
-#include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner_helpers.h"
-#include "base/strings/string16.h"
+#include "base/task/sequenced_task_runner_helpers.h"
+#include "base/threading/platform_thread.h"
 #include "build/build_config.h"
 #include "content/common/render_message_filter.mojom.h"
 #include "content/public/browser/browser_associated_interface.h"
@@ -25,35 +22,33 @@
 #include "content/public/common/widget_type.h"
 #include "gpu/config/gpu_info.h"
 #include "ipc/message_filter.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/surface/transport_dib.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
 class GURL;
 
 namespace media {
-struct MediaLogEvent;
+struct MediaLogRecord;
 }
 
 namespace content {
 class BrowserContext;
 class MediaInternals;
 class RenderWidgetHelper;
-class ResourceContext;
-class ResourceDispatcherHostImpl;
 
 // This class filters out incoming IPC messages for the renderer process on the
 // IPC thread.
-class CONTENT_EXPORT RenderMessageFilter
+class RenderMessageFilter
     : public BrowserMessageFilter,
-      public BrowserAssociatedInterface<mojom::RenderMessageFilter>,
-      public mojom::RenderMessageFilter {
+      public BrowserAssociatedInterface<mojom::RenderMessageFilter> {
  public:
   // Create the filter.
   RenderMessageFilter(int render_process_id,
@@ -61,11 +56,12 @@ class CONTENT_EXPORT RenderMessageFilter
                       RenderWidgetHelper* render_widget_helper,
                       MediaInternals* media_internals);
 
+  RenderMessageFilter(const RenderMessageFilter&) = delete;
+  RenderMessageFilter& operator=(const RenderMessageFilter&) = delete;
+
   // BrowserMessageFilter methods:
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnDestruct() const override;
-  void OverrideThreadForMessage(const IPC::Message& message,
-                                BrowserThread::ID* thread) override;
 
   int render_process_id() const { return render_process_id_; }
 
@@ -80,47 +76,31 @@ class CONTENT_EXPORT RenderMessageFilter
 
   // mojom::RenderMessageFilter:
   void GenerateRoutingID(GenerateRoutingIDCallback routing_id) override;
-  void CreateNewWidget(int32_t opener_id,
-                       mojom::WidgetPtr widget,
-                       CreateNewWidgetCallback callback) override;
-  void CreateFullscreenWidget(int opener_id,
-                              mojom::WidgetPtr widget,
-                              CreateFullscreenWidgetCallback callback) override;
+  void GenerateFrameRoutingID(GenerateFrameRoutingIDCallback callback) override;
   void HasGpuProcess(HasGpuProcessCallback callback) override;
-#if defined(OS_LINUX)
-  void SetThreadPriority(int32_t ns_tid,
-                         base::ThreadPriority priority) override;
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  void SetThreadType(int32_t ns_tid, base::ThreadType thread_type) override;
 #endif
 
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
 
-#if defined(OS_LINUX)
-  void SetThreadPriorityOnFileThread(base::PlatformThreadId ns_tid,
-                                     base::ThreadPriority priority);
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  void SetThreadTypeOnWorkerThread(base::PlatformThreadId ns_tid,
+                                   base::ThreadType thread_type);
 #endif
 
-  void OnMediaLogEvents(const std::vector<media::MediaLogEvent>&);
+  void OnMediaLogRecords(const std::vector<media::MediaLogRecord>&);
 
   bool CheckBenchmarkingEnabled() const;
   bool CheckPreparsedJsCachingEnabled() const;
-
-  // Cached resource request dispatcher host, guaranteed to be non-null. We do
-  // not own it; it is managed by the BrowserProcess, which has a wider scope
-  // than we do.
-  ResourceDispatcherHostImpl* resource_dispatcher_host_;
-
-  // The ResourceContext which is to be used on the IO thread.
-  ResourceContext* resource_context_;
 
   scoped_refptr<RenderWidgetHelper> render_widget_helper_;
 
   int render_process_id_;
 
-  MediaInternals* media_internals_;
+  raw_ptr<MediaInternals> media_internals_;
 
   base::WeakPtrFactory<RenderMessageFilter> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(RenderMessageFilter);
 };
 
 }  // namespace content

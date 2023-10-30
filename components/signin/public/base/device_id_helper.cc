@@ -1,19 +1,20 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/signin/public/base/device_id_helper.h"
 
+#include "base/check.h"
 #include "base/command_line.h"
 #include "base/guid.h"
-#include "base/logging.h"
+#include "build/chromeos_buildflags.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/base/signin_pref_names.h"
 #include "components/signin/public/base/signin_switches.h"
 
 namespace signin {
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
 
 std::string GetSigninScopedDeviceId(PrefService* prefs) {
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(

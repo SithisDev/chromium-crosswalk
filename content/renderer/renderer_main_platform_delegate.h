@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,10 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
-#include "base/macros.h"
 #include "content/common/content_export.h"
 #include "content/public/common/main_function_params.h"
 
@@ -21,6 +20,11 @@ class CONTENT_EXPORT RendererMainPlatformDelegate {
  public:
   explicit RendererMainPlatformDelegate(
       const MainFunctionParams& parameters);
+
+  RendererMainPlatformDelegate(const RendererMainPlatformDelegate&) = delete;
+  RendererMainPlatformDelegate& operator=(const RendererMainPlatformDelegate&) =
+      delete;
+
   ~RendererMainPlatformDelegate();
 
   // Called first thing and last thing in the process' lifecycle, i.e. before
@@ -32,11 +36,9 @@ class CONTENT_EXPORT RendererMainPlatformDelegate {
   bool EnableSandbox();
 
  private:
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   const MainFunctionParams& parameters_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(RendererMainPlatformDelegate);
 };
 
 }  // namespace content

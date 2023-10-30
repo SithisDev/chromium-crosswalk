@@ -1,15 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/webrtc/webrtc_webcam_browsertest.h"
 
 #include "base/command_line.h"
-#include "base/stl_util.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -21,8 +22,8 @@
 namespace {
 
 const base::CommandLine::StringType FAKE_DEVICE_FLAG =
-#if defined(OS_WIN)
-    base::ASCIIToUTF16(switches::kUseFakeDeviceForMediaStream);
+#if BUILDFLAG(IS_WIN)
+    base::ASCIIToWide(switches::kUseFakeDeviceForMediaStream);
 #else
     switches::kUseFakeDeviceForMediaStream;
 #endif
@@ -72,16 +73,17 @@ IN_PROC_BROWSER_TEST_F(UsingRealWebcam_WebRtcWebcamBrowserTest,
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL url(embedded_test_server()->GetURL(
       "/media/getusermedia-real-webcam.html"));
-  NavigateToURL(shell(), url);
+  EXPECT_TRUE(NavigateToURL(shell(), url));
 
   if (!IsWebcamAvailableOnSystem(shell()->web_contents())) {
     DVLOG(0) << "No video device; skipping test...";
     return;
   }
 
-  std::string result;
-  ASSERT_TRUE(ExecuteScriptAndExtractString(
-      shell(), "getUserMediaAndReturnVideoDimensions({video: true})", &result));
+  std::string result =
+      EvalJs(shell(), "getUserMediaAndReturnVideoDimensions({video: true})",
+             EXECUTE_SCRIPT_USE_MANUAL_REPLY)
+          .ExtractString();
 
   if (result == "640x480" || result == "480x640") {
     // Don't care if the device happens to be in landscape or portrait mode

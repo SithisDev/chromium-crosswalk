@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,10 @@ package org.chromium.content.browser;
 import android.content.pm.ActivityInfo;
 import android.graphics.Rect;
 import android.os.Build;
-import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.MediumTest;
 
+import androidx.test.filters.MediumTest;
+
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -17,19 +18,20 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.CriteriaNotSatisfiedException;
 import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.util.DisabledTest;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.content_public.browser.test.ContentJUnit4ClassRunner;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.test.util.JavaScriptUtils;
-import org.chromium.content_public.browser.test.util.UiUtils;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 import org.chromium.media.MediaSwitches;
 import org.chromium.ui.test.util.UiRestriction;
 
-import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -46,14 +48,14 @@ public class VideoFullscreenOrientationLockTest {
     private static final String VIDEO_ID = "video";
 
     private void waitForContentsFullscreenState(boolean fullscreenValue) {
-        CriteriaHelper.pollInstrumentationThread(
-                Criteria.equals(fullscreenValue, new Callable<Boolean>() {
-                    @Override
-                    public Boolean call() throws InterruptedException, TimeoutException {
-                        return DOMUtils.isFullscreen(mActivityTestRule.getWebContents());
-                    }
-                })
-        );
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                Criteria.checkThat(DOMUtils.isFullscreen(mActivityTestRule.getWebContents()),
+                        Matchers.is(fullscreenValue));
+            } catch (TimeoutException ex) {
+                throw new CriteriaNotSatisfiedException(ex);
+            }
+        });
     }
 
     private boolean isScreenOrientationLocked() {
@@ -61,7 +63,7 @@ public class VideoFullscreenOrientationLockTest {
                 != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
     }
 
-    private boolean isScreenOrientationLandscape() throws InterruptedException, TimeoutException {
+    private boolean isScreenOrientationLandscape() throws TimeoutException {
         StringBuilder sb = new StringBuilder();
         sb.append("(function() {");
         sb.append("  return  screen.orientation.type.startsWith('landscape');");
@@ -73,28 +75,20 @@ public class VideoFullscreenOrientationLockTest {
                 .equals("true");
     }
 
-    private void waitUntilLockedToLandscape() throws InterruptedException {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                try {
-                    return isScreenOrientationLocked() && isScreenOrientationLandscape();
-                } catch (InterruptedException e) {
-                    return false;
-                } catch (TimeoutException e) {
-                    return false;
-                }
+    private void waitUntilLockedToLandscape() {
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            try {
+                Criteria.checkThat(isScreenOrientationLocked(), Matchers.is(true));
+                Criteria.checkThat(isScreenOrientationLandscape(), Matchers.is(true));
+            } catch (TimeoutException e) {
+                throw new CriteriaNotSatisfiedException(e);
             }
         });
     }
 
-    private void waitUntilUnlocked() throws InterruptedException {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return !isScreenOrientationLocked();
-            }
-        });
+    private void waitUntilUnlocked() {
+        CriteriaHelper.pollInstrumentationThread(
+                () -> Criteria.checkThat(isScreenOrientationLocked(), Matchers.is(false)));
     }
 
     // TODO(mlamouri): move these constants and bounds  methods to a dedicated helper file for
@@ -121,21 +115,20 @@ public class VideoFullscreenOrientationLockTest {
         return new Rect(left, panel.top, right, panel.bottom);
     }
 
-    private boolean clickFullscreenButton() throws InterruptedException, TimeoutException {
+    private boolean clickFullscreenButton() throws TimeoutException {
         return DOMUtils.clickRect(mActivityTestRule.getWebContents(),
                 fullscreenButtonBounds(
                         DOMUtils.getNodeBounds(mActivityTestRule.getWebContents(), VIDEO_ID)));
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mActivityTestRule.launchContentShellWithUrlSync(TEST_URL);
     }
 
     @Test
     @MediumTest
-    @DisableIf.Build(message = "crbug.com/837423", sdk_is_greater_than = Build.VERSION_CODES.KITKAT,
-            sdk_is_less_than = Build.VERSION_CODES.M)
+    @DisableIf.Build(message = "crbug.com/837423", sdk_is_less_than = Build.VERSION_CODES.M)
     @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE})
     public void testEnterExitFullscreenWithControlsButton() throws Exception {
         // Start playback to guarantee it's properly loaded.
@@ -150,19 +143,36 @@ public class VideoFullscreenOrientationLockTest {
         // Should be locked to landscape now, `waitUntilLockedToLandscape` will throw otherwise.
         waitUntilLockedToLandscape();
 
-        // Because of the fullscreen animation, the click on the exit fullscreen button will fail
-        // roughly 10% of the time. Settling down the UI reduces the flake to 0%.
-        UiUtils.settleDownUI(InstrumentationRegistry.getInstrumentation());
-
         // Leave fullscreen by clicking back on the button.
-        Assert.assertTrue(clickFullscreenButton());
-        waitForContentsFullscreenState(false);
-        waitUntilUnlocked();
+        // Use a loop to retry due to fullscreen re-layout.
+        int i = 0;
+        AssertionError lastException = null;
+        while (i < 10) {
+            Thread.sleep(100);
+            ++i;
+
+            if (!clickFullscreenButton()) {
+                continue;
+            }
+            AssertionError exception = null;
+            try {
+                waitForContentsFullscreenState(false);
+                waitUntilUnlocked();
+            } catch (AssertionError e) {
+                exception = e;
+            }
+            lastException = exception;
+            if (lastException == null) break;
+        }
+        if (lastException != null) throw lastException;
+        // Ensure clickFullscreenButton doesn't fail repeatedly.
+        Assert.assertTrue(i < 10);
     }
 
     @Test
     @MediumTest
     @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE})
+    @DisabledTest(message = "https://crbug.com/1105614")
     public void testEnterExitFullscreenWithAPI() throws Exception {
         // Start playback to guarantee it's properly loaded.
         Assert.assertTrue(DOMUtils.isMediaPaused(mActivityTestRule.getWebContents(), VIDEO_ID));
@@ -185,6 +195,7 @@ public class VideoFullscreenOrientationLockTest {
     @Test
     @MediumTest
     @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE})
+    @FlakyTest(message = "crbug.com/1228632")
     public void testExitFullscreenByRemovingVideo() throws Exception {
         // Start playback to guarantee it's properly loaded.
         Assert.assertTrue(DOMUtils.isMediaPaused(mActivityTestRule.getWebContents(), VIDEO_ID));
@@ -208,6 +219,7 @@ public class VideoFullscreenOrientationLockTest {
     @Test
     @MediumTest
     @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE})
+    @FlakyTest(message = "crbug.com/1228632")
     public void testExitFullscreenWithNavigation() throws Exception {
         // Start playback to guarantee it's properly loaded.
         Assert.assertTrue(DOMUtils.isMediaPaused(mActivityTestRule.getWebContents(), VIDEO_ID));

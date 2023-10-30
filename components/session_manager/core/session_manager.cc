@@ -1,11 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/session_manager/core/session_manager.h"
 
-#include <algorithm>
-
+#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "components/session_manager/core/session_manager_observer.h"
@@ -24,9 +23,6 @@ SessionManager::SessionManager() {
 SessionManager::~SessionManager() {
   DCHECK_EQ(instance, this);
   SessionManager::SetInstance(nullptr);
-
-  for (auto& observer : observers_)
-    observer.OnSessionManagerDestroyed();
 }
 
 // static
@@ -70,22 +66,16 @@ bool SessionManager::IsSessionStarted() const {
 }
 
 void SessionManager::SessionStarted() {
-  if (session_started_)
-    return;
-
   session_started_ = true;
 
-  // SessionStarted() could be called in tests without any session created.
-  if (sessions_.size() == 1)
-    NotifyPrimaryUserSessionStarted();
+  bool is_primary = sessions_.size() == 1;
+  for (auto& observer : observers_)
+    observer.OnUserSessionStarted(is_primary);
 }
 
 bool SessionManager::HasSessionForAccountId(
     const AccountId& user_account_id) const {
-  return std::find_if(sessions_.begin(), sessions_.end(),
-                      [user_account_id](const Session& session) {
-                        return session.user_account_id == user_account_id;
-                      }) != sessions_.end();
+  return base::Contains(sessions_, user_account_id, &Session::user_account_id);
 }
 
 bool SessionManager::IsInSecondaryLoginScreen() const {
@@ -113,9 +103,15 @@ void SessionManager::NotifyUserProfileLoaded(const AccountId& account_id) {
     observer.OnUserProfileLoaded(account_id);
 }
 
-void SessionManager::NotifyPrimaryUserSessionStarted() {
+void SessionManager::NotifyNetworkErrorScreenShown() {
   for (auto& observer : observers_)
-    observer.OnPrimaryUserSessionStarted();
+    observer.OnNetworkErrorScreenShown();
+}
+
+void SessionManager::NotifyLoginOrLockScreenVisible() {
+  login_or_lock_screen_shown_for_test_ = true;
+  for (auto& observer : observers_)
+    observer.OnLoginOrLockScreenVisible();
 }
 
 void SessionManager::NotifyUserLoggedIn(const AccountId& user_account_id,

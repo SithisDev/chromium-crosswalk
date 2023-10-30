@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,10 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/check.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/guid.h"
-#include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/time/time.h"
@@ -22,9 +22,10 @@
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/storage_partition_impl.h"
-#include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -34,7 +35,7 @@ namespace {
 const char kTestOrigin[] = "https://example.com/";
 
 void DidRegisterServiceWorker(int64_t* out_service_worker_registration_id,
-                              base::Closure quit_closure,
+                              base::OnceClosure quit_closure,
                               blink::ServiceWorkerStatusCode status,
                               const std::string& status_message,
                               int64_t service_worker_registration_id) {
@@ -48,7 +49,7 @@ void DidRegisterServiceWorker(int64_t* out_service_worker_registration_id,
 
 void DidFindServiceWorkerRegistration(
     scoped_refptr<ServiceWorkerRegistration>* out_service_worker_registration,
-    base::Closure quit_closure,
+    base::OnceClosure quit_closure,
     blink::ServiceWorkerStatusCode status,
     scoped_refptr<ServiceWorkerRegistration> service_worker_registration) {
   DCHECK(out_service_worker_registration);
@@ -61,7 +62,7 @@ void DidFindServiceWorkerRegistration(
 }
 
 // Callback for UnregisterServiceWorker.
-void DidUnregisterServiceWorker(base::Closure quit_closure,
+void DidUnregisterServiceWorker(base::OnceClosure quit_closure,
                                 blink::ServiceWorkerStatusCode status) {
   EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, status);
   std::move(quit_closure).Run();
@@ -76,12 +77,12 @@ GURL GetScopeForId(const std::string& origin, int64_t id) {
 BackgroundFetchTestBase::BackgroundFetchTestBase()
     // Using REAL_IO_THREAD would give better coverage for thread safety, but
     // at time of writing EmbeddedWorkerTestHelper didn't seem to support that.
-    : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP),
+    : task_environment_(BrowserTaskEnvironment::IO_MAINLOOP),
       delegate_(browser_context_.GetBackgroundFetchDelegate()),
       embedded_worker_test_helper_(base::FilePath()),
-      origin_(url::Origin::Create(GURL(kTestOrigin))),
-      storage_partition_(
-          BrowserContext::GetDefaultStoragePartition(browser_context())) {}
+      storage_key_(blink::StorageKey(url::Origin::Create(GURL(kTestOrigin)))),
+      storage_partition_factory_(static_cast<StoragePartitionImpl*>(
+          browser_context()->GetDefaultStoragePartition())) {}
 
 BackgroundFetchTestBase::~BackgroundFetchTestBase() {
   DCHECK(set_up_called_);
@@ -98,7 +99,7 @@ void BackgroundFetchTestBase::TearDown() {
 }
 
 int64_t BackgroundFetchTestBase::RegisterServiceWorker() {
-  return RegisterServiceWorkerForOrigin(origin_);
+  return RegisterServiceWorkerForOrigin(storage_key_.origin());
 }
 
 int64_t BackgroundFetchTestBase::RegisterServiceWorkerForOrigin(
@@ -107,15 +108,19 @@ int64_t BackgroundFetchTestBase::RegisterServiceWorkerForOrigin(
   int64_t service_worker_registration_id =
       blink::mojom::kInvalidServiceWorkerRegistrationId;
 
+  const blink::StorageKey key(origin);
+
   {
     blink::mojom::ServiceWorkerRegistrationOptions options;
     options.scope = GetScopeForId(origin.GetURL().spec(), next_pattern_id_++);
     base::RunLoop run_loop;
     embedded_worker_test_helper_.context()->RegisterServiceWorker(
-        script_url, options,
+        script_url, key, options,
+        blink::mojom::FetchClientSettingsObject::New(),
         base::BindOnce(&DidRegisterServiceWorker,
-                       &service_worker_registration_id,
-                       run_loop.QuitClosure()));
+                       &service_worker_registration_id, run_loop.QuitClosure()),
+        /*requesting_frame_id=*/GlobalRenderFrameHostId(),
+        PolicyContainerPolicies());
 
     run_loop.Run();
   }
@@ -130,8 +135,8 @@ int64_t BackgroundFetchTestBase::RegisterServiceWorkerForOrigin(
 
   {
     base::RunLoop run_loop;
-    embedded_worker_test_helper_.context()->storage()->FindRegistrationForId(
-        service_worker_registration_id, origin.GetURL(),
+    embedded_worker_test_helper_.context()->registry()->FindRegistrationForId(
+        service_worker_registration_id, key,
         base::BindOnce(&DidFindServiceWorkerRegistration,
                        &service_worker_registration, run_loop.QuitClosure()));
 
@@ -155,8 +160,12 @@ int64_t BackgroundFetchTestBase::RegisterServiceWorkerForOrigin(
 void BackgroundFetchTestBase::UnregisterServiceWorker(
     int64_t service_worker_registration_id) {
   base::RunLoop run_loop;
+  const GURL scope = GetScopeForId(kTestOrigin, service_worker_registration_id);
+  // TODO(crbug.com/1199077): Update this when background fetch implements
+  // StorageKey.
   embedded_worker_test_helper_.context()->UnregisterServiceWorker(
-      GetScopeForId(kTestOrigin, service_worker_registration_id),
+      scope, blink::StorageKey(url::Origin::Create(scope)),
+      /*is_immediate=*/false,
       base::BindOnce(&DidUnregisterServiceWorker, run_loop.QuitClosure()));
   run_loop.Run();
 }
@@ -191,10 +200,9 @@ BackgroundFetchTestBase::CreateBackgroundFetchRegistrationData(
 }
 
 scoped_refptr<DevToolsBackgroundServicesContextImpl>
-BackgroundFetchTestBase::devtools_context() const {
-  DCHECK(storage_partition_);
-  return static_cast<StoragePartitionImpl*>(storage_partition_)
-      ->GetDevToolsBackgroundServicesContext();
+BackgroundFetchTestBase::devtools_context() {
+  return static_cast<DevToolsBackgroundServicesContextImpl*>(
+      storage_partition()->GetDevToolsBackgroundServicesContext());
 }
 
 }  // namespace content

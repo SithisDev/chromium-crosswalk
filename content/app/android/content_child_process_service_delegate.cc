@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,19 @@
 #include "base/android/library_loader/library_loader_hooks.h"
 #include "base/android/memory_pressure_listener_android.h"
 #include "base/android/unguessable_token_android.h"
+#include "base/check.h"
+#include "base/command_line.h"
 #include "base/lazy_instance.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/unguessable_token.h"
 #include "content/child/child_thread_impl.h"
 #include "content/common/android/surface_wrapper.h"
+#include "content/common/shared_file_util.h"
 #include "content/public/android/content_jni_headers/ContentChildProcessServiceDelegate_jni.h"
 #include "content/public/common/content_descriptors.h"
 #include "content/public/common/content_switches.h"
+#include "gpu/command_buffer/service/texture_owner.h"
 #include "gpu/ipc/common/android/scoped_surface_request_conduit.h"
 #include "gpu/ipc/common/gpu_surface_lookup.h"
-#include "services/service_manager/embedder/shared_file_util.h"
-#include "services/service_manager/embedder/switches.h"
 #include "ui/gl/android/scoped_java_surface.h"
 #include "ui/gl/android/surface_texture.h"
 
@@ -38,6 +38,11 @@ class ChildProcessSurfaceManager : public gpu::ScopedSurfaceRequestConduit,
                                    public gpu::GpuSurfaceLookup {
  public:
   ChildProcessSurfaceManager() {}
+
+  ChildProcessSurfaceManager(const ChildProcessSurfaceManager&) = delete;
+  ChildProcessSurfaceManager& operator=(const ChildProcessSurfaceManager&) =
+      delete;
+
   ~ChildProcessSurfaceManager() override {}
 
   // |service_impl| is the instance of
@@ -49,14 +54,14 @@ class ChildProcessSurfaceManager : public gpu::ScopedSurfaceRequestConduit,
   // Overriden from ScopedSurfaceRequestConduit:
   void ForwardSurfaceOwnerForSurfaceRequest(
       const base::UnguessableToken& request_token,
-      const gpu::SurfaceOwner* surface_owner) override {
+      const gpu::TextureOwner* texture_owner) override {
     JNIEnv* env = base::android::AttachCurrentThread();
 
     content::
         Java_ContentChildProcessServiceDelegate_forwardSurfaceForSurfaceRequest(
             env, service_impl_,
             base::android::UnguessableTokenAndroid::Create(env, request_token),
-            surface_owner->CreateJavaSurface().j_surface());
+            texture_owner->CreateJavaSurface().j_surface());
   }
 
   // Overridden from GpuSurfaceLookup:
@@ -112,8 +117,6 @@ class ChildProcessSurfaceManager : public gpu::ScopedSurfaceRequestConduit,
   friend struct base::LazyInstanceTraitsBase<ChildProcessSurfaceManager>;
   // The instance of org.chromium.content.app.ChildProcessService.
   base::android::ScopedJavaGlobalRef<jobject> service_impl_;
-
-  DISALLOW_COPY_AND_ASSIGN(ChildProcessSurfaceManager);
 };
 
 base::LazyInstance<ChildProcessSurfaceManager>::Leaky
@@ -135,8 +138,6 @@ void JNI_ContentChildProcessServiceDelegate_InternalInitChildProcess(
       g_child_process_surface_manager.Pointer());
   gpu::ScopedSurfaceRequestConduit::SetInstance(
       g_child_process_surface_manager.Pointer());
-
-  base::android::MemoryPressureListenerAndroid::Initialize(env);
 }
 
 }  // namespace
@@ -150,19 +151,24 @@ void JNI_ContentChildProcessServiceDelegate_InitChildProcess(
       env, obj, cpu_count, cpu_features);
 }
 
+void JNI_ContentChildProcessServiceDelegate_InitMemoryPressureListener(
+    JNIEnv* env) {
+  base::android::MemoryPressureListenerAndroid::Initialize(env);
+}
+
 void JNI_ContentChildProcessServiceDelegate_RetrieveFileDescriptorsIdsToKeys(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   std::map<int, std::string> ids_to_keys;
   std::string file_switch_value =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          service_manager::switches::kSharedFiles);
+          switches::kSharedFiles);
 
   std::vector<int> ids;
   std::vector<std::string> keys;
   if (!file_switch_value.empty()) {
-    base::Optional<std::map<int, std::string>> ids_to_keys_from_command_line =
-        service_manager::ParseSharedFileSwitchValue(file_switch_value);
+    absl::optional<std::map<int, std::string>> ids_to_keys_from_command_line =
+        ParseSharedFileSwitchValue(file_switch_value);
     if (ids_to_keys_from_command_line) {
       for (auto iter : *ids_to_keys_from_command_line) {
         ids.push_back(iter.first);

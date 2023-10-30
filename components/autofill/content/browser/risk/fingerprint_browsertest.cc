@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,21 +9,18 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "components/autofill/content/browser/risk/proto/fingerprint.pb.h"
+#include "components/autofill/core/common/autofill_clock.h"
 #include "content/public/browser/gpu_data_manager.h"
-#include "content/public/browser/system_connector.h"
-#include "content/public/common/screen_info.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "services/device/public/cpp/test/scoped_geolocation_overrider.h"
 #include "services/device/public/mojom/geoposition.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/web_rect.h"
 #include "ui/gfx/geometry/rect.h"
 
 using testing::ElementsAre;
@@ -38,7 +35,7 @@ void GetFingerprintInternal(
     uint64_t obfuscated_gaia_id,
     const gfx::Rect& window_bounds,
     const gfx::Rect& content_bounds,
-    const content::ScreenInfo& screen_info,
+    const display::ScreenInfo& screen_info,
     const std::string& version,
     const std::string& charset,
     const std::string& accept_languages,
@@ -46,8 +43,7 @@ void GetFingerprintInternal(
     const std::string& app_locale,
     const std::string& user_agent,
     const base::TimeDelta& timeout,
-    base::OnceCallback<void(std::unique_ptr<Fingerprint>)> callback,
-    service_manager::Connector* connector);
+    base::OnceCallback<void(std::unique_ptr<Fingerprint>)> callback);
 
 }  // namespace internal
 
@@ -78,16 +74,17 @@ class AutofillRiskFingerprintTest : public content::ContentBrowserTest {
         unavailable_screen_bounds_(0, 0, 101, 11) {}
 
   void SetUpOnMainThread() override {
-    device::mojom::Geoposition position;
-    position.latitude = kLatitude;
-    position.longitude = kLongitude;
-    position.altitude = kAltitude;
-    position.accuracy = kAccuracy;
-    position.timestamp = base::Time::UnixEpoch() +
-                         base::TimeDelta::FromMilliseconds(kGeolocationTime);
+    auto position = device::mojom::Geoposition::New();
+    position->latitude = kLatitude;
+    position->longitude = kLongitude;
+    position->altitude = kAltitude;
+    position->accuracy = kAccuracy;
+    position->timestamp =
+        base::Time::UnixEpoch() + base::Milliseconds(kGeolocationTime);
 
     geolocation_overrider_ =
-        std::make_unique<device::ScopedGeolocationOverrider>(position);
+        std::make_unique<device::ScopedGeolocationOverrider>(
+            std::move(position));
   }
 
   void GetFingerprintTestCallback(base::OnceClosure continuation_callback,
@@ -98,7 +95,13 @@ class AutofillRiskFingerprintTest : public content::ContentBrowserTest {
         fingerprint->machine_characteristics();
     EXPECT_TRUE(machine.has_operating_system_build());
     EXPECT_TRUE(machine.has_browser_install_time_hours());
+
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ANDROID)
+    // GetFontList() returns an empty list on Fuchsia and Android.
+    EXPECT_EQ(machine.font_size(), 0);
+#else
     EXPECT_GT(machine.font_size(), 0);
+#endif  // BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ANDROID)
 
     // TODO(isherman): http://crbug.com/358548 and EXPECT_EQ.
     EXPECT_GE(machine.plugin_size(), 0);
@@ -203,7 +206,7 @@ class AutofillRiskFingerprintTest : public content::ContentBrowserTest {
 
 // Test that getting a fingerprint works on some basic level.
 IN_PROC_BROWSER_TEST_F(AutofillRiskFingerprintTest, GetFingerprint) {
-  content::ScreenInfo screen_info;
+  display::ScreenInfo screen_info;
   screen_info.depth = kScreenColorDepth;
   screen_info.rect = screen_bounds_;
   screen_info.available_rect = available_screen_bounds_;
@@ -211,12 +214,11 @@ IN_PROC_BROWSER_TEST_F(AutofillRiskFingerprintTest, GetFingerprint) {
   base::RunLoop run_loop;
   internal::GetFingerprintInternal(
       kObfuscatedGaiaId, window_bounds_, content_bounds_, screen_info,
-      "25.0.0.123", kCharset, kAcceptLanguages, base::Time::Now(), kLocale,
+      "25.0.0.123", kCharset, kAcceptLanguages, AutofillClock::Now(), kLocale,
       kUserAgent,
-      base::TimeDelta::FromDays(1),  // Ought to be longer than any test run.
-      base::Bind(&AutofillRiskFingerprintTest::GetFingerprintTestCallback,
-                 base::Unretained(this), run_loop.QuitWhenIdleClosure()),
-      content::GetSystemConnector());
+      base::Days(1),  // Ought to be longer than any test run.
+      base::BindOnce(&AutofillRiskFingerprintTest::GetFingerprintTestCallback,
+                     base::Unretained(this), run_loop.QuitWhenIdleClosure()));
 
   // Wait for the callback to be called.
   run_loop.Run();

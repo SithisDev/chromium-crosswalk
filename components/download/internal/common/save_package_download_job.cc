@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@ namespace download {
 
 SavePackageDownloadJob::SavePackageDownloadJob(
     DownloadItem* download_item,
-    std::unique_ptr<DownloadRequestHandleInterface> request_handle)
-    : DownloadJob(download_item, std::move(request_handle)) {}
+    DownloadJob::CancelRequestCallback cancel_request_callback)
+    : DownloadJob(download_item, std::move(cancel_request_callback)) {}
 
 SavePackageDownloadJob::~SavePackageDownloadJob() = default;
 

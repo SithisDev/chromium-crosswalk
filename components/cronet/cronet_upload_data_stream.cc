@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,7 +67,8 @@ int CronetUploadDataStream::ReadInternal(net::IOBuffer* buf, int buf_len) {
   read_in_progress_ = true;
   waiting_on_read_ = true;
   at_front_of_stream_ = false;
-  delegate_->Read(buf, buf_len);
+  scoped_refptr<net::IOBuffer> buffer(base::WrapRefCounted(buf));
+  delegate_->Read(std::move(buffer), buf_len);
   return net::ERR_IO_PENDING;
 }
 

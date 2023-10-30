@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 
-#include "components/cast_channel/proto/cast_channel.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/openscreen/src/cast/common/channel/proto/cast_channel.pb.h"
 
 namespace cast_channel {
 
@@ -32,7 +33,7 @@ class CastFramerTest : public testing::Test {
 
     buffer_ = base::MakeRefCounted<net::GrowableIOBuffer>();
     buffer_->SetCapacity(MessageFramer::MessageHeader::max_message_size());
-    framer_.reset(new MessageFramer(buffer_.get()));
+    framer_ = std::make_unique<MessageFramer>(buffer_.get());
   }
 
   void WriteToBuffer(const std::string& data) {

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,6 +96,11 @@ void TouchSelectionControllerClientManagerAndroid::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
+void TouchSelectionControllerClientManagerAndroid::ShowContextMenu(
+    const gfx::Point& location) {
+  active_client_->ShowTouchSelectionContextMenu(location);
+}
+
 // TouchSelectionControllerClient implementation.
 bool TouchSelectionControllerClientManagerAndroid::SupportsAnimation() const {
   return rwhv_->SupportsAnimation();
@@ -128,8 +133,9 @@ void TouchSelectionControllerClientManagerAndroid::OnSelectionEvent(
 }
 
 void TouchSelectionControllerClientManagerAndroid::OnDragUpdate(
+    const ui::TouchSelectionDraggable::Type type,
     const gfx::PointF& position) {
-  rwhv_->OnDragUpdate(position);
+  rwhv_->OnDragUpdate(type, position);
 }
 
 std::unique_ptr<ui::TouchHandleDrawable>
@@ -139,6 +145,11 @@ TouchSelectionControllerClientManagerAndroid::CreateDrawable() {
 
 void TouchSelectionControllerClientManagerAndroid::DidScroll() {
   // Nothing needs to be done here.
+}
+
+void TouchSelectionControllerClientManagerAndroid::
+    ShowTouchSelectionContextMenu(const gfx::Point& location) {
+  active_client_->ShowTouchSelectionContextMenu(location);
 }
 
 void TouchSelectionControllerClientManagerAndroid::

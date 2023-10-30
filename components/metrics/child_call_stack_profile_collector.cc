@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -21,8 +21,11 @@ ChildCallStackProfileCollector::ProfileState::ProfileState(ProfileState&&) =
 
 ChildCallStackProfileCollector::ProfileState::ProfileState(
     base::TimeTicks start_timestamp,
-    std::string profile)
-    : start_timestamp(start_timestamp), profile(std::move(profile)) {}
+    mojom::ProfileType profile_type,
+    std::string&& profile)
+    : start_timestamp(start_timestamp),
+      profile_type(profile_type),
+      profile(std::move(profile)) {}
 
 ChildCallStackProfileCollector::ProfileState::~ProfileState() = default;
 
@@ -36,7 +39,8 @@ ChildCallStackProfileCollector::ChildCallStackProfileCollector() {}
 ChildCallStackProfileCollector::~ChildCallStackProfileCollector() {}
 
 void ChildCallStackProfileCollector::SetParentProfileCollector(
-    metrics::mojom::CallStackProfileCollectorPtr parent_collector) {
+    mojo::PendingRemote<metrics::mojom::CallStackProfileCollector>
+        parent_collector) {
   base::AutoLock alock(lock_);
   // This function should only invoked once, during the mode of operation when
   // retaining profiles after construction.
@@ -45,13 +49,17 @@ void ChildCallStackProfileCollector::SetParentProfileCollector(
   task_runner_ = base::ThreadTaskRunnerHandle::Get();
   // This should only be set one time per child process.
   DCHECK(!parent_collector_);
-  parent_collector_ = std::move(parent_collector);
-  if (parent_collector_) {
-    for (ProfileState& state : profiles_) {
-      mojom::SampledProfilePtr mojo_profile = mojom::SampledProfile::New();
-      mojo_profile->contents = std::move(state.profile);
-      parent_collector_->Collect(state.start_timestamp,
-                                 std::move(mojo_profile));
+  // If |parent_collector| is mojo::NullRemote(), it skips Bind since
+  // mojo::Remote doesn't allow Bind with mojo::NullRemote().
+  if (parent_collector) {
+    parent_collector_.Bind(std::move(parent_collector));
+    if (parent_collector_) {
+      for (ProfileState& state : profiles_) {
+        mojom::SampledProfilePtr mojo_profile = mojom::SampledProfile::New();
+        mojo_profile->contents = std::move(state.profile);
+        parent_collector_->Collect(state.start_timestamp, state.profile_type,
+                                   std::move(mojo_profile));
+      }
     }
   }
   profiles_.clear();
@@ -74,17 +82,24 @@ void ChildCallStackProfileCollector::Collect(base::TimeTicks start_timestamp,
     return;
   }
 
+  const mojom::ProfileType profile_type =
+      profile.trigger_event() == SampledProfile::PERIODIC_HEAP_COLLECTION
+          ? mojom::ProfileType::kHeap
+          : mojom::ProfileType::kCPU;
+
   if (parent_collector_) {
     mojom::SampledProfilePtr mojo_profile = mojom::SampledProfile::New();
     profile.SerializeToString(&mojo_profile->contents);
-    parent_collector_->Collect(start_timestamp, std::move(mojo_profile));
+    parent_collector_->Collect(start_timestamp, profile_type,
+                               std::move(mojo_profile));
     return;
   }
 
   if (retain_profiles_) {
     std::string serialized_profile;
     profile.SerializeToString(&serialized_profile);
-    profiles_.emplace_back(start_timestamp, std::move(serialized_profile));
+    profiles_.emplace_back(start_timestamp, profile_type,
+                           std::move(serialized_profile));
   }
 }
 

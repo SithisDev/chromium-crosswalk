@@ -1,48 +1,78 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/test/test_render_widget_host.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "content/browser/renderer_host/frame_token_message_queue.h"
 #include "content/public/common/content_features.h"
 
 namespace content {
 
 std::unique_ptr<RenderWidgetHostImpl> TestRenderWidgetHost::Create(
+    FrameTree* frame_tree,
     RenderWidgetHostDelegate* delegate,
-    RenderProcessHost* process,
+    base::SafeRef<SiteInstanceGroup> site_instance_group,
     int32_t routing_id,
     bool hidden) {
-  mojom::WidgetPtr widget;
-  std::unique_ptr<MockWidgetImpl> widget_impl =
-      std::make_unique<MockWidgetImpl>(mojo::MakeRequest(&widget));
   return base::WrapUnique(new TestRenderWidgetHost(
-      delegate, process, routing_id, std::move(widget_impl), std::move(widget),
+      frame_tree, delegate, std::move(site_instance_group), routing_id,
       hidden));
 }
 
 TestRenderWidgetHost::TestRenderWidgetHost(
+    FrameTree* frame_tree,
     RenderWidgetHostDelegate* delegate,
-    RenderProcessHost* process,
+    base::SafeRef<SiteInstanceGroup> site_instance_group,
     int32_t routing_id,
-    std::unique_ptr<MockWidgetImpl> widget_impl,
-    mojom::WidgetPtr widget,
     bool hidden)
-    : RenderWidgetHostImpl(delegate,
-                           process,
+    : RenderWidgetHostImpl(frame_tree,
+                           /*self_owned=*/false,
+                           delegate,
+                           std::move(site_instance_group),
                            routing_id,
-                           std::move(widget),
-                           hidden),
-      widget_impl_(std::move(widget_impl)) {}
+                           hidden,
+                           /*renderer_initiated_creation=*/false,
+                           std::make_unique<FrameTokenMessageQueue>()) {
+  mojo::AssociatedRemote<blink::mojom::WidgetHost> blink_widget_host;
+  mojo::AssociatedRemote<blink::mojom::Widget> blink_widget;
+  auto blink_widget_receiver =
+      blink_widget.BindNewEndpointAndPassDedicatedReceiver();
+  BindWidgetInterfaces(
+      blink_widget_host.BindNewEndpointAndPassDedicatedReceiver(),
+      blink_widget.Unbind());
+}
 
 TestRenderWidgetHost::~TestRenderWidgetHost() {}
-mojom::WidgetInputHandler* TestRenderWidgetHost::GetWidgetInputHandler() {
-  return widget_impl_->input_handler();
+blink::mojom::WidgetInputHandler*
+TestRenderWidgetHost::GetWidgetInputHandler() {
+  return &input_handler_;
 }
 
 MockWidgetInputHandler* TestRenderWidgetHost::GetMockWidgetInputHandler() {
-  return widget_impl_->input_handler();
+  return &input_handler_;
+}
+
+// static
+mojo::PendingAssociatedRemote<blink::mojom::FrameWidget>
+TestRenderWidgetHost::CreateStubFrameWidgetRemote() {
+  // There's no renderer to pass the receiver to in these tests.
+  mojo::AssociatedRemote<blink::mojom::FrameWidget> widget_remote;
+  mojo::PendingAssociatedReceiver<blink::mojom::FrameWidget> widget_receiver =
+      widget_remote.BindNewEndpointAndPassDedicatedReceiver();
+  return widget_remote.Unbind();
+}
+
+// static
+mojo::PendingAssociatedRemote<blink::mojom::Widget>
+TestRenderWidgetHost::CreateStubWidgetRemote() {
+  // There's no renderer to pass the receiver to in these tests.
+  mojo::AssociatedRemote<blink::mojom::Widget> widget_remote;
+  mojo::PendingAssociatedReceiver<blink::mojom::Widget> widget_receiver =
+      widget_remote.BindNewEndpointAndPassDedicatedReceiver();
+  return widget_remote.Unbind();
 }
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,10 @@
 #include <map>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "content/common/content_export.h"
 #include "ppapi/c/pp_stdint.h"  // For int64_t on Windows.
 #include "ppapi/shared_impl/file_growth.h"
-#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/file_system/file_system_context.h"
 #include "url/gurl.h"
 
 namespace storage {
@@ -40,6 +39,9 @@ class CONTENT_EXPORT QuotaReservation
       const GURL& origin_url,
       storage::FileSystemType file_system_type);
 
+  QuotaReservation(const QuotaReservation&) = delete;
+  QuotaReservation& operator=(const QuotaReservation&) = delete;
+
   // Opens a file with the given id and path and returns its current size.
   int64_t OpenFile(int32_t id, const storage::FileSystemURL& url);
   // Closes the file opened by OpenFile with the given id.
@@ -47,11 +49,11 @@ class CONTENT_EXPORT QuotaReservation
   // Refreshes the quota reservation to a new amount. A map that associates file
   // ids with maximum written offsets is provided as input. The callback will
   // receive a similar map with the updated file sizes.
-  typedef base::Callback<void(int64_t, const ppapi::FileSizeMap&)>
-      ReserveQuotaCallback;
+  using ReserveQuotaCallback =
+      base::OnceCallback<void(int64_t, const ppapi::FileSizeMap&)>;
   void ReserveQuota(int64_t amount,
                     const ppapi::FileGrowthMap& file_growth,
-                    const ReserveQuotaCallback& callback);
+                    ReserveQuotaCallback callback);
 
   // Notifies underlying QuotaReservation that the associated client crashed,
   // and that the reserved quota is no longer traceable.
@@ -77,8 +79,7 @@ class CONTENT_EXPORT QuotaReservation
 
   ~QuotaReservation();
 
-  void GotReservedQuota(const ReserveQuotaCallback& callback,
-                        base::File::Error error);
+  void GotReservedQuota(ReserveQuotaCallback callback, base::File::Error error);
 
   void DeleteOnCorrectThread() const;
 
@@ -86,8 +87,6 @@ class CONTENT_EXPORT QuotaReservation
   scoped_refptr<storage::QuotaReservation> quota_reservation_;
   typedef std::map<int32_t, storage::OpenFileHandle*> FileMap;
   FileMap files_;
-
-  DISALLOW_COPY_AND_ASSIGN(QuotaReservation);
 };
 
 struct QuotaReservationDeleter {

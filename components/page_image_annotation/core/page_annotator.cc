@@ -1,10 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/page_image_annotation/core/page_annotator.h"
 
 #include "base/bind.h"
+#include "base/observer_list.h"
 
 namespace page_image_annotation {
 
@@ -12,8 +13,8 @@ namespace ia_mojom = image_annotation::mojom;
 
 PageAnnotator::Observer::~Observer() {}
 
-PageAnnotator::PageAnnotator(ia_mojom::AnnotatorPtr annotator_ptr)
-    : annotator_ptr_(std::move(annotator_ptr)) {}
+PageAnnotator::PageAnnotator(mojo::PendingRemote<ia_mojom::Annotator> annotator)
+    : annotator_(std::move(annotator)) {}
 
 PageAnnotator::~PageAnnotator() {}
 
@@ -59,10 +60,10 @@ void PageAnnotator::AnnotateImage(Observer* const observer,
     return;
 
   // TODO(crbug.com/916363): get a user's preferred language and pass it here.
-  annotator_ptr_->AnnotateImage(
+  annotator_->AnnotateImage(
       lookup->second.first.source_id,
       std::string() /* description_language_tag */,
-      lookup->second.second.GetPtr(),
+      lookup->second.second.GetPendingRemote(),
       base::BindOnce(&PageAnnotator::NotifyObserver, base::Unretained(this),
                      observer, node_id));
 }

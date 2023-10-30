@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,8 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/gcm_driver/gcm_driver.h"
@@ -54,64 +52,63 @@ InstanceID::Result GCMClientResultToInstanceIDResult(
 std::unique_ptr<InstanceID> InstanceID::CreateInternal(
     const std::string& app_id,
     gcm::GCMDriver* gcm_driver) {
-  return base::WrapUnique(new InstanceIDImpl(app_id, gcm_driver));
+  return std::make_unique<InstanceIDImpl>(app_id, gcm_driver);
 }
 
 InstanceIDImpl::InstanceIDImpl(const std::string& app_id,
                                gcm::GCMDriver* gcm_driver)
     : InstanceID(app_id, gcm_driver) {
   Handler()->GetInstanceIDData(
-      app_id, base::Bind(&InstanceIDImpl::GetInstanceIDDataCompleted,
-                         weak_ptr_factory_.GetWeakPtr()));
+      app_id, base::BindOnce(&InstanceIDImpl::GetInstanceIDDataCompleted,
+                             weak_ptr_factory_.GetWeakPtr()));
 }
 
 InstanceIDImpl::~InstanceIDImpl() {
 }
 
-void InstanceIDImpl::GetID(const GetIDCallback& callback) {
-  RunWhenReady(base::Bind(&InstanceIDImpl::DoGetID,
-                          weak_ptr_factory_.GetWeakPtr(), callback));
+void InstanceIDImpl::GetID(GetIDCallback callback) {
+  RunWhenReady(base::BindOnce(&InstanceIDImpl::DoGetID,
+                              weak_ptr_factory_.GetWeakPtr(),
+                              std::move(callback)));
 }
 
-void InstanceIDImpl::DoGetID(const GetIDCallback& callback) {
+void InstanceIDImpl::DoGetID(GetIDCallback callback) {
   EnsureIDGenerated();
-  callback.Run(id_);
+  std::move(callback).Run(id_);
 }
 
-void InstanceIDImpl::GetCreationTime(const GetCreationTimeCallback& callback) {
+void InstanceIDImpl::GetCreationTime(GetCreationTimeCallback callback) {
   RunWhenReady(base::BindOnce(&InstanceIDImpl::DoGetCreationTime,
-                              weak_ptr_factory_.GetWeakPtr(), callback));
+                              weak_ptr_factory_.GetWeakPtr(),
+                              std::move(callback)));
 }
 
-void InstanceIDImpl::DoGetCreationTime(
-    const GetCreationTimeCallback& callback) {
-  callback.Run(creation_time_);
+void InstanceIDImpl::DoGetCreationTime(GetCreationTimeCallback callback) {
+  std::move(callback).Run(creation_time_);
 }
 
 void InstanceIDImpl::GetToken(const std::string& authorized_entity,
                               const std::string& scope,
-                              const std::map<std::string, std::string>& options,
-                              bool is_lazy,
+                              base::TimeDelta time_to_live,
+                              std::set<Flags> flags,
                               GetTokenCallback callback) {
   DCHECK(!authorized_entity.empty());
   DCHECK(!scope.empty());
 
-  UMA_HISTOGRAM_COUNTS_100("InstanceID.GetToken.OptionsCount", options.size());
-
   RunWhenReady(base::BindOnce(&InstanceIDImpl::DoGetToken,
                               weak_ptr_factory_.GetWeakPtr(), authorized_entity,
-                              scope, options, std::move(callback)));
+                              scope, time_to_live, std::move(callback)));
 }
 
 void InstanceIDImpl::DoGetToken(
     const std::string& authorized_entity,
     const std::string& scope,
-    const std::map<std::string, std::string>& options,
+    base::TimeDelta time_to_live,
     GetTokenCallback callback) {
   EnsureIDGenerated();
 
   Handler()->GetToken(
-      app_id(), authorized_entity, scope, options,
+      app_id(), authorized_entity, scope, time_to_live,
       base::BindOnce(&InstanceIDImpl::OnGetTokenCompleted,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }
@@ -119,26 +116,27 @@ void InstanceIDImpl::DoGetToken(
 void InstanceIDImpl::ValidateToken(const std::string& authorized_entity,
                                    const std::string& scope,
                                    const std::string& token,
-                                   const ValidateTokenCallback& callback) {
+                                   ValidateTokenCallback callback) {
   DCHECK(!authorized_entity.empty());
   DCHECK(!scope.empty());
   DCHECK(!token.empty());
 
   RunWhenReady(base::BindOnce(&InstanceIDImpl::DoValidateToken,
                               weak_ptr_factory_.GetWeakPtr(), authorized_entity,
-                              scope, token, callback));
+                              scope, token, std::move(callback)));
 }
 
 void InstanceIDImpl::DoValidateToken(const std::string& authorized_entity,
                                      const std::string& scope,
                                      const std::string& token,
-                                     const ValidateTokenCallback& callback) {
+                                     ValidateTokenCallback callback) {
   if (id_.empty()) {
-    callback.Run(false /* is_valid */);
+    std::move(callback).Run(false /* is_valid */);
     return;
   }
 
-  Handler()->ValidateToken(app_id(), authorized_entity, scope, token, callback);
+  Handler()->ValidateToken(app_id(), authorized_entity, scope, token,
+                           std::move(callback));
 }
 
 void InstanceIDImpl::DeleteTokenImpl(const std::string& authorized_entity,

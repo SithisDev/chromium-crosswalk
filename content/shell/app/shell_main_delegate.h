@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,32 +7,44 @@
 
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "content/public/app/content_main_delegate.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace content {
-class ContentClient;
+class ShellContentClient;
 class ShellContentBrowserClient;
 class ShellContentGpuClient;
 class ShellContentRendererClient;
 class ShellContentUtilityClient;
 
+#if !BUILDFLAG(IS_ANDROID)
+class WebTestBrowserMainRunner;
+#endif
+
 class ShellMainDelegate : public ContentMainDelegate {
  public:
-  explicit ShellMainDelegate(bool is_browsertest = false);
+  explicit ShellMainDelegate(bool is_content_browsertests = false);
+
+  ShellMainDelegate(const ShellMainDelegate&) = delete;
+  ShellMainDelegate& operator=(const ShellMainDelegate&) = delete;
+
   ~ShellMainDelegate() override;
 
   // ContentMainDelegate implementation:
-  bool BasicStartupComplete(int* exit_code) override;
+  absl::optional<int> BasicStartupComplete() override;
+  bool ShouldCreateFeatureList(InvokedIn invoked_in) override;
+  bool ShouldInitializeMojo(InvokedIn invoked_in) override;
   void PreSandboxStartup() override;
-  int RunProcess(const std::string& process_type,
-                 const MainFunctionParams& main_function_params) override;
-#if defined(OS_LINUX)
+  absl::variant<int, MainFunctionParams> RunProcess(
+      const std::string& process_type,
+      MainFunctionParams main_function_params) override;
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   void ZygoteForked() override;
 #endif
-  void PreCreateMainMessageLoop() override;
+  absl::optional<int> PreBrowserMain() override;
+  absl::optional<int> PostEarlyInitialization(InvokedIn invoked_in) override;
+  ContentClient* CreateContentClient() override;
   ContentBrowserClient* CreateContentBrowserClient() override;
   ContentGpuClient* CreateContentGpuClient() override;
   ContentRendererClient* CreateContentRendererClient() override;
@@ -40,15 +52,26 @@ class ShellMainDelegate : public ContentMainDelegate {
 
   static void InitializeResourceBundle();
 
- private:
-  bool is_browsertest_;
+ protected:
+  // Only present when running content_browsertests, which run inside Content
+  // Shell.
+  //
+  // content_browsertests should not set the kRunWebTests command line flag, so
+  // |is_content_browsertests_| and |web_test_runner_| are mututally exclusive.
+  bool is_content_browsertests_;
+#if !BUILDFLAG(IS_ANDROID)
+  // Only present when running web tests, which run inside Content Shell.
+  //
+  // Web tests are not browser tests, so |is_content_browsertests_| and
+  // |web_test_runner_| are mututally exclusive.
+  std::unique_ptr<WebTestBrowserMainRunner> web_test_runner_;
+#endif
+
   std::unique_ptr<ShellContentBrowserClient> browser_client_;
   std::unique_ptr<ShellContentGpuClient> gpu_client_;
   std::unique_ptr<ShellContentRendererClient> renderer_client_;
   std::unique_ptr<ShellContentUtilityClient> utility_client_;
-  std::unique_ptr<ContentClient> content_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShellMainDelegate);
+  std::unique_ptr<ShellContentClient> content_client_;
 };
 
 }  // namespace content

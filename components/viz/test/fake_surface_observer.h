@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,6 +32,10 @@ class FakeSurfaceObserver : public SurfaceObserver {
 
   const SurfaceInfo& last_surface_info() const { return last_surface_info_; }
 
+  void set_damage_display(bool damage_display) {
+    damage_display_ = damage_display;
+  }
+
   void Reset();
 
  private:
@@ -39,8 +43,7 @@ class FakeSurfaceObserver : public SurfaceObserver {
   bool OnSurfaceDamaged(const SurfaceId& surface_id,
                         const BeginFrameAck& ack) override;
   void OnFirstSurfaceActivation(const SurfaceInfo& surface_info) override;
-  void OnSurfaceActivated(const SurfaceId& surface_id,
-                          base::Optional<base::TimeDelta> duration) override;
+  void OnSurfaceActivated(const SurfaceId& surface_id) override;
   void OnSurfaceDestroyed(const SurfaceId& surface_id) override {}
   void OnSurfaceMarkedForDestruction(const SurfaceId& surface_id) override {}
   void OnSurfaceDamageExpected(const SurfaceId& surface_id,

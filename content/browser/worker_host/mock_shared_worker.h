@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,27 +12,36 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
 #include "content/browser/worker_host/shared_worker_host.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
+#include "services/network/public/mojom/content_security_policy.mojom-forward.h"
 #include "third_party/blink/public/common/messaging/message_port_channel.h"
-#include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
+#include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 #include "third_party/blink/public/mojom/service_worker/controller_service_worker.mojom.h"
-#include "third_party/blink/public/mojom/service_worker/service_worker_provider.mojom.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_container.mojom.h"
 #include "third_party/blink/public/mojom/worker/shared_worker_factory.mojom.h"
 #include "third_party/blink/public/mojom/worker/worker_content_settings_proxy.mojom.h"
 
 class GURL;
 
 namespace blink {
-class URLLoaderFactoryBundleInfo;
+class PendingURLLoaderFactoryBundle;
 }  // namespace blink
 
 namespace content {
 
 class MockSharedWorker : public blink::mojom::SharedWorker {
  public:
-  explicit MockSharedWorker(blink::mojom::SharedWorkerRequest request);
+  explicit MockSharedWorker(
+      mojo::PendingReceiver<blink::mojom::SharedWorker> receiver);
+
+  MockSharedWorker(const MockSharedWorker&) = delete;
+  MockSharedWorker& operator=(const MockSharedWorker&) = delete;
+
   ~MockSharedWorker() override;
 
   bool CheckReceivedConnect(int* connection_request_id,
@@ -40,79 +49,96 @@ class MockSharedWorker : public blink::mojom::SharedWorker {
   bool CheckNotReceivedConnect();
   bool CheckReceivedTerminate();
 
+  void Disconnect();
+
  private:
   // blink::mojom::SharedWorker methods:
   void Connect(int connection_request_id,
-               mojo::ScopedMessagePipeHandle port) override;
+               blink::MessagePortDescriptor port) override;
   void Terminate() override;
-  void BindDevToolsAgent(
-      blink::mojom::DevToolsAgentHostAssociatedPtrInfo host_ptr_info,
-      blink::mojom::DevToolsAgentAssociatedRequest request) override;
 
-  mojo::Binding<blink::mojom::SharedWorker> binding_;
+  mojo::Receiver<blink::mojom::SharedWorker> receiver_;
   std::queue<std::pair<int, blink::MessagePortChannel>> connect_received_;
   bool terminate_received_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(MockSharedWorker);
 };
 
 class MockSharedWorkerFactory : public blink::mojom::SharedWorkerFactory {
  public:
   explicit MockSharedWorkerFactory(
-      blink::mojom::SharedWorkerFactoryRequest request);
+      mojo::PendingReceiver<blink::mojom::SharedWorkerFactory> receiver);
+
+  MockSharedWorkerFactory(const MockSharedWorkerFactory&) = delete;
+  MockSharedWorkerFactory& operator=(const MockSharedWorkerFactory&) = delete;
+
   ~MockSharedWorkerFactory() override;
 
   bool CheckReceivedCreateSharedWorker(
       const GURL& expected_url,
       const std::string& expected_name,
-      blink::mojom::ContentSecurityPolicyType
-          expected_content_security_policy_type,
-      blink::mojom::SharedWorkerHostPtr* host,
-      blink::mojom::SharedWorkerRequest* request);
+      const std::vector<network::mojom::ContentSecurityPolicyPtr>&
+          expected_content_security_policies,
+      mojo::Remote<blink::mojom::SharedWorkerHost>* host,
+      mojo::PendingReceiver<blink::mojom::SharedWorker>* receiver);
+
+  void Disconnect();
 
  private:
   // blink::mojom::SharedWorkerFactory methods:
   void CreateSharedWorker(
       blink::mojom::SharedWorkerInfoPtr info,
+      const blink::SharedWorkerToken& token,
+      const url::Origin& constructor_origin,
+      bool is_constructor_secure_context,
+      const std::string& user_agent,
+      const std::string& full_user_agent,
+      const std::string& reduced_user_agent,
+      const blink::UserAgentMetadata& ua_metadata,
       bool pause_on_start,
       const base::UnguessableToken& devtools_worker_token,
-      blink::mojom::RendererPreferencesPtr renderer_preferences,
-      blink::mojom::RendererPreferenceWatcherRequest preference_watcher_request,
-      blink::mojom::WorkerContentSettingsProxyPtr content_settings,
-      blink::mojom::ServiceWorkerProviderInfoForClientPtr
-          service_worker_provider_info,
-      const base::Optional<base::UnguessableToken>& appcache_host_id,
+      const blink::RendererPreferences& renderer_preferences,
+      mojo::PendingReceiver<blink::mojom::RendererPreferenceWatcher>
+          preference_watcher_receiver,
+      mojo::PendingRemote<blink::mojom::WorkerContentSettingsProxy>
+          content_settings,
+      blink::mojom::ServiceWorkerContainerInfoForClientPtr
+          service_worker_container_info,
       blink::mojom::WorkerMainScriptLoadParamsPtr main_script_load_params,
-      std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+      std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
           subresource_loader_factories,
       blink::mojom::ControllerServiceWorkerInfoPtr controller_info,
-      blink::mojom::SharedWorkerHostPtr host,
-      blink::mojom::SharedWorkerRequest request,
-      service_manager::mojom::InterfaceProviderPtr interface_provider) override;
+      blink::mojom::PolicyContainerPtr policy_container,
+      mojo::PendingRemote<blink::mojom::SharedWorkerHost> host,
+      mojo::PendingReceiver<blink::mojom::SharedWorker> receiver,
+      mojo::PendingRemote<blink::mojom::BrowserInterfaceBroker>
+          browser_interface_broker,
+      ukm::SourceId ukm_source_id) override;
 
   struct CreateParams {
     CreateParams();
     ~CreateParams();
     blink::mojom::SharedWorkerInfoPtr info;
     bool pause_on_start;
-    blink::mojom::WorkerContentSettingsProxyPtr content_settings;
-    blink::mojom::SharedWorkerHostPtr host;
-    blink::mojom::SharedWorkerRequest request;
-    service_manager::mojom::InterfaceProviderPtr interface_provider;
+    mojo::PendingRemote<blink::mojom::WorkerContentSettingsProxy>
+        content_settings;
+    mojo::PendingRemote<blink::mojom::SharedWorkerHost> host;
+    mojo::PendingReceiver<blink::mojom::SharedWorker> receiver;
+    ukm::SourceId ukm_source_id;
   };
 
-  mojo::Binding<blink::mojom::SharedWorkerFactory> binding_;
+  mojo::Receiver<blink::mojom::SharedWorkerFactory> receiver_;
   std::unique_ptr<CreateParams> create_params_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockSharedWorkerFactory);
 };
 
 class MockSharedWorkerClient : public blink::mojom::SharedWorkerClient {
  public:
   MockSharedWorkerClient();
+
+  MockSharedWorkerClient(const MockSharedWorkerClient&) = delete;
+  MockSharedWorkerClient& operator=(const MockSharedWorkerClient&) = delete;
+
   ~MockSharedWorkerClient() override;
 
-  void Bind(blink::mojom::SharedWorkerClientRequest request);
+  void Bind(mojo::PendingReceiver<blink::mojom::SharedWorkerClient> receiver);
   void Close();
   bool CheckReceivedOnCreated();
   bool CheckReceivedOnConnected(
@@ -121,16 +147,20 @@ class MockSharedWorkerClient : public blink::mojom::SharedWorkerClient {
   bool CheckNotReceivedOnFeatureUsed();
   bool CheckReceivedOnScriptLoadFailed();
 
+  // Resets the receiver, allowing the caller to simulate losing the connection
+  // with the client.
+  void ResetReceiver();
+
  private:
   // blink::mojom::SharedWorkerClient methods:
   void OnCreated(blink::mojom::SharedWorkerCreationContextType
                      creation_context_type) override;
   void OnConnected(
       const std::vector<blink::mojom::WebFeature>& features_used) override;
-  void OnScriptLoadFailed() override;
+  void OnScriptLoadFailed(const std::string& error_message) override;
   void OnFeatureUsed(blink::mojom::WebFeature feature) override;
 
-  mojo::Binding<blink::mojom::SharedWorkerClient> binding_;
+  mojo::Receiver<blink::mojom::SharedWorkerClient> receiver_{this};
   bool on_created_received_ = false;
   bool on_connected_received_ = false;
   std::set<blink::mojom::WebFeature> on_connected_features_;
@@ -138,8 +168,6 @@ class MockSharedWorkerClient : public blink::mojom::SharedWorkerClient {
   blink::mojom::WebFeature on_feature_used_feature_ =
       blink::mojom::WebFeature();
   bool on_script_load_failed_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(MockSharedWorkerClient);
 };
 
 }  // namespace content

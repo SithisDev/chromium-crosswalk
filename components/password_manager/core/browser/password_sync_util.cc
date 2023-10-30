@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,9 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_form.h"
+#include "components/password_manager/core/common/password_manager_features.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/sync/base/user_selectable_type.h"
 #include "components/sync/driver/sync_user_settings.h"
@@ -14,11 +16,6 @@
 #include "google_apis/gaia/gaia_urls.h"
 #include "url/origin.h"
 
-#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
-#endif  // SYNC_PASSWORD_REUSE_DETECTION_ENABLED
-
-using autofill::PasswordForm;
 using url::Origin;
 
 namespace {
@@ -44,56 +41,26 @@ std::string GetSyncUsernameIfSyncingPasswords(
     return std::string();
   }
 
-  return identity_manager->GetPrimaryAccountInfo().email;
+  return identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSync)
+      .email;
 }
 
-bool IsSyncAccountCredential(const autofill::PasswordForm& form,
+bool IsSyncAccountCredential(const GURL& url,
+                             const std::u16string& username,
                              const syncer::SyncService* sync_service,
                              const signin::IdentityManager* identity_manager) {
-  if (!IsGaiaCredentialPage(form.signon_realm))
+  if (!url.DomainIs("google.com"))
     return false;
 
   // The empty username can mean that Chrome did not detect it correctly. For
   // reasons described in http://crbug.com/636292#c1, the username is suspected
   // to be the sync username unless proven otherwise.
-  if (form.username_value.empty())
+  if (username.empty())
     return true;
 
   return gaia::AreEmailsSame(
-      base::UTF16ToUTF8(form.username_value),
+      base::UTF16ToUTF8(username),
       GetSyncUsernameIfSyncingPasswords(sync_service, identity_manager));
-}
-
-bool ShouldSavePasswordHash(const autofill::PasswordForm& form,
-                            const signin::IdentityManager* identity_manager,
-                            PrefService* prefs) {
-#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
-  bool is_protected_credential_url =
-      gaia::IsGaiaSignonRealm(GURL(form.signon_realm)) ||
-      form.signon_realm == kGoogleChangePasswordSignonRealm ||
-      safe_browsing::MatchesPasswordProtectionLoginURL(form.origin, *prefs) ||
-      safe_browsing::MatchesPasswordProtectionChangePasswordURL(form.origin,
-                                                                *prefs);
-
-  if (!is_protected_credential_url)
-    return false;
-
-  std::string sync_email = identity_manager->GetPrimaryAccountInfo().email;
-  std::string username = base::UTF16ToUTF8(form.username_value);
-
-  if (sync_email.empty() || username.empty())
-    return false;
-
-  // Add @domain.name to the username if it is absent.
-  std::string email =
-      username + (username.find('@') == std::string::npos
-                      ? "@" + gaia::ExtractDomainName(sync_email)
-                      : std::string());
-
-  return email == sync_email;
-#else
-  return false;
-#endif  // SYNC_PASSWORD_REUSE_DETECTION_ENABLED
 }
 
 bool IsSyncAccountEmail(const std::string& username,
@@ -102,7 +69,9 @@ bool IsSyncAccountEmail(const std::string& username,
   if (!identity_manager)
     return false;
 
-  std::string sync_email = identity_manager->GetPrimaryAccountInfo().email;
+  std::string sync_email =
+      identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSync)
+          .email;
 
   if (sync_email.empty() || username.empty())
     return false;
@@ -114,19 +83,39 @@ bool IsSyncAccountEmail(const std::string& username,
 }
 
 bool IsGaiaCredentialPage(const std::string& signon_realm) {
-  return gaia::IsGaiaSignonRealm(GURL(signon_realm)) ||
-         signon_realm == kGoogleChangePasswordSignonRealm;
+  const GURL signon_realm_url = GURL(signon_realm);
+  const GURL gaia_signon_realm_url =
+      GaiaUrls::GetInstance()->gaia_origin().GetURL();
+  return signon_realm_url == gaia_signon_realm_url ||
+         signon_realm_url == GURL(kGoogleChangePasswordSignonRealm);
 }
 
-bool ShouldSaveEnterprisePasswordHash(const autofill::PasswordForm& form,
+bool ShouldSaveEnterprisePasswordHash(const PasswordForm& form,
                                       const PrefService& prefs) {
-#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
-  return safe_browsing::MatchesPasswordProtectionLoginURL(form.origin, prefs) ||
-         safe_browsing::MatchesPasswordProtectionChangePasswordURL(form.origin,
-                                                                   prefs);
-#else
+  if (base::FeatureList::IsEnabled(features::kPasswordReuseDetectionEnabled)) {
+    return safe_browsing::MatchesPasswordProtectionLoginURL(form.url, prefs) ||
+           safe_browsing::MatchesPasswordProtectionChangePasswordURL(form.url,
+                                                                     prefs);
+  }
   return false;
-#endif  // SYNC_PASSWORD_REUSE_DETECTION_ENABLED
+}
+
+bool IsPasswordSyncEnabled(const syncer::SyncService* sync_service) {
+  return sync_service && sync_service->IsSyncFeatureEnabled() &&
+         sync_service->GetUserSettings()->GetSelectedTypes().Has(
+             syncer::UserSelectableType::kPasswords);
+}
+
+bool IsPasswordSyncActive(const syncer::SyncService* sync_service) {
+  return IsPasswordSyncEnabled(sync_service) &&
+         sync_service->GetActiveDataTypes().Has(syncer::PASSWORDS);
+}
+
+absl::optional<std::string> GetSyncingAccount(
+    const syncer::SyncService* sync_service) {
+  if (!sync_service || !IsPasswordSyncEnabled(sync_service))
+    return absl::nullopt;
+  return sync_service->GetAccountInfo().email;
 }
 
 }  // namespace sync_util

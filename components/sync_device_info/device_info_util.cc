@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,18 @@
 #include <algorithm>
 
 #include "base/strings/string_util.h"
-#include "components/sync/protocol/sync.pb.h"
+#include "base/time/time.h"
+#include "components/sync/protocol/device_info_specifics.pb.h"
 
 namespace syncer {
 
-using base::Time;
-using base::TimeDelta;
-using sync_pb::DeviceInfoSpecifics;
-
 const char DeviceInfoUtil::kClientTagPrefix[] = "DeviceInfo_";
-const TimeDelta DeviceInfoUtil::kPulseInterval = TimeDelta::FromDays(1);
-const TimeDelta DeviceInfoUtil::kActiveThreshold = TimeDelta::FromDays(14);
+const base::TimeDelta DeviceInfoUtil::kActiveThreshold = base::Days(14);
 
 namespace {
+
+// The delay between periodic updates to the entry corresponding to this device.
+const base::TimeDelta kPulseInterval = base::Days(1);
 
 base::TimeDelta Age(const base::Time last_update, const base::Time now) {
   // Don't allow negative age for things somehow updated in the future.
@@ -29,15 +28,22 @@ base::TimeDelta Age(const base::Time last_update, const base::Time now) {
 }  // namespace
 
 // static
+base::TimeDelta DeviceInfoUtil::GetPulseInterval() {
+  return kPulseInterval;
+}
+
+// static
 base::TimeDelta DeviceInfoUtil::CalculatePulseDelay(
     const base::Time last_update,
     const base::Time now) {
   // Don't allow negative delays for very stale data, use delay of 0.
-  return std::max(base::TimeDelta(), kPulseInterval - Age(last_update, now));
+  return std::max(base::TimeDelta(),
+                  GetPulseInterval() - Age(last_update, now));
 }
 
 // static
-bool DeviceInfoUtil::IsActive(const Time last_update, const Time now) {
+bool DeviceInfoUtil::IsActive(const base::Time last_update,
+                              const base::Time now) {
   return Age(last_update, now) < kActiveThreshold;
 }
 

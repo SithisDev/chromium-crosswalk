@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define CHROMEOS_LOGIN_LOGIN_STATE_LOGIN_STATE_H_
 
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
 
 namespace chromeos {
@@ -21,16 +20,15 @@ class COMPONENT_EXPORT(LOGIN_STATE) LoginState {
   };
 
   enum LoggedInUserType {
-    LOGGED_IN_USER_NONE,            // User is not logged in
-    LOGGED_IN_USER_REGULAR,         // A regular user is logged in
-    LOGGED_IN_USER_OWNER,           // The owner of the device is logged in
-    LOGGED_IN_USER_GUEST,           // A guest is logged in (i.e. incognito)
-    LOGGED_IN_USER_PUBLIC_ACCOUNT,  // A user is logged in to a public session.
-    LOGGED_IN_USER_PUBLIC_ACCOUNT_MANAGED,  // Public session v2.
-    LOGGED_IN_USER_SUPERVISED,              // A supervised user is logged in
-    LOGGED_IN_USER_KIOSK_APP,               // Is in kiosk app mode
-    LOGGED_IN_USER_ARC_KIOSK_APP,           // Is in ARC kiosk mode
-    LOGGED_IN_USER_CHILD                    // A child is logged in
+    LOGGED_IN_USER_NONE,     // User is not logged in
+    LOGGED_IN_USER_REGULAR,  // A regular user is logged in
+    LOGGED_IN_USER_OWNER,    // The owner of the device is logged in
+    LOGGED_IN_USER_GUEST,    // A guest is logged in (i.e. incognito)
+    // A user is logged in to a managed guest session ("Public Session v2").
+    LOGGED_IN_USER_PUBLIC_ACCOUNT,
+    LOGGED_IN_USER_KIOSK,  // Is in one of the kiosk modes -- Chrome App,
+                           // Arc or Web App
+    LOGGED_IN_USER_CHILD   // A child is logged in
   };
 
   class Observer {
@@ -47,6 +45,9 @@ class COMPONENT_EXPORT(LOGIN_STATE) LoginState {
   static void Shutdown();
   static LoginState* Get();
   static bool IsInitialized();
+
+  LoginState(const LoginState&) = delete;
+  LoginState& operator=(const LoginState&) = delete;
 
   // Add/remove observers.
   void AddObserver(Observer* observer);
@@ -79,11 +80,8 @@ class COMPONENT_EXPORT(LOGIN_STATE) LoginState {
   // Returns true if logged in to a public session.
   bool IsPublicSessionUser() const;
 
-  // Returns true if restrictions should be enabled for public session.
-  bool ArePublicSessionRestrictionsEnabled() const;
-
-  // Returns true if logged in as a kiosk app.
-  bool IsKioskApp() const;
+  // Returns true if logged in as a kiosk session.
+  bool IsKioskSession() const;
 
   // Returns true if a child user is logged in.
   bool IsChildUser() const;
@@ -94,10 +92,6 @@ class COMPONENT_EXPORT(LOGIN_STATE) LoginState {
   // Returns true if the user is an authenticated user (i.e. the user is not
   // using an anonymous session like public or guest session)
   bool IsUserAuthenticated() const;
-
-  // Returns true if the user is authenticated by logging into Google account
-  // (i.e. not using an anonymous nor supervised session).
-  bool IsUserGaiaAuthenticated() const;
 
   void set_always_logged_in(bool always_logged_in) {
     always_logged_in_ = always_logged_in;
@@ -120,10 +114,13 @@ class COMPONENT_EXPORT(LOGIN_STATE) LoginState {
   // default running on a Linux desktop without flags and test cases. To test
   // behaviors with a specific login state, call set_always_logged_in(false).
   bool always_logged_in_;
-
-  DISALLOW_COPY_AND_ASSIGN(LoginState);
 };
 
 }  // namespace chromeos
+
+// TODO(https://crbug.com/1164001): remove when the migration is finished.
+namespace ash {
+using ::chromeos::LoginState;
+}
 
 #endif  // CHROMEOS_LOGIN_LOGIN_STATE_LOGIN_STATE_H_

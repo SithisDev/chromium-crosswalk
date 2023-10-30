@@ -1,15 +1,20 @@
-// Copyright (c) 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_POLICY_CORE_COMMON_CLOUD_CLOUD_POLICY_UTIL_H_
 #define COMPONENTS_POLICY_CORE_COMMON_CLOUD_CLOUD_POLICY_UTIL_H_
 
+#include <memory>
 #include <string>
 
 #include "components/policy/policy_export.h"
-#include "components/policy/proto/device_management_backend.pb.h"
 #include "components/version_info/channel.h"
+
+namespace enterprise_management {
+class BrowserDeviceIdentifier;
+enum Channel : int;
+}  // namespace enterprise_management
 
 namespace policy {
 
@@ -33,6 +38,22 @@ POLICY_EXPORT std::string GetOSUsername();
 // Converts |version_info::Channel| to |enterprise_management::Channel|.
 POLICY_EXPORT enterprise_management::Channel ConvertToProtoChannel(
     version_info::Channel channel);
+
+// Returns the name of the device. This is equivalent to GetMachineName on
+// non-CrOS platforms and returns the serial number of the device on CrOS.
+POLICY_EXPORT std::string GetDeviceName();
+
+// Returns the browser device identifier for non-CrOS platforms. It includes
+// several identifiers we collect from the device.
+POLICY_EXPORT std::unique_ptr<enterprise_management::BrowserDeviceIdentifier>
+GetBrowserDeviceIdentifier();
+
+// Returns true if the given policy type corresponds to the machine-level user
+// cloud policy type of the current platform.
+POLICY_EXPORT bool IsMachineLevelUserCloudPolicyType(const std::string& type);
+
+// Returns the machine-level user cloud policy type for the current platform.
+POLICY_EXPORT std::string GetMachineLevelUserCloudPolicyTypeForCurrentOS();
 
 }  // namespace policy
 

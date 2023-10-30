@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,17 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
+#include "base/strings/escape.h"
 #include "base/strings/stringprintf.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/quirks/quirks_manager.h"
 #include "components/version_info/version_info.h"
-#include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace quirks {
 
@@ -55,16 +57,15 @@ bool WriteIccFile(const base::FilePath file_path, const std::string& data) {
 
 QuirksClient::QuirksClient(int64_t product_id,
                            const std::string& display_name,
-                           const RequestFinishedCallback& on_request_finished,
+                           RequestFinishedCallback on_request_finished,
                            QuirksManager* manager)
     : product_id_(product_id),
       display_name_(display_name),
-      on_request_finished_(on_request_finished),
+      on_request_finished_(std::move(on_request_finished)),
       manager_(manager),
       icc_path_(manager->delegate()->GetDisplayProfileDirectory().Append(
           IdToFileName(product_id))),
-      backoff_entry_(&kDefaultBackoffPolicy),
-      weak_ptr_factory_(this) {}
+      backoff_entry_(&kDefaultBackoffPolicy) {}
 
 QuirksClient::~QuirksClient() {}
 
@@ -77,8 +78,8 @@ void QuirksClient::StartDownload() {
       kQuirksUrlFormat, IdToHexString(product_id_).c_str(), major_version);
 
   if (!display_name_.empty()) {
-    url +=
-        "display_name=" + net::EscapeQueryParamValue(display_name_, true) + "&";
+    url += "display_name=" + base::EscapeQueryParamValue(display_name_, true) +
+           "&";
   }
 
   VLOG(2) << "Preparing to download\n  " << url << "\nto file "
@@ -90,7 +91,7 @@ void QuirksClient::StartDownload() {
   resource_request->url = GURL(url);
   resource_request->load_flags =
       net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE;
-  resource_request->allow_credentials = false;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("quirks_display_fetcher", R"(
@@ -165,13 +166,14 @@ void QuirksClient::OnDownloadComplete(
 
   base::PostTaskAndReplyWithResult(
       manager_->task_runner(), FROM_HERE,
-      base::Bind(&WriteIccFile, icc_path_, data),
-      base::Bind(&QuirksClient::Shutdown, weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&WriteIccFile, icc_path_, data),
+      base::BindOnce(&QuirksClient::Shutdown, weak_ptr_factory_.GetWeakPtr()));
 }
 
 void QuirksClient::Shutdown(bool success) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  on_request_finished_.Run(success ? icc_path_ : base::FilePath(), true);
+  std::move(on_request_finished_)
+      .Run(success ? icc_path_ : base::FilePath(), true);
   manager_->ClientFinished(this);
 }
 

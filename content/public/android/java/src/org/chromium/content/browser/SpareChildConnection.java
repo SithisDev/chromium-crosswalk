@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@ package org.chromium.content.browser;
 
 import android.content.Context;
 import android.os.Bundle;
-import android.support.annotation.NonNull;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.process_launcher.ChildConnectionAllocator;
 import org.chromium.base.process_launcher.ChildProcessConnection;
 
@@ -57,7 +58,7 @@ public class SpareChildConnection {
                     @Override
                     public void onChildStartFailed(ChildProcessConnection connection) {
                         assert LauncherThread.runningOnLauncherThread();
-                        Log.e(TAG, "Failed to warm up the spare sandbox service");
+                        Log.w(TAG, "Failed to warm up the spare sandbox service");
                         if (mConnectionServiceCallback != null) {
                             mConnectionServiceCallback.onChildStartFailed(connection);
                         }

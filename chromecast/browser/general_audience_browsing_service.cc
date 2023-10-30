@@ -1,15 +1,14 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chromecast/browser/general_audience_browsing_service.h"
 
-#include "base/logging.h"
+#include "chromecast/browser/system_connector.h"
 #include "chromecast/common/mojom/constants.mojom.h"
-#include "components/policy/core/browser/url_util.h"
 #include "components/safe_search_api/safe_search/safe_search_url_checker_client.h"
 #include "components/safe_search_api/url_checker.h"
-#include "content/public/browser/system_connector.h"
+#include "components/url_matcher/url_util.h"
 #include "net/base/net_errors.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -56,17 +55,16 @@ net::NetworkTrafficAnnotationTag CreateNetworkTrafficAnnotationTag() {
 }  // namespace
 
 GeneralAudienceBrowsingService::GeneralAudienceBrowsingService(
+    external_service_support::ExternalConnector* connector,
     scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory)
-    : shared_url_loader_factory_(shared_url_loader_factory),
-      general_audience_browsing_api_key_observer_binding_(this) {
-  mojom::GeneralAudienceBrowsingAPIKeyObserverPtr observer_ptr;
-  general_audience_browsing_api_key_observer_binding_.Bind(
-      mojo::MakeRequest(&observer_ptr));
-  content::GetSystemConnector()->BindInterface(
-      mojom::kChromecastServiceName,
-      &general_audience_browsing_api_key_subject_ptr_);
-  general_audience_browsing_api_key_subject_ptr_
-      ->AddGeneralAudienceBrowsingAPIKeyObserver(std::move(observer_ptr));
+    : shared_url_loader_factory_(shared_url_loader_factory) {
+  connector->BindInterface(mojom::kChromecastServiceName,
+                           general_audience_browsing_api_key_subject_remote_
+                               .BindNewPipeAndPassReceiver());
+  general_audience_browsing_api_key_subject_remote_
+      ->AddGeneralAudienceBrowsingAPIKeyObserver(
+          general_audience_browsing_api_key_observer_receiver_
+              .BindNewPipeAndPassRemote());
 }
 
 GeneralAudienceBrowsingService::~GeneralAudienceBrowsingService() = default;
@@ -78,7 +76,7 @@ bool GeneralAudienceBrowsingService::CheckURL(const GURL& url,
   }
 
   return safe_search_url_checker_->CheckURL(
-      policy::url_util::Normalize(url),
+      url_matcher::util::Normalize(url),
       base::BindOnce(&CheckURLCallbackWrapper, std::move(callback)));
 }
 
@@ -105,7 +103,7 @@ GeneralAudienceBrowsingService::CreateSafeSearchURLChecker() {
   return std::make_unique<safe_search_api::URLChecker>(
       std::make_unique<safe_search_api::SafeSearchURLCheckerClient>(
           shared_url_loader_factory_, CreateNetworkTrafficAnnotationTag(),
-          std::string(), api_key_),
+          api_key_),
       /* cache size */ 1000);
 }
 

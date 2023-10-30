@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,11 @@
 
 #include <map>
 
-#include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
 #include "components/nacl/browser/nacl_broker_host_win.h"
-#include "services/service_manager/public/mojom/service.mojom.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 
 namespace nacl {
 
@@ -25,13 +24,16 @@ class NaClBrokerService {
   // Returns the NaClBrokerService singleton.
   static NaClBrokerService* GetInstance();
 
+  NaClBrokerService(const NaClBrokerService&) = delete;
+  NaClBrokerService& operator=(const NaClBrokerService&) = delete;
+
   // Can be called several times, must be called before LaunchLoader.
   bool StartBroker();
 
   // Send a message to the broker process, causing it to launch
   // a Native Client loader process.
   bool LaunchLoader(base::WeakPtr<NaClProcessHost> client,
-                    service_manager::mojom::ServiceRequest service_request);
+                    mojo::ScopedMessagePipeHandle ipc_channel_handle);
 
   // Called by NaClBrokerHost to notify the service that a loader was launched.
   void OnLoaderLaunched(int launch_id, base::Process process);
@@ -64,8 +66,6 @@ class NaClBrokerService {
   int next_launch_id_ = 0;
   PendingLaunchesMap pending_launches_;
   PendingDebugExceptionHandlersMap pending_debuggers_;
-
-  DISALLOW_COPY_AND_ASSIGN(NaClBrokerService);
 };
 
 }  // namespace nacl

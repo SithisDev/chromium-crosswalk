@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,9 @@
 class GURL;
 
 namespace signin {
+
+// Size of |AccountInfo| image.
+extern const int kAccountInfoImageSize;
 
 // Given an image URL this function builds a new URL, appending passed
 // |image_size| and |no_silhouette| parameters. |old_url| must be valid.

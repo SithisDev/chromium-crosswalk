@@ -1,10 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/sessions/content/content_serialized_navigation_builder.h"
 
-#include "base/logging.h"
+#include <string>
+
+#include "base/check_op.h"
 #include "components/sessions/content/content_record_password_state.h"
 #include "components/sessions/content/content_serialized_navigation_driver.h"
 #include "components/sessions/content/extended_info_handler.h"
@@ -14,18 +16,20 @@
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/navigation_entry_restore_context.h"
 #include "content/public/browser/replaced_navigation_entry_data.h"
-#include "content/public/common/page_state.h"
 #include "content/public/common/referrer.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "third_party/blink/public/common/page_state/page_state.h"
 
 namespace sessions {
 namespace {
 
-base::Optional<SerializedNavigationEntry::ReplacedNavigationEntryData>
+absl::optional<SerializedNavigationEntry::ReplacedNavigationEntryData>
 ConvertReplacedEntryData(
-    const base::Optional<content::ReplacedNavigationEntryData>& input_data) {
+    const absl::optional<content::ReplacedNavigationEntryData>& input_data) {
   if (!input_data.has_value())
-    return base::nullopt;
+    return absl::nullopt;
 
   SerializedNavigationEntry::ReplacedNavigationEntryData output_data;
   output_data.first_committed_url = input_data->first_committed_url;
@@ -68,7 +72,6 @@ ContentSerializedNavigationBuilder::FromNavigationEntry(
   navigation.task_id_ = NavigationTaskId::Get(entry)->id();
   navigation.parent_task_id_ = NavigationTaskId::Get(entry)->parent_id();
   navigation.root_task_id_ = NavigationTaskId::Get(entry)->root_id();
-  navigation.children_task_ids_ = NavigationTaskId::Get(entry)->children_ids();
 
   for (const auto& handler_entry :
        ContentSerializedNavigationDriver::GetInstance()
@@ -87,20 +90,24 @@ ContentSerializedNavigationBuilder::FromNavigationEntry(
 std::unique_ptr<content::NavigationEntry>
 ContentSerializedNavigationBuilder::ToNavigationEntry(
     const SerializedNavigationEntry* navigation,
-    content::BrowserContext* browser_context) {
-  // TODO(lukasza): https://crbug.com/976055: |initiator_origin| should be
-  // persisted across session restore.
-  base::Optional<url::Origin> initiator_origin = base::nullopt;
+    content::BrowserContext* browser_context,
+    content::NavigationEntryRestoreContext* restore_context) {
+  DCHECK(navigation);
+  DCHECK(browser_context);
+  DCHECK(restore_context);
 
-  network::mojom::ReferrerPolicy policy =
-      static_cast<network::mojom::ReferrerPolicy>(navigation->referrer_policy_);
+  // The initial values of the NavigationEntry are only temporary - they
+  // will get cloberred by one of the SetPageState calls below.
+  //
+  // This means that things like |navigation->referrer_url| are ignored
+  // in favor of using the data stored in |navigation->encoded_page_state|.
+  GURL temporary_url;
+  content::Referrer temporary_referrer;
+  absl::optional<url::Origin> temporary_initiator_origin;
+
   std::unique_ptr<content::NavigationEntry> entry(
       content::NavigationController::CreateNavigationEntry(
-          navigation->virtual_url_,
-          content::Referrer::SanitizeForRequest(
-              navigation->virtual_url_,
-              content::Referrer(navigation->referrer_url_, policy)),
-          initiator_origin,
+          temporary_url, temporary_referrer, temporary_initiator_origin,
           // Use a transition type of reload so that we don't incorrectly
           // increase the typed count.
           ui::PAGE_TRANSITION_RELOAD, false,
@@ -108,9 +115,48 @@ ContentSerializedNavigationBuilder::ToNavigationEntry(
           std::string(), browser_context,
           nullptr /* blob_url_loader_factory */));
 
+  // In some cases the |encoded_page_state| might be empty - we
+  // need to gracefully handle such data when it is deserialized.
+  //
+  // One case is tests for "foreign" session restore entries, such as
+  // SessionRestoreTest.RestoreForeignTab.  We hypothesise that old session
+  // restore entries might also contain an empty |encoded_page_state|.
+  if (navigation->encoded_page_state_.empty()) {
+    // Ensure that the deserialized/restored content::NavigationEntry (and
+    // the content::FrameNavigationEntry underneath) has a valid PageState.
+    entry->SetPageState(
+        blink::PageState::CreateFromURL(navigation->virtual_url_),
+        restore_context);
+
+    // The |navigation|-based referrer set below might be inconsistent with the
+    // referrer embedded inside the PageState set above.  Nevertheless, to
+    // minimize changes to behavior of old session restore entries, we restore
+    // the deserialized referrer here.
+    //
+    // TODO(lukasza): Consider including the |deserialized_referrer| in the
+    // PageState set above + drop the SetReferrer call below.  This will
+    // slightly change the legacy behavior, but will make PageState and
+    // Referrer consistent.
+    content::Referrer referrer(
+        navigation->referrer_url(),
+        content::Referrer::ConvertToPolicy(navigation->referrer_policy()));
+    entry->SetReferrer(referrer);
+  } else {
+    // Note that PageState covers some of the values inside |navigation| (e.g.
+    // URL, Referrer).  Calling SetPageState will clobber these values in
+    // content::NavigationEntry (and FrameNavigationEntry(s) below).
+    entry->SetPageState(blink::PageState::CreateFromEncodedData(
+                            navigation->encoded_page_state_),
+                        restore_context);
+
+    // |navigation|-level referrer information is redundant wrt PageState, but
+    // they should be consistent / in-sync.
+    DCHECK_EQ(navigation->referrer_url(), entry->GetReferrer().url);
+    DCHECK_EQ(navigation->referrer_policy(),
+              static_cast<int>(entry->GetReferrer().policy));
+  }
+
   entry->SetTitle(navigation->title_);
-  entry->SetPageState(content::PageState::CreateFromEncodedData(
-      navigation->encoded_page_state_));
   entry->SetHasPostData(navigation->has_post_data_);
   entry->SetPostID(navigation->post_id_);
   entry->SetOriginalRequestURL(navigation->original_request_url_);
@@ -118,6 +164,7 @@ ContentSerializedNavigationBuilder::ToNavigationEntry(
   entry->SetTimestamp(navigation->timestamp_);
   entry->SetHttpStatusCode(navigation->http_status_code_);
   entry->SetRedirectChain(navigation->redirect_chain_);
+  entry->SetVirtualURL(navigation->virtual_url_);
   sessions::NavigationTaskId* navigation_task_id =
       sessions::NavigationTaskId::Get(entry.get());
   navigation_task_id->set_id(navigation->task_id());
@@ -138,10 +185,9 @@ ContentSerializedNavigationBuilder::ToNavigationEntry(
                                                entry.get());
   }
 
-  // These fields should have default values.
+  // This field should have the default value.
   DCHECK_EQ(SerializedNavigationEntry::STATE_INVALID,
             navigation->blocked_state_);
-  DCHECK_EQ(0u, navigation->content_pack_categories_.size());
 
   return entry;
 }
@@ -151,10 +197,14 @@ std::vector<std::unique_ptr<content::NavigationEntry>>
 ContentSerializedNavigationBuilder::ToNavigationEntries(
     const std::vector<SerializedNavigationEntry>& navigations,
     content::BrowserContext* browser_context) {
+  std::unique_ptr<content::NavigationEntryRestoreContext> restore_context =
+      content::NavigationEntryRestoreContext::Create();
   std::vector<std::unique_ptr<content::NavigationEntry>> entries;
   entries.reserve(navigations.size());
-  for (const auto& navigation : navigations)
-    entries.push_back(ToNavigationEntry(&navigation, browser_context));
+  for (const auto& navigation : navigations) {
+    entries.push_back(
+        ToNavigationEntry(&navigation, browser_context, restore_context.get()));
+  }
   return entries;
 }
 

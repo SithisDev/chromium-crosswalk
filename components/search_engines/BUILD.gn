@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,6 +13,8 @@ static_library("search_engines") {
   sources = [
     "default_search_manager.cc",
     "default_search_manager.h",
+    "default_search_policy_handler.cc",
+    "default_search_policy_handler.h",
     "keyword_table.cc",
     "keyword_table.h",
     "keyword_web_data_service.cc",
@@ -42,14 +44,18 @@ static_library("search_engines") {
     "template_url_service.h",
     "template_url_service_client.h",
     "template_url_service_observer.h",
+    "template_url_starter_pack_data.cc",
+    "template_url_starter_pack_data.h",
     "util.cc",
     "util.h",
   ]
 
   public_deps = [
+    ":prepopulated_engines",
     ":search_engine_type",
+    ":search_engine_utils",
     "//base",
-    "//components/google/core/browser",
+    "//components/google/core/common",
     "//components/keyed_service/core",
     "//components/prefs",
     "//components/sync",
@@ -58,21 +64,25 @@ static_library("search_engines") {
   ]
 
   deps = [
-    ":prepopulated_engines",
     "//base:i18n",
     "//components/country_codes",
-    "//components/history/core/browser",
+    "//components/database_utils",
     "//components/infobars/core",
+    "//components/lens:lens",
+    "//components/omnibox/common",
+    "//components/policy:generated",
+    "//components/policy/core/browser",
     "//components/pref_registry",
-    "//components/rappor",
+    "//components/search_provider_logos:switches",
     "//components/strings",
     "//components/url_formatter",
     "//components/variations",
     "//google_apis",
     "//net",
+    "//services/data_decoder/public/cpp",
     "//services/network/public/cpp",
+    "//services/network/public/mojom",
     "//sql",
-    "//third_party/libxml",
     "//third_party/metrics_proto",
     "//ui/base",
     "//ui/gfx",
@@ -88,25 +98,37 @@ static_library("search_engines") {
       "android/template_url_service_android.h",
     ]
 
-    deps += [ "//components/search_engines/android:jni_headers" ]
-  }
-
-  if (!is_ios) {
-    sources += [
-      "default_search_policy_handler.cc",
-      "default_search_policy_handler.h",
-    ]
     deps += [
-      "//components/policy:generated",
-      "//components/policy/core/browser",
+      "//components/search_engines/android:jni_headers",
+      "//url:gurl_android",
+    ]
+  }
+}
+
+source_set("search_engine_utils") {
+  sources = [
+    "search_engine_utils.cc",
+    "search_engine_utils.h",
+  ]
+
+  public_deps = [
+    ":prepopulated_engines",
+    ":search_engine_type",
+    "//components/google/core/common",
+  ]
+
+  deps = [ "//url" ]
+
+  if (is_android) {
+    deps += [
+      "//components/search_engines/android:jni_headers",
+      "//url:gurl_android",
     ]
   }
 }
 
 source_set("search_engine_type") {
-  sources = [
-    "search_engine_type.h",
-  ]
+  sources = [ "search_engine_type.h" ]
 }
 
 static_library("test_support") {
@@ -134,6 +156,7 @@ source_set("unit_tests") {
     "search_host_to_urls_map_unittest.cc",
     "template_url_data_unittest.cc",
     "template_url_prepopulate_data_unittest.cc",
+    "template_url_service_unittest.cc",
     "template_url_service_util_unittest.cc",
     "template_url_unittest.cc",
   ]
@@ -144,11 +167,13 @@ source_set("unit_tests") {
     "//base",
     "//base/test:test_support",
     "//components/country_codes",
-    "//components/google/core/browser",
+    "//components/google/core/common",
+    "//components/omnibox/common",
     "//components/pref_registry:pref_registry",
     "//components/prefs",
     "//components/sync:test_support",
     "//components/sync_preferences:test_support",
+    "//components/variations:test_support",
     "//components/webdata/common",
     "//net:net",
     "//services/network:test_support",
@@ -175,15 +200,11 @@ json_to_struct("prepopulated_engines") {
   source = "prepopulated_engines.json"
   schema_file = "prepopulated_engines_schema.json"
   namespace = "TemplateURLPrepopulateData"
-  deps = [
-    ":search_engine_type",
-  ]
+  deps = [ ":search_engine_type" ]
 }
 
 if (is_android) {
   java_cpp_enum("search_engine_type_java") {
-    sources = [
-      "search_engine_type.h",
-    ]
+    sources = [ "search_engine_type.h" ]
   }
 }

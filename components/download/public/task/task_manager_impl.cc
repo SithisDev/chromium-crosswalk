@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,11 +49,10 @@ void TaskManagerImpl::UnscheduleTask(DownloadTaskType task_type) {
 
 void TaskManagerImpl::OnStartScheduledTask(DownloadTaskType task_type,
                                            TaskFinishedCallback callback) {
-  DCHECK(pending_task_params_.find(task_type) != pending_task_params_.end());
-  current_task_params_[task_type] = pending_task_params_[task_type];
-  pending_task_params_.erase(task_type);
+  if (pending_task_params_.find(task_type) != pending_task_params_.end())
+    current_task_params_[task_type] = pending_task_params_[task_type];
 
-  DCHECK(!IsRunningTask(task_type));
+  pending_task_params_.erase(task_type);
   task_finished_callbacks_[task_type] = std::move(callback);
 }
 

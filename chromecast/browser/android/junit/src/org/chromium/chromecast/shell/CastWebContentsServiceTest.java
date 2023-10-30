@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,7 @@ import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.PatternMatcher;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -90,6 +91,12 @@ public class CastWebContentsServiceTest {
             return mMediaSessionImpl;
         });
         mShadowService = Shadows.shadowOf(mService);
+    }
+
+    @After
+    public void tearDown() {
+        mServiceLifecycle.unbind();
+        mServiceLifecycle.destroy();
     }
 
     @Test

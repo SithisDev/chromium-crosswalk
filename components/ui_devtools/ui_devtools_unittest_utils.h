@@ -1,11 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_UI_DEVTOOLS_UI_DEVTOOLS_UNITTEST_UTILS_H_
 #define COMPONENTS_UI_DEVTOOLS_UI_DEVTOOLS_UNITTEST_UTILS_H_
 
-#include "components/ui_devtools/Protocol.h"
+#include "components/ui_devtools/protocol.h"
 #include "components/ui_devtools/ui_element_delegate.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -14,6 +14,10 @@ namespace ui_devtools {
 class FakeFrontendChannel : public protocol::FrontendChannel {
  public:
   FakeFrontendChannel();
+
+  FakeFrontendChannel(const FakeFrontendChannel&) = delete;
+  FakeFrontendChannel& operator=(const FakeFrontendChannel&) = delete;
+
   ~FakeFrontendChannel() override;
 
   int CountProtocolNotificationMessageStartsWith(const std::string& message);
@@ -25,21 +29,19 @@ class FakeFrontendChannel : public protocol::FrontendChannel {
   }
 
   // FrontendChannel:
-  void sendProtocolResponse(
+  void SendProtocolResponse(
       int callId,
       std::unique_ptr<protocol::Serializable> message) override {}
-  void flushProtocolNotifications() override {}
-  void fallThrough(int call_id,
-                   const std::string& method,
-                   const std::string& message) override {}
-  void sendProtocolNotification(
+  void FlushProtocolNotifications() override {}
+  void FallThrough(int call_id,
+                   crdtp::span<uint8_t> method,
+                   crdtp::span<uint8_t> message) override {}
+  void SendProtocolNotification(
       std::unique_ptr<protocol::Serializable> message) override;
 
  private:
   std::vector<std::string> protocol_notification_messages_;
   bool allow_notifications_ = true;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeFrontendChannel);
 };
 
 class MockUIElementDelegate : public UIElementDelegate {

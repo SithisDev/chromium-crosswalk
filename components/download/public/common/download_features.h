@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,14 @@
 namespace download {
 namespace features {
 
+// The Finch parameter to control whether download later dialog should show the
+// date time picker option.
+constexpr char kDownloadLaterShowDateTimePicker[] = "show_date_time_picker";
+
+// The Finch parameter to control the minimum download file size to show the
+// download later dialog.
+constexpr char kDownloadLaterMinFileSizeKb[] = "min_file_size_kb";
+
 // Whether offline content provider should be used for the downloads UI..
 COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
     kUseDownloadOfflineContentProvider;
@@ -23,19 +31,17 @@ COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
 // Whether a download can be handled by parallel jobs.
 COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature kParallelDownloading;
 
-// Whether metadata for new in-progress downloads will be be stored in download
-// DB, rather than history DB.
-COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
-    kDownloadDBForNewDownloads;
+// Whether to enable download later feature.
+COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature kDownloadLater;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 // Whether download expiration date will be refreshed on resumption.
 COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature kRefreshExpirationDate;
-#endif
 
-// Whether concurrent downloads to the same target path should be allowed.
+// Whether to enable smart suggestion for large downloads
 COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
-    kPreventDownloadsWithSamePath;
+    kSmartSuggestionForLargeDownloads;
+#endif
 
 // Whether in-progress download manager will be used to initialize download
 // service.
@@ -46,11 +52,6 @@ COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
 COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
     kAllowDownloadResumptionWithoutStrongValidators;
 
-// Whether parallel requests are used if server response doesn't reveal range
-// support.
-COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
-    kUseParallelRequestsForUnknwonRangeSupport;
-
 // Whether parallel download is used for HTTP2 connections.
 COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
     kUseParallelRequestsForHTTP2;
@@ -58,7 +59,29 @@ COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
 // Whether parallel download is used for QUIC connections.
 COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
     kUseParallelRequestsForQUIC;
+
+// Whether to delete expired download.
+COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature kDeleteExpiredDownloads;
+
+// Whether to delete downloads that are overwritten by others.
+COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
+    kDeleteOverwrittenDownloads;
+
+// Whether to allow changing the size of file buffer.
+COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature
+    kAllowFileBufferSizeControl;
+
+// Arbitrary range request support for download system.
+COMPONENTS_DOWNLOAD_EXPORT extern const base::Feature kDownloadRange;
 }  // namespace features
+
+namespace switches {
+
+// If set, show the download later dialog without the requirement of being on
+// cellular network.
+COMPONENTS_DOWNLOAD_EXPORT extern const char kDownloadLaterDebugOnWifi[];
+
+}  // namespace switches
 
 }  // namespace download
 

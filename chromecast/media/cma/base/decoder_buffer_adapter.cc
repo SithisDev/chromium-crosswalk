@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,11 +82,6 @@ const CastDecryptConfig* DecoderBufferAdapter::decrypt_config() const {
 
 bool DecoderBufferAdapter::end_of_stream() const {
   return buffer_->end_of_stream();
-}
-
-scoped_refptr<::media::DecoderBuffer>
-DecoderBufferAdapter::ToMediaBuffer() const {
-  return buffer_;
 }
 
 }  // namespace media

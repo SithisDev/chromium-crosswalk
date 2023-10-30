@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,27 +10,32 @@
 #include <string>
 #include <vector>
 
-#include "base/lazy_instance.h"
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/containers/flat_set.h"
+#include "base/dcheck_is_on.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
+#include "base/notreached.h"
 #include "base/process/process.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/system/sys_info.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/scoped_thread_priority.h"
+#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "components/prefs/pref_registry_simple.h"
-#include "components/prefs/pref_service.h"
-#include "components/startup_metric_utils/browser/pref_names.h"
 #include "components/version_info/version_info.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #include <winternl.h>
 #include "base/win/win_util.h"
 #endif
+
+// Data from deprecated UMA histograms available at
+// https://docs.google.com/document/d/18uYnVwLly7C_ckGsDbqdNs-AgAAt3AmUmn7wYLkyBN0/edit?usp=sharing
 
 namespace startup_metric_utils {
 
@@ -42,17 +47,13 @@ volatile bool g_main_window_startup_interrupted = false;
 
 base::TimeTicks g_process_creation_ticks;
 
-base::TimeTicks g_browser_main_entry_point_ticks;
+base::TimeTicks g_application_start_ticks;
 
-base::TimeTicks g_renderer_main_entry_point_ticks;
-
-base::TimeTicks g_browser_exe_main_entry_point_ticks;
+base::TimeTicks g_chrome_main_entry_ticks;
 
 base::TimeTicks g_message_loop_start_ticks;
 
 base::TimeTicks g_browser_window_display_ticks;
-
-base::TimeDelta g_browser_open_tabs_duration = base::TimeDelta::Max();
 
 // An enumeration of startup temperatures. This must be kept in sync with the
 // UMA StartupType enumeration defined in histograms.xml.
@@ -66,34 +67,34 @@ enum StartupTemperature {
   // The startup type couldn't quite be classified as warm or cold, but rather
   // was somewhere in between.
   LUKEWARM_STARTUP_TEMPERATURE = 2,
+  // Startup temperature wasn't yet determined, or could not be determined.
+  UNDETERMINED_STARTUP_TEMPERATURE = 3,
   // This must be after all meaningful values. All new values should be added
   // above this one.
   STARTUP_TEMPERATURE_COUNT,
-  // Startup temperature wasn't yet determined.
-  UNDETERMINED_STARTUP_TEMPERATURE
 };
 
 StartupTemperature g_startup_temperature = UNDETERMINED_STARTUP_TEMPERATURE;
 
-constexpr int kUndeterminedStartupsWithCurrentVersion = 0;
-int g_startups_with_current_version = kUndeterminedStartupsWithCurrentVersion;
-
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 // These values are taken from the Startup.BrowserMessageLoopStartHardFaultCount
-// histogram. If the cold start histogram starts looking strongly bimodal it may
-// be because the binary/resource sizes have grown significantly larger than
-// when these values were set. In this case the new values need to be chosen
-// from the original histogram.
+// histogram. The latest revision landed on <5 and >3500 for a good split
+// of warm/cold. In between being considered "lukewarm". Full analysis @
+// https://docs.google.com/document/d/1haXFN1cQ6XE-NfhKgww-rOP-Wi-gK6AczP3gT4M5_kI
+// These values should be reconsidered if either .WarmStartup or .ColdStartup
+// distributions of a suffixed histogram becomes unexplainably bimodal.
 //
 // Maximum number of hard faults tolerated for a startup to be classified as a
-// warm start. Set at roughly the 40th percentile of the HardFaultCount
-// histogram.
+// warm start.
 constexpr uint32_t kWarmStartHardFaultCountThreshold = 5;
-// Minimum number of hard faults expected for a startup to be classified as a
-// cold start. Set at roughly the 60th percentile of the HardFaultCount
-// histogram.
-constexpr uint32_t kColdStartHardFaultCountThreshold = 1200;
+// Minimum number of hard faults (of 4KB pages) expected for a startup to be
+// classified as a cold start. The right value for this seems to be between 10%
+// and 15% of chrome.dll's size (from anecdata of the two times we did this
+// analysis... it was 1200 in M47 back when chrome.dll was 35MB (32-bit and
+// split from chrome_child.dll) and was made 3500 in M81 when chrome.dll was
+// 126MB).
+constexpr uint32_t kColdStartHardFaultCountThreshold = 3500;
 
 // The struct used to return system process information via the NT internal
 // QuerySystemInformation call. This is partially documented at
@@ -125,17 +126,15 @@ struct SYSTEM_PROCESS_INFORMATION_EX {
 typedef NTSTATUS (WINAPI *NtQuerySystemInformationPtr)(
     SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 
-// Gets the hard fault count of the current process through |hard_fault_count|.
-// Returns true on success.
-bool GetHardFaultCountForCurrentProcess(uint32_t* hard_fault_count) {
-  DCHECK(hard_fault_count);
-
+// Returns the hard fault count of the current process, or nullopt if it can't
+// be determined.
+absl::optional<uint32_t> GetHardFaultCountForCurrentProcess() {
   // Get the function pointer.
   static const NtQuerySystemInformationPtr query_sys_info =
       reinterpret_cast<NtQuerySystemInformationPtr>(::GetProcAddress(
           GetModuleHandle(L"ntdll.dll"), "NtQuerySystemInformation"));
   if (query_sys_info == nullptr)
-    return false;
+    return absl::nullopt;
 
   // The output of this system call depends on the number of threads and
   // processes on the entire system, and this can change between calls. Retry
@@ -144,19 +143,42 @@ bool GetHardFaultCountForCurrentProcess(uint32_t* hard_fault_count) {
   //       and threads running on the system. The initial guess suffices for
   //       ~100s of processes and ~1000s of threads.
   std::vector<uint8_t> buffer(32 * 1024);
-  for (size_t tries = 0; tries < 3; ++tries) {
+  constexpr int kMaxNumBufferResize = 2;
+  int num_buffer_resize = 0;
+  for (;;) {
     ULONG return_length = 0;
     const NTSTATUS status =
         query_sys_info(SystemProcessInformation, buffer.data(),
                        static_cast<ULONG>(buffer.size()), &return_length);
-    // Insufficient space in the buffer.
-    if (return_length > buffer.size()) {
-      buffer.resize(return_length);
-      continue;
-    }
-    if (NT_SUCCESS(status) && return_length <= buffer.size())
+
+    // NtQuerySystemInformation succeeded.
+    if (NT_SUCCESS(status)) {
+      DCHECK_LE(return_length, buffer.size());
       break;
-    return false;
+    }
+
+    // NtQuerySystemInformation failed due to insufficient buffer length.
+    if (return_length > buffer.size()) {
+      // Abort if a large size is required for the buffer. It is undesirable to
+      // fill a large buffer just to record histograms.
+      constexpr ULONG kMaxLength = 512 * 1024;
+      if (return_length >= kMaxLength)
+        return absl::nullopt;
+
+      // Resize the buffer and retry, if the buffer hasn't already been resized
+      // too many times.
+      if (num_buffer_resize < kMaxNumBufferResize) {
+        ++num_buffer_resize;
+        buffer.resize(return_length);
+        continue;
+      }
+    }
+
+    // Abort if NtQuerySystemInformation failed for another reason than
+    // insufficient buffer length, or if the buffer was resized too many times.
+    DCHECK(return_length <= buffer.size() ||
+           num_buffer_resize >= kMaxNumBufferResize);
+    return absl::nullopt;
   }
 
   // Look for the struct housing information for the current process.
@@ -166,216 +188,110 @@ bool GetHardFaultCountForCurrentProcess(uint32_t* hard_fault_count) {
     DCHECK_LE(index + sizeof(SYSTEM_PROCESS_INFORMATION_EX), buffer.size());
     SYSTEM_PROCESS_INFORMATION_EX* proc_info =
         reinterpret_cast<SYSTEM_PROCESS_INFORMATION_EX*>(buffer.data() + index);
-    if (base::win::HandleToUint32(proc_info->UniqueProcessId) == proc_id) {
-      *hard_fault_count = proc_info->HardFaultCount;
-      return true;
-    }
+    if (base::win::HandleToUint32(proc_info->UniqueProcessId) == proc_id)
+      return proc_info->HardFaultCount;
     // The list ends when NextEntryOffset is zero. This also prevents busy
     // looping if the data is in fact invalid.
     if (proc_info->NextEntryOffset <= 0)
-      return false;
+      return absl::nullopt;
     index += proc_info->NextEntryOffset;
   }
 
-  return false;
+  return absl::nullopt;
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
-#define UMA_HISTOGRAM_TIME_IN_MINUTES_MONTH_RANGE(name, sample) \
-  UMA_HISTOGRAM_CUSTOM_COUNTS(name, sample, 1,                  \
-                              base::TimeDelta::FromDays(30).InMinutes(), 50)
-
-// Helper macro for splitting out an UMA histogram based on startup temperature.
-// |type| is the histogram type, and corresponds to an UMA macro like
-// UMA_HISTOGRAM_LONG_TIMES. It must itself be a macro that only takes two
-// parameters.
+// Helper function for splitting out an UMA histogram based on startup
+// temperature. |histogram_function| is the histogram type, and corresponds to
+// an UMA function like base::UmaHistogramLongTimes. It must itself be a
+// function that only takes two parameters.
 // |basename| is the basename of the histogram. A histogram of this name will
 // always be recorded to. If the startup temperature is known then a value will
 // also be recorded to the histogram with name |basename| and suffix
-// ".ColdStart", ".WarmStart" or ".LukewarmStartup" as appropriate.
+// ".ColdStart", ".WarmStart" as appropriate.
 // |value_expr| is an expression evaluating to the value to be recorded. This
 // will be evaluated exactly once and cached, so side effects are not an issue.
-// A metric logged using this macro must have an affected-histogram entry in the
-// definition of the StartupTemperature suffix in histograms.xml.
-// This macro must only be used in code that runs after |g_startup_temperature|
-// has been initialized.
-#define UMA_HISTOGRAM_WITH_TEMPERATURE(type, basename, value_expr)            \
-  do {                                                                        \
-    const auto value = value_expr;                                            \
-    /* Always record to the base histogram. */                                \
-    type(basename, value);                                                    \
-    /* Record to the cold/warm/lukewarm suffixed histogram as appropriate. */ \
-    switch (g_startup_temperature) {                                          \
-      case COLD_STARTUP_TEMPERATURE:                                          \
-        type(basename ".ColdStartup", value);                                 \
-        break;                                                                \
-      case WARM_STARTUP_TEMPERATURE:                                          \
-        type(basename ".WarmStartup", value);                                 \
-        break;                                                                \
-      case LUKEWARM_STARTUP_TEMPERATURE:                                      \
-        type(basename ".LukewarmStartup", value);                             \
-        break;                                                                \
-      case UNDETERMINED_STARTUP_TEMPERATURE:                                  \
-        break;                                                                \
-      case STARTUP_TEMPERATURE_COUNT:                                         \
-        NOTREACHED();                                                         \
-        break;                                                                \
-    }                                                                         \
-  } while (0)
-
-// Records |value_expr| to the histogram with name |basename| suffixed with the
-// number of startups with the current version in addition to all histograms
-// recorded by UMA_HISTOGRAM_WITH_TEMPERATURE.
-// A metric logged using this macro must have affected-histogram entries in the
-// definition of the StartupTemperature and SameVersionStartupCounts suffixes in
-// histograms.xml.
-// This macro must only be used in code that runs after |g_startup_temperature|
-// and |g_startups_with_current_version| have been initialized.
-#define UMA_HISTOGRAM_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(type, basename, \
-                                                              value_expr)     \
-  do {                                                                        \
-    const auto value_same_version_count = value_expr;                         \
-    /* Record to the base histogram and to a histogram suffixed with the      \
-       startup temperature. */                                                \
-    UMA_HISTOGRAM_WITH_TEMPERATURE(type, basename, value_same_version_count); \
-    /* Record to a histogram suffixed with the number of startups for the     \
-       current version. Since the number of startups for the current version  \
-       is set once per process, using a histogram macro which expects a       \
-       constant histogram name across invocations is fine. */                 \
-    const auto same_version_startup_count_suffix =                            \
-        GetSameVersionStartupCountSuffix();                                   \
-    if (!same_version_startup_count_suffix.empty()) {                         \
-      type(basename + same_version_startup_count_suffix,                      \
-           value_same_version_count);                                         \
-    }                                                                         \
-  } while (0)
-
-#define UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE(type, basename, begin_ticks, \
-                                                 end_ticks)                   \
-  do {                                                                        \
-    UMA_HISTOGRAM_WITH_TEMPERATURE(type, basename, end_ticks - begin_ticks);  \
-    TRACE_EVENT_ASYNC_BEGIN_WITH_TIMESTAMP1(                                  \
-        "startup", basename, 0, begin_ticks, "Temperature",                   \
-        g_startup_temperature);                                               \
-    TRACE_EVENT_ASYNC_END_WITH_TIMESTAMP1(                                    \
-        "startup", basename, 0, end_ticks, "Temperature",                     \
-        g_startup_temperature);                                               \
-  } while (0)
-
-#define UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(      \
-    type, basename, begin_ticks, end_ticks)                                   \
-  do {                                                                        \
-    UMA_HISTOGRAM_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(                    \
-        type, basename, end_ticks - begin_ticks);                             \
-    TRACE_EVENT_ASYNC_BEGIN_WITH_TIMESTAMP2(                                  \
-        "startup", basename, 0, begin_ticks, "Temperature",                   \
-        g_startup_temperature, "Startups with current version",               \
-        g_startups_with_current_version);                                     \
-    TRACE_EVENT_ASYNC_END_WITH_TIMESTAMP2(                                    \
-        "startup", basename, 0, end_ticks, "Temperature",                     \
-        g_startup_temperature, "Startups with current version",               \
-        g_startups_with_current_version);                                     \
-  } while (0)
-
-std::string GetSameVersionStartupCountSuffix() {
-  // TODO(fdoray): Remove this once crbug.com/580207 is fixed.
-  if (g_startups_with_current_version ==
-      kUndeterminedStartupsWithCurrentVersion) {
-    return std::string();
+// A metric logged using this function must have an affected-histogram entry in
+// the definition of the StartupTemperature suffix in histograms.xml.
+// This function must only be used in code that runs after
+// |g_startup_temperature| has been initialized.
+template <typename T>
+void UmaHistogramWithTemperature(
+    void (*histogram_function)(const std::string& name, T),
+    const std::string& histogram_basename,
+    T value) {
+  // Always record to the base histogram.
+  (*histogram_function)(histogram_basename, value);
+  // Record to the cold/warm suffixed histogram as appropriate.
+  switch (g_startup_temperature) {
+    case COLD_STARTUP_TEMPERATURE:
+      (*histogram_function)(histogram_basename + ".ColdStartup", value);
+      break;
+    case WARM_STARTUP_TEMPERATURE:
+      (*histogram_function)(histogram_basename + ".WarmStartup", value);
+      break;
+    case LUKEWARM_STARTUP_TEMPERATURE:
+      // No suffix emitted for lukewarm startups.
+      break;
+    case UNDETERMINED_STARTUP_TEMPERATURE:
+      break;
+    case STARTUP_TEMPERATURE_COUNT:
+      NOTREACHED();
+      break;
   }
-
-  // The suffix is |g_startups_with_current_version| up to
-  // |kMaxSameVersionCountRecorded|. Higher counts are grouped in the ".Over"
-  // suffix. Make sure to reflect changes to |kMaxSameVersionCountRecorded| in
-  // the "SameVersionStartupCounts" histogram suffix.
-  constexpr int kMaxSameVersionCountRecorded = 9;
-  DCHECK_GE(g_startups_with_current_version, 1);
-  if (g_startups_with_current_version > kMaxSameVersionCountRecorded)
-    return ".Over";
-  return std::string(".") +
-         base::NumberToString(g_startups_with_current_version);
 }
 
-// Returns the system uptime on process launch.
-base::TimeDelta GetSystemUptimeOnProcessLaunch() {
-  // Process launch time is not available on Android.
-  if (g_process_creation_ticks.is_null())
-    return base::TimeDelta();
-
-  // base::SysInfo::Uptime returns the time elapsed between system boot and now.
-  // Substract the time elapsed between process launch and now to get the time
-  // elapsed between system boot and process launch.
-  return base::SysInfo::Uptime() -
-         (base::TimeTicks::Now() - g_process_creation_ticks);
-}
-
-void RecordSystemUptimeHistogram() {
-  const base::TimeDelta system_uptime_on_process_launch =
-      GetSystemUptimeOnProcessLaunch();
-  if (system_uptime_on_process_launch.is_zero())
-    return;
-
-  UMA_HISTOGRAM_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-      UMA_HISTOGRAM_LONG_TIMES_100, "Startup.SystemUptime",
-      GetSystemUptimeOnProcessLaunch());
+void UmaHistogramWithTraceAndTemperature(
+    void (*histogram_function)(const std::string& name, base::TimeDelta),
+    const char* histogram_basename,
+    base::TimeTicks begin_ticks,
+    base::TimeTicks end_ticks) {
+  UmaHistogramWithTemperature(histogram_function, histogram_basename,
+                              end_ticks - begin_ticks);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP1(
+      "startup", histogram_basename, TRACE_ID_WITH_SCOPE(histogram_basename, 0),
+      begin_ticks, "Temperature", g_startup_temperature);
+  TRACE_EVENT_NESTABLE_ASYNC_END_WITH_TIMESTAMP0(
+      "startup", histogram_basename, TRACE_ID_WITH_SCOPE(histogram_basename, 0),
+      end_ticks);
 }
 
 // On Windows, records the number of hard-faults that have occurred in the
 // current chrome.exe process since it was started. This is a nop on other
 // platforms.
 void RecordHardFaultHistogram() {
-#if defined(OS_WIN)
-  uint32_t hard_fault_count = 0;
-
-  // Don't record histograms if unable to get the hard fault count.
-  if (!GetHardFaultCountForCurrentProcess(&hard_fault_count))
-    return;
-
-  const std::string same_version_startup_count_suffix(
-      GetSameVersionStartupCountSuffix());
-
-  // Hard fault counts are expected to be in the thousands range,
-  // corresponding to faulting in ~10s of MBs of code ~10s of KBs at a time.
-  // (Observed to vary from 1000 to 10000 on various test machines and
-  // platforms.)
-  const char kHardFaultCountHistogram[] =
-      "Startup.BrowserMessageLoopStartHardFaultCount";
-  UMA_HISTOGRAM_CUSTOM_COUNTS(kHardFaultCountHistogram, hard_fault_count, 1,
-                              40000, 50);
-  // Also record the hard fault count histogram suffixed by the number of
-  // startups this specific version has been through.
-  // Factory properties copied from UMA_HISTOGRAM_CUSTOM_COUNTS macro.
-  if (!same_version_startup_count_suffix.empty()) {
-    base::Histogram::FactoryGet(
-        kHardFaultCountHistogram + same_version_startup_count_suffix, 1, 40000,
-        50, base::HistogramBase::kUmaTargetedHistogramFlag)
-        ->Add(hard_fault_count);
-  }
-
-  // Determine the startup type based on the number of observed hard faults.
+#if BUILDFLAG(IS_WIN)
   DCHECK_EQ(UNDETERMINED_STARTUP_TEMPERATURE, g_startup_temperature);
-  if (hard_fault_count < kWarmStartHardFaultCountThreshold) {
-    g_startup_temperature = WARM_STARTUP_TEMPERATURE;
-  } else if (hard_fault_count >= kColdStartHardFaultCountThreshold) {
-    g_startup_temperature = COLD_STARTUP_TEMPERATURE;
+
+  const absl::optional<uint32_t> hard_fault_count =
+      GetHardFaultCountForCurrentProcess();
+
+  if (hard_fault_count.has_value()) {
+    // Hard fault counts are expected to be in the thousands range,
+    // corresponding to faulting in ~10s of MBs of code ~10s of KBs at a time.
+    // (Observed to vary from 1000 to 10000 on various test machines and
+    // platforms.)
+    base::UmaHistogramCustomCounts(
+        "Startup.BrowserMessageLoopStartHardFaultCount",
+        hard_fault_count.value(), 1, 40000, 50);
+
+    // Determine the startup type based on the number of observed hard faults.
+    if (hard_fault_count < kWarmStartHardFaultCountThreshold) {
+      g_startup_temperature = WARM_STARTUP_TEMPERATURE;
+    } else if (hard_fault_count >= kColdStartHardFaultCountThreshold) {
+      g_startup_temperature = COLD_STARTUP_TEMPERATURE;
+    } else {
+      g_startup_temperature = LUKEWARM_STARTUP_TEMPERATURE;
+    }
   } else {
-    g_startup_temperature = LUKEWARM_STARTUP_TEMPERATURE;
+    // |g_startup_temperature| remains UNDETERMINED_STARTUP_TEMPERATURE if the
+    // number of hard faults could not be determined.
   }
 
   // Record the startup 'temperature'.
-  const char kStartupTemperatureHistogram[] = "Startup.Temperature";
-  UMA_HISTOGRAM_ENUMERATION(kStartupTemperatureHistogram, g_startup_temperature,
-                            STARTUP_TEMPERATURE_COUNT);
-  // As well as its suffixed twin.
-  // Factory properties copied from UMA_HISTOGRAM_ENUMERATION macro.
-  if (!same_version_startup_count_suffix.empty()) {
-    base::LinearHistogram::FactoryGet(
-        kStartupTemperatureHistogram + same_version_startup_count_suffix, 1,
-        STARTUP_TEMPERATURE_COUNT, STARTUP_TEMPERATURE_COUNT + 1,
-        base::HistogramBase::kUmaTargetedHistogramFlag)
-        ->Add(g_startup_temperature);
-  }
-#endif  // defined(OS_WIN)
+  base::UmaHistogramEnumeration("Startup.Temperature", g_startup_temperature,
+                                STARTUP_TEMPERATURE_COUNT);
+#endif  // BUILDFLAG(IS_WIN)
 }
 
 // Converts a base::Time value to a base::TimeTicks value. The conversion isn't
@@ -385,34 +301,26 @@ void RecordHardFaultHistogram() {
 // base::TimeTicks::Now() at play, but in practice it is pretty much instant
 // compared to multi-seconds startup timings.
 base::TimeTicks StartupTimeToTimeTicks(base::Time time) {
-// First get a base which represents the same point in time in both units.
-// Bump the priority of this thread while doing this as the wall clock time it
-// takes to resolve these two calls affects the precision of this method and
-// bumping the priority reduces the likelihood of a context switch interfering
-// with this computation.
+  // First get a base which represents the same point in time in both units.
+  // Bump the priority of this thread while doing this as the wall clock time it
+  // takes to resolve these two calls affects the precision of this method and
+  // bumping the priority reduces the likelihood of a context switch interfering
+  // with this computation.
+  absl::optional<base::ScopedBoostPriority> scoped_boost_priority;
 
 // Enabling this logic on OS X causes a significant performance regression.
-// https://crbug.com/601270
-#if !defined(OS_MACOSX)
+// TODO(crbug.com/601270): Remove IS_APPLE ifdef once priority changes are
+// ignored on Mac main thread.
+#if !BUILDFLAG(IS_APPLE)
   static bool statics_initialized = false;
-
-  base::ThreadPriority previous_priority = base::ThreadPriority::NORMAL;
   if (!statics_initialized) {
-    previous_priority = base::PlatformThread::GetCurrentThreadPriority();
-    base::PlatformThread::SetCurrentThreadPriority(
-        base::ThreadPriority::DISPLAY);
+    statics_initialized = true;
+    scoped_boost_priority.emplace(base::ThreadType::kDisplayCritical);
   }
-#endif
+#endif  // !BUILDFLAG(IS_APPLE)
 
   static const base::Time time_base = base::Time::Now();
   static const base::TimeTicks trace_ticks_base = base::TimeTicks::Now();
-
-#if !defined(OS_MACOSX)
-  if (!statics_initialized) {
-    base::PlatformThread::SetCurrentThreadPriority(previous_priority);
-  }
-  statics_initialized = true;
-#endif
 
   // Then use the TimeDelta common ground between the two units to make the
   // conversion.
@@ -420,100 +328,47 @@ base::TimeTicks StartupTimeToTimeTicks(base::Time time) {
   return trace_ticks_base - delta_since_base;
 }
 
-void RecordRendererMainEntryHistogram() {
-  if (!g_browser_main_entry_point_ticks.is_null() &&
-      !g_renderer_main_entry_point_ticks.is_null()) {
-    UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-        UMA_HISTOGRAM_LONG_TIMES_100, "Startup.BrowserMainToRendererMain",
-        g_browser_main_entry_point_ticks, g_renderer_main_entry_point_ticks);
-  }
-}
+void AddStartupEventsForTelemetry() {
+  // Record the event only if RecordChromeMainEntryTime() was called, which is
+  // not the case for some tests.
+  if (g_chrome_main_entry_ticks.is_null())
+    return;
 
-void AddStartupEventsForTelemetry()
-{
-  DCHECK(!g_browser_main_entry_point_ticks.is_null());
-
-  TRACE_EVENT_INSTANT_WITH_TIMESTAMP0("startup",
-                                      "Startup.BrowserMainEntryPoint", 0,
-                                      g_browser_main_entry_point_ticks);
-}
-
-// Logs the Startup.TimeSinceLastStartup histogram. Obtains the timestamp of the
-// last startup from |pref_service| and overwrites it with the timestamp of the
-// current startup. If the startup temperature has been set by
-// RecordBrowserMainMessageLoopStart, the time since last startup is also logged
-// to a histogram suffixed with the startup temperature.
-void RecordTimeSinceLastStartup(PrefService* pref_service) {
-#if defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
-  DCHECK(pref_service);
-
-  // Get the timestamp of the current startup.
-  const base::Time process_start_time =
-      base::Process::Current().CreationTime();
-
-  // Get the timestamp of the last startup from |pref_service|.
-  const int64_t last_startup_timestamp_internal =
-      pref_service->GetInt64(prefs::kLastStartupTimestamp);
-  if (last_startup_timestamp_internal != 0) {
-    // Log the Startup.TimeSinceLastStartup histogram.
-    const base::Time last_startup_timestamp =
-        base::Time::FromInternalValue(last_startup_timestamp_internal);
-    const base::TimeDelta time_since_last_startup =
-        process_start_time - last_startup_timestamp;
-    const int minutes_since_last_startup = time_since_last_startup.InMinutes();
-
-    // Ignore negative values, which can be caused by system clock changes.
-    if (minutes_since_last_startup >= 0) {
-      UMA_HISTOGRAM_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-          UMA_HISTOGRAM_TIME_IN_MINUTES_MONTH_RANGE,
-          "Startup.TimeSinceLastStartup", minutes_since_last_startup);
-    }
-  }
-
-  // Write the timestamp of the current startup in |pref_service|.
-  pref_service->SetInt64(prefs::kLastStartupTimestamp,
-                         process_start_time.ToInternalValue());
-#endif  // defined(OS_MACOSX) || defined(OS_WIN) || defined(OS_LINUX)
-}
-
-// Logs the Startup.SameVersionStartupCount histogram. Relies on |pref_service|
-// to know information about the previous startups and store information for
-// future ones. Stores the logged value in |g_startups_with_current_version|.
-void RecordSameVersionStartupCount(PrefService* pref_service) {
-  DCHECK(pref_service);
-  DCHECK_EQ(kUndeterminedStartupsWithCurrentVersion,
-            g_startups_with_current_version);
-
-  const std::string current_version = version_info::GetVersionNumber();
-
-  if (current_version == pref_service->GetString(prefs::kLastStartupVersion)) {
-    g_startups_with_current_version =
-        pref_service->GetInteger(prefs::kSameVersionStartupCount);
-    ++g_startups_with_current_version;
-    pref_service->SetInteger(prefs::kSameVersionStartupCount,
-                             g_startups_with_current_version);
-  } else {
-    g_startups_with_current_version = 1;
-    pref_service->SetString(prefs::kLastStartupVersion, current_version);
-    pref_service->SetInteger(prefs::kSameVersionStartupCount, 1);
-  }
-
-  UMA_HISTOGRAM_COUNTS_100("Startup.SameVersionStartupCount",
-                           g_startups_with_current_version);
+  TRACE_EVENT_INSTANT_WITH_TIMESTAMP0(
+      "startup", "Startup.BrowserMainEntryPoint", 0, g_chrome_main_entry_ticks);
 }
 
 bool ShouldLogStartupHistogram() {
-  return !WasMainWindowStartupInterrupted() &&
-         !g_process_creation_ticks.is_null();
+  return !WasMainWindowStartupInterrupted();
+}
+
+#if DCHECK_IS_ON()
+base::flat_set<int>& GetSessionLog() {
+  static base::NoDestructor<base::flat_set<int>> session_log;
+  return *session_log;
+}
+#endif  // DCHECK_IS_ON()
+
+// DCHECKs that this is the first time |method_id| is passed to this assertion
+// in this session (a session is typically process-lifetime but this can be
+// reset in tests via ResetSessionForTesting()). Callers should use __LINE__ as
+// a unique id in this file.
+void AssertFirstCallInSession(int method_id) {
+#if DCHECK_IS_ON()
+  DCHECK(GetSessionLog().insert(method_id).second);
+#endif  // DCHECK_IS_ON()
 }
 
 }  // namespace
 
-void RegisterPrefs(PrefRegistrySimple* registry) {
-  DCHECK(registry);
-  registry->RegisterInt64Pref(prefs::kLastStartupTimestamp, 0);
-  registry->RegisterStringPref(prefs::kLastStartupVersion, std::string());
-  registry->RegisterIntegerPref(prefs::kSameVersionStartupCount, 0);
+void ResetSessionForTesting() {
+#if DCHECK_IS_ON()
+  GetSessionLog().clear();
+#endif  // DCHECK_IS_ON()
+  // Reset global ticks that will be recorded multiple times when multiple
+  // tests run in the same process.
+  g_message_loop_start_ticks = base::TimeTicks();
+  g_browser_window_display_ticks = base::TimeTicks();
 }
 
 bool WasMainWindowStartupInterrupted() {
@@ -529,21 +384,25 @@ void SetBackgroundModeEnabled() {
 }
 
 void RecordStartupProcessCreationTime(base::Time time) {
+  RecordStartupProcessCreationTime(StartupTimeToTimeTicks(time));
+}
+
+void RecordStartupProcessCreationTime(base::TimeTicks ticks) {
   DCHECK(g_process_creation_ticks.is_null());
-  g_process_creation_ticks = StartupTimeToTimeTicks(time);
+  g_process_creation_ticks = ticks;
   DCHECK(!g_process_creation_ticks.is_null());
 }
 
-void RecordMainEntryPointTime(base::TimeTicks ticks) {
-  DCHECK(g_browser_main_entry_point_ticks.is_null());
-  g_browser_main_entry_point_ticks = ticks;
-  DCHECK(!g_browser_main_entry_point_ticks.is_null());
+void RecordApplicationStartTime(base::TimeTicks ticks) {
+  DCHECK(g_application_start_ticks.is_null());
+  g_application_start_ticks = ticks;
+  DCHECK(!g_application_start_ticks.is_null());
 }
 
-void RecordExeMainEntryPointTicks(base::TimeTicks ticks) {
-  DCHECK(g_browser_exe_main_entry_point_ticks.is_null());
-  g_browser_exe_main_entry_point_ticks = ticks;
-  DCHECK(!g_browser_exe_main_entry_point_ticks.is_null());
+void RecordChromeMainEntryTime(base::TimeTicks ticks) {
+  DCHECK(g_chrome_main_entry_ticks.is_null());
+  g_chrome_main_entry_ticks = ticks;
+  DCHECK(!g_chrome_main_entry_ticks.is_null());
 }
 
 void RecordMessageLoopStartTicks(base::TimeTicks ticks) {
@@ -553,78 +412,65 @@ void RecordMessageLoopStartTicks(base::TimeTicks ticks) {
 }
 
 void RecordBrowserMainMessageLoopStart(base::TimeTicks ticks,
-                                       bool is_first_run,
-                                       PrefService* pref_service) {
-  DCHECK(pref_service);
+                                       bool is_first_run) {
+  DCHECK(!g_application_start_ticks.is_null());
+
   RecordMessageLoopStartTicks(ticks);
 
-  // Keep RecordSameVersionStartupCount() and RecordHardFaultHistogram()
-  // near the top of this method (as much as possible) as many other
-  // histograms depend on it setting |g_startup_temperature| and
-  // |g_startups_with_current_version|.
-  RecordSameVersionStartupCount(pref_service);
+  // Keep RecordHardFaultHistogram() near the top of this method (as much as
+  // possible) as many other histograms depend on it setting
+  // |g_startup_temperature|.
   RecordHardFaultHistogram();
 
   // Record timing of the browser message-loop start time.
-  if (!is_first_run && !g_process_creation_ticks.is_null()) {
-    UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-        UMA_HISTOGRAM_LONG_TIMES_100, "Startup.BrowserMessageLoopStartTime",
-        g_process_creation_ticks, ticks);
-  }
-
-  // Record timing between the shared library's main() entry and the browser
-  // main message loop start.
   if (is_first_run) {
-    UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE(
-        UMA_HISTOGRAM_LONG_TIMES,
-        "Startup.BrowserMessageLoopStartTimeFromMainEntry.FirstRun2",
-        g_browser_main_entry_point_ticks, ticks);
+    UmaHistogramWithTraceAndTemperature(
+        &base::UmaHistogramLongTimes100,
+        "Startup.BrowserMessageLoopStartTime.FirstRun",
+        g_application_start_ticks, ticks);
   } else {
-    UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-        UMA_HISTOGRAM_LONG_TIMES,
-        "Startup.BrowserMessageLoopStartTimeFromMainEntry3",
-        g_browser_main_entry_point_ticks, ticks);
+    UmaHistogramWithTraceAndTemperature(&base::UmaHistogramLongTimes100,
+                                        "Startup.BrowserMessageLoopStartTime",
+                                        g_application_start_ticks, ticks);
   }
 
   AddStartupEventsForTelemetry();
-  RecordTimeSinceLastStartup(pref_service);
-  RecordSystemUptimeHistogram();
 
   // Record values stored prior to startup temperature evaluation.
-  if (ShouldLogStartupHistogram()) {
-    if (!g_browser_open_tabs_duration.is_max()) {
-      UMA_HISTOGRAM_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-          UMA_HISTOGRAM_LONG_TIMES_100, "Startup.BrowserOpenTabs",
-          g_browser_open_tabs_duration);
-    }
-
-    if (!g_browser_window_display_ticks.is_null()) {
-      UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-          UMA_HISTOGRAM_LONG_TIMES, "Startup.BrowserWindowDisplay",
-          g_process_creation_ticks, g_browser_window_display_ticks);
-    }
+  if (ShouldLogStartupHistogram() &&
+      !g_browser_window_display_ticks.is_null()) {
+    UmaHistogramWithTraceAndTemperature(
+        &base::UmaHistogramLongTimes, "Startup.BrowserWindowDisplay",
+        g_application_start_ticks, g_browser_window_display_ticks);
   }
 
-  // Record timings between process creation, the main() in the executable being
-  // reached and the main() in the shared library being reached.
-  if (!g_process_creation_ticks.is_null() &&
-      !g_browser_exe_main_entry_point_ticks.is_null()) {
-    // Process create to chrome.exe:main().
-    UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-        UMA_HISTOGRAM_LONG_TIMES, "Startup.LoadTime.ProcessCreateToExeMain2",
-        g_process_creation_ticks, g_browser_exe_main_entry_point_ticks);
+  // Process creation to application start. See comment above
+  // RecordApplicationStart().
+  if (!g_process_creation_ticks.is_null()) {
+    UmaHistogramWithTraceAndTemperature(
+        &base::UmaHistogramLongTimes,
+        "Startup.LoadTime.ProcessCreateToApplicationStart",
+        g_process_creation_ticks, g_application_start_ticks);
 
-    // chrome.exe:main() to chrome.dll:main().
-    UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-        UMA_HISTOGRAM_LONG_TIMES, "Startup.LoadTime.ExeMainToDllMain2",
-        g_browser_exe_main_entry_point_ticks, g_browser_main_entry_point_ticks);
-
-    // Process create to chrome.dll:main(). Reported as a histogram only as
-    // the other two events above are sufficient for tracing purposes.
-    UMA_HISTOGRAM_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-        UMA_HISTOGRAM_LONG_TIMES, "Startup.LoadTime.ProcessCreateToDllMain2",
-        g_browser_main_entry_point_ticks - g_process_creation_ticks);
+    // Application start to ChromeMain().
+    DCHECK(!g_chrome_main_entry_ticks.is_null());
+    UmaHistogramWithTraceAndTemperature(
+        &base::UmaHistogramLongTimes,
+        "Startup.LoadTime.ApplicationStartToChromeMain",
+        g_application_start_ticks, g_chrome_main_entry_ticks);
   }
+}
+
+void RecordBrowserMainLoopFirstIdle(base::TimeTicks ticks) {
+  DCHECK(!g_application_start_ticks.is_null());
+  AssertFirstCallInSession(__LINE__);
+
+  if (!ShouldLogStartupHistogram())
+    return;
+
+  UmaHistogramWithTraceAndTemperature(&base::UmaHistogramLongTimes100,
+                                      "Startup.BrowserMessageLoopFirstIdle",
+                                      g_application_start_ticks, ticks);
 }
 
 void RecordBrowserWindowDisplay(base::TimeTicks ticks) {
@@ -643,108 +489,59 @@ void RecordBrowserWindowDisplay(base::TimeTicks ticks) {
   g_browser_window_display_ticks = ticks;
 }
 
-void RecordBrowserOpenTabsDelta(base::TimeDelta delta) {
-  DCHECK(g_browser_open_tabs_duration.is_max());
-  DCHECK_EQ(g_startup_temperature, UNDETERMINED_STARTUP_TEMPERATURE);
-  // The value will be recorded in appropriate histograms after the startup
-  // temperature is evaluated.
-  g_browser_open_tabs_duration = delta;
-}
-
-void RecordRendererMainEntryTime(base::TimeTicks ticks) {
-  // Record the renderer main entry time, but don't log the UMA metric
-  // immediately because the startup temperature is not known yet.
-  if (g_renderer_main_entry_point_ticks.is_null())
-    g_renderer_main_entry_point_ticks = ticks;
-}
-
-void RecordFirstWebContentsMainFrameLoad(base::TimeTicks ticks) {
-  static bool is_first_call = true;
-  if (!is_first_call || ticks.is_null())
-    return;
-  is_first_call = false;
-  if (!ShouldLogStartupHistogram())
-    return;
-
-  UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-      UMA_HISTOGRAM_LONG_TIMES_100, "Startup.FirstWebContents.MainFrameLoad2",
-      g_process_creation_ticks, ticks);
-}
-
 void RecordFirstWebContentsNonEmptyPaint(
     base::TimeTicks now,
     base::TimeTicks render_process_host_init_time) {
-  static bool is_first_call = true;
-  if (!is_first_call || now.is_null())
-    return;
-  is_first_call = false;
-
-  // Log Startup.BrowserMainToRendererMain now that the first renderer main
-  // entry time and the startup temperature are known.
-  RecordRendererMainEntryHistogram();
+  DCHECK(!g_application_start_ticks.is_null());
+  AssertFirstCallInSession(__LINE__);
 
   if (!ShouldLogStartupHistogram())
     return;
 
-  UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-      UMA_HISTOGRAM_LONG_TIMES_100, "Startup.FirstWebContents.NonEmptyPaint2",
-      g_process_creation_ticks, now);
-  UMA_HISTOGRAM_WITH_TEMPERATURE(
-      UMA_HISTOGRAM_LONG_TIMES_100,
+  UmaHistogramWithTraceAndTemperature(&base::UmaHistogramLongTimes100,
+                                      "Startup.FirstWebContents.NonEmptyPaint3",
+                                      g_application_start_ticks, now);
+
+  UmaHistogramWithTemperature(
+      &base::UmaHistogramLongTimes100,
       "Startup.BrowserMessageLoopStart.To.NonEmptyPaint2",
       now - g_message_loop_start_ticks);
 
-  UMA_HISTOGRAM_WITH_TEMPERATURE(
-      UMA_HISTOGRAM_LONG_TIMES_100,
+  UmaHistogramWithTemperature(
+      &base::UmaHistogramLongTimes100,
       "Startup.FirstWebContents.RenderProcessHostInit.ToNonEmptyPaint",
       now - render_process_host_init_time);
 }
 
-void RecordFirstWebContentsMainNavigationStart(base::TimeTicks ticks,
-                                               WebContentsWorkload workload) {
-  static bool is_first_call = true;
-  if (!is_first_call || ticks.is_null())
-    return;
-  is_first_call = false;
+void RecordFirstWebContentsMainNavigationStart(base::TimeTicks ticks) {
+  DCHECK(!g_application_start_ticks.is_null());
+  AssertFirstCallInSession(__LINE__);
+
   if (!ShouldLogStartupHistogram())
     return;
 
-  UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-      UMA_HISTOGRAM_LONG_TIMES_100,
-      "Startup.FirstWebContents.MainNavigationStart", g_process_creation_ticks,
+  UmaHistogramWithTraceAndTemperature(
+      &base::UmaHistogramLongTimes100,
+      "Startup.FirstWebContents.MainNavigationStart", g_application_start_ticks,
       ticks);
-
-  // Log extra information about this startup's workload. Only added to this
-  // histogram as this extra suffix can help making it less noisy but isn't
-  // worth tripling the number of startup histograms either.
-  if (workload == WebContentsWorkload::SINGLE_TAB) {
-    UMA_HISTOGRAM_WITH_TEMPERATURE(
-        UMA_HISTOGRAM_LONG_TIMES_100,
-        "Startup.FirstWebContents.MainNavigationStart.SingleTab",
-        ticks - g_process_creation_ticks);
-  } else {
-    UMA_HISTOGRAM_WITH_TEMPERATURE(
-        UMA_HISTOGRAM_LONG_TIMES_100,
-        "Startup.FirstWebContents.MainNavigationStart.MultiTabs",
-        ticks - g_process_creation_ticks);
-  }
 }
 
 void RecordFirstWebContentsMainNavigationFinished(base::TimeTicks ticks) {
-  static bool is_first_call = true;
-  if (!is_first_call || ticks.is_null())
-    return;
-  is_first_call = false;
+  DCHECK(!g_application_start_ticks.is_null());
+  AssertFirstCallInSession(__LINE__);
+
   if (!ShouldLogStartupHistogram())
     return;
 
-  UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE_AND_SAME_VERSION_COUNT(
-      UMA_HISTOGRAM_LONG_TIMES_100,
+  UmaHistogramWithTraceAndTemperature(
+      &base::UmaHistogramLongTimes100,
       "Startup.FirstWebContents.MainNavigationFinished",
-      g_process_creation_ticks, ticks);
+      g_application_start_ticks, ticks);
 }
 
 void RecordBrowserWindowFirstPaint(base::TimeTicks ticks) {
+  DCHECK(!g_application_start_ticks.is_null());
+
   static bool is_first_call = true;
   if (!is_first_call || ticks.is_null())
     return;
@@ -752,28 +549,29 @@ void RecordBrowserWindowFirstPaint(base::TimeTicks ticks) {
   if (!ShouldLogStartupHistogram())
     return;
 
-  UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE(UMA_HISTOGRAM_LONG_TIMES_100,
-                                           "Startup.BrowserWindow.FirstPaint",
-                                           g_process_creation_ticks, ticks);
-}
-
-void RecordBrowserWindowFirstPaintCompositingEnded(
-    const base::TimeTicks ticks) {
-  static bool is_first_call = true;
-  if (!is_first_call || ticks.is_null())
-    return;
-  is_first_call = false;
-  if (!ShouldLogStartupHistogram())
-    return;
-
-  UMA_HISTOGRAM_AND_TRACE_WITH_TEMPERATURE(
-      UMA_HISTOGRAM_LONG_TIMES_100,
-      "Startup.BrowserWindow.FirstPaint.CompositingEnded",
-      g_process_creation_ticks, ticks);
+  UmaHistogramWithTraceAndTemperature(&base::UmaHistogramLongTimes100,
+                                      "Startup.BrowserWindow.FirstPaint",
+                                      g_application_start_ticks, ticks);
 }
 
 base::TimeTicks MainEntryPointTicks() {
-  return g_browser_main_entry_point_ticks;
+  return g_chrome_main_entry_ticks;
+}
+
+void RecordExternalStartupMetric(const char* histogram_name,
+                                 base::TimeTicks completion_ticks,
+                                 bool set_non_browser_ui_displayed) {
+  DCHECK(!g_application_start_ticks.is_null());
+
+  if (!ShouldLogStartupHistogram())
+    return;
+
+  UmaHistogramWithTraceAndTemperature(&base::UmaHistogramMediumTimes,
+                                      histogram_name, g_application_start_ticks,
+                                      completion_ticks);
+
+  if (set_non_browser_ui_displayed)
+    SetNonBrowserUIDisplayed();
 }
 
 }  // namespace startup_metric_utils

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@
 #include <memory>
 
 #include "base/containers/unique_ptr_adapters.h"
-#include "base/macros.h"
-#include "base/memory/ref_counted_delete_on_sequence.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
@@ -24,61 +24,74 @@ class BackgroundSyncManager;
 class DevToolsBackgroundServicesContextImpl;
 class OneShotBackgroundSyncServiceImpl;
 class PeriodicBackgroundSyncServiceImpl;
+class RenderProcessHost;
 class ServiceWorkerContextWrapper;
 
 // One instance of this exists per StoragePartition, and services multiple child
 // processes/origins. Most logic is delegated to the owned BackgroundSyncManager
-// instance, which is only accessed on the IO thread.
+// instance. Lives on the UI thread.
+//
+// TODO(falken): Consider removing this delegating. Previously these were
+// separate classes because this lived on the IO and UI thread until
+// https://crbug.com/824858.
 class CONTENT_EXPORT BackgroundSyncContextImpl
     : public BackgroundSyncContext,
-      public base::RefCountedDeleteOnSequence<BackgroundSyncContextImpl> {
+      public base::RefCounted<BackgroundSyncContextImpl> {
  public:
   REQUIRE_ADOPTION_FOR_REFCOUNTED_TYPE();
 
   BackgroundSyncContextImpl();
 
-  // Init and Shutdown are for use on the UI thread when the
-  // StoragePartition is being setup and torn down.
+  BackgroundSyncContextImpl(const BackgroundSyncContextImpl&) = delete;
+  BackgroundSyncContextImpl& operator=(const BackgroundSyncContextImpl&) =
+      delete;
+
+  // Called when StoragePartition is being setup.
   void Init(
       const scoped_refptr<ServiceWorkerContextWrapper>& service_worker_context,
       const scoped_refptr<DevToolsBackgroundServicesContextImpl>&
           devtools_context);
 
-  // Shutdown must be called before deleting this. Call on the UI thread.
+  // Called when StoragePartition is being torn down. Must be called before
+  // deleting `this`.
   void Shutdown();
 
-  // Create a OneShotBackgroundSyncServiceImpl that is owned by this. Call on
-  // the UI thread.
+  // Creates a OneShotBackgroundSyncServiceImpl that is owned by `this`.
   void CreateOneShotSyncService(
-      blink::mojom::OneShotBackgroundSyncServiceRequest request);
+      const url::Origin& origin,
+      RenderProcessHost* render_process_host,
+      mojo::PendingReceiver<blink::mojom::OneShotBackgroundSyncService>
+          receiver);
 
-  // Create a PeriodicBackgroundSyncServiceImpl that is owned by this. Call on
-  // the UI thread.
+  // Creates a PeriodicBackgroundSyncServiceImpl that is owned by `this`.
   void CreatePeriodicSyncService(
-      blink::mojom::PeriodicBackgroundSyncServiceRequest request);
+      const url::Origin& origin,
+      RenderProcessHost* render_process_host,
+      mojo::PendingReceiver<blink::mojom::PeriodicBackgroundSyncService>
+          receiver);
 
-  // Called by *BackgroundSyncServiceImpl objects so that they can
-  // be deleted. Call on the IO thread.
+  // Called by *BackgroundSyncServiceImpl objects so that they can be deleted.
   void OneShotSyncServiceHadConnectionError(
       OneShotBackgroundSyncServiceImpl* service);
   void PeriodicSyncServiceHadConnectionError(
       PeriodicBackgroundSyncServiceImpl* service);
 
-  // Call on the IO thread.
   BackgroundSyncManager* background_sync_manager() const;
 
   // BackgroundSyncContext implementation.
   void FireBackgroundSyncEvents(blink::mojom::BackgroundSyncType sync_type,
                                 base::OnceClosure done_closure) override;
-  void GetSoonestWakeupDelta(
-      blink::mojom::BackgroundSyncType sync_type,
-      base::Time last_browser_wakeup_for_periodic_sync,
-      base::OnceCallback<void(base::TimeDelta)> callback) override;
   void RevivePeriodicBackgroundSyncRegistrations(url::Origin origin) override;
+  void UnregisterPeriodicSyncForOrigin(url::Origin origin) override;
+
+  // Gets the soonest time delta from now, when the browser should be woken up
+  // to fire any Background Sync events.
+  base::TimeDelta GetSoonestWakeupDelta(
+      blink::mojom::BackgroundSyncType sync_type,
+      base::Time last_browser_wakeup_for_periodic_sync);
 
  protected:
-  friend class base::RefCountedDeleteOnSequence<BackgroundSyncContextImpl>;
-  friend class base::DeleteHelper<BackgroundSyncContextImpl>;
+  friend class base::RefCounted<BackgroundSyncContextImpl>;
   ~BackgroundSyncContextImpl() override;
 
   void set_background_sync_manager_for_testing(
@@ -92,35 +105,12 @@ class CONTENT_EXPORT BackgroundSyncContextImpl
   friend class BackgroundSyncLauncherTest;
   friend class BackgroundSyncManagerTest;
 
-  void FireBackgroundSyncEventsOnIOThread(
-      blink::mojom::BackgroundSyncType sync_type,
-      base::OnceClosure done_closure);
-  void DidFireBackgroundSyncEventsOnIOThread(base::OnceClosure done_closure);
   virtual void CreateBackgroundSyncManager(
       scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
       scoped_refptr<DevToolsBackgroundServicesContextImpl> devtools_context);
 
-  void CreateOneShotSyncServiceOnIOThread(
-      mojo::InterfaceRequest<blink::mojom::OneShotBackgroundSyncService>
-          request);
-  void CreatePeriodicSyncServiceOnIOThread(
-      mojo::InterfaceRequest<blink::mojom::PeriodicBackgroundSyncService>
-          request);
-
-  void ShutdownOnIO();
-
-  base::TimeDelta GetSoonestWakeupDeltaOnIOThread(
-      blink::mojom::BackgroundSyncType sync_type,
-      base::Time last_browser_wakeup_for_periodic_sync);
-  void DidGetSoonestWakeupDelta(
-      base::OnceCallback<void(base::TimeDelta)> callback,
-      base::TimeDelta soonest_wakeup_delta);
-
-  void RevivePeriodicBackgroundSyncRegistrationsOnIOThread(url::Origin origin);
-
-  // The services are owned by this. They're either deleted
-  // during ShutdownOnIO or when the channel is closed via
-  // *ServiceHadConnectionError. Only accessed on the IO thread.
+  // The services are owned by this. They're either deleted during Shutdown()
+  // or when the channel is closed via *ServiceHadConnectionError.
   std::set<std::unique_ptr<OneShotBackgroundSyncServiceImpl>,
            base::UniquePtrComparator>
       one_shot_sync_services_;
@@ -128,13 +118,12 @@ class CONTENT_EXPORT BackgroundSyncContextImpl
            base::UniquePtrComparator>
       periodic_sync_services_;
 
-  // Only accessed on the IO thread.
   std::unique_ptr<BackgroundSyncManager> background_sync_manager_;
 
   std::map<blink::mojom::BackgroundSyncType, base::TimeDelta>
       test_wakeup_delta_;
 
-  DISALLOW_COPY_AND_ASSIGN(BackgroundSyncContextImpl);
+  SEQUENCE_CHECKER(sequence_checker_);
 };
 
 }  // namespace content

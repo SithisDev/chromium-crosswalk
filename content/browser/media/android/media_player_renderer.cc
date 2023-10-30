@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,8 @@
 
 #include <memory>
 
-#include "base/android/build_info.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/task/post_task.h"
 #include "content/browser/android/scoped_surface_request_manager.h"
 #include "content/browser/media/android/media_player_renderer_web_contents_observer.h"
 #include "content/browser/media/android/media_resource_getter_impl.h"
@@ -19,7 +17,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "media/base/android/media_service_throttler.h"
@@ -38,19 +35,17 @@ MediaPlayerRenderer::MediaPlayerRenderer(
     int process_id,
     int routing_id,
     WebContents* web_contents,
-    RendererExtensionRequest renderer_extension_request,
-    ClientExtensionPtr client_extension_ptr)
-    : client_extension_(std::move(client_extension_ptr)),
+    mojo::PendingReceiver<RendererExtension> renderer_extension_receiver,
+    mojo::PendingRemote<ClientExtension> client_extension_remote)
+    : client_extension_(std::move(client_extension_remote)),
       render_process_id_(process_id),
       routing_id_(routing_id),
       has_error_(false),
       volume_(kDefaultVolume),
-      renderer_extension_binding_(this, std::move(renderer_extension_request)),
-      weak_factory_(this) {
-  DCHECK_EQ(static_cast<RenderFrameHostImpl*>(
-                RenderFrameHost::FromID(process_id, routing_id))
-                ->delegate()
-                ->GetAsWebContents(),
+      renderer_extension_receiver_(this,
+                                   std::move(renderer_extension_receiver)) {
+  DCHECK_EQ(WebContents::FromRenderFrameHost(
+                RenderFrameHost::FromID(process_id, routing_id)),
             web_contents);
 
   WebContentsImpl* web_contents_impl =
@@ -74,7 +69,7 @@ MediaPlayerRenderer::~MediaPlayerRenderer() {
 
 void MediaPlayerRenderer::Initialize(media::MediaResource* media_resource,
                                      media::RendererClient* client,
-                                     const media::PipelineStatusCB& init_cb) {
+                                     media::PipelineStatusCallback init_cb) {
   DVLOG(1) << __func__;
 
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -83,7 +78,7 @@ void MediaPlayerRenderer::Initialize(media::MediaResource* media_resource,
 
   if (media_resource->GetType() != media::MediaResource::Type::URL) {
     DLOG(ERROR) << "MediaResource is not of Type URL";
-    init_cb.Run(media::PIPELINE_ERROR_INITIALIZATION_FAILED);
+    std::move(init_cb).Run(media::PIPELINE_ERROR_INITIALIZATION_FAILED);
     return;
   }
 
@@ -91,58 +86,52 @@ void MediaPlayerRenderer::Initialize(media::MediaResource* media_resource,
       media::MediaServiceThrottler::GetInstance()->GetDelayForClientCreation();
 
   if (creation_delay.is_zero()) {
-    CreateMediaPlayer(media_resource->GetMediaUrlParams(), init_cb);
+    CreateMediaPlayer(media_resource->GetMediaUrlParams(), std::move(init_cb));
     return;
   }
 
-  base::PostDelayedTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
+  GetUIThreadTaskRunner({})->PostDelayedTask(
+      FROM_HERE,
       base::BindOnce(&MediaPlayerRenderer::CreateMediaPlayer,
                      weak_factory_.GetWeakPtr(),
-                     media_resource->GetMediaUrlParams(), init_cb),
+                     media_resource->GetMediaUrlParams(), std::move(init_cb)),
       creation_delay);
 }
 
 void MediaPlayerRenderer::CreateMediaPlayer(
     const media::MediaUrlParams& url_params,
-    const media::PipelineStatusCB& init_cb) {
+    media::PipelineStatusCallback init_cb) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Force the initialization of |media_resource_getter_| first. If it fails,
   // the RenderFrameHost may have been destroyed already.
   if (!GetMediaResourceGetter()) {
     DLOG(ERROR) << "Unable to retrieve MediaResourceGetter";
-    init_cb.Run(media::PIPELINE_ERROR_INITIALIZATION_FAILED);
+    std::move(init_cb).Run(media::PIPELINE_ERROR_INITIALIZATION_FAILED);
     return;
   }
 
   const std::string user_agent = GetContentClient()->browser()->GetUserAgent();
 
-  // Never allow credentials on KitKat. See https://crbug.com/936566.
-  bool allow_credentials = url_params.allow_credentials &&
-                           base::android::BuildInfo::GetInstance()->sdk_int() >
-                               base::android::SDK_VERSION_KITKAT;
-
-  media_player_.reset(new media::MediaPlayerBridge(
-      url_params.media_url, url_params.site_for_cookies, user_agent,
+  media_player_ = std::make_unique<media::MediaPlayerBridge>(
+      url_params.media_url, url_params.site_for_cookies,
+      url_params.top_frame_origin, user_agent,
       false,  // hide_url_log
       this,   // MediaPlayerBridge::Client
-      allow_credentials));
+      url_params.allow_credentials, url_params.is_hls);
 
   media_player_->Initialize();
   UpdateVolume();
 
-  init_cb.Run(media::PIPELINE_OK);
+  std::move(init_cb).Run(media::PIPELINE_OK);
 }
 
-void MediaPlayerRenderer::SetCdm(media::CdmContext* cdm_context,
-                                 const media::CdmAttachedCB& cdm_attached_cb) {
-  NOTREACHED();
-}
+void MediaPlayerRenderer::SetLatencyHint(
+    absl::optional<base::TimeDelta> latency_hint) {}
 
-void MediaPlayerRenderer::Flush(const base::Closure& flush_cb) {
+void MediaPlayerRenderer::Flush(base::OnceClosure flush_cb) {
   DVLOG(3) << __func__;
-  flush_cb.Run();
+  std::move(flush_cb).Run();
 }
 
 void MediaPlayerRenderer::StartPlayingFrom(base::TimeDelta time) {
@@ -175,12 +164,9 @@ void MediaPlayerRenderer::SetPlaybackRate(double playback_rate) {
   if (playback_rate == 0) {
     media_player_->Pause();
   } else {
+    media_player_->SetPlaybackRate(playback_rate);
     // MediaPlayerBridge's Start() is idempotent.
     media_player_->Start();
-
-    // TODO(tguilbert): MediaPlayer's interface allows variable playback rate,
-    // but is not currently exposed in the MediaPlayerBridge interface.
-    // Investigate wether or not we want to add variable playback speed.
   }
 }
 
@@ -199,8 +185,8 @@ void MediaPlayerRenderer::InitiateScopedSurfaceRequest(
 
   surface_request_token_ =
       ScopedSurfaceRequestManager::GetInstance()->RegisterScopedSurfaceRequest(
-          base::Bind(&MediaPlayerRenderer::OnScopedSurfaceRequestCompleted,
-                     weak_factory_.GetWeakPtr()));
+          base::BindOnce(&MediaPlayerRenderer::OnScopedSurfaceRequestCompleted,
+                         weak_factory_.GetWeakPtr()));
 
   std::move(callback).Run(surface_request_token_);
 }
@@ -232,11 +218,8 @@ media::MediaResourceGetter* MediaPlayerRenderer::GetMediaResourceGetter() {
       return nullptr;
 
     BrowserContext* context = host->GetBrowserContext();
-    StoragePartition* partition = host->GetStoragePartition();
-    storage::FileSystemContext* file_system_context =
-        partition ? partition->GetFileSystemContext() : nullptr;
-    media_resource_getter_.reset(new MediaResourceGetterImpl(
-        context, file_system_context, render_process_id_, routing_id_));
+    media_resource_getter_ = std::make_unique<MediaResourceGetterImpl>(
+        context, render_process_id_, routing_id_);
   }
   return media_resource_getter_.get();
 }

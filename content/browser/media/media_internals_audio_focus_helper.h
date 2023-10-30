@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 
 #include <map>
 
-#include "base/macros.h"
+#include "base/values.h"
 #include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/media_session/public/mojom/audio_focus.mojom.h"
 
 namespace content {
@@ -19,6 +20,12 @@ class MediaInternalsAudioFocusHelper
     : public media_session::mojom::AudioFocusObserver {
  public:
   MediaInternalsAudioFocusHelper();
+
+  MediaInternalsAudioFocusHelper(const MediaInternalsAudioFocusHelper&) =
+      delete;
+  MediaInternalsAudioFocusHelper& operator=(
+      const MediaInternalsAudioFocusHelper&) = delete;
+
   ~MediaInternalsAudioFocusHelper() override;
 
   // Sends all audio focus information to media internals.
@@ -29,6 +36,7 @@ class MediaInternalsAudioFocusHelper
       media_session::mojom::AudioFocusRequestStatePtr session) override;
   void OnFocusLost(
       media_session::mojom::AudioFocusRequestStatePtr session) override;
+  void OnRequestIdReleased(const base::UnguessableToken&) override {}
 
   // Sets whether we should listen to audio focus events.
   void SetEnabled(bool enabled);
@@ -48,8 +56,8 @@ class MediaInternalsAudioFocusHelper
       const std::string& id,
       media_session::mojom::MediaSessionDebugInfoPtr info);
 
-  void SerializeAndSendUpdate(const std::string& function,
-                              const base::Value* value);
+  void SerializeAndSendUpdate(base::StringPiece function,
+                              const base::Value::Dict& value);
 
   // Build the name of the request to display and inject values from |state|.
   std::string BuildNameString(
@@ -61,20 +69,18 @@ class MediaInternalsAudioFocusHelper
       const media_session::mojom::AudioFocusRequestStatePtr& state,
       const std::string& provided_state) const;
 
-  // Holds a pointer to the media session service and it's debug interface.
-  media_session::mojom::AudioFocusManagerPtr audio_focus_ptr_;
-  media_session::mojom::AudioFocusManagerDebugPtr audio_focus_debug_ptr_;
+  // Holds a remote to the media session service and it's debug interface.
+  mojo::Remote<media_session::mojom::AudioFocusManager> audio_focus_;
+  mojo::Remote<media_session::mojom::AudioFocusManagerDebug> audio_focus_debug_;
 
   // Must only be accessed on the UI thread.
-  base::DictionaryValue audio_focus_data_;
+  base::Value::Dict audio_focus_data_;
   std::map<std::string, media_session::mojom::AudioFocusRequestStatePtr>
       request_state_;
 
   bool enabled_ = false;
 
   mojo::Receiver<media_session::mojom::AudioFocusObserver> receiver_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MediaInternalsAudioFocusHelper);
 };
 
 }  // namespace content

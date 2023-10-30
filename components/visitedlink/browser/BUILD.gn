@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,8 +7,8 @@ static_library("browser") {
     "visitedlink_delegate.h",
     "visitedlink_event_listener.cc",
     "visitedlink_event_listener.h",
-    "visitedlink_master.cc",
-    "visitedlink_master.h",
+    "visitedlink_writer.cc",
+    "visitedlink_writer.h",
   ]
 
   deps = [

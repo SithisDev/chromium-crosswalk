@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/stl_util.h"
+#include "base/observer_list.h"
 #include "base/values.h"
 
 ValueMapPrefStore::ValueMapPrefStore() {}
@@ -17,8 +17,8 @@ bool ValueMapPrefStore::GetValue(const std::string& key,
   return prefs_.GetValue(key, value);
 }
 
-std::unique_ptr<base::DictionaryValue> ValueMapPrefStore::GetValues() const {
-  return prefs_.AsDictionaryValue();
+base::Value::Dict ValueMapPrefStore::GetValues() const {
+  return prefs_.AsDict();
 }
 
 void ValueMapPrefStore::AddObserver(PrefStore::Observer* observer) {
@@ -30,7 +30,7 @@ void ValueMapPrefStore::RemoveObserver(PrefStore::Observer* observer) {
 }
 
 bool ValueMapPrefStore::HasObservers() const {
-  return observers_.might_have_observers();
+  return !observers_.empty();
 }
 
 void ValueMapPrefStore::SetValue(const std::string& key,
@@ -73,4 +73,9 @@ ValueMapPrefStore::~ValueMapPrefStore() {}
 void ValueMapPrefStore::NotifyInitializationCompleted() {
   for (Observer& observer : observers_)
     observer.OnInitializationCompleted(true);
+}
+
+void ValueMapPrefStore::RemoveValuesByPrefixSilently(
+    const std::string& prefix) {
+  prefs_.ClearWithPrefix(prefix);
 }

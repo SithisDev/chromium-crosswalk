@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,14 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "chromecast/public/cast_sys_info.h"
 #include "components/metrics/enabled_state_provider.h"
+#include "components/metrics/metrics_log_store.h"
 #include "components/metrics/metrics_log_uploader.h"
 #include "components/metrics/metrics_service_client.h"
+#include "components/variations/synthetic_trial_registry.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -41,8 +43,13 @@ class CastMetricsServiceDelegate {
  public:
   // Invoked when the metrics client ID changes.
   virtual void SetMetricsClientId(const std::string& client_id) = 0;
+
   // Allows registration of extra metrics providers.
   virtual void RegisterMetricsProviders(::metrics::MetricsService* service) = 0;
+
+  // Adds Cast embedder-specific storage limits to |limits| object.
+  virtual void ApplyMetricsStorageLimits(
+      ::metrics::MetricsLogStore::StorageLimits* limits) {}
 
  protected:
   virtual ~CastMetricsServiceDelegate() = default;
@@ -57,6 +64,9 @@ class CastMetricsServiceClient : public ::metrics::MetricsServiceClient,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
   ~CastMetricsServiceClient() override;
 
+  CastMetricsServiceClient(const CastMetricsServiceClient&) = delete;
+  CastMetricsServiceClient& operator=(const CastMetricsServiceClient&) = delete;
+
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // Use |client_id| when starting MetricsService instead of generating a new
@@ -67,21 +77,24 @@ class CastMetricsServiceClient : public ::metrics::MetricsServiceClient,
   // Processes all events from shared file. This should be used to consume all
   // events in the file before shutdown. This function is safe to call from any
   // thread.
-  void ProcessExternalEvents(const base::Closure& cb);
+  void ProcessExternalEvents(base::OnceClosure cb);
 
   void InitializeMetricsService();
   void StartMetricsService();
   void Finalize();
 
   // ::metrics::MetricsServiceClient:
+  variations::SyntheticTrialRegistry* GetSyntheticTrialRegistry() override;
   ::metrics::MetricsService* GetMetricsService() override;
   void SetMetricsClientId(const std::string& client_id) override;
   int32_t GetProduct() override;
   std::string GetApplicationLocale() override;
+  const network_time::NetworkTimeTracker* GetNetworkTimeTracker() override;
   bool GetBrand(std::string* brand_code) override;
   ::metrics::SystemProfileProto::Channel GetChannel() override;
+  bool IsExtendedStableChannel() override;
   std::string GetVersionString() override;
-  void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
+  void CollectFinalMetricsForLog(base::OnceClosure done_callback) override;
   GURL GetMetricsServerUrl() override;
   std::unique_ptr<::metrics::MetricsLogUploader> CreateUploader(
       const GURL& server_url,
@@ -91,6 +104,7 @@ class CastMetricsServiceClient : public ::metrics::MetricsServiceClient,
       const ::metrics::MetricsLogUploader::UploadCallback& on_upload_complete)
       override;
   base::TimeDelta GetStandardUploadInterval() override;
+  ::metrics::MetricsLogStore::StorageLimits GetStorageLimits() const override;
 
   // ::metrics::EnabledStateProvider:
   bool IsConsentGiven() const override;
@@ -102,9 +116,8 @@ class CastMetricsServiceClient : public ::metrics::MetricsServiceClient,
 
   PrefService* pref_service() const { return pref_service_; }
   void SetCallbacks(
-      base::RepeatingCallback<void(const base::Closure&)>
-          collect_final_metrics_cb,
-      base::RepeatingCallback<void(const base::Closure&)> external_events_cb);
+      base::RepeatingCallback<void(base::OnceClosure)> collect_final_metrics_cb,
+      base::RepeatingCallback<void(base::OnceClosure)> external_events_cb);
 
  private:
   std::unique_ptr<::metrics::ClientInfo> LoadClientInfo();
@@ -118,13 +131,13 @@ class CastMetricsServiceClient : public ::metrics::MetricsServiceClient,
 
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   std::unique_ptr<::metrics::MetricsStateManager> metrics_state_manager_;
+  std::unique_ptr<variations::SyntheticTrialRegistry> synthetic_trial_registry_;
   std::unique_ptr<::metrics::MetricsService> metrics_service_;
   std::unique_ptr<::metrics::EnabledStateProvider> enabled_state_provider_;
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
-  base::RepeatingCallback<void(const base::Closure&)> collect_final_metrics_cb_;
-  base::RepeatingCallback<void(const base::Closure&)> external_events_cb_;
-
-  DISALLOW_COPY_AND_ASSIGN(CastMetricsServiceClient);
+  base::RepeatingCallback<void(base::OnceClosure)> collect_final_metrics_cb_;
+  base::RepeatingCallback<void(base::OnceClosure)> external_events_cb_;
+  const std::unique_ptr<CastSysInfo> cast_sys_info_;
 };
 
 }  // namespace metrics

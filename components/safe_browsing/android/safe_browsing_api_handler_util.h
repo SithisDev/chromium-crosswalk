@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,7 +9,7 @@
 
 #include <string>
 
-#include "components/safe_browsing/db/util.h"
+#include "components/safe_browsing/core/browser/db/util.h"
 
 namespace safe_browsing {
 
@@ -28,6 +28,10 @@ enum JavaThreatTypes {
   JAVA_THREAT_TYPE_SOCIAL_ENGINEERING = 5,
   JAVA_THREAT_TYPE_SUBRESOURCE_FILTER = 13,
   JAVA_THREAT_TYPE_BILLING = 15,
+  // TODO(crbug.com/999344): temp magic number, update once GMSCore is
+  // available.
+  JAVA_THREAT_TYPE_CSD_ALLOWLIST = 16,
+  JAVA_THREAT_TYPE_HIGH_CONFIDENCE_ALLOWLIST = 17,
   JAVA_THREAT_TYPE_MAX_VALUE
 };
 
@@ -55,10 +59,6 @@ UmaRemoteCallResult ParseJsonFromGMSCore(const std::string& metadata_str,
                                          SBThreatType* worst_threat,
                                          ThreatMetadata* metadata);
 
-// DEPRECATED.  Will be removed.
-UmaRemoteCallResult ParseJsonToThreatAndPB(const std::string& metadata_str,
-                                           SBThreatType* worst_threat,
-                                           std::string* metadata_pb_str);
 }  // namespace safe_browsing
 
 #endif  // COMPONENTS_SAFE_BROWSING_ANDROID_SAFE_BROWSING_API_HANDLER_UTIL_H_

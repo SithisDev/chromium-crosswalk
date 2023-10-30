@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,69 +6,92 @@
 
 #include <algorithm>
 
-#include "base/macros.h"
-#include "base/metrics/field_trial.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/feature_list.h"
 #include "base/metrics/user_metrics.h"
-#include "components/password_manager/core/browser/password_form_manager_for_ui.h"
+#include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_sync_util.h"
 #include "components/password_manager/core/common/password_manager_features.h"
-#include "google_apis/gaia/gaia_urls.h"
-#include "net/base/url_util.h"
-
-using autofill::PasswordForm;
+#include "components/signin/public/identity_manager/account_info.h"
+#include "components/signin/public/identity_manager/identity_manager.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 
 namespace password_manager {
 
 SyncCredentialsFilter::SyncCredentialsFilter(
-    const PasswordManagerClient* client,
-    SyncServiceFactoryFunction sync_service_factory_function,
-    IdentityManagerFactoryFunction identity_manager_factory_function)
+    PasswordManagerClient* client,
+    SyncServiceFactoryFunction sync_service_factory_function)
     : client_(client),
-      sync_service_factory_function_(sync_service_factory_function),
-      identity_manager_factory_function_(identity_manager_factory_function) {}
+      sync_service_factory_function_(std::move(sync_service_factory_function)) {
+}
 
-SyncCredentialsFilter::~SyncCredentialsFilter() {}
+SyncCredentialsFilter::~SyncCredentialsFilter() = default;
 
-bool SyncCredentialsFilter::ShouldSave(
-    const autofill::PasswordForm& form) const {
-  return !client_->IsIncognito() &&
-         !form.form_data.is_gaia_with_skip_save_password_form &&
-         !sync_util::IsSyncAccountCredential(
-             form, sync_service_factory_function_.Run(),
-             identity_manager_factory_function_.Run());
+bool SyncCredentialsFilter::ShouldSave(const PasswordForm& form) const {
+  if (client_->IsIncognito())
+    return false;
+
+  if (form.form_data.is_gaia_with_skip_save_password_form)
+    return false;
+
+  const syncer::SyncService* sync_service =
+      sync_service_factory_function_.Run();
+  const signin::IdentityManager* identity_manager =
+      client_->GetIdentityManager();
+
+  if (base::FeatureList::IsEnabled(features::kEnablePasswordsAccountStorage)) {
+    // If kEnablePasswordsAccountStorage is enabled, then don't allow saving the
+    // password if it corresponds to the primary account. Note that if the user
+    // is just signing in to the first Gaia account, then IdentityManager might
+    // not know about the account yet.
+    if (sync_util::IsGaiaCredentialPage(form.signon_realm)) {
+      CoreAccountInfo primary_account = identity_manager->GetPrimaryAccountInfo(
+          signin::ConsentLevel::kSignin);
+      if (primary_account.IsEmpty() ||
+          gaia::AreEmailsSame(base::UTF16ToUTF8(form.username_value),
+                              primary_account.email)) {
+        return false;
+      }
+    }
+  } else {
+    // If kEnablePasswordsAccountStorage is NOT enabled, then don't allow saving
+    // the password for the sync account specifically.
+    if (sync_util::IsSyncAccountCredential(form.url, form.username_value,
+                                           sync_service, identity_manager)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 bool SyncCredentialsFilter::ShouldSaveGaiaPasswordHash(
-    const autofill::PasswordForm& form) const {
-#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
-  return !client_->IsIncognito() &&
-         sync_util::IsGaiaCredentialPage(form.signon_realm);
-#else
+    const PasswordForm& form) const {
+  if (base::FeatureList::IsEnabled(features::kPasswordReuseDetectionEnabled)) {
+    return !client_->IsIncognito() &&
+           sync_util::IsGaiaCredentialPage(form.signon_realm);
+  }
   return false;
-#endif  // SYNC_PASSWORD_REUSE_DETECTION_ENABLED
 }
 
 bool SyncCredentialsFilter::ShouldSaveEnterprisePasswordHash(
-    const autofill::PasswordForm& form) const {
+    const PasswordForm& form) const {
   return !client_->IsIncognito() && sync_util::ShouldSaveEnterprisePasswordHash(
                                         form, *client_->GetPrefs());
 }
 
 bool SyncCredentialsFilter::IsSyncAccountEmail(
     const std::string& username) const {
-  return sync_util::IsSyncAccountEmail(
-      username, identity_manager_factory_function_.Run());
+  return sync_util::IsSyncAccountEmail(username, client_->GetIdentityManager());
 }
 
 void SyncCredentialsFilter::ReportFormLoginSuccess(
-    const PasswordFormManagerInterface& form_manager) const {
+    const PasswordFormManager& form_manager) const {
+  const PasswordForm& form = form_manager.GetPendingCredentials();
   if (!form_manager.IsNewLogin() &&
-      sync_util::IsSyncAccountCredential(
-          form_manager.GetPendingCredentials(),
-          sync_service_factory_function_.Run(),
-          identity_manager_factory_function_.Run())) {
+      sync_util::IsSyncAccountCredential(form.url, form.username_value,
+                                         sync_service_factory_function_.Run(),
+                                         client_->GetIdentityManager())) {
     base::RecordAction(base::UserMetricsAction(
         "PasswordManager_SyncCredentialFilledAndLoginSuccessfull"));
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -155,14 +155,14 @@ function promiseDeleteThenOpenDb(dbName, upgradeCallback) {
     };
     deleteRequest.onsuccess = () => {
       const openRequest = indexedDB.open(dbName);
-      openRequest.onerror = () => {
+      openRequest.onerror = (event) => {
         reject(new Error('An error occurred on opening database ${dbName}'));
       };
       openRequest.onblocked = () => {
         reject(new Error('Opening database ${dbName} was blocked'));
       };
-      openRequest.onupgradeneeded = () => {
-        upgradeCallback();
+      openRequest.onupgradeneeded = (event) => {
+        upgradeCallback(event.target.result);
       };
       openRequest.onsuccess = () => {
         resolve(event.target.result);
@@ -185,7 +185,7 @@ function promiseOpenDb(dbName, optionalUpgradeCallback) {
       reject(e);
     };
     if (optionalUpgradeCallback) {
-      openRequest.onupgradeneeded = () => {
+      openRequest.onupgradeneeded = (event) => {
         const db = event.target.result;
         optionalUpgradeCallback(db);
       };

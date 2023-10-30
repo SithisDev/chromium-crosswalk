@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -144,7 +144,7 @@ const url_pattern_index::flat::UrlRule* FilterTool::MatchImpl(
                           ParseRequestUrl(url), ParseType(type));
 
   *blocked = rule && !(rule->options() &
-                       url_pattern_index::flat::OptionFlag_IS_WHITELIST);
+                       url_pattern_index::flat::OptionFlag_IS_ALLOWLIST);
   return rule;
 }
 

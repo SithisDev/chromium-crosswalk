@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include "base/task/task_traits.h"
 
 namespace update_client {
+
+// Task traits for tasks posted to base::ThreadPool from update_client.
 
 constexpr base::TaskTraits kTaskTraits = {
     base::MayBlock(), base::TaskPriority::BEST_EFFORT,

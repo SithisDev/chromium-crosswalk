@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,22 @@
 
 #include <utility>
 
+#include "base/unguessable_token.h"
 #include "build/build_config.h"
+#include "build/chromecast_buildflags.h"
+#include "content/browser/renderer_host/page_impl.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/frame_messages.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/messaging/string_message_codec.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_string.h"
+#include "base/android/scoped_java_ref.h"
 #include "content/browser/android/app_web_message_port.h"
+#include "content/browser/android/message_payload.h"
 #endif
 
 using blink::MessagePortChannel;
@@ -24,30 +29,34 @@ using blink::MessagePortChannel;
 namespace content {
 namespace {
 
-void PostMessageToFrameInternal(WebContents* web_contents,
-                                const base::string16& source_origin,
-                                const base::string16& target_origin,
-                                const base::string16& data,
-                                std::vector<MessagePortChannel> channels) {
+void PostMessageToFrameInternal(
+    Page& page,
+    const std::u16string& source_origin,
+    const std::u16string& target_origin,
+    const blink::WebMessagePayload& data,
+    std::vector<blink::MessagePortDescriptor> ports) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  blink::TransferableMessage message;
-  message.owned_encoded_message = blink::EncodeStringMessage(data);
-  message.encoded_message = message.owned_encoded_message;
+  // TODO(chrisha): Kill off MessagePortChannel, as MessagePortDescriptor now
+  // plays that role.
+  std::vector<MessagePortChannel> channels;
+  for (auto& port : ports)
+    channels.emplace_back(MessagePortChannel(std::move(port)));
+
+  blink::TransferableMessage message = blink::EncodeWebMessagePayload(data);
   message.ports = std::move(channels);
-  int32_t source_routing_id = MSG_ROUTING_NONE;
 
   RenderFrameHostImpl* rfh =
-      static_cast<RenderFrameHostImpl*>(web_contents->GetMainFrame());
-  rfh->PostMessageEvent(source_routing_id, source_origin, target_origin,
+      static_cast<RenderFrameHostImpl*>(&page.GetMainDocument());
+  rfh->PostMessageEvent(absl::nullopt, source_origin, target_origin,
                         std::move(message));
 }
 
-#if defined(OS_ANDROID)
-base::string16 ToString16(JNIEnv* env,
+#if BUILDFLAG(IS_ANDROID)
+std::u16string ToString16(JNIEnv* env,
                           const base::android::JavaParamRef<jstring>& s) {
   if (s.is_null())
-    return base::string16();
+    return std::u16string();
   return base::android::ConvertJavaStringToUTF16(env, s);
 }
 #endif
@@ -56,44 +65,48 @@ base::string16 ToString16(JNIEnv* env,
 
 // static
 void MessagePortProvider::PostMessageToFrame(
-    WebContents* web_contents,
-    const base::string16& source_origin,
-    const base::string16& target_origin,
-    const base::string16& data) {
-  PostMessageToFrameInternal(web_contents, source_origin, target_origin, data,
-                             std::vector<MessagePortChannel>());
+    Page& page,
+    const std::u16string& source_origin,
+    const std::u16string& target_origin,
+    const blink::WebMessagePayload& data) {
+  PostMessageToFrameInternal(page, source_origin, target_origin, data,
+                             std::vector<blink::MessagePortDescriptor>());
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 void MessagePortProvider::PostMessageToFrame(
-    WebContents* web_contents,
+    Page& page,
     JNIEnv* env,
     const base::android::JavaParamRef<jstring>& source_origin,
     const base::android::JavaParamRef<jstring>& target_origin,
-    const base::android::JavaParamRef<jstring>& data,
+    const base::android::JavaParamRef<jobject>& payload,
     const base::android::JavaParamRef<jobjectArray>& ports) {
-  PostMessageToFrameInternal(web_contents, ToString16(env, source_origin),
-                             ToString16(env, target_origin),
-                             ToString16(env, data),
-                             AppWebMessagePort::UnwrapJavaArray(env, ports));
+  PostMessageToFrameInternal(
+      page, ToString16(env, source_origin), ToString16(env, target_origin),
+      android::ConvertToWebMessagePayloadFromJava(
+          base::android::ScopedJavaLocalRef<jobject>(payload)),
+      android::AppWebMessagePort::Release(env, ports));
 }
 #endif
 
-#if defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA) ||           \
+    BUILDFLAG(ENABLE_CAST_RECEIVER) && \
+        (BUILDFLAG(IS_CASTOS) || BUILDFLAG(IS_CAST_ANDROID))
 // static
 void MessagePortProvider::PostMessageToFrame(
-    WebContents* web_contents,
-    const base::string16& source_origin,
-    const base::Optional<base::string16>& target_origin,
-    const base::string16& data,
-    std::vector<mojo::ScopedMessagePipeHandle> channels) {
-  std::vector<MessagePortChannel> channels_wrapped;
-  for (mojo::ScopedMessagePipeHandle& handle : channels) {
-    channels_wrapped.emplace_back(std::move(handle));
-  }
-  PostMessageToFrameInternal(web_contents, source_origin,
+    Page& page,
+    const std::u16string& source_origin,
+    const absl::optional<std::u16string>& target_origin,
+    const std::u16string& data,
+    std::vector<blink::WebMessagePort> ports) {
+  // Extract the underlying descriptors.
+  std::vector<blink::MessagePortDescriptor> descriptors;
+  descriptors.reserve(ports.size());
+  for (size_t i = 0; i < ports.size(); ++i)
+    descriptors.push_back(ports[i].PassPort());
+  PostMessageToFrameInternal(page, source_origin,
                              target_origin.value_or(base::EmptyString16()),
-                             data, channels_wrapped);
+                             data, std::move(descriptors));
 }
 #endif
 

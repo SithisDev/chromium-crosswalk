@@ -1,14 +1,21 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/service/display_embedder/skia_output_surface_dependency_impl.h"
 
+#include <memory>
+#include <utility>
+
+#include "base/callback_helpers.h"
+#include "base/task/bind_post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/viz/service/gl/gpu_service_impl.h"
+#include "gpu/command_buffer/service/command_buffer_task_executor.h"
+#include "gpu/command_buffer/service/gpu_task_scheduler_helper.h"
 #include "gpu/command_buffer/service/scheduler.h"
-#include "gpu/ipc/scheduler_sequence.h"
+#include "gpu/command_buffer/service/scheduler_sequence.h"
 #include "gpu/ipc/service/image_transport_surface.h"
 #include "ui/gl/init/gl_factory.h"
 
@@ -26,11 +33,8 @@ SkiaOutputSurfaceDependencyImpl::~SkiaOutputSurfaceDependencyImpl() = default;
 std::unique_ptr<gpu::SingleTaskSequence>
 SkiaOutputSurfaceDependencyImpl::CreateSequence() {
   return std::make_unique<gpu::SchedulerSequence>(
-      gpu_service_impl_->scheduler());
-}
-
-bool SkiaOutputSurfaceDependencyImpl::IsUsingVulkan() {
-  return gpu_service_impl_->is_using_vulkan();
+      gpu_service_impl_->GetGpuScheduler(),
+      gpu_service_impl_->gpu_task_runner());
 }
 
 gpu::SharedImageManager*
@@ -44,11 +48,14 @@ gpu::SyncPointManager* SkiaOutputSurfaceDependencyImpl::GetSyncPointManager() {
 
 const gpu::GpuDriverBugWorkarounds&
 SkiaOutputSurfaceDependencyImpl::GetGpuDriverBugWorkarounds() {
-  return gpu_service_impl_->gpu_channel_manager()->gpu_driver_bug_workarounds();
+  return gpu_service_impl_->gpu_driver_bug_workarounds();
 }
 
 scoped_refptr<gpu::SharedContextState>
 SkiaOutputSurfaceDependencyImpl::GetSharedContextState() {
+  if (gpu_service_impl_->compositor_gpu_thread()) {
+    return gpu_service_impl_->compositor_gpu_thread()->GetSharedContextState();
+  }
   return gpu_service_impl_->GetContextState();
 }
 
@@ -59,11 +66,19 @@ SkiaOutputSurfaceDependencyImpl::GetGrShaderCache() {
 
 VulkanContextProvider*
 SkiaOutputSurfaceDependencyImpl::GetVulkanContextProvider() {
+  if (gpu_service_impl_->compositor_gpu_thread()) {
+    return gpu_service_impl_->compositor_gpu_thread()
+        ->vulkan_context_provider();
+  }
   return gpu_service_impl_->vulkan_context_provider();
 }
 
-const gpu::GpuPreferences&
-SkiaOutputSurfaceDependencyImpl::GetGpuPreferences() {
+DawnContextProvider* SkiaOutputSurfaceDependencyImpl::GetDawnContextProvider() {
+  return gpu_service_impl_->dawn_context_provider();
+}
+
+const gpu::GpuPreferences& SkiaOutputSurfaceDependencyImpl::GetGpuPreferences()
+    const {
   return gpu_service_impl_->gpu_preferences();
 }
 
@@ -76,6 +91,10 @@ gpu::MailboxManager* SkiaOutputSurfaceDependencyImpl::GetMailboxManager() {
   return gpu_service_impl_->mailbox_manager();
 }
 
+gpu::ImageFactory* SkiaOutputSurfaceDependencyImpl::GetGpuImageFactory() {
+  return gpu_service_impl_->gpu_image_factory();
+}
+
 bool SkiaOutputSurfaceDependencyImpl::IsOffscreen() {
   return surface_handle_ == gpu::kNullSurfaceHandle;
 }
@@ -85,30 +104,69 @@ gpu::SurfaceHandle SkiaOutputSurfaceDependencyImpl::GetSurfaceHandle() {
 }
 
 scoped_refptr<gl::GLSurface> SkiaOutputSurfaceDependencyImpl::CreateGLSurface(
-    base::WeakPtr<gpu::ImageTransportSurfaceDelegate> stub) {
+    base::WeakPtr<gpu::ImageTransportSurfaceDelegate> stub,
+    gl::GLSurfaceFormat format) {
   if (IsOffscreen()) {
-    return gl::init::CreateOffscreenGLSurface(gfx::Size());
+    return gl::init::CreateOffscreenGLSurfaceWithFormat(
+        GetSharedContextState()->display(), gfx::Size(), format);
   } else {
     return gpu::ImageTransportSurface::CreateNativeSurface(
-        stub, surface_handle_, gl::GLSurfaceFormat());
+        GetSharedContextState()->display(), stub, surface_handle_, format);
   }
 }
 
-void SkiaOutputSurfaceDependencyImpl::PostTaskToClientThread(
-    base::OnceClosure closure) {
-  client_thread_task_runner_->PostTask(FROM_HERE, std::move(closure));
+base::ScopedClosureRunner SkiaOutputSurfaceDependencyImpl::CacheGLSurface(
+    gl::GLSurface* surface) {
+  gpu_service_impl_->gpu_task_runner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&gl::GLSurface::AddRef, base::Unretained(surface)));
+
+  auto release_callback = base::BindPostTask(
+      gpu_service_impl_->gpu_task_runner(),
+      base::BindOnce(&gl::GLSurface::Release, base::Unretained(surface)));
+
+  return base::ScopedClosureRunner(std::move(release_callback));
+}
+
+scoped_refptr<base::TaskRunner>
+SkiaOutputSurfaceDependencyImpl::GetClientTaskRunner() {
+  return client_thread_task_runner_;
 }
 
 void SkiaOutputSurfaceDependencyImpl::ScheduleGrContextCleanup() {
-  gpu_service_impl_->gpu_channel_manager()->ScheduleGrContextCleanup();
+  GetSharedContextState()->ScheduleGrContextCleanup();
 }
 
-#if defined(OS_WIN)
+void SkiaOutputSurfaceDependencyImpl::ScheduleDelayedGPUTaskFromGPUThread(
+    base::OnceClosure task) {
+  constexpr base::TimeDelta kDelayForDelayedWork = base::Milliseconds(2);
+  gpu_service_impl_->gpu_task_runner()->PostDelayedTask(
+      FROM_HERE, std::move(task), kDelayForDelayedWork);
+}
+
+#if BUILDFLAG(IS_WIN)
 void SkiaOutputSurfaceDependencyImpl::DidCreateAcceleratedSurfaceChildWindow(
     gpu::SurfaceHandle parent_window,
     gpu::SurfaceHandle child_window) {
   gpu_service_impl_->SendCreatedChildWindow(parent_window, child_window);
 }
 #endif
+
+void SkiaOutputSurfaceDependencyImpl::DidLoseContext(
+    gpu::error::ContextLostReason reason,
+    const GURL& active_url) {
+  // |offscreen| is used to determine if it's compositing context or not to
+  // decide if we need to disable webgl and canvas.
+  gpu_service_impl_->DidLoseContext(/*offscreen=*/false, reason, active_url);
+}
+
+base::TimeDelta
+SkiaOutputSurfaceDependencyImpl::GetGpuBlockedTimeSinceLastSwap() {
+  return gpu_service_impl_->GetGpuScheduler()->TakeTotalBlockingTime();
+}
+
+bool SkiaOutputSurfaceDependencyImpl::NeedsSupportForExternalStencil() {
+  return false;
+}
 
 }  // namespace viz

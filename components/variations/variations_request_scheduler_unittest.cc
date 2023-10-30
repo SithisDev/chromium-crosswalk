@@ -1,20 +1,20 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/variations/variations_request_scheduler.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/callback_helpers.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace variations {
 
 TEST(VariationsRequestSchedulerTest, ScheduleFetchShortly) {
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::SingleThreadTaskEnvironment task_environment;
 
-  const base::Closure task = base::DoNothing();
+  const base::RepeatingClosure task = base::DoNothing();
   VariationsRequestScheduler scheduler(task);
   EXPECT_FALSE(scheduler.one_shot_timer_.IsRunning());
 

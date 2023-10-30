@@ -1,14 +1,31 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/download/database/download_db_conversions.h"
 
 #include <utility>
-#include "base/logging.h"
+
+#include "base/notreached.h"
 #include "base/pickle.h"
+#include "base/time/time.h"
+#include "components/download/public/common/download_features.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 
 namespace download {
+namespace {
+
+// Converts base::Time to a timpstamp in milliseconds.
+int64_t FromTimeToMilliseconds(base::Time time) {
+  return time.ToDeltaSinceWindowsEpoch().InMilliseconds();
+}
+
+// Converts a time stamp in milliseconds to base::Time.
+base::Time FromMillisecondsToTime(int64_t time_ms) {
+  return base::Time::FromDeltaSinceWindowsEpoch(base::Milliseconds(time_ms));
+}
+
+}  // namespace
 
 DownloadEntry DownloadDBConversions::DownloadEntryFromProto(
     const download_pb::DownloadEntry& proto) {
@@ -67,6 +84,8 @@ DownloadSource DownloadDBConversions::DownloadSourceFromProto(
       return DownloadSource::CONTEXT_MENU;
     case download_pb::DownloadSource::RETRY:
       return DownloadSource::RETRY;
+    case download_pb::DownloadSource::RETRY_FROM_BUBBLE:
+      return DownloadSource::RETRY_FROM_BUBBLE;
   }
   NOTREACHED();
   return DownloadSource::UNKNOWN;
@@ -98,6 +117,8 @@ download_pb::DownloadSource DownloadDBConversions::DownloadSourceToProto(
       return download_pb::DownloadSource::CONTEXT_MENU;
     case DownloadSource::RETRY:
       return download_pb::DownloadSource::RETRY;
+    case DownloadSource::RETRY_FROM_BUBBLE:
+      return download_pb::DownloadSource::RETRY_FROM_BUBBLE;
   }
   NOTREACHED();
   return download_pb::DownloadSource::UNKNOWN;
@@ -150,7 +171,8 @@ download_pb::InProgressInfo DownloadDBConversions::InProgressInfoToProto(
   for (size_t i = 0; i < in_progress_info.url_chain.size(); ++i)
     proto.add_url_chain(in_progress_info.url_chain[i].spec());
   proto.set_referrer_url(in_progress_info.referrer_url.spec());
-  proto.set_site_url(in_progress_info.site_url.spec());
+  proto.set_serialized_embedder_download_data(
+      in_progress_info.serialized_embedder_download_data);
   proto.set_tab_url(in_progress_info.tab_url.spec());
   proto.set_tab_referrer_url(in_progress_info.tab_referrer_url.spec());
   proto.set_fetch_error_body(in_progress_info.fetch_error_body);
@@ -173,12 +195,10 @@ download_pb::InProgressInfo DownloadDBConversions::InProgressInfoToProto(
   proto.set_start_time(
       in_progress_info.start_time.is_null()
           ? -1
-          : in_progress_info.start_time.ToDeltaSinceWindowsEpoch()
-                .InMilliseconds());
+          : FromTimeToMilliseconds(in_progress_info.start_time));
   proto.set_end_time(in_progress_info.end_time.is_null()
                          ? -1
-                         : in_progress_info.end_time.ToDeltaSinceWindowsEpoch()
-                               .InMilliseconds());
+                         : FromTimeToMilliseconds(in_progress_info.end_time));
   for (size_t i = 0; i < in_progress_info.received_slices.size(); ++i) {
     download_pb::ReceivedSlice* slice = proto.add_received_slices();
     slice->set_received_bytes(
@@ -195,6 +215,16 @@ download_pb::InProgressInfo DownloadDBConversions::InProgressInfoToProto(
   proto.set_metered(in_progress_info.metered);
   proto.set_bytes_wasted(in_progress_info.bytes_wasted);
   proto.set_auto_resume_count(in_progress_info.auto_resume_count);
+  // Fill in the output proto's |reroute_info| iff |in_progress_info|'s
+  // |reroute_info| is initialized, because it has a required field and parsing
+  // an uninitialized one to and from serialized strings would fail.
+  if (in_progress_info.reroute_info.IsInitialized()) {
+    *proto.mutable_reroute_info() = in_progress_info.reroute_info;
+  }
+  proto.set_credentials_mode(
+      static_cast<int32_t>(in_progress_info.credentials_mode));
+  proto.set_range_request_from(in_progress_info.range_request_from);
+  proto.set_range_request_to(in_progress_info.range_request_to);
   return proto;
 }
 
@@ -205,7 +235,8 @@ InProgressInfo DownloadDBConversions::InProgressInfoFromProto(
   for (const auto& url : proto.url_chain())
     info.url_chain.emplace_back(url);
   info.referrer_url = GURL(proto.referrer_url());
-  info.site_url = GURL(proto.site_url());
+  info.serialized_embedder_download_data =
+      proto.serialized_embedder_download_data();
   info.tab_url = GURL(proto.tab_url());
   info.tab_referrer_url = GURL(proto.tab_referrer_url());
   info.fetch_error_body = proto.fetch_error_body();
@@ -223,16 +254,12 @@ InProgressInfo DownloadDBConversions::InProgressInfoFromProto(
       base::Pickle(proto.target_path().data(), proto.target_path().size()));
   info.target_path.ReadFromPickle(&target_path);
   info.received_bytes = proto.received_bytes();
-  info.start_time =
-      proto.start_time() == -1
-          ? base::Time()
-          : base::Time::FromDeltaSinceWindowsEpoch(
-                base::TimeDelta::FromMilliseconds(proto.start_time()));
-  info.end_time =
-      proto.end_time() == -1
-          ? base::Time()
-          : base::Time::FromDeltaSinceWindowsEpoch(
-                base::TimeDelta::FromMilliseconds(proto.end_time()));
+  info.start_time = proto.start_time() == -1
+                        ? base::Time()
+                        : FromMillisecondsToTime(proto.start_time());
+  info.end_time = proto.end_time() == -1
+                      ? base::Time()
+                      : FromMillisecondsToTime(proto.end_time());
 
   for (int i = 0; i < proto.received_slices_size(); ++i) {
     info.received_slices.emplace_back(proto.received_slices(i).offset(),
@@ -249,6 +276,18 @@ InProgressInfo DownloadDBConversions::InProgressInfoFromProto(
   info.metered = proto.metered();
   info.bytes_wasted = proto.bytes_wasted();
   info.auto_resume_count = proto.auto_resume_count();
+  if (proto.has_reroute_info()) {
+    info.reroute_info = proto.reroute_info();
+  }
+  if (proto.has_credentials_mode()) {
+    info.credentials_mode = static_cast<::network::mojom::CredentialsMode>(
+        proto.credentials_mode());
+  }
+  if (proto.has_range_request_from())
+    info.range_request_from = proto.range_request_from();
+  if (proto.has_range_request_to())
+    info.range_request_to = proto.range_request_to();
+
   return info;
 }
 

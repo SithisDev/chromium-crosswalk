@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,10 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "content/browser/loader/navigation_url_loader_factory.h"
 
 namespace content {
 
-// PlzNavigate
 // Manages creation of the NavigationURLLoaders; when registered, all created
 // NavigationURLLoaderss will be TestNavigationURLLoaderss. This automatically
 // registers itself when it goes in scope, and unregisters itself when it goes
@@ -21,19 +19,22 @@ namespace content {
 class TestNavigationURLLoaderFactory : public NavigationURLLoaderFactory {
  public:
   TestNavigationURLLoaderFactory();
+
+  TestNavigationURLLoaderFactory(const TestNavigationURLLoaderFactory&) =
+      delete;
+  TestNavigationURLLoaderFactory& operator=(
+      const TestNavigationURLLoaderFactory&) = delete;
+
   ~TestNavigationURLLoaderFactory() override;
 
   // TestNavigationURLLoaderFactory implementation.
   std::unique_ptr<NavigationURLLoader> CreateLoader(
-      ResourceContext* resource_context,
       StoragePartition* storage_partition,
       std::unique_ptr<NavigationRequestInfo> request_info,
       std::unique_ptr<NavigationUIData> navigation_ui_data,
-      ServiceWorkerNavigationHandle* service_worker_handle,
-      NavigationURLLoaderDelegate* delegate) override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestNavigationURLLoaderFactory);
+      ServiceWorkerMainResourceHandle* service_worker_handle,
+      NavigationURLLoaderDelegate* delegate,
+      NavigationURLLoader::LoaderType loader_type) override;
 };
 
 }  // namespace content

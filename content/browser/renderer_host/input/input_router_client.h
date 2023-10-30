@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,11 @@
 
 #include "cc/input/touch_action.h"
 #include "content/browser/renderer_host/event_with_latency_info.h"
-#include "content/common/content_export.h"
+#include "content/browser/scheduler/browser_ui_thread_scheduler.h"
 #include "content/public/browser/native_web_keyboard_event.h"
-#include "content/public/common/input_event_ack_source.h"
-#include "content/public/common/input_event_ack_state.h"
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
+#include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom.h"
 
 namespace ui {
 class LatencyInfo;
@@ -20,7 +20,7 @@ struct DidOverscrollParams;
 
 namespace content {
 
-class CONTENT_EXPORT InputRouterClient {
+class InputRouterClient {
  public:
   virtual ~InputRouterClient() {}
 
@@ -30,7 +30,7 @@ class CONTENT_EXPORT InputRouterClient {
   //   * |NOT_CONSUMED| will result in |input_event| being sent as usual.
   //   * |CONSUMED| or |NO_CONSUMER_EXISTS| will trigger the appropriate ack.
   //   * |UNKNOWN| will result in |input_event| being dropped.
-  virtual InputEventAckState FilterInputEvent(
+  virtual blink::mojom::InputEventResultState FilterInputEvent(
       const blink::WebInputEvent& input_event,
       const ui::LatencyInfo& latency_info) = 0;
 
@@ -38,15 +38,21 @@ class CONTENT_EXPORT InputRouterClient {
   virtual void IncrementInFlightEventCount() = 0;
 
   // Called each time a WebInputEvent ACK IPC is received.
-  virtual void DecrementInFlightEventCount(InputEventAckSource ack_source) = 0;
+  virtual void DecrementInFlightEventCount(
+      blink::mojom::InputEventResultSource ack_source) = 0;
+
+  // Called each time the browser UI scheduler should be notified of a scroll
+  // state update.
+  virtual void NotifyUISchedulerOfScrollStateUpdate(
+      BrowserUIThreadScheduler::ScrollState scroll_state) = 0;
 
   // Called when the router has received an overscroll notification from the
   // renderer.
   virtual void DidOverscroll(const ui::DidOverscrollParams& params) = 0;
 
-  // Called when the router has received a whitelisted touch action notification
+  // Called when the router has received an allowed touch action notification
   // from the renderer.
-  virtual void OnSetWhiteListedTouchAction(cc::TouchAction touch_action) = 0;
+  virtual void OnSetCompositorAllowedTouchAction(cc::TouchAction) = 0;
 
   // Called when a GSB has started scrolling a viewport.
   virtual void DidStartScrollingViewport() = 0;
@@ -77,12 +83,17 @@ class CONTENT_EXPORT InputRouterClient {
   // Called to toggle whether the RenderWidgetHost should capture all mouse
   // input.
   virtual void SetMouseCapture(bool capture) = 0;
+  virtual void RequestMouseLock(
+      bool from_user_gesture,
+      bool unadjusted_movement,
+      blink::mojom::WidgetInputHandlerHost::RequestMouseLockCallback
+          response) = 0;
 
-  virtual void FallbackCursorModeLockCursor(bool left,
-                                            bool right,
-                                            bool up,
-                                            bool down) = 0;
-  virtual void FallbackCursorModeSetCursorVisibility(bool visible) = 0;
+  // Returns the size of visible viewport in screen space, in DIPs.
+  virtual gfx::Size GetRootWidgetViewportSize() = 0;
+
+  // Called when an invalid input event source is sent from the renderer.
+  virtual void OnInvalidInputEventSource() = 0;
 };
 
 } // namespace content

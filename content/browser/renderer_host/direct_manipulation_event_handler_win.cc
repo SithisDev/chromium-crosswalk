@@ -1,10 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/renderer_host/direct_manipulation_event_handler_win.h"
 
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "content/browser/renderer_host/direct_manipulation_helper_win.h"
 #include "ui/base/ui_base_features.h"
@@ -28,24 +29,25 @@ bool FloatEquals(float f1, float f2) {
 }  // namespace
 
 DirectManipulationEventHandler::DirectManipulationEventHandler(
-    DirectManipulationHelper* helper)
-    : helper_(helper) {}
+    ui::WindowEventTarget* event_target)
+    : event_target_(event_target) {}
 
-void DirectManipulationEventHandler::SetWindowEventTarget(
-    ui::WindowEventTarget* event_target) {
-  if (!event_target && LoggingEnabled()) {
-    DebugLogging("Event target is null.", S_OK);
-    if (event_target_)
-      DebugLogging("Previous event target is not null", S_OK);
-    else
-      DebugLogging("Previous event target is null", S_OK);
-  }
-  event_target_ = event_target;
+bool DirectManipulationEventHandler::SetViewportSizeInPixels(
+    const gfx::Size& viewport_size_in_pixels) {
+  if (viewport_size_in_pixels_ == viewport_size_in_pixels)
+    return false;
+  viewport_size_in_pixels_ = viewport_size_in_pixels;
+  return true;
 }
 
 void DirectManipulationEventHandler::SetDeviceScaleFactor(
     float device_scale_factor) {
   device_scale_factor_ = device_scale_factor;
+}
+
+void DirectManipulationEventHandler::SetDirectManipulationHelper(
+    DirectManipulationHelper* helper) {
+  helper_ = helper;
 }
 
 DirectManipulationEventHandler::~DirectManipulationEventHandler() {}
@@ -54,14 +56,6 @@ void DirectManipulationEventHandler::TransitionToState(
     GestureState new_gesture_state) {
   if (gesture_state_ == new_gesture_state)
     return;
-
-  if (LoggingEnabled()) {
-    std::string s = "TransitionToState " +
-                    base::NumberToString(static_cast<int>(gesture_state_)) +
-                    " -> " +
-                    base::NumberToString(static_cast<int>(new_gesture_state));
-    DebugLogging(s, S_OK);
-  }
 
   GestureState previous_gesture_state = gesture_state_;
   gesture_state_ = new_gesture_state;
@@ -72,7 +66,8 @@ void DirectManipulationEventHandler::TransitionToState(
       // kScroll -> kNone, kPinch, ScrollEnd.
       // kScroll -> kFling, we don't want to end the current scroll sequence.
       if (new_gesture_state != GestureState::kFling)
-        event_target_->ApplyPanGestureScrollEnd();
+        event_target_->ApplyPanGestureScrollEnd(new_gesture_state ==
+                                                GestureState::kPinch);
       break;
     }
     case GestureState::kFling: {
@@ -132,12 +127,6 @@ HRESULT DirectManipulationEventHandler::OnViewportStatusChanged(
   // testing.
   DCHECK(viewport);
 
-  if (LoggingEnabled()) {
-    std::string s = "ViewportStatusChanged " + base::NumberToString(previous) +
-                    " -> " + base::NumberToString(current);
-    DebugLogging(s, S_OK);
-  }
-
   // The state of our viewport has changed! We'l be in one of three states:
   // - ENABLED: initial state
   // - READY: the previous gesture has been completed
@@ -175,25 +164,31 @@ HRESULT DirectManipulationEventHandler::OnViewportStatusChanged(
   if (current != DIRECTMANIPULATION_READY)
     return S_OK;
 
-  // Reset the viewport when we're idle, so the content transforms always start
-  // at identity.
-  // Every animation will receive 2 ready message, we should stop request
-  // compositor animation at the second ready.
-  first_ready_ = !first_ready_;
-  HRESULT hr = helper_->Reset(first_ready_);
+  // Normally gesture sequence will receive 2 READY message, the first one is
+  // gesture end, the second one is from viewport reset. We don't have content
+  // transform in the second RUNNING -> READY. We should not reset on an empty
+  // RUNNING -> READY sequence.
+  if (last_scale_ != 1.0f || last_x_offset_ != 0 || last_y_offset_ != 0) {
+    HRESULT hr = viewport->ZoomToRect(
+        static_cast<float>(0), static_cast<float>(0),
+        static_cast<float>(viewport_size_in_pixels_.width()),
+        static_cast<float>(viewport_size_in_pixels_.height()), FALSE);
+    if (!SUCCEEDED(hr)) {
+      return hr;
+    }
+  }
+
   last_scale_ = 1.0f;
   last_x_offset_ = 0.0f;
   last_y_offset_ = 0.0f;
 
   TransitionToState(GestureState::kNone);
 
-  return hr;
+  return S_OK;
 }
 
 HRESULT DirectManipulationEventHandler::OnViewportUpdated(
     IDirectManipulationViewport* viewport) {
-  if (LoggingEnabled())
-    DebugLogging("OnViewportUpdated", S_OK);
   // Nothing to do here.
   return S_OK;
 }
@@ -206,22 +201,15 @@ HRESULT DirectManipulationEventHandler::OnContentUpdated(
   DCHECK(viewport);
   DCHECK(content);
 
-  if (LoggingEnabled())
-    DebugLogging("OnContentUpdated", S_OK);
-
   // Windows should not call this when event_target_ is null since we do not
   // pass the DM_POINTERHITTEST to DirectManipulation.
-  if (!event_target_) {
-    DebugLogging("OnContentUpdated event_target_ is null.", S_OK);
+  if (!event_target_)
     return S_OK;
-  }
 
   float xform[6];
   HRESULT hr = content->GetContentTransform(xform, ARRAYSIZE(xform));
-  if (!SUCCEEDED(hr)) {
-    DebugLogging("DirectManipulationContent get transform failed.", hr);
+  if (!SUCCEEDED(hr))
     return hr;
-  }
 
   float scale = xform[0];
   int x_offset = xform[4] / device_scale_factor_;
@@ -241,16 +229,6 @@ HRESULT DirectManipulationEventHandler::OnContentUpdated(
   // second x_offset is 1 but x_offset - last_x_offset_ is 0.9 ignored.
   if (FloatEquals(scale, last_scale_) && x_offset == last_x_offset_ &&
       y_offset == last_y_offset_) {
-    if (LoggingEnabled()) {
-      std::string s =
-          "OnContentUpdated ignored. scale=" + base::NumberToString(scale) +
-          ", last_scale=" + base::NumberToString(last_scale_) +
-          ", x_offset=" + base::NumberToString(x_offset) +
-          ", last_x_offset=" + base::NumberToString(last_x_offset_) +
-          ", y_offset=" + base::NumberToString(y_offset) +
-          ", last_y_offset=" + base::NumberToString(last_y_offset_);
-      DebugLogging(s, S_OK);
-    }
     return hr;
   }
 
@@ -292,6 +270,20 @@ HRESULT DirectManipulationEventHandler::OnContentUpdated(
   last_y_offset_ = y_offset;
 
   return hr;
+}
+
+HRESULT DirectManipulationEventHandler::OnInteraction(
+    IDirectManipulationViewport2* viewport,
+    DIRECTMANIPULATION_INTERACTION_TYPE interaction) {
+  if (!helper_)
+    return S_OK;
+
+  if (interaction == DIRECTMANIPULATION_INTERACTION_BEGIN)
+    helper_->AddAnimationObserver();
+  else if (interaction == DIRECTMANIPULATION_INTERACTION_END)
+    helper_->RemoveAnimationObserver();
+
+  return S_OK;
 }
 
 }  // namespace content

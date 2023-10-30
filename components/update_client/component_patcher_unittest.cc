@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,10 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/values.h"
-#include "components/services/patch/patch_service.h"
-#include "components/services/patch/public/mojom/constants.mojom.h"
+#include "components/services/patch/in_process_file_patcher.h"
 #include "components/update_client/component_patcher_operation.h"
 #include "components/update_client/component_patcher_unittest.h"
 #include "components/update_client/patch/patch_impl.h"
@@ -21,7 +19,6 @@
 #include "components/update_client/update_client_errors.h"
 #include "courgette/courgette.h"
 #include "courgette/third_party/bsdiff/bsdiff.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -29,15 +26,16 @@ namespace {
 class TestCallback {
  public:
   TestCallback();
-  virtual ~TestCallback() {}
+
+  TestCallback(const TestCallback&) = delete;
+  TestCallback& operator=(const TestCallback&) = delete;
+
+  virtual ~TestCallback() = default;
   void Set(update_client::UnpackerError error, int extra_code);
 
   update_client::UnpackerError error_;
   int extra_code_;
   bool called_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestCallback);
 };
 
 TestCallback::TestCallback()
@@ -66,8 +64,7 @@ base::FilePath test_file(const char* file) {
 namespace update_client {
 
 ComponentPatcherOperationTest::ComponentPatcherOperationTest()
-    : scoped_task_environment_(
-          base::test::ScopedTaskEnvironment::MainThreadType::IO) {
+    : task_environment_(base::test::TaskEnvironment::MainThreadType::IO) {
   EXPECT_TRUE(unpack_dir_.CreateUniqueTempDir());
   EXPECT_TRUE(input_dir_.CreateUniqueTempDir());
   EXPECT_TRUE(installed_dir_.CreateUniqueTempDir());
@@ -75,8 +72,7 @@ ComponentPatcherOperationTest::ComponentPatcherOperationTest()
       base::MakeRefCounted<ReadOnlyTestInstaller>(installed_dir_.GetPath());
 }
 
-ComponentPatcherOperationTest::~ComponentPatcherOperationTest() {
-}
+ComponentPatcherOperationTest::~ComponentPatcherOperationTest() = default;
 
 // Verify that a 'create' delta update operation works correctly.
 TEST_F(ComponentPatcherOperationTest, CheckCreateOperation) {
@@ -84,19 +80,17 @@ TEST_F(ComponentPatcherOperationTest, CheckCreateOperation) {
       test_file("binary_output.bin"),
       input_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_output.bin"))));
 
-  std::unique_ptr<base::DictionaryValue> command_args =
-      std::make_unique<base::DictionaryValue>();
-  command_args->SetString("output", "output.bin");
-  command_args->SetString("sha256", binary_output_hash);
-  command_args->SetString("op", "create");
-  command_args->SetString("patch", "binary_output.bin");
+  base::Value::Dict command_args;
+  command_args.Set("output", "output.bin");
+  command_args.Set("sha256", binary_output_hash);
+  command_args.Set("op", "create");
+  command_args.Set("patch", "binary_output.bin");
 
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op = base::MakeRefCounted<DeltaUpdateOpCreate>();
-  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
-          nullptr,
+  op->Run(command_args, input_dir_.GetPath(), unpack_dir_.GetPath(), nullptr,
           base::BindOnce(&TestCallback::Set, base::Unretained(&callback)));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_EQ(true, callback.called_);
   EXPECT_EQ(UnpackerError::kNone, callback.error_);
@@ -112,19 +106,18 @@ TEST_F(ComponentPatcherOperationTest, CheckCopyOperation) {
       test_file("binary_output.bin"),
       installed_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_output.bin"))));
 
-  std::unique_ptr<base::DictionaryValue> command_args =
-      std::make_unique<base::DictionaryValue>();
-  command_args->SetString("output", "output.bin");
-  command_args->SetString("sha256", binary_output_hash);
-  command_args->SetString("op", "copy");
-  command_args->SetString("input", "binary_output.bin");
+  base::Value::Dict command_args;
+  command_args.Set("output", "output.bin");
+  command_args.Set("sha256", binary_output_hash);
+  command_args.Set("op", "copy");
+  command_args.Set("input", "binary_output.bin");
 
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op = base::MakeRefCounted<DeltaUpdateOpCopy>();
-  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
+  op->Run(command_args, input_dir_.GetPath(), unpack_dir_.GetPath(),
           installer_.get(),
           base::BindOnce(&TestCallback::Set, base::Unretained(&callback)));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_EQ(true, callback.called_);
   EXPECT_EQ(UnpackerError::kNone, callback.error_);
@@ -143,28 +136,24 @@ TEST_F(ComponentPatcherOperationTest, CheckCourgetteOperation) {
                              input_dir_.GetPath().Append(FILE_PATH_LITERAL(
                                  "binary_courgette_patch.bin"))));
 
-  std::unique_ptr<base::DictionaryValue> command_args =
-      std::make_unique<base::DictionaryValue>();
-  command_args->SetString("output", "output.bin");
-  command_args->SetString("sha256", binary_output_hash);
-  command_args->SetString("op", "courgette");
-  command_args->SetString("input", "binary_input.bin");
-  command_args->SetString("patch", "binary_courgette_patch.bin");
+  base::Value::Dict command_args;
+  command_args.Set("output", "output.bin");
+  command_args.Set("sha256", binary_output_hash);
+  command_args.Set("op", "courgette");
+  command_args.Set("input", "binary_input.bin");
+  command_args.Set("patch", "binary_courgette_patch.bin");
 
-  // The operation needs a Patcher to access the PatchService.
-  service_manager::TestConnectorFactory connector_factory;
-  patch::PatchService patch_service(
-      connector_factory.RegisterInstance(patch::mojom::kServiceName));
-  scoped_refptr<Patcher> patcher = base::MakeRefCounted<PatchChromiumFactory>(
-                                       connector_factory.CreateConnector())
-                                       ->Create();
+  scoped_refptr<Patcher> patcher =
+      base::MakeRefCounted<PatchChromiumFactory>(
+          base::BindRepeating(&patch::LaunchInProcessFilePatcher))
+          ->Create();
 
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op = CreateDeltaUpdateOp("courgette", patcher);
-  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
+  op->Run(command_args, input_dir_.GetPath(), unpack_dir_.GetPath(),
           installer_.get(),
           base::BindOnce(&TestCallback::Set, base::Unretained(&callback)));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_EQ(true, callback.called_);
   EXPECT_EQ(UnpackerError::kNone, callback.error_);
@@ -183,28 +172,25 @@ TEST_F(ComponentPatcherOperationTest, CheckBsdiffOperation) {
                              input_dir_.GetPath().Append(FILE_PATH_LITERAL(
                                  "binary_bsdiff_patch.bin"))));
 
-  std::unique_ptr<base::DictionaryValue> command_args =
-      std::make_unique<base::DictionaryValue>();
-  command_args->SetString("output", "output.bin");
-  command_args->SetString("sha256", binary_output_hash);
-  command_args->SetString("op", "courgette");
-  command_args->SetString("input", "binary_input.bin");
-  command_args->SetString("patch", "binary_bsdiff_patch.bin");
+  base::Value::Dict command_args;
+  command_args.Set("output", "output.bin");
+  command_args.Set("sha256", binary_output_hash);
+  command_args.Set("op", "courgette");
+  command_args.Set("input", "binary_input.bin");
+  command_args.Set("patch", "binary_bsdiff_patch.bin");
 
   // The operation needs a Patcher to access the PatchService.
-  service_manager::TestConnectorFactory connector_factory;
-  patch::PatchService patch_service(
-      connector_factory.RegisterInstance(patch::mojom::kServiceName));
-  scoped_refptr<Patcher> patcher = base::MakeRefCounted<PatchChromiumFactory>(
-                                       connector_factory.CreateConnector())
-                                       ->Create();
+  scoped_refptr<Patcher> patcher =
+      base::MakeRefCounted<PatchChromiumFactory>(
+          base::BindRepeating(&patch::LaunchInProcessFilePatcher))
+          ->Create();
 
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op = CreateDeltaUpdateOp("bsdiff", patcher);
-  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
+  op->Run(command_args, input_dir_.GetPath(), unpack_dir_.GetPath(),
           installer_.get(),
           base::BindOnce(&TestCallback::Set, base::Unretained(&callback)));
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   EXPECT_EQ(true, callback.called_);
   EXPECT_EQ(UnpackerError::kNone, callback.error_);

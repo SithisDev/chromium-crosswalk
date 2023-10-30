@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,47 +10,39 @@
 #include "base/callback.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/strings/stringprintf.h"
-#include "content/browser/loader/data_pipe_to_source_stream.h"
-#include "content/browser/loader/source_stream_to_data_pipe.h"
+#include "components/web_package/web_bundle_utils.h"
+#include "content/browser/web_package/prefetched_signed_exchange_cache_entry.h"
 #include "content/browser/web_package/signed_exchange_cert_fetcher_factory.h"
 #include "content/browser/web_package/signed_exchange_devtools_proxy.h"
 #include "content/browser/web_package/signed_exchange_handler.h"
 #include "content/browser/web_package/signed_exchange_prefetch_metric_recorder.h"
 #include "content/browser/web_package/signed_exchange_reporter.h"
 #include "content/browser/web_package/signed_exchange_utils.h"
-#include "content/browser/web_package/signed_exchange_validity_pinger.h"
 #include "content/public/common/content_features.h"
-#include "content/public/common/origin_util.h"
-#include "content/public/common/url_loader_throttle.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/http/http_util.h"
 #include "net/url_request/redirect_util.h"
 #include "services/network/public/cpp/constants.h"
+#include "services/network/public/cpp/data_pipe_to_source_stream.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/cpp/source_stream_to_data_pipe.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
-#include "third_party/blink/public/common/web_package/signed_exchange_request_matcher.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
+#include "third_party/blink/public/common/loader/url_loader_throttle.h"
+#include "third_party/blink/public/common/web_package/web_package_request_matcher.h"
 
 namespace content {
 
 namespace {
 
-constexpr char kLoadResultHistogram[] = "SignedExchange.LoadResult2";
 constexpr char kPrefetchLoadResultHistogram[] =
     "SignedExchange.Prefetch.LoadResult2";
-constexpr char kContentTypeOptionsHeaderName[] = "x-content-type-options";
-constexpr char kNoSniffHeaderValue[] = "nosniff";
-
-bool HasNoSniffHeader(const network::ResourceResponseHead& response) {
-  std::string content_type_options;
-  response.headers->EnumerateHeader(nullptr, kContentTypeOptionsHeaderName,
-                                    &content_type_options);
-  return base::LowerCaseEqualsASCII(content_type_options, kNoSniffHeaderValue);
-}
 
 SignedExchangeHandlerFactory* g_signed_exchange_factory_for_testing_ = nullptr;
 
@@ -58,9 +50,9 @@ SignedExchangeHandlerFactory* g_signed_exchange_factory_for_testing_ = nullptr;
 
 SignedExchangeLoader::SignedExchangeLoader(
     const network::ResourceRequest& outer_request,
-    const network::ResourceResponseHead& outer_response_head,
+    network::mojom::URLResponseHeadPtr outer_response_head,
     mojo::ScopedDataPipeConsumerHandle outer_response_body,
-    network::mojom::URLLoaderClientPtr forwarding_client,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> forwarding_client,
     network::mojom::URLLoaderClientEndpointsPtr endpoints,
     uint32_t url_loader_options,
     bool should_redirect_on_failure,
@@ -68,69 +60,66 @@ SignedExchangeLoader::SignedExchangeLoader(
     std::unique_ptr<SignedExchangeReporter> reporter,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     URLLoaderThrottlesGetter url_loader_throttles_getter,
-    base::RepeatingCallback<int(void)> frame_tree_node_id_getter,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    int frame_tree_node_id,
     scoped_refptr<SignedExchangePrefetchMetricRecorder> metric_recorder,
-    const std::string& accept_langs)
+    const std::string& accept_langs,
+    bool keep_entry_for_prefetch_cache)
     : outer_request_(outer_request),
-      outer_response_head_(outer_response_head),
+      outer_response_head_(std::move(outer_response_head)),
       forwarding_client_(std::move(forwarding_client)),
-      url_loader_client_binding_(this),
+      reporter_(std::move(reporter)),
       url_loader_options_(url_loader_options),
       should_redirect_on_failure_(should_redirect_on_failure),
       devtools_proxy_(std::move(devtools_proxy)),
-      reporter_(std::move(reporter)),
       url_loader_factory_(std::move(url_loader_factory)),
       url_loader_throttles_getter_(std::move(url_loader_throttles_getter)),
-      frame_tree_node_id_getter_(frame_tree_node_id_getter),
+      network_anonymization_key_(network_anonymization_key),
+      frame_tree_node_id_(frame_tree_node_id),
       metric_recorder_(std::move(metric_recorder)),
       accept_langs_(accept_langs) {
   DCHECK(outer_request_.url.is_valid());
 
+  if (keep_entry_for_prefetch_cache) {
+    cache_entry_ = std::make_unique<PrefetchedSignedExchangeCacheEntry>();
+    cache_entry_->SetOuterUrl(outer_request_.url);
+    cache_entry_->SetOuterResponse(outer_response_head_->Clone());
+  }
+
   // |metric_recorder_| could be null in some tests.
   if (!(outer_request_.load_flags & net::LOAD_PREFETCH) && metric_recorder_) {
     metric_recorder_->OnSignedExchangeNonPrefetch(
-        outer_request_.url, outer_response_head.response_time);
+        outer_request_.url, outer_response_head_->response_time);
   }
   // Can't use HttpResponseHeaders::GetMimeType() because SignedExchangeHandler
   // checks "v=" parameter.
-  outer_response_head.headers->EnumerateHeader(nullptr, "content-type",
-                                               &content_type_);
+  outer_response_head_->headers->EnumerateHeader(nullptr, "content-type",
+                                                 &content_type_);
 
   url_loader_.Bind(std::move(endpoints->url_loader));
 
-  // Available when NavigationImmediateResponse is enabled.
+  // |outer_response_body| is valid, when it's a navigation request.
   if (outer_response_body)
     OnStartLoadingResponseBody(std::move(outer_response_body));
 
-  // TODO(https://crbug.com/791049): Remove this when NetworkService is
-  // enabled by default.
-  if (url_loader_options_ &
-      network::mojom::kURLLoadOptionPauseOnResponseStarted) {
-    // We don't propagate the response to the navigation request and its
-    // throttles, therefore we need to call this here internally in order to
-    // move it forward.
-    //
-    // ProceedWithResponse() is used when the network service is disabled to
-    // prevent the InterceptingResourceHandler (used for download) from
-    // intercepting the load before the NavigationRequest allowed it.
-    // See https://crbug.com/791049.
-    //
-    // Special care has been taken not to resume the InterceptingResourceHandler
-    // by mistake in https://crbug.com/896659.
-    url_loader_->ProceedWithResponse();
-  }
-
   // Bind the endpoint with |this| to get the body DataPipe.
-  url_loader_client_binding_.Bind(std::move(endpoints->url_loader_client));
+  url_loader_client_receiver_.Bind(std::move(endpoints->url_loader_client));
 
   // |client_| will be bound with a forwarding client by ConnectToClient().
-  pending_client_request_ = mojo::MakeRequest(&client_);
+  pending_client_receiver_ = client_.BindNewPipeAndPassReceiver();
 }
 
 SignedExchangeLoader::~SignedExchangeLoader() = default;
 
+void SignedExchangeLoader::OnReceiveEarlyHints(
+    network::mojom::EarlyHintsPtr early_hints) {
+  NOTREACHED();
+}
+
 void SignedExchangeLoader::OnReceiveResponse(
-    const network::ResourceResponseHead& response_head) {
+    network::mojom::URLResponseHeadPtr response_head,
+    mojo::ScopedDataPipeConsumerHandle body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
   // Must not be called because this SignedExchangeLoader and the client
   // endpoints were bound after OnReceiveResponse() is called.
   NOTREACHED();
@@ -138,7 +127,7 @@ void SignedExchangeLoader::OnReceiveResponse(
 
 void SignedExchangeLoader::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
-    const network::ResourceResponseHead& response_head) {
+    network::mojom::URLResponseHeadPtr response_head) {
   // Must not be called because this SignedExchangeLoader and the client
   // endpoints were bound after OnReceiveResponse() is called.
   NOTREACHED();
@@ -153,11 +142,6 @@ void SignedExchangeLoader::OnUploadProgress(
   NOTREACHED();
 }
 
-void SignedExchangeLoader::OnReceiveCachedMetadata(mojo_base::BigBuffer data) {
-  // Curerntly CachedMetadata for Signed Exchange is not supported.
-  NOTREACHED();
-}
-
 void SignedExchangeLoader::OnTransferSizeUpdated(int32_t transfer_size_diff) {
   // TODO(https://crbug.com/803774): Implement this to progressively update the
   // encoded data length in DevTools.
@@ -167,12 +151,29 @@ void SignedExchangeLoader::OnStartLoadingResponseBody(
     mojo::ScopedDataPipeConsumerHandle response_body) {
   auto cert_fetcher_factory = SignedExchangeCertFetcherFactory::Create(
       url_loader_factory_, url_loader_throttles_getter_,
-      outer_request_.throttling_profile_id);
+      outer_request_.throttling_profile_id,
+      (outer_request_.trusted_params &&
+       !outer_request_.trusted_params->isolation_info.IsEmpty())
+          ? net::IsolationInfo::IsFrameSiteEnabled()
+                ? net::IsolationInfo::Create(
+                      net::IsolationInfo::RequestType::kOther,
+                      *outer_request_.trusted_params->isolation_info
+                           .top_frame_origin(),
+                      *outer_request_.trusted_params->isolation_info
+                           .frame_origin(),
+                      net::SiteForCookies())
+                : net::IsolationInfo::CreateDoubleKey(
+                      net::IsolationInfo::RequestType::kOther,
+                      *outer_request_.trusted_params->isolation_info
+                           .top_frame_origin(),
+                      net::SiteForCookies())
+          : net::IsolationInfo());
 
   if (g_signed_exchange_factory_for_testing_) {
     signed_exchange_handler_ = g_signed_exchange_factory_for_testing_->Create(
         outer_request_.url,
-        std::make_unique<DataPipeToSourceStream>(std::move(response_body)),
+        std::make_unique<network::DataPipeToSourceStream>(
+            std::move(response_body)),
         base::BindOnce(&SignedExchangeLoader::OnHTTPExchangeFound,
                        weak_factory_.GetWeakPtr()),
         std::move(cert_fetcher_factory));
@@ -180,15 +181,20 @@ void SignedExchangeLoader::OnStartLoadingResponseBody(
   }
 
   signed_exchange_handler_ = std::make_unique<SignedExchangeHandler>(
-      IsOriginSecure(outer_request_.url),
-      HasNoSniffHeader(outer_response_head_), content_type_,
-      std::make_unique<DataPipeToSourceStream>(std::move(response_body)),
+      network::IsUrlPotentiallyTrustworthy(outer_request_.url),
+      web_package::HasNoSniffHeader(*outer_response_head_), content_type_,
+      std::make_unique<network::DataPipeToSourceStream>(
+          std::move(response_body)),
       base::BindOnce(&SignedExchangeLoader::OnHTTPExchangeFound,
                      weak_factory_.GetWeakPtr()),
-      std::move(cert_fetcher_factory), outer_request_.load_flags,
-      std::make_unique<blink::SignedExchangeRequestMatcher>(
-          outer_request_.headers, accept_langs_),
-      std::move(devtools_proxy_), reporter_.get(), frame_tree_node_id_getter_);
+      std::move(cert_fetcher_factory), network_anonymization_key_,
+      outer_request_.trusted_params
+          ? absl::make_optional(outer_request_.trusted_params->isolation_info)
+          : absl::nullopt,
+      outer_request_.load_flags, outer_response_head_->remote_endpoint,
+      std::make_unique<blink::WebPackageRequestMatcher>(outer_request_.headers,
+                                                        accept_langs_),
+      std::move(devtools_proxy_), reporter_.get(), frame_tree_node_id_);
 }
 
 void SignedExchangeLoader::OnComplete(
@@ -203,15 +209,9 @@ void SignedExchangeLoader::OnComplete(
 void SignedExchangeLoader::FollowRedirect(
     const std::vector<std::string>& removed_headers,
     const net::HttpRequestHeaders& modified_headers,
-    const base::Optional<GURL>& new_url) {
+    const net::HttpRequestHeaders& modified_cors_exempt_headers,
+    const absl::optional<GURL>& new_url) {
   NOTREACHED();
-}
-
-void SignedExchangeLoader::ProceedWithResponse() {
-  DCHECK(!base::FeatureList::IsEnabled(network::features::kNetworkService));
-  DCHECK(url_loader_options_ &
-         network::mojom::kURLLoadOptionPauseOnResponseStarted);
-  // ProceedWithResponse() has already been called in the constructor.
 }
 
 void SignedExchangeLoader::SetPriority(net::RequestPriority priority,
@@ -228,30 +228,22 @@ void SignedExchangeLoader::ResumeReadingBodyFromNet() {
 }
 
 void SignedExchangeLoader::ConnectToClient(
-    network::mojom::URLLoaderClientPtr client) {
-  DCHECK(pending_client_request_.is_pending());
-  mojo::FuseInterface(std::move(pending_client_request_),
-                      client.PassInterface());
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
+  DCHECK(pending_client_receiver_.is_valid());
+  mojo::FusePipes(std::move(pending_client_receiver_), std::move(client));
 }
 
-base::Optional<net::SHA256HashValue>
-SignedExchangeLoader::ComputeHeaderIntegrity() const {
-  if (!signed_exchange_handler_)
-    return base::nullopt;
-  return signed_exchange_handler_->ComputeHeaderIntegrity();
-}
-
-base::Time SignedExchangeLoader::GetSignatureExpireTime() const {
-  if (!signed_exchange_handler_)
-    return base::Time();
-  return signed_exchange_handler_->GetSignatureExpireTime();
+std::unique_ptr<PrefetchedSignedExchangeCacheEntry>
+SignedExchangeLoader::TakePrefetchedSignedExchangeCacheEntry() {
+  DCHECK(cache_entry_);
+  return std::move(cache_entry_);
 }
 
 void SignedExchangeLoader::OnHTTPExchangeFound(
     SignedExchangeLoadResult result,
     net::Error error,
     const GURL& request_url,
-    const network::ResourceResponseHead& resource_response,
+    network::mojom::URLResponseHeadPtr resource_response,
     std::unique_ptr<net::SourceStream> payload_stream) {
   if (error) {
     DCHECK_NE(result, SignedExchangeLoadResult::kSuccess);
@@ -270,43 +262,53 @@ void SignedExchangeLoader::OnHTTPExchangeFound(
     fallback_url_ = request_url;
     forwarding_client_->OnReceiveRedirect(
         signed_exchange_utils::CreateRedirectInfo(
-            request_url, outer_request_, outer_response_head_,
+            request_url, outer_request_, *outer_response_head_,
             true /* is_fallback_redirect */),
         signed_exchange_utils::CreateRedirectResponseHead(
-            outer_response_head_, true /* is_fallback_redirect */));
+            *outer_response_head_, true /* is_fallback_redirect */));
     forwarding_client_.reset();
     return;
   }
   DCHECK_EQ(result, SignedExchangeLoadResult::kSuccess);
   inner_request_url_ = request_url;
 
+  if (cache_entry_) {
+    cache_entry_->SetInnerUrl(*inner_request_url_);
+    auto inner_response_for_cache = resource_response->Clone();
+    inner_response_for_cache->was_fetched_via_cache = true;
+    inner_response_for_cache->was_in_prefetch_cache = true;
+    cache_entry_->SetInnerResponse(std::move(inner_response_for_cache));
+    const bool get_info_result =
+        signed_exchange_handler_->GetSignedExchangeInfoForPrefetchCache(
+            *cache_entry_);
+    DCHECK(get_info_result);
+  }
+
   forwarding_client_->OnReceiveRedirect(
       signed_exchange_utils::CreateRedirectInfo(
-          request_url, outer_request_, outer_response_head_,
+          request_url, outer_request_, *outer_response_head_,
           false /* is_fallback_redirect */),
       signed_exchange_utils::CreateRedirectResponseHead(
-          outer_response_head_, false /* is_fallback_redirect */));
+          *outer_response_head_, false /* is_fallback_redirect */));
   forwarding_client_.reset();
 
-  const base::Optional<net::SSLInfo>& ssl_info = resource_response.ssl_info;
+  const absl::optional<net::SSLInfo>& ssl_info = resource_response->ssl_info;
   if (ssl_info.has_value() &&
       (url_loader_options_ &
        network::mojom::kURLLoadOptionSendSSLInfoForCertificateError) &&
-      net::IsCertStatusError(ssl_info->cert_status) &&
-      !net::IsCertStatusMinorError(ssl_info->cert_status)) {
+      net::IsCertStatusError(ssl_info->cert_status)) {
     ssl_info_ = ssl_info;
   }
 
-  network::ResourceResponseHead inner_response_head_shown_to_client =
-      resource_response;
+  network::mojom::URLResponseHeadPtr inner_response_head_shown_to_client =
+      std::move(resource_response);
   if (ssl_info.has_value() &&
       !(url_loader_options_ &
         network::mojom::kURLLoadOptionSendSSLInfoWithResponse)) {
-    inner_response_head_shown_to_client.ssl_info = base::nullopt;
+    inner_response_head_shown_to_client->ssl_info = absl::nullopt;
   }
-  inner_response_head_shown_to_client.was_fetched_via_cache =
-      outer_response_head_.was_fetched_via_cache;
-  client_->OnReceiveResponse(inner_response_head_shown_to_client);
+  inner_response_head_shown_to_client->was_fetched_via_cache =
+      outer_response_head_->was_fetched_via_cache;
 
   // Currently we always assume that we have body.
   // TODO(https://crbug.com/80374): Add error handling and bail out
@@ -317,53 +319,24 @@ void SignedExchangeLoader::OnHTTPExchangeFound(
   options.struct_size = sizeof(MojoCreateDataPipeOptions);
   options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
   options.element_num_bytes = 1;
-  options.capacity_num_bytes = network::kDataPipeDefaultAllocationSize;
-  if (mojo::CreateDataPipe(&options, &producer_handle, &consumer_handle) !=
+  options.capacity_num_bytes =
+      network::features::GetDataPipeDefaultAllocationSize();
+  if (mojo::CreateDataPipe(&options, producer_handle, consumer_handle) !=
       MOJO_RESULT_OK) {
     forwarding_client_->OnComplete(
         network::URLLoaderCompletionStatus(net::ERR_INSUFFICIENT_RESOURCES));
     return;
   }
-  pending_body_consumer_ = std::move(consumer_handle);
-  body_data_pipe_adapter_ = std::make_unique<SourceStreamToDataPipe>(
-      std::move(payload_stream), std::move(producer_handle),
-      base::BindOnce(&SignedExchangeLoader::FinishReadingBody,
-                     base::Unretained(this)));
 
-  StartReadingBody();
-}
+  client_->OnReceiveResponse(std::move(inner_response_head_shown_to_client),
+                             std::move(consumer_handle), absl::nullopt);
 
-void SignedExchangeLoader::StartReadingBody() {
-  DCHECK(body_data_pipe_adapter_);
-  DCHECK(pending_body_consumer_.is_valid());
-
-  // If it's not for prefetch, kSignedHTTPExchangePingValidity is enabled
-  // and validity_pinger_ is not initialized yet, create a validity pinger
-  // and start it to ping the validity URL before start reading the inner
-  // response body.
-  if (!(outer_request_.load_flags & net::LOAD_PREFETCH) &&
-      base::FeatureList::IsEnabled(features::kSignedHTTPExchangePingValidity) &&
-      !validity_pinger_) {
-    DCHECK(url_loader_factory_);
-    DCHECK(url_loader_throttles_getter_);
-    DCHECK(inner_request_url_);
-    // For now we just use the fallback (request) URL to ping.
-    // TODO(kinuko): Use the validity URL extracted from the exchange.
-    validity_pinger_ = SignedExchangeValidityPinger::CreateAndStart(
-        *inner_request_url_, url_loader_factory_,
-        url_loader_throttles_getter_.Run(),
-        outer_request_.throttling_profile_id,
-        base::BindOnce(&SignedExchangeLoader::StartReadingBody,
-                       weak_factory_.GetWeakPtr()));
-    DCHECK(validity_pinger_);
-    return;
-  }
-
-  validity_pinger_.reset();
+  body_data_pipe_adapter_ = std::make_unique<network::SourceStreamToDataPipe>(
+      std::move(payload_stream), std::move(producer_handle));
 
   // Start reading.
-  client_->OnStartLoadingResponseBody(std::move(pending_body_consumer_));
-  body_data_pipe_adapter_->Start();
+  body_data_pipe_adapter_->Start(base::BindOnce(
+      &SignedExchangeLoader::FinishReadingBody, base::Unretained(this)));
 }
 
 void SignedExchangeLoader::FinishReadingBody(int result) {
@@ -394,8 +367,7 @@ void SignedExchangeLoader::NotifyClientOnCompleteIfReady() {
   if (ssl_info_) {
     DCHECK((url_loader_options_ &
             network::mojom::kURLLoadOptionSendSSLInfoForCertificateError) &&
-           net::IsCertStatusError(ssl_info_->cert_status) &&
-           !net::IsCertStatusMinorError(ssl_info_->cert_status));
+           net::IsCertStatusError(ssl_info_->cert_status));
     status.ssl_info = *ssl_info_;
   }
 
@@ -404,16 +376,16 @@ void SignedExchangeLoader::NotifyClientOnCompleteIfReady() {
 }
 
 void SignedExchangeLoader::ReportLoadResult(SignedExchangeLoadResult result) {
-  UMA_HISTOGRAM_ENUMERATION(kLoadResultHistogram, result);
+  signed_exchange_utils::RecordLoadResultHistogram(result);
   // |metric_recorder_| could be null in some tests.
   if ((outer_request_.load_flags & net::LOAD_PREFETCH) && metric_recorder_) {
     UMA_HISTOGRAM_ENUMERATION(kPrefetchLoadResultHistogram, result);
     metric_recorder_->OnSignedExchangePrefetchFinished(
-        outer_request_.url, outer_response_head_.response_time);
+        outer_request_.url, outer_response_head_->response_time);
   }
 
   if (reporter_)
-    reporter_->ReportResultAndFinish(result);
+    reporter_->ReportLoadResultAndFinish(result);
 }
 
 void SignedExchangeLoader::SetSignedExchangeHandlerFactoryForTest(

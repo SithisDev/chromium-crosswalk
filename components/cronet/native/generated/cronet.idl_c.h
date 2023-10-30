@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -132,6 +132,12 @@ typedef enum Cronet_UrlRequestParams_REQUEST_PRIORITY {
   Cronet_UrlRequestParams_REQUEST_PRIORITY_REQUEST_PRIORITY_HIGHEST = 4,
 } Cronet_UrlRequestParams_REQUEST_PRIORITY;
 
+typedef enum Cronet_UrlRequestParams_IDEMPOTENCY {
+  Cronet_UrlRequestParams_IDEMPOTENCY_DEFAULT_IDEMPOTENCY = 0,
+  Cronet_UrlRequestParams_IDEMPOTENCY_IDEMPOTENT = 1,
+  Cronet_UrlRequestParams_IDEMPOTENCY_NOT_IDEMPOTENT = 2,
+} Cronet_UrlRequestParams_IDEMPOTENCY;
+
 typedef enum Cronet_RequestFinishedInfo_FINISHED_REASON {
   Cronet_RequestFinishedInfo_FINISHED_REASON_SUCCEEDED = 0,
   Cronet_RequestFinishedInfo_FINISHED_REASON_FAILED = 1,
@@ -163,7 +169,7 @@ typedef enum Cronet_UrlRequestStatusListener_Status {
 // Concrete interface Cronet_Buffer.
 
 // Create an instance of Cronet_Buffer.
-CRONET_EXPORT Cronet_BufferPtr Cronet_Buffer_Create();
+CRONET_EXPORT Cronet_BufferPtr Cronet_Buffer_Create(void);
 // Destroy an instance of Cronet_Buffer.
 CRONET_EXPORT void Cronet_Buffer_Destroy(Cronet_BufferPtr self);
 // Set and get app-specific Cronet_ClientContext.
@@ -291,7 +297,7 @@ Cronet_Executor_CreateWith(Cronet_Executor_ExecuteFunc ExecuteFunc);
 // Concrete interface Cronet_Engine.
 
 // Create an instance of Cronet_Engine.
-CRONET_EXPORT Cronet_EnginePtr Cronet_Engine_Create();
+CRONET_EXPORT Cronet_EnginePtr Cronet_Engine_Create(void);
 // Destroy an instance of Cronet_Engine.
 CRONET_EXPORT void Cronet_Engine_Destroy(Cronet_EnginePtr self);
 // Set and get app-specific Cronet_ClientContext.
@@ -485,7 +491,7 @@ CRONET_EXPORT Cronet_UrlRequestCallbackPtr Cronet_UrlRequestCallback_CreateWith(
 // Concrete interface Cronet_UploadDataSink.
 
 // Create an instance of Cronet_UploadDataSink.
-CRONET_EXPORT Cronet_UploadDataSinkPtr Cronet_UploadDataSink_Create();
+CRONET_EXPORT Cronet_UploadDataSinkPtr Cronet_UploadDataSink_Create(void);
 // Destroy an instance of Cronet_UploadDataSink.
 CRONET_EXPORT void Cronet_UploadDataSink_Destroy(Cronet_UploadDataSinkPtr self);
 // Set and get app-specific Cronet_ClientContext.
@@ -584,7 +590,7 @@ CRONET_EXPORT Cronet_UploadDataProviderPtr Cronet_UploadDataProvider_CreateWith(
 // Concrete interface Cronet_UrlRequest.
 
 // Create an instance of Cronet_UrlRequest.
-CRONET_EXPORT Cronet_UrlRequestPtr Cronet_UrlRequest_Create();
+CRONET_EXPORT Cronet_UrlRequestPtr Cronet_UrlRequest_Create(void);
 // Destroy an instance of Cronet_UrlRequest.
 CRONET_EXPORT void Cronet_UrlRequest_Destroy(Cronet_UrlRequestPtr self);
 // Set and get app-specific Cronet_ClientContext.
@@ -688,7 +694,7 @@ Cronet_RequestFinishedInfoListener_CreateWith(
 
 ///////////////////////
 // Struct Cronet_Error.
-CRONET_EXPORT Cronet_ErrorPtr Cronet_Error_Create();
+CRONET_EXPORT Cronet_ErrorPtr Cronet_Error_Create(void);
 CRONET_EXPORT void Cronet_Error_Destroy(Cronet_ErrorPtr self);
 // Cronet_Error setters.
 CRONET_EXPORT
@@ -721,7 +727,7 @@ int32_t Cronet_Error_quic_detailed_error_code_get(const Cronet_ErrorPtr self);
 
 ///////////////////////
 // Struct Cronet_QuicHint.
-CRONET_EXPORT Cronet_QuicHintPtr Cronet_QuicHint_Create();
+CRONET_EXPORT Cronet_QuicHintPtr Cronet_QuicHint_Create(void);
 CRONET_EXPORT void Cronet_QuicHint_Destroy(Cronet_QuicHintPtr self);
 // Cronet_QuicHint setters.
 CRONET_EXPORT
@@ -742,7 +748,7 @@ int32_t Cronet_QuicHint_alternate_port_get(const Cronet_QuicHintPtr self);
 
 ///////////////////////
 // Struct Cronet_PublicKeyPins.
-CRONET_EXPORT Cronet_PublicKeyPinsPtr Cronet_PublicKeyPins_Create();
+CRONET_EXPORT Cronet_PublicKeyPinsPtr Cronet_PublicKeyPins_Create(void);
 CRONET_EXPORT void Cronet_PublicKeyPins_Destroy(Cronet_PublicKeyPinsPtr self);
 // Cronet_PublicKeyPins setters.
 CRONET_EXPORT
@@ -778,7 +784,7 @@ int64_t Cronet_PublicKeyPins_expiration_date_get(
 
 ///////////////////////
 // Struct Cronet_EngineParams.
-CRONET_EXPORT Cronet_EngineParamsPtr Cronet_EngineParams_Create();
+CRONET_EXPORT Cronet_EngineParamsPtr Cronet_EngineParams_Create(void);
 CRONET_EXPORT void Cronet_EngineParams_Destroy(Cronet_EngineParamsPtr self);
 // Cronet_EngineParams setters.
 CRONET_EXPORT
@@ -885,7 +891,7 @@ Cronet_String Cronet_EngineParams_experimental_options_get(
 
 ///////////////////////
 // Struct Cronet_HttpHeader.
-CRONET_EXPORT Cronet_HttpHeaderPtr Cronet_HttpHeader_Create();
+CRONET_EXPORT Cronet_HttpHeaderPtr Cronet_HttpHeader_Create(void);
 CRONET_EXPORT void Cronet_HttpHeader_Destroy(Cronet_HttpHeaderPtr self);
 // Cronet_HttpHeader setters.
 CRONET_EXPORT
@@ -902,7 +908,7 @@ Cronet_String Cronet_HttpHeader_value_get(const Cronet_HttpHeaderPtr self);
 
 ///////////////////////
 // Struct Cronet_UrlResponseInfo.
-CRONET_EXPORT Cronet_UrlResponseInfoPtr Cronet_UrlResponseInfo_Create();
+CRONET_EXPORT Cronet_UrlResponseInfoPtr Cronet_UrlResponseInfo_Create(void);
 CRONET_EXPORT void Cronet_UrlResponseInfo_Destroy(
     Cronet_UrlResponseInfoPtr self);
 // Cronet_UrlResponseInfo setters.
@@ -982,7 +988,7 @@ int64_t Cronet_UrlResponseInfo_received_byte_count_get(
 
 ///////////////////////
 // Struct Cronet_UrlRequestParams.
-CRONET_EXPORT Cronet_UrlRequestParamsPtr Cronet_UrlRequestParams_Create();
+CRONET_EXPORT Cronet_UrlRequestParamsPtr Cronet_UrlRequestParams_Create(void);
 CRONET_EXPORT void Cronet_UrlRequestParams_Destroy(
     Cronet_UrlRequestParamsPtr self);
 // Cronet_UrlRequestParams setters.
@@ -1023,6 +1029,10 @@ CRONET_EXPORT
 void Cronet_UrlRequestParams_request_finished_executor_set(
     Cronet_UrlRequestParamsPtr self,
     const Cronet_ExecutorPtr request_finished_executor);
+CRONET_EXPORT
+void Cronet_UrlRequestParams_idempotency_set(
+    Cronet_UrlRequestParamsPtr self,
+    const Cronet_UrlRequestParams_IDEMPOTENCY idempotency);
 // Cronet_UrlRequestParams getters.
 CRONET_EXPORT
 Cronet_String Cronet_UrlRequestParams_http_method_get(
@@ -1068,10 +1078,13 @@ Cronet_UrlRequestParams_request_finished_listener_get(
 CRONET_EXPORT
 Cronet_ExecutorPtr Cronet_UrlRequestParams_request_finished_executor_get(
     const Cronet_UrlRequestParamsPtr self);
+CRONET_EXPORT
+Cronet_UrlRequestParams_IDEMPOTENCY Cronet_UrlRequestParams_idempotency_get(
+    const Cronet_UrlRequestParamsPtr self);
 
 ///////////////////////
 // Struct Cronet_DateTime.
-CRONET_EXPORT Cronet_DateTimePtr Cronet_DateTime_Create();
+CRONET_EXPORT Cronet_DateTimePtr Cronet_DateTime_Create(void);
 CRONET_EXPORT void Cronet_DateTime_Destroy(Cronet_DateTimePtr self);
 // Cronet_DateTime setters.
 CRONET_EXPORT
@@ -1082,7 +1095,7 @@ int64_t Cronet_DateTime_value_get(const Cronet_DateTimePtr self);
 
 ///////////////////////
 // Struct Cronet_Metrics.
-CRONET_EXPORT Cronet_MetricsPtr Cronet_Metrics_Create();
+CRONET_EXPORT Cronet_MetricsPtr Cronet_Metrics_Create(void);
 CRONET_EXPORT void Cronet_Metrics_Destroy(Cronet_MetricsPtr self);
 // Cronet_Metrics setters.
 CRONET_EXPORT
@@ -1225,7 +1238,8 @@ int64_t Cronet_Metrics_received_byte_count_get(const Cronet_MetricsPtr self);
 
 ///////////////////////
 // Struct Cronet_RequestFinishedInfo.
-CRONET_EXPORT Cronet_RequestFinishedInfoPtr Cronet_RequestFinishedInfo_Create();
+CRONET_EXPORT Cronet_RequestFinishedInfoPtr
+Cronet_RequestFinishedInfo_Create(void);
 CRONET_EXPORT void Cronet_RequestFinishedInfo_Destroy(
     Cronet_RequestFinishedInfoPtr self);
 // Cronet_RequestFinishedInfo setters.

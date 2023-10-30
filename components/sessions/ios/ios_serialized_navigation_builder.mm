@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,11 @@
 #include "ios/web/public/favicon/favicon_status.h"
 #include "ios/web/public/navigation/navigation_item.h"
 #include "ios/web/public/navigation/referrer.h"
+#include "ios/web/public/session/crw_navigation_item_storage.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace sessions {
 
@@ -24,8 +29,30 @@ IOSSerializedNavigationBuilder::FromNavigationItem(
   navigation.title_ = item.GetTitle();
   navigation.transition_type_ = item.GetTransitionType();
   navigation.timestamp_ = item.GetTimestamp();
-  if (item.GetFavicon().valid)
-    navigation.favicon_url_ = item.GetFavicon().url;
+
+  const web::FaviconStatus& favicon_status = item.GetFaviconStatus();
+  if (favicon_status.valid)
+    navigation.favicon_url_ = favicon_status.url;
+
+  return navigation;
+}
+
+SerializedNavigationEntry
+IOSSerializedNavigationBuilder::FromNavigationStorageItem(
+    int index,
+    CRWNavigationItemStorage* item) {
+  // Create a NavigationItem to reserve a UniqueID.
+  auto navigation_item = web::NavigationItem::Create();
+  SerializedNavigationEntry navigation;
+  navigation.index_ = index;
+  navigation.unique_id_ = navigation_item->GetUniqueID();
+  navigation.referrer_url_ = item.referrer.url;
+  navigation.referrer_policy_ = item.referrer.policy;
+  navigation.virtual_url_ = item.virtualURL;
+  navigation.title_ = item.title;
+  // Use reload transition type to avoid incorrect increase for typed count.
+  navigation.transition_type_ = ui::PAGE_TRANSITION_RELOAD;
+  navigation.timestamp_ = item.timestamp;
 
   return navigation;
 }
@@ -45,7 +72,9 @@ IOSSerializedNavigationBuilder::ToNavigationItem(
   item->SetTimestamp(navigation->timestamp_);
 
   if (navigation->favicon_url_.is_valid()) {
-    item->GetFavicon().url = navigation->favicon_url_;
+    web::FaviconStatus favicon_status = item->GetFaviconStatus();
+    favicon_status.url = navigation->favicon_url_;
+    item->SetFaviconStatus(favicon_status);
   }
 
   return item;

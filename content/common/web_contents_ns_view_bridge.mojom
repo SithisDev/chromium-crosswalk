@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@ module remote_cocoa.mojom;
 
 import "content/public/common/drop_data.mojom";
 import "mojo/public/mojom/base/file_path.mojom";
-import "ui/gfx/geometry/mojo/geometry.mojom";
-import "ui/gfx/image/mojo/image.mojom";
+import "ui/gfx/geometry/mojom/geometry.mojom";
+import "ui/gfx/image/mojom/image.mojom";
 import "url/mojom/url.mojom";
 
 // Interface through which a WebContentsViewMac communicates with its NSView in
@@ -39,6 +39,12 @@ interface WebContentsNSView {
             uint32 operation_mask,
             gfx.mojom.ImageSkia? image,
             gfx.mojom.Vector2d image_offset);
+
+  // TODO(https://crbug.com/1327478): This is a work around for a bug in mojo
+  // where close notifications for associated messages pipes can sometimes be
+  // delivered later than they should. This method is called before closing the
+  // remote, and is treated as if a close notification was received.
+  Destroy();
 };
 
 // The method through which a window was focused (directly focused, or by

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
-
 #include <stddef.h>
 #include <stdint.h>
 
@@ -16,7 +15,6 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/mac/scoped_cftyperef.h"
-#import "base/mac/scoped_nsobject.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
@@ -45,9 +43,9 @@ class WebpDecoderDelegate : public WebpDecoder::Delegate {
   void OnDataDecoded(NSData* data) override { [image_ appendData:data]; }
 
  private:
-  virtual ~WebpDecoderDelegate() {}
+  ~WebpDecoderDelegate() override {}
 
-  base::scoped_nsobject<NSMutableData> image_;
+  __strong NSMutableData* image_;
 };
 
 class WebpDecoderTest : public testing::Test {
@@ -82,9 +80,6 @@ class WebpDecoderTest : public testing::Test {
       case WebpDecoder::TIFF:
         ADD_FAILURE() << "Data already decompressed";
         return nil;
-      case WebpDecoder::DECODED_FORMAT_COUNT:
-        ADD_FAILURE() << "Unknown format";
-        return nil;
     }
     size_t width = CGImageGetWidth(image);
     size_t height = CGImageGetHeight(image);
@@ -97,7 +92,9 @@ class WebpDecoderTest : public testing::Test {
         new std::vector<uint8_t>(width * height * bytes_per_pixel, 0);
     base::ScopedCFTypeRef<CGContextRef> context(CGBitmapContextCreate(
         &result->front(), width, height, bits_per_component, bytes_per_row,
-        color_space, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big));
+        color_space,
+        base::to_underlying(kCGImageAlphaPremultipliedLast) |
+            base::to_underlying(kCGBitmapByteOrder32Big)));
     CGContextDrawImage(context, CGRectMake(0, 0, width, height), image);
     // Check that someting has been written in |result|.
     std::vector<uint8_t> zeroes(width * height * bytes_per_pixel, 0);
@@ -169,12 +166,10 @@ class WebpDecoderTest : public testing::Test {
 
 TEST_F(WebpDecoderTest, DecodeToJpeg) {
   // Load a WebP image from disk.
-  base::scoped_nsobject<NSData> webp_image(
-      LoadImage(base::FilePath("test.webp")));
+  NSData* webp_image = LoadImage(base::FilePath("test.webp"));
   ASSERT_TRUE(webp_image != nil);
   // Load reference image.
-  base::scoped_nsobject<NSData> jpg_image(
-      LoadImage(base::FilePath("test.jpg")));
+  NSData* jpg_image = LoadImage(base::FilePath("test.jpg"));
   ASSERT_TRUE(jpg_image != nil);
   // Convert to JPEG.
   EXPECT_CALL(*delegate_, OnFinishedDecoding(true)).Times(1);
@@ -188,12 +183,10 @@ TEST_F(WebpDecoderTest, DecodeToJpeg) {
 
 TEST_F(WebpDecoderTest, DecodeToPng) {
   // Load a WebP image from disk.
-  base::scoped_nsobject<NSData> webp_image(
-      LoadImage(base::FilePath("test_alpha.webp")));
+  NSData* webp_image = LoadImage(base::FilePath("test_alpha.webp"));
   ASSERT_TRUE(webp_image != nil);
   // Load reference image.
-  base::scoped_nsobject<NSData> png_image(
-      LoadImage(base::FilePath("test_alpha.png")));
+  NSData* png_image = LoadImage(base::FilePath("test_alpha.png"));
   ASSERT_TRUE(png_image != nil);
   // Convert to PNG.
   EXPECT_CALL(*delegate_, OnFinishedDecoding(true)).Times(1);
@@ -207,12 +200,10 @@ TEST_F(WebpDecoderTest, DecodeToPng) {
 
 TEST_F(WebpDecoderTest, DecodeToTiff) {
   // Load a WebP image from disk.
-  base::scoped_nsobject<NSData> webp_image(
-      LoadImage(base::FilePath("test_small.webp")));
+  NSData* webp_image = LoadImage(base::FilePath("test_small.webp"));
   ASSERT_TRUE(webp_image != nil);
   // Load reference image.
-  base::scoped_nsobject<NSData> tiff_image(
-      LoadImage(base::FilePath("test_small.tiff")));
+  NSData* tiff_image = LoadImage(base::FilePath("test_small.tiff"));
   ASSERT_TRUE(tiff_image != nil);
   // Convert to TIFF.
   EXPECT_CALL(*delegate_, OnFinishedDecoding(true)).Times(1);
@@ -226,12 +217,10 @@ TEST_F(WebpDecoderTest, DecodeToTiff) {
 
 TEST_F(WebpDecoderTest, StreamedDecode) {
   // Load a WebP image from disk.
-  base::scoped_nsobject<NSData> webp_image(
-      LoadImage(base::FilePath("test.webp")));
+  NSData* webp_image = LoadImage(base::FilePath("test.webp"));
   ASSERT_TRUE(webp_image != nil);
   // Load reference image.
-  base::scoped_nsobject<NSData> jpg_image(
-      LoadImage(base::FilePath("test.jpg")));
+  NSData* jpg_image = LoadImage(base::FilePath("test.jpg"));
   ASSERT_TRUE(jpg_image != nil);
   // Convert to JPEG in chunks.
   EXPECT_CALL(*delegate_, OnFinishedDecoding(true)).Times(1);
@@ -240,12 +229,11 @@ TEST_F(WebpDecoderTest, StreamedDecode) {
   const size_t kChunkSize = 10;
   unsigned int num_chunks = 0;
   while ([webp_image length] > kChunkSize) {
-    base::scoped_nsobject<NSData> chunk(
-        [webp_image subdataWithRange:NSMakeRange(0, kChunkSize)]);
+    NSData* chunk = [webp_image subdataWithRange:NSMakeRange(0, kChunkSize)];
     decoder_->OnDataReceived(chunk);
-    webp_image.reset([webp_image
+    webp_image = [webp_image
         subdataWithRange:NSMakeRange(kChunkSize,
-                                     [webp_image length] - kChunkSize)]);
+                                     [webp_image length] - kChunkSize)];
     ++num_chunks;
   }
   if ([webp_image length] > 0u) {
@@ -261,9 +249,8 @@ TEST_F(WebpDecoderTest, StreamedDecode) {
 TEST_F(WebpDecoderTest, InvalidFormat) {
   EXPECT_CALL(*delegate_, OnFinishedDecoding(false)).Times(1);
   const char dummy_image[] = "(>'-')> <('-'<) ^('-')^ <('-'<) (>'-')>";
-  base::scoped_nsobject<NSData> data([[NSData alloc]
-      initWithBytes:dummy_image
-             length:base::size(dummy_image)]);
+  NSData* data = [[NSData alloc] initWithBytes:dummy_image
+                                        length:std::size(dummy_image)];
   decoder_->OnDataReceived(data);
   EXPECT_EQ(0u, [delegate_->GetImage() length]);
 }

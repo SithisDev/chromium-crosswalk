@@ -1,16 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_INFOBARS_CORE_CONFIRM_INFOBAR_DELEGATE_H_
 #define COMPONENTS_INFOBARS_CORE_CONFIRM_INFOBAR_DELEGATE_H_
 
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include <string>
+
+#include "build/build_config.h"
 #include "components/infobars/core/infobar_delegate.h"
 #include "components/infobars/core/infobar_manager.h"
+#include "ui/base/models/image_model.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/text_constants.h"
-#include "url/gurl.h"
 
 namespace infobars {
 class InfoBar;
@@ -26,13 +28,23 @@ class ConfirmInfoBarDelegate : public infobars::InfoBarDelegate {
     BUTTON_CANCEL = 1 << 1,
   };
 
+  ConfirmInfoBarDelegate(const ConfirmInfoBarDelegate&) = delete;
+  ConfirmInfoBarDelegate& operator=(const ConfirmInfoBarDelegate&) = delete;
   ~ConfirmInfoBarDelegate() override;
+
+  // InfoBarDelegate:
+  bool EqualsDelegate(infobars::InfoBarDelegate* delegate) const override;
+  ConfirmInfoBarDelegate* AsConfirmInfoBarDelegate() override;
 
   // Returns the InfoBar type to be displayed for the InfoBar.
   InfoBarAutomationType GetInfoBarAutomationType() const override;
 
+  // Returns the title string to be displayed for the InfoBar.
+  // Defaults to having not title. Currently only used on iOS.
+  virtual std::u16string GetTitleText() const;
+
   // Returns the message string to be displayed for the InfoBar.
-  virtual base::string16 GetMessageText() const = 0;
+  virtual std::u16string GetMessageText() const = 0;
 
   // Returns the elide behavior for the message string.
   // Not supported on Android.
@@ -43,11 +55,29 @@ class ConfirmInfoBarDelegate : public infobars::InfoBarDelegate {
 
   // Returns the label for the specified button. The default implementation
   // returns "OK" for the OK button and "Cancel" for the Cancel button.
-  virtual base::string16 GetButtonLabel(InfoBarButton button) const;
+  virtual std::u16string GetButtonLabel(InfoBarButton button) const;
+
+  // Returns the label for the specified button. The default implementation
+  // returns an empty image.
+  virtual ui::ImageModel GetButtonImage(InfoBarButton button) const;
+
+  // Returns whether the specified button is enabled. The default implementation
+  // returns true.
+  virtual bool GetButtonEnabled(InfoBarButton button) const;
+
+  // Returns the tooltip for the specified button. The default implementation
+  // returns an empty tooltip.
+  virtual std::u16string GetButtonTooltip(InfoBarButton button) const;
 
   // Returns whether or not the OK button will trigger a UAC elevation prompt on
   // Windows.
   virtual bool OKButtonTriggersUACPrompt() const;
+
+#if BUILDFLAG(IS_IOS)
+  // Returns whether or not a tint should be applied to the icon background.
+  // Defaults to true.
+  virtual bool UseIconBackgroundTint() const;
+#endif
 
   // Called when the OK button is pressed. If this function returns true, the
   // infobar is then immediately closed. Subclasses MUST NOT return true if in
@@ -59,32 +89,8 @@ class ConfirmInfoBarDelegate : public infobars::InfoBarDelegate {
   // in handling this call something triggers the infobar to begin closing.
   virtual bool Cancel();
 
-  // Returns the text of the link to be displayed, if any. Otherwise returns
-  // an empty string.
-  virtual base::string16 GetLinkText() const;
-
-  // Returns the URL of the link to be displayed.
-  virtual GURL GetLinkURL() const;
-
-  // Called when the link (if any) is clicked; if this function returns true,
-  // the infobar is then immediately closed. The default implementation opens
-  // the URL returned by GetLinkURL(), above, and returns false. Subclasses MUST
-  // NOT return true if in handling this call something triggers the infobar to
-  // begin closing.
-  //
-  // The |disposition| specifies how the resulting document should be loaded
-  // (based on the event flags present when the link was clicked).
-  virtual bool LinkClicked(WindowOpenDisposition disposition);
-
  protected:
   ConfirmInfoBarDelegate();
-
- private:
-  // InfoBarDelegate:
-  bool EqualsDelegate(infobars::InfoBarDelegate* delegate) const override;
-  ConfirmInfoBarDelegate* AsConfirmInfoBarDelegate() override;
-
-  DISALLOW_COPY_AND_ASSIGN(ConfirmInfoBarDelegate);
 };
 
 #endif  // COMPONENTS_INFOBARS_CORE_CONFIRM_INFOBAR_DELEGATE_H_

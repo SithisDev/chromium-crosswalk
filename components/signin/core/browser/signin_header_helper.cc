@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,16 @@
 
 #include <stddef.h>
 
+#include "base/containers/contains.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/strings/escape.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "components/google/core/common/google_util.h"
 #include "components/signin/core/browser/chrome_connected_header_helper.h"
 #include "google_apis/gaia/gaia_auth_util.h"
-#include "net/base/escape.h"
-#include "net/url_request/url_request.h"
+#include "net/http/http_request_headers.h"
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
 #include "components/signin/core/browser/dice_header_helper.h"
@@ -23,19 +24,18 @@
 namespace signin {
 
 const char kChromeConnectedHeader[] = "X-Chrome-Connected";
+const char kChromeManageAccountsHeader[] = "X-Chrome-Manage-Accounts";
+const char kAutoLoginHeader[] = "X-Auto-Login";
 const char kDiceRequestHeader[] = "X-Chrome-ID-Consistency-Request";
 const char kDiceResponseHeader[] = "X-Chrome-ID-Consistency-Response";
 
-ManageAccountsParams::ManageAccountsParams()
-    : service_type(GAIA_SERVICE_TYPE_NONE),
-      email(""),
-      is_saml(false),
-      continue_url(""),
-      is_same_tab(false) {
-}
+ManageAccountsParams::ManageAccountsParams() = default;
 
 ManageAccountsParams::ManageAccountsParams(const ManageAccountsParams&) =
     default;
+
+ManageAccountsParams& ManageAccountsParams::operator=(
+    const ManageAccountsParams&) = default;
 
 // Trivial constructors and destructors.
 DiceResponseParams::DiceResponseParams() {}
@@ -65,35 +65,53 @@ DiceResponseParams::EnableSyncInfo::~EnableSyncInfo() {}
 DiceResponseParams::EnableSyncInfo::EnableSyncInfo(const EnableSyncInfo&) =
     default;
 
-RequestAdapter::RequestAdapter(net::URLRequest* request) : request_(request) {}
+RequestAdapter::RequestAdapter(const GURL& url,
+                               const net::HttpRequestHeaders& original_headers,
+                               net::HttpRequestHeaders* modified_headers,
+                               std::vector<std::string>* headers_to_remove)
+    : url_(url),
+      original_headers_(original_headers),
+      modified_headers_(modified_headers),
+      headers_to_remove_(headers_to_remove) {
+  DCHECK(modified_headers_);
+  DCHECK(headers_to_remove_);
+}
 
 RequestAdapter::~RequestAdapter() = default;
 
 const GURL& RequestAdapter::GetUrl() {
-  return request_->url();
+  return url_;
 }
 
 bool RequestAdapter::HasHeader(const std::string& name) {
-  return request_->extra_request_headers().HasHeader(name);
+  return (original_headers_.HasHeader(name) ||
+          modified_headers_->HasHeader(name)) &&
+         !base::Contains(*headers_to_remove_, name);
 }
 
 void RequestAdapter::RemoveRequestHeaderByName(const std::string& name) {
-  return request_->RemoveRequestHeaderByName(name);
+  if (!base::Contains(*headers_to_remove_, name))
+    headers_to_remove_->push_back(name);
 }
 
 void RequestAdapter::SetExtraHeaderByName(const std::string& name,
                                           const std::string& value) {
-  return request_->SetExtraRequestHeaderByName(name, value, false);
+  modified_headers_->SetHeader(name, value);
+
+  auto it =
+      std::find(headers_to_remove_->begin(), headers_to_remove_->end(), name);
+  if (it != headers_to_remove_->end())
+    headers_to_remove_->erase(it);
 }
 
 std::string BuildMirrorRequestCookieIfPossible(
     const GURL& url,
-    const std::string& account_id,
+    const std::string& gaia_id,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,
     int profile_mode_mask) {
   return ChromeConnectedHeaderHelper::BuildRequestCookieIfPossible(
-      url, account_id, account_consistency, cookie_settings, profile_mode_mask);
+      url, gaia_id, account_consistency, cookie_settings, profile_mode_mask);
 }
 
 SigninHeaderHelper::SigninHeaderHelper() = default;
@@ -134,29 +152,39 @@ SigninHeaderHelper::ParseAccountConsistencyResponseHeader(
       DLOG(WARNING) << "Unexpected Gaia header field '" << field << "'.";
       continue;
     }
-    dictionary.insert(
-        {field.substr(0, delim).as_string(),
-         net::UnescapeURLComponent(
-             field.substr(delim + 1).as_string(),
-             net::UnescapeRule::PATH_SEPARATORS |
-                 net::UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS)});
+    dictionary.insert({std::string(field.substr(0, delim)),
+                       base::UnescapeURLComponent(
+                           field.substr(delim + 1),
+                           base::UnescapeRule::PATH_SEPARATORS |
+                               base::UnescapeRule::
+                                   URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS)});
   }
   return dictionary;
+}
+
+bool IsUrlEligibleForMirrorCookie(const GURL& url) {
+  ChromeConnectedHeaderHelper chrome_connected_helper(
+      AccountConsistencyMethod::kMirror);
+  return chrome_connected_helper.IsUrlEligibleForRequestHeader(url);
 }
 
 void AppendOrRemoveMirrorRequestHeader(
     RequestAdapter* request,
     const GURL& redirect_url,
-    const std::string& account_id,
+    const std::string& gaia_id,
+    Tribool is_child_account,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,
-    int profile_mode_mask) {
+    int profile_mode_mask,
+    const std::string& source,
+    bool force_account_consistency) {
   const GURL& url = redirect_url.is_empty() ? request->GetUrl() : redirect_url;
   ChromeConnectedHeaderHelper chrome_connected_helper(account_consistency);
   std::string chrome_connected_header_value;
   if (chrome_connected_helper.ShouldBuildRequestHeader(url, cookie_settings)) {
     chrome_connected_header_value = chrome_connected_helper.BuildRequestHeader(
-        true /* is_header_request */, url, account_id, profile_mode_mask);
+        true /* is_header_request */, url, gaia_id, is_child_account,
+        profile_mode_mask, source, force_account_consistency);
   }
   chrome_connected_helper.AppendOrRemoveRequestHeader(
       request, redirect_url, kChromeConnectedHeader,
@@ -166,7 +194,7 @@ void AppendOrRemoveMirrorRequestHeader(
 bool AppendOrRemoveDiceRequestHeader(
     RequestAdapter* request,
     const GURL& redirect_url,
-    const std::string& account_id,
+    const std::string& gaia_id,
     bool sync_enabled,
     AccountConsistencyMethod account_consistency,
     const content_settings::CookieSettings* cookie_settings,
@@ -177,7 +205,7 @@ bool AppendOrRemoveDiceRequestHeader(
   std::string dice_header_value;
   if (dice_helper.ShouldBuildRequestHeader(url, cookie_settings)) {
     dice_header_value = dice_helper.BuildRequestHeader(
-        sync_enabled ? account_id : std::string(), device_id);
+        sync_enabled ? gaia_id : std::string(), device_id);
   }
   return dice_helper.AppendOrRemoveRequestHeader(
       request, redirect_url, kDiceRequestHeader, dice_header_value);

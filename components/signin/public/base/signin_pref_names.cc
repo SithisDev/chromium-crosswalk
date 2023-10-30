@@ -1,25 +1,24 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/signin/public/base/signin_pref_names.h"
 
+#include "build/chromeos_buildflags.h"
+
 namespace prefs {
 
-#if defined(OS_CHROMEOS)
-// Boolean identifying if Mirror account consistency is required for profile.
-// If Chrome OS Account Manager is not available, this has the effect of
-// disabling secondary account sign-ins within the content area.
-// TODO(https://crbug.com/938835): Clean this up after releasing Chrome OS
-// Account Manager.
-const char kAccountConsistencyMirrorRequired[] =
-    "account_consistency_mirror.required";
-#endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+// A boolean pref - should unauthenticated user should be logged out
+// automatically. Default value is false.
+const char kForceLogoutUnauthenticatedUserEnabled[] =
+    "profile.force_logout_unauthenticated_user_enabled";
 
 // An integer property indicating the state of account id migration from
 // email to gaia id for the the profile.  See account_tracker_service.h
 // for possible values.
 const char kAccountIdMigrationState[] = "account_id_migration_state";
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 // Name of the preference property that persists the account information
 // tracked by this signin.
@@ -41,27 +40,24 @@ const char kGaiaCookieChangedTime[] = "gaia_cookie.changed_time";
 // double that should be converted into base::Time.
 const char kGaiaCookiePeriodicReportTime[] = "gaia_cookie.periodic_report_time";
 
-// Typically contains an obfuscated gaiaid and will match the value of
-// kGoogleServicesUserAccountId. Some platforms and legacy clients may have
+// Typically contains an obfuscated gaiaid. Some platforms may have
 // an email stored in this preference instead. This is transitional and will
-// eventually be fixed, allowing the removal of kGoogleServicesUserAccountId.
+// eventually be fixed.
 const char kGoogleServicesAccountId[] = "google.services.account_id";
 
-// The profile's hosted domain; empty if unset; kNoHostedDomainFound if there
-// is none.
-const char kGoogleServicesHostedDomain[] = "google.services.hosted_domain";
+// Boolean indicating if the user gave consent for Sync.
+const char kGoogleServicesConsentedToSync[] =
+    "google.services.consented_to_sync";
 
 // Similar to kGoogleServicesLastUsername, this is the corresponding version of
 // kGoogleServicesAccountId that is not cleared on signout.
 const char kGoogleServicesLastAccountId[] = "google.services.last_account_id";
 
 // String the identifies the last user that logged into sync and other
-// google services. As opposed to kGoogleServicesUsername, this value is not
-// cleared on signout, but while the user is signed in the two values will
-// be the same.  This pref remains in order to pre-fill the sign in page when
-// reconnecting a profile, but programmatic checks to see if a given account
-// is the same as the last account should use kGoogleServicesLastAccountId
-// instead.
+// google services. This value is not cleared on signout.
+// This pref remains in order to pre-fill the sign in page when reconnecting a
+// profile, but programmatic checks to see if a given account is the same as the
+// last account should use kGoogleServicesLastAccountId instead.
 const char kGoogleServicesLastUsername[] = "google.services.last_username";
 
 // Device id scoped to single signin. This device id will be regenerated if user
@@ -69,15 +65,6 @@ const char kGoogleServicesLastUsername[] = "google.services.last_username";
 // will be annotated with this device id.
 const char kGoogleServicesSigninScopedDeviceId[] =
     "google.services.signin_scoped_device_id";
-
-// Obfuscated account ID that identifies the current user logged into sync and
-// other google services.
-const char kGoogleServicesUserAccountId[] = "google.services.user_account_id";
-
-// String that identifies the current user logged into sync and other google
-// services.
-// DEPRECATED.
-const char kGoogleServicesUsername[] = "google.services.username";
 
 // Local state pref containing a string regex that restricts which accounts
 // can be used to log in to chrome (e.g. "*@google.com"). If missing or blank,
@@ -98,17 +85,12 @@ const char kSignedInWithCredentialProvider[] =
 // Boolean which stores if the user is allowed to signin to chrome.
 const char kSigninAllowed[] = "signin.allowed";
 
-// True if the token service has been prepared for Dice migration.
-const char kTokenServiceDiceCompatible[] = "token_service.dice_compatible";
+// Contains last |ListAccounts| data which corresponds to Gaia cookies.
+const char kGaiaCookieLastListAccountsData[] =
+    "gaia_cookie.last_list_accounts_data";
 
-// Boolean which stores if the OAuth2TokenService should ignore secondary
-// accounts.
-const char kTokenServiceExcludeAllSecondaryAccounts[] =
-    "token_service.exclude_all_secondary_accounts";
-
-// List that identifies the account id that should be ignored by the token
-// service.
-const char kTokenServiceExcludedSecondaryAccounts[] =
-    "token_service.excluded_secondary_accounts";
+// List of patterns to determine the account visibility.
+const char kRestrictAccountsToPatterns[] =
+    "signin.restrict_accounts_to_patterns";
 
 }  // namespace prefs

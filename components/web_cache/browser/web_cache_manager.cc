@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,23 +11,24 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
-#include "base/memory/singleton.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/no_destructor.h"
 #include "base/system/sys_info.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
-#include "content/public/browser/render_process_host.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "components/web_cache/public/features.h"
 
 using base::Time;
-using base::TimeDelta;
 
 namespace web_cache {
+
+constexpr uint64_t kNoCapacitySet = std::numeric_limits<uint64_t>::max();
+
+WebCacheManager::WebCacheInfo::WebCacheInfo() : last_capacity(kNoCapacitySet) {}
+WebCacheManager::WebCacheInfo::~WebCacheInfo() = default;
 
 static const int kReviseAllocationDelayMS = 200;
 
@@ -47,9 +48,6 @@ int GetDefaultCacheSize() {
   else if (mem_size_mb >= 512)  // With 512 MB, set a slightly larger default.
     default_cache_size *= 2;
 
-  UMA_HISTOGRAM_MEMORY_MB("Cache.MaxCacheSizeMB",
-                          default_cache_size / 1024 / 1024);
-
   return default_cache_size;
 }
 
@@ -57,17 +55,12 @@ int GetDefaultCacheSize() {
 
 // static
 WebCacheManager* WebCacheManager::GetInstance() {
-  return base::Singleton<WebCacheManager>::get();
+  static base::NoDestructor<WebCacheManager> s_instance;
+  return s_instance.get();
 }
 
 WebCacheManager::WebCacheManager()
     : global_size_limit_(GetDefaultGlobalSizeLimit()) {
-  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
-                 content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-                 content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 content::NotificationService::AllBrowserContextsAndSources());
 }
 
 WebCacheManager::~WebCacheManager() {
@@ -85,9 +78,9 @@ void WebCacheManager::Add(int renderer_id) {
   content::RenderProcessHost* host =
       content::RenderProcessHost::FromID(renderer_id);
   if (host) {
-    mojom::WebCachePtr service;
-    BindInterface(host, &service);
-    web_cache_services_[renderer_id] = std::move(service);
+    mojo::Remote<mojom::WebCache> service;
+    host->BindReceiver(service.BindNewPipeAndPassReceiver());
+    web_cache_services_[renderer_id].service = std::move(service);
   }
 
   // Revise our allocation strategy to account for this new renderer.
@@ -164,27 +157,22 @@ void WebCacheManager::ClearCacheOnNavigation() {
   ClearRendererCache(inactive_renderers_, ON_NAVIGATION);
 }
 
-void WebCacheManager::Observe(int type,
-                              const content::NotificationSource& source,
-                              const content::NotificationDetails& details) {
-  switch (type) {
-    case content::NOTIFICATION_RENDERER_PROCESS_CREATED: {
-      content::RenderProcessHost* process =
-          content::Source<content::RenderProcessHost>(source).ptr();
-      Add(process->GetID());
-      break;
-    }
-    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED:
-    case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED: {
-      content::RenderProcessHost* process =
-          content::Source<content::RenderProcessHost>(source).ptr();
-      Remove(process->GetID());
-      break;
-    }
-    default:
-      NOTREACHED();
-      break;
-  }
+void WebCacheManager::OnRenderProcessHostCreated(
+    content::RenderProcessHost* process_host) {
+  Add(process_host->GetID());
+  rph_observations_.AddObservation(process_host);
+}
+
+void WebCacheManager::RenderProcessExited(
+    content::RenderProcessHost* process_host,
+    const content::ChildProcessTerminationInfo& info) {
+  RenderProcessHostDestroyed(process_host);
+}
+
+void WebCacheManager::RenderProcessHostDestroyed(
+    content::RenderProcessHost* process_host) {
+  rph_observations_.RemoveObservation(process_host);
+  Remove(process_host->GetID());
 }
 
 // static
@@ -297,24 +285,24 @@ void WebCacheManager::AddToStrategy(const std::set<int>& renderers,
 }
 
 void WebCacheManager::EnactStrategy(const AllocationStrategy& strategy) {
-  // Inform each render process of its cache allocation.
-  auto allocation = strategy.begin();
-  while (allocation != strategy.end()) {
+  for (auto& [render_process_id, new_capacity] : strategy) {
     content::RenderProcessHost* host =
-        content::RenderProcessHost::FromID(allocation->first);
-    if (host) {
-      // This is the capacity this renderer has been allocated.
-      uint64_t capacity = allocation->second;
+        content::RenderProcessHost::FromID(render_process_id);
+    if (!host)
+      continue;
 
-      // Find the WebCachePtr by renderer process id.
-      auto it = web_cache_services_.find(allocation->first);
-      if (it != web_cache_services_.end()) {
-        const mojom::WebCachePtr& service = it->second;
-        DCHECK(service);
-        service->SetCacheCapacity(capacity);
-      }
-    }
-    ++allocation;
+    // Find the mojo::Remote<WebCache> by renderer process id.
+    auto it = web_cache_services_.find(render_process_id);
+    if (it == web_cache_services_.end())
+      continue;
+
+    WebCacheInfo& cache_info = it->second;
+    if (cache_info.last_capacity == new_capacity)
+      continue;
+
+    DCHECK(cache_info.service);
+    cache_info.service->SetCacheCapacity(new_capacity);
+    cache_info.last_capacity = new_capacity;
   }
 }
 
@@ -332,20 +320,24 @@ void WebCacheManager::ClearRendererCache(
     content::RenderProcessHost* host =
         content::RenderProcessHost::FromID(*iter);
     if (host) {
-      // Find the WebCachePtr by renderer process id.
+      // Find the mojo::Remote<WebCache> by renderer process id.
       auto it = web_cache_services_.find(*iter);
       if (it != web_cache_services_.end()) {
-        const mojom::WebCachePtr& service = it->second;
-        DCHECK(service);
-        service->ClearCache(occasion == ON_NAVIGATION);
+        WebCacheInfo& cache_info = it->second;
+        DCHECK(cache_info.service);
+        cache_info.service->ClearCache(occasion == ON_NAVIGATION);
       }
     }
   }
 }
 
 void WebCacheManager::ReviseAllocationStrategy() {
+  DCHECK(!base::FeatureList::IsEnabled(kTrimWebCacheOnMemoryPressureOnly));
+
   DCHECK(stats_.size() <=
       active_renderers_.size() + inactive_renderers_.size());
+
+  callback_pending_ = false;
 
   // Check if renderers have gone inactive.
   FindInactiveRenderers();
@@ -354,16 +346,6 @@ void WebCacheManager::ReviseAllocationStrategy() {
   uint64_t active_capacity, active_size, inactive_capacity, inactive_size;
   GatherStats(active_renderers_, &active_capacity, &active_size);
   GatherStats(inactive_renderers_, &inactive_capacity, &inactive_size);
-
-  UMA_HISTOGRAM_COUNTS_100("Cache.ActiveTabs", active_renderers_.size());
-  UMA_HISTOGRAM_COUNTS_100("Cache.InactiveTabs", inactive_renderers_.size());
-  UMA_HISTOGRAM_MEMORY_MB("Cache.ActiveCapacityMB",
-                          active_capacity / 1024 / 1024);
-  UMA_HISTOGRAM_MEMORY_MB("Cache.ActiveLiveSizeMB", active_size / 1024 / 1024);
-  UMA_HISTOGRAM_MEMORY_MB("Cache.InactiveCapacityMB",
-                          inactive_capacity / 1024 / 1024);
-  UMA_HISTOGRAM_MEMORY_MB("Cache.InactiveLiveSizeMB",
-                          inactive_size / 1024 / 1024);
 
   // Compute an allocation strategy.
   //
@@ -405,13 +387,22 @@ void WebCacheManager::ReviseAllocationStrategy() {
 }
 
 void WebCacheManager::ReviseAllocationStrategyLater() {
+  if (base::FeatureList::IsEnabled(kTrimWebCacheOnMemoryPressureOnly))
+    return;
+
+  // Avoid piling up notifications.
+  if (callback_pending_)
+    return;
+
+  callback_pending_ = true;
+
   // Ask to be called back in a few milliseconds to actually recompute our
   // allocation.
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&WebCacheManager::ReviseAllocationStrategy,
                      weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kReviseAllocationDelayMS));
+      base::Milliseconds(kReviseAllocationDelayMS));
 }
 
 void WebCacheManager::FindInactiveRenderers() {
@@ -419,8 +410,8 @@ void WebCacheManager::FindInactiveRenderers() {
   while (iter != active_renderers_.end()) {
     auto elmt = stats_.find(*iter);
     DCHECK(elmt != stats_.end());
-    TimeDelta idle = Time::Now() - elmt->second.access;
-    if (idle >= TimeDelta::FromMinutes(kRendererInactiveThresholdMinutes)) {
+    base::TimeDelta idle = Time::Now() - elmt->second.access;
+    if (idle >= base::Minutes(kRendererInactiveThresholdMinutes)) {
       // Moved to inactive status.  This invalidates our iterator.
       inactive_renderers_.insert(*iter);
       active_renderers_.erase(*iter);

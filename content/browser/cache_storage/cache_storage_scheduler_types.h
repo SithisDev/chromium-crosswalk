@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,6 +49,11 @@ enum class CacheStorageSchedulerOp {
   kTest = 13,
   kWriteIndex = 14,
   kWriteSideData = 15,
+};
+
+enum class CacheStorageSchedulerPriority {
+  kNormal = 0,
+  kHigh = 1,
 };
 
 }  // namespace content

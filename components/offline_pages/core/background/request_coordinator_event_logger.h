@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,9 @@ class RequestCoordinatorEventLogger : public OfflineEventLogger {
 
   void RecordUpdateRequestFailed(const std::string& name_space,
                                  UpdateRequestResult result);
+
+  void RecordAddRequestFailed(const std::string& name_space,
+                              AddRequestResult result);
 };
 
 }  // namespace offline_pages

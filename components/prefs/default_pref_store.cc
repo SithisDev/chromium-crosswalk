@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/observer_list.h"
 
 using base::Value;
 
@@ -17,8 +18,8 @@ bool DefaultPrefStore::GetValue(const std::string& key,
   return prefs_.GetValue(key, result);
 }
 
-std::unique_ptr<base::DictionaryValue> DefaultPrefStore::GetValues() const {
-  return prefs_.AsDictionaryValue();
+base::Value::Dict DefaultPrefStore::GetValues() const {
+  return prefs_.AsDict();
 }
 
 void DefaultPrefStore::AddObserver(PrefStore::Observer* observer) {
@@ -30,7 +31,7 @@ void DefaultPrefStore::RemoveObserver(PrefStore::Observer* observer) {
 }
 
 bool DefaultPrefStore::HasObservers() const {
-  return observers_.might_have_observers();
+  return !observers_.empty();
 }
 
 void DefaultPrefStore::SetDefaultValue(const std::string& key, Value value) {

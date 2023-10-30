@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,17 +23,19 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.LooperMode;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.process_launcher.ChildConnectionAllocator;
 import org.chromium.base.process_launcher.ChildProcessConnection;
+import org.chromium.base.process_launcher.TestChildProcessConnection;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.TestChildProcessConnection;
 import org.chromium.base.test.util.Feature;
 
 /** Unit tests for the SpareChildConnection class. */
 @Config(manifest = Config.NONE)
 @RunWith(BaseRobolectricTestRunner.class)
+@LooperMode(LooperMode.Mode.LEGACY)
 public class SpareChildConnectionTest {
     @Mock
     private ChildProcessConnection.ServiceCallback mServiceCallback;
@@ -53,8 +55,8 @@ public class SpareChildConnectionTest {
 
         @Override
         public ChildProcessConnection createConnection(Context context, ComponentName serviceName,
-                boolean bindToCaller, boolean bindAsExternalService, Bundle serviceBundle,
-                String instanceName) {
+                ComponentName fallbackServiceName, boolean bindToCaller,
+                boolean bindAsExternalService, Bundle serviceBundle, String instanceName) {
             // We expect to create only one connection in these tests.
             assert mConnection == null;
             mConnection = new TestChildProcessConnection(

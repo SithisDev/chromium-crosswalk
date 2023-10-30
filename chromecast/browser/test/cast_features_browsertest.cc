@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,14 @@
 #include <memory>
 #include <unordered_set>
 
-#include "base/macros.h"
 #include "base/metrics/field_trial_params.h"
+#include "build/build_config.h"
 #include "chromecast/base/pref_names.h"
 #include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/test/cast_browser_test.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "content/public/test/browser_test.h"
 
 // PLEASE READ:
 // 1) These tests are run in groups to simulate a restart of cast_shell. Each
@@ -108,6 +109,10 @@ void SetupFeatures() {
 class CastFeaturesBrowserTest : public CastBrowserTest {
  public:
   CastFeaturesBrowserTest() { SetupFeatures(); }
+
+  CastFeaturesBrowserTest(const CastFeaturesBrowserTest&) = delete;
+  CastFeaturesBrowserTest& operator=(const CastFeaturesBrowserTest&) = delete;
+
   ~CastFeaturesBrowserTest() override { chromecast::ResetCastFeaturesForTesting(); }
 
   static PrefService* pref_service() {
@@ -117,21 +122,22 @@ class CastFeaturesBrowserTest : public CastBrowserTest {
   // Write |dcs_features| to the pref store. This method is intended to be
   // overridden in internal test to utilize the real production codepath for
   // setting features from the server.
-  virtual void SetFeatures(const base::DictionaryValue& dcs_features) {
-    auto pref_features = GetOverriddenFeaturesForStorage(dcs_features);
-    ScopedUserPrefUpdate<base::DictionaryValue, base::Value::Type::DICTIONARY>
-        dict(pref_service(), prefs::kLatestDCSFeatures);
-    dict->MergeDictionary(&pref_features);
+  virtual void SetFeatures(const base::Value::Dict& dcs_features) {
+    base::Value::Dict pref_features =
+        GetOverriddenFeaturesForStorage(dcs_features);
+    DictionaryPrefUpdate dict(pref_service(), prefs::kLatestDCSFeatures);
+    for (auto [pref_name, pref_value] : pref_features) {
+      dict->SetStringKey(pref_name, pref_value.GetString());
+    }
     pref_service()->CommitPendingWrite();
   }
 
   // Clears |features| from the PrefStore. Should be called in a PRE_PRE_*
   // method for any tested feature in a test to ensure consistent state.
   void ClearFeaturesFromPrefs(std::vector<base::Feature> features) {
-    ScopedUserPrefUpdate<base::DictionaryValue, base::Value::Type::DICTIONARY>
-        dict(pref_service(), prefs::kLatestDCSFeatures);
+    DictionaryPrefUpdate dict(pref_service(), prefs::kLatestDCSFeatures);
     for (auto f : features)
-      dict->Remove(f.name, nullptr);
+      dict->RemoveKey(f.name);
     pref_service()->CommitPendingWrite();
   }
 
@@ -142,7 +148,7 @@ class CastFeaturesBrowserTest : public CastBrowserTest {
       const std::unordered_set<int32_t>& experiment_ids) {
     base::ListValue list;
     for (auto id : experiment_ids)
-      list.AppendInteger(id);
+      list.Append(id);
     pref_service()->Set(prefs::kActiveDCSExperiments, list);
     pref_service()->CommitPendingWrite();
   }
@@ -152,9 +158,6 @@ class CastFeaturesBrowserTest : public CastBrowserTest {
     pref_service()->Set(prefs::kActiveDCSExperiments, base::ListValue());
     pref_service()->CommitPendingWrite();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CastFeaturesBrowserTest);
 };
 
 // Test that set features activate on the next boot. Part 1 of 3.
@@ -173,10 +176,10 @@ IN_PROC_BROWSER_TEST_F(CastFeaturesBrowserTest,
   ASSERT_TRUE(chromecast::IsFeatureEnabled(kTestFeat4));
 
   // Set the features to be used on next boot.
-  base::DictionaryValue features;
-  features.SetBoolean("test_feat_1", true);
-  features.SetBoolean("test_feat_4", false);
-  SetFeatures(features);
+  base::Value::Dict features;
+  features.Set("test_feat_1", true);
+  features.Set("test_feat_4", false);
+  SetFeatures(std::move(features));
 
   // Default values should still be returned until next boot.
   EXPECT_FALSE(chromecast::IsFeatureEnabled(kTestFeat1));
@@ -208,15 +211,15 @@ IN_PROC_BROWSER_TEST_F(CastFeaturesBrowserTest,
   ASSERT_FALSE(chromecast::IsFeatureEnabled(kTestFeat11));
 
   // Set the features to be used on next boot.
-  base::DictionaryValue features;
-  auto params = std::make_unique<base::DictionaryValue>();
-  params->SetBoolean("bool_param", true);
-  params->SetBoolean("bool_param_2", false);
-  params->SetString("str_param", "foo");
-  params->SetDouble("doub_param", 3.14159);
-  params->SetInteger("int_param", 76543);
+  base::Value::Dict features;
+  base::Value::Dict params;
+  params.Set("bool_param", true);
+  params.Set("bool_param_2", false);
+  params.Set("str_param", "foo");
+  params.Set("doub_param", 3.14159);
+  params.Set("int_param", 76543);
   features.Set("test_feat_11", std::move(params));
-  SetFeatures(features);
+  SetFeatures(std::move(features));
 
   // Default value should still be returned until next boot.
   EXPECT_FALSE(chromecast::IsFeatureEnabled(kTestFeat11));
@@ -262,15 +265,16 @@ IN_PROC_BROWSER_TEST_F(CastFeaturesBrowserTest,
   ASSERT_TRUE(chromecast::IsFeatureEnabled(kTestFeat24));
 
   // Set both good parameters...
-  base::DictionaryValue features;
-  features.SetBoolean("test_feat_21", true);
-  features.SetBoolean("test_feat_24", false);
+  base::Value::Dict features;
+  features.Set("test_feat_21", true);
+  features.Set("test_feat_24", false);
 
   // ... and bad parameters.
-  features.SetString("test_feat_22", "False");
-  features.Set("test_feat_23", std::make_unique<base::ListValue>());
+  features.Set("test_feat_22", "False");
+  base::Value::List empty_list;
+  features.Set("test_feat_23", std::move(empty_list));
 
-  SetFeatures(features);
+  SetFeatures(std::move(features));
 }
 
 // Test that only well-formed features are persisted to disk. Part 2 of 2.
@@ -305,7 +309,7 @@ IN_PROC_BROWSER_TEST_F(CastFeaturesBrowserTest,
   ASSERT_TRUE(GetDCSExperimentIds().empty());
 }
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_TestExperimentIdsPersisted DISABLED_TestExperimentIdsPersisted
 #else
 #define MAYBE_TestExperimentIdsPersisted TestExperimentIdsPersisted

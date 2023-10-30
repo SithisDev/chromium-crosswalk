@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,15 @@ bool RebootUtil::IsValidRebootSource(RebootShlib::RebootSource reboot_source) {
     case RebootShlib::RebootSource::SW_OTHER:
     case RebootShlib::RebootSource::OVERHEAT:
     case RebootShlib::RebootSource::REGENERATE_CLOUD_ID:
+    case RebootShlib::RebootSource::REPEATED_OOM:
+    case RebootShlib::RebootSource::UTILITY_PROCESS_CRASH:
+    case RebootShlib::RebootSource::GRACEFUL_RESTART:
+    case RebootShlib::RebootSource::UNGRACEFUL_RESTART:
+    case RebootShlib::RebootSource::MULTI_SERVICE_BUG:
+    case RebootShlib::RebootSource::POWER_MANAGER_SHUTDOWN:
+    case RebootShlib::RebootSource::EXPERIMENT_CHANGE:
+    case RebootShlib::RebootSource::ANOMALY:
+    case RebootShlib::RebootSource::KERNEL_PANIC:
       return true;
     default:
       return false;
@@ -90,6 +99,18 @@ bool RebootUtil::IsOtaForNextRebootSupported() {
 void RebootUtil::SetOtaForNextReboot() {
   DCHECK(IsOtaForNextRebootSupported());
   RebootShlib::SetOtaForNextReboot();
+}
+
+// static
+bool RebootUtil::IsClearOtaForNextRebootSupported() {
+  return RebootShlib::IsSupported() &&
+         RebootShlib::IsClearOtaForNextRebootSupported();
+}
+
+// static
+void RebootUtil::ClearOtaForNextReboot() {
+  DCHECK(IsClearOtaForNextRebootSupported());
+  RebootShlib::ClearOtaForNextReboot();
 }
 
 // static

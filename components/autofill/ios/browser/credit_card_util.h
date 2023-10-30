@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,11 @@ class CreditCard;
 NSString* GetCreditCardName(const CreditCard& credit_card,
                             const std::string& locale);
 
-// Returns |credit_card| obfuscated number as an autoreleased NSString.
-NSString* GetCreditCardObfuscatedNumber(const CreditCard& credit_card);
+// Returns |credit_card| card identifier string as an autoreleased NSString.
+NSString* GetCreditCardIdentifierString(const CreditCard& credit_card);
+
+// Returns |credit_card| nickname string as an autoreleased NSString.
+NSString* GetCreditCardNicknameString(const CreditCard& credit_card);
 
 // Returns |credit_card| expiration date as an autoreleased NSDateComponents.
 // Only |year| and |month| fields of the NSDateComponents are valid.

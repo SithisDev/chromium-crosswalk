@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,19 @@
 
 #include <vector>
 
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/common/form_data.h"
+#include "components/autofill/core/common/unique_ids.h"
+#include "components/password_manager/core/common/password_manager_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using autofill::AutofillField;
 using autofill::ACCOUNT_CREATION_PASSWORD;
+using autofill::AutofillField;
 using autofill::CONFIRMATION_PASSWORD;
+using autofill::CREDIT_CARD_VERIFICATION_CODE;
 using autofill::EMAIL_ADDRESS;
 using autofill::FormData;
 using autofill::FormFieldData;
@@ -24,27 +27,18 @@ using autofill::NEW_PASSWORD;
 using autofill::NO_SERVER_DATA;
 using autofill::PASSWORD;
 using autofill::ServerFieldType;
+using autofill::SINGLE_USERNAME;
 using autofill::UNKNOWN_TYPE;
 using autofill::USERNAME;
 using autofill::USERNAME_AND_EMAIL_ADDRESS;
 using base::ASCIIToUTF16;
 
-using FieldPrediction =
-    autofill::AutofillQueryResponseContents::Field::FieldPrediction;
+using FieldPrediction = autofill::AutofillQueryResponse::FormSuggestion::
+    FieldSuggestion::FieldPrediction;
 
 namespace password_manager {
 
 namespace {
-
-const PasswordFieldPrediction* FindFormPrediction(
-    const FormPredictions& predictions,
-    uint32_t renderer_id) {
-  for (const PasswordFieldPrediction& prediction : predictions) {
-    if (prediction.renderer_id == renderer_id)
-      return &prediction;
-  }
-  return nullptr;
-}
 
 TEST(FormPredictionsTest, ConvertToFormPredictions) {
   struct TestField {
@@ -53,58 +47,75 @@ TEST(FormPredictionsTest, ConvertToFormPredictions) {
     ServerFieldType input_type;
     ServerFieldType expected_type;
     bool may_use_prefilled_placeholder;
+    std::vector<ServerFieldType> additional_types;
   } test_fields[] = {
       {"full_name", "text", UNKNOWN_TYPE, UNKNOWN_TYPE, false},
       // Password Manager is interested only in credential related types.
-      {"Email", "email", EMAIL_ADDRESS, UNKNOWN_TYPE, false},
+      {"Email", "email", EMAIL_ADDRESS, EMAIL_ADDRESS, false},
       {"username", "text", USERNAME, USERNAME, true},
       {"Password", "password", PASSWORD, PASSWORD, false},
       {"confirm_password", "password", CONFIRMATION_PASSWORD,
-       CONFIRMATION_PASSWORD, true}};
+       CONFIRMATION_PASSWORD, true},
+      // username in |additional_types| takes precedence if the feature is
+      // enabled.
+      {"email", "text", EMAIL_ADDRESS, USERNAME, false, {USERNAME}},
+      // cvc in |additional_types| takes precedence if the feature is enabled.
+      {"cvc",
+       "password",
+       PASSWORD,
+       CREDIT_CARD_VERIFICATION_CODE,
+       false,
+       {CREDIT_CARD_VERIFICATION_CODE}},
+      // non-password, non-cvc types in |additional_types| are ignored.
+      {"email", "text", UNKNOWN_TYPE, UNKNOWN_TYPE, false, {EMAIL_ADDRESS}},
+  };
 
   FormData form_data;
-  for (size_t i = 0; i < base::size(test_fields); ++i) {
+  for (size_t i = 0; i < std::size(test_fields); ++i) {
     FormFieldData field;
-    field.unique_renderer_id = i + 1000;
+    field.unique_renderer_id = autofill::FieldRendererId(i + 1000);
     field.name = ASCIIToUTF16(test_fields[i].name);
     field.form_control_type = test_fields[i].form_control_type;
     form_data.fields.push_back(field);
   }
 
   FormStructure form_structure(form_data);
-  size_t expected_predictions = 0;
   // Set server predictions and create expected votes.
-  for (size_t i = 0; i < base::size(test_fields); ++i) {
+  for (size_t i = 0; i < std::size(test_fields); ++i) {
     AutofillField* field = form_structure.field(i);
-    field->set_server_type(test_fields[i].input_type);
-    ServerFieldType expected_type = test_fields[i].expected_type;
 
+    std::vector<FieldPrediction> predictions;
     FieldPrediction prediction;
-    prediction.set_may_use_prefilled_placeholder(
-        test_fields[i].may_use_prefilled_placeholder);
-    field->set_server_predictions({prediction});
+    prediction.set_type(test_fields[i].input_type);
+    predictions.push_back(prediction);
 
-    if (expected_type != UNKNOWN_TYPE)
-      ++expected_predictions;
+    for (ServerFieldType type : test_fields[i].additional_types) {
+      FieldPrediction additional_prediction;
+      additional_prediction.set_type(type);
+      predictions.push_back(additional_prediction);
+    }
+    field->set_server_predictions(predictions);
+    field->set_may_use_prefilled_placeholder(
+        test_fields[i].may_use_prefilled_placeholder);
   }
 
-  FormPredictions actual_predictions = ConvertToFormPredictions(form_structure);
+  constexpr int driver_id = 1000;
+  FormPredictions actual_predictions =
+      ConvertToFormPredictions(driver_id, form_structure);
 
   // Check whether actual predictions are equal to expected ones.
-  EXPECT_EQ(expected_predictions, actual_predictions.size());
+  EXPECT_EQ(driver_id, actual_predictions.driver_id);
+  EXPECT_EQ(form_structure.form_signature(), actual_predictions.form_signature);
+  EXPECT_EQ(std::size(test_fields), actual_predictions.fields.size());
 
-  for (size_t i = 0; i < base::size(test_fields); ++i) {
-    uint32_t unique_renderer_id = form_data.fields[i].unique_renderer_id;
-    const PasswordFieldPrediction* actual_prediction =
-        FindFormPrediction(actual_predictions, unique_renderer_id);
-    if (test_fields[i].expected_type == UNKNOWN_TYPE) {
-      EXPECT_FALSE(actual_prediction);
-    } else {
-      ASSERT_TRUE(actual_prediction);
-      EXPECT_EQ(test_fields[i].expected_type, actual_prediction->type);
-      EXPECT_EQ(test_fields[i].may_use_prefilled_placeholder,
-                actual_prediction->may_use_prefilled_placeholder);
-    }
+  for (size_t i = 0; i < std::size(test_fields); ++i) {
+    const PasswordFieldPrediction& actual_prediction =
+        actual_predictions.fields[i];
+    EXPECT_EQ(test_fields[i].expected_type, actual_prediction.type);
+    EXPECT_EQ(test_fields[i].may_use_prefilled_placeholder,
+              actual_prediction.may_use_prefilled_placeholder);
+    EXPECT_EQ(form_structure.field(i)->GetFieldSignature(),
+              actual_prediction.signature);
   }
 }
 
@@ -143,7 +154,7 @@ TEST(FormPredictionsTest, ConvertToFormPredictions_SynthesiseConfirmation) {
     FormData form_data;
     for (size_t i = 0; i < test_form.size(); ++i) {
       FormFieldData field;
-      field.unique_renderer_id = i + 1000;
+      field.unique_renderer_id = autofill::FieldRendererId(i + 1000);
       field.name = ASCIIToUTF16(test_form[i].name);
       field.form_control_type = test_form[i].form_control_type;
       form_data.fields.push_back(field);
@@ -153,11 +164,13 @@ TEST(FormPredictionsTest, ConvertToFormPredictions_SynthesiseConfirmation) {
     // Set server predictions and create expected votes.
     for (size_t i = 0; i < test_form.size(); ++i) {
       AutofillField* field = form_structure.field(i);
-      field->set_server_type(test_form[i].input_type);
+      FieldPrediction prediction;
+      prediction.set_type(test_form[i].input_type);
+      field->set_server_predictions({prediction});
     }
 
     FormPredictions actual_predictions =
-        ConvertToFormPredictions(form_structure);
+        ConvertToFormPredictions(0 /*driver_id*/, form_structure);
 
     for (size_t i = 0; i < form_data.fields.size(); ++i) {
       SCOPED_TRACE(testing::Message()
@@ -166,10 +179,7 @@ TEST(FormPredictionsTest, ConvertToFormPredictions_SynthesiseConfirmation) {
                    << ", input type=" << test_form[i].input_type
                    << ", expected type=" << test_form[i].expected_type
                    << ", synthesised FormFieldData=" << form_data.fields[i]);
-      const PasswordFieldPrediction* actual_prediction = FindFormPrediction(
-          actual_predictions, form_data.fields[i].unique_renderer_id);
-      ASSERT_TRUE(actual_prediction);
-      EXPECT_EQ(test_form[i].expected_type, actual_prediction->type);
+      EXPECT_EQ(test_form[i].expected_type, actual_predictions.fields[i].type);
     }
   }
 }
@@ -186,6 +196,8 @@ TEST(FormPredictionsTest, DeriveFromServerFieldType) {
       {"Username", USERNAME, CredentialFieldType::kUsername},
       {"Username/Email", USERNAME_AND_EMAIL_ADDRESS,
        CredentialFieldType::kUsername},
+      {"Single Username", SINGLE_USERNAME,
+       CredentialFieldType::kSingleUsername},
       {"Password", PASSWORD, CredentialFieldType::kCurrentPassword},
       {"New password", NEW_PASSWORD, CredentialFieldType::kNewPassword},
       {"Account creation password", ACCOUNT_CREATION_PASSWORD,
@@ -200,7 +212,6 @@ TEST(FormPredictionsTest, DeriveFromServerFieldType) {
               DeriveFromServerFieldType(test_case.server_type));
   }
 }
-
 }  // namespace
 
 }  // namespace password_manager

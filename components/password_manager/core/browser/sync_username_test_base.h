@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,14 @@
 
 #include <string>
 
-#include "base/test/scoped_task_environment.h"
-#include "components/autofill/core/common/password_form.h"
+#include "base/test/task_environment.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
-#include "components/sync/driver/test_sync_service.h"
+#include "components/sync/test/test_sync_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace password_manager {
+
+struct PasswordForm;
 
 class SyncUsernameTestBase : public testing::Test {
  public:
@@ -27,23 +28,28 @@ class SyncUsernameTestBase : public testing::Test {
   void FakeSigninAs(const std::string& email);
 
   // Produce a sample PasswordForm.
-  static autofill::PasswordForm SimpleGaiaForm(const char* username);
-  static autofill::PasswordForm SimpleNonGaiaForm(const char* username);
-  static autofill::PasswordForm SimpleNonGaiaForm(const char* username,
-                                                  const char* origin);
+  static PasswordForm SimpleGaiaForm(const char* username);
+  static PasswordForm SimpleNonGaiaForm(const char* username);
+  static PasswordForm SimpleNonGaiaForm(const char* username,
+                                        const char* origin);
 
   // Instruct the sync service to pretend whether or not it is syncing
   // passwords.
   void SetSyncingPasswords(bool syncing_passwords);
 
   const syncer::SyncService* sync_service() const { return &sync_service_; }
+  syncer::TestSyncService* test_sync_service() { return &sync_service_; }
 
-  const signin::IdentityManager* identity_manager() {
+  signin::IdentityManager* identity_manager() {
     return identity_test_env_.identity_manager();
   }
 
+  void FastForwardBy(base::TimeDelta delta) { task_env_.FastForwardBy(delta); }
+  void RunUntilIdle() { task_env_.RunUntilIdle(); }
+
  private:
-  base::test::ScopedTaskEnvironment scoped_task_env_;
+  base::test::TaskEnvironment task_env_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   signin::IdentityTestEnvironment identity_test_env_;
   syncer::TestSyncService sync_service_;
 };

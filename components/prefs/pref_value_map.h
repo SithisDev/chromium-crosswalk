@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,11 @@
 #define COMPONENTS_PREFS_PREF_VALUE_MAP_H_
 
 #include <map>
-#include <memory>
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/values.h"
 #include "components/prefs/prefs_export.h"
-
-namespace base {
-class DictionaryValue;
-class Value;
-}
 
 // A generic string to value map used by the PrefStore implementations.
 class COMPONENTS_PREFS_EXPORT PrefValueMap {
@@ -26,6 +20,10 @@ class COMPONENTS_PREFS_EXPORT PrefValueMap {
   using const_iterator = Map::const_iterator;
 
   PrefValueMap();
+
+  PrefValueMap(const PrefValueMap&) = delete;
+  PrefValueMap& operator=(const PrefValueMap&) = delete;
+
   virtual ~PrefValueMap();
 
   // Gets the value for |key| and stores it in |value|. Ownership remains with
@@ -43,6 +41,9 @@ class COMPONENTS_PREFS_EXPORT PrefValueMap {
 
   // Clears the map.
   void Clear();
+
+  // Clear the preferences which start with |prefix|.
+  void ClearWithPrefix(const std::string& prefix);
 
   // Swaps the contents of two maps.
   void Swap(PrefValueMap* other);
@@ -83,13 +84,11 @@ class COMPONENTS_PREFS_EXPORT PrefValueMap {
   void GetDifferingKeys(const PrefValueMap* other,
                         std::vector<std::string>* differing_keys) const;
 
-  // Copies the map into a dictionary value.
-  std::unique_ptr<base::DictionaryValue> AsDictionaryValue() const;
+  // Copies the map into a Value::Dict.
+  base::Value::Dict AsDict() const;
 
  private:
   Map prefs_;
-
-  DISALLOW_COPY_AND_ASSIGN(PrefValueMap);
 };
 
 #endif  // COMPONENTS_PREFS_PREF_VALUE_MAP_H_

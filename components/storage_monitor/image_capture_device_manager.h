@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,9 +43,9 @@ class ImageCaptureDeviceManager {
 
   // Eject the given device. The ID passed is not the device ID, but the
   // ImageCapture UUID.
-  void EjectDevice(const std::string& uuid,
-                   base::Callback<void(StorageMonitor::EjectStatus)> callback);
-
+  void EjectDevice(
+      const std::string& uuid,
+      base::OnceCallback<void(StorageMonitor::EjectStatus)> callback);
 
  private:
   base::scoped_nsobject<ImageCaptureDeviceManagerImpl> device_browser_;

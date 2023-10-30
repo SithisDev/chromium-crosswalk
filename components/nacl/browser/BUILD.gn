@@ -1,4 +1,4 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,10 +10,6 @@ static_library("browser") {
   sources = [
     "bad_message.cc",
     "bad_message.h",
-    "nacl_broker_host_win.cc",
-    "nacl_broker_host_win.h",
-    "nacl_broker_service_win.cc",
-    "nacl_broker_service_win.h",
     "nacl_browser.cc",
     "nacl_browser.h",
     "nacl_file_host.cc",
@@ -33,18 +29,17 @@ static_library("browser") {
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
+    "//build:chromeos_buildflags",
     "//components/nacl/common",
     "//components/nacl/common:buildflags",
     "//components/nacl/common:debug_exception_handler",
     "//components/url_formatter",
     "//content/public/browser",
     "//content/public/common",
-    "//native_client/src/trusted/service_runtime:sel_main_chrome",
     "//net",
     "//ppapi/host",
     "//ppapi/proxy:ipc",
     "//ppapi/shared_impl",
-    "//services/service_manager/zygote:zygote_buildflags",
   ]
 
   public_deps = [
@@ -54,21 +49,37 @@ static_library("browser") {
 
   data_deps = []
 
-  if (is_linux) {
+  if (is_win) {
+    sources += [
+      "nacl_broker_host_win.cc",
+      "nacl_broker_host_win.h",
+      "nacl_broker_service_win.cc",
+      "nacl_broker_service_win.h",
+    ]
+
+    deps += [
+      # This is needed for the Windows debug exception handler.
+      "//native_client/src/trusted/service_runtime:sel",
+    ]
+  }
+
+  if (is_linux || is_chromeos) {
     sources += [
       "../zygote/nacl_fork_delegate_linux.cc",
       "../zygote/nacl_fork_delegate_linux.h",
     ]
 
     deps += [
-      "//components/nacl/loader:nacl_helper_integration",
       "//sandbox/linux:sandbox_services",
       "//sandbox/linux:suid_sandbox_client",
-      "//services/service_manager/zygote",
     ]
-
-    if (enable_nacl_nonsfi) {
-      data_deps += [ "//components/nacl/loader:helper_nonsfi" ]
+    # TODO(https://crbug.com/1299021): Implement building the dependencies of
+    # this NaCl target as ARM32 when Chrome is built for ARM64 (for
+    # Linux/Chrome OS).
+    if (target_cpu != "arm64") {
+      deps += [
+        "//components/nacl/loader:nacl_helper_integration",
+      ]
     }
   }
 
@@ -97,7 +108,7 @@ source_set("unit_tests") {
     "//net:test_support",
   ]
 
-  if (is_linux) {
+  if (is_linux || is_chromeos) {
     sources += [ "../zygote/nacl_fork_delegate_linux_unittest.cc" ]
   }
 }

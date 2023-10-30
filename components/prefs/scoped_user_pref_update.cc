@@ -1,10 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/prefs/scoped_user_pref_update.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "components/prefs/pref_notifier.h"
 #include "components/prefs/pref_service.h"
 

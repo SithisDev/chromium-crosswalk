@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
-#include "components/cast_channel/proto/cast_channel.pb.h"
+#include "third_party/openscreen/src/cast/common/channel/proto/cast_channel.pb.h"
 
 namespace cast_certificate {
 enum class CRLPolicy;
@@ -22,8 +22,8 @@ class TrustStore;
 
 namespace cast_channel {
 
-class AuthResponse;
-class CastMessage;
+using ::cast::channel::AuthResponse;
+using ::cast::channel::CastMessage;
 
 struct AuthResult {
  public:
@@ -76,6 +76,8 @@ class AuthContext {
   // Get an auth challenge context.
   // The same context must be used in the challenge and reply.
   static AuthContext Create();
+
+  static AuthContext CreateForTest(const std::string& nonce);
 
   // Verifies the nonce received in the response is equivalent to the one sent.
   // Returns success if |nonce_response| matches nonce_

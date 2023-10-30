@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,6 +64,14 @@ class MockObjectProxy : public ObjectProxy {
                     int timeout_ms,
                     ResponseCallback* callback,
                     ErrorCallback* error_callback));
+
+  // This method is not mockable because it takes a move-only argument. To work
+  // around this, WaitForServiceToBeAvailable() implementation here calls
+  // DoWaitForServiceToBeAvailable() which is mockable.
+  void WaitForServiceToBeAvailable(
+      WaitForServiceToBeAvailableCallback callback) override;
+  MOCK_METHOD1(DoWaitForServiceToBeAvailable,
+               void(WaitForServiceToBeAvailableCallback* callback));
 
   // This method is not mockable because it takes a move-only argument. To work
   // around this, ConnectToSignal() implementation here calls

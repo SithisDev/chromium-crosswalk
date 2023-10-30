@@ -7,8 +7,8 @@ include_rules = [
   "+components/version_info",
   "+courgette",
   "+crypto",
-  "+mojo",
-  "+services/service_manager/public",
+  "+mojo/public",
+  "+third_party/puffin",
   "+third_party/re2",
   "+third_party/zlib",
 ]
@@ -18,6 +18,7 @@ specific_include_rules = {
   "(test_configurator|.*_unittest\.(cc|h))" : [
     "+net",
     "+services/network/public/cpp",
+    "+services/network/public/mojom",
     "+services/network/test",
   ]
 }

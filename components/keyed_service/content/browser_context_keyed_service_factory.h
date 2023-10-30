@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 
 #include <memory>
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "components/keyed_service/core/keyed_service_export.h"
 #include "components/keyed_service/core/keyed_service_factory.h"
 
@@ -35,6 +36,11 @@ class KEYED_SERVICE_EXPORT BrowserContextKeyedServiceFactory
   using TestingFactory = base::RepeatingCallback<std::unique_ptr<KeyedService>(
       content::BrowserContext* context)>;
 
+  BrowserContextKeyedServiceFactory(const BrowserContextKeyedServiceFactory&) =
+      delete;
+  BrowserContextKeyedServiceFactory& operator=(
+      const BrowserContextKeyedServiceFactory&) = delete;
+
   // Associates |testing_factory| with |context| so that |testing_factory| is
   // used to create the KeyedService when requested.  |testing_factory| can be
   // empty to signal that KeyedService should be null. Multiple calls to
@@ -47,6 +53,34 @@ class KEYED_SERVICE_EXPORT BrowserContextKeyedServiceFactory
   // not be empty.
   KeyedService* SetTestingFactoryAndUse(content::BrowserContext* context,
                                         TestingFactory testing_factory);
+
+  // A variant of |TestingFactory| for supplying a subclass of
+  // KeyedService for a given BrowserContext.
+  template <typename Derived>
+  using TestingSubclassFactory =
+      base::RepeatingCallback<std::unique_ptr<Derived>(
+          content::BrowserContext* context)>;
+
+  // Like |SetTestingFactoryAndUse|, but instead takes a factory for a
+  // subclass of KeyedService and returns a pointer to this subclass.
+  // This allows callers to avoid using static_cast in both directions:
+  // casting up to KeyedService in their factory, and casting down to
+  // their subclass on the returned pointer.
+  template <typename Derived>
+  Derived* SetTestingSubclassFactoryAndUse(
+      content::BrowserContext* context,
+      TestingSubclassFactory<Derived> derived_factory) {
+    TestingFactory upcast_factory = base::BindRepeating(
+        [](TestingSubclassFactory<Derived> derived_factory,
+           content::BrowserContext* context) {
+          return std::unique_ptr<KeyedService>(
+              derived_factory.Run(context).release());
+        },
+        std::move(derived_factory));
+
+    return static_cast<Derived*>(
+        SetTestingFactoryAndUse(context, std::move(upcast_factory)));
+  }
 
  protected:
   // BrowserContextKeyedServiceFactories must communicate with a
@@ -110,7 +144,7 @@ class KEYED_SERVICE_EXPORT BrowserContextKeyedServiceFactory
   // and the default implementation removes it from |mapping_| and deletes
   // the pointer.
   virtual void BrowserContextShutdown(content::BrowserContext* context);
-  virtual void BrowserContextDestroyed(content::BrowserContext* context);
+  void BrowserContextDestroyed(content::BrowserContext* context);
 
  private:
   friend class BrowserContextDependencyManagerUnittests;
@@ -132,8 +166,6 @@ class KEYED_SERVICE_EXPORT BrowserContextKeyedServiceFactory
   void ContextDestroyed(void* context) final;
   void RegisterPrefs(user_prefs::PrefRegistrySyncable* registry) final;
   void CreateServiceNow(void* context) final;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserContextKeyedServiceFactory);
 };
 
 #endif  // COMPONENTS_KEYED_SERVICE_CONTENT_BROWSER_CONTEXT_KEYED_SERVICE_FACTORY_H_

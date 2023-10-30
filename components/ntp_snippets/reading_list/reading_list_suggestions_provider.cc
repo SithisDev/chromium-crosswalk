@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,12 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/ntp_snippets/category.h"
 #include "components/reading_list/core/reading_list_entry.h"
-#include "components/reading_list/core/reading_list_model.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -38,13 +38,12 @@ ReadingListSuggestionsProvider::ReadingListSuggestionsProvider(
       category_status_(CategoryStatus::AVAILABLE_LOADING),
       provided_category_(
           Category::FromKnownCategory(KnownCategories::READING_LIST)),
-      reading_list_model_(reading_list_model),
-      scoped_observer_(this) {
+      reading_list_model_(reading_list_model) {
   observer->OnCategoryStatusChanged(this, provided_category_, category_status_);
 
   // If the ReadingListModel is loaded, this will trigger a call to
   // ReadingListModelLoaded. Keep it as last instruction.
-  scoped_observer_.Add(reading_list_model_);
+  scoped_observation_.Observe(reading_list_model_.get());
 }
 
 ReadingListSuggestionsProvider::~ReadingListSuggestionsProvider() {}
@@ -110,7 +109,7 @@ void ReadingListSuggestionsProvider::Fetch(
 void ReadingListSuggestionsProvider::ClearHistory(
     base::Time begin,
     base::Time end,
-    const base::Callback<bool(const GURL& url)>& filter) {
+    const base::RepeatingCallback<bool(const GURL& url)>& filter) {
   // Ignored, Reading List does not depend on history.
 }
 
@@ -161,7 +160,8 @@ void ReadingListSuggestionsProvider::ReadingListModelLoaded(
 void ReadingListSuggestionsProvider::ReadingListModelBeingDeleted(
     const ReadingListModel* model) {
   DCHECK(model == reading_list_model_);
-  scoped_observer_.Remove(reading_list_model_);
+  DCHECK(scoped_observation_.IsObservingSource(reading_list_model_.get()));
+  scoped_observation_.Reset();
   reading_list_model_ = nullptr;
 }
 
@@ -225,7 +225,7 @@ ContentSuggestion ReadingListSuggestionsProvider::ConvertEntry(
     suggestion.set_title(url_formatter::FormatUrl(entry->URL()));
   }
   suggestion.set_publisher_name(
-      url_formatter::FormatUrl(entry->URL().GetOrigin()));
+      url_formatter::FormatUrl(entry->URL().DeprecatedGetOriginAsURL()));
   int64_t entry_time = entry->DistillationTime();
   if (entry_time == 0) {
     entry_time = entry->CreationTime();

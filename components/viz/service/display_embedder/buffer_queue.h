@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,52 +11,54 @@
 #include <vector>
 
 #include "base/containers/circular_deque.h"
-#include "base/macros.h"
-#include "base/memory/ref_counted.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "components/viz/service/viz_service_export.h"
-#include "gpu/command_buffer/common/capabilities.h"
+#include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/ipc/common/surface_handle.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
-namespace gfx {
-class GpuMemoryBuffer;
-}
-
-namespace gpu {
-class GpuMemoryBufferManager;
-
-namespace gles2 {
-class GLES2Interface;
-}
-}  // namespace gpu
-
 namespace viz {
 
-// Provides a surface that manages its own buffers, backed by GpuMemoryBuffers
-// created using CHROMIUM_image. Double/triple buffering is implemented
-// internally. Doublebuffering occurs if PageFlipComplete is called before the
-// next BindFramebuffer call, otherwise it creates extra buffers.
+class SkiaOutputSurface;
+
+// Encapsulates a queue of buffers for compositing backed by SharedImages.
+// Double/triple/N-buffering is configured by specifying |number_of_buffers| at
+// construction, or by calling EnsureMinNumberOfBuffers().
 class VIZ_SERVICE_EXPORT BufferQueue {
  public:
-  BufferQueue(gpu::gles2::GLES2Interface* gl,
-              gfx::BufferFormat format,
-              gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+  // Creates a BufferQueue that allocates SharedImage buffers using |sii|.
+  // Buffers are not allocated until Reshape() is called. |number_of_buffers|
+  // specifies the number of buffers that will be allocated, and can be
+  // increased by calling EnsureMinNumberOfBuffers() when
+  // |supports_dynamic_frame_buffer_allocation| capability is true.
+  BufferQueue(SkiaOutputSurface* skia_output_surface,
               gpu::SurfaceHandle surface_handle,
-              const gpu::Capabilities& capabilities);
-  virtual ~BufferQueue();
+              size_t number_of_buffers);
 
-  // Returns the texture name of the current buffer and the name of the
-  // corresponding stencil buffer. The returned values are 0u if there is no
-  // current buffer and one could not be created.
-  unsigned GetCurrentBuffer(unsigned* stencil);
+  BufferQueue(const BufferQueue&) = delete;
+  BufferQueue& operator=(const BufferQueue&) = delete;
+
+  ~BufferQueue();
+
+  // Returns the SharedImage backed by the current buffer (i.e., the render
+  // target for compositing).
+  gpu::Mailbox GetCurrentBuffer();
+
+  // Returns a rectangle whose contents may have changed since the current
+  // buffer was last submitted and needs to be redrawn. For partial swap,
+  // only the contents outside this rectangle can be considered valid and do not
+  // need to be redrawn.
+  gfx::Rect CurrentBufferDamage() const;
 
   // Called by the user of this object to indicate that the buffer currently
-  // marked for drawing should be moved to the list of in-flight buffers. If
-  // |damage| is not empty, the damage rectangle for all buffers except the
-  // one currently marked for drawing is unioned with |damage|.
+  // marked for drawing should be moved to the list of in-flight buffers.
+  // |damage| represents the rectangle containing the damaged area since the
+  // last SwapBuffers.
   void SwapBuffers(const gfx::Rect& damage);
 
   // Called by the user of this object to indicate that a previous request to
@@ -64,84 +66,85 @@ class VIZ_SERVICE_EXPORT BufferQueue {
   // state of the buffers: the buffer currently marked as being displayed will
   // now marked as available, and the next buffer marked as in-flight will now
   // be marked as displayed.
-  void PageFlipComplete();
+  void SwapBuffersComplete();
 
-  // Destroys all the buffers (useful if for some reason, the buffers are no
-  // longer presentable).
-  void FreeAllSurfaces();
+  // Called when SwapBuffers is skipped this frame. Damages allocated buffers,
+  // but does not advance |in_flight_buffers_| or |current_buffer_|. We don't
+  // clear the damage on |current_buffer_| because it hasn't been displayed yet.
+  void SwapBuffersSkipped(const gfx::Rect& damage);
 
-  // Frees all buffers if |size|, |color_space|, or |use_stencil| correspond to
-  // a change of state. Otherwise, it's a no-op. Returns true if there was a
-  // change of state, false otherwise.
+  // If |size| or |color_space| correspond to a change of state, frees all
+  // the buffers and reallocatess |number_of_buffers_| buffers. Otherwise, it's
+  // a no-op. Returns true if there was a change of state, false otherwise.
   bool Reshape(const gfx::Size& size,
-               float scale_factor,
                const gfx::ColorSpace& color_space,
-               bool use_stencil);
+               gfx::BufferFormat format);
 
-  // Copies the damage from the most recently swapped available buffer into the
-  // current buffer.
-  void CopyDamageForCurrentSurface(const gfx::Rect& damage);
+  gfx::BufferFormat buffer_format() const { return *format_; }
 
-  uint32_t internal_format() const { return internal_format_; }
-  gfx::BufferFormat buffer_format() const { return format_; }
-  uint32_t texture_target() const { return texture_target_; }
+  // Sets the number of frame buffers to use when
+  // |supports_dynamic_frame_buffer_allocation| is true, and allocates those
+  // buffers if necessary. If |n| <= |number_of_buffers_| this is a no-op.
+  void EnsureMinNumberOfBuffers(size_t n);
 
  private:
   friend class BufferQueueTest;
-  friend class AllocatedSurface;
+  friend class BufferQueueMockedSharedImageInterfaceTest;
+  FRIEND_TEST_ALL_PREFIXES(BufferQueueTest, AllocateFails);
+  FRIEND_TEST_ALL_PREFIXES(BufferQueueMockedSharedImageInterfaceTest,
+                           AllocateFails);
 
-  struct VIZ_SERVICE_EXPORT AllocatedSurface {
-    AllocatedSurface(BufferQueue* buffer_queue,
-                     std::unique_ptr<gfx::GpuMemoryBuffer> buffer,
-                     unsigned texture,
-                     unsigned image,
-                     unsigned stencil,
-                     const gfx::Rect& rect);
-    ~AllocatedSurface();
-    BufferQueue* const buffer_queue;
-    std::unique_ptr<gfx::GpuMemoryBuffer> buffer;
-    const unsigned texture;
-    const unsigned image;
-    const unsigned stencil;
+  struct VIZ_SERVICE_EXPORT AllocatedBuffer {
+    AllocatedBuffer(const gpu::Mailbox& mailbox, const gfx::Rect& rect);
+    ~AllocatedBuffer();
+
+    gpu::Mailbox mailbox;
     gfx::Rect damage;  // This is the damage for this frame from the previous.
   };
 
-  void FreeSurfaceResources(AllocatedSurface* surface);
+  // Frees all buffers that have been allocated, and destroys their shared
+  // images.
+  void FreeAllBuffers();
 
-  // Copy everything that is in |copy_rect|, except for what is in
-  // |exclude_rect| from |source_texture| to |texture|.
-  virtual void CopyBufferDamage(unsigned texture,
-                                unsigned source_texture,
-                                const gfx::Rect& new_damage,
-                                const gfx::Rect& old_damage);
+  // Free |buffer| and destroy its shared image.
+  void FreeBuffer(std::unique_ptr<AllocatedBuffer> buffer);
 
+  // Unions |damage| to all allocated buffers except |current_buffer_| which
+  // hasn't been displayed yet.
   void UpdateBufferDamage(const gfx::Rect& damage);
 
-  // Return a surface, available to be drawn into.
-  std::unique_ptr<AllocatedSurface> GetNextSurface();
+  // Allocates |n| buffers and pushes them into |available_buffers_|.
+  void AllocateBuffers(size_t n);
 
-  gpu::gles2::GLES2Interface* const gl_;
-  gfx::Size size_;
-  gfx::ColorSpace color_space_;
-  bool use_stencil_ = false;
-  size_t allocated_count_;
-  uint32_t texture_target_;
-  uint32_t internal_format_;
-  gfx::BufferFormat format_;
-  // This surface is currently bound. This may be nullptr if no surface has
-  // been bound, or if allocation failed at bind.
-  std::unique_ptr<AllocatedSurface> current_surface_;
-  // The surface currently on the screen, if any.
-  std::unique_ptr<AllocatedSurface> displayed_surface_;
-  // These are free for use, and are not nullptr.
-  std::vector<std::unique_ptr<AllocatedSurface>> available_surfaces_;
-  // These have been swapped but are not displayed yet. Entries of this deque
-  // may be nullptr, if they represent frames that have been destroyed.
-  base::circular_deque<std::unique_ptr<AllocatedSurface>> in_flight_surfaces_;
-  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
+  // Return a buffer that is available to be drawn into.
+  std::unique_ptr<AllocatedBuffer> GetNextBuffer();
+
+  // Used to create and destroy shared images.
+  const raw_ptr<SkiaOutputSurface> skia_output_surface_;
+  // Used when creating shared images.
   gpu::SurfaceHandle surface_handle_;
+  // The number of buffers that should be allocated when Reshape() is called.
+  size_t number_of_buffers_ = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(BufferQueue);
+  // The size of all allocated buffers.
+  gfx::Size size_;
+  // The color space of all allocated buffers.
+  gfx::ColorSpace color_space_;
+  // The format of all allocated buffers. The |format_| is optional to prevent
+  // use of uninitialized values.
+  absl::optional<gfx::BufferFormat> format_;
+
+  // This buffer is currently bound. This may be nullptr if no buffer has
+  // been bound.
+  std::unique_ptr<AllocatedBuffer> current_buffer_;
+  // The buffer currently on the screen, if any.
+  std::unique_ptr<AllocatedBuffer> displayed_buffer_;
+  // These are free for use, and are not nullptr.
+  base::circular_deque<std::unique_ptr<AllocatedBuffer>> available_buffers_;
+  // These have been swapped but are not displayed yet. Entries of this deque
+  // may be nullptr, if they represent frames that have been destroyed, or
+  // frames where SwapBuffers() was called without calling GetCurrentBuffer().
+  base::circular_deque<std::unique_ptr<AllocatedBuffer>> in_flight_buffers_;
 };
 
 }  // namespace viz

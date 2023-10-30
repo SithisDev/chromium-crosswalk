@@ -1,9 +1,8 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/nacl/loader/nacl_listener.h"
-#include "base/bind.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -13,19 +12,23 @@
 #include <memory>
 #include <utility>
 
-#if defined(OS_POSIX)
+#include "base/bind.h"
+#include "base/memory/raw_ptr.h"
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_POSIX)
 #include <unistd.h>
 #endif
 
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/read_only_shared_memory_region.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "build/build_config.h"
 #include "components/nacl/common/nacl.mojom.h"
 #include "components/nacl/common/nacl_messages.h"
 #include "components/nacl/common/nacl_service.h"
@@ -36,22 +39,21 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "native_client/src/public/chrome_main.h"
 #include "native_client/src/public/nacl_app.h"
 #include "native_client/src/public/nacl_desc.h"
 
-#if defined(OS_LINUX)
-#include "services/service_manager/zygote/common/common_sandbox_support_linux.h"
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#include "content/public/common/zygote/sandbox_support_linux.h"
 #endif
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
 #include "base/posix/eintr_wrapper.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <io.h>
-
-#include "content/public/common/sandbox_init.h"
 #endif
 
 namespace {
@@ -78,7 +80,7 @@ void LoadStatusCallback(int load_status) {
       static_cast<NaClErrorCode>(load_status));
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 int AttachDebugExceptionHandler(const void* info, size_t info_size) {
   std::string info_string(reinterpret_cast<const char*>(info), info_size);
   bool result = false;
@@ -107,9 +109,9 @@ void SetUpIPCAdapter(
     NaClIPCAdapter::ResolveFileTokenCallback resolve_file_token_cb,
     NaClIPCAdapter::OpenResourceCallback open_resource_cb) {
   mojo::MessagePipe pipe;
-  scoped_refptr<NaClIPCAdapter> ipc_adapter(
-      new NaClIPCAdapter(pipe.handle0.release(), task_runner,
-                         resolve_file_token_cb, open_resource_cb));
+  scoped_refptr<NaClIPCAdapter> ipc_adapter(new NaClIPCAdapter(
+      pipe.handle0.release(), task_runner, std::move(resolve_file_token_cb),
+      std::move(open_resource_cb)));
   ipc_adapter->ConnectChannel();
   *handle = pipe.handle1.release();
 
@@ -148,22 +150,22 @@ class BrowserValidationDBProxy : public NaClValidationDB {
 
  private:
   // The listener never dies, otherwise this might be a dangling reference.
-  NaClListener* listener_;
+  raw_ptr<NaClListener> listener_;
 };
 
 NaClListener::NaClListener()
     : shutdown_event_(base::WaitableEvent::ResetPolicy::MANUAL,
                       base::WaitableEvent::InitialState::NOT_SIGNALED),
       io_thread_("NaCl_IOThread"),
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
       prereserved_sandbox_size_(0),
 #endif
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
       number_of_cores_(-1),  // unknown/error
 #endif
       is_started_(false) {
   io_thread_.StartWithOptions(
-      base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
+      base::Thread::Options(base::MessagePumpType::IO, 0));
   DCHECK(g_listener == NULL);
   g_listener = this;
 }
@@ -213,23 +215,23 @@ class FileTokenMessageFilter : public IPC::MessageFilter {
 };
 
 void NaClListener::Listen() {
+  NaClService service(io_thread_.task_runner());
   channel_ = IPC::SyncChannel::Create(this, io_thread_.task_runner().get(),
                                       base::ThreadTaskRunnerHandle::Get(),
                                       &shutdown_event_);
   filter_ = channel_->CreateSyncMessageFilter();
   channel_->AddFilter(new FileTokenMessageFilter());
-  mojo::ScopedMessagePipeHandle channel_handle;
-  auto service = CreateNaClService(io_thread_.task_runner(), &channel_handle);
-  channel_->Init(channel_handle.release(), IPC::Channel::MODE_CLIENT, true);
+  channel_->Init(service.TakeChannelPipe().release(), IPC::Channel::MODE_CLIENT,
+                 true);
   main_task_runner_ = base::ThreadTaskRunnerHandle::Get();
   base::RunLoop().Run();
 }
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 // static
 int NaClListener::MakeSharedMemorySegment(size_t length, int executable) {
-  return service_manager::SharedMemoryIPCSupport::MakeSharedMemorySegment(
-      length, executable);
+  return content::SharedMemoryIPCSupport::MakeSharedMemorySegment(length,
+                                                                  executable);
 }
 #endif
 
@@ -260,7 +262,7 @@ bool NaClListener::OnOpenResource(
     prefetched_resource_files_.erase(it);
     // A pre-opened resource descriptor is available. Run the reply callback
     // and return true.
-    cb.Run(msg, file, path);
+    std::move(cb).Run(msg, file, path);
     return true;
   }
 
@@ -287,7 +289,7 @@ void NaClListener::OnAddPrefetchedResource(
 
 void NaClListener::OnStart(nacl::NaClStartParams params) {
   is_started_ = true;
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_APPLE)
   int urandom_fd = HANDLE_EINTR(dup(base::GetUrandomFD()));
   if (urandom_fd < 0) {
     LOG(FATAL) << "Failed to dup() the urandom FD";
@@ -326,16 +328,17 @@ void NaClListener::OnStart(nacl::NaClStartParams params) {
                   NACL_CHROME_DESC_BASE + 1,
                   NaClIPCAdapter::ResolveFileTokenCallback(),
                   NaClIPCAdapter::OpenResourceCallback());
-  SetUpIPCAdapter(
-      &manifest_service_handle, io_thread_.task_runner(), nap,
-      NACL_CHROME_DESC_BASE + 2,
-      base::Bind(&NaClListener::ResolveFileToken, base::Unretained(this)),
-      base::Bind(&NaClListener::OnOpenResource, base::Unretained(this)));
+  SetUpIPCAdapter(&manifest_service_handle, io_thread_.task_runner(), nap,
+                  NACL_CHROME_DESC_BASE + 2,
+                  base::BindRepeating(&NaClListener::ResolveFileToken,
+                                      base::Unretained(this)),
+                  base::BindRepeating(&NaClListener::OnOpenResource,
+                                      base::Unretained(this)));
 
-  nacl::mojom::NaClRendererHostPtr renderer_host;
+  mojo::PendingRemote<nacl::mojom::NaClRendererHost> renderer_host;
   if (!Send(new NaClProcessHostMsg_PpapiChannelsCreated(
           browser_handle, ppapi_renderer_handle,
-          MakeRequest(&renderer_host).PassMessagePipe().release(),
+          renderer_host.InitWithNewPipeAndPassReceiver().PassPipe().release(),
           manifest_service_handle, ro_shmem_region)))
     LOG(FATAL) << "Failed to send IPC channel handle to NaClProcessHost.";
 
@@ -346,11 +349,11 @@ void NaClListener::OnStart(nacl::NaClStartParams params) {
     LOG(FATAL) << "NaClChromeMainArgsCreate() failed";
   }
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   args->number_of_cores = number_of_cores_;
 #endif
 
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   args->create_memory_object_func = &MakeSharedMemorySegment;
 #endif
 
@@ -359,7 +362,7 @@ void NaClListener::OnStart(nacl::NaClStartParams params) {
   base::PlatformFile irt_handle =
       IPC::PlatformFileForTransitToPlatformFile(params.irt_handle);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   args->irt_fd = _open_osfhandle(reinterpret_cast<intptr_t>(irt_handle),
                                  _O_RDONLY | _O_BINARY);
   if (args->irt_fd < 0) {
@@ -403,18 +406,18 @@ void NaClListener::OnStart(nacl::NaClStartParams params) {
     args->pnacl_mode = 0;
   }
 
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   args->debug_stub_server_bound_socket_fd =
       IPC::PlatformFileForTransitToPlatformFile(
           params.debug_stub_server_bound_socket);
 #endif
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   args->attach_debug_exception_handler_func = AttachDebugExceptionHandler;
   args->debug_stub_server_port_selected_handler_func =
       DebugStubPortSelectedHandler;
 #endif
   args->load_status_handler_func = LoadStatusCallback;
-#if defined(OS_LINUX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   args->prereserved_sandbox_size = prereserved_sandbox_size_;
 #endif
 
@@ -436,12 +439,12 @@ void NaClListener::OnStart(nacl::NaClStartParams params) {
 void NaClListener::ResolveFileToken(
     uint64_t token_lo,
     uint64_t token_hi,
-    base::Callback<void(IPC::PlatformFileForTransit, base::FilePath)> cb) {
+    NaClIPCAdapter::ResolveFileTokenReplyCallback cb) {
   if (!Send(new NaClProcessMsg_ResolveFileToken(token_lo, token_hi))) {
-    cb.Run(IPC::PlatformFileForTransit(), base::FilePath());
+    std::move(cb).Run(IPC::PlatformFileForTransit(), base::FilePath());
     return;
   }
-  resolved_cb_ = cb;
+  resolved_cb_ = std::move(cb);
 }
 
 void NaClListener::OnFileTokenResolved(
@@ -449,6 +452,6 @@ void NaClListener::OnFileTokenResolved(
     uint64_t token_hi,
     IPC::PlatformFileForTransit ipc_fd,
     base::FilePath file_path) {
-  resolved_cb_.Run(ipc_fd, file_path);
-  resolved_cb_.Reset();
+  if (resolved_cb_)
+    std::move(resolved_cb_).Run(ipc_fd, file_path);
 }

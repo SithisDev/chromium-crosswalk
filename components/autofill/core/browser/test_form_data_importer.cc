@@ -1,8 +1,9 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/core/browser/test_form_data_importer.h"
+#include "build/build_config.h"
 
 namespace autofill {
 
@@ -18,7 +19,9 @@ TestFormDataImporter::TestFormDataImporter(
                        personal_data_manager,
                        app_locale) {
   set_credit_card_save_manager(std::move(credit_card_save_manager));
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   set_local_card_migration_manager(std::move(local_card_migration_manager));
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 }
 
 }  // namespace autofill

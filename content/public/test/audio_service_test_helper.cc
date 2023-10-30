@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,23 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/process/process.h"
 #include "content/public/common/content_features.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
+#include "services/audio/service.h"
 
 namespace content {
 
 class AudioServiceTestHelper::TestingApi : public audio::mojom::TestingApi {
  public:
   TestingApi() = default;
+
+  TestingApi(const TestingApi&) = delete;
+  TestingApi& operator=(const TestingApi&) = delete;
+
   ~TestingApi() override = default;
 
   // audio::mojom::TestingApi implementation
@@ -34,22 +40,20 @@ class AudioServiceTestHelper::TestingApi : public audio::mojom::TestingApi {
 
  private:
   mojo::ReceiverSet<audio::mojom::TestingApi> receivers_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestingApi);
 };
 
 AudioServiceTestHelper::AudioServiceTestHelper()
-    : testing_api_(new TestingApi) {}
+    : testing_api_(new TestingApi) {
+  if (base::FeatureList::IsEnabled(features::kAudioServiceOutOfProcess)) {
+    audio::Service::SetTestingApiBinderForTesting(
+        base::BindRepeating(&AudioServiceTestHelper::BindTestingApiReceiver,
+                            base::Unretained(this)));
+  }
+}
 
-AudioServiceTestHelper::~AudioServiceTestHelper() = default;
-
-void AudioServiceTestHelper::RegisterAudioBinders(
-    service_manager::BinderMap* binders) {
-  if (!base::FeatureList::IsEnabled(features::kAudioServiceOutOfProcess))
-    return;
-
-  binders->Add(base::BindRepeating(
-      &AudioServiceTestHelper::BindTestingApiReceiver, base::Unretained(this)));
+AudioServiceTestHelper::~AudioServiceTestHelper() {
+  if (base::FeatureList::IsEnabled(features::kAudioServiceOutOfProcess))
+    audio::Service::SetTestingApiBinderForTesting(base::NullCallback());
 }
 
 void AudioServiceTestHelper::BindTestingApiReceiver(

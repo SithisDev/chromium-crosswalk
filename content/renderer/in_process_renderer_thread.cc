@@ -1,52 +1,54 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/renderer/in_process_renderer_thread.h"
 
 #include "build/build_config.h"
+#include "content/public/common/content_client.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_thread_impl.h"
+#include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_android.h"
 #endif
 
 namespace content {
 
-#if defined(OS_ANDROID)
-extern bool g_browser_main_loop_shutting_down;
-#endif
-
 InProcessRendererThread::InProcessRendererThread(
-    const InProcessChildThreadParams& params)
-    : Thread("Chrome_InProcRendererThread"), params_(params) {
-}
+    const InProcessChildThreadParams& params,
+    int32_t renderer_client_id)
+    : Thread("Chrome_InProcRendererThread"),
+      params_(params),
+      renderer_client_id_(renderer_client_id) {}
 
 InProcessRendererThread::~InProcessRendererThread() {
-#if defined(OS_ANDROID)
-  // Don't allow the render thread to be shut down in single process mode on
-  // Android unless the browser is shutting down.
-  // Temporary CHECK() to debug http://crbug.com/514141
-  CHECK(g_browser_main_loop_shutting_down);
-#endif
-
   Stop();
 }
 
 void InProcessRendererThread::Init() {
+  // In single-process mode, we never enter the sandbox, so run the post-sandbox
+  // code now.
+  content::ContentRendererClient* client = GetContentClient()->renderer();
+  if (client) {
+    client->PostSandboxInitialized();
+  }
+
   // Call AttachCurrentThreadWithName, before any other AttachCurrentThread()
   // calls. The latter causes Java VM to assign Thread-??? to the thread name.
   // Please note calls to AttachCurrentThreadWithName after AttachCurrentThread
   // will not change the thread name kept in Java VM.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   base::android::AttachCurrentThreadWithName(thread_name());
   // Make sure we aren't somehow reinitialising the inprocess renderer thread on
   // Android. Temporary CHECK() to debug http://crbug.com/514141
   CHECK(!render_process_);
 #endif
+  blink::Platform::InitializeBlink();
   std::unique_ptr<blink::scheduler::WebThreadScheduler> main_thread_scheduler =
       blink::scheduler::WebThreadScheduler::CreateMainThreadScheduler();
 
@@ -54,17 +56,11 @@ void InProcessRendererThread::Init() {
   // RenderThreadImpl doesn't currently support a proper shutdown sequence
   // and it's okay when we're running in multi-process mode because renderers
   // get killed by the OS. In-process mode is used for test and debug only.
-  new RenderThreadImpl(params_, std::move(main_thread_scheduler));
+  new RenderThreadImpl(params_, renderer_client_id_,
+                       std::move(main_thread_scheduler));
 }
 
 void InProcessRendererThread::CleanUp() {
-#if defined(OS_ANDROID)
-  // Don't allow the render thread to be shut down in single process mode on
-  // Android unless the browser is shutting down.
-  // Temporary CHECK() to debug http://crbug.com/514141
-  CHECK(g_browser_main_loop_shutting_down);
-#endif
-
   render_process_.reset();
 
   // It's a little lame to manually set this flag.  But the single process
@@ -80,8 +76,9 @@ void InProcessRendererThread::CleanUp() {
 }
 
 base::Thread* CreateInProcessRendererThread(
-    const InProcessChildThreadParams& params) {
-  return new InProcessRendererThread(params);
+    const InProcessChildThreadParams& params,
+    int32_t renderer_client_id) {
+  return new InProcessRendererThread(params, renderer_client_id);
 }
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include <memory>
 #include <string>
 
+#include "base/unguessable_token.h"
+#include "chromecast/external_mojo/external_service_support/external_connector.h"
 #include "media/mojo/buildflags.h"
 #include "media/mojo/services/mojo_media_client.h"
 
@@ -15,7 +17,7 @@ namespace chromecast {
 namespace media {
 
 class CmaBackendFactory;
-class MediaResourceTracker;
+class VideoGeometrySetterService;
 class VideoModeSwitcher;
 class VideoResolutionPolicy;
 
@@ -23,41 +25,53 @@ class CastMojoMediaClient : public ::media::MojoMediaClient {
  public:
   using CreateCdmFactoryCB =
       base::RepeatingCallback<std::unique_ptr<::media::CdmFactory>(
-          service_manager::mojom::InterfaceProvider*)>;
+          ::media::mojom::FrameInterfaceFactory*)>;
+  using EnableBufferingCB = base::RepeatingCallback<bool()>;
 
   CastMojoMediaClient(CmaBackendFactory* backend_factory,
                       const CreateCdmFactoryCB& create_cdm_factory_cb,
                       VideoModeSwitcher* video_mode_switcher,
                       VideoResolutionPolicy* video_resolution_policy,
-                      MediaResourceTracker* media_resource_tracker);
+                      external_service_support::ExternalConnector* connector,
+                      EnableBufferingCB enable_buffering_cb);
+
+  CastMojoMediaClient(const CastMojoMediaClient&) = delete;
+  CastMojoMediaClient& operator=(const CastMojoMediaClient&) = delete;
+
   ~CastMojoMediaClient() override;
 
+#if BUILDFLAG(ENABLE_CAST_RENDERER)
+  void SetVideoGeometrySetterService(
+      VideoGeometrySetterService* video_geometry_setter);
+#endif
+
   // MojoMediaClient implementation:
-  void Initialize(service_manager::Connector* connector) override;
 #if BUILDFLAG(ENABLE_CAST_RENDERER)
   std::unique_ptr<::media::Renderer> CreateCastRenderer(
-      service_manager::mojom::InterfaceProvider* host_interfaces,
+      ::media::mojom::FrameInterfaceFactory* frame_interfaces,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       ::media::MediaLog* media_log,
       const base::UnguessableToken& overlay_plane_id) override;
 #endif
   std::unique_ptr<::media::Renderer> CreateRenderer(
-      service_manager::mojom::InterfaceProvider* host_interfaces,
+      ::media::mojom::FrameInterfaceFactory* frame_interfaces,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       ::media::MediaLog* media_log,
       const std::string& audio_device_id) override;
   std::unique_ptr<::media::CdmFactory> CreateCdmFactory(
-      service_manager::mojom::InterfaceProvider* host_interfaces) override;
+      ::media::mojom::FrameInterfaceFactory* frame_interfaces) override;
 
  private:
-  service_manager::Connector* connector_;
   CmaBackendFactory* const backend_factory_;
   const CreateCdmFactoryCB create_cdm_factory_cb_;
-  VideoModeSwitcher* video_mode_switcher_;
-  VideoResolutionPolicy* video_resolution_policy_;
-  MediaResourceTracker* media_resource_tracker_;
+  [[maybe_unused]] VideoModeSwitcher* video_mode_switcher_;
+  [[maybe_unused]] VideoResolutionPolicy* video_resolution_policy_;
+  external_service_support::ExternalConnector* const connector_;
+  const EnableBufferingCB enable_buffering_cb_;
 
-  DISALLOW_COPY_AND_ASSIGN(CastMojoMediaClient);
+#if BUILDFLAG(ENABLE_CAST_RENDERER)
+  VideoGeometrySetterService* video_geometry_setter_;
+#endif
 };
 
 }  // namespace media

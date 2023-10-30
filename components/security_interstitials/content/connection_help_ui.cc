@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,8 @@ ConnectionHelpUI::ConnectionHelpUI(content::WebUI* web_ui)
                           net::ERR_CERT_AUTHORITY_INVALID);
   html_source->AddInteger("certWeakSignatureAlgorithm",
                           net::ERR_CERT_WEAK_SIGNATURE_ALGORITHM);
+  html_source->AddInteger("certKnownInterceptionBlocked",
+                          net::ERR_CERT_KNOWN_INTERCEPTION_BLOCKED);
 
   html_source->AddLocalizedString("connectionHelpTitle",
                                   IDS_CONNECTION_HELP_TITLE);
@@ -56,7 +58,7 @@ ConnectionHelpUI::ConnectionHelpUI(content::WebUI* web_ui)
                                   IDS_CONNECTION_HELP_INCORRECT_CLOCK_DETAILS);
 
 // The superfish section should only be added on Windows.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   html_source->AddBoolean("isWindows", true);
   html_source->AddLocalizedString("connectionHelpMitmSoftwareTitle",
                                   IDS_CONNECTION_HELP_MITM_SOFTWARE_TITLE);
@@ -73,7 +75,7 @@ ConnectionHelpUI::ConnectionHelpUI(content::WebUI* web_ui)
   html_source->AddLocalizedString("connectionHelpShowLess",
                                   IDS_CONNECTION_HELP_SHOW_LESS);
 
-  html_source->SetJsonPath("strings.js");
+  html_source->UseStringsJs();
 
   html_source->AddResourcePath("interstitial_core.css",
                                IDR_SECURITY_INTERSTITIAL_CORE_CSS);

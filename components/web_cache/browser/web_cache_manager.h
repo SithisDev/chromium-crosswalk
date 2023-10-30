@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,23 +16,22 @@
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/no_destructor.h"
+#include "base/scoped_multi_source_observation.h"
 #include "base/time/time.h"
 #include "components/web_cache/public/mojom/web_cache.mojom.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-
-namespace base {
-template<typename Type>
-struct DefaultSingletonTraits;
-}  // namespace base
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_process_host_creation_observer.h"
+#include "content/public/browser/render_process_host_observer.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace web_cache {
 
 // Note: memory usage uses uint64_t because potentially the browser could be
 // 32 bit and the renderers 64 bits.
-class WebCacheManager : public content::NotificationObserver {
+class WebCacheManager : public content::RenderProcessHostCreationObserver,
+                        public content::RenderProcessHostObserver {
   friend class WebCacheManagerTest;
   FRIEND_TEST_ALL_PREFIXES(
       WebCacheManagerTest,
@@ -61,6 +60,9 @@ class WebCacheManager : public content::NotificationObserver {
   // is called, a WebCacheManager object is constructed and returned.
   // Subsequent calls will return the same object.
   static WebCacheManager* GetInstance();
+
+  WebCacheManager(const WebCacheManager&) = delete;
+  WebCacheManager& operator=(const WebCacheManager&) = delete;
 
   // When a render process is created, it registers itself with the cache
   // manager host, causing the renderer to be allocated cache resources.
@@ -101,10 +103,15 @@ class WebCacheManager : public content::NotificationObserver {
   // to a different website.
   void ClearCacheOnNavigation();
 
-  // content::NotificationObserver implementation:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // content::RenderProcessHostCreationObserver:
+  void OnRenderProcessHostCreated(
+      content::RenderProcessHost* process_host) override;
+
+  // content::RenderProcessHostObserver:
+  void RenderProcessExited(
+      content::RenderProcessHost* host,
+      const content::ChildProcessTerminationInfo& info) override;
+  void RenderProcessHostDestroyed(content::RenderProcessHost* host) override;
 
   // Gets the default global size limit.  This interrogates system metrics to
   // tune the default size to the current system.
@@ -132,12 +139,19 @@ class WebCacheManager : public content::NotificationObserver {
   // each renderer is permitted to consume for its cache.
   typedef std::list<Allocation> AllocationStrategy;
 
+  struct WebCacheInfo {
+    WebCacheInfo();
+    ~WebCacheInfo();
+    mojo::Remote<mojom::WebCache> service;
+    uint64_t last_capacity;
+  };
   // The key is the unique id of every render process host.
-  typedef std::map<int, mojom::WebCachePtr> WebCacheServicesMap;
+  typedef std::map<int, WebCacheInfo> WebCacheServicesMap;
 
-  // This class is a singleton.  Do not instantiate directly.
+  // This class is a singleton.  Do not instantiate directly. Call GetInstance()
+  // instead.
   WebCacheManager();
-  friend struct base::DefaultSingletonTraits<WebCacheManager>;
+  friend class base::NoDestructor<WebCacheManager>;
 
   ~WebCacheManager() override;
 
@@ -237,14 +251,18 @@ class WebCacheManager : public content::NotificationObserver {
   // recently than they have been active.
   std::set<int> inactive_renderers_;
 
-  content::NotificationRegistrar registrar_;
+  // True if a delayed call to ReviseAllocationStrategy() is pending.
+  bool callback_pending_ = false;
 
-  // Maps every renderer_id with its corresponding mojom::WebCachePtr.
+  // Maps every renderer_id with its corresponding
+  // mojo::Remote<mojom::WebCache>.
   WebCacheServicesMap web_cache_services_;
 
-  base::WeakPtrFactory<WebCacheManager> weak_factory_{this};
+  base::ScopedMultiSourceObservation<content::RenderProcessHost,
+                                     content::RenderProcessHostObserver>
+      rph_observations_{this};
 
-  DISALLOW_COPY_AND_ASSIGN(WebCacheManager);
+  base::WeakPtrFactory<WebCacheManager> weak_factory_{this};
 };
 
 }  // namespace web_cache

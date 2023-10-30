@@ -1,7 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/posix/global_descriptors.h"
 #include "build/build_config.h"
@@ -9,25 +10,26 @@
 #include "content/browser/child_process_launcher_helper.h"
 #include "content/browser/child_process_launcher_helper_posix.h"
 #include "content/browser/sandbox_host_linux.h"
+#include "content/browser/zygote_host/zygote_host_impl_linux.h"
+#include "content/common/zygote/zygote_communication_linux.h"
 #include "content/public/browser/child_process_launcher_utils.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
-#include "services/service_manager/sandbox/linux/sandbox_linux.h"
-#include "services/service_manager/zygote/common/common_sandbox_support_linux.h"
-#include "services/service_manager/zygote/common/zygote_handle.h"
-#include "services/service_manager/zygote/host/zygote_communication_linux.h"
-#include "services/service_manager/zygote/host/zygote_host_impl_linux.h"
+#include "content/public/common/zygote/sandbox_support_linux.h"
+#include "content/public/common/zygote/zygote_handle.h"
+#include "sandbox/policy/linux/sandbox_linux.h"
 
 namespace content {
 namespace internal {
 
-base::Optional<mojo::NamedPlatformChannel>
+absl::optional<mojo::NamedPlatformChannel>
 ChildProcessLauncherHelper::CreateNamedPlatformChannelOnClientThread() {
   DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 void ChildProcessLauncherHelper::BeforeLaunchOnClientThread() {
@@ -37,10 +39,9 @@ void ChildProcessLauncherHelper::BeforeLaunchOnClientThread() {
 std::unique_ptr<FileMappedForLaunch>
 ChildProcessLauncherHelper::GetFilesToMap() {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
-  return CreateDefaultPosixFilesToMap(child_process_id(),
-                                      mojo_channel_->remote_endpoint(),
-                                      true /* include_service_required_files */,
-                                      GetProcessType(), command_line());
+  return CreateDefaultPosixFilesToMap(
+      child_process_id(), mojo_channel_->remote_endpoint(),
+      file_data_->files_to_preload, GetProcessType(), command_line());
 }
 
 bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
@@ -52,8 +53,12 @@ bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
 
   if (GetProcessType() == switches::kRendererProcess) {
     const int sandbox_fd = SandboxHostLinux::GetInstance()->GetChildSocket();
-    options->fds_to_remap.push_back(
-        std::make_pair(sandbox_fd, service_manager::GetSandboxFD()));
+    options->fds_to_remap.push_back(std::make_pair(sandbox_fd, GetSandboxFD()));
+  }
+
+  for (const auto& remapped_fd : file_data_->additional_remapped_fds) {
+    options->fds_to_remap.emplace_back(remapped_fd.second.get(),
+                                       remapped_fd.first);
   }
 
   options->environment = delegate_->GetEnvironment();
@@ -68,8 +73,8 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
     bool* is_synchronous_launch,
     int* launch_result) {
   *is_synchronous_launch = true;
-
-  service_manager::ZygoteHandle zygote_handle =
+  Process process;
+  ZygoteHandle zygote_handle =
       base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoZygote)
           ? nullptr
           : delegate_->GetZygote();
@@ -82,29 +87,31 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
         GetProcessType());
     *launch_result = LAUNCH_RESULT_SUCCESS;
 
-#if !defined(OS_OPENBSD)
+#if !BUILDFLAG(IS_OPENBSD)
     if (handle) {
-      // This is just a starting score for a renderer or extension (the
-      // only types of processes that will be started this way).  It will
-      // get adjusted as time goes on.  (This is the same value as
-      // chrome::kLowestRendererOomScore in chrome/chrome_constants.h, but
-      // that's not something we can include here.)
-      const int kLowestRendererOomScore = 300;
-      service_manager::ZygoteHostImpl::GetInstance()->AdjustRendererOOMScore(
-          handle, kLowestRendererOomScore);
+      // It could be a renderer process or an utility process.
+      int oom_score = content::kMiscOomScore;
+      if (command_line()->GetSwitchValueASCII(switches::kProcessType) ==
+          switches::kRendererProcess)
+        oom_score = content::kLowestRendererOomScore;
+      ZygoteHostImpl::GetInstance()->AdjustRendererOOMScore(handle, oom_score);
     }
 #endif
 
-    Process process;
     process.process = base::Process(handle);
     process.zygote = zygote_handle;
-    return process;
+  } else {
+    process.process = base::LaunchProcess(*command_line(), options);
+    *launch_result = process.process.IsValid() ? LAUNCH_RESULT_SUCCESS
+                                               : LAUNCH_RESULT_FAILURE;
   }
 
-  Process process;
-  process.process = base::LaunchProcess(*command_line(), options);
-  *launch_result = process.process.IsValid() ? LAUNCH_RESULT_SUCCESS
-                                             : LAUNCH_RESULT_FAILURE;
+#if BUILDFLAG(IS_CHROMEOS)
+  if (GetProcessType() == switches::kRendererProcess) {
+    process.process.InitializePriority();
+  }
+#endif
+
   return process;
 }
 
@@ -142,7 +149,7 @@ bool ChildProcessLauncherHelper::TerminateProcess(const base::Process& process,
 void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
     ChildProcessLauncherHelper::Process process) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
-  process.process.Terminate(service_manager::RESULT_CODE_NORMAL_EXIT, false);
+  process.process.Terminate(RESULT_CODE_NORMAL_EXIT, false);
   // On POSIX, we must additionally reap the child.
   if (process.zygote) {
     // If the renderer was created via a zygote, we have to proxy the reaping
@@ -159,18 +166,6 @@ void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
   if (process.CanBackgroundProcesses())
     process.SetProcessBackgrounded(priority.is_background());
-}
-
-// static
-void ChildProcessLauncherHelper::SetRegisteredFilesForService(
-    const std::string& service_name,
-    std::map<std::string, base::FilePath> required_files) {
-  SetFilesToShareForServicePosix(service_name, std::move(required_files));
-}
-
-// static
-void ChildProcessLauncherHelper::ResetRegisteredFilesForTesting() {
-  ResetFilesToShareForTestingPosix();
 }
 
 // static

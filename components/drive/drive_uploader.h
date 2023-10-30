@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,14 @@
 #include <string>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "components/drive/service/drive_service_interface.h"
-#include "google_apis/drive/drive_api_error_codes.h"
+#include "google_apis/common/api_error_codes.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/wake_lock_provider.mojom.h"
 
 class GURL;
@@ -23,7 +25,7 @@ class GURL;
 namespace base {
 class FilePath;
 class TaskRunner;
-}
+}  // namespace base
 
 namespace google_apis {
 struct UploadRangeResponse;
@@ -36,11 +38,10 @@ class DriveServiceInterface;
 // |upload_location| will be returned when the uploading process is started but
 // terminated before the completion due to some errors. It can be used to
 // resume it.
-typedef base::Callback<void(
-    google_apis::DriveApiErrorCode error,
+using UploadCompletionCallback = base::OnceCallback<void(
+    google_apis::ApiErrorCode error,
     const GURL& upload_location,
-    std::unique_ptr<google_apis::FileResource> resource_entry)>
-    UploadCompletionCallback;
+    std::unique_ptr<google_apis::FileResource> resource_entry)>;
 
 class DriveUploaderInterface {
  public:
@@ -78,14 +79,14 @@ class DriveUploaderInterface {
   // progress_callback:
   //   Periodically called back with the total number of bytes sent so far.
   //   May be null if the information is not needed.
-  virtual google_apis::CancelCallback UploadNewFile(
+  virtual google_apis::CancelCallbackOnce UploadNewFile(
       const std::string& parent_resource_id,
       const base::FilePath& local_file_path,
       const std::string& title,
       const std::string& content_type,
       const UploadNewFileOptions& options,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) = 0;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) = 0;
 
   // Uploads an existing file (a file that already exists on Drive).
   //
@@ -98,13 +99,13 @@ class DriveUploaderInterface {
   //   Expected ETag for the destination file. If it does not match, the upload
   //   fails with UPLOAD_ERROR_CONFLICT.
   //   If |etag| is empty, the test is skipped.
-  virtual google_apis::CancelCallback UploadExistingFile(
+  virtual google_apis::CancelCallbackOnce UploadExistingFile(
       const std::string& resource_id,
       const base::FilePath& local_file_path,
       const std::string& content_type,
       const UploadExistingFileOptions& options,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) = 0;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) = 0;
 
   // Resumes the uploading process terminated before the completion.
   // |upload_location| should be the one returned via UploadCompletionCallback
@@ -112,61 +113,66 @@ class DriveUploaderInterface {
   // |content_type| must be set to the same ones for previous invocation.
   //
   // See comments at UploadNewFile about common parameters and the return value.
-  virtual google_apis::CancelCallback ResumeUploadFile(
+  virtual google_apis::CancelCallbackOnce ResumeUploadFile(
       const GURL& upload_location,
       const base::FilePath& local_file_path,
       const std::string& content_type,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) = 0;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) = 0;
 };
 
 class DriveUploader : public DriveUploaderInterface {
  public:
   // In unittest, the |wake_lock_provider| is set as nullptr.
-  DriveUploader(DriveServiceInterface* drive_service,
-                const scoped_refptr<base::TaskRunner>& blocking_task_runner,
-                device::mojom::WakeLockProviderPtr wake_lock_provider);
+  DriveUploader(
+      DriveServiceInterface* drive_service,
+      const scoped_refptr<base::TaskRunner>& blocking_task_runner,
+      mojo::PendingRemote<device::mojom::WakeLockProvider> wake_lock_provider);
+
+  DriveUploader(const DriveUploader&) = delete;
+  DriveUploader& operator=(const DriveUploader&) = delete;
 
   ~DriveUploader() override;
 
   // DriveUploaderInterface overrides.
   void StartBatchProcessing() override;
   void StopBatchProcessing() override;
-  google_apis::CancelCallback UploadNewFile(
+  google_apis::CancelCallbackOnce UploadNewFile(
       const std::string& parent_resource_id,
       const base::FilePath& local_file_path,
       const std::string& title,
       const std::string& content_type,
       const UploadNewFileOptions& options,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) override;
-  google_apis::CancelCallback UploadExistingFile(
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) override;
+  google_apis::CancelCallbackOnce UploadExistingFile(
       const std::string& resource_id,
       const base::FilePath& local_file_path,
       const std::string& content_type,
       const UploadExistingFileOptions& options,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) override;
-  google_apis::CancelCallback ResumeUploadFile(
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) override;
+  google_apis::CancelCallbackOnce ResumeUploadFile(
       const GURL& upload_location,
       const base::FilePath& local_file_path,
       const std::string& content_type,
-      const UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) override;
+      UploadCompletionCallback callback,
+      google_apis::ProgressCallback progress_callback) override;
 
  private:
   class RefCountedBatchRequest;
   struct UploadFileInfo;
-  typedef base::Callback<void(std::unique_ptr<UploadFileInfo> upload_file_info)>
+  typedef base::OnceCallback<void(
+      std::unique_ptr<UploadFileInfo> upload_file_info)>
       StartInitiateUploadCallback;
 
   // Starts uploading a file with |upload_file_info|.
-  google_apis::CancelCallback StartUploadFile(
+  google_apis::CancelCallbackOnce StartUploadFile(
       std::unique_ptr<UploadFileInfo> upload_file_info,
-      const StartInitiateUploadCallback& start_initiate_upload_callback);
+      StartInitiateUploadCallback start_initiate_upload_callback);
   void StartUploadFileAfterGetFileSize(
       std::unique_ptr<UploadFileInfo> upload_file_info,
-      const StartInitiateUploadCallback& start_initiate_upload_callback,
+      StartInitiateUploadCallback start_initiate_upload_callback,
       bool get_file_size_result);
 
   // Checks file size and call InitiateUploadNewFile or MultipartUploadNewFile
@@ -196,7 +202,7 @@ class DriveUploader : public DriveUploaderInterface {
   // DriveService callback for InitiateUpload.
   void OnUploadLocationReceived(
       std::unique_ptr<UploadFileInfo> upload_file_info,
-      google_apis::DriveApiErrorCode code,
+      google_apis::ApiErrorCode code,
       const GURL& upload_location);
 
   // Starts to get the current upload status for the file uploading.
@@ -211,7 +217,7 @@ class DriveUploader : public DriveUploaderInterface {
       std::unique_ptr<UploadFileInfo> upload_file_info,
       const google_apis::UploadRangeResponse& response,
       std::unique_ptr<google_apis::FileResource> entry);
-  void OnUploadProgress(const google_apis::ProgressCallback& callback,
+  void OnUploadProgress(google_apis::ProgressCallback callback,
                         int64_t start_position,
                         int64_t total_size,
                         int64_t progress_of_chunk,
@@ -219,30 +225,31 @@ class DriveUploader : public DriveUploaderInterface {
 
   // Handles failed uploads.
   void UploadFailed(std::unique_ptr<UploadFileInfo> upload_file_info,
-                    google_apis::DriveApiErrorCode error);
+                    google_apis::ApiErrorCode error);
 
   // Handles completion/error of multipart uploading.
   void OnMultipartUploadComplete(
       std::unique_ptr<UploadFileInfo> upload_file_info,
-      google_apis::DriveApiErrorCode error,
+      google_apis::ApiErrorCode error,
       std::unique_ptr<google_apis::FileResource> entry);
+
+  device::mojom::WakeLockProvider* GetWakeLockProvider();
 
   // The class is expected to run on UI thread.
   base::ThreadChecker thread_checker_;
 
   // The lifetime of this object should be guaranteed to exceed that of the
   // DriveUploader instance.
-  DriveServiceInterface* drive_service_;  // Not owned by this class.
+  raw_ptr<DriveServiceInterface> drive_service_;  // Not owned by this class.
 
   scoped_refptr<base::TaskRunner> blocking_task_runner_;
   scoped_refptr<RefCountedBatchRequest> current_batch_request_;
 
-  device::mojom::WakeLockProviderPtr wake_lock_provider_;
+  mojo::Remote<device::mojom::WakeLockProvider> wake_lock_provider_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<DriveUploader> weak_ptr_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(DriveUploader);
 };
 
 }  // namespace drive

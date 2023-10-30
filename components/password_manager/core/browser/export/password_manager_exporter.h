@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,17 @@
 
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
-#include "base/time/time.h"
+#include "base/strings/string_piece.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/password_manager/core/browser/ui/export_progress_status.h"
 
 namespace password_manager {
 
-class CredentialProviderInterface;
+class SavedPasswordsPresenter;
 
 // Controls the exporting of passwords. One instance per export flow.
 // PasswordManagerExporter will perform the export asynchronously as soon as all
@@ -27,19 +26,19 @@ class CredentialProviderInterface;
 class PasswordManagerExporter {
  public:
   using ProgressCallback =
-      base::RepeatingCallback<void(password_manager::ExportProgressStatus,
-                                   const std::string&)>;
+      base::RepeatingCallback<void(ExportProgressStatus, const std::string&)>;
   using WriteCallback =
-      base::RepeatingCallback<int(const base::FilePath&, const char*, int)>;
-  using DeleteCallback =
-      base::RepeatingCallback<bool(const base::FilePath&, bool)>;
+      base::RepeatingCallback<bool(const base::FilePath&, base::StringPiece)>;
+  using DeleteCallback = base::RepeatingCallback<bool(const base::FilePath&)>;
   using SetPosixFilePermissionsCallback =
       base::RepeatingCallback<bool(const base::FilePath&, int)>;
 
-  explicit PasswordManagerExporter(
-      password_manager::CredentialProviderInterface*
-          credential_provider_interface,
-      ProgressCallback on_progress);
+  explicit PasswordManagerExporter(SavedPasswordsPresenter* presenter,
+                                   ProgressCallback on_progress);
+
+  PasswordManagerExporter(const PasswordManagerExporter&) = delete;
+  PasswordManagerExporter& operator=(const PasswordManagerExporter&) = delete;
+
   virtual ~PasswordManagerExporter();
 
   // Pre-load the passwords from the password store.
@@ -58,15 +57,13 @@ class PasswordManagerExporter {
   virtual ExportProgressStatus GetProgressStatus();
 
   // Replace the function which writes to the filesystem with a custom action.
-  // The return value is -1 on error, otherwise the number of bytes written.
   void SetWriteForTesting(WriteCallback write_callback);
 
   // Replace the function which writes to the filesystem with a custom action.
-  // The return value is true when deleting successfully.
   void SetDeleteForTesting(DeleteCallback delete_callback);
 
   // Replace the function which sets file permissions on Posix with a custom
-  // action. The return values is true when successful.
+  // action.
   void SetSetPosixFilePermissionsForTesting(
       SetPosixFilePermissionsCallback set_permissions_callback);
 
@@ -98,7 +95,7 @@ class PasswordManagerExporter {
   void Cleanup();
 
   // The source of the password list which will be exported.
-  CredentialProviderInterface* const credential_provider_interface_;
+  const raw_ptr<SavedPasswordsPresenter> presenter_;
 
   // Callback to the UI.
   ProgressCallback on_progress_;
@@ -133,8 +130,6 @@ class PasswordManagerExporter {
   // the same sequence.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   base::WeakPtrFactory<PasswordManagerExporter> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PasswordManagerExporter);
 };
 
 }  // namespace password_manager

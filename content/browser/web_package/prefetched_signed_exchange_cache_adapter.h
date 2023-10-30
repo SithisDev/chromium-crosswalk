@@ -1,24 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_WEB_PACKAGE_PREFETCHED_SIGNED_EXCHANGE_CACHE_ADAPTER_H_
 #define CONTENT_BROWSER_WEB_PACKAGE_PREFETCHED_SIGNED_EXCHANGE_CACHE_ADAPTER_H_
 
-#include "base/optional.h"
+#include "base/memory/raw_ptr.h"
 #include "content/browser/web_package/prefetched_signed_exchange_cache.h"
 #include "content/public/browser/browser_context.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 
 class GURL;
-
-namespace base {
-class Time;
-}  // namespace base
-
-namespace net {
-struct SHA256HashValue;
-}  // namespace net
 
 namespace storage {
 class BlobBuilderFromStream;
@@ -38,14 +30,16 @@ class PrefetchedSignedExchangeCacheAdapter {
       BrowserContext::BlobContextGetter blob_context_getter,
       const GURL& request_url,
       PrefetchURLLoader* prefetch_url_loader);
+
+  PrefetchedSignedExchangeCacheAdapter(
+      const PrefetchedSignedExchangeCacheAdapter&) = delete;
+  PrefetchedSignedExchangeCacheAdapter& operator=(
+      const PrefetchedSignedExchangeCacheAdapter&) = delete;
+
   ~PrefetchedSignedExchangeCacheAdapter();
 
-  void OnReceiveOuterResponse(const network::ResourceResponseHead& response);
-  void OnReceiveRedirect(
-      const GURL& new_url,
-      const base::Optional<net::SHA256HashValue> header_integrity,
-      const base::Time& signature_expire_time);
-  void OnReceiveInnerResponse(const network::ResourceResponseHead& response);
+  void OnReceiveSignedExchange(
+      std::unique_ptr<PrefetchedSignedExchangeCacheEntry> entry);
   void OnStartLoadingResponseBody(mojo::ScopedDataPipeConsumerHandle body);
   void OnComplete(const network::URLLoaderCompletionStatus& status);
 
@@ -86,7 +80,7 @@ class PrefetchedSignedExchangeCacheAdapter {
 
   // A temporary entry of PrefetchedSignedExchangeCache, which will be stored
   // to |prefetched_signed_exchange_cache_|.
-  std::unique_ptr<PrefetchedSignedExchangeCache::Entry> cached_exchange_;
+  std::unique_ptr<PrefetchedSignedExchangeCacheEntry> cached_exchange_;
 
   // Used to create a BlobDataHandle from a DataPipe of signed exchange's inner
   // response body. This should only be accessed on the IO thread.
@@ -94,12 +88,10 @@ class PrefetchedSignedExchangeCacheAdapter {
   bool blob_is_streaming_ = false;
 
   // |prefetch_url_loader_| owns |this|.
-  PrefetchURLLoader* prefetch_url_loader_;
+  raw_ptr<PrefetchURLLoader> prefetch_url_loader_;
 
   base::WeakPtrFactory<PrefetchedSignedExchangeCacheAdapter> weak_factory_{
       this};
-
-  DISALLOW_COPY_AND_ASSIGN(PrefetchedSignedExchangeCacheAdapter);
 };
 
 }  // namespace content

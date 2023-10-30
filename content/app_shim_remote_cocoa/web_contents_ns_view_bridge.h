@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,12 @@
 #include <memory>
 
 #import "base/mac/scoped_nsobject.h"
-#include "base/macros.h"
 #include "components/remote_cocoa/app_shim/ns_view_ids.h"
 #include "content/common/content_export.h"
 #include "content/common/web_contents_ns_view_bridge.mojom.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 
 @class WebContentsViewCocoa;
 
@@ -29,14 +31,22 @@ class CONTENT_EXPORT WebContentsNSViewBridge : public mojom::WebContentsNSView {
  public:
   // Create a bridge that will access its client in another process via a mojo
   // interface.
-  WebContentsNSViewBridge(uint64_t view_id,
-                          mojom::WebContentsNSViewHostAssociatedPtr client);
+  WebContentsNSViewBridge(
+      uint64_t view_id,
+      mojo::PendingAssociatedRemote<mojom::WebContentsNSViewHost> client);
   // Create a bridge that will access its client directly in-process.
   // TODO(ccameron): Change this to expose only the mojom::WebContentsNSView
   // when all communication is through mojo.
   WebContentsNSViewBridge(uint64_t view_id,
                           content::WebContentsViewMac* web_contents_view);
+
+  WebContentsNSViewBridge(const WebContentsNSViewBridge&) = delete;
+  WebContentsNSViewBridge& operator=(const WebContentsNSViewBridge&) = delete;
+
   ~WebContentsNSViewBridge() override;
+
+  void Bind(mojo::PendingAssociatedReceiver<mojom::WebContentsNSView> receiver,
+            scoped_refptr<base::SequencedTaskRunner> task_runner);
 
   WebContentsViewCocoa* GetNSView() const { return ns_view_.get(); }
 
@@ -51,14 +61,14 @@ class CONTENT_EXPORT WebContentsNSViewBridge : public mojom::WebContentsNSView {
                  uint32_t operation_mask,
                  const gfx::ImageSkia& image,
                  const gfx::Vector2d& image_offset) override;
+  void Destroy() override;
 
  private:
   base::scoped_nsobject<WebContentsViewCocoa> ns_view_;
-  mojom::WebContentsNSViewHostAssociatedPtr host_;
+  mojo::AssociatedReceiver<mojom::WebContentsNSView> receiver_{this};
+  mojo::AssociatedRemote<mojom::WebContentsNSViewHost> host_;
 
   std::unique_ptr<ScopedNSViewIdMapping> view_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebContentsNSViewBridge);
 };
 
 }  // namespace content

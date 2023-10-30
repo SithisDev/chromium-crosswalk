@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "third_party/blink/public/common/frame/blocked_navigation_types.h"
+#include "third_party/blink/public/mojom/frame/blocked_navigation_types.mojom.h"
 
 class GURL;
 
@@ -50,7 +50,7 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   content::WebContents* OpenURLFromTab(
       content::WebContents* source,
       const content::OpenURLParams& params) override;
-  content::ColorChooser* OpenColorChooser(
+  std::unique_ptr<content::ColorChooser> OpenColorChooser(
       content::WebContents* source,
       SkColor color,
       const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions)
@@ -60,9 +60,7 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   void VisibleSecurityStateChanged(content::WebContents* source) override;
   void ActivateContents(content::WebContents* contents) override;
   void LoadingStateChanged(content::WebContents* source,
-                           bool to_different_document) override;
-  void LoadProgressChanged(content::WebContents* source,
-                           double load_progress) override;
+                           bool should_show_loading_ui) override;
   void RendererUnresponsive(
       content::WebContents* source,
       content::RenderWidgetHost* render_widget_host,
@@ -76,27 +74,20 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
                           const std::string& frame_name,
                           const GURL& target_url,
                           content::WebContents* new_contents) override;
-  bool ShouldCreateWebContents(
-      content::WebContents* web_contents,
-      content::RenderFrameHost* opener,
+  bool IsWebContentsCreationOverridden(
       content::SiteInstance* source_site_instance,
-      int32_t route_id,
-      int32_t main_frame_route_id,
-      int32_t main_frame_widget_route_id,
       content::mojom::WindowContainerType window_container_type,
       const GURL& opener_url,
       const std::string& frame_name,
-      const GURL& target_url,
-      const std::string& partition_id,
-      content::SessionStorageNamespace* session_storage_namespace) override;
+      const GURL& target_url) override;
   void CloseContents(content::WebContents* source) override;
   void SetContentsBounds(content::WebContents* source,
                          const gfx::Rect& bounds) override;
   bool DidAddMessageToConsole(content::WebContents* source,
                               blink::mojom::ConsoleMessageLevel log_level,
-                              const base::string16& message,
+                              const std::u16string& message,
                               int32_t line_no,
-                              const base::string16& source_id) override;
+                              const std::u16string& source_id) override;
   void UpdateTargetURL(content::WebContents* source, const GURL& url) override;
   bool HandleKeyboardEvent(
       content::WebContents* source,
@@ -105,20 +96,28 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   void ShowRepostFormWarningDialog(content::WebContents* source) override;
   bool ShouldBlockMediaRequest(const GURL& url) override;
   void EnterFullscreenModeForTab(
-      content::WebContents* web_contents,
-      const GURL& origin,
-      const blink::WebFullscreenOptions& options) override;
+      content::RenderFrameHost* requesting_frame,
+      const blink::mojom::FullscreenOptions& options) override;
+  void FullscreenStateChangedForTab(
+      content::RenderFrameHost* requesting_frame,
+      const blink::mojom::FullscreenOptions& options) override;
   void ExitFullscreenModeForTab(content::WebContents* web_contents) override;
   bool IsFullscreenForTabOrPending(
       const content::WebContents* web_contents) override;
-  void OnDidBlockNavigation(content::WebContents* web_contents,
-                            const GURL& blocked_url,
-                            const GURL& initiator_url,
-                            blink::NavigationBlockedReason reason) override;
+  void OnDidBlockNavigation(
+      content::WebContents* web_contents,
+      const GURL& blocked_url,
+      const GURL& initiator_url,
+      blink::mojom::NavigationBlockedReason reason) override;
   int GetTopControlsHeight() override;
+  int GetTopControlsMinHeight() override;
   int GetBottomControlsHeight() override;
+  int GetBottomControlsMinHeight() override;
+  bool ShouldAnimateBrowserControlsHeightChanges() override;
   bool DoBrowserControlsShrinkRendererSize(
-      const content::WebContents* contents) override;
+      content::WebContents* contents) override;
+  blink::mojom::DisplayMode GetDisplayMode(
+      const content::WebContents* web_contents) override;
 
  protected:
   base::android::ScopedJavaLocalRef<jobject> GetJavaDelegate(JNIEnv* env) const;

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,7 @@
 #include <memory>
 #include <string>
 
-#include "base/callback.h"
 #include "base/feature_list.h"
-#include "base/macros.h"
-#include "components/security_state/core/insecure_input_event_data.h"
 #include "net/base/url_util.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/sct_status_flags.h"
@@ -40,7 +37,8 @@ namespace security_state {
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.security_state
 // GENERATED_JAVA_CLASS_NAME_OVERRIDE: ConnectionSecurityLevel
 enum SecurityLevel {
-  // HTTP/no URL/HTTPS but with insecure passive content on the page.
+  // Neutral; neither positively secure nor insecure. Used for e.g. some types
+  // of non-http/https URLs.
   NONE = 0,
 
   // HTTP, in a case where we want to show a visible warning about the page's
@@ -49,10 +47,13 @@ enum SecurityLevel {
   // The criteria used to classify pages as NONE vs. HTTP_SHOW_WARNING will
   // change over time. Eventually, NONE will be eliminated.
   // See https://crbug.com/647754.
-  HTTP_SHOW_WARNING = 1,
+  // DEPRECATED: Use WARNING instead in most cases.
+  // HTTP_SHOW_WARNING = 1,
 
   // HTTPS with valid EV cert.
-  EV_SECURE = 2,
+  // DEPRECATED: EV certs no longer receive special UI treatment.
+  // See https://crbug.com/1006943.
+  // EV_SECURE = 2,
 
   // HTTPS (non-EV) with valid cert.
   SECURE = 3,
@@ -68,6 +69,11 @@ enum SecurityLevel {
   // insecure active content on the page, malware, phishing, or any other
   // serious security issue that could be dangerous.
   DANGEROUS = 5,
+
+  // Pages deemed insecure, where we should show a warning indicator. This
+  // includes HTTP pages (previously these were HTTP_SHOW_WARNING) and cases
+  // where we consider an HTTPS page to be insecure (e.g., legacy TLS versions).
+  WARNING = 6,
 
   SECURITY_LEVEL_COUNT
 };
@@ -91,19 +97,73 @@ enum MaliciousContentStatus {
   MALICIOUS_CONTENT_STATUS_MALWARE,
   MALICIOUS_CONTENT_STATUS_UNWANTED_SOFTWARE,
   MALICIOUS_CONTENT_STATUS_SOCIAL_ENGINEERING,
-  MALICIOUS_CONTENT_STATUS_SIGN_IN_PASSWORD_REUSE,
+  MALICIOUS_CONTENT_STATUS_SAVED_PASSWORD_REUSE,
+  MALICIOUS_CONTENT_STATUS_SIGNED_IN_SYNC_PASSWORD_REUSE,
+  MALICIOUS_CONTENT_STATUS_SIGNED_IN_NON_SYNC_PASSWORD_REUSE,
   MALICIOUS_CONTENT_STATUS_ENTERPRISE_PASSWORD_REUSE,
   MALICIOUS_CONTENT_STATUS_BILLING,
+};
+
+// Describes whether the page triggers any safety tips or reputation
+// warnings.
+//
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+//
+// Style note: this differs from other enums in this file to follow new
+// histogram enum naming conventions
+// (https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/histograms/README.md#usage).
+enum class SafetyTipStatus {
+  // Safety tip status is not applicable, e.g. there is no current navigation.
+  kUnknown = 0,
+  // The current page did not trigger any Safety Tip.
+  kNone = 1,
+  // The current page triggered a Safety Tip because it was bad reputation.
+  kBadReputation = 2,
+  // The current page triggered a Safety Tip because it had a lookalike URL.
+  kLookalike = 3,
+  // The current page triggered a Safety Tip because a suspicious keyword was
+  // found in its hostname.
+  kBadKeyword = 4,
+  // The current page had bad reputation, but a Safety Tip was not shown since
+  // it had been previously ignored by the user.
+  kBadReputationIgnored = 5,
+  // The current page had a lookalike URL, but a Safety Tip was not shown since
+  // it had been previously ignored by the user.
+  kLookalikeIgnored = 6,
+  // Safety tip UI was ignored because of the lookalike's digital asset link
+  // manifest matched the target's.
+  kDigitalAssetLinkMatch = 7,
+  kMaxValue = kDigitalAssetLinkMatch,
+};
+
+// Information about the last safety tip shown in the UI. This is used in page
+// info and security tab (in devtools) to give more information about the safety
+// tip.
+struct SafetyTipInfo {
+  SafetyTipStatus status = SafetyTipStatus::kUnknown;
+  // The URL the safety tip suggested ("Did you mean?"). Only filled in for
+  // lookalike matches.
+  GURL safe_url;
 };
 
 // Contains the security state relevant to computing the SecurityLevel
 // for a page. This is the input to GetSecurityLevel().
 struct VisibleSecurityState {
   VisibleSecurityState();
+  VisibleSecurityState(const VisibleSecurityState& other);
+  VisibleSecurityState& operator=(const VisibleSecurityState& other);
   ~VisibleSecurityState();
+
   GURL url;
 
   MaliciousContentStatus malicious_content_status;
+
+  // What type of Safety Tip (if any) triggered on the page. Note that this
+  // field will be set even if the Safety Tip UI was not actually shown due to
+  // the feature being disabled (so that this field can be used to record
+  // metrics independent of whether the UI actually showed).
+  SafetyTipInfo safety_tip_info;
 
   // CONNECTION SECURITY FIELDS
   // Whether the connection security fields are initialized.
@@ -136,30 +196,32 @@ struct VisibleSecurityState {
   bool is_error_page;
   // True if the page is a view-source page.
   bool is_view_source;
-  // Contains information about input events that may impact the security
-  // level of the page.
-  InsecureInputEventData insecure_input_events;
+  // True if the page is a devtools page.
+  bool is_devtools;
+  // True if the page is a reader mode page.
+  bool is_reader_mode;
+  // True if mixed forms should be treated as secure from the visible security
+  // state perspective (for example, if a different warning is being shown for
+  // them).
+  bool should_treat_displayed_mixed_forms_as_secure;
+  // True if the page was the result of an HTTPS-Only Mode upgrade.
+  bool is_https_only_mode_upgraded;
 };
 
 // These security levels describe the treatment given to pages that
 // display and run mixed content. They are used to coordinate the
 // treatment of mixed content with other security UI elements.
 constexpr SecurityLevel kDisplayedInsecureContentLevel = NONE;
+constexpr SecurityLevel kDisplayedInsecureContentWarningLevel = WARNING;
 constexpr SecurityLevel kRanInsecureContentLevel = DANGEROUS;
-
-// Returns true if the given |url|'s origin should be considered secure.
-using IsOriginSecureCallback = base::Callback<bool(const GURL& url)>;
 
 // Returns a SecurityLevel to describe the current page.
 // |visible_security_state| contains the relevant security state.
 // |used_policy_installed_certificate| indicates whether the page or request
 // is known to be loaded with a certificate installed by the system admin.
-// |is_origin_secure_callback| determines whether a URL's origin should be
-// considered secure.
 SecurityLevel GetSecurityLevel(
     const VisibleSecurityState& visible_security_state,
-    bool used_policy_installed_certificate,
-    IsOriginSecureCallback is_origin_secure_callback);
+    bool used_policy_installed_certificate);
 
 // Returns true if the current page was loaded using a cryptographic protocol
 // and its certificate has any major errors.
@@ -172,13 +234,17 @@ bool IsSchemeCryptographic(const GURL& url);
 // Returns true for a valid |url| with localhost or file:// scheme origin.
 bool IsOriginLocalhostOrFile(const GURL& url);
 
-// Returns true if the page has a valid SSL certificate. Only EV_SECURE,
-// SECURE, and SECURE_WITH_POLICY_INSTALLED_CERT are considered valid.
+// Returns true if the page has a valid SSL certificate. Only SECURE and
+// SECURE_WITH_POLICY_INSTALLED_CERT are considered valid.
 bool IsSslCertificateValid(security_state::SecurityLevel security_level);
 
 // Returns the given prefix suffixed with a dot and the current security level.
 std::string GetSecurityLevelHistogramName(
     const std::string& prefix, security_state::SecurityLevel level);
+
+// Returns the given prefix suffixed with a dot and the given Safety Tip status.
+std::string GetSafetyTipHistogramName(const std::string& prefix,
+                                      SafetyTipStatus safety_tip_status);
 
 bool IsSHA1InChain(const VisibleSecurityState& visible_security_state);
 

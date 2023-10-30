@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -328,6 +328,51 @@ const char* kJSONAppsStatusError = R"()]}'
    ]
   }})";
 
+// Includes a manifest |run| value for an update check with status='ok'. Also
+// includes install data in the `data` element.
+const char* kJSONManifestRun = R"()]}'
+  {"response":{
+   "protocol":"3.1",
+   "app":[
+    {"appid":"12345",
+     "data":[{
+      "status":"ok",
+      "name":"install",
+      "index":"foobar_install_data_index",
+      "#text":"sampledata"
+     }],
+     "updatecheck":{
+     "status":"ok",
+     "urls":{"url":[{"codebase":"http://example.com/"},
+                    {"codebasediff":"http://diff.example.com/"}]},
+     "manifest":{
+      "version":"1.2.3.4",
+      "prodversionmin":"2.0.143.0",
+      "run":"UpdaterSetup.exe",
+      "arguments":"--arg1 --arg2",
+      "packages":{"package":[{"name":"extension_1_2_3_4.crx"}]}}
+     }
+    }
+   ]
+  }})";
+
+// Includes two custom response attributes in the update_check.
+const char* kJSONCustomAttributes = R"()]}'
+  {"response":{
+   "protocol":"3.1",
+   "app":[
+    {"appid":"12345",
+     "updatecheck":{
+     "_example1":"example_value1",
+     "_example2":"example_value2",
+     "_example_bad": {"value": "bad-non-string-value"},
+     "_example_bad2": 15,
+     "status":"noupdate"
+     }
+    }
+   ]
+  }})";
+
 TEST(UpdateClientProtocolParserJSONTest, Parse) {
   const auto parser = std::make_unique<ProtocolParserJSON>();
 
@@ -500,6 +545,41 @@ TEST(UpdateClientProtocolParserJSONTest, Parse) {
     EXPECT_EQ(third_result->extension_id, "cccccccc");
     EXPECT_STREQ("error-invalidAppId", third_result->status.c_str());
     EXPECT_TRUE(third_result->manifest.version.empty());
+  }
+  {
+    EXPECT_TRUE(parser->Parse(kJSONManifestRun));
+    EXPECT_TRUE(parser->errors().empty());
+    EXPECT_EQ(1u, parser->results().list.size());
+    const auto& result = parser->results().list[0];
+    EXPECT_STREQ("UpdaterSetup.exe", result.manifest.run.c_str());
+    EXPECT_STREQ("--arg1 --arg2", result.manifest.arguments.c_str());
+
+    ASSERT_EQ(1u, result.data.size());
+    EXPECT_STREQ("ok", result.data[0].status.c_str());
+    EXPECT_STREQ("install", result.data[0].name.c_str());
+    EXPECT_STREQ("foobar_install_data_index",
+                 result.data[0].install_data_index.c_str());
+    EXPECT_STREQ("sampledata", result.data[0].text.c_str());
+  }
+}
+
+TEST(UpdateClientProtocolParserJSONTest, ParseAttrs) {
+  const auto parser = std::make_unique<ProtocolParserJSON>();
+  {  // No custom attrs in kJSONManifestRun
+    EXPECT_TRUE(parser->Parse(kJSONManifestRun));
+    EXPECT_TRUE(parser->errors().empty());
+    EXPECT_EQ(1u, parser->results().list.size());
+    const auto& result = parser->results().list[0];
+    EXPECT_EQ(0u, result.custom_attributes.size());
+  }
+  {  // Two custom attrs in kJSONCustomAttributes
+    EXPECT_TRUE(parser->Parse(kJSONCustomAttributes));
+    EXPECT_TRUE(parser->errors().empty());
+    EXPECT_EQ(1u, parser->results().list.size());
+    const auto& result = parser->results().list[0];
+    EXPECT_EQ(2u, result.custom_attributes.size());
+    EXPECT_EQ("example_value1", result.custom_attributes.at("_example1"));
+    EXPECT_EQ("example_value2", result.custom_attributes.at("_example2"));
   }
 }
 

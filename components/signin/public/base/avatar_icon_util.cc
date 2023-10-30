@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "base/stl_util.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -118,6 +118,8 @@ std::vector<std::string> TryProcessAsContentImageURL(
 }  // namespace
 
 namespace signin {
+
+const int kAccountInfoImageSize = 256;
 
 GURL GetAvatarImageURLWithOptions(const GURL& old_url,
                                   int image_size,

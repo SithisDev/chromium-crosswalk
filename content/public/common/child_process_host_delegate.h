@@ -1,15 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_CHILD_PROCESS_HOST_DELEGATE_H_
 #define CONTENT_PUBLIC_COMMON_CHILD_PROCESS_HOST_DELEGATE_H_
 
-#include <string>
-
 #include "base/process/process.h"
-#include "content/common/content_export.h"
 #include "ipc/ipc_listener.h"
+#include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 
 namespace IPC {
@@ -34,9 +32,9 @@ class ChildProcessHostDelegate : public IPC::Listener {
   // OnProcessLaunched is called or it will be invalid and may crash.
   virtual const base::Process& GetProcess() = 0;
 
-  // Binds an interface in the child process.
-  virtual void BindInterface(const std::string& interface_name,
-                             mojo::ScopedMessagePipeHandle interface_pipe) {}
+  // Binds an interface receiver in the host process, as requested by the child
+  // process.
+  virtual void BindHostReceiver(mojo::GenericPendingReceiver receiver) {}
 };
 
 }  // namespace content

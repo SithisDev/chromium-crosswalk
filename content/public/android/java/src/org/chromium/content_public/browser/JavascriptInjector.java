@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,11 +18,12 @@ import java.util.Map;
 public interface JavascriptInjector {
     /**
      * @param webContents {@link WebContents} object.
+     * @param useMojo Whether to use {@link RemoteObjectInjector} methods
      * @return {@link JavascriptInjector} object used for the give WebContents.
      *         Creates one if not present.
      */
-    static JavascriptInjector fromWebContents(WebContents webContents) {
-        return JavascriptInjectorImpl.fromWebContents(webContents);
+    static JavascriptInjector fromWebContents(WebContents webContents, boolean useMojo) {
+        return JavascriptInjectorImpl.fromWebContents(webContents, useMojo);
     }
 
     /**

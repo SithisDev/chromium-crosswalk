@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,15 +24,14 @@ class WebAuthnHandlerTest : public testing::Test {
 };
 
 TEST_F(WebAuthnHandlerTest, EnableFailsGracefullyIfNoFrameHostSet) {
-  Response response = webauthn_handler()->Enable();
-  EXPECT_EQ(DispatchResponse::Status::kError, response.status());
-  EXPECT_STREQ("The DevTools session is not attached to a frame",
-               response.errorMessage().c_str());
+  Response response = webauthn_handler()->Enable(/*enable_ui=*/false);
+  EXPECT_EQ(crdtp::DispatchCode::SERVER_ERROR, response.Code());
+  EXPECT_EQ("The DevTools session is not attached to a frame",
+            response.Message());
 }
 
 TEST_F(WebAuthnHandlerTest, DisableGracefullyIfNoFrameHostSet) {
-  Response response = webauthn_handler()->Disable();
-  EXPECT_EQ(DispatchResponse::Status::kSuccess, response.status());
+  EXPECT_TRUE(webauthn_handler()->Disable().IsSuccess());
 }
 
 }  // namespace protocol

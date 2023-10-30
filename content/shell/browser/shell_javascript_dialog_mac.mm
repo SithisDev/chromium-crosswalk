@@ -1,8 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/shell/browser/shell_javascript_dialog.h"
+
+#include "base/memory/raw_ptr.h"
 
 #import <Cocoa/Cocoa.h>
 
@@ -14,12 +16,12 @@
 // going away. Is responsible for cleaning itself up.
 @interface ShellJavaScriptDialogHelper : NSObject<NSAlertDelegate> {
  @private
-  base::scoped_nsobject<NSAlert> alert_;
-  NSTextField* textField_;  // WEAK; owned by alert_
+  base::scoped_nsobject<NSAlert> _alert;
+  NSTextField* _textField;  // WEAK; owned by alert_
 
   // Copies of the fields in ShellJavaScriptDialog because they're private.
-  content::ShellJavaScriptDialogManager* manager_;
-  content::JavaScriptDialogManager::DialogClosedCallback callback_;
+  raw_ptr<content::ShellJavaScriptDialogManager> _manager;
+  content::JavaScriptDialogManager::DialogClosedCallback _callback;
 }
 
 - (id)initHelperWithManager:(content::ShellJavaScriptDialogManager*)manager
@@ -37,26 +39,26 @@
 - (id)initHelperWithManager:(content::ShellJavaScriptDialogManager*)manager
   andCallback:(content::JavaScriptDialogManager::DialogClosedCallback)callback {
   if (self = [super init]) {
-    manager_ = manager;
-    callback_ = std::move(callback);
+    _manager = manager;
+    _callback = std::move(callback);
   }
 
   return self;
 }
 
 - (NSAlert*)alert {
-  alert_.reset([[NSAlert alloc] init]);
-  return alert_;
+  _alert.reset([[NSAlert alloc] init]);
+  return _alert;
 }
 
 - (NSTextField*)textField {
-  textField_ = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 22)];
-  [[textField_ cell] setLineBreakMode:NSLineBreakByTruncatingTail];
-  [alert_ setAccessoryView:textField_];
-  [[alert_ window] setInitialFirstResponder:textField_];
-  [textField_ release];
+  _textField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 22)];
+  [[_textField cell] setLineBreakMode:NSLineBreakByTruncatingTail];
+  [_alert setAccessoryView:_textField];
+  [[_alert window] setInitialFirstResponder:_textField];
+  [_textField release];
 
-  return textField_;
+  return _textField;
 }
 
 - (void)alertDidEndWithResult:(NSModalResponse)returnCode
@@ -65,17 +67,19 @@
     return;
 
   bool success = returnCode == NSAlertFirstButtonReturn;
-  base::string16 input;
-  if (textField_)
-    input = base::SysNSStringToUTF16([textField_ stringValue]);
+  std::u16string input;
+  if (_textField)
+    input = base::SysNSStringToUTF16([_textField stringValue]);
 
-  std::move(callback_).Run(success, input);
-  manager_->DialogClosed(dialog);
+  std::move(_callback).Run(success, input);
+  _manager->DialogClosed(dialog);
 }
 
 - (void)cancel {
-  [NSApp endSheet:[alert_ window]];
-  alert_.reset();
+  [NSApp endSheet:[_alert window]];
+  _alert.reset();
+  if (_callback)
+    std::move(_callback).Run(false, std::u16string());
 }
 
 @end
@@ -86,10 +90,9 @@ ShellJavaScriptDialog::ShellJavaScriptDialog(
     ShellJavaScriptDialogManager* manager,
     gfx::NativeWindow parent_window,
     JavaScriptDialogType dialog_type,
-    const base::string16& message_text,
-    const base::string16& default_prompt_text,
-    JavaScriptDialogManager::DialogClosedCallback callback)
-    : callback_(std::move(callback)) {
+    const std::u16string& message_text,
+    const std::u16string& default_prompt_text,
+    JavaScriptDialogManager::DialogClosedCallback callback) {
   bool text_field = dialog_type == JAVASCRIPT_DIALOG_TYPE_PROMPT;
   bool one_button = dialog_type == JAVASCRIPT_DIALOG_TYPE_ALERT;
 

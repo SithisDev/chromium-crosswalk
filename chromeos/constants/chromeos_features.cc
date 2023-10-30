@@ -1,177 +1,80 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2021 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chromeos/constants/chromeos_features.h"
 
-namespace chromeos {
+#include "base/feature_list.h"
 
-namespace features {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/startup/browser_params_proxy.h"
+#endif
 
-// Enables or disables auto screen-brightness adjustment when ambient light
-// changes.
-const base::Feature kAutoScreenBrightness{"AutoScreenBrightness",
+namespace chromeos::features {
+
+// Enables or disables more filtering out of phones from the Bluetooth UI.
+const base::Feature kBluetoothPhoneFilter{"BluetoothPhoneFilter",
                                           base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Enables or disables more aggressive filtering out of Bluetooth devices with
-// "appearances" that are less likely to be pairable or useful.
-const base::Feature kBluetoothAggressiveAppearanceFilter{
-    "BluetoothAggressiveAppearanceFilter", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Feature containing param to block provided long term keys.
-const base::Feature kBlueZLongTermKeyBlocklist{
-    "BlueZLongTermKeyBlocklist", base::FEATURE_DISABLED_BY_DEFAULT};
-const char kBlueZLongTermKeyBlocklistParamName[] = "ltk_blocklist";
-
-// Enable or disables running the Camera App as a System Web App.
-const base::Feature kCameraSystemWebApp{"CameraSystemWebApp",
-                                        base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables or disables Crostini Backup.
-const base::Feature kCrostiniBackup{"CrostiniBackup",
-                                    base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables or disables Crostini GPU support.
-const base::Feature kCrostiniGpuSupport{"CrostiniGpuSupport",
-                                        base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables or disables Crostini support for usb mounting.
-const base::Feature kCrostiniUsbSupport{"CrostiniUsbSupport",
-                                        base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Enables or disables Crostini usb mounting for unsupported devices.
-// To enable, CrostiniUsbSupport must also be enabled.
-const base::Feature kCrostiniUsbAllowUnsupported{
-    "CrostiniUsbAllowUnsupported", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables or disables the new WebUI Crostini installer.
-const base::Feature kCrostiniWebUIInstaller{"CrostiniWebUIInstaller",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables or disables the CryptAuth v2 Enrollment flow.
-const base::Feature kCryptAuthV2Enrollment{"CryptAuthV2Enrollment",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables or disables Discover Application on Chrome OS.
-// If enabled, Discover App will be shown in launcher.
-const base::Feature kDiscoverApp{"DiscoverApp",
-                                 base::FEATURE_DISABLED_BY_DEFAULT};
-
-// If enabled, DriveFS will be used for Drive sync.
-const base::Feature kDriveFs{"DriveFS", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Enables DriveFS' experimental local files mirroring functionality.
-const base::Feature kDriveFsMirroring{"DriveFsMirroring",
-                                      base::FEATURE_DISABLED_BY_DEFAULT};
-
-// If enabled shows the visual signals feedback panel.
-const base::Feature kEnableFileManagerFeedbackPanel{
-    "EnableFeedbackPanel", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables the enhanced external media formatting dialog in the file manager,
-// with support for labelling and also NTFS/exFAT filesystems.
-const base::Feature kEnableFileManagerFormatDialog{
-    "EnableFileManagerFormatDialog", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Enable the piex-wasm module for raw image preview image extraction.
-const base::Feature kEnableFileManagerPiexWasm{
-    "PiexWasm", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Enables or disables web push for background notifications in
-// Android Messages Integration on Chrome OS.
-const base::Feature kEnableMessagesWebPush{"EnableMessagesWebPush",
-                                           base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Enables the use of Mojo by Chrome-process code to communicate with Power
-// Manager. In order to use mojo, this feature must be turned on and a callsite
-// must use PowerManagerMojoClient::Get().
-const base::Feature kMojoDBusRelay{"MojoDBusRelay",
-                                   base::FEATURE_DISABLED_BY_DEFAULT};
-
-// If enabled, MyFiles will be a root/volume and user can create other
-// sub-folders and files in addition to the Downloads folder inside MyFiles.
-const base::Feature kMyFilesVolume{"MyFilesVolume",
-                                   base::FEATURE_ENABLED_BY_DEFAULT};
-
-// If enabled, will display blocking screens during re-authentication after a
-// supervision transition occurred.
-const base::Feature kEnableSupervisionTransitionScreens{
-    "EnableSupervisionTransitionScreens", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Enable restriction of symlink traversal on user-supplied filesystems.
-const base::Feature kFsNosymfollow{"FsNosymfollow",
-                                   base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enable a D-Bus service for accessing gesture properties.
-const base::Feature kGesturePropertiesDBusService{
-    "GesturePropertiesDBusService", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enable primary/secondary action buttons on Gaia login screen.
-const base::Feature kGaiaActionButtons{"GaiaActionButtons",
+// Enables cloud game features. A separate flag "LauncherGameSearch" controls
+// launcher-only cloud gaming features, since they can also be enabled on
+// non-cloud-gaming devices.
+const base::Feature kCloudGamingDevice{"CloudGamingDevice",
                                        base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Enable or disable Unified Input Logic for FST decocder in the IME extension
-// on Chrome OS.
-const base::Feature kImeInputLogicFst{"ImeInputLogicFst",
-                                      base::FEATURE_DISABLED_BY_DEFAULT};
+// Enables dark/light mode feature.
+const base::Feature kDarkLightMode{"DarkLightMode",
+                                   base::FEATURE_ENABLED_BY_DEFAULT};
 
-// Enables or disables Instant Tethering on Chrome OS.
-const base::Feature kInstantTethering{"InstantTethering",
-                                      base::FEATURE_DISABLED_BY_DEFAULT};
+// Disable idle sockets closing on memory pressure for NetworkContexts that
+// belong to Profiles. It only applies to Profiles because the goal is to
+// improve perceived performance of web browsing within the ChromeOS user
+// session by avoiding re-estabshing TLS connections that require client
+// certificates.
+const base::Feature kDisableIdleSocketsCloseOnMemoryPressure{
+    "disable_idle_sockets_close_on_memory_pressure",
+    base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Enables or disables showing the battery level in the System Tray and Settings
-// UI for supported Bluetooth Devices.
-const base::Feature kShowBluetoothDeviceBattery{
-    "ShowBluetoothDeviceBattery", base::FEATURE_DISABLED_BY_DEFAULT};
+// Disables "Office Editing for Docs, Sheets & Slides" component app so handlers
+// won't be registered, making it possible to install another version for
+// testing.
+const base::Feature kDisableOfficeEditingComponentApp{
+    "DisableOfficeEditingComponentApp", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Enables or disables Release Notes on Chrome OS.
-const base::Feature kReleaseNotes{"ReleaseNotes",
-                                  base::FEATURE_ENABLED_BY_DEFAULT};
+// Disables translation services of the Quick Answers V2.
+const base::Feature kDisableQuickAnswersV2Translation{
+    "DisableQuickAnswersV2Translation", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Uses the V3 (~2019-05 era) Smart Dim model instead of the default V2
-// (~2018-11) model.
-const base::Feature kSmartDimModelV3{"SmartDimModelV3",
-                                     base::FEATURE_DISABLED_BY_DEFAULT};
+// Controls whether to enable quick answers V2 settings sub-toggles.
+const base::Feature kQuickAnswersV2SettingsSubToggle{
+    "QuickAnswersV2SettingsSubToggle", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Splits OS settings (display, mouse, keyboard, etc.) out from browser settings
-// into a separate window.
-const base::Feature kSplitSettings{"SplitSettings",
-                                   base::FEATURE_DISABLED_BY_DEFAULT};
+// Enables Quick Answers for more locales.
+const base::Feature kQuickAnswersForMoreLocales{
+    "QuickAnswersForMoreLocales", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Enables the updated cellular activation UI; see go/cros-cellular-design.
-const base::Feature kUpdatedCellularActivationUi{
-    "UpdatedCellularActivationUi", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Use the messages.google.com domain as part of the "Messages" feature under
-// "Connected Devices" settings.
-const base::Feature kUseMessagesGoogleComDomain{
-    "UseMessagesGoogleComDomain", base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Use the staging URL as part of the "Messages" feature under "Connected
-// Devices" settings.
-const base::Feature kUseMessagesStagingUrl{"UseMessagesStagingUrl",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enables or disables user activity prediction for power management on
-// Chrome OS.
-// Defined here rather than in //chrome alongside other related features so that
-// PowerPolicyController can check it.
-const base::Feature kUserActivityPrediction{"UserActivityPrediction",
-                                            base::FEATURE_ENABLED_BY_DEFAULT};
-
-// Remap search+click to right click instead of the legacy alt+click on
-// Chrome OS.
-const base::Feature kUseSearchClickForRightClick{
-    "UseSearchClickForRightClick", base::FEATURE_DISABLED_BY_DEFAULT};
-
-// Enable or disable native controls in video player on Chrome OS.
-const base::Feature kVideoPlayerNativeControls{
-    "VideoPlayerNativeControls", base::FEATURE_ENABLED_BY_DEFAULT};
-
-bool IsSplitSettingsEnabled() {
-  return base::FeatureList::IsEnabled(kSplitSettings);
+bool IsCloudGamingDeviceEnabled() {
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  return chromeos::BrowserParamsProxy::Get()->IsCloudGamingDevice();
+#else
+  return base::FeatureList::IsEnabled(kCloudGamingDevice);
+#endif
 }
 
-}  // namespace features
+bool IsDarkLightModeEnabled() {
+  return base::FeatureList::IsEnabled(kDarkLightMode);
+}
 
-}  // namespace chromeos
+bool IsQuickAnswersV2TranslationDisabled() {
+  return base::FeatureList::IsEnabled(kDisableQuickAnswersV2Translation);
+}
+
+bool IsQuickAnswersV2SettingsSubToggleEnabled() {
+  return base::FeatureList::IsEnabled(kQuickAnswersV2SettingsSubToggle);
+}
+
+bool IsQuickAnswersForMoreLocalesEnabled() {
+  return base::FeatureList::IsEnabled(kQuickAnswersForMoreLocales);
+}
+
+}  // namespace chromeos::features

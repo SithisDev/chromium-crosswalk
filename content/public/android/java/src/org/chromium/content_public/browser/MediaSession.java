@@ -1,13 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content_public.browser;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.ObserverList;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.content.browser.MediaSessionImpl;
 
 /**
@@ -53,6 +53,12 @@ public abstract class MediaSession {
     public abstract void seek(long millis);
 
     /**
+     * Seeks the media session to a specific point relative from the beginning
+     * of the media. The number of milliseconds should not be negative.
+     */
+    public abstract void seekTo(long millis);
+
+    /**
      * Notify the media session that an action has been performed.
      */
     public abstract void didReceiveAction(int action);
@@ -61,4 +67,9 @@ public abstract class MediaSession {
      * Request audio focus from the system.
      */
     public abstract void requestSystemAudioFocus();
+
+    /**
+     * Returns whether the media session can be resumed/suspended.
+     */
+    public abstract boolean isControllable();
 }

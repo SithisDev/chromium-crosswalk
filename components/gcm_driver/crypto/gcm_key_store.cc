@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,17 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/gcm_driver/crypto/p256_key_util.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
+#include "components/leveldb_proto/public/shared_proto_database_client_list.h"
 #include "crypto/random.h"
+#include "third_party/leveldatabase/env_chromium.h"
 
 namespace gcm {
 
@@ -27,15 +28,12 @@ namespace {
 using EntryVectorType =
     leveldb_proto::ProtoDatabase<EncryptionData>::KeyEntryVector;
 
-// Statistics are logged to UMA with this string as part of histogram name. They
-// can all be found under LevelDB.*.GCMKeyStore. Changing this needs to
-// synchronize with histograms.xml, AND will also become incompatible with older
-// browsers still reporting the previous values.
-const char kDatabaseUMAClientName[] = "GCMKeyStore";
-
 // Number of cryptographically secure random bytes to generate as a key pair's
 // authentication secret. Must be at least 16 bytes.
 const size_t kAuthSecretBytes = 16;
+
+// Size cap for the leveldb log file before compression.
+const size_t kDatabaseWriteBufferSizeBytes = 16 * 1024;
 
 std::string DatabaseKey(const std::string& app_id,
                         const std::string& authorized_entity) {
@@ -45,6 +43,14 @@ std::string DatabaseKey(const std::string& app_id,
   return authorized_entity.empty()
              ? app_id  // No comma, for compatibility with existing keys.
              : app_id + ',' + authorized_entity;
+}
+
+leveldb_env::Options CreateLevelDbOptions() {
+  leveldb_env::Options options;
+  options.create_if_missing = true;
+  options.max_open_files = 0;  // Use minimum.
+  options.write_buffer_size = kDatabaseWriteBufferSizeBytes;
+  return options;
 }
 
 }  // namespace
@@ -287,24 +293,23 @@ void GCMKeyStore::LazyInitialize(base::OnceClosure done_closure) {
     return;
   }
 
-  delayed_task_controller_.AddTask(
-      base::AdaptCallbackForRepeating(std::move(done_closure)));
+  delayed_task_controller_.AddTask(std::move(done_closure));
   if (state_ == State::INITIALIZING)
     return;
 
   state_ = State::INITIALIZING;
 
-  database_ =
-      leveldb_proto::ProtoDatabaseProvider::CreateUniqueDB<EncryptionData>(
-          blocking_task_runner_);
+  database_ = leveldb_proto::ProtoDatabaseProvider::GetUniqueDB<EncryptionData>(
+      leveldb_proto::ProtoDbType::GCM_KEY_STORE, key_store_path_,
+      blocking_task_runner_);
 
   database_->Init(
-      kDatabaseUMAClientName, key_store_path_,
-      leveldb_proto::CreateSimpleOptions(),
+      CreateLevelDbOptions(),
       base::BindOnce(&GCMKeyStore::DidInitialize, weak_factory_.GetWeakPtr()));
 }
 
-void GCMKeyStore::DidInitialize(bool success) {
+void GCMKeyStore::DidInitialize(leveldb_proto::Enums::InitStatus status) {
+  bool success = status == leveldb_proto::Enums::kOK;
   UMA_HISTOGRAM_BOOLEAN("GCM.Crypto.InitKeyStoreSuccessRate", success);
   if (!success) {
     DVLOG(1) << "Unable to initialize the GCM Key Store.";

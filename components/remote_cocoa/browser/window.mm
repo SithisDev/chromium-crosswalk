@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #import <Cocoa/Cocoa.h>
 #include <map>
 
+#include "base/check.h"
 #include "base/no_destructor.h"
 
 namespace remote_cocoa {
@@ -63,19 +64,6 @@ mojom::NativeWidgetNSWindow* GetWindowMojoInterface(
   if (scoped_mapping)
     return scoped_mapping->mojo_interface();
   return nullptr;
-}
-
-NSWindow* CreateInProcessTransparentClone(gfx::NativeWindow remote_window) {
-  DCHECK(IsWindowRemote(remote_window));
-  NSWindow* window = [[NSWindow alloc]
-      initWithContentRect:[remote_window.GetNativeNSWindow() frame]
-                styleMask:NSWindowStyleMaskBorderless
-                  backing:NSBackingStoreBuffered
-                    defer:NO];
-  [window setAlphaValue:0];
-  [window makeKeyAndOrderFront:nil];
-  [window setLevel:NSModalPanelWindowLevel];
-  return window;
 }
 
 }  // namespace remote_cocoa

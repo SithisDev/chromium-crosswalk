@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,23 +10,22 @@ StubCredentialsFilter::StubCredentialsFilter() = default;
 
 StubCredentialsFilter::~StubCredentialsFilter() = default;
 
-bool StubCredentialsFilter::ShouldSave(
-    const autofill::PasswordForm& form) const {
+bool StubCredentialsFilter::ShouldSave(const PasswordForm& form) const {
   return true;
 }
 
 bool StubCredentialsFilter::ShouldSaveGaiaPasswordHash(
-    const autofill::PasswordForm& form) const {
+    const PasswordForm& form) const {
   return false;
 }
 
 bool StubCredentialsFilter::ShouldSaveEnterprisePasswordHash(
-    const autofill::PasswordForm& form) const {
+    const PasswordForm& form) const {
   return false;
 }
 
 void StubCredentialsFilter::ReportFormLoginSuccess(
-    const PasswordFormManagerInterface& form_manager) const {}
+    const PasswordFormManager& form_manager) const {}
 
 bool StubCredentialsFilter::IsSyncAccountEmail(
     const std::string& username) const {

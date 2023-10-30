@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,9 @@
 #define COMPONENTS_FAVICON_CORE_LARGE_ICON_SERVICE_IMPL_H_
 
 #include <memory>
-#include <vector>
 
 #include "base/feature_list.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "components/favicon/core/large_icon_service.h"
@@ -26,7 +25,6 @@ struct NetworkTrafficAnnotationTag;
 namespace favicon {
 
 class FaviconService;
-class FaviconServerFetcherParams;
 
 extern const base::Feature kLargeIconServiceFetchingFeature;
 
@@ -35,7 +33,14 @@ class LargeIconServiceImpl : public LargeIconService {
  public:
   LargeIconServiceImpl(
       FaviconService* favicon_service,
-      std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher);
+      std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
+      int desired_size_in_dip_for_server_requests,
+      favicon_base::IconType icon_type_for_server_requests,
+      const std::string& google_server_client_param);
+
+  LargeIconServiceImpl(const LargeIconServiceImpl&) = delete;
+  LargeIconServiceImpl& operator=(const LargeIconServiceImpl&) = delete;
+
   ~LargeIconServiceImpl() override;
 
   // LargeIconService Implementation.
@@ -60,17 +65,22 @@ class LargeIconServiceImpl : public LargeIconService {
       int desired_size_in_pixel,
       favicon_base::LargeIconCallback callback,
       base::CancelableTaskTracker* tracker) override;
+  base::CancelableTaskTracker::TaskId GetIconRawBitmapOrFallbackStyleForPageUrl(
+      const GURL& page_url,
+      int desired_size_in_pixel,
+      favicon_base::LargeIconCallback callback,
+      base::CancelableTaskTracker* tracker) override;
   void GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
-      std::unique_ptr<FaviconServerFetcherParams> params,
+      const GURL& page_url,
       bool may_page_url_be_private,
       bool should_trim_page_url_path,
       const net::NetworkTrafficAnnotationTag& traffic_annotation,
       favicon_base::GoogleFaviconServerCallback callback) override;
   void TouchIconFromGoogleServer(const GURL& icon_url) override;
-  // Extracts the organization-identifying domain from |url| which excludes
-  // registrar portion (e.g. final ".com"). Used for logging UMA metrics.
-  // Exposed publicly for testing.
-  static std::string GetOrganizationNameForUma(const GURL& url);
+
+  // Overrides the URL of the Google favicon server to send requests to for
+  // testing.
+  void SetServerUrlForTesting(const GURL& server_url_for_testing);
 
  private:
   base::CancelableTaskTracker::TaskId GetLargeIconOrFallbackStyleImpl(
@@ -84,23 +94,24 @@ class LargeIconServiceImpl : public LargeIconService {
   void OnCanSetOnDemandFaviconComplete(
       const GURL& server_request_url,
       const GURL& page_url,
-      favicon_base::IconType icon_type,
       const net::NetworkTrafficAnnotationTag& traffic_annotation,
       favicon_base::GoogleFaviconServerCallback callback,
       bool can_set_on_demand_favicon);
 
-  FaviconService* favicon_service_;
+  const raw_ptr<FaviconService> favicon_service_;
 
-  // A pre-populated list of icon types to consider when looking for large
-  // icons. This is an optimization over populating an icon type vector on each
-  // request.
-  std::vector<favicon_base::IconTypeSet> large_icon_types_;
+  const std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher_;
 
-  std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher_;
+  const int desired_size_in_pixel_for_server_requests_;
+
+  const favicon_base::IconType icon_type_for_server_requests_;
+
+  const std::string google_server_client_param_;
+
+  // URL of the Google favicon server (overridable by tests).
+  GURL server_url_;
 
   base::WeakPtrFactory<LargeIconServiceImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(LargeIconServiceImpl);
 };
 
 }  // namespace favicon

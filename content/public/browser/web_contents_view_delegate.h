@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,11 +22,25 @@ class RenderFrameHost;
 class RenderWidgetHost;
 class WebDragDestDelegate;
 struct ContextMenuParams;
+struct DropData;
 
 // This interface allows a client to extend the functionality of the
 // WebContentsView implementation.
 class CONTENT_EXPORT WebContentsViewDelegate {
  public:
+  enum class DropCompletionResult {
+    // The drag and drop operation can continue normally.
+    kContinue,
+
+    // The drag and drop should be aborted.  For example, the data in the
+    // drop does not comply with enterprise policies.
+    kAbort,
+  };
+
+  // Callback used with OnPerformDrop() method that is called once
+  // OnPerformDrop() completes.
+  using DropCompletionCallback = base::OnceCallback<void(DropCompletionResult)>;
+
   virtual ~WebContentsViewDelegate();
 
   // Returns the native window containing the WebContents, or nullptr if the
@@ -37,8 +51,20 @@ class CONTENT_EXPORT WebContentsViewDelegate {
   virtual WebDragDestDelegate* GetDragDestDelegate();
 
   // Shows a context menu.
-  virtual void ShowContextMenu(RenderFrameHost* render_frame_host,
+  //
+  // The `render_frame_host` represents the frame that requests the context menu
+  // (typically this frame is focused, but this is not necessarily the case -
+  // see https://crbug.com/1257907#c14).
+  virtual void ShowContextMenu(RenderFrameHost& render_frame_host,
                                const ContextMenuParams& params);
+
+  // Dismiss the context menu if one exists.
+  virtual void DismissContextMenu();
+
+  // Tests can use ExecuteCommandForTesting to simulate executing a context menu
+  // item (after first opening the context menu using the ShowContextMenu
+  // method).
+  virtual void ExecuteCommandForTesting(int command_id, int event_flags);
 
   // Store the current focused view and start tracking it.
   virtual void StoreFocus();
@@ -67,6 +93,11 @@ class CONTENT_EXPORT WebContentsViewDelegate {
       RenderWidgetHost* render_widget_host,
       bool is_popup);
 #endif
+
+  // Performs the actions needed for a drop and then calls the completion
+  // callback once done.
+  virtual void OnPerformDrop(const DropData& drop_data,
+                             DropCompletionCallback callback);
 };
 
 }  // namespace content

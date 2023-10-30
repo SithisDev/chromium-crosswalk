@@ -1,26 +1,22 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_FORM_MANAGER_FOR_UI_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_FORM_MANAGER_FOR_UI_H_
 
-#include <map>
+#include <string>
 #include <vector>
 
 #include "base/containers/span.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
+#include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
-
-namespace autofill {
-struct PasswordForm;
-}
 
 namespace password_manager {
 
-class FormFetcher;
 struct InteractionsStats;
+struct PasswordForm;
 class PasswordFormMetricsRecorder;
 
 // Interface that contains all methods from PasswordFormManager that are used in
@@ -29,41 +25,46 @@ class PasswordFormManagerForUI {
  public:
   virtual ~PasswordFormManagerForUI() = default;
 
-  // Returns origin of the initially observed form.
-  virtual const GURL& GetOrigin() const = 0;
+  // Returns URL of the initially observed form.
+  virtual const GURL& GetURL() const = 0;
 
   // Returns the best saved matches for the observed form.
-  // TODO(crbug.com/831123): it should return a vector.
-  virtual const std::map<base::string16, const autofill::PasswordForm*>&
-  GetBestMatches() const = 0;
+  virtual const std::vector<const PasswordForm*>& GetBestMatches() const = 0;
 
   // Returns the federated saved matches for the observed form.
   // TODO(crbug.com/831123): merge with GetBestMatches.
-  virtual std::vector<const autofill::PasswordForm*> GetFederatedMatches()
-      const = 0;
+  virtual std::vector<const PasswordForm*> GetFederatedMatches() const = 0;
 
   // Returns credentials that are ready to be written (saved or updated) to a
   // password store.
-  virtual const autofill::PasswordForm& GetPendingCredentials() const = 0;
+  virtual const PasswordForm& GetPendingCredentials() const = 0;
 
   // Returns who created this PasswordFormManager. The Credential Management API
   // uses a derived class of the PasswordFormManager that can indicate its
   // origin.
-  virtual metrics_util::CredentialSourceType GetCredentialSource() = 0;
+  virtual metrics_util::CredentialSourceType GetCredentialSource() const = 0;
 
   // Returns metric recorder which responsible for recording metrics for this
   // form.
   virtual PasswordFormMetricsRecorder* GetMetricsRecorder() = 0;
 
-  // Returns the blacklisted matches for the current page.
-  virtual base::span<const autofill::PasswordForm* const>
-  GetBlacklistedMatches() const = 0;
-
   // Statistics for recent password bubble usage.
   virtual base::span<const InteractionsStats> GetInteractionsStats() const = 0;
 
+  // List of insecure passwords for the current site.
+  virtual std::vector<const PasswordForm*> GetInsecureCredentials() const = 0;
+
   // Determines if the user opted to 'never remember' passwords for this form.
-  virtual bool IsBlacklisted() const = 0;
+  virtual bool IsBlocklisted() const = 0;
+
+  // Checks if the user unblocklisted the origin of the form for saving.
+  virtual bool WasUnblocklisted() const = 0;
+
+  // Determines whether the submitted credentials returned by
+  // GetPendingCredentials() can be moved to the signed in account store.
+  // Returns true if the submitted credentials are stored in the profile store
+  // and the current signed in user didn't block moving them.
+  virtual bool IsMovableToAccountStore() const = 0;
 
   // Handles save-as-new or update of the form managed by this manager.
   virtual void Save() = 0;
@@ -72,17 +73,19 @@ class PasswordFormManagerForUI {
   // password from the pending credentials. It modifies the pending credentials.
   // |credentials_to_update| should be one of the best matches or the pending
   // credentials.
-  virtual void Update(const autofill::PasswordForm& credentials_to_update) = 0;
+  virtual void Update(const PasswordForm& credentials_to_update) = 0;
 
   // Updates the username value. Called when user edits the username and clicks
   // the save button. Updates the username and modifies internal state
   // accordingly.
-  virtual void UpdateUsername(const base::string16& new_username) = 0;
+  virtual void OnUpdateUsernameFromPrompt(
+      const std::u16string& new_username) = 0;
 
   // Updates the password value. Called when user selects a password from the
   // password selection dropdown and clicks the save button. Updates the
   // password and modifies internal state accordingly.
-  virtual void UpdatePasswordValue(const base::string16& new_password) = 0;
+  virtual void OnUpdatePasswordFromPrompt(
+      const std::u16string& new_password) = 0;
 
   // Called when the user chose not to update password.
   virtual void OnNopeUpdateClicked() = 0;
@@ -95,69 +98,20 @@ class PasswordFormManagerForUI {
   virtual void OnNoInteraction(bool is_update) = 0;
 
   // A user opted to 'never remember' passwords for this form.
-  // Blacklist it so that from now on when it is seen we ignore it.
-  virtual void PermanentlyBlacklist() = 0;
+  // Blocklist it so that from now on when it is seen we ignore it.
+  virtual void Blocklist() = 0;
 
   // Called when the passwords were shown on on the bubble without obfuscation.
   virtual void OnPasswordsRevealed() = 0;
-};
 
-class PasswordManagerDriver;
+  // A user opted to move the credentials used for a successful login from the
+  // profile store to the account store.
+  virtual void MoveCredentialsToAccountStore() = 0;
 
-// This is a temporary class for unification of processing of old an new
-// PasswordFormManager in PasswordManager.
-// TODO(https://crbug.com/831123): Remove when the old PasswordFormManager is
-// gone.
-class PasswordFormManagerInterface : public PasswordFormManagerForUI {
- public:
-  // Returns whether it is a new (i.e. not saved yet) credentials.
-  virtual bool IsNewLogin() const = 0;
-
-  // Returns the form fetcher which is responsible for fetching saved matches
-  // from the store for the observed from.
-  virtual FormFetcher* GetFormFetcher() = 0;
-
-  // Returns true if the current pending credentials were found using
-  // origin matching of the public suffix, instead of the signon realm of the
-  // form.
-  virtual bool IsPendingCredentialsPublicSuffixMatch() const = 0;
-
-  // Called when generated password is accepted or changed by user.
-  virtual void PresaveGeneratedPassword(const autofill::PasswordForm& form) = 0;
-
-  // Called when user removed a generated password.
-  virtual void PasswordNoLongerGenerated() = 0;
-
-  // Returns if the password was generated.
-  virtual bool HasGeneratedPassword() const = 0;
-
-  // Called when the generation popup is shown. |is_manual_generation| true if
-  // the generation was initiated by the user. It is used for metrics and votes
-  // uploading.
-  // TODO(https://crbug.com/831123): Remove |generation_popup_was_shown| it is
-  // always true.
-  virtual void SetGenerationPopupWasShown(bool generation_popup_was_shown,
-                                          bool is_manual_generation) = 0;
-
-  // Called when the generation element with identifier |generation_element| is
-  // found on the page. It is used for metrics and votes uploading.
-  virtual void SetGenerationElement(
-      const base::string16& generation_element) = 0;
-
-  // True if we consider this form to be a change password form without username
-  // field. We use only client heuristics, so it could include signup forms.
-  virtual bool IsPossibleChangePasswordFormWithoutUsername() const = 0;
-
-  // Helper function that determines whether update or save prompt should be
-  // shown for credentials in |provisional_save_manager|.
-  virtual bool IsPasswordUpdate() const = 0;
-
-  // Returns the drivers representing all the frames for the form.
-  virtual std::vector<base::WeakPtr<PasswordManagerDriver>> GetDrivers()
-      const = 0;
-
-  // Returns the submitted form, if it exists, otherwise nullptr.
-  virtual const autofill::PasswordForm* GetSubmittedForm() const = 0;
+  // Suppresses future prompts for moving the submitted credentials returned by
+  // GetPendingCredentials() to the account store of the currently signed in
+  // user.
+  virtual void BlockMovingCredentialsToAccountStore() = 0;
 };
 
 }  // namespace  password_manager

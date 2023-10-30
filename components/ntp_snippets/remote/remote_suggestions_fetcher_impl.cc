@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/default_clock.h"
@@ -19,6 +20,7 @@
 #include "components/ntp_snippets/user_classifier.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/primary_account_access_token_fetcher.h"
+#include "components/signin/public/identity_manager/scope_set.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/url_util.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -131,16 +133,13 @@ int GetMinuteOfTheDay(bool local_time,
 // categories. If only a single category was requested, this function filters
 // all other categories out.
 void FilterCategories(FetchedCategoriesVector* categories,
-                      base::Optional<Category> exclusive_category) {
+                      absl::optional<Category> exclusive_category) {
   if (!exclusive_category.has_value()) {
     return;
   }
   Category exclusive = exclusive_category.value();
   auto category_it =
-      std::find_if(categories->begin(), categories->end(),
-                   [&exclusive](const FetchedCategory& c) -> bool {
-                     return c.category == exclusive;
-                   });
+      base::ranges::find(*categories, exclusive, &FetchedCategory::category);
   if (category_it == categories->end()) {
     categories->clear();
     return;
@@ -218,7 +217,7 @@ void RemoteSuggestionsFetcherImpl::FetchSnippets(
       .SetUserClassifier(*user_classifier_)
       .SetOptionalImagesCapability(true);
 
-  if (identity_manager_->HasPrimaryAccount()) {
+  if (identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSync)) {
     // Signed-in: get OAuth token --> fetch suggestions.
     pending_requests_.emplace(std::move(builder), std::move(wrapped_callback));
     StartTokenRequest();
@@ -257,7 +256,6 @@ void RemoteSuggestionsFetcherImpl::FetchSnippetsAuthenticated(
       fetch_url_, builder.is_interactive_request());
 
   builder.SetUrl(url).SetAuthentication(
-      identity_manager_->GetPrimaryAccountId(),
       base::StringPrintf(kAuthorizationRequestHeaderFormat,
                          oauth_access_token.c_str()));
   StartRequest(std::move(builder), std::move(callback),
@@ -283,7 +281,7 @@ void RemoteSuggestionsFetcherImpl::StartTokenRequest() {
   }
 
   base::Time token_start_time = clock_->Now();
-  identity::ScopeSet scopes{kContentSuggestionsApiScope};
+  signin::ScopeSet scopes{kContentSuggestionsApiScope};
   token_fetcher_ = std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
       "ntp_snippets", identity_manager_, scopes,
       base::BindOnce(&RemoteSuggestionsFetcherImpl::AccessTokenFetchFinished,
@@ -391,8 +389,9 @@ void RemoteSuggestionsFetcherImpl::FetchFinished(
   DCHECK(fetch_result == FetchResult::SUCCESS || !categories.has_value());
 
   if (fetch_result == FetchResult::HTTP_ERROR_UNAUTHORIZED) {
-    identity::ScopeSet scopes{kContentSuggestionsApiScope};
-    std::string account_id = identity_manager_->GetPrimaryAccountId();
+    signin::ScopeSet scopes{kContentSuggestionsApiScope};
+    CoreAccountId account_id =
+        identity_manager_->GetPrimaryAccountId(signin::ConsentLevel::kSync);
     identity_manager_->RemoveAccessTokenFromCache(account_id, scopes,
                                                   access_token);
   }

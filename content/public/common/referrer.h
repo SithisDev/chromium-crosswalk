@@ -1,15 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_COMMON_REFERRER_H_
 #define CONTENT_PUBLIC_COMMON_REFERRER_H_
 
-#include "base/logging.h"
 #include "content/common/content_export.h"
-#include "net/url_request/url_request.h"
+#include "net/url_request/referrer_policy.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
+#include "third_party/blink/public/mojom/loader/referrer.mojom-forward.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 
@@ -23,12 +24,16 @@ struct CONTENT_EXPORT Referrer {
   Referrer(const GURL& url, network::mojom::ReferrerPolicy policy)
       : url(url), policy(policy) {}
   Referrer() : policy(network::mojom::ReferrerPolicy::kDefault) {}
+  explicit Referrer(const blink::mojom::Referrer& referrer);
 
   GURL url;
   network::mojom::ReferrerPolicy policy;
 
   static Referrer SanitizeForRequest(const GURL& request,
                                      const Referrer& referrer);
+  static blink::mojom::ReferrerPtr SanitizeForRequest(
+      const GURL& request,
+      const blink::mojom::Referrer& referrer);
 
   // Returns |initiator| origin sanitized by |policy| so that it can be used
   // when requesting |request| URL.
@@ -42,16 +47,13 @@ struct CONTENT_EXPORT Referrer {
       const url::Origin& initiator,
       network::mojom::ReferrerPolicy policy);
 
-  static void SetReferrerForRequest(net::URLRequest* request,
-                                    const Referrer& referrer);
-
-  static net::URLRequest::ReferrerPolicy ReferrerPolicyForUrlRequest(
+  static net::ReferrerPolicy ReferrerPolicyForUrlRequest(
       network::mojom::ReferrerPolicy referrer_policy);
 
-  static network::mojom::ReferrerPolicy NetReferrerPolicyToBlinkReferrerPolicy(
-      net::URLRequest::ReferrerPolicy net_policy);
-
-  static net::URLRequest::ReferrerPolicy GetDefaultReferrerPolicy();
+  // Validates |policy| to make sure it represents one of the valid
+  // net::mojom::ReferrerPolicy enum values and returns it.  The relatively safe
+  // |kNever| value is returned if |policy| is not a valid value.
+  static network::mojom::ReferrerPolicy ConvertToPolicy(int32_t policy);
 };
 
 }  // namespace content

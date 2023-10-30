@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,15 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/suggestion_answer.h"
+#include "components/omnibox/browser/suggestion_group.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/metrics_proto/chrome_searchbox_stats.pb.h"
+#include "third_party/omnibox_proto/types.pb.h"
 #include "url/gurl.h"
 
 class AutocompleteInput;
@@ -31,8 +32,16 @@ namespace network {
 class SimpleURLLoader;
 }
 
+// Returns the omnibox::SuggestSubtype enum object corresponding to `value`.
+omnibox::SuggestSubtype SuggestSubtypeForNumber(int value);
+
 class SearchSuggestionParser {
  public:
+  // Disallow implicit constructors.
+  SearchSuggestionParser() = delete;
+  SearchSuggestionParser(const SearchSuggestionParser&) = delete;
+  SearchSuggestionParser& operator=(const SearchSuggestionParser&) = delete;
+
   // The Result classes are intermediate representations of AutocompleteMatches,
   // simply containing relevance-ranked search and navigation suggestions.
   // They may be cached to provide some synchronous matches while requests for
@@ -46,20 +55,20 @@ class SearchSuggestionParser {
            int relevance,
            bool relevance_from_server,
            AutocompleteMatchType::Type type,
-           int subtype_identifier,
+           std::vector<int> subtypes,
            const std::string& deletion_url);
     Result(const Result& other);
     virtual ~Result();
 
     bool from_keyword() const { return from_keyword_; }
 
-    const base::string16& match_contents() const { return match_contents_; }
+    const std::u16string& match_contents() const { return match_contents_; }
     const ACMatchClassifications& match_contents_class() const {
       return match_contents_class_;
     }
 
     AutocompleteMatchType::Type type() const { return type_; }
-    int subtype_identifier() const { return subtype_identifier_; }
+    const std::vector<int>& subtypes() const { return subtypes_; }
     int relevance() const { return relevance_; }
     void set_relevance(int relevance) { relevance_ = relevance; }
     bool received_after_last_keystroke() const {
@@ -86,7 +95,7 @@ class SearchSuggestionParser {
 
    protected:
     // The contents to be displayed and its style info.
-    base::string16 match_contents_;
+    std::u16string match_contents_;
     ACMatchClassifications match_contents_class_;
 
     // True if the result came from a keyword suggestion.
@@ -94,11 +103,8 @@ class SearchSuggestionParser {
 
     AutocompleteMatchType::Type type_;
 
-    // Used to identify the specific source / type for suggestions by the
-    // suggest server. See |result_subtype_identifier| in omnibox.proto for more
-    // details.
-    // The identifier 0 is reserved for cases where this specific type is unset.
-    int subtype_identifier_;
+    // Suggestion subtypes.
+    std::vector<int> subtypes_;
 
     // The relevance score.
     int relevance_;
@@ -124,19 +130,19 @@ class SearchSuggestionParser {
 
   class SuggestResult : public Result {
    public:
-    SuggestResult(const base::string16& suggestion,
+    SuggestResult(const std::u16string& suggestion,
                   AutocompleteMatchType::Type type,
-                  int subtype_identifier,
+                  std::vector<int> subtypes,
                   bool from_keyword,
                   int relevance,
                   bool relevance_from_server,
-                  const base::string16& input_text);
-    SuggestResult(const base::string16& suggestion,
+                  const std::u16string& input_text);
+    SuggestResult(const std::u16string& suggestion,
                   AutocompleteMatchType::Type type,
-                  int subtype_identifier,
-                  const base::string16& match_contents,
-                  const base::string16& match_contents_prefix,
-                  const base::string16& annotation,
+                  std::vector<int> subtypes,
+                  const std::u16string& match_contents,
+                  const std::u16string& match_contents_prefix,
+                  const std::u16string& annotation,
                   const std::string& additional_query_params,
                   const std::string& deletion_url,
                   const std::string& image_dominant_color,
@@ -145,37 +151,46 @@ class SearchSuggestionParser {
                   int relevance,
                   bool relevance_from_server,
                   bool should_prefetch,
-                  const base::string16& input_text);
+                  bool should_prerender,
+                  const std::u16string& input_text);
     SuggestResult(const SuggestResult& result);
     ~SuggestResult() override;
 
     SuggestResult& operator=(const SuggestResult& rhs);
 
-    const base::string16& suggestion() const { return suggestion_; }
-    const base::string16& match_contents_prefix() const {
+    const std::u16string& suggestion() const { return suggestion_; }
+    const std::u16string& match_contents_prefix() const {
       return match_contents_prefix_;
     }
-    const base::string16& annotation() const { return annotation_; }
+    const std::u16string& annotation() const { return annotation_; }
     const std::string& additional_query_params() const {
       return additional_query_params_;
     }
 
+    void set_suggestion_group_id(omnibox::GroupId suggestion_group_id) {
+      suggestion_group_id_ = suggestion_group_id;
+    }
+    absl::optional<omnibox::GroupId> suggestion_group_id() const {
+      return suggestion_group_id_;
+    }
+
     void SetAnswer(const SuggestionAnswer& answer);
-    const base::Optional<SuggestionAnswer>& answer() const { return answer_; }
+    const absl::optional<SuggestionAnswer>& answer() const { return answer_; }
 
     const std::string& image_dominant_color() const {
       return image_dominant_color_;
     }
-    const std::string& image_url() const { return image_url_; }
+    const GURL& image_url() const { return image_url_; }
 
     bool should_prefetch() const { return should_prefetch_; }
+    bool should_prerender() const { return should_prerender_; }
 
     // Fills in |match_contents_class_| to reflect how |match_contents_| should
     // be displayed and bolded against the current |input_text|.  If
     // |allow_bolding_all| is false and |match_contents_class_| would have all
     // of |match_contents_| bolded, do nothing.
     void ClassifyMatchContents(const bool allow_bolding_all,
-                               const base::string16& input_text);
+                               const std::u16string& input_text);
 
     // Result:
     int CalculateRelevance(const AutocompleteInput& input,
@@ -183,33 +198,45 @@ class SearchSuggestionParser {
 
    private:
     // The search terms to be used for this suggestion.
-    base::string16 suggestion_;
+    std::u16string suggestion_;
 
     // The contents to be displayed as prefix of match contents.
     // Used for tail suggestions to display a leading ellipsis (or some
     // equivalent character) to indicate omitted text.
     // Only used to pass this information to about:omnibox's "Additional Info".
-    base::string16 match_contents_prefix_;
+    std::u16string match_contents_prefix_;
 
     // Optional annotation for the |match_contents_| for disambiguation.
     // This may be displayed in the autocomplete match contents, but is defined
     // separately to facilitate different formatting.
-    base::string16 annotation_;
+    std::u16string annotation_;
 
     // Optional additional parameters to be added to the search URL.
     std::string additional_query_params_;
 
+    // The suggestion group ID based on the omnibox::GroupIds enum in
+    // suggestion_config.proto. Used to look up the suggestion group info this
+    // suggestion belong to such as the header text this suggestion must appear
+    // under.
+    // Note: Use omnibox::GroupId::INVALID in place of a missing suggestion
+    // group Id when this is to be converted to a primitive type.
+    absl::optional<omnibox::GroupId> suggestion_group_id_;
+
     // Optional short answer to the input that produced this suggestion.
-    base::Optional<SuggestionAnswer> answer_;
+    absl::optional<SuggestionAnswer> answer_;
 
     // Optional image information. Used for entity suggestions. The dominant
     // color can be used to paint the image placeholder while fetching the
     // image.
     std::string image_dominant_color_;
-    std::string image_url_;
+    GURL image_url_;
 
     // Should this result be prefetched?
     bool should_prefetch_;
+
+    // Should this result trigger Prerender2? See
+    // content/browser/preloading/prerender/README.md for more information.
+    bool should_prerender_;
   };
 
   class NavigationResult : public Result {
@@ -217,51 +244,53 @@ class SearchSuggestionParser {
     NavigationResult(const AutocompleteSchemeClassifier& scheme_classifier,
                      const GURL& url,
                      AutocompleteMatchType::Type type,
-                     int subtype_identifier,
-                     const base::string16& description,
+                     std::vector<int> subtypes,
+                     const std::u16string& description,
                      const std::string& deletion_url,
                      bool from_keyword,
                      int relevance,
                      bool relevance_from_server,
-                     const base::string16& input_text);
+                     const std::u16string& input_text);
     NavigationResult(const NavigationResult& other);
     ~NavigationResult() override;
 
     const GURL& url() const { return url_; }
-    const base::string16& description() const { return description_; }
+    const std::u16string& description() const { return description_; }
     const ACMatchClassifications& description_class() const {
       return description_class_;
     }
-    const base::string16& formatted_url() const { return formatted_url_; }
+    const std::u16string& formatted_url() const { return formatted_url_; }
 
     // Fills in |match_contents_| and |match_contents_class_| to reflect how
     // the URL should be displayed and bolded against the current |input_text|.
     // If |allow_bolding_nothing| is false and |match_contents_class_| would
     // result in an entirely unbolded |match_contents_|, do nothing.
     void CalculateAndClassifyMatchContents(const bool allow_bolding_nothing,
-                                           const base::string16& input_text);
+                                           const std::u16string& input_text);
 
     // Result:
     int CalculateRelevance(const AutocompleteInput& input,
                            bool keyword_provider_requested) const override;
 
    private:
-    void ClassifyDescription(const base::string16& input_text);
+    void ClassifyDescription(const std::u16string& input_text);
 
     // The suggested url for navigation.
     GURL url_;
 
     // The properly formatted ("fixed up") URL string with equivalent meaning
     // to the one in |url_|.
-    base::string16 formatted_url_;
+    std::u16string formatted_url_;
 
     // The suggested navigational result description; generally the site name.
-    base::string16 description_;
+    std::u16string description_;
     ACMatchClassifications description_class_;
   };
 
   typedef std::vector<SuggestResult> SuggestResults;
   typedef std::vector<NavigationResult> NavigationResults;
+  typedef std::vector<metrics::ChromeSearchboxStats::ExperimentStatsV2>
+      ExperimentStatsV2s;
 
   // A simple structure bundling most of the information (including
   // both SuggestResults and NavigationResults) returned by a call to
@@ -271,6 +300,8 @@ class SearchSuggestionParser {
   struct Results {
     Results();
     ~Results();
+    Results(const Results&) = delete;
+    Results& operator=(const Results&) = delete;
 
     // Clears |suggest_results| and |navigation_results| and resets
     // |verbatim_relevance| to -1 (implies unset).
@@ -302,11 +333,15 @@ class SearchSuggestionParser {
     // If the active suggest field trial (if any) has triggered.
     bool field_trial_triggered;
 
+    // The ExperimentStatsV2 containing GWS experiment details, if any. To be
+    // logged to SearchboxStats.
+    ExperimentStatsV2s experiment_stats_v2s;
+
     // If the relevance values of the results are from the server.
     bool relevances_from_server;
 
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Results);
+    // The server supplied map of suggestion group IDs to suggestion group info.
+    SuggestionGroupsMap suggestion_groups_map;
   };
 
   // Converts JSON loaded by a SimpleURLLoader into UTF-8 and returns the
@@ -314,6 +349,7 @@ class SearchSuggestionParser {
   //
   // |source| must be the SimpleURLLoader that loaded the data; it is used to
   // lookup the body's encoding from response headers.
+  // Note: It can be nullptr in tests.
   //
   // |response_body| must be the body of the response; it may be null.
   static std::string ExtractJsonData(
@@ -337,8 +373,6 @@ class SearchSuggestionParser {
       int default_result_relevance,
       bool is_keyword_result,
       Results* results);
-
-  DISALLOW_COPY_AND_ASSIGN(SearchSuggestionParser);
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_SEARCH_SUGGESTION_PARSER_H_

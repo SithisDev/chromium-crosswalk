@@ -1,11 +1,9 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/common/cursors/webcursor.h"
 
-#include "base/logging.h"
-#include "third_party/blink/public/platform/web_cursor_info.h"
 
 namespace content {
 
@@ -20,12 +18,6 @@ gfx::NativeCursor WebCursor::GetNativeCursor() {
 void WebCursor::SetDisplayInfo(const display::Display& display) {}
 #endif
 
-bool WebCursor::IsPlatformDataEqual(const WebCursor& other) const {
-  return true;
-}
-
 void WebCursor::CleanupPlatformData() {}
-
-void WebCursor::CopyPlatformData(const WebCursor& other) {}
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,15 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "components/storage_monitor/image_capture_device_manager.h"
 #include "components/storage_monitor/media_storage_util.h"
@@ -24,24 +26,24 @@ namespace storage_monitor {
 
 namespace {
 
-const char kDiskImageModelName[] = "Disk Image";
+const char16_t kDiskImageModelName[] = u"Disk Image";
 
-base::string16 GetUTF16FromDictionary(CFDictionaryRef dictionary,
+std::u16string GetUTF16FromDictionary(CFDictionaryRef dictionary,
                                       CFStringRef key) {
   CFStringRef value =
       base::mac::GetValueFromDictionary<CFStringRef>(dictionary, key);
   if (!value)
-    return base::string16();
+    return std::u16string();
   return base::SysCFStringRefToUTF16(value);
 }
 
-base::string16 JoinName(const base::string16& name,
-                        const base::string16& addition) {
+std::u16string JoinName(const std::u16string& name,
+                        const std::u16string& addition) {
   if (addition.empty())
     return name;
   if (name.empty())
     return addition;
-  return name + static_cast<base::char16>(' ') + addition;
+  return name + u' ' + addition;
 }
 
 StorageInfo::Type GetDeviceType(bool is_removable, bool has_dcim) {
@@ -73,12 +75,12 @@ StorageInfo BuildStorageInfo(
   if (size_number)
     CFNumberGetValue(size_number, kCFNumberLongLongType, &size_in_bytes);
 
-  base::string16 vendor = GetUTF16FromDictionary(
-      dict, kDADiskDescriptionDeviceVendorKey);
-  base::string16 model = GetUTF16FromDictionary(
-      dict, kDADiskDescriptionDeviceModelKey);
-  base::string16 label = GetUTF16FromDictionary(
-      dict, kDADiskDescriptionVolumeNameKey);
+  std::u16string vendor =
+      GetUTF16FromDictionary(dict, kDADiskDescriptionDeviceVendorKey);
+  std::u16string model =
+      GetUTF16FromDictionary(dict, kDADiskDescriptionDeviceModelKey);
+  std::u16string label =
+      GetUTF16FromDictionary(dict, kDADiskDescriptionVolumeNameKey);
 
   CFUUIDRef uuid = base::mac::GetValueFromDictionary<CFUUIDRef>(
       dict, kDADiskDescriptionVolumeUUIDKey);
@@ -90,9 +92,9 @@ StorageInfo BuildStorageInfo(
       unique_id = base::SysCFStringRefToUTF8(uuid_string);
   }
   if (unique_id.empty()) {
-    base::string16 revision = GetUTF16FromDictionary(
-        dict, kDADiskDescriptionDeviceRevisionKey);
-    base::string16 unique_id2 = vendor;
+    std::u16string revision =
+        GetUTF16FromDictionary(dict, kDADiskDescriptionDeviceRevisionKey);
+    std::u16string unique_id2 = vendor;
     unique_id2 = JoinName(unique_id2, model);
     unique_id2 = JoinName(unique_id2, revision);
     unique_id = base::UTF16ToUTF8(unique_id2);
@@ -115,7 +117,7 @@ StorageInfo BuildStorageInfo(
 
 struct EjectDiskOptions {
   std::string bsd_name;
-  base::Callback<void(StorageMonitor::EjectStatus)> callback;
+  base::OnceCallback<void(StorageMonitor::EjectStatus)> callback;
   base::ScopedCFTypeRef<DADiskRef> disk;
 };
 
@@ -125,11 +127,11 @@ void PostEjectCallback(DADiskRef disk,
   std::unique_ptr<EjectDiskOptions> options_deleter(
       static_cast<EjectDiskOptions*>(context));
   if (dissenter) {
-    options_deleter->callback.Run(StorageMonitor::EJECT_IN_USE);
+    std::move(options_deleter->callback).Run(StorageMonitor::EJECT_IN_USE);
     return;
   }
 
-  options_deleter->callback.Run(StorageMonitor::EJECT_OK);
+  std::move(options_deleter->callback).Run(StorageMonitor::EJECT_OK);
 }
 
 void PostUnmountCallback(DADiskRef disk,
@@ -138,7 +140,7 @@ void PostUnmountCallback(DADiskRef disk,
   std::unique_ptr<EjectDiskOptions> options_deleter(
       static_cast<EjectDiskOptions*>(context));
   if (dissenter) {
-    options_deleter->callback.Run(StorageMonitor::EJECT_IN_USE);
+    std::move(options_deleter->callback).Run(StorageMonitor::EJECT_IN_USE);
     return;
   }
 
@@ -188,7 +190,7 @@ void StorageMonitorMac::Init() {
   DASessionScheduleWithRunLoop(
       session_, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
 
-  image_capture_device_manager_.reset(new ImageCaptureDeviceManager);
+  image_capture_device_manager_ = std::make_unique<ImageCaptureDeviceManager>();
   image_capture_device_manager_->SetNotifications(receiver());
 }
 
@@ -257,18 +259,18 @@ bool StorageMonitorMac::GetStorageInfoForPath(const base::FilePath& path,
 }
 
 void StorageMonitorMac::EjectDevice(
-      const std::string& device_id,
-      base::Callback<void(EjectStatus)> callback) {
+    const std::string& device_id,
+    base::OnceCallback<void(EjectStatus)> callback) {
   StorageInfo::Type type;
   std::string uuid;
   if (!StorageInfo::CrackDeviceId(device_id, &type, &uuid)) {
-    callback.Run(EJECT_FAILURE);
+    std::move(callback).Run(EJECT_FAILURE);
     return;
   }
 
   if (type == StorageInfo::MAC_IMAGE_CAPTURE &&
       image_capture_device_manager_.get()) {
-    image_capture_device_manager_->EjectDevice(uuid, callback);
+    image_capture_device_manager_->EjectDevice(uuid, std::move(callback));
     return;
   }
 
@@ -283,7 +285,7 @@ void StorageMonitorMac::EjectDevice(
   }
 
   if (bsd_name.empty()) {
-    callback.Run(EJECT_NO_SUCH_DEVICE);
+    std::move(callback).Run(EJECT_NO_SUCH_DEVICE);
     return;
   }
 
@@ -292,22 +294,22 @@ void StorageMonitorMac::EjectDevice(
   base::ScopedCFTypeRef<DADiskRef> disk(
       DADiskCreateFromBSDName(NULL, session_, bsd_name.c_str()));
   if (!disk.get()) {
-    callback.Run(StorageMonitor::EJECT_FAILURE);
+    std::move(callback).Run(StorageMonitor::EJECT_FAILURE);
     return;
   }
   // Get the reference to the full disk for ejecting.
   disk.reset(DADiskCopyWholeDisk(disk));
   if (!disk.get()) {
-    callback.Run(StorageMonitor::EJECT_FAILURE);
+    std::move(callback).Run(StorageMonitor::EJECT_FAILURE);
     return;
   }
 
   EjectDiskOptions* options = new EjectDiskOptions;
   options->bsd_name = bsd_name;
-  options->callback = callback;
+  options->callback = std::move(callback);
   options->disk = std::move(disk);
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           base::BindOnce(EjectDisk, options));
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(EjectDisk, options));
 }
 
 // static
@@ -339,7 +341,7 @@ void StorageMonitorMac::GetDiskInfoAndUpdate(
 
   base::ScopedCFTypeRef<CFDictionaryRef> dict(DADiskCopyDescription(disk));
   std::string* bsd_name = new std::string;
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&BuildStorageInfo, dict, bsd_name),
       base::BindOnce(&StorageMonitorMac::UpdateDisk, AsWeakPtr(), update_type,
@@ -351,9 +353,8 @@ bool StorageMonitorMac::ShouldPostNotificationForDisk(
     const StorageInfo& info) const {
   // Only post notifications about disks that have no empty fields and
   // are removable. Also exclude disk images (DMGs).
-  return !info.device_id().empty() &&
-         !info.location().empty() &&
-         info.model_name() != base::ASCIIToUTF16(kDiskImageModelName) &&
+  return !info.device_id().empty() && !info.location().empty() &&
+         info.model_name() != kDiskImageModelName &&
          StorageInfo::IsMassStorageDevice(info.device_id());
 }
 

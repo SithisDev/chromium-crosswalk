@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,27 +8,16 @@
 #include <map>
 
 #include "base/memory/ref_counted.h"
-#include "base/time/time.h"
+#include "base/observer_list.h"
+#include "content/browser/web_package/prefetched_signed_exchange_cache_entry.h"
 #include "content/common/content_export.h"
-#include "content/common/prefetched_signed_exchange_info.h"
 #include "net/base/hash_value.h"
-#include "services/network/public/cpp/resource_response.h"
-#include "services/network/public/cpp/url_loader_completion_status.h"
-#include "storage/browser/blob/blob_data_handle.h"
+#include "third_party/blink/public/mojom/navigation/prefetched_signed_exchange_info.mojom.h"
 #include "url/gurl.h"
 
 namespace net {
-struct SHA256HashValue;
-}  // namespace net
-
-namespace network {
-struct ResourceResponseHead;
-struct URLLoaderCompletionStatus;
-}  // namespace network
-
-namespace storage {
-class BlobDataHandle;
-}  // namespace storage
+class IsolationInfo;
+}
 
 namespace content {
 
@@ -39,78 +28,47 @@ class NavigationLoaderInterceptor;
 class CONTENT_EXPORT PrefetchedSignedExchangeCache
     : public base::RefCountedThreadSafe<PrefetchedSignedExchangeCache> {
  public:
-  class CONTENT_EXPORT Entry {
+  // A test observer to monitor the cache entry.
+  class TestObserver : public base::CheckedObserver {
    public:
-    Entry();
-    ~Entry();
-
-    const GURL& outer_url() const { return outer_url_; }
-    const std::unique_ptr<const network::ResourceResponseHead>& outer_response()
-        const {
-      return outer_response_;
-    }
-    const std::unique_ptr<const net::SHA256HashValue>& header_integrity()
-        const {
-      return header_integrity_;
-    }
-    const GURL& inner_url() const { return inner_url_; }
-    const std::unique_ptr<const network::ResourceResponseHead>& inner_response()
-        const {
-      return inner_response_;
-    }
-    const std::unique_ptr<const network::URLLoaderCompletionStatus>&
-    completion_status() const {
-      return completion_status_;
-    }
-    const std::unique_ptr<const storage::BlobDataHandle>& blob_data_handle()
-        const {
-      return blob_data_handle_;
-    }
-    base::Time signature_expire_time() const { return signature_expire_time_; }
-
-    void SetOuterUrl(const GURL& outer_url);
-    void SetOuterResponse(
-        std::unique_ptr<const network::ResourceResponseHead> outer_response);
-    void SetHeaderIntegrity(
-        std::unique_ptr<const net::SHA256HashValue> header_integrity);
-    void SetInnerUrl(const GURL& inner_url);
-    void SetInnerResponse(
-        std::unique_ptr<const network::ResourceResponseHead> inner_response);
-    void SetCompletionStatus(
-        std::unique_ptr<const network::URLLoaderCompletionStatus>
-            completion_status);
-    void SetBlobDataHandle(
-        std::unique_ptr<const storage::BlobDataHandle> blob_data_handle);
-    void SetSignatureExpireTime(const base::Time& signature_expire_time);
-
-    std::unique_ptr<const Entry> Clone() const;
-
-   private:
-    GURL outer_url_;
-    std::unique_ptr<const network::ResourceResponseHead> outer_response_;
-    std::unique_ptr<const net::SHA256HashValue> header_integrity_;
-    GURL inner_url_;
-    std::unique_ptr<const network::ResourceResponseHead> inner_response_;
-    std::unique_ptr<const network::URLLoaderCompletionStatus>
-        completion_status_;
-    std::unique_ptr<const storage::BlobDataHandle> blob_data_handle_;
-    base::Time signature_expire_time_;
-
-    DISALLOW_COPY_AND_ASSIGN(Entry);
+    virtual void OnStored(PrefetchedSignedExchangeCache* cache,
+                          const GURL& outer_url) = 0;
   };
 
-  using EntryMap = std::map<GURL /* outer_url */, std::unique_ptr<const Entry>>;
+  using EntryMap =
+      std::map<GURL /* outer_url */,
+               std::unique_ptr<const PrefetchedSignedExchangeCacheEntry>>;
 
   PrefetchedSignedExchangeCache();
 
-  void Store(std::unique_ptr<const Entry> cached_exchange);
+  PrefetchedSignedExchangeCache(const PrefetchedSignedExchangeCache&) = delete;
+  PrefetchedSignedExchangeCache& operator=(
+      const PrefetchedSignedExchangeCache&) = delete;
 
+  void Store(std::unique_ptr<const PrefetchedSignedExchangeCacheEntry>
+                 cached_exchange);
+
+  void Clear();
+
+  // If there is a matching entry for |outer_url| in the cache, returns a
+  // NavigationLoaderInterceptor which will load the entry. Otherwise, returns
+  // null.
+  // |frame_tree_node_id| is used to send a NEL report when there is a mismatch
+  // between the 'header-integrity' value of 'allowed-alt-sxg' link header of
+  // the cached main resource and the header integrity value of the cached
+  // subresource.
   std::unique_ptr<NavigationLoaderInterceptor> MaybeCreateInterceptor(
-      const GURL& outer_url);
+      const GURL& outer_url,
+      int frame_tree_node_id,
+      const net::IsolationInfo& isolation_info);
 
   const EntryMap& GetExchanges();
 
   void RecordHistograms();
+
+  // Adds/removes test observers.
+  void AddObserverForTesting(TestObserver* observer);
+  void RemoveObserverForTesting(const TestObserver* observer);
 
  private:
   friend class base::RefCountedThreadSafe<PrefetchedSignedExchangeCache>;
@@ -122,13 +80,16 @@ class CONTENT_EXPORT PrefetchedSignedExchangeCache
   // |main_exchange|'s inner response and which outer URL's origin is same as
   // the origin of |main_exchange|'s outer URL. Note that this method erases
   // expired entries in |exchanges_|.
-  std::vector<PrefetchedSignedExchangeInfo> GetInfoListForNavigation(
-      const Entry& main_exchange,
-      const base::Time& now);
+  std::vector<blink::mojom::PrefetchedSignedExchangeInfoPtr>
+  GetInfoListForNavigation(
+      const PrefetchedSignedExchangeCacheEntry& main_exchange,
+      const base::Time& now,
+      int frame_tree_node_id,
+      const net::NetworkAnonymizationKey& network_anonymization_key);
 
   EntryMap exchanges_;
 
-  DISALLOW_COPY_AND_ASSIGN(PrefetchedSignedExchangeCache);
+  base::ObserverList<TestObserver> test_observers_;
 };
 
 }  // namespace content

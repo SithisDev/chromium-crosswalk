@@ -1,12 +1,15 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/cast_channel/cast_socket_service.h"
 
+#include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
-#include "base/task/post_task.h"
+#include "base/observer_list.h"
+#include "base/ranges/algorithm.h"
 #include "components/cast_channel/cast_socket.h"
+#include "components/cast_channel/libcast_socket_service.h"
 #include "components/cast_channel/logger.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -15,7 +18,17 @@ using content::BrowserThread;
 
 namespace cast_channel {
 
-int CastSocketService::last_channel_id_ = 0;
+const base::Feature kLibcastSocketService{"LibcastSocketService",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
+
+// static
+CastSocketService* CastSocketService::GetInstance() {
+  static CastSocketService* service =
+      base::FeatureList::IsEnabled(kLibcastSocketService)
+          ? static_cast<CastSocketService*>(new LibcastSocketService())
+          : static_cast<CastSocketService*>(new CastSocketServiceImpl());
+  return service;
+}
 
 CastSocketService::CastSocketService()
     : logger_(new Logger()),
@@ -23,23 +36,19 @@ CastSocketService::CastSocketService()
       // (1) ChromeURLRequestContextGetter::GetURLRequestContext, which is
       // called by CastMediaSinkServiceImpl, must run on IO thread. (2) Parts of
       // CastChannel extension API functions run on IO thread.
-      task_runner_(base::CreateSingleThreadTaskRunnerWithTraits(
-          {content::BrowserThread::IO})) {}
+      task_runner_(content::GetIOThreadTaskRunner({})) {}
 
-// This is a leaky singleton and the dtor won't be called.
 CastSocketService::~CastSocketService() = default;
 
-// static
-CastSocketService* CastSocketService::GetInstance() {
-  static CastSocketService* instance = new CastSocketService();
-  return instance;
-}
+int CastSocketServiceImpl::last_channel_id_ = 0;
 
-scoped_refptr<Logger> CastSocketService::GetLogger() {
-  return logger_;
-}
+CastSocketServiceImpl::CastSocketServiceImpl() = default;
 
-CastSocket* CastSocketService::AddSocket(std::unique_ptr<CastSocket> socket) {
+// This is a leaky singleton and the dtor won't be called.
+CastSocketServiceImpl::~CastSocketServiceImpl() = default;
+
+CastSocket* CastSocketServiceImpl::AddSocket(
+    std::unique_ptr<CastSocket> socket) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(socket);
   int id = ++last_channel_id_;
@@ -50,7 +59,8 @@ CastSocket* CastSocketService::AddSocket(std::unique_ptr<CastSocket> socket) {
   return socket_ptr;
 }
 
-std::unique_ptr<CastSocket> CastSocketService::RemoveSocket(int channel_id) {
+std::unique_ptr<CastSocket> CastSocketServiceImpl::RemoveSocket(
+    int channel_id) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(channel_id > 0);
   auto socket_it = sockets_.find(channel_id);
@@ -63,28 +73,36 @@ std::unique_ptr<CastSocket> CastSocketService::RemoveSocket(int channel_id) {
   return socket;
 }
 
-CastSocket* CastSocketService::GetSocket(int channel_id) const {
+void CastSocketService::CloseSocket(int channel_id) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  auto* socket = GetSocket(channel_id);
+  if (socket) {
+    socket->Close(base::BindOnce([](int x) {}));
+    RemoveSocket(socket->id());
+  }
+}
+
+CastSocket* CastSocketServiceImpl::GetSocket(int channel_id) const {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(channel_id > 0);
   const auto& socket_it = sockets_.find(channel_id);
   return socket_it == sockets_.end() ? nullptr : socket_it->second.get();
 }
 
-CastSocket* CastSocketService::GetSocket(
+CastSocket* CastSocketServiceImpl::GetSocket(
     const net::IPEndPoint& ip_endpoint) const {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  auto it = std::find_if(
-      sockets_.begin(), sockets_.end(),
-      [&ip_endpoint](
-          const std::pair<const int, std::unique_ptr<CastSocket>>& pair) {
-        return pair.second->ip_endpoint() == ip_endpoint;
-      });
+  auto it = base::ranges::find(sockets_, ip_endpoint,
+                               [](const Sockets::value_type& pair) {
+                                 return pair.second->ip_endpoint();
+                               });
   return it == sockets_.end() ? nullptr : it->second.get();
 }
 
-void CastSocketService::OpenSocket(NetworkContextGetter network_context_getter,
-                                   const CastSocketOpenParams& open_params,
-                                   CastSocket::OnOpenCallback open_cb) {
+void CastSocketServiceImpl::OpenSocket(
+    NetworkContextGetter network_context_getter,
+    const CastSocketOpenParams& open_params,
+    CastSocket::OnOpenCallback open_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   const net::IPEndPoint& ip_endpoint = open_params.ip_endpoint;
@@ -105,7 +123,7 @@ void CastSocketService::OpenSocket(NetworkContextGetter network_context_getter,
   socket->Connect(std::move(open_cb));
 }
 
-void CastSocketService::AddObserver(CastSocket::Observer* observer) {
+void CastSocketServiceImpl::AddObserver(CastSocket::Observer* observer) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(observer);
   if (observers_.HasObserver(observer))
@@ -116,18 +134,13 @@ void CastSocketService::AddObserver(CastSocket::Observer* observer) {
     socket_it.second->AddObserver(observer);
 }
 
-void CastSocketService::RemoveObserver(CastSocket::Observer* observer) {
+void CastSocketServiceImpl::RemoveObserver(CastSocket::Observer* observer) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(observer);
 
   for (auto& socket_it : sockets_)
     socket_it.second->RemoveObserver(observer);
   observers_.RemoveObserver(observer);
-}
-
-void CastSocketService::SetSocketForTest(
-    std::unique_ptr<cast_channel::CastSocket> socket_for_test) {
-  socket_for_test_ = std::move(socket_for_test);
 }
 
 }  // namespace cast_channel

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,16 @@
 #include <string>
 
 #include "base/run_loop.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/public/browser/content_index_provider.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/origin.h"
 
@@ -24,6 +27,8 @@ using ::testing::_;
 
 class MockContentIndexProvider : public ContentIndexProvider {
  public:
+  MOCK_METHOD1(GetIconSizes,
+               std::vector<gfx::Size>(blink::mojom::ContentCategory));
   MOCK_METHOD1(OnContentAdded, void(ContentIndexEntry entry));
   MOCK_METHOD3(OnContentDeleted,
                void(int64_t service_Worker_registration_id,
@@ -92,10 +97,11 @@ void GetDescriptionsCallback(
   std::move(quit_closure).Run();
 }
 
-SkBitmap CreateTestIcon() {
-  SkBitmap icon;
-  icon.allocN32Pixels(42, 42);
-  return icon;
+std::vector<SkBitmap> CreateTestIcons() {
+  std::vector<SkBitmap> icons(2);
+  icons[0].allocN32Pixels(42, 42);
+  icons[1].allocN32Pixels(24, 24);
+  return icons;
 }
 
 }  // namespace
@@ -103,14 +109,17 @@ SkBitmap CreateTestIcon() {
 class ContentIndexDatabaseTest : public ::testing::Test {
  public:
   ContentIndexDatabaseTest()
-      : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP),
+      : task_environment_(BrowserTaskEnvironment::IO_MAINLOOP),
         embedded_worker_test_helper_(base::FilePath() /* in memory */) {}
+
+  ContentIndexDatabaseTest(const ContentIndexDatabaseTest&) = delete;
+  ContentIndexDatabaseTest& operator=(const ContentIndexDatabaseTest&) = delete;
 
   ~ContentIndexDatabaseTest() override = default;
 
   void SetUp() override {
     // Register Service Worker.
-    service_worker_registration_id_ = RegisterServiceWorker();
+    service_worker_registration_id_ = RegisterServiceWorker(origin_);
     ASSERT_NE(service_worker_registration_id_,
               blink::mojom::kInvalidServiceWorkerRegistrationId);
     database_ = std::make_unique<ContentIndexDatabase>(
@@ -118,18 +127,27 @@ class ContentIndexDatabaseTest : public ::testing::Test {
   }
 
   blink::mojom::ContentDescriptionPtr CreateDescription(const std::string& id) {
+    auto icon_definition = blink::mojom::ContentIconDefinition::New();
+    icon_definition->src = "https://example.com/image.png";
+    icon_definition->type = "image/png";
+
+    std::vector<blink::mojom::ContentIconDefinitionPtr> icons;
+    icons.push_back(std::move(icon_definition));
+
     return blink::mojom::ContentDescription::New(
         id, "title", "description", blink::mojom::ContentCategory::HOME_PAGE,
-        "https://example.com", "https://example.com");
+        std::move(icons), "https://example.com");
   }
 
   blink::mojom::ContentIndexError AddEntry(
-      blink::mojom::ContentDescriptionPtr description) {
+      blink::mojom::ContentDescriptionPtr description,
+      std::vector<SkBitmap> icons = CreateTestIcons()) {
     base::RunLoop run_loop;
     blink::mojom::ContentIndexError error;
     database_->AddEntry(
-        service_worker_registration_id_, origin_, std::move(description),
-        CreateTestIcon(), launch_url(),
+        service_worker_registration_id_, origin_,
+        /* is_top_level_context= */ true, std::move(description),
+        std::move(icons), launch_url(),
         base::BindOnce(&DatabaseErrorCallback, run_loop.QuitClosure(), &error));
     run_loop.Run();
 
@@ -152,23 +170,24 @@ class ContentIndexDatabaseTest : public ::testing::Test {
     base::RunLoop run_loop;
     std::vector<blink::mojom::ContentDescriptionPtr> descriptions;
     database_->GetDescriptions(
-        service_worker_registration_id_,
+        service_worker_registration_id_, origin_,
         base::BindOnce(&GetDescriptionsCallback, run_loop.QuitClosure(),
                        out_error, &descriptions));
     run_loop.Run();
     return descriptions;
   }
 
-  SkBitmap GetIcon(const std::string& id) {
+  std::vector<SkBitmap> GetIcons(const std::string& id) {
     base::RunLoop run_loop;
-    SkBitmap out_icon;
-    database_->GetIcon(service_worker_registration_id_, id,
-                       base::BindLambdaForTesting([&](SkBitmap icon) {
-                         out_icon = std::move(icon);
-                         run_loop.Quit();
-                       }));
+    std::vector<SkBitmap> out_icons;
+    database_->GetIcons(
+        service_worker_registration_id_, id,
+        base::BindLambdaForTesting([&](std::vector<SkBitmap> icons) {
+          out_icons = std::move(icons);
+          run_loop.Quit();
+        }));
     run_loop.Run();
-    return out_icon;
+    return out_icons;
   }
 
   std::vector<ContentIndexEntry> GetAllEntries() {
@@ -191,7 +210,7 @@ class ContentIndexDatabaseTest : public ::testing::Test {
     std::unique_ptr<ContentIndexEntry> out_entry;
     database_->GetEntry(service_worker_registration_id_, description_id,
                         base::BindLambdaForTesting(
-                            [&](base::Optional<ContentIndexEntry> entry) {
+                            [&](absl::optional<ContentIndexEntry> entry) {
                               if (entry)
                                 out_entry = std::make_unique<ContentIndexEntry>(
                                     std::move(*entry));
@@ -209,29 +228,37 @@ class ContentIndexDatabaseTest : public ::testing::Test {
     return service_worker_registration_id_;
   }
 
+  void set_service_worker_registration_id(
+      int64_t service_worker_registration_id) {
+    service_worker_registration_id_ = service_worker_registration_id;
+  }
+
   ContentIndexDatabase* database() { return database_.get(); }
 
-  TestBrowserThreadBundle& thread_bundle() { return thread_bundle_; }
+  BrowserTaskEnvironment& task_environment() { return task_environment_; }
 
   const url::Origin& origin() { return origin_; }
 
   GURL launch_url() { return origin_.GetURL(); }
 
- private:
-  int64_t RegisterServiceWorker() {
-    GURL script_url(origin_.GetURL().spec() + "sw.js");
+  int64_t RegisterServiceWorker(const url::Origin& origin) {
+    GURL script_url(origin.GetURL().spec() + "sw.js");
     int64_t service_worker_registration_id =
         blink::mojom::kInvalidServiceWorkerRegistrationId;
 
     {
       blink::mojom::ServiceWorkerRegistrationOptions options;
-      options.scope = origin_.GetURL();
+      options.scope = origin.GetURL();
+      blink::StorageKey key(origin);
       base::RunLoop run_loop;
       embedded_worker_test_helper_.context()->RegisterServiceWorker(
-          script_url, options,
+          script_url, key, options,
+          blink::mojom::FetchClientSettingsObject::New(),
           base::BindOnce(&DidRegisterServiceWorker,
                          &service_worker_registration_id,
-                         run_loop.QuitClosure()));
+                         run_loop.QuitClosure()),
+          /*requesting_frame_id=*/GlobalRenderFrameHostId(),
+          PolicyContainerPolicies());
 
       run_loop.Run();
     }
@@ -244,8 +271,8 @@ class ContentIndexDatabaseTest : public ::testing::Test {
 
     {
       base::RunLoop run_loop;
-      embedded_worker_test_helper_.context()->storage()->FindRegistrationForId(
-          service_worker_registration_id, origin_.GetURL(),
+      embedded_worker_test_helper_.context()->registry()->FindRegistrationForId(
+          service_worker_registration_id, blink::StorageKey(origin),
           base::BindOnce(&DidFindServiceWorkerRegistration,
                          &service_worker_registration_,
                          run_loop.QuitClosure()));
@@ -263,7 +290,8 @@ class ContentIndexDatabaseTest : public ::testing::Test {
     return service_worker_registration_id;
   }
 
-  TestBrowserThreadBundle thread_bundle_;  // Must be first member.
+ private:
+  BrowserTaskEnvironment task_environment_;  // Must be first member.
   ContentIndexTestBrowserContext browser_context_;
   url::Origin origin_ = url::Origin::Create(GURL("https://example.com"));
   int64_t service_worker_registration_id_ =
@@ -271,8 +299,6 @@ class ContentIndexDatabaseTest : public ::testing::Test {
   EmbeddedWorkerTestHelper embedded_worker_test_helper_;
   scoped_refptr<ServiceWorkerRegistration> service_worker_registration_;
   std::unique_ptr<ContentIndexDatabase> database_;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentIndexDatabaseTest);
 };
 
 TEST_F(ContentIndexDatabaseTest, DatabaseOperations) {
@@ -299,6 +325,24 @@ TEST_F(ContentIndexDatabaseTest, DatabaseOperations) {
   ASSERT_EQ(descriptions.size(), 1u);
   auto expected_description = CreateDescription("id1");
   EXPECT_TRUE(descriptions[0]->Equals(*expected_description));
+}
+
+TEST_F(ContentIndexDatabaseTest, DatabaseOperationsBadSWID) {
+  url::Origin other_origin = url::Origin::Create(GURL("https://other.com"));
+  int64_t other_service_worker_registration_id =
+      RegisterServiceWorker(other_origin);
+  ASSERT_NE(other_service_worker_registration_id,
+            blink::mojom::kInvalidServiceWorkerRegistrationId);
+  set_service_worker_registration_id(other_service_worker_registration_id);
+
+  blink::mojom::ContentIndexError error;
+  auto descriptions = GetDescriptions(&error);
+  EXPECT_TRUE(descriptions.empty());
+  EXPECT_EQ(error, blink::mojom::ContentIndexError::STORAGE_ERROR);
+
+  EXPECT_EQ(AddEntry(CreateDescription("id1")),
+            blink::mojom::ContentIndexError::STORAGE_ERROR);
+  EXPECT_EQ(DeleteEntry("id2"), blink::mojom::ContentIndexError::STORAGE_ERROR);
 }
 
 TEST_F(ContentIndexDatabaseTest, AddDuplicateIdWillOverwrite) {
@@ -336,7 +380,7 @@ TEST_F(ContentIndexDatabaseTest, ProviderUpdated) {
               blink::mojom::ContentIndexError::NONE);
 
     // Wait for the provider to receive the OnContentAdded event.
-    thread_bundle().RunUntilIdle();
+    task_environment().RunUntilIdle();
 
     ASSERT_TRUE(out_entry);
     ASSERT_TRUE(out_entry->description);
@@ -351,24 +395,44 @@ TEST_F(ContentIndexDatabaseTest, ProviderUpdated) {
     EXPECT_CALL(*provider(), OnContentDeleted(service_worker_registration_id(),
                                               origin(), "id"));
     EXPECT_EQ(DeleteEntry("id"), blink::mojom::ContentIndexError::NONE);
-    thread_bundle().RunUntilIdle();
+    task_environment().RunUntilIdle();
   }
 }
 
 TEST_F(ContentIndexDatabaseTest, IconLifetimeTiedToEntry) {
   // Initially we don't have an icon.
-  EXPECT_TRUE(GetIcon("id").isNull());
+  EXPECT_TRUE(GetIcons("id").empty());
 
   EXPECT_EQ(AddEntry(CreateDescription("id")),
             blink::mojom::ContentIndexError::NONE);
-  SkBitmap icon = GetIcon("id");
-  EXPECT_FALSE(icon.isNull());
-  EXPECT_FALSE(icon.drawsNothing());
-  EXPECT_EQ(icon.width(), 42);
-  EXPECT_EQ(icon.height(), 42);
+  auto icons = GetIcons("id");
+  ASSERT_EQ(icons.size(), 2u);
+  if (icons[0].width() > icons[1].width())
+    std::swap(icons[0], icons[1]);
+
+  EXPECT_FALSE(icons[0].isNull());
+  EXPECT_FALSE(icons[0].drawsNothing());
+  EXPECT_EQ(icons[0].width(), 24);
+  EXPECT_EQ(icons[0].height(), 24);
+  EXPECT_FALSE(icons[1].isNull());
+  EXPECT_FALSE(icons[1].drawsNothing());
+  EXPECT_EQ(icons[1].width(), 42);
+  EXPECT_EQ(icons[1].height(), 42);
 
   EXPECT_EQ(DeleteEntry("id"), blink::mojom::ContentIndexError::NONE);
-  EXPECT_TRUE(GetIcon("id").isNull());
+  EXPECT_TRUE(GetIcons("id").empty());
+}
+
+TEST_F(ContentIndexDatabaseTest, NoIconsAreSupported) {
+  // Initially we don't have an icon.
+  EXPECT_TRUE(GetIcons("id").empty());
+
+  // Create an entry with no icons.
+  EXPECT_EQ(AddEntry(CreateDescription("id"), /* icons= */ {}),
+            blink::mojom::ContentIndexError::NONE);
+
+  // No icons should be found.
+  EXPECT_TRUE(GetIcons("id").empty());
 }
 
 TEST_F(ContentIndexDatabaseTest, GetEntries) {
@@ -435,6 +499,41 @@ TEST_F(ContentIndexDatabaseTest, BlockedOriginsCannotRegisterContent) {
   // Registering is OK now.
   EXPECT_EQ(AddEntry(CreateDescription("id4")),
             blink::mojom::ContentIndexError::NONE);
+}
+
+TEST_F(ContentIndexDatabaseTest, UmaRecorded) {
+  base::HistogramTester histogram_tester;
+
+  EXPECT_EQ(AddEntry(CreateDescription("id")),
+            blink::mojom::ContentIndexError::NONE);
+  histogram_tester.ExpectBucketCount("ContentIndex.Database.Add",
+                                     blink::ServiceWorkerStatusCode::kOk, 1);
+
+  EXPECT_FALSE(GetIcons("id").empty());
+  histogram_tester.ExpectBucketCount("ContentIndex.Database.GetIcon",
+                                     blink::ServiceWorkerStatusCode::kOk, 1);
+
+  EXPECT_EQ(GetAllEntries().size(), 1u);
+  histogram_tester.ExpectBucketCount("ContentIndex.Database.GetAllEntries",
+                                     blink::ServiceWorkerStatusCode::kOk, 1);
+
+  EXPECT_EQ(GetDescriptions().size(), 1u);
+  histogram_tester.ExpectBucketCount("ContentIndex.Database.GetDescriptions",
+                                     blink::ServiceWorkerStatusCode::kOk, 1);
+
+  EXPECT_TRUE(GetEntry("id"));
+  histogram_tester.ExpectBucketCount("ContentIndex.Database.GetEntry",
+                                     blink::ServiceWorkerStatusCode::kOk, 1);
+
+  EXPECT_EQ(DeleteEntry("id"), blink::mojom::ContentIndexError::NONE);
+  histogram_tester.ExpectBucketCount("ContentIndex.Database.Delete",
+                                     blink::ServiceWorkerStatusCode::kOk, 1);
+
+  database()->BlockOrigin(origin());
+  AddEntry(CreateDescription("id"));
+  histogram_tester.ExpectBucketCount("ContentIndex.RegistrationBlocked",
+                                     blink::mojom::ContentCategory::HOME_PAGE,
+                                     1);
 }
 
 }  // namespace content

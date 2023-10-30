@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,19 +22,19 @@
 // "how to tie a tie", and |allow_mid_word_matching| false, this will return
 // "[ho]w [to] tie a tie". On the other hand, for |allow_mid_word_matching|
 // true, this will return "[ho]w [to] t[ie] a t[ie]."
-TermMatches FindTermMatches(base::string16 find_text,
-                            base::string16 text,
+TermMatches FindTermMatches(std::u16string find_text,
+                            std::u16string text,
                             bool allow_prefix_matching = true,
                             bool allow_mid_word_matching = false);
 
 // Return an ACMatchClassifications structure given the |matches| to highlight.
 // |matches| can be retrieved from calling FindTermMatches. |text_length| should
 // be the full length (not the length of the truncated text clean returns) of
-// the text being classified. It is used to ensure the the trailing
-// classification is correct; i.e. if matches end at 20, and text_length is
-// greater than 20, ClassifyTermMatches will add a non_match_style
-// classification with offset 20. |match_style| and |non_match_style| specify
-// the classifications to use for matched and non-matched text.
+// the text being classified. It is used to ensure the trailing classification
+// is correct; i.e. if matches end at 20, and text_length is greater than 20,
+// ClassifyTermMatches will add a non_match_style classification with offset 20.
+// |match_style| and |non_match_style| specify the classifications to use for
+// matched and non-matched text.
 ACMatchClassifications ClassifyTermMatches(TermMatches matches,
                                            size_t text_length,
                                            int match_style,

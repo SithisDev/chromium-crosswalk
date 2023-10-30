@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,19 @@
 
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/language/content/browser/language_code_locator.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/geolocation.mojom.h"
+#include "services/device/public/mojom/geoposition.mojom.h"
+#include "services/device/public/mojom/public_ip_address_geolocation_provider.mojom.h"
 
 namespace base {
 template <typename T>
 struct DefaultSingletonTraits;
-}
-
-namespace service_manager {
-class Connector;
 }
 
 class PrefRegistrySimple;
@@ -35,8 +34,12 @@ namespace language {
 class GeoLanguageProvider {
  public:
   static const char kCachedGeoLanguagesPref[];
+  static const char kTimeOfLastGeoLanguagesUpdatePref[];
 
   static GeoLanguageProvider* GetInstance();
+
+  GeoLanguageProvider(const GeoLanguageProvider&) = delete;
+  GeoLanguageProvider& operator=(const GeoLanguageProvider&) = delete;
 
   static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
 
@@ -44,12 +47,7 @@ class GeoLanguageProvider {
   // * Initializes location->language mapping in a low-priority background task.
   // * Until the first IP geolocation completes, CurrentGeoLanguages() will
   //   return an empty list.
-  // |service_manager_connector| should not yet be bound to a sequence, e.g., it
-  // should be the result of invoking ServiceManagerConnect::Clone() on another
-  // connector.
-  void StartUp(
-      std::unique_ptr<service_manager::Connector> service_manager_connector,
-      PrefService* prefs);
+  void StartUp(PrefService* prefs);
 
   // Returns the inferred ranked list of local languages based on the most
   // recently obtained approximate public-IP geolocation of the device.
@@ -60,6 +58,13 @@ class GeoLanguageProvider {
   //   - Geolocation pending
   //   - Geolocation succeeded but no local language is mapped to that location
   std::vector<std::string> CurrentGeoLanguages() const;
+
+  // Allows tests to override how this class binds
+  // PublicIpAddressGeolocationProvider receivers.
+  using Binder = base::RepeatingCallback<void(
+      mojo::PendingReceiver<
+          device::mojom::PublicIpAddressGeolocationProvider>)>;
+  static void OverrideBinderForTesting(Binder binder);
 
  private:
   friend class GeoLanguageModelTest;
@@ -74,7 +79,7 @@ class GeoLanguageProvider {
   // Performs actual work described in StartUp() above.
   void BackgroundStartUp();
 
-  // Binds |ip_geolocation_service_| using a service_manager::Connector.
+  // Binds |ip_geolocation_service_| to the Device Service.
   void BindIpGeolocationService();
 
   // Requests the next available IP-based approximate geolocation from
@@ -98,11 +103,8 @@ class GeoLanguageProvider {
   // May be empty. See comment on CurrentGeoLanguages() above.
   std::vector<std::string> languages_;
 
-  // Service manager connector for use on background_task_runner_.
-  std::unique_ptr<service_manager::Connector> service_manager_connector_;
-
   // Connection to the IP geolocation service.
-  device::mojom::GeolocationPtr geolocation_provider_;
+  mojo::Remote<device::mojom::Geolocation> geolocation_provider_;
 
   // Location -> Language lookup library.
   std::unique_ptr<language::LanguageCodeLocator> language_code_locator_;
@@ -121,9 +123,7 @@ class GeoLanguageProvider {
 
   // The pref service used to cached the latest latitude/longitude pair
   // obtained.
-  PrefService* prefs_;
-
-  DISALLOW_COPY_AND_ASSIGN(GeoLanguageProvider);
+  raw_ptr<PrefService> prefs_;
 };
 
 }  // namespace language

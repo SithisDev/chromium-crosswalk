@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,10 @@
 #include <sstream>
 
 #include "base/callback.h"
+#include "base/logging.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 
-namespace syncer {
-
-namespace internal {
+namespace syncer::internal {
 
 WeakHandleCoreBase::WeakHandleCoreBase()
     : owner_loop_task_runner_(base::SequencedTaskRunnerHandle::Get()) {}
@@ -20,15 +19,13 @@ bool WeakHandleCoreBase::IsOnOwnerThread() const {
   return owner_loop_task_runner_->RunsTasksInCurrentSequence();
 }
 
-WeakHandleCoreBase::~WeakHandleCoreBase() {}
+WeakHandleCoreBase::~WeakHandleCoreBase() = default;
 
 void WeakHandleCoreBase::PostToOwnerThread(const base::Location& from_here,
-                                           const base::Closure& fn) const {
-  if (!owner_loop_task_runner_->PostTask(from_here, fn)) {
+                                           base::OnceClosure fn) const {
+  if (!owner_loop_task_runner_->PostTask(from_here, std::move(fn))) {
     DVLOG(1) << "Could not post task from " << from_here.ToString();
   }
 }
 
-}  // namespace internal
-
-}  // namespace syncer
+}  // namespace syncer::internal

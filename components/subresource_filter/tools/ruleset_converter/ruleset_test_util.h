@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,6 +45,10 @@ class ScopedTempRulesetFile {
  public:
   // Creates a temporary file of the specified |format|.
   explicit ScopedTempRulesetFile(RulesetFormat format);
+
+  ScopedTempRulesetFile(const ScopedTempRulesetFile&) = delete;
+  ScopedTempRulesetFile& operator=(const ScopedTempRulesetFile&) = delete;
+
   ~ScopedTempRulesetFile();
 
   // Opens the |ruleset_file| and creates an empty rule output stream to this
@@ -68,8 +72,6 @@ class ScopedTempRulesetFile {
   base::ScopedTempDir scoped_dir_;
   base::FilePath ruleset_path_;
   const RulesetFormat format_;  // The format of the |file|.
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedTempRulesetFile);
 };
 
 bool AreUrlRulesEqual(const url_pattern_index::proto::UrlRule& first,

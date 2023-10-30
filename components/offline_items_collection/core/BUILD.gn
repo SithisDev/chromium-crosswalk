@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,11 +16,14 @@ static_library("core") {
     "launch_location.h",
     "offline_content_aggregator.cc",
     "offline_content_aggregator.h",
+    "offline_content_provider.cc",
     "offline_content_provider.h",
     "offline_item.cc",
     "offline_item.h",
     "offline_item_filter.h",
     "offline_item_state.h",
+    "open_params.cc",
+    "open_params.h",
     "pending_state.h",
     "rename_result.h",
     "throttled_offline_content_provider.cc",
@@ -53,7 +56,10 @@ static_library("core") {
       "android/offline_item_visuals_bridge.h",
     ]
 
-    deps += [ ":jni_headers" ]
+    deps += [
+      ":jni_headers",
+      "//url:gurl_android",
+    ]
   }
 }
 
@@ -63,6 +69,7 @@ source_set("unit_tests") {
   sources = [
     "filtered_offline_item_observer_unittest.cc",
     "offline_content_aggregator_unittest.cc",
+    "offline_item_unittest.cc",
     "throttled_offline_content_provider_unittest.cc",
   ]
 
@@ -72,31 +79,45 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//components/offline_items_collection/core/test_support",
   ]
+
+  if (is_android) {
+    sources += [ "android/offline_item_bridge_unittest.cc" ]
+    deps += [
+      ":native_j_unittests_jni_headers",
+      ":native_java_unittests_java",
+    ]
+  }
 }
 
 if (is_android) {
   android_library("core_java") {
-    java_files = [
-      "android/java/src/org/chromium/components/offline_items_collection/bridges/OfflineItemBridge.java",
-      "android/java/src/org/chromium/components/offline_items_collection/bridges/OfflineItemShareInfoBridge.java",
-      "android/java/src/org/chromium/components/offline_items_collection/bridges/OfflineItemVisualsBridge.java",
+    sources = [
       "android/java/src/org/chromium/components/offline_items_collection/ContentId.java",
       "android/java/src/org/chromium/components/offline_items_collection/LegacyHelpers.java",
       "android/java/src/org/chromium/components/offline_items_collection/OfflineContentAggregatorBridge.java",
       "android/java/src/org/chromium/components/offline_items_collection/OfflineContentProvider.java",
       "android/java/src/org/chromium/components/offline_items_collection/OfflineItem.java",
+      "android/java/src/org/chromium/components/offline_items_collection/OfflineItemSchedule.java",
       "android/java/src/org/chromium/components/offline_items_collection/OfflineItemShareInfo.java",
       "android/java/src/org/chromium/components/offline_items_collection/OfflineItemVisuals.java",
+      "android/java/src/org/chromium/components/offline_items_collection/OpenParams.java",
       "android/java/src/org/chromium/components/offline_items_collection/ShareCallback.java",
       "android/java/src/org/chromium/components/offline_items_collection/UpdateDelta.java",
       "android/java/src/org/chromium/components/offline_items_collection/VisualsCallback.java",
+      "android/java/src/org/chromium/components/offline_items_collection/bridges/OfflineItemBridge.java",
+      "android/java/src/org/chromium/components/offline_items_collection/bridges/OfflineItemShareInfoBridge.java",
+      "android/java/src/org/chromium/components/offline_items_collection/bridges/OfflineItemVisualsBridge.java",
     ]
+    annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
 
     srcjar_deps = [ ":jni_enums" ]
 
     deps = [
       "//base:base_java",
-      "//third_party/android_deps:com_android_support_support_annotations_java",
+      "//base:jni_java",
+      "//build/android:build_java",
+      "//third_party/androidx:androidx_annotation_annotation_java",
+      "//url:gurl_java",
     ]
   }
 
@@ -123,5 +144,23 @@ if (is_android) {
       "pending_state.h",
       "rename_result.h",
     ]
+  }
+
+  android_library("native_java_unittests_java") {
+    testonly = true
+    deps = [
+      ":core_java",
+      "//base:jni_java",
+      "//third_party/junit",
+    ]
+
+    sources = [ "android/native_java_unittests/src/org/chromium/components/offline_items_collection/bridges/OfflineItemBridgeUnitTest.java" ]
+
+    annotation_processor_deps = [ "//base/android/jni_generator:jni_processor" ]
+  }
+
+  generate_jni("native_j_unittests_jni_headers") {
+    testonly = true
+    sources = [ "android/native_java_unittests/src/org/chromium/components/offline_items_collection/bridges/OfflineItemBridgeUnitTest.java" ]
   }
 }

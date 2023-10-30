@@ -1,13 +1,12 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/gpu/compositor_util.h"
@@ -15,18 +14,18 @@
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/input/synthetic_web_input_event_builders.h"
-#include "content/common/input_messages.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/hit_test_region_observer.h"
 #include "content/shell/browser/shell.h"
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/public/common/input/synthetic_web_input_event_builders.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "ui/latency/latency_info.h"
 
 using blink::WebInputEvent;
@@ -35,7 +34,7 @@ namespace {
 
 const char kTouchEventDataURL[] =
     "data:text/html;charset=utf-8,"
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     "<head>"
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
     "</head>"
@@ -90,8 +89,11 @@ class TouchInputBrowserTest : public ContentBrowserTest {
   ~TouchInputBrowserTest() override {}
 
   RenderWidgetHostImpl* GetWidgetHost() {
-    return RenderWidgetHostImpl::From(
-        shell()->web_contents()->GetRenderViewHost()->GetWidget());
+    return RenderWidgetHostImpl::From(shell()
+                                          ->web_contents()
+                                          ->GetPrimaryMainFrame()
+                                          ->GetRenderViewHost()
+                                          ->GetWidget());
   }
 
   std::unique_ptr<InputMsgWatcher> AddFilter(blink::WebInputEvent::Type type) {
@@ -99,7 +101,7 @@ class TouchInputBrowserTest : public ContentBrowserTest {
   }
 
  protected:
-  void SendTouchEvent(SyntheticWebTouchEvent* event) {
+  void SendTouchEvent(blink::SyntheticWebTouchEvent* event) {
     auto* root_view = GetWidgetHost()->GetView();
     auto* input_event_router =
         GetWidgetHost()->delegate()->GetInputEventRouter();
@@ -109,7 +111,7 @@ class TouchInputBrowserTest : public ContentBrowserTest {
   }
   void LoadURL() {
     const GURL data_url(kTouchEventDataURL);
-    NavigateToURL(shell(), data_url);
+    EXPECT_TRUE(NavigateToURL(shell(), data_url));
 
     RenderWidgetHostImpl* host = GetWidgetHost();
     // Wait to confirm a frame was generated from the navigation.
@@ -117,7 +119,7 @@ class TouchInputBrowserTest : public ContentBrowserTest {
         host->render_frame_metadata_provider());
     frame_observer.WaitForMetadataChange();
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
     // On non-Android, set a size for the view, and wait for a new frame to be
     // generated at that size. On Android the size is specified in
     // kTouchEventDataURL.
@@ -137,15 +139,16 @@ class TouchInputBrowserTest : public ContentBrowserTest {
 
 IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, TouchNoHandler) {
   LoadURL();
-  SyntheticWebTouchEvent touch;
+  blink::SyntheticWebTouchEvent touch;
 
   // A press on |first| should be acked with NO_CONSUMER_EXISTS since there is
   // no touch-handler on it.
   touch.PressPoint(25, 25);
-  auto filter = AddFilter(WebInputEvent::kTouchStart);
+  auto filter = AddFilter(WebInputEvent::Type::kTouchStart);
   SendTouchEvent(&touch);
 
-  EXPECT_EQ(INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS, filter->WaitForAck());
+  EXPECT_EQ(blink::mojom::InputEventResultState::kNoConsumerExists,
+            filter->WaitForAck());
 
   // If a touch-press is acked with NO_CONSUMER_EXISTS, then subsequent
   // touch-points don't need to be dispatched until the touch point is released.
@@ -155,16 +158,17 @@ IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, TouchNoHandler) {
 
 IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, TouchHandlerNoConsume) {
   LoadURL();
-  SyntheticWebTouchEvent touch;
+  blink::SyntheticWebTouchEvent touch;
 
   // Press on |second| should be acked with NOT_CONSUMED since there is a
   // touch-handler on |second|, but it doesn't consume the event.
   touch.PressPoint(125, 25);
-  auto filter = AddFilter(WebInputEvent::kTouchStart);
+  auto filter = AddFilter(WebInputEvent::Type::kTouchStart);
   SendTouchEvent(&touch);
-  EXPECT_EQ(INPUT_EVENT_ACK_STATE_NOT_CONSUMED, filter->WaitForAck());
+  EXPECT_EQ(blink::mojom::InputEventResultState::kNotConsumed,
+            filter->WaitForAck());
 
-  filter = AddFilter(WebInputEvent::kTouchEnd);
+  filter = AddFilter(WebInputEvent::Type::kTouchEnd);
   touch.ReleasePoint(0);
   SendTouchEvent(&touch);
   filter->WaitForAck();
@@ -172,36 +176,39 @@ IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, TouchHandlerNoConsume) {
 
 IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, TouchHandlerConsume) {
   LoadURL();
-  SyntheticWebTouchEvent touch;
+  blink::SyntheticWebTouchEvent touch;
 
   // Press on |third| should be acked with CONSUMED since the touch-handler on
   // |third| consimes the event.
   touch.PressPoint(25, 125);
-  auto filter = AddFilter(WebInputEvent::kTouchStart);
+  auto filter = AddFilter(WebInputEvent::Type::kTouchStart);
   SendTouchEvent(&touch);
-  EXPECT_EQ(INPUT_EVENT_ACK_STATE_CONSUMED, filter->WaitForAck());
+  EXPECT_EQ(blink::mojom::InputEventResultState::kConsumed,
+            filter->WaitForAck());
 
   touch.ReleasePoint(0);
-  filter = AddFilter(WebInputEvent::kTouchEnd);
+  filter = AddFilter(WebInputEvent::Type::kTouchEnd);
   SendTouchEvent(&touch);
   filter->WaitForAck();
 }
 
 IN_PROC_BROWSER_TEST_F(TouchInputBrowserTest, MultiPointTouchPress) {
   LoadURL();
-  SyntheticWebTouchEvent touch;
+  blink::SyntheticWebTouchEvent touch;
 
   // Press on |first|, which sould be acked with NO_CONSUMER_EXISTS. Then press
   // on |third|. That point should be acked with CONSUMED.
   touch.PressPoint(25, 25);
-  auto filter = AddFilter(WebInputEvent::kTouchStart);
+  auto filter = AddFilter(WebInputEvent::Type::kTouchStart);
   SendTouchEvent(&touch);
-  EXPECT_EQ(INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS, filter->WaitForAck());
+  EXPECT_EQ(blink::mojom::InputEventResultState::kNoConsumerExists,
+            filter->WaitForAck());
 
   touch.PressPoint(25, 125);
-  filter = AddFilter(WebInputEvent::kTouchStart);
+  filter = AddFilter(WebInputEvent::Type::kTouchStart);
   SendTouchEvent(&touch);
-  EXPECT_EQ(INPUT_EVENT_ACK_STATE_CONSUMED, filter->WaitForAck());
+  EXPECT_EQ(blink::mojom::InputEventResultState::kConsumed,
+            filter->WaitForAck());
 }
 
 }  // namespace content

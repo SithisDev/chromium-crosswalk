@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <unordered_map>
 
-#include "base/macros.h"
+#include "base/callback.h"
 #include "base/memory/singleton.h"
 #include "base/unguessable_token.h"
 #include "content/common/content_export.h"
@@ -21,7 +21,12 @@ class CONTENT_EXPORT ScopedSurfaceRequestManager
  public:
   static ScopedSurfaceRequestManager* GetInstance();
 
-  using ScopedSurfaceRequestCB = base::Callback<void(gl::ScopedJavaSurface)>;
+  ScopedSurfaceRequestManager(const ScopedSurfaceRequestManager&) = delete;
+  ScopedSurfaceRequestManager& operator=(const ScopedSurfaceRequestManager&) =
+      delete;
+
+  using ScopedSurfaceRequestCB =
+      base::OnceCallback<void(gl::ScopedJavaSurface)>;
 
   // Registers a request, and returns the |request_token| that should be used to
   // call Fulfill at a later time. The caller is responsible for unregistering
@@ -30,7 +35,7 @@ class CONTENT_EXPORT ScopedSurfaceRequestManager
   // ScopedJavaSurface (as passing an empty surface is a valid operation).
   // Must be called on the UI thread.
   base::UnguessableToken RegisterScopedSurfaceRequest(
-      const ScopedSurfaceRequestCB& request_cb);
+      ScopedSurfaceRequestCB request_cb);
 
   // Unregisters a request registered under |request_token| if it exists,
   // no-ops otherwise.
@@ -51,7 +56,7 @@ class CONTENT_EXPORT ScopedSurfaceRequestManager
   // Can be called from any thread.
   void ForwardSurfaceOwnerForSurfaceRequest(
       const base::UnguessableToken& request_token,
-      const gpu::SurfaceOwner* surface_owner) override;
+      const gpu::TextureOwner* texture_owner) override;
 
   void clear_requests_for_testing() { request_callbacks_.clear(); }
 
@@ -75,8 +80,6 @@ class CONTENT_EXPORT ScopedSurfaceRequestManager
 
   ScopedSurfaceRequestManager();
   ~ScopedSurfaceRequestManager() override;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedSurfaceRequestManager);
 };
 
 }  // namespace content

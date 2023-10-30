@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 #define COMPONENTS_NACL_RENDERER_FILE_DOWNLOADER_H_
 
 #include <stdint.h>
-
-#include <string>
 
 #include "base/callback.h"
 #include "base/files/file.h"
@@ -34,11 +32,11 @@ class FileDownloader : public blink::WebAssociatedURLLoaderClient {
   };
 
   // Provides the FileDownloader status and the HTTP status code.
-  typedef base::Callback<void(Status, base::File, int)> StatusCallback;
+  typedef base::OnceCallback<void(Status, base::File, int)> StatusCallback;
 
   // Provides the bytes received so far, and the total bytes expected to be
   // received.
-  typedef base::Callback<void(int64_t, int64_t)> ProgressCallback;
+  typedef base::RepeatingCallback<void(int64_t, int64_t)> ProgressCallback;
 
   FileDownloader(std::unique_ptr<blink::WebAssociatedURLLoader> url_loader,
                  base::File file,

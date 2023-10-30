@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,8 @@
 #include <memory>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/threading/thread_checker.h"
+#include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "components/update_client/crx_downloader.h"
 
@@ -25,25 +24,23 @@ class NetworkFetcherFactory;
 class UrlFetcherDownloader : public CrxDownloader {
  public:
   UrlFetcherDownloader(
-      std::unique_ptr<CrxDownloader> successor,
+      scoped_refptr<CrxDownloader> successor,
       scoped_refptr<NetworkFetcherFactory> network_fetcher_factory);
-  ~UrlFetcherDownloader() override;
+  UrlFetcherDownloader(const UrlFetcherDownloader&) = delete;
+  UrlFetcherDownloader& operator=(const UrlFetcherDownloader&) = delete;
 
  private:
   // Overrides for CrxDownloader.
+  ~UrlFetcherDownloader() override;
   void DoStartDownload(const GURL& url) override;
 
   void CreateDownloadDir();
   void StartURLFetch(const GURL& url);
-  void OnNetworkFetcherComplete(base::FilePath file_path,
-                                int net_error,
-                                int64_t content_size);
-  void OnResponseStarted(const GURL& final_url,
-                         int response_code,
-                         int64_t content_length);
+  void OnNetworkFetcherComplete(int net_error, int64_t content_size);
+  void OnResponseStarted(int response_code, int64_t content_length);
   void OnDownloadProgress(int64_t content_length);
 
-  THREAD_CHECKER(thread_checker_);
+  SEQUENCE_CHECKER(sequence_checker_);
 
   scoped_refptr<NetworkFetcherFactory> network_fetcher_factory_;
   std::unique_ptr<NetworkFetcher> network_fetcher_;
@@ -51,13 +48,13 @@ class UrlFetcherDownloader : public CrxDownloader {
   // Contains a temporary download directory for the downloaded file.
   base::FilePath download_dir_;
 
+  // Contains the file path to the downloaded file.
+  base::FilePath file_path_;
+
   base::TimeTicks download_start_time_;
 
-  GURL final_url_;
   int response_code_ = -1;
   int64_t total_bytes_ = -1;
-
-  DISALLOW_COPY_AND_ASSIGN(UrlFetcherDownloader);
 };
 
 }  // namespace update_client

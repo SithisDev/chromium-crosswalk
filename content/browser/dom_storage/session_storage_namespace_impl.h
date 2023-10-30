@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,8 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
-#include "base/memory/ref_counted.h"
-#include "content/common/content_export.h"
+#include "base/memory/scoped_refptr.h"
 #include "content/public/browser/session_storage_namespace.h"
-
-namespace base {
-class SequencedTaskRunner;
-}
 
 namespace content {
 class DOMStorageContextWrapper;
@@ -26,14 +20,14 @@ class SessionStorageNamespaceImpl : public SessionStorageNamespace {
  public:
   // Constructs a SessionStorageNamespaceImpl and allocates a new ID for it.
   //
-  // The CONTENT_EXPORT allows TestRenderViewHost to instantiate these.
-  CONTENT_EXPORT static scoped_refptr<SessionStorageNamespaceImpl> Create(
+  // The allows TestRenderViewHost to instantiate these.
+  static scoped_refptr<SessionStorageNamespaceImpl> Create(
       scoped_refptr<DOMStorageContextWrapper> context);
 
   // If there is an existing SessionStorageNamespaceImpl with the given id in
   // the DOMStorageContextWrapper, this will return that object. Otherwise this
   // constructs a SessionStorageNamespaceImpl and assigns |namespace_id| to it.
-  CONTENT_EXPORT static scoped_refptr<SessionStorageNamespaceImpl> Create(
+  static scoped_refptr<SessionStorageNamespaceImpl> Create(
       scoped_refptr<DOMStorageContextWrapper> context,
       std::string namespace_id);
 
@@ -47,6 +41,10 @@ class SessionStorageNamespaceImpl : public SessionStorageNamespace {
       std::string namespace_id,
       const std::string& namespace_id_to_clone,
       bool immediately = false);
+
+  SessionStorageNamespaceImpl(const SessionStorageNamespaceImpl&) = delete;
+  SessionStorageNamespaceImpl& operator=(const SessionStorageNamespaceImpl&) =
+      delete;
 
   DOMStorageContextWrapper* context() const { return context_wrapper_.get(); }
 
@@ -66,17 +64,13 @@ class SessionStorageNamespaceImpl : public SessionStorageNamespace {
   ~SessionStorageNamespaceImpl() override;
 
   static void DeleteSessionNamespaceFromUIThread(
-      scoped_refptr<base::SequencedTaskRunner> mojo_task_runner,
       scoped_refptr<DOMStorageContextWrapper> context_wrapper,
       std::string namespace_id,
       bool should_persist);
 
   scoped_refptr<DOMStorageContextWrapper> context_wrapper_;
-  scoped_refptr<base::SequencedTaskRunner> mojo_task_runner_;
   std::string namespace_id_;
   bool should_persist_;
-
-  DISALLOW_COPY_AND_ASSIGN(SessionStorageNamespaceImpl);
 };
 
 }  // namespace content

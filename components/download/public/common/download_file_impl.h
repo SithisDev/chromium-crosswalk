@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,12 @@
 #include <unordered_map>
 #include <vector>
 
+#include "base/cancelable_callback.h"
 #include "base/files/file.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
-#include "base/task_runner.h"
+#include "base/task/task_runner.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
@@ -29,12 +29,7 @@
 #include "components/download/public/common/download_save_info.h"
 #include "components/download/public/common/rate_estimator.h"
 #include "components/services/quarantine/public/mojom/quarantine.mojom.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
-
-namespace service_manager {
-class Connector;
-}
 
 namespace download {
 
@@ -56,24 +51,26 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
                    uint32_t download_id,
                    base::WeakPtr<DownloadDestinationObserver> observer);
 
+  DownloadFileImpl(const DownloadFileImpl&) = delete;
+  DownloadFileImpl& operator=(const DownloadFileImpl&) = delete;
+
   ~DownloadFileImpl() override;
 
   // DownloadFile functions.
   void Initialize(InitializeCallback initialize_callback,
-                  const CancelRequestCallback& cancel_request_callback,
-                  const DownloadItem::ReceivedSlices& received_slices,
-                  bool is_parallelizable) override;
+                  CancelRequestCallback cancel_request_callback,
+                  const DownloadItem::ReceivedSlices& received_slices) override;
   void AddInputStream(std::unique_ptr<InputStream> stream,
-                      int64_t offset,
-                      int64_t length) override;
+                      int64_t offset) override;
   void RenameAndUniquify(const base::FilePath& full_path,
-                         const RenameCompletionCallback& callback) override;
-  void RenameAndAnnotate(const base::FilePath& full_path,
-                         const std::string& client_guid,
-                         const GURL& source_url,
-                         const GURL& referrer_url,
-                         std::unique_ptr<service_manager::Connector> connector,
-                         const RenameCompletionCallback& callback) override;
+                         RenameCompletionCallback callback) override;
+  void RenameAndAnnotate(
+      const base::FilePath& full_path,
+      const std::string& client_guid,
+      const GURL& source_url,
+      const GURL& referrer_url,
+      mojo::PendingRemote<quarantine::mojom::Quarantine> remote_quarantine,
+      RenameCompletionCallback callback) override;
   void Detach() override;
   void Cancel() override;
   void SetPotentialFileLength(int64_t length) override;
@@ -82,17 +79,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
   void Pause() override;
   void Resume() override;
 
-#if defined(OS_ANDROID)
-  void RenameToIntermediateUri(
-      const GURL& original_url,
-      const GURL& referrer_url,
-      const base::FilePath& file_name,
-      const std::string& mime_type,
-      const base::FilePath& current_path,
-      const RenameCompletionCallback& callback) override;
-  void PublishDownload(const RenameCompletionCallback& callback) override;
-  base::FilePath GetDisplayName() override;
-#endif  // defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
+  void PublishDownload(RenameCompletionCallback callback) override;
+#endif  // BUILDFLAG(IS_ANDROID)
 
   // Wrapper of a ByteStreamReader or ScopedDataPipeConsumerHandle, and the meta
   // data needed to write to a slice of the target file.
@@ -105,9 +94,12 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
   class COMPONENTS_DOWNLOAD_EXPORT SourceStream {
    public:
     SourceStream(int64_t offset,
-                 int64_t length,
                  int64_t starting_file_write_offset,
                  std::unique_ptr<InputStream> stream);
+
+    SourceStream(const SourceStream&) = delete;
+    SourceStream& operator=(const SourceStream&) = delete;
+
     ~SourceStream();
 
     void Initialize();
@@ -159,6 +151,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
     void set_finished(bool finish) { finished_ = finish; }
     size_t index() { return index_; }
     void set_index(size_t index) { index_ = index; }
+    base::CancelableOnceClosure* read_stream_callback() {
+      return &read_stream_callback_;
+    }
 
    private:
     // Starting position of the stream, this is from the network response.
@@ -192,8 +187,14 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
     // The stream through which data comes.
     std::unique_ptr<InputStream> input_stream_;
 
-    DISALLOW_COPY_AND_ASSIGN(SourceStream);
+    // Cancelable callback to read from the |input_stream_|.
+    base::CancelableOnceClosure read_stream_callback_;
   };
+
+  // Sets the task runner for testing purpose, must be called before
+  // Initialize().
+  void SetTaskRunnerForTesting(
+      scoped_refptr<base::SequencedTaskRunner> task_runner);
 
  protected:
   // For test class overrides.
@@ -226,7 +227,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
   struct RenameParameters {
     RenameParameters(RenameOption option,
                      const base::FilePath& new_path,
-                     const RenameCompletionCallback& completion_callback);
+                     RenameCompletionCallback completion_callback);
     ~RenameParameters();
 
     RenameOption option;
@@ -234,7 +235,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
     std::string client_guid;  // See BaseFile::AnnotateWithSourceInformation()
     GURL source_url;          // See BaseFile::AnnotateWithSourceInformation()
     GURL referrer_url;        // See BaseFile::AnnotateWithSourceInformation()
-    std::unique_ptr<service_manager::Connector> connector;
+    mojo::PendingRemote<quarantine::mojom::Quarantine> remote_quarantine;
     int retries_left;         // RenameWithRetryInternal() will
                               // automatically retry until this
                               // count reaches 0. Each attempt
@@ -250,7 +251,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
 
   // Called after |file_| was renamed.
   void OnRenameComplete(const base::FilePath& content_path,
-                        const RenameCompletionCallback& callback,
+                        RenameCompletionCallback callback,
                         DownloadInterruptReason reason);
 
   // Send an update on our progress.
@@ -302,6 +303,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
   // Otherwise, return the current file size.
   int64_t TotalBytesReceived() const;
 
+  // Sends an error update to the observer.
+  void SendErrorUpdateIfFinished(DownloadInterruptReason reason);
+
   // Helper method to handle stream error
   void HandleStreamError(SourceStream* source_stream,
                          DownloadInterruptReason reason);
@@ -315,6 +319,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
 
   // See |cancel_request_callback_|.
   void CancelRequest(int64_t offset);
+
+  // Called when the download is completed.
+  void OnDownloadCompleted();
 
   // Print the internal states for debugging.
   void DebugStates() const;
@@ -352,14 +359,13 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
   base::TimeTicks download_start_;
   RateEstimator rate_estimator_;
   int num_active_streams_;
-  bool record_stream_bandwidth_;
-  base::TimeTicks last_update_time_;
-  size_t bytes_seen_with_parallel_streams_;
-  size_t bytes_seen_without_parallel_streams_;
-  base::TimeDelta download_time_with_parallel_streams_;
-  base::TimeDelta download_time_without_parallel_streams_;
 
+  // The slices received, this is being updated when new data are written.
   std::vector<DownloadItem::ReceivedSlice> received_slices_;
+
+  // Slices to download, calculated during the initialization and are not
+  // updated when new data are written.
+  std::vector<DownloadItem::ReceivedSlice> slice_to_download_;
 
   // Used to track whether the download is paused or not. This value is ignored
   // when network service is disabled as download pause/resumption is handled
@@ -371,16 +377,13 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadFileImpl : public DownloadFile {
   // TaskRunner to post updates to the |observer_|.
   scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
 
-#if defined(OS_ANDROID)
-  base::FilePath display_name_;
-#endif  // defined(OS_ANDROID)
+  // TaskRunner this object lives on after initialization.
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtr<DownloadDestinationObserver> observer_;
   base::WeakPtrFactory<DownloadFileImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(DownloadFileImpl);
 };
 
 }  // namespace download

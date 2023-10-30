@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,14 @@
 
 #include <stdint.h>
 
+#include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/host/viz_host_export.h"
-
-namespace viz {
-class RendererSettings;
-}  // namespace viz
 
 namespace viz {
 
 VIZ_HOST_EXPORT RendererSettings CreateRendererSettings();
+
+VIZ_HOST_EXPORT DebugRendererSettings CreateDefaultDebugRendererSettings();
 
 }  // namespace viz
 

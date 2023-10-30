@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <memory>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/threading/thread_checker.h"
 #include "base/timer/timer.h"
 #include "net/base/backoff_entry.h"
@@ -23,15 +22,19 @@ class QuirksManager;
 
 // See declaration in quirks_manager.h.
 using RequestFinishedCallback =
-    base::Callback<void(const base::FilePath&, bool)>;
+    base::OnceCallback<void(const base::FilePath&, bool)>;
 
 // Handles downloading icc and other display data files from Quirks Server.
 class QuirksClient {
  public:
   QuirksClient(int64_t product_id,
                const std::string& display_name,
-               const RequestFinishedCallback& on_request_finished,
+               RequestFinishedCallback on_request_finished,
                QuirksManager* manager);
+
+  QuirksClient(const QuirksClient&) = delete;
+  QuirksClient& operator=(const QuirksClient&) = delete;
+
   ~QuirksClient();
 
   void StartDownload();
@@ -57,7 +60,7 @@ class QuirksClient {
   const std::string display_name_;
 
   // Callback supplied by caller.
-  const RequestFinishedCallback on_request_finished_;
+  RequestFinishedCallback on_request_finished_;
 
   // Weak pointer owned by manager, guaranteed to outlive this client object.
   QuirksManager* manager_;
@@ -78,9 +81,7 @@ class QuirksClient {
   net::BackoffEntry backoff_entry_;
 
   // Factory for callbacks.
-  base::WeakPtrFactory<QuirksClient> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(QuirksClient);
+  base::WeakPtrFactory<QuirksClient> weak_ptr_factory_{this};
 };
 
 }  // namespace quirks

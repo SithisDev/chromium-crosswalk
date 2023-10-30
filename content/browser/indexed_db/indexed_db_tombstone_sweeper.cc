@@ -1,15 +1,19 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/indexed_db/indexed_db_tombstone_sweeper.h"
 
+#include <string>
+
 #include "base/metrics/histogram_functions.h"
 #include "base/rand_util.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/tick_clock.h"
+#include "components/services/storage/indexed_db/scopes/varint_coding.h"
 #include "content/browser/indexed_db/indexed_db_backing_store.h"
 #include "third_party/blink/public/common/indexeddb/indexeddb_key.h"
 #include "third_party/blink/public/common/indexeddb/indexeddb_metadata.h"
@@ -69,9 +73,9 @@ const typename T::value_type& WrappingIterator<T>::Value() const {
 IndexedDBTombstoneSweeper::IndexedDBTombstoneSweeper(int round_iterations,
                                                      int max_iterations,
                                                      leveldb::DB* database)
-    : max_round_iterations_(round_iterations),
-      max_iterations_(max_iterations),
-      database_(database) {
+    : IndexedDBPreCloseTaskQueue::PreCloseTask(database),
+      max_round_iterations_(round_iterations),
+      max_iterations_(max_iterations) {
   sweep_state_.start_database_seed = static_cast<size_t>(base::RandUint64());
   sweep_state_.start_object_store_seed =
       static_cast<size_t>(base::RandUint64());
@@ -80,8 +84,12 @@ IndexedDBTombstoneSweeper::IndexedDBTombstoneSweeper(int round_iterations,
 
 IndexedDBTombstoneSweeper::~IndexedDBTombstoneSweeper() {}
 
+bool IndexedDBTombstoneSweeper::RequiresMetadata() const {
+  return true;
+}
+
 void IndexedDBTombstoneSweeper::SetMetadata(
-    std::vector<IndexedDBDatabaseMetadata> const* metadata) {
+    const std::vector<IndexedDBDatabaseMetadata>* metadata) {
   database_metadata_ = metadata;
   total_indices_ = 0;
   for (const auto& db : *metadata) {
@@ -97,7 +105,7 @@ IndexedDBTombstoneSweeper::SweepState::~SweepState() = default;
 
 void IndexedDBTombstoneSweeper::Stop(StopReason reason) {
   leveldb::Status s;
-  RecordUMAStats(reason, base::nullopt, s);
+  RecordUMAStats(reason, absl::nullopt, s);
 }
 
 bool IndexedDBTombstoneSweeper::RunRound() {
@@ -123,13 +131,13 @@ bool IndexedDBTombstoneSweeper::RunRound() {
   if (status == Status::SWEEPING)
     return false;
 
-  RecordUMAStats(base::nullopt, status, s);
+  RecordUMAStats(absl::nullopt, status, s);
   return true;
 }
 
 void IndexedDBTombstoneSweeper::RecordUMAStats(
-    base::Optional<StopReason> stop_reason,
-    base::Optional<IndexedDBTombstoneSweeper::Status> status,
+    absl::optional<StopReason> stop_reason,
+    absl::optional<IndexedDBTombstoneSweeper::Status> status,
     const leveldb::Status& leveldb_error) {
   DCHECK(stop_reason || status);
   DCHECK(!stop_reason || !status);
@@ -155,6 +163,10 @@ void IndexedDBTombstoneSweeper::RecordUMAStats(
         break;
       case StopReason::METADATA_ERROR:
         NOTREACHED();
+        break;
+      case StopReason::FORCE_CLOSE:
+        uma_count_label.append("ForceClose");
+        uma_size_label.append("ForceClose");
         break;
     }
   } else if (status) {
@@ -219,7 +231,7 @@ void IndexedDBTombstoneSweeper::RecordUMAStats(
 
   // We put our max at 20 instead of 100 to reduce the number of buckets.
   if (total_indices_ > 0) {
-    const static int kIndexPercentageBucketCount = 20;
+    static const int kIndexPercentageBucketCount = 20;
     base::UmaHistogramExactLinear(
         "WebCore.IndexedDB.TombstoneSweeper.IndexScanPercent",
         indices_scanned_ * kIndexPercentageBucketCount / total_indices_,
@@ -233,7 +245,7 @@ leveldb::Status IndexedDBTombstoneSweeper::FlushDeletions() {
   base::TimeTicks start = base::TimeTicks::Now();
 
   leveldb::Status status =
-      database_->Write(leveldb::WriteOptions(), &round_deletion_batch_);
+      database()->Write(leveldb::WriteOptions(), &round_deletion_batch_);
   round_deletion_batch_.Clear();
   has_writes_ = false;
 
@@ -288,14 +300,14 @@ IndexedDBTombstoneSweeper::Status IndexedDBTombstoneSweeper::DoSweep(
     leveldb::ReadOptions iterator_options;
     iterator_options.fill_cache = false;
     iterator_options.verify_checksums = true;
-    iterator_.reset(database_->NewIterator(iterator_options));
+    iterator_.reset(database()->NewIterator(iterator_options));
   }
 
   if (!sweep_state_.database_it) {
     size_t start_database_idx = static_cast<size_t>(
         sweep_state_.start_database_seed % database_metadata_->size());
     sweep_state_.database_it = WrappingIterator<DatabaseMetadataVector>(
-        database_metadata_, start_database_idx);
+        database_metadata_.get(), start_database_idx);
   }
   // Loop conditions facilitate starting at random index.
   for (; sweep_state_.database_it.value().IsValid();
@@ -338,9 +350,9 @@ IndexedDBTombstoneSweeper::Status IndexedDBTombstoneSweeper::DoSweep(
         if (!can_continue)
           return sweep_status;
       }
-      sweep_state_.index_it = base::nullopt;
+      sweep_state_.index_it = absl::nullopt;
     }
-    sweep_state_.object_store_it = base::nullopt;
+    sweep_state_.object_store_it = absl::nullopt;
   }
   return Status::DONE_COMPLETE;
 }
@@ -403,13 +415,13 @@ bool IndexedDBTombstoneSweeper::IterateIndex(
       }
       continue;
     }
-    std::string encoded_primary_key = index_value_str.as_string();
+    std::string encoded_primary_key(index_value_str);
     std::string exists_key = ExistsEntryKey::Encode(
         database_id, object_store_id, encoded_primary_key);
 
     std::string exists_value;
     leveldb::Status s =
-        database_->Get(leveldb::ReadOptions(), exists_key, &exists_value);
+        database()->Get(leveldb::ReadOptions(), exists_key, &exists_value);
     if (!s.ok()) {
       ++metrics_.num_errors_reading_exists_table;
       iterator_->Next();
@@ -446,7 +458,7 @@ bool IndexedDBTombstoneSweeper::IterateIndex(
     }
   }
   ++indices_scanned_;
-  sweep_state_.index_it_key = base::nullopt;
+  sweep_state_.index_it_key = absl::nullopt;
   return true;
 }
 

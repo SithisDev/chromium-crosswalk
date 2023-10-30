@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "components/ntp_snippets/content_suggestions_provider.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -25,6 +24,10 @@ class MockContentSuggestionsProvider : public ContentSuggestionsProvider {
   MockContentSuggestionsProvider(
       Observer* observer,
       const std::vector<Category>& provided_categories);
+  MockContentSuggestionsProvider(const MockContentSuggestionsProvider&) =
+      delete;
+  MockContentSuggestionsProvider& operator=(
+      const MockContentSuggestionsProvider&) = delete;
   ~MockContentSuggestionsProvider() override;
 
   void SetProvidedCategories(const std::vector<Category>& provided_categories);
@@ -49,10 +52,11 @@ class MockContentSuggestionsProvider : public ContentSuggestionsProvider {
   // Set a callback to be called in the destructor. Used to "mock" destruction.
   void SetDestructorCallback(DestructorCallback callback);
 
-  MOCK_METHOD3(ClearHistory,
-               void(base::Time begin,
-                    base::Time end,
-                    const base::Callback<bool(const GURL& url)>& filter));
+  MOCK_METHOD3(
+      ClearHistory,
+      void(base::Time begin,
+           base::Time end,
+           const base::RepeatingCallback<bool(const GURL& url)>& filter));
   // Gmock cannot mock methods that have movable-only type callbacks as
   // parameters such as FetchDoneCallback, DismissedSuggestionsCallback,
   // ImageFetchedCallback. As a work-around, Fetch calls the mock method
@@ -88,8 +92,6 @@ class MockContentSuggestionsProvider : public ContentSuggestionsProvider {
   std::map<int, CategoryStatus> statuses_;
 
   DestructorCallback destructor_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockContentSuggestionsProvider);
 };
 
 }  // namespace ntp_snippets

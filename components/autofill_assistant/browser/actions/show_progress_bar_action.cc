@@ -1,15 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill_assistant/browser/actions/show_progress_bar_action.h"
 
-#include <algorithm>
 #include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/cxx17_backports.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
 
 namespace autofill_assistant {
@@ -20,21 +20,55 @@ ShowProgressBarAction::ShowProgressBarAction(ActionDelegate* delegate,
   DCHECK(proto_.has_show_progress_bar());
 }
 
-ShowProgressBarAction::~ShowProgressBarAction() {}
+ShowProgressBarAction::~ShowProgressBarAction() = default;
 
 void ShowProgressBarAction::InternalProcessAction(
     ProcessActionCallback callback) {
-  if (!proto_.show_progress_bar().message().empty()) {
-    delegate_->SetStatusMessage(proto_.show_progress_bar().message());
-  }
-  int progress =
-      std::min(100, std::max(0, proto_.show_progress_bar().progress()));
-  delegate_->SetProgress(progress);
   if (proto_.show_progress_bar().has_hide()) {
     delegate_->SetProgressVisible(!proto_.show_progress_bar().hide());
   }
+  if (proto_.show_progress_bar().has_step_progress_bar_configuration()) {
+    const auto& configuration =
+        proto_.show_progress_bar().step_progress_bar_configuration();
+    if (!configuration.annotated_step_icons().empty() &&
+        configuration.annotated_step_icons().size() < 2) {
+      EndAction(std::move(callback), INVALID_ACTION);
+      return;
+    }
+    delegate_->SetStepProgressBarConfiguration(configuration);
+  }
 
-  UpdateProcessedAction(ACTION_APPLIED);
+  switch (proto_.show_progress_bar().progress_indicator_case()) {
+    case ShowProgressBarProto::ProgressIndicatorCase::kActiveStep:
+      delegate_->SetProgressActiveStep(
+          proto_.show_progress_bar().active_step());
+      break;
+    case ShowProgressBarProto::ProgressIndicatorCase::kActiveStepIdentifier:
+      if (!delegate_->SetProgressActiveStepIdentifier(
+              proto_.show_progress_bar().active_step_identifier())) {
+        EndAction(std::move(callback), INVALID_ACTION);
+        return;
+      }
+      break;
+    case ShowProgressBarProto::ProgressIndicatorCase::kCompleteProgress:
+      delegate_->SetProgressActiveStep(-1);
+      break;
+    default:
+      // Ignore.
+      break;
+  }
+
+  if (proto_.show_progress_bar().has_error_state()) {
+    delegate_->SetProgressBarErrorState(
+        proto_.show_progress_bar().error_state());
+  }
+
+  EndAction(std::move(callback), ACTION_APPLIED);
+}
+
+void ShowProgressBarAction::EndAction(ProcessActionCallback callback,
+                                      ProcessedActionStatusProto status) {
+  UpdateProcessedAction(status);
   std::move(callback).Run(std::move(processed_action_proto_));
 }
 

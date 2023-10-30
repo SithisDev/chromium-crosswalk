@@ -1,17 +1,19 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/common/gpu/context_cache_controller.h"
 
 #include <chrono>
+#include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "base/synchronization/lock.h"
+#include "base/time/time.h"
 #include "gpu/command_buffer/client/context_support.h"
-#include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 
 namespace viz {
 namespace {
@@ -47,7 +49,7 @@ ContextCacheController::~ContextCacheController() {
     ClientBecameNotVisible(std::move(held_visibility_));
 }
 
-void ContextCacheController::SetGrContext(GrContext* gr_context) {
+void ContextCacheController::SetGrContext(GrDirectContext* gr_context) {
   gr_context_ = gr_context;
 }
 
@@ -153,7 +155,7 @@ void ContextCacheController::PostIdleCallback(
       FROM_HERE,
       base::BindOnce(&ContextCacheController::OnIdle, weak_ptr_,
                      current_idle_generation),
-      base::TimeDelta::FromSeconds(kIdleCleanupDelaySeconds));
+      base::Seconds(kIdleCleanupDelaySeconds));
 }
 
 void ContextCacheController::InvalidatePendingIdleCallbacks() {
@@ -161,7 +163,8 @@ void ContextCacheController::InvalidatePendingIdleCallbacks() {
   ++current_idle_generation_;
 }
 
-void ContextCacheController::OnIdle(uint32_t idle_generation) {
+void ContextCacheController::OnIdle(uint32_t idle_generation)
+    NO_THREAD_SAFETY_ANALYSIS {
   // First check if we should run our idle callback at all. If we have become
   // busy since scheduling, just schedule another idle callback and return.
   {
@@ -175,6 +178,8 @@ void ContextCacheController::OnIdle(uint32_t idle_generation) {
   // Try to acquire the context lock - if we can't acquire it then we've become
   // busy since checking |current_idle_generation_| above. In this case, just
   // re-post our idle callback and return.
+  //
+  // NO_THREAD_SAFETY_ANALYSIS: Locking depends on runtime properties.
   if (context_lock_ && !context_lock_->Try()) {
     base::AutoLock hold(current_idle_generation_lock_);
     PostIdleCallback(current_idle_generation_);

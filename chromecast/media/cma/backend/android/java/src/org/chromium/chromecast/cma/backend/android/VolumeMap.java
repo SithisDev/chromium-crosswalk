@@ -1,15 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chromecast.cma.backend.android;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Build;
 import android.util.SparseIntArray;
+
+import androidx.annotation.RequiresApi;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
@@ -19,10 +20,10 @@ import org.chromium.chromecast.media.AudioContentType;
 
 /**
  * Implements the java-side of the volume control API that maps between volume levels ([0..100])
- * and dBFS values. It uses an Android Things specific system API.
+ * and dBFS values. It uses an Android API that was made public in SDK version 28.
  */
 @JNINamespace("chromecast::media")
-@TargetApi(Build.VERSION_CODES.N)
+@RequiresApi(Build.VERSION_CODES.N)
 public final class VolumeMap {
     private static final String TAG = "VolumeMap";
 
@@ -94,6 +95,9 @@ public final class VolumeMap {
 
     // Returns the current volume in dB for the given stream type and volume index.
     private static float getStreamVolumeDB(int streamType, int idx) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            return getAudioManager().getStreamVolumeDb(streamType, idx, DEVICE_TYPE);
+        }
         float db = 0;
         if (Build.VERSION.SDK_INT == Build.VERSION_CODES.O_MR1
                 || Build.VERSION.SDK_INT == Build.VERSION_CODES.N) {
@@ -106,10 +110,6 @@ public final class VolumeMap {
             } catch (Exception e) {
                 Log.e(TAG, "Can not call AudioManager.getStreamVolumeDb():", e);
             }
-            // TODO(ckuiper): when Android P becomes available add something like this to call the
-            // AudioManager.getStreamVolumeDb() directly as it is public in P.
-            //   } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            //       db = sAudioManager.getStreamVolumeDb();
         } else {
             Log.e(TAG, "Unsupported Android SDK version:" + Build.VERSION.SDK_INT);
         }
@@ -170,7 +170,8 @@ public final class VolumeMap {
         // There are only a few volume index steps, so simply loop through them
         // and find the interval [dbLeft .. dbRight] that contains db, then
         // interpolate to estimate the volume level to return.
-        float dbLeft = dbMin, dbRight = dbMin;
+        float dbLeft = dbMin;
+        float dbRight = dbMin;
         int idx = minIndex + 1;
         for (; idx <= maxIndex; idx++) {
             dbLeft = dbRight;

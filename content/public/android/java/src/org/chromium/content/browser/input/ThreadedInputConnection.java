@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser.input;
 
 import android.annotation.SuppressLint;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -18,10 +19,13 @@ import android.view.inputmethod.CorrectionInfo;
 import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.SurroundingText;
+
+import androidx.annotation.RequiresApi;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.VisibleForTesting;
 import org.chromium.base.task.PostTask;
 import org.chromium.content_public.browser.UiThreadTaskTraits;
 
@@ -40,7 +44,7 @@ import java.util.concurrent.LinkedBlockingQueue;
  * details.
  */
 class ThreadedInputConnection extends BaseInputConnection implements ChromiumBaseInputConnection {
-    private static final String TAG = "cr_Ime";
+    private static final String TAG = "Ime";
     private static final boolean DEBUG_LOGS = false;
 
     private static final TextInputState UNBLOCKER = new TextInputState(
@@ -205,8 +209,12 @@ class ThreadedInputConnection extends BaseInputConnection implements ChromiumBas
             final ExtractedText extractedText = convertToExtractedText(textInputState);
             mImeAdapter.updateExtractedText(mCurrentExtractedTextRequestToken, extractedText);
         }
-        mImeAdapter.updateSelection(
-                selection.start(), selection.end(), composition.start(), composition.end());
+        // This leads to containerView#onCheckIsTextEditor(). Run it on UI thread.
+        // See https://crbug.com/1060361.
+        PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> {
+            mImeAdapter.updateSelection(
+                    selection.start(), selection.end(), composition.start(), composition.end());
+        });
     }
 
     private TextInputState requestAndWaitForTextInputState() {
@@ -606,6 +614,21 @@ class ThreadedInputConnection extends BaseInputConnection implements ChromiumBas
             }
         });
         return true;
+    }
+
+    /**
+     * @see InputConnection#getSurroundingText(int, int, int)
+     */
+    @RequiresApi(Build.VERSION_CODES.S)
+    @SuppressLint("Override")
+    @Override
+    public SurroundingText getSurroundingText(int beforeLength, int afterLength, int flags) {
+        if (DEBUG_LOGS) {
+            Log.i(TAG, "getSurroundingText [%d %d %x]", beforeLength, afterLength, flags);
+        }
+        TextInputState textInputState = requestAndWaitForTextInputState();
+        if (textInputState == null) return null;
+        return textInputState.getSurroundingText(beforeLength, afterLength);
     }
 
     /**

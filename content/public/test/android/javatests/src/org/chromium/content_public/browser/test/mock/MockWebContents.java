@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,22 +8,31 @@ import android.annotation.SuppressLint;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Parcel;
-import android.support.annotation.Nullable;
 
-import org.chromium.content_public.browser.AccessibilitySnapshotCallback;
+import androidx.annotation.Nullable;
+
+import org.chromium.blink_public.input.SelectionGranularity;
+import org.chromium.content_public.browser.GlobalRenderFrameHostId;
 import org.chromium.content_public.browser.ImageDownloadCallback;
 import org.chromium.content_public.browser.JavaScriptCallback;
+import org.chromium.content_public.browser.MessagePayload;
 import org.chromium.content_public.browser.MessagePort;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.RenderWidgetHostView;
+import org.chromium.content_public.browser.StylusWritingHandler;
 import org.chromium.content_public.browser.ViewEventSink;
+import org.chromium.content_public.browser.Visibility;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.ui.OverscrollRefreshHandler;
 import org.chromium.ui.base.EventForwarder;
 import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.url.GURL;
+
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Mock class for {@link WebContents}.
@@ -31,11 +40,15 @@ import org.chromium.ui.base.WindowAndroid;
 @SuppressLint("ParcelCreator")
 public class MockWebContents implements WebContents {
     public RenderFrameHost renderFrameHost;
+    private GURL mLastCommittedUrl;
 
     @Override
     public void initialize(String productVersion, ViewAndroidDelegate viewDelegate,
             ViewEventSink.InternalAccessDelegate accessDelegate, WindowAndroid windowAndroid,
             WebContents.InternalsHolder internalsHolder) {}
+
+    @Override
+    public void clearJavaWebContentsObservers() {}
 
     @Override
     public int describeContents() {
@@ -85,9 +98,24 @@ public class MockWebContents implements WebContents {
     }
 
     @Override
+    public RenderFrameHost getRenderFrameHostFromId(GlobalRenderFrameHostId id) {
+        return null;
+    }
+
+    @Override
     @Nullable
     public RenderWidgetHostView getRenderWidgetHostView() {
         return null;
+    }
+
+    @Override
+    public List<? extends WebContents> getInnerWebContents() {
+        return Collections.emptyList();
+    }
+
+    @Override
+    public @Visibility int getVisibility() {
+        return Visibility.VISIBLE;
     }
 
     @Override
@@ -96,8 +124,8 @@ public class MockWebContents implements WebContents {
     }
 
     @Override
-    public String getVisibleUrl() {
-        return null;
+    public GURL getVisibleUrl() {
+        return GURL.emptyGURL();
     }
 
     @Override
@@ -111,9 +139,12 @@ public class MockWebContents implements WebContents {
     }
 
     @Override
-    public boolean isLoadingToDifferentDocument() {
+    public boolean shouldShowLoadingUI() {
         return false;
     }
+
+    @Override
+    public void dispatchBeforeUnload(boolean autoCancel) {}
 
     @Override
     public void stop() {}
@@ -134,12 +165,15 @@ public class MockWebContents implements WebContents {
     public void setAudioMuted(boolean mute) {}
 
     @Override
-    public boolean isShowingInterstitialPage() {
+    public boolean focusLocationBarByDefault() {
         return false;
     }
 
     @Override
-    public boolean focusLocationBarByDefault() {
+    public void setFocus(boolean hasFocus) {}
+
+    @Override
+    public boolean isFullscreenForCurrentTab() {
         return false;
     }
 
@@ -150,15 +184,20 @@ public class MockWebContents implements WebContents {
     public void scrollFocusedEditableNodeIntoView() {}
 
     @Override
-    public void selectWordAroundCaret() {}
+    public void selectAroundCaret(@SelectionGranularity int granularity, boolean shouldShowHandle,
+            boolean shouldShowContextMenu) {}
 
     @Override
     public void adjustSelectionByCharacterOffset(
             int startAdjust, int endAdjust, boolean showSelectionMenu) {}
 
     @Override
-    public String getLastCommittedUrl() {
-        return null;
+    public GURL getLastCommittedUrl() {
+        return mLastCommittedUrl;
+    }
+
+    public void setLastCommittedUrl(GURL url) {
+        mLastCommittedUrl = url;
     }
 
     @Override
@@ -179,8 +218,8 @@ public class MockWebContents implements WebContents {
     public void addMessageToDevToolsConsole(int level, String message) {}
 
     @Override
-    public void postMessageToMainFrame(
-            String message, String sourceOrigin, String targetOrigin, MessagePort[] ports) {}
+    public void postMessageToMainFrame(MessagePayload messagePayload, String sourceOrigin,
+            String targetOrigin, MessagePort[] ports) {}
 
     @Override
     public MessagePort[] createMessageChannel() {
@@ -198,7 +237,7 @@ public class MockWebContents implements WebContents {
     }
 
     @Override
-    public int getLoadProgress() {
+    public float getLoadProgress() {
         return 0;
     }
 
@@ -209,7 +248,7 @@ public class MockWebContents implements WebContents {
     public void setSmartClipResultHandler(Handler smartClipHandler) {}
 
     @Override
-    public void requestAccessibilitySnapshot(AccessibilitySnapshotCallback callback) {}
+    public void setStylusWritingHandler(StylusWritingHandler stylusWritingHandler) {}
 
     @Override
     public EventForwarder getEventForwarder() {
@@ -229,10 +268,7 @@ public class MockWebContents implements WebContents {
     public void setSpatialNavigationDisabled(boolean disabled) {}
 
     @Override
-    public void reloadLoFiImages() {}
-
-    @Override
-    public int downloadImage(String url, boolean isFavicon, int maxBitmapSize, boolean bypassCache,
+    public int downloadImage(GURL url, boolean isFavicon, int maxBitmapSize, boolean bypassCache,
             ImageDownloadCallback callback) {
         return 0;
     }
@@ -273,4 +309,7 @@ public class MockWebContents implements WebContents {
 
     @Override
     public void notifyRendererPreferenceUpdate() {}
+
+    @Override
+    public void notifyBrowserControlsHeightChanged() {}
 }

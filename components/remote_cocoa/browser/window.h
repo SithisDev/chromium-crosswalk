@@ -1,10 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_REMOTE_COCOA_BROWSER_WINDOW_H_
 #define COMPONENTS_REMOTE_COCOA_BROWSER_WINDOW_H_
 
+#include "base/memory/raw_ptr.h"
 #include "components/remote_cocoa/browser/remote_cocoa_browser_export.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -36,9 +37,9 @@ class REMOTE_COCOA_BROWSER_EXPORT ScopedNativeWindowMapping {
 
  private:
   const gfx::NativeWindow native_window_;
-  ApplicationHost* const application_host_;
-  NativeWidgetNSWindowBridge* const in_process_window_bridge_;
-  mojom::NativeWidgetNSWindow* const mojo_interface_;
+  const raw_ptr<ApplicationHost> application_host_;
+  const raw_ptr<NativeWidgetNSWindowBridge> in_process_window_bridge_;
+  const raw_ptr<mojom::NativeWidgetNSWindow> mojo_interface_;
 };
 
 // Return the application host for the specified browser-side gfx::NativeWindow.
@@ -54,12 +55,6 @@ GetWindowMojoInterface(gfx::NativeWindow window);
 // Returns true if the specified NSWindow corresponds to an NSWindow that is
 // being viewed in a remote process.
 bool REMOTE_COCOA_BROWSER_EXPORT IsWindowRemote(gfx::NativeWindow window);
-
-// Create a transparent NSWindow that is in the same position as |window|,
-// but is at the ModalPanel window level, so that it will appear over all
-// other window.
-NSWindow* REMOTE_COCOA_BROWSER_EXPORT
-CreateInProcessTransparentClone(gfx::NativeWindow window);
 
 }  // namespace remote_cocoa
 

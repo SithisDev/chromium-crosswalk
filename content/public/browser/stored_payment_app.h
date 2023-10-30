@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "content/common/content_export.h"
+#include "content/public/browser/supported_delegations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
 
@@ -32,9 +33,6 @@ struct CONTENT_EXPORT StoredCapabilities {
 
   // A list of ::payments::mojom::BasicCardNetwork.
   std::vector<int32_t> supported_card_networks;
-
-  // A list of ::payments::mojom::BasicCardType.
-  std::vector<int32_t> supported_card_types;
 };
 
 // This class represents the stored payment app.
@@ -76,6 +74,9 @@ struct CONTENT_EXPORT StoredPaymentApp {
 
   // User hint for this payment app.
   std::string user_hint;
+
+  // List of supported delegations for this payment app.
+  SupportedDelegations supported_delegations;
 };
 
 }  // namespace content

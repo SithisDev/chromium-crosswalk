@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,20 +13,19 @@ class DictionaryValue;
 
 namespace sync_pb {
 class AppListSpecifics;
-class AppNotification;
-class AppNotificationSettings;
 class AppSettingSpecifics;
 class AppSpecifics;
 class ArcPackageSpecifics;
-class ArticleSpecifics;
 class AutofillProfileSpecifics;
 class AutofillSpecifics;
+class AutofillOfferSpecifics;
 class AutofillWalletSpecifics;
+class AutofillWalletUsageSpecifics;
 class BookmarkSpecifics;
 class ClientConfigParams;
 class ClientToServerMessage;
 class ClientToServerResponse;
-class DatatypeAssociationStats;
+class ContactInfoSpecifics;
 class DebugEventInfo;
 class DebugInfo;
 class DeviceInfoSpecifics;
@@ -34,40 +33,36 @@ class DictionarySpecifics;
 class EncryptedData;
 class EntityMetadata;
 class EntitySpecifics;
-class ExperimentsSpecifics;
 class ExtensionSettingSpecifics;
 class ExtensionSpecifics;
-class FaviconImageSpecifics;
-class FaviconTrackingSpecifics;
-class GlobalIdDirective;
 class HistoryDeleteDirectiveSpecifics;
+class HistorySpecifics;
 class LinkedAppIconInfo;
 class ManagedUserSettingSpecifics;
-class ManagedUserSharedSettingSpecifics;
-class ManagedUserSpecifics;
-class ManagedUserWhitelistSpecifics;
-class MountainShareSpecifics;
 class NavigationRedirect;
 class NigoriSpecifics;
+class OsPreferenceSpecifics;
+class OsPriorityPreferenceSpecifics;
 class PasswordSpecifics;
 class PasswordSpecificsData;
 class PaymentsCustomerData;
 class PreferenceSpecifics;
 class PrinterPPDReference;
 class PrinterSpecifics;
+class PrintersAuthorizationServerSpecifics;
 class PriorityPreferenceSpecifics;
 class ReadingListSpecifics;
 class SearchEngineSpecifics;
 class SecurityEventSpecifics;
+class SegmentationSpecifics;
 class SendTabToSelfSpecifics;
 class SessionHeader;
 class SessionSpecifics;
 class SessionTab;
 class SessionWindow;
+class SharingMessageSpecifics;
 class SyncCycleCompletedEventInfo;
 class SyncEntity;
-class SyncedNotificationAppInfoSpecifics;
-class SyncedNotificationSpecifics;
 class TabNavigation;
 class ThemeSpecifics;
 class TimeRangeDirective;
@@ -75,12 +70,13 @@ class TypedUrlSpecifics;
 class UrlDirective;
 class UserConsentSpecifics;
 class UserEventSpecifics;
+class WalletCreditCardCloudTokenData;
 class WalletMaskedCreditCard;
 class WalletMetadataSpecifics;
 class WalletPostalAddress;
 class WebAppSpecifics;
 class WifiConfigurationSpecifics;
-class WifiCredentialSpecifics;
+class WorkspaceDeskSpecifics;
 }  // namespace sync_pb
 
 // Keep this file in sync with the .proto files in this directory.
@@ -95,12 +91,6 @@ namespace syncer {
 std::unique_ptr<base::DictionaryValue> AppListSpecificsToValue(
     const sync_pb::AppListSpecifics& proto);
 
-std::unique_ptr<base::DictionaryValue> AppNotificationToValue(
-    const sync_pb::AppNotification& app_notification_specifics);
-
-std::unique_ptr<base::DictionaryValue> AppNotificationSettingsToValue(
-    const sync_pb::AppNotificationSettings& app_notification_settings);
-
 std::unique_ptr<base::DictionaryValue> AppSettingSpecificsToValue(
     const sync_pb::AppSettingSpecifics& app_setting_specifics);
 
@@ -110,8 +100,8 @@ std::unique_ptr<base::DictionaryValue> AppSpecificsToValue(
 std::unique_ptr<base::DictionaryValue> ArcPackageSpecificsToValue(
     const sync_pb::ArcPackageSpecifics& proto);
 
-std::unique_ptr<base::DictionaryValue> ArticleSpecificsToValue(
-    const sync_pb::ArticleSpecifics& article_specifics);
+std::unique_ptr<base::DictionaryValue> AutofillOfferSpecificsToValue(
+    const sync_pb::AutofillOfferSpecifics& autofill_offer_specifics);
 
 std::unique_ptr<base::DictionaryValue> AutofillProfileSpecificsToValue(
     const sync_pb::AutofillProfileSpecifics& autofill_profile_specifics);
@@ -122,14 +112,18 @@ std::unique_ptr<base::DictionaryValue> AutofillSpecificsToValue(
 std::unique_ptr<base::DictionaryValue> AutofillWalletSpecificsToValue(
     const sync_pb::AutofillWalletSpecifics& autofill_wallet_specifics);
 
+std::unique_ptr<base::DictionaryValue> AutofillWalletUsageSpecificsToValue(
+    const sync_pb::AutofillWalletUsageSpecifics&
+        autofill_wallet_usage_specifics);
+
 std::unique_ptr<base::DictionaryValue> BookmarkSpecificsToValue(
     const sync_pb::BookmarkSpecifics& bookmark_specifics);
 
 std::unique_ptr<base::DictionaryValue> ClientConfigParamsToValue(
     const sync_pb::ClientConfigParams& proto);
 
-std::unique_ptr<base::DictionaryValue> DatatypeAssociationStatsToValue(
-    const sync_pb::DatatypeAssociationStats& proto);
+std::unique_ptr<base::DictionaryValue> ContactInfoSpecificsToValue(
+    const sync_pb::ContactInfoSpecifics& proto);
 
 std::unique_ptr<base::DictionaryValue> DebugEventInfoToValue(
     const sync_pb::DebugEventInfo& proto);
@@ -152,27 +146,18 @@ std::unique_ptr<base::DictionaryValue> EntityMetadataToValue(
 std::unique_ptr<base::DictionaryValue> EntitySpecificsToValue(
     const sync_pb::EntitySpecifics& specifics);
 
-std::unique_ptr<base::DictionaryValue> ExperimentsSpecificsToValue(
-    const sync_pb::ExperimentsSpecifics& proto);
-
 std::unique_ptr<base::DictionaryValue> ExtensionSettingSpecificsToValue(
     const sync_pb::ExtensionSettingSpecifics& extension_setting_specifics);
 
 std::unique_ptr<base::DictionaryValue> ExtensionSpecificsToValue(
     const sync_pb::ExtensionSpecifics& extension_specifics);
 
-std::unique_ptr<base::DictionaryValue> FaviconImageSpecificsToValue(
-    const sync_pb::FaviconImageSpecifics& favicon_image_specifics);
-
-std::unique_ptr<base::DictionaryValue> FaviconTrackingSpecificsToValue(
-    const sync_pb::FaviconTrackingSpecifics& favicon_tracking_specifics);
-
-std::unique_ptr<base::DictionaryValue> GlobalIdDirectiveToValue(
-    const sync_pb::GlobalIdDirective& global_id_directive);
-
 std::unique_ptr<base::DictionaryValue> HistoryDeleteDirectiveSpecificsToValue(
     const sync_pb::HistoryDeleteDirectiveSpecifics&
         history_delete_directive_specifics);
+
+std::unique_ptr<base::DictionaryValue> HistorySpecificsToValue(
+    const sync_pb::HistorySpecifics& history_specifics);
 
 std::unique_ptr<base::DictionaryValue> LinkedAppIconInfoToValue(
     const sync_pb::LinkedAppIconInfo& linked_app_icon_info);
@@ -180,25 +165,17 @@ std::unique_ptr<base::DictionaryValue> LinkedAppIconInfoToValue(
 std::unique_ptr<base::DictionaryValue> ManagedUserSettingSpecificsToValue(
     const sync_pb::ManagedUserSettingSpecifics& managed_user_setting_specifics);
 
-std::unique_ptr<base::DictionaryValue> ManagedUserSharedSettingSpecificsToValue(
-    const sync_pb::ManagedUserSharedSettingSpecifics&
-        managed_user_shared_setting_specifics);
-
-std::unique_ptr<base::DictionaryValue> ManagedUserSpecificsToValue(
-    const sync_pb::ManagedUserSpecifics& managed_user_specifics);
-
-std::unique_ptr<base::DictionaryValue> ManagedUserWhitelistSpecificsToValue(
-    const sync_pb::ManagedUserWhitelistSpecifics&
-        managed_user_whitelist_specifics);
-
-std::unique_ptr<base::DictionaryValue> MountainShareSpecificsToValue(
-    const sync_pb::MountainShareSpecifics& mountain_share_specifics);
-
 std::unique_ptr<base::DictionaryValue> NavigationRedirectToValue(
     const sync_pb::NavigationRedirect& navigation_redirect);
 
 std::unique_ptr<base::DictionaryValue> NigoriSpecificsToValue(
     const sync_pb::NigoriSpecifics& nigori_specifics);
+
+std::unique_ptr<base::DictionaryValue> OsPreferenceSpecificsToValue(
+    const sync_pb::OsPreferenceSpecifics& specifics);
+
+std::unique_ptr<base::DictionaryValue> OsPriorityPreferenceSpecificsToValue(
+    const sync_pb::OsPriorityPreferenceSpecifics& specifics);
 
 std::unique_ptr<base::DictionaryValue> PasswordSpecificsToValue(
     const sync_pb::PasswordSpecifics& password_specifics);
@@ -218,6 +195,11 @@ std::unique_ptr<base::DictionaryValue> PrinterPPDReferenceToValue(
 std::unique_ptr<base::DictionaryValue> PrinterSpecificsToValue(
     const sync_pb::PrinterSpecifics& printer_specifics);
 
+std::unique_ptr<base::DictionaryValue>
+PrintersAuthorizationServerSpecificsToValue(
+    const sync_pb::PrintersAuthorizationServerSpecifics&
+        printers_authorization_server_specifics);
+
 std::unique_ptr<base::DictionaryValue> PriorityPreferenceSpecificsToValue(
     const sync_pb::PriorityPreferenceSpecifics& proto);
 
@@ -226,6 +208,9 @@ std::unique_ptr<base::DictionaryValue> ReadingListSpecificsToValue(
 
 std::unique_ptr<base::DictionaryValue> SearchEngineSpecificsToValue(
     const sync_pb::SearchEngineSpecifics& search_engine_specifics);
+
+std::unique_ptr<base::DictionaryValue> SegmentationSpecificsToValue(
+    const sync_pb::SegmentationSpecifics& segmentation_specifics);
 
 std::unique_ptr<base::DictionaryValue> SendTabToSelfSpecificsToValue(
     const sync_pb::SendTabToSelfSpecifics& send_tab_specifics);
@@ -245,16 +230,11 @@ std::unique_ptr<base::DictionaryValue> SessionTabToValue(
 std::unique_ptr<base::DictionaryValue> SessionWindowToValue(
     const sync_pb::SessionWindow& session_window);
 
+std::unique_ptr<base::DictionaryValue> SharingMessageSpecificsToValue(
+    const sync_pb::SharingMessageSpecifics& sharing_message_specifics);
+
 std::unique_ptr<base::DictionaryValue> SyncCycleCompletedEventInfoToValue(
     const sync_pb::SyncCycleCompletedEventInfo& proto);
-
-std::unique_ptr<base::DictionaryValue>
-SyncedNotificationAppInfoSpecificsToValue(
-    const sync_pb::SyncedNotificationAppInfoSpecifics&
-        synced_notification_specifics);
-
-std::unique_ptr<base::DictionaryValue> SyncedNotificationSpecificsToValue(
-    const sync_pb::SyncedNotificationSpecifics& synced_notification_specifics);
 
 std::unique_ptr<base::DictionaryValue> TabNavigationToValue(
     const sync_pb::TabNavigation& tab_navigation);
@@ -277,6 +257,9 @@ std::unique_ptr<base::DictionaryValue> UserConsentSpecificsToValue(
 std::unique_ptr<base::DictionaryValue> UserEventSpecificsToValue(
     const sync_pb::UserEventSpecifics& user_event_specifics);
 
+std::unique_ptr<base::DictionaryValue> WalletCreditCardCloudTokenDataToValue(
+    const sync_pb::WalletCreditCardCloudTokenData& cloud_token_data);
+
 std::unique_ptr<base::DictionaryValue> WalletMaskedCreditCardToValue(
     const sync_pb::WalletMaskedCreditCard& wallet_masked_card);
 
@@ -292,22 +275,30 @@ std::unique_ptr<base::DictionaryValue> WebAppSpecificsToValue(
 std::unique_ptr<base::DictionaryValue> WifiConfigurationSpecificsToValue(
     const sync_pb::WifiConfigurationSpecifics& wifi_configuration_specifics);
 
-std::unique_ptr<base::DictionaryValue> WifiCredentialSpecificsToValue(
-    const sync_pb::WifiCredentialSpecifics& wifi_credential_specifics);
+std::unique_ptr<base::DictionaryValue> WorkspaceDeskSpecificsToValue(
+    const sync_pb::WorkspaceDeskSpecifics& workspace_desk_specifics);
 
-// ToValue functions that allow omitting specifics.
+// ToValue functions that allow omitting specifics and other fields.
+
+struct ProtoValueConversionOptions {
+  // Whether to include specifics.
+  bool include_specifics = true;
+
+  // Whether to include default values which are set in GetUpdateTriggers.
+  bool include_full_get_update_triggers = true;
+};
 
 std::unique_ptr<base::DictionaryValue> ClientToServerMessageToValue(
     const sync_pb::ClientToServerMessage& proto,
-    bool include_specifics);
+    const ProtoValueConversionOptions& options);
 
 std::unique_ptr<base::DictionaryValue> ClientToServerResponseToValue(
     const sync_pb::ClientToServerResponse& proto,
-    bool include_specifics);
+    const ProtoValueConversionOptions& options);
 
 std::unique_ptr<base::DictionaryValue> SyncEntityToValue(
     const sync_pb::SyncEntity& entity,
-    bool include_specifics);
+    const ProtoValueConversionOptions& options);
 
 }  // namespace syncer
 

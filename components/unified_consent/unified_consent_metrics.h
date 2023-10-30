@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,22 +13,6 @@ class SyncUserSettings;
 
 namespace unified_consent {
 namespace metrics {
-
-// Google services that can be toggled in user settings.
-// Used in histograms. Do not change existing values, append new values at the
-// end.
-enum class SettingsHistogramValue {
-  kNone = 0,
-  kUnifiedConsentGiven = 1,
-  kUserEvents = 2,
-  kUrlKeyedAnonymizedDataCollection = 3,
-  kSafeBrowsingExtendedReporting = 4,
-  kSpellCheck = 5,
-  kAllServicesWereEnabled = 6,
-
-  kMaxValue = kAllServicesWereEnabled
-};
-
 // Records settings entries in the SyncAndGoogleServicesSettings.
 // kNone is recorded when none of the settings is enabled.
 void RecordSettingsHistogram(PrefService* pref_service);

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "url/gurl.h"
 
@@ -43,8 +42,6 @@ class PasswordManagerMetricsRecorder {
     NO_MATCHING_FORM,
     // FormFetcher of PasswordFormManager is still loading.
     MATCHING_NOT_COMPLETE,
-    // Form is blacklisted for saving. Obsolete since M47.
-    FORM_BLACKLISTED,
     // <unknown purpose>. Obsolete since M48.
     INVALID_FORM,
     // A Google credential cannot be saved by policy because it is the Chrome
@@ -82,11 +79,16 @@ class PasswordManagerMetricsRecorder {
   };
 
   // Records UKM metrics and reports them on destruction.
-  PasswordManagerMetricsRecorder(ukm::SourceId source_id,
-                                 const GURL& main_frame_url);
+  explicit PasswordManagerMetricsRecorder(ukm::SourceId source_id);
 
   PasswordManagerMetricsRecorder(
       PasswordManagerMetricsRecorder&& that) noexcept;
+
+  PasswordManagerMetricsRecorder(const PasswordManagerMetricsRecorder&) =
+      delete;
+  PasswordManagerMetricsRecorder& operator=(
+      const PasswordManagerMetricsRecorder&) = delete;
+
   ~PasswordManagerMetricsRecorder();
 
   PasswordManagerMetricsRecorder& operator=(
@@ -110,9 +112,6 @@ class PasswordManagerMetricsRecorder {
   void RecordPageLevelUserAction(PageLevelUserAction action);
 
  private:
-  // URL for which UKMs are reported.
-  GURL main_frame_url_;
-
   // Records URL keyed metrics (UKMs) and submits them on its destruction.
   std::unique_ptr<ukm::builders::PageWithPassword> ukm_entry_builder_;
 
@@ -121,8 +120,6 @@ class PasswordManagerMetricsRecorder {
   // Stores the value most recently reported via RecordFormManagerAvailable.
   FormManagerAvailable form_manager_availability_ =
       FormManagerAvailable::kNotSet;
-
-  DISALLOW_COPY_AND_ASSIGN(PasswordManagerMetricsRecorder);
 };
 
 }  // namespace password_manager

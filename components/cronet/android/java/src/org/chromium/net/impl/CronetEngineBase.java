@@ -1,10 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 package org.chromium.net.impl;
 
-import android.support.annotation.IntDef;
-import android.support.annotation.Nullable;
+import androidx.annotation.IntDef;
+import androidx.annotation.Nullable;
 
 import org.chromium.net.BidirectionalStream;
 import org.chromium.net.ExperimentalBidirectionalStream;
@@ -26,6 +26,12 @@ import java.util.concurrent.Executor;
  * shared logic.
  */
 public abstract class CronetEngineBase extends ExperimentalCronetEngine {
+    /*
+     * Network handle representing the default network. To be used when a network has not been
+     * explicitly set.
+     */
+    protected static final long DEFAULT_NETWORK_HANDLE = -1;
+
     /**
      * Creates a {@link UrlRequest} object. All callbacks will
      * be called on {@code executor}'s thread. {@code executor} must not run
@@ -54,13 +60,18 @@ public abstract class CronetEngineBase extends ExperimentalCronetEngine {
      * @param trafficStatsUid UID to attribute traffic used to perform this request.
      * @param requestFinishedListener callback to get invoked with metrics when request is finished.
      *        Set to {@code null} if not used.
+     * @param idempotency idempotency of the request which should be one of the
+     *         {@link ExperimentalUrlRequest.Builder#DEFAULT_IDEMPOTENCY IDEMPOTENT NOT_IDEMPOTENT}
+     *         values.
+     * @param network network to be used to send this request. Set to {@code null} if not specified.
      * @return new request.
      */
     protected abstract UrlRequestBase createRequest(String url, UrlRequest.Callback callback,
             Executor executor, @RequestPriority int priority, Collection<Object> requestAnnotations,
             boolean disableCache, boolean disableConnectionMigration, boolean allowDirectExecutor,
             boolean trafficStatsTagSet, int trafficStatsTag, boolean trafficStatsUidSet,
-            int trafficStatsUid, @Nullable RequestFinishedInfo.Listener requestFinishedListener);
+            int trafficStatsUid, @Nullable RequestFinishedInfo.Listener requestFinishedListener,
+            @Idempotency int idempotency, long networkHandle);
 
     /**
      * Creates a {@link BidirectionalStream} object. {@code callback} methods will
@@ -87,6 +98,7 @@ public abstract class CronetEngineBase extends ExperimentalCronetEngine {
      * @param trafficStatsUidSet {@code true} if {@code trafficStatsUid} represents a UID to
      *         attribute traffic used to perform this request.
      * @param trafficStatsUid UID to attribute traffic used to perform this request.
+     * @param network network to be used to send this request. Set to {@code null} if not specified.
      * @return a new stream.
      */
     protected abstract ExperimentalBidirectionalStream createBidirectionalStream(String url,
@@ -94,7 +106,7 @@ public abstract class CronetEngineBase extends ExperimentalCronetEngine {
             List<Map.Entry<String, String>> requestHeaders, @StreamPriority int priority,
             boolean delayRequestHeadersUntilFirstFlush, Collection<Object> requestAnnotations,
             boolean trafficStatsTagSet, int trafficStatsTag, boolean trafficStatsUidSet,
-            int trafficStatsUid);
+            int trafficStatsUid, long networkHandle);
 
     @Override
     public ExperimentalUrlRequest.Builder newUrlRequestBuilder(
@@ -117,4 +129,10 @@ public abstract class CronetEngineBase extends ExperimentalCronetEngine {
     })
     @Retention(RetentionPolicy.SOURCE)
     public @interface StreamPriority {}
+
+    @IntDef({ExperimentalUrlRequest.Builder.DEFAULT_IDEMPOTENCY,
+            ExperimentalUrlRequest.Builder.IDEMPOTENT,
+            ExperimentalUrlRequest.Builder.NOT_IDEMPOTENT})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface Idempotency {}
 }

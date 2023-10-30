@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,40 +7,37 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/callback.h"
+#include "base/memory/weak_ptr.h"
 #include "components/download/public/common/download_create_info.h"
 #include "components/download/public/common/download_export.h"
-
-namespace net {
-class URLRequestContextGetter;
-}  // namespace net
-
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
+#include "components/download/public/common/download_job.h"
+#include "components/download/public/common/url_loader_factory_provider.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/device/public/mojom/wake_lock_provider.mojom.h"
 
 namespace download {
-
 class DownloadItem;
-class DownloadJob;
-class DownloadRequestHandleInterface;
-class DownloadURLLoaderFactoryGetter;
 
 // Factory class to create different kinds of DownloadJob.
 class COMPONENTS_DOWNLOAD_EXPORT DownloadJobFactory {
  public:
+  // A callback that can be called to bind a device.mojom.WakeLockProvider
+  // receiver.
+  using WakeLockProviderBinder = base::RepeatingCallback<void(
+      mojo::PendingReceiver<device::mojom::WakeLockProvider>)>;
+
+  DownloadJobFactory(const DownloadJobFactory&) = delete;
+  DownloadJobFactory& operator=(const DownloadJobFactory&) = delete;
+
   static std::unique_ptr<DownloadJob> CreateJob(
       DownloadItem* download_item,
-      std::unique_ptr<DownloadRequestHandleInterface> req_handle,
+      DownloadJob::CancelRequestCallback cancel_request_callback,
       const DownloadCreateInfo& create_info,
       bool is_save_package_download,
-      scoped_refptr<download::DownloadURLLoaderFactoryGetter>
-          url_loader_factory_getter,
-      net::URLRequestContextGetter* url_request_context_getter,
-      service_manager::Connector* connector);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DownloadJobFactory);
+      URLLoaderFactoryProvider::URLLoaderFactoryProviderPtr
+          url_loader_factory_provider,
+      WakeLockProviderBinder wake_lock_provider_binder);
 };
 
 }  // namespace download

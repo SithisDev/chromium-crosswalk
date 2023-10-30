@@ -1,11 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chromecast/media/cma/backend/alsa/mixer_output_stream_alsa.h"
 
+#include <algorithm>
+#include <limits>
+#include <string>
+
 #include "base/command_line.h"
-#include "base/stl_util.h"
+#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "chromecast/base/chromecast_switches.h"
@@ -13,22 +18,22 @@
 #include "media/base/audio_sample_types.h"
 #include "media/base/media_switches.h"
 
-#define RETURN_FALSE_ON_ERROR(snd_func, ...)                      \
-  do {                                                            \
-    int err = alsa_->snd_func(__VA_ARGS__);                       \
-    if (err < 0) {                                                \
-      LOG(ERROR) << #snd_func " error: " << alsa_->StrError(err); \
-      return false;                                               \
-    }                                                             \
+#define RETURN_FALSE_ON_ERROR(snd_func, ...)                        \
+  do {                                                              \
+    int a_err = alsa_->snd_func(__VA_ARGS__);                       \
+    if (a_err < 0) {                                                \
+      LOG(ERROR) << #snd_func " error: " << alsa_->StrError(a_err); \
+      return false;                                                 \
+    }                                                               \
   } while (0)
 
-#define RETURN_ERROR_CODE(snd_func, ...)                          \
-  do {                                                            \
-    int err = alsa_->snd_func(__VA_ARGS__);                       \
-    if (err < 0) {                                                \
-      LOG(ERROR) << #snd_func " error: " << alsa_->StrError(err); \
-      return err;                                                 \
-    }                                                             \
+#define RETURN_ERROR_CODE(snd_func, ...)                            \
+  do {                                                              \
+    int a_err = alsa_->snd_func(__VA_ARGS__);                       \
+    if (a_err < 0) {                                                \
+      LOG(ERROR) << #snd_func " error: " << alsa_->StrError(a_err); \
+      return a_err;                                                 \
+    }                                                               \
   } while (0)
 
 #define CHECK_PCM_INITIALIZED()                                              \
@@ -109,7 +114,7 @@ constexpr int* kAlsaDirDontCare = nullptr;
 // retried. Below constants define retries params.
 constexpr int kRestoreAfterSuspensionAttempts = 10;
 constexpr base::TimeDelta kRestoreAfterSuspensionAttemptDelay =
-    base::TimeDelta::FromMilliseconds(20);
+    base::Milliseconds(20);
 
 // These sample formats will be tried in order. 32 bit samples is ideal, but
 // some devices do not support 32 bit samples.
@@ -183,8 +188,13 @@ bool MixerOutputStreamAlsa::Start(int sample_rate, int channels) {
 
   rendering_delay_.timestamp_microseconds = kNoTimestamp;
   rendering_delay_.delay_microseconds = 0;
+  first_write_ = true;
 
   return true;
+}
+
+int MixerOutputStreamAlsa::GetNumChannels() {
+  return num_output_channels_;
 }
 
 int MixerOutputStreamAlsa::GetSampleRate() {
@@ -232,7 +242,9 @@ bool MixerOutputStreamAlsa::Write(const float* data,
     int frames_or_error;
     while ((frames_or_error =
                 alsa_->PcmWritei(pcm_, output_data, frames_left)) < 0) {
-      *out_playback_interrupted = true;
+      if (!first_write_) {
+        *out_playback_interrupted = true;
+      }
       if (frames_or_error == -EBADFD &&
           MaybeRecoverDeviceFromSuspendedState()) {
         // Write data again, if recovered.
@@ -245,6 +257,7 @@ bool MixerOutputStreamAlsa::Write(const float* data,
     DCHECK_GE(frames_left, 0);
     output_data += frames_or_error * num_output_channels_ * bytes_per_sample;
   }
+  first_write_ = false;
   UpdateRenderingDelay();
 
   return true;
@@ -452,7 +465,7 @@ int MixerOutputStreamAlsa::DetermineOutputRate(int requested_sample_rate) {
   // doesn't always choose a rate that's actually near the given input sample
   // rate when the input sample rate is not supported.
   const int* kSupportedSampleRatesEnd =
-      kSupportedSampleRates + base::size(kSupportedSampleRates);
+      kSupportedSampleRates + std::size(kSupportedSampleRates);
   auto* nearest_sample_rate =
       std::min_element(kSupportedSampleRates, kSupportedSampleRatesEnd,
                        [requested_sample_rate](int r1, int r2) -> bool {

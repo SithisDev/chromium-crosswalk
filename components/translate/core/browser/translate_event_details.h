@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,9 @@
 namespace translate {
 
 struct TranslateEventDetails {
-  TranslateEventDetails(const std::string& in_filename,
+  TranslateEventDetails(std::string in_filename,
                         int in_line,
-                        const std::string& in_message);
+                        std::string in_message);
 
   // The time when this event was created.
   base::Time time;

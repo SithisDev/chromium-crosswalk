@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,13 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/test/mock_callback.h"
-#include "base/test/test_mock_time_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromecast/device/bluetooth/bluetooth_util.h"
-#include "chromecast/device/bluetooth/le/remote_characteristic.h"
-#include "chromecast/device/bluetooth/le/remote_descriptor.h"
+#include "chromecast/device/bluetooth/le/remote_characteristic_impl.h"
+#include "chromecast/device/bluetooth/le/remote_descriptor_impl.h"
 #include "chromecast/device/bluetooth/le/remote_device_impl.h"
 #include "chromecast/device/bluetooth/le/remote_service.h"
 #include "chromecast/device/bluetooth/shlib/mock_gatt_client.h"
@@ -24,7 +24,6 @@ using ::testing::Return;
 
 namespace chromecast {
 namespace bluetooth {
-
 
 namespace {
 
@@ -165,10 +164,6 @@ std::vector<bluetooth_v2_shlib::Gatt::Service> GenerateServices() {
 class GattClientManagerTest : public ::testing::Test {
  public:
   void SetUp() override {
-    fake_task_runner_ = new base::TestMockTimeTaskRunner();
-    message_loop_ =
-        std::make_unique<base::MessageLoop>(base::MessageLoop::TYPE_DEFAULT);
-    message_loop_->SetTaskRunner(fake_task_runner_);
     gatt_client_ = std::make_unique<bluetooth_v2_shlib::MockGattClient>();
     gatt_client_manager_ =
         std::make_unique<GattClientManagerImpl>(gatt_client_.get());
@@ -176,7 +171,7 @@ class GattClientManagerTest : public ::testing::Test {
 
     // Normally bluetooth_manager does this.
     gatt_client_->SetDelegate(gatt_client_manager_.get());
-    gatt_client_manager_->Initialize(fake_task_runner_);
+    gatt_client_manager_->Initialize(base::ThreadTaskRunnerHandle::Get());
     gatt_client_manager_->AddObserver(observer_.get());
   }
 
@@ -184,7 +179,6 @@ class GattClientManagerTest : public ::testing::Test {
     gatt_client_->SetDelegate(nullptr);
     gatt_client_manager_->RemoveObserver(observer_.get());
     gatt_client_manager_->Finalize();
-    fake_task_runner_ = nullptr;
   }
 
   scoped_refptr<RemoteDevice> GetDevice(const bluetooth_v2_shlib::Addr& addr) {
@@ -224,10 +218,12 @@ class GattClientManagerTest : public ::testing::Test {
   }
 
   void Connect(const bluetooth_v2_shlib::Addr& addr) {
-    EXPECT_CALL(*gatt_client_, Connect(addr)).WillOnce(Return(true));
+    EXPECT_CALL(*gatt_client_,
+                Connect(addr, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+      .WillOnce(Return(true));
     scoped_refptr<RemoteDevice> device = GetDevice(addr);
-    EXPECT_CALL(cb_, Run(true));
-    device->Connect(cb_.Get());
+    EXPECT_CALL(connect_cb_, Run(RemoteDevice::ConnectStatus::kSuccess));
+    device->Connect(connect_cb_.Get());
     bluetooth_v2_shlib::Gatt::Client::Delegate* delegate =
         gatt_client_->delegate();
     EXPECT_CALL(*gatt_client_, GetServices(addr)).WillOnce(Return(true));
@@ -236,9 +232,10 @@ class GattClientManagerTest : public ::testing::Test {
     ASSERT_TRUE(device->IsConnected());
   }
 
-  scoped_refptr<base::TestMockTimeTaskRunner> fake_task_runner_;
   base::MockCallback<RemoteDevice::StatusCallback> cb_;
-  std::unique_ptr<base::MessageLoop> message_loop_;
+  base::MockCallback<RemoteDevice::ConnectCallback> connect_cb_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   std::unique_ptr<GattClientManagerImpl> gatt_client_manager_;
   std::unique_ptr<bluetooth_v2_shlib::MockGattClient> gatt_client_;
   std::unique_ptr<MockGattClientManagerObserver> observer_;
@@ -255,10 +252,14 @@ TEST_F(GattClientManagerTest, RemoteDeviceConnect) {
   EXPECT_FALSE(gatt_client_manager_->IsConnectedLeDevice(kTestAddr1));
   EXPECT_EQ(kTestAddr1, device->addr());
 
-  // These should fail if we're not connected.
-  EXPECT_CALL(cb_, Run(false));
+  // Disconnect from an already disconnected device.
+  EXPECT_CALL(*gatt_client_, Disconnect(kTestAddr1)).WillOnce(Return(false));
+  EXPECT_CALL(*gatt_client_, ClearPendingDisconnect(kTestAddr1))
+      .WillOnce(Return(true));
+  EXPECT_CALL(cb_, Run(true));
   device->Disconnect(cb_.Get());
 
+  // These should fail if we're not connected.
   EXPECT_CALL(cb_, Run(false));
   device->CreateBond(cb_.Get());
 
@@ -273,16 +274,21 @@ TEST_F(GattClientManagerTest, RemoteDeviceConnect) {
   device->ConnectionParameterUpdate(10, 10, 50, 100, cb_.Get());
 
   // First connect request fails right away.
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr1)).WillOnce(Return(false));
-  EXPECT_CALL(*gatt_client_, ClearPendingConnect(kTestAddr1)).WillOnce(Return(true));
-  EXPECT_CALL(cb_, Run(false));
-  device->Connect(cb_.Get());
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr1, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(false));
+  EXPECT_CALL(*gatt_client_, ClearPendingConnect(kTestAddr1))
+      .WillOnce(Return(true));
+  EXPECT_CALL(connect_cb_, Run(RemoteDevice::ConnectStatus::kFailure));
+  device->Connect(connect_cb_.Get());
   EXPECT_FALSE(device->IsConnected());
 
   // Second connect request succeeds.
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr1)).WillOnce(Return(true));
-  EXPECT_CALL(cb_, Run(true));
-  device->Connect(cb_.Get());
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr1, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(true));
+  EXPECT_CALL(connect_cb_, Run(RemoteDevice::ConnectStatus::kSuccess));
+  device->Connect(connect_cb_.Get());
   EXPECT_CALL(*gatt_client_, GetServices(kTestAddr1)).WillOnce(Return(true));
   delegate->OnConnectChanged(kTestAddr1, true /* status */,
                              true /* connected */);
@@ -312,7 +318,7 @@ TEST_F(GattClientManagerTest, RemoteDeviceConnect) {
   EXPECT_FALSE(device->IsConnected());
   EXPECT_FALSE(gatt_client_manager_->IsConnectedLeDevice(kTestAddr1));
 
-  fake_task_runner_->RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(GattClientManagerTest, RemoteDeviceBond) {
@@ -384,7 +390,7 @@ TEST_F(GattClientManagerTest, RemoteDeviceBond) {
   delegate->OnBondChanged(kTestAddr1, false /* status */, false /* bonded */);
   EXPECT_FALSE(device->IsBonded());
 
-  fake_task_runner_->RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(GattClientManagerTest, RemoteDeviceBondedOnInitialization) {
@@ -400,7 +406,7 @@ TEST_F(GattClientManagerTest, RemoteDeviceBondedOnInitialization) {
   EXPECT_TRUE(device->IsConnected());
   EXPECT_TRUE(device->IsBonded());
 
-  fake_task_runner_->RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(GattClientManagerTest, RemoteDeviceConnectConcurrent) {
@@ -412,10 +418,10 @@ TEST_F(GattClientManagerTest, RemoteDeviceConnectConcurrent) {
   scoped_refptr<RemoteDevice> device4 = GetDevice(kTestAddr4);
   scoped_refptr<RemoteDevice> device5 = GetDevice(kTestAddr5);
 
-  base::MockCallback<RemoteDevice::StatusCallback> cb1;
-  base::MockCallback<RemoteDevice::StatusCallback> cb2;
-  base::MockCallback<RemoteDevice::StatusCallback> cb3;
-  base::MockCallback<RemoteDevice::StatusCallback> cb4;
+  base::MockCallback<RemoteDevice::ConnectCallback> cb1;
+  base::MockCallback<RemoteDevice::ConnectCallback> cb2;
+  base::MockCallback<RemoteDevice::ConnectCallback> cb3;
+  base::MockCallback<RemoteDevice::ConnectCallback> cb4;
   base::MockCallback<RemoteDevice::StatusCallback> cb5;
 
   // Device5 is already connected at the beginning.
@@ -423,7 +429,9 @@ TEST_F(GattClientManagerTest, RemoteDeviceConnectConcurrent) {
 
   // Only the 1st Connect request will be executed immediately. The rest will be
   // queued.
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr1)).WillOnce(Return(true));
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr1, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(true));
   device1->Connect(cb1.Get());
   device2->Connect(cb2.Get());
   device3->Connect(cb3.Get());
@@ -436,16 +444,22 @@ TEST_F(GattClientManagerTest, RemoteDeviceConnectConcurrent) {
 
   // Queued Connect requests will not be called until we receive OnGetServices
   // of the current Connect request if it is successful.
-  EXPECT_CALL(cb1, Run(true));
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr2)).WillOnce(Return(false));
-  EXPECT_CALL(cb2, Run(false));
+  EXPECT_CALL(cb1, Run(RemoteDevice::ConnectStatus::kSuccess));
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr2, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(false));
+  EXPECT_CALL(cb2, Run(RemoteDevice::ConnectStatus::kFailure));
   // If the Connect request fails in the initial request (not in the callback),
   // the next queued request will be executed immediately.
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr3)).WillOnce(Return(true));
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr3, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(true));
   delegate->OnGetServices(kTestAddr1, {});
 
-  EXPECT_CALL(cb3, Run(false));
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr4)).WillOnce(Return(true));
+  EXPECT_CALL(cb3, Run(RemoteDevice::ConnectStatus::kFailure));
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr4, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(true));
   delegate->OnConnectChanged(kTestAddr3, true /* status */,
                              false /* connected */);
 
@@ -453,7 +467,7 @@ TEST_F(GattClientManagerTest, RemoteDeviceConnectConcurrent) {
   delegate->OnConnectChanged(kTestAddr4, true /* status */,
                              true /* connected */);
 
-  EXPECT_CALL(cb4, Run(true));
+  EXPECT_CALL(cb4, Run(RemoteDevice::ConnectStatus::kSuccess));
   EXPECT_CALL(*gatt_client_, Disconnect(kTestAddr5)).WillOnce(Return(true));
   delegate->OnGetServices(kTestAddr4, {});
 
@@ -479,15 +493,17 @@ TEST_F(GattClientManagerTest, ConnectTimeout) {
   scoped_refptr<RemoteDevice> device = GetDevice(kTestAddr1);
 
   // Issue a Connect request
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr1)).WillOnce(Return(true));
-  device->Connect(cb_.Get());
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr1, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(true));
+  device->Connect(connect_cb_.Get());
 
   // Let Connect request timeout
-  base::TestMockTimeTaskRunner::ScopedContext context(fake_task_runner_);
   // We should expect to receive Connect failure message
-  EXPECT_CALL(*gatt_client_, ClearPendingConnect(kTestAddr1)).WillOnce(Return(true));
-  EXPECT_CALL(cb_, Run(false));
-  fake_task_runner_->FastForwardBy(GattClientManagerImpl::kConnectTimeout);
+  EXPECT_CALL(*gatt_client_, ClearPendingConnect(kTestAddr1))
+      .WillOnce(Return(true));
+  EXPECT_CALL(connect_cb_, Run(RemoteDevice::ConnectStatus::kFailure));
+  task_environment_.FastForwardBy(GattClientManagerImpl::kConnectTimeout);
   EXPECT_FALSE(device->IsConnected());
 }
 
@@ -498,22 +514,23 @@ TEST_F(GattClientManagerTest, GetServicesTimeout) {
   scoped_refptr<RemoteDevice> device = GetDevice(kTestAddr1);
 
   // Issue a Connect request and let Connect succeed
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr1)).WillOnce(Return(true));
-  device->Connect(cb_.Get());
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr1, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(true));
+  device->Connect(connect_cb_.Get());
   EXPECT_CALL(*gatt_client_, GetServices(kTestAddr1)).WillOnce(Return(true));
   delegate->OnConnectChanged(kTestAddr1, true /* status */,
                              true /* connected */);
 
   // Let GetServices request timeout
-  base::TestMockTimeTaskRunner::ScopedContext context(fake_task_runner_);
   // We should request a disconnect.
   EXPECT_CALL(*gatt_client_, Disconnect(kTestAddr1)).WillOnce(Return(true));
-  fake_task_runner_->FastForwardBy(GattClientManagerImpl::kConnectTimeout);
+  task_environment_.FastForwardBy(GattClientManagerImpl::kConnectTimeout);
 
   // Make sure we issued a disconnect.
   testing::Mock::VerifyAndClearExpectations(gatt_client_.get());
 
-  EXPECT_CALL(cb_, Run(false));
+  EXPECT_CALL(connect_cb_, Run(RemoteDevice::ConnectStatus::kFailure));
   delegate->OnConnectChanged(kTestAddr1, true /* status */,
                              false /* connected */);
 
@@ -613,15 +630,14 @@ TEST_F(GattClientManagerTest, DisconnectAllTimeout) {
   gatt_client_manager_->DisconnectAll(cb.Get());
 
   // Let the fist Disconnect request timeout
-  base::TestMockTimeTaskRunner::ScopedContext context(fake_task_runner_);
-
-  EXPECT_CALL(*gatt_client_, ClearPendingDisconnect(kTestAddr1)).WillOnce(Return(true));;
+  EXPECT_CALL(*gatt_client_, ClearPendingDisconnect(kTestAddr1))
+      .WillOnce(Return(true));
 
   // We should expect to receive DisconnectAll failure message
   EXPECT_CALL(cb, Run(false));
   // Run second Disconnect request in the queue.
   EXPECT_CALL(*gatt_client_, Disconnect(kTestAddr2)).WillOnce(Return(true));
-  fake_task_runner_->FastForwardBy(GattClientManagerImpl::kDisconnectTimeout);
+  task_environment_.FastForwardBy(GattClientManagerImpl::kDisconnectTimeout);
 
   // We should treat device as disconnected for this unknown case
   EXPECT_FALSE(device1->IsConnected());
@@ -645,8 +661,10 @@ TEST_F(GattClientManagerTest, Connectability) {
   EXPECT_TRUE(gatt_client_manager_->gatt_client_connectable());
 
   // Start a connection.
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr1)).WillOnce(Return(true));
-  device->Connect(cb_.Get());
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr1, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(true));
+  device->Connect(connect_cb_.Get());
 
   // Disable GATT client connectability while connection is pending.
   EXPECT_TRUE(gatt_client_manager_->SetGattClientConnectable(false));
@@ -657,15 +675,15 @@ TEST_F(GattClientManagerTest, Connectability) {
   delegate->OnConnectChanged(kTestAddr1, true /* status */,
                              true /* connected */);
 
-  EXPECT_CALL(cb_, Run(false));
+  EXPECT_CALL(connect_cb_, Run(RemoteDevice::ConnectStatus::kFailure));
   delegate->OnConnectChanged(kTestAddr1, true /* status */,
                              false /* connected */);
   ASSERT_FALSE(device->IsConnected());
 
   // Connect should fail when GATT client connectability is already disabled.
-  EXPECT_CALL(*gatt_client_, Connect(_)).Times(0);
-  EXPECT_CALL(cb_, Run(false));
-  device->Connect(cb_.Get());
+  EXPECT_CALL(*gatt_client_, Connect).Times(0);
+  EXPECT_CALL(connect_cb_, Run(RemoteDevice::ConnectStatus::kFailure));
+  device->Connect(connect_cb_.Get());
   ASSERT_FALSE(device->IsConnected());
 
   // Re-enable connectability.
@@ -693,10 +711,9 @@ TEST_F(GattClientManagerTest, ReadRemoteRssiTimeout) {
   device->ReadRemoteRssi(rssi_cb.Get());
 
   // Let ReadRemoteRssi request timeout.
-  base::TestMockTimeTaskRunner::ScopedContext context(fake_task_runner_);
   // We should expect to receive ReadRemoteRssi failure message.
   EXPECT_CALL(rssi_cb, Run(false, 0));
-  fake_task_runner_->FastForwardBy(
+  task_environment_.FastForwardBy(
       GattClientManagerImpl::kReadRemoteRssiTimeout);
 
   // The following callback should be ignored.
@@ -757,7 +774,7 @@ TEST_F(GattClientManagerTest, RemoteDeviceRequestMtu) {
   EXPECT_CALL(*observer_, OnMtuChanged(device, kMtu));
   delegate->OnMtuChanged(kTestAddr1, true, kMtu);
   EXPECT_EQ(kMtu, device->GetMtu());
-  fake_task_runner_->RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(GattClientManagerTest, RemoteDeviceConnectionParameterUpdate) {
@@ -847,7 +864,9 @@ TEST_F(GattClientManagerTest, RemoteDeviceCharacteristic) {
   std::vector<scoped_refptr<RemoteCharacteristic>> characteristics =
       service->GetCharacteristics();
   ASSERT_GE(characteristics.size(), 1ul);
-  auto characteristic = characteristics[0];
+  ASSERT_TRUE(characteristics[0]);
+  auto* characteristic =
+      static_cast<RemoteCharacteristicImpl*>(characteristics[0].get());
 
   EXPECT_CALL(*gatt_client_,
               WriteCharacteristic(kTestAddr1, characteristic->characteristic(),
@@ -878,10 +897,10 @@ TEST_F(GattClientManagerTest, RemoteDeviceCharacteristic) {
   EXPECT_CALL(cb_, Run(true));
   characteristic->SetNotification(true, cb_.Get());
 
-  EXPECT_CALL(*observer_,
-              OnCharacteristicNotification(device, characteristic, kTestData3));
+  EXPECT_CALL(*observer_, OnCharacteristicNotification(
+                              device, characteristics[0], kTestData3));
   delegate->OnNotification(kTestAddr1, characteristic->handle(), kTestData3);
-  fake_task_runner_->RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(GattClientManagerTest,
@@ -901,7 +920,9 @@ TEST_F(GattClientManagerTest,
   std::vector<scoped_refptr<RemoteCharacteristic>> characteristics =
       service->GetCharacteristics();
   ASSERT_GE(characteristics.size(), 1ul);
-  scoped_refptr<RemoteCharacteristic> characteristic = characteristics[0];
+  ASSERT_TRUE(characteristics[0]);
+  RemoteCharacteristicImpl* characteristic =
+      static_cast<RemoteCharacteristicImpl*>(characteristics[0].get());
 
   scoped_refptr<RemoteDescriptor> cccd =
       characteristic->GetDescriptorByUuid(RemoteDescriptor::kCccdUuid);
@@ -914,18 +935,21 @@ TEST_F(GattClientManagerTest,
   std::vector<uint8_t> cccd_enable_notification = {
       std::begin(bluetooth::RemoteDescriptor::kEnableNotificationValue),
       std::end(bluetooth::RemoteDescriptor::kEnableNotificationValue)};
-  EXPECT_CALL(*gatt_client_, WriteDescriptor(kTestAddr1, cccd->descriptor(), _,
-                                             cccd_enable_notification))
+  EXPECT_CALL(*gatt_client_,
+              WriteDescriptor(
+                  kTestAddr1,
+                  static_cast<RemoteDescriptorImpl*>(cccd.get())->descriptor(),
+                  _, cccd_enable_notification))
       .WillOnce(Return(true));
 
   characteristic->SetRegisterNotification(true, cb_.Get());
   EXPECT_CALL(cb_, Run(true));
   delegate->OnDescriptorWriteResponse(kTestAddr1, true, cccd->handle());
 
-  EXPECT_CALL(*observer_,
-              OnCharacteristicNotification(device, characteristic, kTestData1));
+  EXPECT_CALL(*observer_, OnCharacteristicNotification(
+                              device, characteristics[0], kTestData1));
   delegate->OnNotification(kTestAddr1, characteristic->handle(), kTestData1);
-  fake_task_runner_->RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(GattClientManagerTest, RemoteDeviceCharacteristicSetRegisterIndication) {
@@ -946,7 +970,9 @@ TEST_F(GattClientManagerTest, RemoteDeviceCharacteristicSetRegisterIndication) {
   ASSERT_EQ(characteristics.size(), 4ul);
 
   // |characteristics[2]| supports indication only.
-  scoped_refptr<RemoteCharacteristic> characteristic = characteristics[2];
+  ASSERT_TRUE(characteristics[2]);
+  RemoteCharacteristicImpl* characteristic =
+      static_cast<RemoteCharacteristicImpl*>(characteristics[2].get());
 
   scoped_refptr<RemoteDescriptor> cccd =
       characteristic->GetDescriptorByUuid(RemoteDescriptor::kCccdUuid);
@@ -959,21 +985,26 @@ TEST_F(GattClientManagerTest, RemoteDeviceCharacteristicSetRegisterIndication) {
   std::vector<uint8_t> cccd_enable_indication = {
       std::begin(bluetooth::RemoteDescriptor::kEnableIndicationValue),
       std::end(bluetooth::RemoteDescriptor::kEnableIndicationValue)};
-  EXPECT_CALL(*gatt_client_, WriteDescriptor(kTestAddr1, cccd->descriptor(), _,
-                                             cccd_enable_indication))
+  EXPECT_CALL(*gatt_client_,
+              WriteDescriptor(
+                  kTestAddr1,
+                  static_cast<RemoteDescriptorImpl*>(cccd.get())->descriptor(),
+                  _, cccd_enable_indication))
       .WillOnce(Return(true));
 
   characteristic->SetRegisterNotificationOrIndication(true, cb_.Get());
   EXPECT_CALL(cb_, Run(true));
   delegate->OnDescriptorWriteResponse(kTestAddr1, true, cccd->handle());
 
-  EXPECT_CALL(*observer_,
-              OnCharacteristicNotification(device, characteristic, kTestData1));
+  EXPECT_CALL(*observer_, OnCharacteristicNotification(
+                              device, characteristics[2], kTestData1));
   delegate->OnNotification(kTestAddr1, characteristic->handle(), kTestData1);
-  fake_task_runner_->RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   // |characteristics[3]| supports both notification and indication.
-  characteristic = characteristics[3];
+  ASSERT_TRUE(characteristics[3]);
+  characteristic =
+      static_cast<RemoteCharacteristicImpl*>(characteristics[3].get());
 
   cccd = characteristic->GetDescriptorByUuid(RemoteDescriptor::kCccdUuid);
   ASSERT_TRUE(cccd);
@@ -988,18 +1019,21 @@ TEST_F(GattClientManagerTest, RemoteDeviceCharacteristicSetRegisterIndication) {
   std::vector<uint8_t> cccd_enable_notification = {
       std::begin(bluetooth::RemoteDescriptor::kEnableNotificationValue),
       std::end(bluetooth::RemoteDescriptor::kEnableNotificationValue)};
-  EXPECT_CALL(*gatt_client_, WriteDescriptor(kTestAddr1, cccd->descriptor(), _,
-                                             cccd_enable_notification))
+  EXPECT_CALL(*gatt_client_,
+              WriteDescriptor(
+                  kTestAddr1,
+                  static_cast<RemoteDescriptorImpl*>(cccd.get())->descriptor(),
+                  _, cccd_enable_notification))
       .WillOnce(Return(true));
 
   characteristic->SetRegisterNotificationOrIndication(true, cb_.Get());
   EXPECT_CALL(cb_, Run(true));
   delegate->OnDescriptorWriteResponse(kTestAddr1, true, cccd->handle());
 
-  EXPECT_CALL(*observer_,
-              OnCharacteristicNotification(device, characteristic, kTestData1));
+  EXPECT_CALL(*observer_, OnCharacteristicNotification(
+                              device, characteristics[3], kTestData1));
   delegate->OnNotification(kTestAddr1, characteristic->handle(), kTestData1);
-  fake_task_runner_->RunUntilIdle();
+  task_environment_.RunUntilIdle();
 }
 
 TEST_F(GattClientManagerTest, RemoteDeviceDescriptor) {
@@ -1026,7 +1060,8 @@ TEST_F(GattClientManagerTest, RemoteDeviceDescriptor) {
   std::vector<scoped_refptr<RemoteDescriptor>> descriptors =
       characteristic->GetDescriptors();
   ASSERT_GE(descriptors.size(), 1ul);
-  auto descriptor = descriptors[0];
+  ASSERT_TRUE(descriptors[0]);
+  auto* descriptor = static_cast<RemoteDescriptorImpl*>(descriptors[0].get());
 
   EXPECT_CALL(*gatt_client_,
               WriteDescriptor(kTestAddr1, descriptor->descriptor(), kAuthReq,
@@ -1098,30 +1133,32 @@ TEST_F(GattClientManagerTest, WriteType) {
   const std::vector<uint8_t> kTestData1 = {0x1, 0x2, 0x3};
 
   bluetooth_v2_shlib::Gatt::Service service;
-  bluetooth_v2_shlib::Gatt::Characteristic characteristic;
 
   service.uuid = {{0x1}};
   service.handle = 0x1;
   service.primary = true;
 
-  characteristic.uuid = {{0x1, 0x1}};
-  characteristic.handle = 0x2;
-  characteristic.permissions = bluetooth_v2_shlib::Gatt::PERMISSION_WRITE;
-  characteristic.properties = bluetooth_v2_shlib::Gatt::PROPERTY_WRITE;
-  service.characteristics.push_back(characteristic);
+  {
+    bluetooth_v2_shlib::Gatt::Characteristic characteristic;
+    characteristic.uuid = {{0x1, 0x1}};
+    characteristic.handle = 0x2;
+    characteristic.permissions = bluetooth_v2_shlib::Gatt::PERMISSION_WRITE;
+    characteristic.properties = bluetooth_v2_shlib::Gatt::PROPERTY_WRITE;
+    service.characteristics.push_back(characteristic);
 
-  characteristic.uuid = {{0x1, 0x2}};
-  characteristic.handle = 0x3;
-  characteristic.permissions = bluetooth_v2_shlib::Gatt::PERMISSION_WRITE;
-  characteristic.properties =
-      bluetooth_v2_shlib::Gatt::PROPERTY_WRITE_NO_RESPONSE;
-  service.characteristics.push_back(characteristic);
+    characteristic.uuid = {{0x1, 0x2}};
+    characteristic.handle = 0x3;
+    characteristic.permissions = bluetooth_v2_shlib::Gatt::PERMISSION_WRITE;
+    characteristic.properties =
+        bluetooth_v2_shlib::Gatt::PROPERTY_WRITE_NO_RESPONSE;
+    service.characteristics.push_back(characteristic);
 
-  characteristic.uuid = {{0x1, 0x3}};
-  characteristic.handle = 0x4;
-  characteristic.permissions = bluetooth_v2_shlib::Gatt::PERMISSION_WRITE;
-  characteristic.properties = bluetooth_v2_shlib::Gatt::PROPERTY_SIGNED_WRITE;
-  service.characteristics.push_back(characteristic);
+    characteristic.uuid = {{0x1, 0x3}};
+    characteristic.handle = 0x4;
+    characteristic.permissions = bluetooth_v2_shlib::Gatt::PERMISSION_WRITE;
+    characteristic.properties = bluetooth_v2_shlib::Gatt::PROPERTY_SIGNED_WRITE;
+    service.characteristics.push_back(characteristic);
+  }
 
   Connect(kTestAddr1);
   bluetooth_v2_shlib::Gatt::Client::Delegate* delegate =
@@ -1147,7 +1184,9 @@ TEST_F(GattClientManagerTest, WriteType) {
                                    WriteType::WRITE_TYPE_SIGNED};
 
   for (size_t i = 0; i < characteristics.size(); ++i) {
-    const auto& characteristic = characteristics[i];
+    ASSERT_TRUE(characteristics[i]);
+    auto* characteristic =
+        static_cast<RemoteCharacteristicImpl*>(characteristics[i].get());
     EXPECT_CALL(
         *gatt_client_,
         WriteCharacteristic(kTestAddr1, characteristic->characteristic(),
@@ -1180,12 +1219,14 @@ TEST_F(GattClientManagerTest, ConnectMultiple) {
 
 TEST_F(GattClientManagerTest, GetServicesFailOnConnect) {
   scoped_refptr<RemoteDevice> device = GetDevice(kTestAddr1);
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr1)).WillOnce(Return(true));
-  device->Connect(cb_.Get());
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr1, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(true));
+  device->Connect(connect_cb_.Get());
   bluetooth_v2_shlib::Gatt::Client::Delegate* delegate =
       gatt_client_->delegate();
 
-  EXPECT_CALL(cb_, Run(false));
+  EXPECT_CALL(connect_cb_, Run(RemoteDevice::ConnectStatus::kFailure));
   EXPECT_CALL(*gatt_client_, GetServices(kTestAddr1)).WillOnce(Return(false));
   delegate->OnConnectChanged(kTestAddr1, true /* status */,
                              true /* connected */);
@@ -1203,8 +1244,8 @@ TEST_F(GattClientManagerTest, GetServicesSuccessAfterConnectCallback) {
       [](GattClientManagerTest* gcmt,
          const std::vector<bluetooth_v2_shlib::Gatt::Service>*
              expected_services,
-         bool* cb_called, bool success) {
-        EXPECT_TRUE(success);
+         bool* cb_called, RemoteDevice::ConnectStatus status) {
+        EXPECT_EQ(RemoteDevice::ConnectStatus::kSuccess, status);
         *cb_called = true;
 
         auto device = gcmt->GetDevice(kTestAddr1);
@@ -1212,7 +1253,9 @@ TEST_F(GattClientManagerTest, GetServicesSuccessAfterConnectCallback) {
         EXPECT_EQ(expected_services->size(), services.size());
       },
       this, &kServices, &cb_called);
-  EXPECT_CALL(*gatt_client_, Connect(kTestAddr1)).WillOnce(Return(true));
+  EXPECT_CALL(*gatt_client_,
+              Connect(kTestAddr1, bluetooth_v2_shlib::Gatt::Client::Transport::kAuto))
+    .WillOnce(Return(true));
   device->Connect(std::move(cb));
 
   bluetooth_v2_shlib::Gatt::Client::Delegate* delegate =
@@ -1251,8 +1294,12 @@ TEST_F(GattClientManagerTest, Queuing) {
   std::vector<scoped_refptr<RemoteCharacteristic>> characteristics =
       service->GetCharacteristics();
   ASSERT_GE(characteristics.size(), 2ul);
-  auto characteristic1 = characteristics[0];
-  auto characteristic2 = characteristics[1];
+  ASSERT_TRUE(characteristics[0]);
+  ASSERT_TRUE(characteristics[1]);
+  auto* characteristic1 =
+      static_cast<RemoteCharacteristicImpl*>(characteristics[0].get());
+  auto* characteristic2 =
+      static_cast<RemoteCharacteristicImpl*>(characteristics[1].get());
 
   // Issue a write to one characteristic.
   EXPECT_CALL(*gatt_client_,
@@ -1304,20 +1351,21 @@ TEST_F(GattClientManagerTest, CommandTimeout) {
   std::vector<scoped_refptr<RemoteCharacteristic>> characteristics =
       service->GetCharacteristics();
   ASSERT_GE(characteristics.size(), 1ul);
-  auto characteristic1 = characteristics[0];
+  ASSERT_TRUE(characteristics[0]);
+  auto* characteristic =
+      static_cast<RemoteCharacteristicImpl*>(characteristics[0].get());
 
   // Issue a write to one characteristic.
   EXPECT_CALL(*gatt_client_,
-              WriteCharacteristic(kTestAddr1, characteristic1->characteristic(),
+              WriteCharacteristic(kTestAddr1, characteristic->characteristic(),
                                   kAuthReq, kWriteType, kTestData))
       .WillOnce(Return(true));
-  characteristic1->WriteAuth(kAuthReq, kWriteType, kTestData, cb_.Get());
+  characteristic->WriteAuth(kAuthReq, kWriteType, kTestData, cb_.Get());
 
   // Let the command timeout
-  base::TestMockTimeTaskRunner::ScopedContext context(fake_task_runner_);
   // We should request a disconnect.
   EXPECT_CALL(*gatt_client_, Disconnect(kTestAddr1)).WillOnce(Return(true));
-  fake_task_runner_->FastForwardBy(RemoteDeviceImpl::kCommandTimeout);
+  task_environment_.FastForwardBy(RemoteDeviceImpl::kCommandTimeout);
 
   // Make sure we issued a disconnect.
   testing::Mock::VerifyAndClearExpectations(gatt_client_.get());

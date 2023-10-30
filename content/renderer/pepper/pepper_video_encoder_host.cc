@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,24 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/shared_memory.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/numerics/safe_math.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/common/pepper_file_util.h"
 #include "content/public/common/gpu_stream_constants.h"
+#include "content/public/renderer/ppapi_gfx_conversion.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
-#include "content/renderer/pepper/gfx_conversion.h"
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/video_encoder_shim.h"
 #include "content/renderer/render_thread_impl.h"
 #include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/ipc/client/command_buffer_proxy_impl.h"
+#include "media/base/bitrate.h"
+#include "media/base/bitstream_buffer.h"
+#include "media/base/media_log.h"
+#include "media/base/video_frame.h"
+#include "media/video/video_encode_accelerator.h"
 #include "ppapi/c/pp_codecs.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_graphics_3d.h"
@@ -160,16 +165,19 @@ PP_VideoProfileDescription PP_FromVideoEncodeAcceleratorSupportedProfile(
 
 PepperVideoEncoderHost::ShmBuffer::ShmBuffer(
     uint32_t id,
-    std::unique_ptr<base::SharedMemory> shm)
-    : id(id), shm(std::move(shm)), in_use(true) {
-  DCHECK(this->shm);
+    base::UnsafeSharedMemoryRegion shm_region)
+    : id(id), region(std::move(shm_region)), in_use(true) {
+  DCHECK(region.IsValid());
+  mapping = region.Map();
+  DCHECK(mapping.IsValid());
 }
 
 PepperVideoEncoderHost::ShmBuffer::~ShmBuffer() {}
 
 media::BitstreamBuffer PepperVideoEncoderHost::ShmBuffer::ToBitstreamBuffer() {
-  return media::BitstreamBuffer(id, shm->handle(), false /* read_only */,
-                                shm->mapped_size());
+  DCHECK(region.IsValid());
+  DCHECK(mapping.IsValid());
+  return media::BitstreamBuffer(id, region.Duplicate(), mapping.size());
 }
 
 PepperVideoEncoderHost::PepperVideoEncoderHost(RendererPpapiHost* host,
@@ -272,7 +280,8 @@ int32_t PepperVideoEncoderHost::OnHostMsgInitialize(
 
   initialize_reply_context_ = context->MakeReplyMessageContext();
   const media::VideoEncodeAccelerator::Config config(
-      media_input_format_, input_size, media_profile, initial_bitrate);
+      media_input_format_, input_size, media_profile,
+      media::Bitrate::ConstantBitrate(initial_bitrate));
   if (encoder_->Initialize(config, this))
     return PP_OK_COMPLETIONPENDING;
 
@@ -332,7 +341,8 @@ int32_t PepperVideoEncoderHost::OnHostMsgRequestEncodingParametersChange(
   if (encoder_last_error_)
     return encoder_last_error_;
 
-  encoder_->RequestEncodingParametersChange(bitrate, framerate);
+  encoder_->RequestEncodingParametersChange(
+      media::Bitrate::ConstantBitrate(bitrate), framerate);
 
   return PP_OK;
 }
@@ -357,16 +367,14 @@ void PepperVideoEncoderHost::RequireBitstreamBuffers(
   frame_count_ = frame_count;
 
   for (uint32_t i = 0; i < kDefaultNumberOfBitstreamBuffers; ++i) {
-    std::unique_ptr<base::SharedMemory> shm(
-        RenderThread::Get()->HostAllocateSharedMemoryBuffer(
-            output_buffer_size));
-
-    if (!shm || !shm->Map(output_buffer_size)) {
+    base::UnsafeSharedMemoryRegion region =
+        base::UnsafeSharedMemoryRegion::Create(output_buffer_size);
+    if (!region.IsValid()) {
       shm_buffers_.clear();
       break;
     }
 
-    shm_buffers_.push_back(std::make_unique<ShmBuffer>(i, std::move(shm)));
+    shm_buffers_.push_back(std::make_unique<ShmBuffer>(i, std::move(region)));
   }
 
   // Feed buffers to the encoder.
@@ -374,9 +382,8 @@ void PepperVideoEncoderHost::RequireBitstreamBuffers(
   for (const auto& buffer : shm_buffers_) {
     encoder_->UseOutputBitstreamBuffer(buffer->ToBitstreamBuffer());
     handles.push_back(SerializedHandle(
-        renderer_ppapi_host_->ShareSharedMemoryHandleWithRemote(
-            buffer->shm->handle()),
-        output_buffer_size));
+        renderer_ppapi_host_->ShareUnsafeSharedMemoryRegionWithRemote(
+            buffer->region)));
   }
 
   host()->SendUnsolicitedReplyWithHandles(
@@ -469,11 +476,11 @@ void PepperVideoEncoderHost::AllocateVideoFrames() {
   size *= frame_count_;
   uint32_t total_size = size.ValueOrDie();
 
-  std::unique_ptr<base::SharedMemory> shm(
-      RenderThreadImpl::current()->HostAllocateSharedMemoryBuffer(total_size));
-  if (!shm ||
+  base::UnsafeSharedMemoryRegion region =
+      base::UnsafeSharedMemoryRegion::Create(total_size);
+  if (!region.IsValid() ||
       !buffer_manager_.SetBuffers(frame_count_, buffer_size_aligned,
-                                  std::move(shm), true)) {
+                                  std::move(region), true)) {
     SendGetFramesErrorReply(PP_ERROR_NOMEMORY);
     return;
   }
@@ -493,10 +500,9 @@ void PepperVideoEncoderHost::AllocateVideoFrames() {
   }
 
   DCHECK(get_video_frames_reply_context_.is_valid());
-  get_video_frames_reply_context_.params.AppendHandle(
-      SerializedHandle(renderer_ppapi_host_->ShareSharedMemoryHandleWithRemote(
-                           buffer_manager_.shm()->handle()),
-                       total_size));
+  get_video_frames_reply_context_.params.AppendHandle(SerializedHandle(
+      renderer_ppapi_host_->ShareUnsafeSharedMemoryRegionWithRemote(
+          buffer_manager_.region())));
 
   host()->SendReply(get_video_frames_reply_context_,
                     PpapiPluginMsg_VideoEncoder_GetVideoFramesReply(
@@ -520,15 +526,13 @@ scoped_refptr<media::VideoFrame> PepperVideoEncoderHost::CreateVideoFrame(
 
   ppapi::MediaStreamBuffer* buffer = buffer_manager_.GetBufferPointer(frame_id);
   DCHECK(buffer);
-  uint32_t shm_offset = static_cast<uint8_t*>(buffer->video.data) -
-                        static_cast<uint8_t*>(buffer_manager_.shm()->memory());
-
-  scoped_refptr<media::VideoFrame> frame =
-      media::VideoFrame::WrapExternalSharedMemory(
-          media_input_format_, input_coded_size_, gfx::Rect(input_coded_size_),
-          input_coded_size_, static_cast<uint8_t*>(buffer->video.data),
-          buffer->video.data_size, buffer_manager_.shm()->handle(), shm_offset,
-          base::TimeDelta());
+  // The shared memory handle does not need to be given to the video frame as
+  // cross-process calls coordinate shared memory via a buffer index. See
+  // ppapi/shared_impl/media_stream_buffer_manager.h for details.
+  scoped_refptr<media::VideoFrame> frame = media::VideoFrame::WrapExternalData(
+      media_input_format_, input_coded_size_, gfx::Rect(input_coded_size_),
+      input_coded_size_, static_cast<uint8_t*>(buffer->video.data),
+      buffer->video.data_size, base::TimeDelta());
   if (!frame) {
     NotifyPepperError(PP_ERROR_FAILED);
     return frame;
@@ -563,7 +567,7 @@ uint8_t* PepperVideoEncoderHost::ShmHandleToAddress(int32_t buffer_id) {
   DCHECK(RenderThreadImpl::current());
   DCHECK_GE(buffer_id, 0);
   DCHECK_LT(buffer_id, static_cast<int32_t>(shm_buffers_.size()));
-  return static_cast<uint8_t*>(shm_buffers_[buffer_id]->shm->memory());
+  return shm_buffers_[buffer_id]->mapping.GetMemoryAsSpan<uint8_t>().data();
 }
 
 }  // namespace content

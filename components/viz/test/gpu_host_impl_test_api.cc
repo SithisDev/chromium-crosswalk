@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,10 @@ GpuHostImplTestApi::GpuHostImplTestApi(GpuHostImpl* gpu_host)
     : gpu_host_(gpu_host) {}
 
 GpuHostImplTestApi::~GpuHostImplTestApi() = default;
+
+void GpuHostImplTestApi::FlushRemoteForTesting() {
+  gpu_host_->gpu_service_remote_.FlushForTesting();
+}
 
 void GpuHostImplTestApi::SetGpuService(
     mojo::Remote<mojom::GpuService> gpu_service) {

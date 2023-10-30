@@ -1,27 +1,28 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/compiler_specific.h"
+#include "base/callback_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/sys_byteorder.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "content/browser/speech/proto/google_streaming_api.pb.h"
 #include "content/browser/speech/speech_recognition_engine.h"
 #include "content/browser/speech/speech_recognizer_impl.h"
+#include "content/public/browser/google_streaming_api.pb.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/common/content_features.h"
+#include "content/public/test/browser_task_environment.h"
 #include "media/audio/audio_device_description.h"
 #include "media/audio/audio_system_impl.h"
 #include "media/audio/fake_audio_input_stream.h"
@@ -30,14 +31,15 @@
 #include "media/audio/test_audio_thread.h"
 #include "media/base/audio_bus.h"
 #include "media/base/test_helpers.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/data_pipe_utils.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
-#include "services/network/public/cpp/resource_response.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -82,6 +84,11 @@ class SpeechRecognizerImplTest : public SpeechRecognitionEventListener,
         sound_ended_(false),
         error_(blink::mojom::SpeechRecognitionErrorCode::kNone),
         volume_(-1.0f) {
+    // This test environment is not set up to support out-of-process services.
+    feature_list_.InitWithFeatures(
+        /*enabled_features=*/{},
+        /*disabled_features=*/{features::kAudioServiceOutOfProcess});
+
     // SpeechRecognizer takes ownership of sr_engine.
     SpeechRecognitionEngine* sr_engine = new SpeechRecognitionEngine(
         base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
@@ -96,8 +103,8 @@ class SpeechRecognizerImplTest : public SpeechRecognitionEventListener,
 
     const int kTestingSessionId = 1;
 
-    audio_manager_.reset(new media::MockAudioManager(
-        std::make_unique<media::TestAudioThread>(true)));
+    audio_manager_ = std::make_unique<media::MockAudioManager>(
+        std::make_unique<media::TestAudioThread>(true));
     audio_manager_->SetInputStreamParameters(
         media::AudioParameters::UnavailableDeviceParams());
     audio_system_ =
@@ -127,20 +134,21 @@ class SpeechRecognizerImplTest : public SpeechRecognitionEventListener,
     audio_manager_->Shutdown();
   }
 
-  bool GetUpstreamRequest(const network::TestURLLoaderFactory::PendingRequest**
-                              pending_request_out) WARN_UNUSED_RESULT {
+  [[nodiscard]] bool GetUpstreamRequest(
+      const network::TestURLLoaderFactory::PendingRequest**
+          pending_request_out) {
     return GetPendingRequest(pending_request_out, "/up");
   }
 
-  bool GetDownstreamRequest(
-      const network::TestURLLoaderFactory::PendingRequest** pending_request_out)
-      WARN_UNUSED_RESULT {
+  [[nodiscard]] bool GetDownstreamRequest(
+      const network::TestURLLoaderFactory::PendingRequest**
+          pending_request_out) {
     return GetPendingRequest(pending_request_out, "/down");
   }
 
-  bool GetPendingRequest(
+  [[nodiscard]] bool GetPendingRequest(
       const network::TestURLLoaderFactory::PendingRequest** pending_request_out,
-      const char* url_substring) WARN_UNUSED_RESULT {
+      const char* url_substring) {
     for (const auto& pending_request :
          *url_loader_factory_.pending_requests()) {
       if (pending_request.request.url.spec().find(url_substring) !=
@@ -261,7 +269,8 @@ class SpeechRecognizerImplTest : public SpeechRecognitionEventListener,
     auto* capture_callback =
         static_cast<media::AudioCapturerSource::CaptureCallback*>(
             recognizer_.get());
-    capture_callback->OnCaptureError("");
+    capture_callback->OnCaptureError(
+        media::AudioCapturerSource::ErrorCode::kUnknown, "");
   }
 
   void WaitForAudioThreadToPostDeviceInfo() {
@@ -275,7 +284,8 @@ class SpeechRecognizerImplTest : public SpeechRecognitionEventListener,
   }
 
  protected:
-  TestBrowserThreadBundle thread_bundle_;
+  base::test::ScopedFeatureList feature_list_;
+  BrowserTaskEnvironment task_environment_;
   network::TestURLLoaderFactory url_loader_factory_;
   scoped_refptr<SpeechRecognizerImpl> recognizer_;
   std::unique_ptr<media::MockAudioManager> audio_manager_;
@@ -411,8 +421,11 @@ TEST_F(SpeechRecognizerImplTest, StopWithData) {
   // that we are streaming out encoded data as chunks without waiting for the
   // full recording to complete.
   const size_t kNumChunks = 5;
-  network::mojom::ChunkedDataPipeGetterPtr chunked_data_pipe_getter;
-  mojo::DataPipe data_pipe;
+  mojo::Remote<network::mojom::ChunkedDataPipeGetter> chunked_data_pipe_getter;
+  mojo::ScopedDataPipeProducerHandle producer_handle;
+  mojo::ScopedDataPipeConsumerHandle consumer_handle;
+  ASSERT_EQ(mojo::CreateDataPipe(nullptr, producer_handle, consumer_handle),
+            MOJO_RESULT_OK);
   for (size_t i = 0; i < kNumChunks; ++i) {
     Capture(audio_bus_.get());
 
@@ -424,17 +437,13 @@ TEST_F(SpeechRecognizerImplTest, StopWithData) {
       ASSERT_TRUE(GetUpstreamRequest(&upstream_request));
       ASSERT_TRUE(upstream_request->request.request_body);
       ASSERT_EQ(1u, upstream_request->request.request_body->elements()->size());
-      ASSERT_EQ(
-          network::mojom::DataElementType::kChunkedDataPipe,
-          (*upstream_request->request.request_body->elements())[0].type());
-      network::TestURLLoaderFactory::PendingRequest* mutable_upstream_request =
-          const_cast<network::TestURLLoaderFactory::PendingRequest*>(
-              upstream_request);
-      chunked_data_pipe_getter.Bind((*mutable_upstream_request->request
-                                          .request_body->elements_mutable())[0]
-                                        .ReleaseChunkedDataPipeGetter());
-      chunked_data_pipe_getter->StartReading(
-          std::move(data_pipe.producer_handle));
+      auto& element =
+          (*upstream_request->request.request_body->elements_mutable())[0];
+      ASSERT_EQ(network::DataElement::Tag::kChunkedDataPipe, element.type());
+      chunked_data_pipe_getter.Bind(
+          element.As<network::DataElementChunkedDataPipe>()
+              .ReleaseChunkedDataPipeGetter());
+      chunked_data_pipe_getter->StartReading(std::move(producer_handle));
     }
 
     std::string data;
@@ -443,11 +452,11 @@ TEST_F(SpeechRecognizerImplTest, StopWithData) {
 
       const void* buffer;
       uint32_t num_bytes;
-      MojoResult result = data_pipe.consumer_handle->BeginReadData(
+      MojoResult result = consumer_handle->BeginReadData(
           &buffer, &num_bytes, MOJO_READ_DATA_FLAG_NONE);
       if (result == MOJO_RESULT_OK) {
         data.append(static_cast<const char*>(buffer), num_bytes);
-        data_pipe.consumer_handle->EndReadData(num_bytes);
+        consumer_handle->EndReadData(num_bytes);
         continue;
       }
       if (result == MOJO_RESULT_SHOULD_WAIT) {
@@ -544,7 +553,7 @@ TEST_F(SpeechRecognizerImplTest, ConnectionError) {
   const network::TestURLLoaderFactory::PendingRequest* pending_request;
   ASSERT_TRUE(GetUpstreamRequest(&pending_request));
   url_loader_factory_.AddResponse(
-      pending_request->request.url, network::ResourceResponseHead(), "",
+      pending_request->request.url, network::mojom::URLResponseHead::New(), "",
       network::URLLoaderCompletionStatus(net::ERR_CONNECTION_REFUSED));
 
   base::RunLoop().RunUntilIdle();
@@ -577,11 +586,12 @@ TEST_F(SpeechRecognizerImplTest, ServerError) {
 
   const network::TestURLLoaderFactory::PendingRequest* pending_request;
   ASSERT_TRUE(GetUpstreamRequest(&pending_request));
-  network::ResourceResponseHead response;
+  auto response = network::mojom::URLResponseHead::New();
   const char kHeaders[] = "HTTP/1.0 500 Internal Server Error";
-  response.headers = base::MakeRefCounted<net::HttpResponseHeaders>(
+  response->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
       net::HttpUtil::AssembleRawHeaders(kHeaders));
-  url_loader_factory_.AddResponse(pending_request->request.url, response, "",
+  url_loader_factory_.AddResponse(pending_request->request.url,
+                                  std::move(response), "",
                                   network::URLLoaderCompletionStatus());
 
   base::RunLoop().RunUntilIdle();

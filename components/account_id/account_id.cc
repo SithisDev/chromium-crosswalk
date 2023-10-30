@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,9 @@
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/logging.h"
 #include "base/no_destructor.h"
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "google_apis/gaia/gaia_auth_util.h"
@@ -33,7 +35,7 @@ const char kKeyAdIdPrefix[] = "a-";
 
 }  // anonymous namespace
 
-AccountId::AccountId() {}
+AccountId::AccountId() = default;
 
 AccountId::AccountId(const std::string& id,
                      const std::string& user_email,
@@ -52,10 +54,9 @@ AccountId::AccountId(const std::string& id,
   // TODO(alemate): check gaia_id is not empty once it is required.
 }
 
-AccountId::AccountId(const AccountId& other)
-    : id_(other.id_),
-      user_email_(other.user_email_),
-      account_type_(other.account_type_) {}
+AccountId::AccountId(const AccountId& other) = default;
+
+AccountId& AccountId::operator=(const AccountId& other) = default;
 
 bool AccountId::operator==(const AccountId& other) const {
   if (this == &other)
@@ -167,12 +168,6 @@ AccountId AccountId::FromUserEmail(const std::string& email) {
 }
 
 // static
-AccountId AccountId::FromGaiaId(const std::string& gaia_id) {
-  DCHECK(!gaia_id.empty());
-  return AccountId(gaia_id, std::string() /* email */, AccountType::GOOGLE);
-}
-
-// static
 AccountId AccountId::FromUserEmailGaiaId(const std::string& email,
                                          const std::string& gaia_id) {
   DCHECK(!(email.empty() && gaia_id.empty()));
@@ -184,13 +179,6 @@ AccountId AccountId::AdFromUserEmailObjGuid(const std::string& email,
                                             const std::string& obj_guid) {
   DCHECK(!email.empty() && !obj_guid.empty());
   return AccountId(obj_guid, email, AccountType::ACTIVE_DIRECTORY);
-}
-
-// static
-AccountId AccountId::AdFromObjGuid(const std::string& obj_guid) {
-  DCHECK(!obj_guid.empty());
-  return AccountId(obj_guid, std::string() /* email */,
-                   AccountType::ACTIVE_DIRECTORY);
 }
 
 // static
@@ -220,19 +208,19 @@ std::string AccountId::AccountTypeToString(const AccountType& account_type) {
 }
 
 std::string AccountId::Serialize() const {
-  base::DictionaryValue value;
+  base::Value::Dict value;
   switch (GetAccountType()) {
     case AccountType::GOOGLE:
-      value.SetString(kGaiaIdKey, id_);
+      value.Set(kGaiaIdKey, id_);
       break;
     case AccountType::ACTIVE_DIRECTORY:
-      value.SetString(kObjGuid, id_);
+      value.Set(kObjGuid, id_);
       break;
     case AccountType::UNKNOWN:
       break;
   }
-  value.SetString(kAccountTypeKey, AccountTypeToString(GetAccountType()));
-  value.SetString(kEmailKey, user_email_);
+  value.Set(kAccountTypeKey, AccountTypeToString(GetAccountType()));
+  value.Set(kEmailKey, user_email_);
 
   std::string serialized;
   base::JSONWriter::Write(value, &serialized);
@@ -242,7 +230,7 @@ std::string AccountId::Serialize() const {
 // static
 bool AccountId::Deserialize(const std::string& serialized,
                             AccountId* account_id) {
-  base::Optional<base::Value> value(base::JSONReader::Read(serialized));
+  absl::optional<base::Value> value(base::JSONReader::Read(serialized));
   if (!value || !value->is_dict())
     return false;
 

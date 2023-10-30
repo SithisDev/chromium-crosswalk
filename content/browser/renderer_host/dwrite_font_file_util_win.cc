@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,18 +12,15 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/renderer_host/dwrite_font_uma_logging_win.h"
 
 namespace content {
 
-using namespace dwrite_font_uma_logging;
-
-namespace dwrite_font_file_util {
-
-bool FontFilePathAndTtcIndex(IDWriteFont* font,
-                             base::string16& file_path,
-                             uint32_t& ttc_index) {
+HRESULT FontFilePathAndTtcIndex(IDWriteFont* font,
+                                std::wstring& file_path,
+                                uint32_t& ttc_index) {
   Microsoft::WRL::ComPtr<IDWriteFontFace> font_face;
   HRESULT hr;
   hr = font->CreateFontFace(&font_face);
@@ -32,14 +29,14 @@ bool FontFilePathAndTtcIndex(IDWriteFont* font,
                              hr);
     LogMessageFilterError(
         MessageFilterError::ADD_FILES_FOR_FONT_CREATE_FACE_FAILED);
-    return false;
+    return hr;
   }
   return FontFilePathAndTtcIndex(font_face.Get(), file_path, ttc_index);
 }
 
-bool FontFilePathAndTtcIndex(IDWriteFontFace* font_face,
-                             base::string16& file_path,
-                             uint32_t& ttc_index) {
+HRESULT FontFilePathAndTtcIndex(IDWriteFontFace* font_face,
+                                std::wstring& file_path,
+                                uint32_t& ttc_index) {
   TRACE_EVENT0("dwrite,fonts",
                "dwrite_font_file_util::FontFilePathAndTtcIndex");
   UINT32 file_count;
@@ -48,7 +45,7 @@ bool FontFilePathAndTtcIndex(IDWriteFontFace* font_face,
   if (FAILED(hr)) {
     LogMessageFilterError(
         MessageFilterError::ADD_FILES_FOR_FONT_GET_FILE_COUNT_FAILED);
-    return false;
+    return hr;
   }
 
   // We've learned from the DirectWrite team at MS that the number of font files
@@ -62,7 +59,7 @@ bool FontFilePathAndTtcIndex(IDWriteFontFace* font_face,
   if (file_count > 1) {
     LogMessageFilterError(
         MessageFilterError::GET_FILE_COUNT_INVALID_NUMBER_OF_FILES);
-    return false;
+    return kErrorFontFileUtilTooManyFilesPerFace;
   }
 
   Microsoft::WRL::ComPtr<IDWriteFontFile> font_file;
@@ -70,7 +67,7 @@ bool FontFilePathAndTtcIndex(IDWriteFontFace* font_face,
   if (FAILED(hr)) {
     LogMessageFilterError(
         MessageFilterError::ADD_FILES_FOR_FONT_GET_FILES_FAILED);
-    return false;
+    return hr;
   }
 
   Microsoft::WRL::ComPtr<IDWriteFontFileLoader> loader;
@@ -78,7 +75,7 @@ bool FontFilePathAndTtcIndex(IDWriteFontFace* font_face,
   if (FAILED(hr)) {
     LogMessageFilterError(
         MessageFilterError::ADD_FILES_FOR_FONT_GET_LOADER_FAILED);
-    return false;
+    return hr;
   }
 
   Microsoft::WRL::ComPtr<IDWriteLocalFontFileLoader> local_loader;
@@ -96,10 +93,10 @@ bool FontFilePathAndTtcIndex(IDWriteFontFace* font_face,
     // we could proxy the stream reads directly instead.
     LogLoaderType(DirectWriteFontLoaderType::OTHER_LOADER);
     DCHECK(false);
-    return false;
+    return hr;
   } else if (FAILED(hr)) {
     LogMessageFilterError(MessageFilterError::ADD_FILES_FOR_FONT_QI_FAILED);
-    return false;
+    return hr;
   }
 
   const void* key;
@@ -108,7 +105,7 @@ bool FontFilePathAndTtcIndex(IDWriteFontFace* font_face,
   if (FAILED(hr)) {
     LogMessageFilterError(
         MessageFilterError::ADD_LOCAL_FILE_GET_REFERENCE_KEY_FAILED);
-    return false;
+    return hr;
   }
 
   UINT32 path_length = 0;
@@ -116,45 +113,47 @@ bool FontFilePathAndTtcIndex(IDWriteFontFace* font_face,
   if (FAILED(hr)) {
     LogMessageFilterError(
         MessageFilterError::ADD_LOCAL_FILE_GET_PATH_LENGTH_FAILED);
-    return false;
+    return hr;
   }
-  base::string16 retrieve_file_path;
+  std::wstring retrieve_file_path;
   retrieve_file_path.resize(
       ++path_length);  // Reserve space for the null terminator.
   hr = local_loader->GetFilePathFromKey(key, key_size, &retrieve_file_path[0],
                                         path_length);
   if (FAILED(hr)) {
     LogMessageFilterError(MessageFilterError::ADD_LOCAL_FILE_GET_PATH_FAILED);
-    return false;
+    return hr;
   }
-  // No need for the null-terminator in base::string16.
+  // No need for the null-terminator in std::u16string.
   retrieve_file_path.resize(--path_length);
 
   uint32_t retrieve_ttc_index = font_face->GetIndex();
   if (FAILED(hr)) {
-    return false;
+    return hr;
   }
 
   file_path = retrieve_file_path;
   ttc_index = retrieve_ttc_index;
 
-  return true;
+  return S_OK;
 }
 
-bool AddFilesForFont(IDWriteFont* font,
-                     const base::string16& windows_fonts_path,
-                     std::set<base::string16>* path_set,
-                     std::set<base::string16>* custom_font_path_set,
-                     uint32_t* ttc_index) {
-  base::string16 file_path;
-  if (!FontFilePathAndTtcIndex(font, file_path, *ttc_index)) {
-    return false;
+HRESULT AddFilesForFont(IDWriteFont* font,
+                        const std::u16string& windows_fonts_path,
+                        std::set<std::wstring>* path_set,
+                        std::set<std::wstring>* custom_font_path_set,
+                        uint32_t* ttc_index) {
+  std::wstring file_path;
+  HRESULT hr = FontFilePathAndTtcIndex(font, file_path, *ttc_index);
+  if (FAILED(hr)) {
+    return hr;
   }
 
-  base::string16 file_path_folded = base::i18n::FoldCase(file_path);
+  std::u16string file_path_folded =
+      base::i18n::FoldCase(base::WideToUTF16(file_path));
 
   if (!file_path_folded.size())
-    return false;
+    return kErrorFontFileUtilEmptyFilePath;
 
   if (!base::StartsWith(file_path_folded, windows_fonts_path,
                         base::CompareCase::SENSITIVE)) {
@@ -164,19 +163,18 @@ bool AddFilesForFont(IDWriteFont* font,
     LogLoaderType(DirectWriteFontLoaderType::FILE_SYSTEM_FONT_DIR);
     path_set->insert(file_path);
   }
-  return true;
+  return S_OK;
 }
 
-base::string16 GetWindowsFontsPath() {
-  std::vector<base::char16> font_path_chars;
+std::u16string GetWindowsFontsPath() {
+  std::vector<wchar_t> font_path_chars;
   // SHGetSpecialFolderPath requires at least MAX_PATH characters.
   font_path_chars.resize(MAX_PATH);
   BOOL result = SHGetSpecialFolderPath(nullptr /* hwndOwner - reserved */,
                                        font_path_chars.data(), CSIDL_FONTS,
                                        FALSE /* fCreate */);
   DCHECK(result);
-  return base::i18n::FoldCase(font_path_chars.data());
+  return base::i18n::FoldCase(base::AsStringPiece16(font_path_chars.data()));
 }
 
-}  // namespace dwrite_font_file_util
 }  // namespace content

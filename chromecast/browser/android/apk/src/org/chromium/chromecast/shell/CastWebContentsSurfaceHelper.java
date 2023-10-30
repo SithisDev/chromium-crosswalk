@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,9 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 
+import org.chromium.base.Consumer;
 import org.chromium.base.Log;
-import org.chromium.base.annotations.RemovableInRelease;
 import org.chromium.chromecast.base.Both;
-import org.chromium.chromecast.base.Consumer;
 import org.chromium.chromecast.base.Controller;
 import org.chromium.chromecast.base.Observable;
 import org.chromium.chromecast.base.Observer;
@@ -23,19 +22,18 @@ import org.chromium.content.browser.MediaSessionImpl;
 import org.chromium.content_public.browser.WebContents;
 
 /**
- * A util class for CastWebContentsActivity and CastWebContentsFragment to show
- * WebContent on its views.
+ * A util class for CastWebContentsActivity to show WebContents on its views.
  * <p>
- * This class is to help the activity or fragment class to work with CastContentWindowAndroid,
- * which will start a new instance of activity or fragment. If the CastContentWindowAndroid is
- * destroyed, CastWebContentsActivity or CastWebContentsFragment should be stopped.
- * Similarily,  CastWebContentsActivity or CastWebContentsFragment is stopped, eg.
- * CastWebContentsFragment is removed from a activity or the activity holding it
- * is destroyed, or CastWebContentsActivity is closed, CastContentWindowAndroid should be
- * notified by intent.
+ * This class is to help the activity class to work with CastContentWindowAndroid, which will start
+ * a new instance of the activity. If the CastContentWindowAndroid is destroyed,
+ * CastWebContentsActivity should be stopped.
+ * <p>
+ * Similarly, if CastWebContentsActivity is stopped, eg. the user goes "back" or "home" via the
+ * remote (or a gesture on touch-compatible devices), CastContentWindowAndroid should be notified
+ * by intent.
  */
 class CastWebContentsSurfaceHelper {
-    private static final String TAG = "cr_CastWebContents";
+    private static final String TAG = "CastWebContents";
 
     private static final int TEARDOWN_GRACE_PERIOD_TIMEOUT_MILLIS = 300;
 
@@ -169,12 +167,6 @@ class CastWebContentsSurfaceHelper {
                 .map(params -> mMediaSessionGetter.get(params.webContents))
                 .subscribe(Observers.onEnter(MediaSessionImpl::requestSystemAudioFocus));
 
-        // Miscellaneous actions responding to WebContents lifecycle.
-        webContentsState.subscribe((WebContents webContents) -> {
-            // Notify CastWebContentsComponent when closed.
-            return () -> CastWebContentsComponent.onComponentClosed(mSessionId);
-        });
-
         // When onDestroy() is called after onNewStartParams(), log and reset StartParams states.
         uriState.andThen(Observable.not(mCreatedState))
                 .map(Both::getFirst)
@@ -220,7 +212,6 @@ class CastWebContentsSurfaceHelper {
         return mTouchInputEnabled;
     }
 
-    @RemovableInRelease
     void setMediaSessionGetterForTesting(MediaSessionGetter mediaSessionGetter) {
         mMediaSessionGetter = mediaSessionGetter;
     }

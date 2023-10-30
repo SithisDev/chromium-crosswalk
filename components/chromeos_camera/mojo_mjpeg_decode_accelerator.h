@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,10 @@
 
 #include <stdint.h>
 
-#include <memory>
-
-#include "base/macros.h"
 #include "components/chromeos_camera/common/mjpeg_decode_accelerator.mojom.h"
 #include "components/chromeos_camera/mjpeg_decode_accelerator.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace base {
 class SequencedTaskRunner;
@@ -22,24 +21,32 @@ namespace chromeos_camera {
 // A MjpegDecodeAccelerator, for use in the browser process, that proxies to a
 // chromeos_camera::mojom::MjpegDecodeAccelerator. Created on the owner's
 // thread, otherwise operating and deleted on |io_task_runner|.
-class MojoMjpegDecodeAccelerator : public MjpegDecodeAccelerator {
+class MojoMjpegDecodeAccelerator {
  public:
   MojoMjpegDecodeAccelerator(
       scoped_refptr<base::SequencedTaskRunner> io_task_runner,
-      chromeos_camera::mojom::MjpegDecodeAcceleratorPtrInfo jpeg_decoder);
-  ~MojoMjpegDecodeAccelerator() override;
+      mojo::PendingRemote<chromeos_camera::mojom::MjpegDecodeAccelerator>
+          jpeg_decoder);
+
+  MojoMjpegDecodeAccelerator(const MojoMjpegDecodeAccelerator&) = delete;
+  MojoMjpegDecodeAccelerator& operator=(const MojoMjpegDecodeAccelerator&) =
+      delete;
+
+  ~MojoMjpegDecodeAccelerator();
 
   // MjpegDecodeAccelerator implementation.
   // |client| is called on the IO thread, but is never called into after the
   // MojoMjpegDecodeAccelerator is destroyed.
-  bool Initialize(Client* client) override;
-  void InitializeAsync(Client* client, InitCB init_cb) override;
+  void InitializeAsync(MjpegDecodeAccelerator::Client* client,
+                       MjpegDecodeAccelerator::InitCB init_cb);
   void Decode(media::BitstreamBuffer bitstream_buffer,
-              scoped_refptr<media::VideoFrame> video_frame) override;
-  bool IsSupported() override;
+              media::VideoPixelFormat format,
+              const gfx::Size& coded_size,
+              base::UnsafeSharedMemoryRegion output_region);
+  bool IsSupported();
 
  private:
-  void OnInitializeDone(InitCB init_cb,
+  void OnInitializeDone(MjpegDecodeAccelerator::InitCB init_cb,
                         MjpegDecodeAccelerator::Client* client,
                         bool success);
   void OnDecodeAck(int32_t bitstream_buffer_id,
@@ -48,17 +55,17 @@ class MojoMjpegDecodeAccelerator : public MjpegDecodeAccelerator {
 
   scoped_refptr<base::SequencedTaskRunner> io_task_runner_;
 
-  Client* client_ = nullptr;
+  MjpegDecodeAccelerator::Client* client_ = nullptr;
 
-  // Used to safely pass the chromeos_camera::mojom::MjpegDecodeAcceleratorPtr
-  // from one thread to another. It is set in the constructor and consumed in
+  // Used to safely pass the
+  // chromeos_mojo::Remote<camera::mojom::MjpegDecodeAccelerator> from one
+  // thread to another. It is set in the constructor and consumed in
   // InitializeAsync().
   // TODO(mcasas): s/jpeg_decoder_/jda_/ https://crbug.com/699255.
-  chromeos_camera::mojom::MjpegDecodeAcceleratorPtrInfo jpeg_decoder_info_;
+  mojo::PendingRemote<chromeos_camera::mojom::MjpegDecodeAccelerator>
+      jpeg_decoder_remote_;
 
-  chromeos_camera::mojom::MjpegDecodeAcceleratorPtr jpeg_decoder_;
-
-  DISALLOW_COPY_AND_ASSIGN(MojoMjpegDecodeAccelerator);
+  mojo::Remote<chromeos_camera::mojom::MjpegDecodeAccelerator> jpeg_decoder_;
 };
 
 }  // namespace chromeos_camera

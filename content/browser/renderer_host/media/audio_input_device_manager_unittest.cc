@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,15 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "media/audio/audio_system_impl.h"
 #include "media/audio/audio_thread_impl.h"
 #include "media/audio/mock_audio_manager.h"
@@ -37,21 +36,30 @@ class MockAudioInputDeviceManagerListener
     : public MediaStreamProviderListener {
  public:
   MockAudioInputDeviceManagerListener() {}
+
+  MockAudioInputDeviceManagerListener(
+      const MockAudioInputDeviceManagerListener&) = delete;
+  MockAudioInputDeviceManagerListener& operator=(
+      const MockAudioInputDeviceManagerListener&) = delete;
+
   ~MockAudioInputDeviceManagerListener() override {}
 
-  MOCK_METHOD2(Opened, void(blink::mojom::MediaStreamType, const int));
-  MOCK_METHOD2(Closed, void(blink::mojom::MediaStreamType, const int));
-  MOCK_METHOD2(Aborted, void(blink::mojom::MediaStreamType, int));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockAudioInputDeviceManagerListener);
+  MOCK_METHOD2(Opened,
+               void(blink::mojom::MediaStreamType,
+                    const base::UnguessableToken&));
+  MOCK_METHOD2(Closed,
+               void(blink::mojom::MediaStreamType,
+                    const base::UnguessableToken&));
+  MOCK_METHOD2(Aborted,
+               void(blink::mojom::MediaStreamType,
+                    const base::UnguessableToken&));
 };
 
 // TODO(henrika): there are special restrictions for Android since
 // AudioInputDeviceManager::Open() must be called on the audio thread.
 // This test suite must be modified to run on Android.
 // Flaky on Linux. See http://crbug.com/867397.
-#if defined(OS_ANDROID) || defined(OS_LINUX)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_AudioInputDeviceManagerTest DISABLED_AudioInputDeviceManagerTest
 #else
 #define MAYBE_AudioInputDeviceManagerTest AudioInputDeviceManagerTest
@@ -60,6 +68,11 @@ class MockAudioInputDeviceManagerListener
 class MAYBE_AudioInputDeviceManagerTest : public testing::Test {
  public:
   MAYBE_AudioInputDeviceManagerTest() {}
+
+  MAYBE_AudioInputDeviceManagerTest(const MAYBE_AudioInputDeviceManagerTest&) =
+      delete;
+  MAYBE_AudioInputDeviceManagerTest& operator=(
+      const MAYBE_AudioInputDeviceManagerTest&) = delete;
 
  protected:
   virtual void Initialize() {
@@ -108,15 +121,12 @@ class MAYBE_AudioInputDeviceManagerTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  TestBrowserThreadBundle thread_bundle_;
+  BrowserTaskEnvironment task_environment_;
   std::unique_ptr<media::AudioManager> audio_manager_;
   std::unique_ptr<media::AudioSystem> audio_system_;
   scoped_refptr<AudioInputDeviceManager> manager_;
   std::unique_ptr<MockAudioInputDeviceManagerListener> audio_input_listener_;
   blink::MediaStreamDevices devices_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MAYBE_AudioInputDeviceManagerTest);
 };
 
 // Opens and closes the devices.
@@ -128,7 +138,7 @@ TEST_F(MAYBE_AudioInputDeviceManagerTest, OpenAndCloseDevice) {
   for (blink::MediaStreamDevices::const_iterator iter = devices_.begin();
        iter != devices_.end(); ++iter) {
     // Opens/closes the devices.
-    int session_id = manager_->Open(*iter);
+    base::UnguessableToken session_id = manager_->Open(*iter);
 
     // Expected mock call with expected return value.
     EXPECT_CALL(
@@ -156,7 +166,8 @@ TEST_F(MAYBE_AudioInputDeviceManagerTest, OpenMultipleDevices) {
   InSequence s;
 
   int index = 0;
-  std::unique_ptr<int[]> session_id(new int[devices_.size()]);
+  std::unique_ptr<base::UnguessableToken[]> session_id(
+      new base::UnguessableToken[devices_.size()]);
 
   // Opens the devices in a loop.
   for (blink::MediaStreamDevices::const_iterator iter = devices_.begin();
@@ -204,7 +215,7 @@ TEST_F(MAYBE_AudioInputDeviceManagerTest, OpenNotExistingDevice) {
   std::string device_id("id_doesnt_exist");
   blink::MediaStreamDevice dummy_device(stream_type, device_id, device_name);
 
-  int session_id = manager_->Open(dummy_device);
+  base::UnguessableToken session_id = manager_->Open(dummy_device);
   EXPECT_CALL(
       *audio_input_listener_,
       Opened(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE, session_id))
@@ -221,8 +232,8 @@ TEST_F(MAYBE_AudioInputDeviceManagerTest, OpenDeviceTwice) {
   InSequence s;
 
   // Opens and closes the default device twice.
-  int first_session_id = manager_->Open(devices_.front());
-  int second_session_id = manager_->Open(devices_.front());
+  base::UnguessableToken first_session_id = manager_->Open(devices_.front());
+  base::UnguessableToken second_session_id = manager_->Open(devices_.front());
 
   // Expected mock calls with expected returned values.
   EXPECT_NE(first_session_id, second_session_id);
@@ -258,7 +269,8 @@ TEST_F(MAYBE_AudioInputDeviceManagerTest, AccessAndCloseSession) {
   InSequence s;
 
   int index = 0;
-  std::unique_ptr<int[]> session_id(new int[devices_.size()]);
+  std::unique_ptr<base::UnguessableToken[]> session_id(
+      new base::UnguessableToken[devices_.size()]);
 
   // Loops through the devices and calls Open()/Close()/GetOpenedDeviceById
   // for each device.
@@ -292,7 +304,7 @@ TEST_F(MAYBE_AudioInputDeviceManagerTest, AccessInvalidSession) {
 
   // Opens the first device.
   blink::MediaStreamDevices::const_iterator iter = devices_.begin();
-  int session_id = manager_->Open(*iter);
+  base::UnguessableToken session_id = manager_->Open(*iter);
   EXPECT_CALL(
       *audio_input_listener_,
       Opened(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE, session_id))
@@ -301,7 +313,7 @@ TEST_F(MAYBE_AudioInputDeviceManagerTest, AccessInvalidSession) {
 
   // Access a non-opened device.
   // This should fail and return an empty blink::MediaStreamDevice.
-  int invalid_session_id = session_id + 1;
+  base::UnguessableToken invalid_session_id = base::UnguessableToken::Create();
   const blink::MediaStreamDevice* device =
       manager_->GetOpenedDeviceById(invalid_session_id);
   DCHECK(!device);
@@ -319,6 +331,11 @@ class AudioInputDeviceManagerNoDevicesTest
  public:
   AudioInputDeviceManagerNoDevicesTest() {}
 
+  AudioInputDeviceManagerNoDevicesTest(
+      const AudioInputDeviceManagerNoDevicesTest&) = delete;
+  AudioInputDeviceManagerNoDevicesTest& operator=(
+      const AudioInputDeviceManagerNoDevicesTest&) = delete;
+
  protected:
   void Initialize() override {
     // MockAudioManager has no input and no output audio devices.
@@ -334,9 +351,6 @@ class AudioInputDeviceManagerNoDevicesTest
     devices_.emplace_back(blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE,
                           "fake_device", "Fake Device");
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioInputDeviceManagerNoDevicesTest);
 };
 
 TEST_F(AudioInputDeviceManagerNoDevicesTest,
@@ -346,7 +360,7 @@ TEST_F(AudioInputDeviceManagerNoDevicesTest,
   InSequence s;
 
   for (const auto& device_request : devices_) {
-    int session_id = manager_->Open(device_request);
+    base::UnguessableToken session_id = manager_->Open(device_request);
 
     EXPECT_CALL(*audio_input_listener_, Opened(device_request.type, session_id))
         .Times(1);

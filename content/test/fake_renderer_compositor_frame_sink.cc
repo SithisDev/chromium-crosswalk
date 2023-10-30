@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,21 @@
 namespace content {
 
 FakeRendererCompositorFrameSink::FakeRendererCompositorFrameSink(
-    viz::mojom::CompositorFrameSinkPtr sink,
-    viz::mojom::CompositorFrameSinkClientRequest request)
-    : binding_(this, std::move(request)), sink_(std::move(sink)) {}
+    mojo::PendingRemote<viz::mojom::CompositorFrameSink> sink,
+    mojo::PendingReceiver<viz::mojom::CompositorFrameSinkClient> receiver)
+    : receiver_(this, std::move(receiver)), sink_(std::move(sink)) {}
 
 FakeRendererCompositorFrameSink::~FakeRendererCompositorFrameSink() = default;
 
 void FakeRendererCompositorFrameSink::DidReceiveCompositorFrameAck(
-    const std::vector<viz::ReturnedResource>& resources) {
-  ReclaimResources(resources);
+    std::vector<viz::ReturnedResource> resources) {
+  ReclaimResources(std::move(resources));
   did_receive_ack_ = true;
 }
 
 void FakeRendererCompositorFrameSink::ReclaimResources(
-    const std::vector<viz::ReturnedResource>& resources) {
-  last_reclaimed_resources_ = resources;
+    std::vector<viz::ReturnedResource> resources) {
+  last_reclaimed_resources_ = std::move(resources);
 }
 
 void FakeRendererCompositorFrameSink::Reset() {
@@ -30,7 +30,7 @@ void FakeRendererCompositorFrameSink::Reset() {
 }
 
 void FakeRendererCompositorFrameSink::Flush() {
-  binding_.FlushForTesting();
+  receiver_.FlushForTesting();
 }
 
 }  // namespace content

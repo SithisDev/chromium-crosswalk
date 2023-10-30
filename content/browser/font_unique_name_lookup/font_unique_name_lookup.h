@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/read_only_shared_memory_region.h"
-#include "base/sequenced_task_runner.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/task/sequenced_task_runner.h"
 #include "content/common/content_export.h"
 #include "third_party/blink/public/mojom/font_unique_name_lookup/font_unique_name_lookup.mojom.h"
 
@@ -127,7 +128,7 @@ class CONTENT_EXPORT FontUniqueNameLookup {
   base::MappedReadOnlyRegion proto_storage_;
 
   base::FilePath cache_directory_;
-  std::string android_build_fingerprint_for_testing_ = "";
+  std::string android_build_fingerprint_for_testing_;
   std::vector<std::string> font_file_paths_for_testing_ =
       std::vector<std::string>();
 

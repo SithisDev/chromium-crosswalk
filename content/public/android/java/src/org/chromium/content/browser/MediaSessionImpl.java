@@ -1,17 +1,21 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser;
 
+import androidx.annotation.Nullable;
+
 import org.chromium.base.ObserverList;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.content_public.browser.MediaSession;
 import org.chromium.content_public.browser.MediaSessionObserver;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.services.media_session.MediaImage;
 import org.chromium.services.media_session.MediaMetadata;
+import org.chromium.services.media_session.MediaPosition;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -29,12 +33,34 @@ public class MediaSessionImpl extends MediaSession {
     private ObserverList<MediaSessionObserver> mObservers;
     private ObserverList.RewindableIterator<MediaSessionObserver> mObserversIterator;
 
+    private boolean mIsControllable;
+    private Boolean mIsSuspended;
+    private MediaMetadata mMetadata;
+    private List<MediaImage> mImagesList;
+    private HashSet<Integer> mActionSet;
+    private MediaPosition mPosition;
+
     public static MediaSessionImpl fromWebContents(WebContents webContents) {
-        return nativeGetMediaSessionFromWebContents(webContents);
+        return MediaSessionImplJni.get().getMediaSessionFromWebContents(webContents);
     }
 
     public void addObserver(MediaSessionObserver observer) {
         mObservers.addObserver(observer);
+        if (mIsSuspended != null) {
+            observer.mediaSessionStateChanged(mIsControllable, mIsSuspended);
+        }
+        if (mMetadata != null) {
+            observer.mediaSessionMetadataChanged(mMetadata);
+        }
+        if (mImagesList != null) {
+            observer.mediaSessionArtworkChanged(mImagesList);
+        }
+        if (mPosition != null) {
+            observer.mediaSessionPositionChanged(mPosition);
+        }
+        if (mActionSet != null) {
+            observer.mediaSessionActionsChanged(mActionSet);
+        }
     }
 
     public void removeObserver(MediaSessionObserver observer) {
@@ -48,33 +74,46 @@ public class MediaSessionImpl extends MediaSession {
 
     @Override
     public void resume() {
-        nativeResume(mNativeMediaSessionAndroid);
+        MediaSessionImplJni.get().resume(mNativeMediaSessionAndroid, MediaSessionImpl.this);
     }
 
     @Override
     public void suspend() {
-        nativeSuspend(mNativeMediaSessionAndroid);
+        MediaSessionImplJni.get().suspend(mNativeMediaSessionAndroid, MediaSessionImpl.this);
     }
 
     @Override
     public void stop() {
-        nativeStop(mNativeMediaSessionAndroid);
+        MediaSessionImplJni.get().stop(mNativeMediaSessionAndroid, MediaSessionImpl.this);
     }
 
     @Override
     public void seek(long millis) {
-        assert millis == 0 : "Attempted to seek by an unspecified number of milliseconds";
-        nativeSeek(mNativeMediaSessionAndroid, millis);
+        assert millis != 0 : "Attempted to seek by an unspecified number of milliseconds";
+        MediaSessionImplJni.get().seek(mNativeMediaSessionAndroid, MediaSessionImpl.this, millis);
+    }
+
+    @Override
+    public void seekTo(long millis) {
+        assert millis >= 0 : "Attempted to seek to a negative posision";
+        MediaSessionImplJni.get().seekTo(mNativeMediaSessionAndroid, MediaSessionImpl.this, millis);
     }
 
     @Override
     public void didReceiveAction(int action) {
-        nativeDidReceiveAction(mNativeMediaSessionAndroid, action);
+        MediaSessionImplJni.get().didReceiveAction(
+                mNativeMediaSessionAndroid, MediaSessionImpl.this, action);
     }
 
     @Override
     public void requestSystemAudioFocus() {
-        nativeRequestSystemAudioFocus(mNativeMediaSessionAndroid);
+        MediaSessionImplJni.get().requestSystemAudioFocus(
+                mNativeMediaSessionAndroid, MediaSessionImpl.this);
+    }
+
+    @Override
+    public boolean isControllable() {
+        return mIsControllable;
     }
 
     @CalledByNative
@@ -96,6 +135,9 @@ public class MediaSessionImpl extends MediaSession {
 
     @CalledByNative
     private void mediaSessionStateChanged(boolean isControllable, boolean isSuspended) {
+        mIsControllable = isControllable;
+        mIsSuspended = isSuspended;
+
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
             mObserversIterator.next().mediaSessionStateChanged(isControllable, isSuspended);
         }
@@ -103,6 +145,7 @@ public class MediaSessionImpl extends MediaSession {
 
     @CalledByNative
     private void mediaSessionMetadataChanged(MediaMetadata metadata) {
+        mMetadata = metadata;
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
             mObserversIterator.next().mediaSessionMetadataChanged(metadata);
         }
@@ -112,6 +155,7 @@ public class MediaSessionImpl extends MediaSession {
     private void mediaSessionActionsChanged(int[] actions) {
         HashSet<Integer> actionSet = new HashSet<Integer>();
         for (int action : actions) actionSet.add(action);
+        mActionSet = actionSet;
 
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
             mObserversIterator.next().mediaSessionActionsChanged(actionSet);
@@ -120,10 +164,18 @@ public class MediaSessionImpl extends MediaSession {
 
     @CalledByNative
     private void mediaSessionArtworkChanged(MediaImage[] images) {
-        List<MediaImage> imagesList = Arrays.asList(images);
+        mImagesList = Arrays.asList(images);
 
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
-            mObserversIterator.next().mediaSessionArtworkChanged(imagesList);
+            mObserversIterator.next().mediaSessionArtworkChanged(mImagesList);
+        }
+    }
+
+    @CalledByNative
+    private void mediaSessionPositionChanged(@Nullable MediaPosition position) {
+        mPosition = position;
+        for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
+            mObserversIterator.next().mediaSessionPositionChanged(position);
         }
     }
 
@@ -138,12 +190,15 @@ public class MediaSessionImpl extends MediaSession {
         mObserversIterator = mObservers.rewindableIterator();
     }
 
-    private native void nativeResume(long nativeMediaSessionAndroid);
-    private native void nativeSuspend(long nativeMediaSessionAndroid);
-    private native void nativeStop(long nativeMediaSessionAndroid);
-    private native void nativeSeek(long nativeMediaSessionAndroid, long millis);
-    private native void nativeDidReceiveAction(long nativeMediaSessionAndroid, int action);
-    private native void nativeRequestSystemAudioFocus(long nativeMediaSessionAndroid);
-    private static native MediaSessionImpl nativeGetMediaSessionFromWebContents(
-            WebContents contents);
+    @NativeMethods
+    interface Natives {
+        void resume(long nativeMediaSessionAndroid, MediaSessionImpl caller);
+        void suspend(long nativeMediaSessionAndroid, MediaSessionImpl caller);
+        void stop(long nativeMediaSessionAndroid, MediaSessionImpl caller);
+        void seek(long nativeMediaSessionAndroid, MediaSessionImpl caller, long millis);
+        void seekTo(long nativeMediaSessionAndroid, MediaSessionImpl caller, long millis);
+        void didReceiveAction(long nativeMediaSessionAndroid, MediaSessionImpl caller, int action);
+        void requestSystemAudioFocus(long nativeMediaSessionAndroid, MediaSessionImpl caller);
+        MediaSessionImpl getMediaSessionFromWebContents(WebContents contents);
+    }
 }

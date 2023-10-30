@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,8 @@ uint32_t MockTranslateRanker::GetModelVersion() const {
 }
 
 bool MockTranslateRanker::ShouldOfferTranslation(
-    metrics::TranslateEventProto* /*translate_event */) {
+    metrics::TranslateEventProto* /*translate_event */,
+    TranslateMetricsLogger* /*translate_metrics_logger*/) {
   return should_offer_translation_;
 }
 

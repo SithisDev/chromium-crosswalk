@@ -1,15 +1,18 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/metrics/file_metrics_provider.h"
 
-#include <functional>
+#include <memory>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/files/file_util.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_flattener.h"
 #include "base/metrics/histogram_snapshot_manager.h"
@@ -17,7 +20,6 @@
 #include "base/metrics/persistent_memory_allocator.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_simple_task_runner.h"
@@ -42,6 +44,11 @@ class HistogramFlattenerDeltaRecorder : public base::HistogramFlattener {
  public:
   HistogramFlattenerDeltaRecorder() {}
 
+  HistogramFlattenerDeltaRecorder(const HistogramFlattenerDeltaRecorder&) =
+      delete;
+  HistogramFlattenerDeltaRecorder& operator=(
+      const HistogramFlattenerDeltaRecorder&) = delete;
+
   void RecordDelta(const base::HistogramBase& histogram,
                    const base::HistogramSamples& snapshot) override {
     // Only remember locally created histograms; they have exactly 2 chars.
@@ -55,12 +62,14 @@ class HistogramFlattenerDeltaRecorder : public base::HistogramFlattener {
 
  private:
   std::vector<std::string> recorded_delta_histogram_names_;
-
-  DISALLOW_COPY_AND_ASSIGN(HistogramFlattenerDeltaRecorder);
 };
 
 
 class FileMetricsProviderTest : public testing::TestWithParam<bool> {
+ public:
+  FileMetricsProviderTest(const FileMetricsProviderTest&) = delete;
+  FileMetricsProviderTest& operator=(const FileMetricsProviderTest&) = delete;
+
  protected:
   const size_t kSmallFileSize = 64 << 10;  // 64 KiB
   const size_t kLargeFileSize =  2 << 20;  //  2 MiB
@@ -75,7 +84,7 @@ class FileMetricsProviderTest : public testing::TestWithParam<bool> {
             base::StatisticsRecorder::CreateTemporaryForTesting()),
         prefs_(new TestingPrefServiceSimple) {
     EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
-    FileMetricsProvider::RegisterPrefs(prefs_->registry(), kMetricsName);
+    FileMetricsProvider::RegisterSourcePrefs(prefs_->registry(), kMetricsName);
     FileMetricsProvider::SetTaskRunnerForTesting(task_runner_);
   }
 
@@ -98,7 +107,7 @@ class FileMetricsProviderTest : public testing::TestWithParam<bool> {
 
   FileMetricsProvider* provider() {
     if (!provider_)
-      provider_.reset(new FileMetricsProvider(prefs()));
+      provider_ = std::make_unique<FileMetricsProvider>(prefs());
     return provider_.get();
   }
 
@@ -206,8 +215,7 @@ class FileMetricsProviderTest : public testing::TestWithParam<bool> {
       const base::FilePath& file_path,
       base::Time write_time,
       int histogram_count,
-      const std::function<void(base::PersistentHistogramAllocator*)>&
-          callback) {
+      base::OnceCallback<void(base::PersistentHistogramAllocator*)> callback) {
     base::GlobalHistogramAllocator::CreateWithLocalMemory(
         create_large_files_ ? kLargeFileSize : kSmallFileSize,
         0, kMetricsName);
@@ -216,7 +224,7 @@ class FileMetricsProviderTest : public testing::TestWithParam<bool> {
 
     std::unique_ptr<base::PersistentHistogramAllocator> histogram_allocator =
         base::GlobalHistogramAllocator::ReleaseForTesting();
-    callback(histogram_allocator.get());
+    std::move(callback).Run(histogram_allocator.get());
 
     WriteMetricsFileAtTime(file_path, histogram_allocator.get(), write_time);
     return histogram_allocator;
@@ -226,7 +234,7 @@ class FileMetricsProviderTest : public testing::TestWithParam<bool> {
   CreateMetricsFileWithHistograms(int histogram_count) {
     return CreateMetricsFileWithHistograms(
         metrics_file(), base::Time::Now(), histogram_count,
-        [](base::PersistentHistogramAllocator* allocator) {});
+        base::BindOnce([](base::PersistentHistogramAllocator* allocator) {}));
   }
 
   base::HistogramBase* GetCreatedHistogram(int index) {
@@ -239,8 +247,8 @@ class FileMetricsProviderTest : public testing::TestWithParam<bool> {
                         size_t count) {
     filter_actions_ = actions;
     filter_actions_remaining_ = count;
-    params->filter = base::Bind(&FileMetricsProviderTest::FilterSourcePath,
-                                base::Unretained(this));
+    params->filter = base::BindRepeating(
+        &FileMetricsProviderTest::FilterSourcePath, base::Unretained(this));
   }
 
   const bool create_large_files_;
@@ -262,10 +270,8 @@ class FileMetricsProviderTest : public testing::TestWithParam<bool> {
   std::unique_ptr<FileMetricsProvider> provider_;
   base::HistogramBase* created_histograms_[kMaxCreateHistograms];
 
-  const FileMetricsProvider::FilterAction* filter_actions_ = nullptr;
+  raw_ptr<const FileMetricsProvider::FilterAction> filter_actions_ = nullptr;
   size_t filter_actions_remaining_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(FileMetricsProviderTest);
 };
 
 // Run all test cases with both small and large files.
@@ -276,7 +282,7 @@ INSTANTIATE_TEST_SUITE_P(SmallAndLargeFiles,
 TEST_P(FileMetricsProviderTest, AccessMetrics) {
   ASSERT_FALSE(PathExists(metrics_file()));
 
-  base::Time metrics_time = base::Time::Now() - base::TimeDelta::FromMinutes(5);
+  base::Time metrics_time = base::Time::Now() - base::Minutes(5);
   std::unique_ptr<base::PersistentHistogramAllocator> histogram_allocator =
       CreateMetricsFileWithHistograms(2);
   ASSERT_TRUE(PathExists(metrics_file()));
@@ -310,7 +316,7 @@ TEST_P(FileMetricsProviderTest, AccessMetrics) {
   EXPECT_FALSE(base::PathExists(metrics_file()));
 
   // Recreate the file to indicate that it is "new" and must be recorded.
-  metrics_time = metrics_time + base::TimeDelta::FromMinutes(1);
+  metrics_time = metrics_time + base::Minutes(1);
   WriteMetricsFileAtTime(metrics_file(), histogram_allocator.get(),
                          metrics_time);
 
@@ -324,7 +330,7 @@ TEST_P(FileMetricsProviderTest, AccessMetrics) {
 TEST_P(FileMetricsProviderTest, AccessTimeLimitedFile) {
   ASSERT_FALSE(PathExists(metrics_file()));
 
-  base::Time metrics_time = base::Time::Now() - base::TimeDelta::FromHours(5);
+  base::Time metrics_time = base::Time::Now() - base::Hours(5);
   std::unique_ptr<base::PersistentHistogramAllocator> histogram_allocator =
       CreateMetricsFileWithHistograms(2);
   ASSERT_TRUE(PathExists(metrics_file()));
@@ -334,7 +340,7 @@ TEST_P(FileMetricsProviderTest, AccessTimeLimitedFile) {
   FileMetricsProvider::Params params(
       metrics_file(), FileMetricsProvider::SOURCE_HISTOGRAMS_ATOMIC_FILE,
       FileMetricsProvider::ASSOCIATE_CURRENT_RUN, kMetricsName);
-  params.max_age = base::TimeDelta::FromHours(1);
+  params.max_age = base::Hours(1);
   provider()->RegisterSource(params);
 
   // Attempt to access the file should return nothing.
@@ -348,7 +354,7 @@ TEST_P(FileMetricsProviderTest, FilterDelaysFile) {
   ASSERT_FALSE(PathExists(metrics_file()));
 
   base::Time now_time = base::Time::Now();
-  base::Time metrics_time = now_time - base::TimeDelta::FromMinutes(5);
+  base::Time metrics_time = now_time - base::Minutes(5);
   std::unique_ptr<base::PersistentHistogramAllocator> histogram_allocator =
       CreateMetricsFileWithHistograms(2);
   ASSERT_TRUE(PathExists(metrics_file()));
@@ -364,7 +370,7 @@ TEST_P(FileMetricsProviderTest, FilterDelaysFile) {
   const FileMetricsProvider::FilterAction actions[] = {
       FileMetricsProvider::FILTER_TRY_LATER,
       FileMetricsProvider::FILTER_PROCESS_FILE};
-  SetFilterActions(&params, actions, base::size(actions));
+  SetFilterActions(&params, actions, std::size(actions));
   provider()->RegisterSource(params);
 
   // Processing the file should touch it but yield no results. File timestamp
@@ -375,7 +381,7 @@ TEST_P(FileMetricsProviderTest, FilterDelaysFile) {
   EXPECT_TRUE(base::PathExists(metrics_file()));
   ASSERT_TRUE(base::GetFileInfo(metrics_file(), &fileinfo));
   EXPECT_LT(metrics_time, fileinfo.last_modified);
-  EXPECT_LE(now_time - base::TimeDelta::FromSeconds(2), fileinfo.last_modified);
+  EXPECT_LE(now_time - base::Seconds(2), fileinfo.last_modified);
 
   // Second full run on the same file should process the file.
   OnDidCreateMetricsLog();
@@ -388,7 +394,7 @@ TEST_P(FileMetricsProviderTest, FilterSkipsFile) {
   ASSERT_FALSE(PathExists(metrics_file()));
 
   base::Time now_time = base::Time::Now();
-  base::Time metrics_time = now_time - base::TimeDelta::FromMinutes(5);
+  base::Time metrics_time = now_time - base::Minutes(5);
   std::unique_ptr<base::PersistentHistogramAllocator> histogram_allocator =
       CreateMetricsFileWithHistograms(2);
   ASSERT_TRUE(PathExists(metrics_file()));
@@ -403,7 +409,7 @@ TEST_P(FileMetricsProviderTest, FilterSkipsFile) {
       FileMetricsProvider::ASSOCIATE_CURRENT_RUN, kMetricsName);
   const FileMetricsProvider::FilterAction actions[] = {
       FileMetricsProvider::FILTER_SKIP_FILE};
-  SetFilterActions(&params, actions, base::size(actions));
+  SetFilterActions(&params, actions, std::size(actions));
   provider()->RegisterSource(params);
 
   // Processing the file should delete it.
@@ -423,7 +429,7 @@ TEST_P(FileMetricsProviderTest, AccessDirectory) {
   base::HistogramBase* histogram;
 
   // Create files starting with a timestamp a few minutes back.
-  base::Time base_time = base::Time::Now() - base::TimeDelta::FromMinutes(10);
+  base::Time base_time = base::Time::Now() - base::Minutes(10);
 
   // Create some files in an odd order. The files are "touched" back in time to
   // ensure that each file has a later timestamp on disk than the previous one.
@@ -437,33 +443,28 @@ TEST_P(FileMetricsProviderTest, AccessDirectory) {
   histogram = base::Histogram::FactoryGet("h1", 1, 100, 10, 0);
   histogram->Add(1);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("a1.pma"),
-                         allocator,
-                         base_time + base::TimeDelta::FromMinutes(1));
+                         allocator, base_time + base::Minutes(1));
 
   histogram = base::Histogram::FactoryGet("h2", 1, 100, 10, 0);
   histogram->Add(2);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("c2.pma"),
-                         allocator,
-                         base_time + base::TimeDelta::FromMinutes(2));
+                         allocator, base_time + base::Minutes(2));
 
   histogram = base::Histogram::FactoryGet("h3", 1, 100, 10, 0);
   histogram->Add(3);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("b3.pma"),
-                         allocator,
-                         base_time + base::TimeDelta::FromMinutes(3));
+                         allocator, base_time + base::Minutes(3));
 
   histogram = base::Histogram::FactoryGet("h4", 1, 100, 10, 0);
   histogram->Add(3);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("d4.pma"),
-                         allocator,
-                         base_time + base::TimeDelta::FromMinutes(4));
+                         allocator, base_time + base::Minutes(4));
 
   base::TouchFile(metrics_files.GetPath().AppendASCII("b3.pma"),
-                  base_time + base::TimeDelta::FromMinutes(5),
-                  base_time + base::TimeDelta::FromMinutes(5));
+                  base_time + base::Minutes(5), base_time + base::Minutes(5));
 
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("baz"), allocator,
-                         base_time + base::TimeDelta::FromMinutes(6));
+                         base_time + base::Minutes(6));
 
   // The global allocator has to be detached here so that no metrics created
   // by code called below get stored in it as that would make for potential
@@ -479,7 +480,7 @@ TEST_P(FileMetricsProviderTest, AccessDirectory) {
   // Files could come out in the order: a1, c2, d4, b3. They are recognizeable
   // by the number of histograms contained within each.
   const uint32_t expect_order[] = {1, 2, 4, 3, 0};
-  for (size_t i = 0; i < base::size(expect_order); ++i) {
+  for (size_t i = 0; i < std::size(expect_order); ++i) {
     // Record embedded snapshots via snapshot-manager.
     OnDidCreateMetricsLog();
     RunTasks();
@@ -501,23 +502,23 @@ TEST_P(FileMetricsProviderTest, AccessDirectoryWithInvalidFiles) {
   ASSERT_FALSE(PathExists(metrics_file()));
 
   // Create files starting with a timestamp a few minutes back.
-  base::Time base_time = base::Time::Now() - base::TimeDelta::FromMinutes(10);
+  base::Time base_time = base::Time::Now() - base::Minutes(10);
 
   base::ScopedTempDir metrics_files;
   EXPECT_TRUE(metrics_files.CreateUniqueTempDir());
 
   CreateMetricsFileWithHistograms(
       metrics_files.GetPath().AppendASCII("h1.pma"),
-      base_time + base::TimeDelta::FromMinutes(1), 1,
-      [](base::PersistentHistogramAllocator* allocator) {
+      base_time + base::Minutes(1), 1,
+      base::BindOnce([](base::PersistentHistogramAllocator* allocator) {
         allocator->memory_allocator()->SetMemoryState(
             base::PersistentMemoryAllocator::MEMORY_DELETED);
-      });
+      }));
 
   CreateMetricsFileWithHistograms(
       metrics_files.GetPath().AppendASCII("h2.pma"),
-      base_time + base::TimeDelta::FromMinutes(2), 2,
-      [](base::PersistentHistogramAllocator* allocator) {
+      base_time + base::Minutes(2), 2,
+      base::BindOnce([](base::PersistentHistogramAllocator* allocator) {
         SystemProfileProto profile_proto;
         SystemProfileProto::FieldTrial* trial = profile_proto.add_field_trial();
         trial->set_name_id(123);
@@ -527,23 +528,22 @@ TEST_P(FileMetricsProviderTest, AccessDirectoryWithInvalidFiles) {
         persistent_profile.RegisterPersistentAllocator(
             allocator->memory_allocator());
         persistent_profile.SetSystemProfile(profile_proto, true);
-      });
+      }));
 
   CreateMetricsFileWithHistograms(
       metrics_files.GetPath().AppendASCII("h3.pma"),
-      base_time + base::TimeDelta::FromMinutes(3), 3,
-      [](base::PersistentHistogramAllocator* allocator) {
+      base_time + base::Minutes(3), 3,
+      base::BindOnce([](base::PersistentHistogramAllocator* allocator) {
         allocator->memory_allocator()->SetMemoryState(
             base::PersistentMemoryAllocator::MEMORY_DELETED);
-      });
+      }));
 
   {
     base::File empty(metrics_files.GetPath().AppendASCII("h4.pma"),
                      base::File::FLAG_CREATE | base::File::FLAG_WRITE);
   }
   base::TouchFile(metrics_files.GetPath().AppendASCII("h4.pma"),
-                  base_time + base::TimeDelta::FromMinutes(4),
-                  base_time + base::TimeDelta::FromMinutes(4));
+                  base_time + base::Minutes(4), base_time + base::Minutes(4));
 
   // Register the file and allow the "checker" task to run.
   provider()->RegisterSource(FileMetricsProvider::Params(
@@ -594,8 +594,7 @@ TEST_P(FileMetricsProviderTest, AccessTimeLimitedDirectory) {
   histogram = base::Histogram::FactoryGet("h1", 1, 100, 10, 0);
   histogram->Add(1);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("a1.pma"),
-                         allocator,
-                         base::Time::Now() - base::TimeDelta::FromHours(1));
+                         allocator, base::Time::Now() - base::Hours(1));
 
   histogram = base::Histogram::FactoryGet("h2", 1, 100, 10, 0);
   histogram->Add(2);
@@ -612,7 +611,7 @@ TEST_P(FileMetricsProviderTest, AccessTimeLimitedDirectory) {
       metrics_files.GetPath(),
       FileMetricsProvider::SOURCE_HISTOGRAMS_ATOMIC_DIR,
       FileMetricsProvider::ASSOCIATE_CURRENT_RUN, kMetricsName);
-  params.max_age = base::TimeDelta::FromMinutes(30);
+  params.max_age = base::Minutes(30);
   provider()->RegisterSource(params);
 
   // Only b2, with 2 histograms, should be read.
@@ -642,8 +641,7 @@ TEST_P(FileMetricsProviderTest, AccessCountLimitedDirectory) {
   histogram = base::Histogram::FactoryGet("h1", 1, 100, 10, 0);
   histogram->Add(1);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("a1.pma"),
-                         allocator,
-                         base::Time::Now() - base::TimeDelta::FromHours(1));
+                         allocator, base::Time::Now() - base::Hours(1));
 
   histogram = base::Histogram::FactoryGet("h2", 1, 100, 10, 0);
   histogram->Add(2);
@@ -695,8 +693,7 @@ TEST_P(FileMetricsProviderTest, AccessSizeLimitedDirectory) {
   histogram = base::Histogram::FactoryGet("h1", 1, 100, 10, 0);
   histogram->Add(1);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("a1.pma"),
-                         allocator,
-                         base::Time::Now() - base::TimeDelta::FromHours(1));
+                         allocator, base::Time::Now() - base::Hours(1));
 
   histogram = base::Histogram::FactoryGet("h2", 1, 100, 10, 0);
   histogram->Add(2);
@@ -738,7 +735,7 @@ TEST_P(FileMetricsProviderTest, AccessFilteredDirectory) {
   base::HistogramBase* histogram;
 
   // Create files starting with a timestamp a few minutes back.
-  base::Time base_time = base::Time::Now() - base::TimeDelta::FromMinutes(10);
+  base::Time base_time = base::Time::Now() - base::Minutes(10);
 
   // Create some files in an odd order. The files are "touched" back in time to
   // ensure that each file has a later timestamp on disk than the previous one.
@@ -748,30 +745,25 @@ TEST_P(FileMetricsProviderTest, AccessFilteredDirectory) {
   histogram = base::Histogram::FactoryGet("h1", 1, 100, 10, 0);
   histogram->Add(1);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("a1.pma"),
-                         allocator,
-                         base_time + base::TimeDelta::FromMinutes(1));
+                         allocator, base_time + base::Minutes(1));
 
   histogram = base::Histogram::FactoryGet("h2", 1, 100, 10, 0);
   histogram->Add(2);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("c2.pma"),
-                         allocator,
-                         base_time + base::TimeDelta::FromMinutes(2));
+                         allocator, base_time + base::Minutes(2));
 
   histogram = base::Histogram::FactoryGet("h3", 1, 100, 10, 0);
   histogram->Add(3);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("b3.pma"),
-                         allocator,
-                         base_time + base::TimeDelta::FromMinutes(3));
+                         allocator, base_time + base::Minutes(3));
 
   histogram = base::Histogram::FactoryGet("h4", 1, 100, 10, 0);
   histogram->Add(3);
   WriteMetricsFileAtTime(metrics_files.GetPath().AppendASCII("d4.pma"),
-                         allocator,
-                         base_time + base::TimeDelta::FromMinutes(4));
+                         allocator, base_time + base::Minutes(4));
 
   base::TouchFile(metrics_files.GetPath().AppendASCII("b3.pma"),
-                  base_time + base::TimeDelta::FromMinutes(5),
-                  base_time + base::TimeDelta::FromMinutes(5));
+                  base_time + base::Minutes(5), base_time + base::Minutes(5));
 
   // The global allocator has to be detached here so that no metrics created
   // by code called below get stored in it as that would make for potential
@@ -789,13 +781,13 @@ TEST_P(FileMetricsProviderTest, AccessFilteredDirectory) {
       FileMetricsProvider::FILTER_SKIP_FILE,      // d4
       FileMetricsProvider::FILTER_PROCESS_FILE,   // b3
       FileMetricsProvider::FILTER_PROCESS_FILE};  // c2 (again)
-  SetFilterActions(&params, actions, base::size(actions));
+  SetFilterActions(&params, actions, std::size(actions));
   provider()->RegisterSource(params);
 
   // Files could come out in the order: a1, b3, c2. They are recognizeable
   // by the number of histograms contained within each.
   const uint32_t expect_order[] = {1, 3, 2, 0};
-  for (size_t i = 0; i < base::size(expect_order); ++i) {
+  for (size_t i = 0; i < std::size(expect_order); ++i) {
     // Record embedded snapshots via snapshot-manager.
     OnDidCreateMetricsLog();
     RunTasks();
@@ -919,7 +911,7 @@ TEST_P(FileMetricsProviderTest, AccessEmbeddedProfileMetricsWithProfile) {
   ASSERT_FALSE(PathExists(metrics_file()));
   CreateMetricsFileWithHistograms(
       metrics_file(), base::Time::Now(), 2,
-      [](base::PersistentHistogramAllocator* allocator) {
+      base::BindOnce([](base::PersistentHistogramAllocator* allocator) {
         SystemProfileProto profile_proto;
         SystemProfileProto::FieldTrial* trial = profile_proto.add_field_trial();
         trial->set_name_id(123);
@@ -929,7 +921,7 @@ TEST_P(FileMetricsProviderTest, AccessEmbeddedProfileMetricsWithProfile) {
         persistent_profile.RegisterPersistentAllocator(
             allocator->memory_allocator());
         persistent_profile.SetSystemProfile(profile_proto, true);
-      });
+      }));
 
   // Register the file and allow the "checker" task to run.
   ASSERT_TRUE(PathExists(metrics_file()));
@@ -992,7 +984,7 @@ TEST_P(FileMetricsProviderTest, AccessEmbeddedFallbackMetricsWithProfile) {
   ASSERT_FALSE(PathExists(metrics_file()));
   CreateMetricsFileWithHistograms(
       metrics_file(), base::Time::Now(), 2,
-      [](base::PersistentHistogramAllocator* allocator) {
+      base::BindOnce([](base::PersistentHistogramAllocator* allocator) {
         SystemProfileProto profile_proto;
         SystemProfileProto::FieldTrial* trial = profile_proto.add_field_trial();
         trial->set_name_id(123);
@@ -1002,7 +994,7 @@ TEST_P(FileMetricsProviderTest, AccessEmbeddedFallbackMetricsWithProfile) {
         persistent_profile.RegisterPersistentAllocator(
             allocator->memory_allocator());
         persistent_profile.SetSystemProfile(profile_proto, true);
-      });
+      }));
 
   // Register the file and allow the "checker" task to run.
   ASSERT_TRUE(PathExists(metrics_file()));
@@ -1038,7 +1030,7 @@ TEST_P(FileMetricsProviderTest, AccessEmbeddedProfileMetricsFromDir) {
   for (int i = 0; i < file_count; ++i) {
     CreateMetricsFileWithHistograms(
         metrics_file(), base::Time::Now(), 2,
-        [](base::PersistentHistogramAllocator* allocator) {
+        base::BindOnce([](base::PersistentHistogramAllocator* allocator) {
           SystemProfileProto profile_proto;
           SystemProfileProto::FieldTrial* trial =
               profile_proto.add_field_trial();
@@ -1049,14 +1041,13 @@ TEST_P(FileMetricsProviderTest, AccessEmbeddedProfileMetricsFromDir) {
           persistent_profile.RegisterPersistentAllocator(
               allocator->memory_allocator());
           persistent_profile.SetSystemProfile(profile_proto, true);
-        });
+        }));
     ASSERT_TRUE(PathExists(metrics_file()));
     char new_name[] = "hX";
     new_name[1] = '1' + i;
     base::FilePath file_name = temp_dir().AppendASCII(new_name).AddExtension(
         base::PersistentMemoryAllocator::kFileExtension);
-    base::Time file_time =
-        file_base_time - base::TimeDelta::FromMinutes(file_count - i);
+    base::Time file_time = file_base_time - base::Minutes(file_count - i);
     base::TouchFile(metrics_file(), file_time, file_time);
     base::Move(metrics_file(), file_name);
     file_names.push_back(std::move(file_name));

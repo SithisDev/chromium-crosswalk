@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 
 #include <iterator>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_piece.h"
 
 namespace url_pattern_index {
@@ -22,9 +23,14 @@ namespace url_pattern_index {
 template <typename IsSeparator>
 class StringSplitter {
  public:
-  class Iterator
-      : public std::iterator<std::input_iterator_tag, base::StringPiece> {
+  class Iterator {
    public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = base::StringPiece;
+    using difference_type = std::ptrdiff_t;
+    using pointer = base::StringPiece*;
+    using reference = base::StringPiece&;
+
     // Creates an iterator, which points to the leftmost token within the
     // |splitter|'s |text|, starting from |head|.
     Iterator(const StringSplitter& splitter,
@@ -58,16 +64,16 @@ class StringSplitter {
 
    private:
     void Advance() {
-      auto begin = current_.end();
+      base::StringPiece::const_iterator begin = current_.end();
       while (begin != end_ && splitter_->is_separator_(*begin))
         ++begin;
-      auto end = begin;
+      base::StringPiece::const_iterator end = begin;
       while (end != end_ && !splitter_->is_separator_(*end))
         ++end;
       current_ = base::StringPiece(begin, end - begin);
     }
 
-    const StringSplitter* splitter_;
+    raw_ptr<const StringSplitter<IsSeparator>> splitter_;
 
     // Contains the token currently pointed to by the iterator.
     base::StringPiece current_;

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,12 @@
 #define COMPONENTS_AUTOFILL_CONTENT_RENDERER_AUTOFILL_AGENT_H_
 
 #include <set>
+#include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
-#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "components/autofill/content/common/mojom/autofill_agent.mojom.h"
 #include "components/autofill/content/common/mojom/autofill_driver.mojom.h"
@@ -22,6 +21,7 @@
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/blink/public/web/web_autofill_client.h"
 #include "third_party/blink/public/web/web_form_control_element.h"
@@ -33,74 +33,97 @@ namespace blink {
 class WebNode;
 class WebView;
 class WebFormControlElement;
+class WebFormElement;
 template <typename T>
 class WebVector;
-}
+}  // namespace blink
 
 namespace autofill {
 
 struct FormData;
-struct FormFieldData;
-struct PasswordFormFillData;
+class AutofillAssistantAgent;
 class PasswordAutofillAgent;
 class PasswordGenerationAgent;
+class FieldDataManager;
 
 // AutofillAgent deals with Autofill related communications between WebKit and
-// the browser.  There is one AutofillAgent per RenderFrame.
+// the browser.
+//
+// Each AutofillAgent is associated with exactly one RenderFrame and
+// communicates with exactly one ContentAutofillDriver throughout its entire
+// lifetime.
+//
+// This RenderFrame owns all forms and fields in the renderer-browser
+// communication:
+// - AutofillAgent may assume that forms and fields received in the
+//   mojom::AutofillAgent events are owned by that RenderFrame.
+// - Conversely, the forms and fields which AutofillAgent passes to
+//   mojom::AutofillDriver events must be owned by that RenderFrame.
+//
 // Note that Autofill encompasses:
 // - single text field suggestions, that we usually refer to as Autocomplete,
 // - password form fill, refered to as Password Autofill, and
 // - entire form fill based on one field entry, referred to as Form Autofill.
-
 class AutofillAgent : public content::RenderFrameObserver,
                       public FormTracker::Observer,
                       public blink::WebAutofillClient,
                       public mojom::AutofillAgent {
  public:
   // PasswordAutofillAgent is guaranteed to outlive AutofillAgent.
-  // PasswordGenerationAgent may be NULL. If it is not, then it is also
-  // guaranteed to outlive AutofillAgent.
+  // PasswordGenerationAgent and AutofillAssistantAgent may be nullptr. If they
+  // are not, then they are also guaranteed to outlive AutofillAgent.
   AutofillAgent(content::RenderFrame* render_frame,
-                PasswordAutofillAgent* password_autofill_manager,
+                PasswordAutofillAgent* password_autofill_agent,
                 PasswordGenerationAgent* password_generation_agent,
+                AutofillAssistantAgent* autofill_assistant_agent,
                 blink::AssociatedInterfaceRegistry* registry);
+
+  AutofillAgent(const AutofillAgent&) = delete;
+  AutofillAgent& operator=(const AutofillAgent&) = delete;
+
   ~AutofillAgent() override;
 
   void BindPendingReceiver(
       mojo::PendingAssociatedReceiver<mojom::AutofillAgent> pending_receiver);
 
-  const mojo::AssociatedRemote<mojom::AutofillDriver>& GetAutofillDriver();
-
-  const mojo::AssociatedRemote<mojom::PasswordManagerDriver>&
-  GetPasswordManagerDriver();
+  // Callers should not store the returned value longer than a function scope.
+  mojom::AutofillDriver& GetAutofillDriver();
+  mojom::PasswordManagerDriver& GetPasswordManagerDriver();
 
   // mojom::AutofillAgent:
-  void FillForm(int32_t id, const FormData& form) override;
-  void PreviewForm(int32_t id, const FormData& form) override;
+  void TriggerReparse() override;
+  void FillOrPreviewForm(int32_t query_id,
+                         const FormData& form,
+                         mojom::RendererFormDataAction action) override;
   void FieldTypePredictionsAvailable(
       const std::vector<FormDataPredictions>& forms) override;
   void ClearSection() override;
   void ClearPreviewedForm() override;
-  void FillFieldWithValue(const base::string16& value) override;
-  void PreviewFieldWithValue(const base::string16& value) override;
-  void SetSuggestionAvailability(bool available) override;
-  void AcceptDataListSuggestion(const base::string16& value) override;
-  void FillPasswordSuggestion(const base::string16& username,
-                              const base::string16& password) override;
-  void PreviewPasswordSuggestion(const base::string16& username,
-                                 const base::string16& password) override;
-  void ShowInitialPasswordAccountSuggestions(
-      const PasswordFormFillData& form_data) override;
+  void FillFieldWithValue(FieldRendererId field_id,
+                          const std::u16string& value) override;
+  void PreviewFieldWithValue(FieldRendererId field_id,
+                             const std::u16string& value) override;
+  void SetSuggestionAvailability(FieldRendererId field_id,
+                                 const mojom::AutofillState state) override;
+  void AcceptDataListSuggestion(FieldRendererId field_id,
+                                const std::u16string& suggested_value) override;
+  void FillPasswordSuggestion(const std::u16string& username,
+                              const std::u16string& password) override;
+  void PreviewPasswordSuggestion(const std::u16string& username,
+                                 const std::u16string& password) override;
   void SetUserGestureRequired(bool required) override;
   void SetSecureContextRequired(bool required) override;
   void SetFocusRequiresScroll(bool require) override;
   void SetQueryPasswordSuggestion(bool required) override;
-  void GetElementFormAndFieldData(
-      const std::vector<std::string>& selectors,
-      GetElementFormAndFieldDataCallback callback) override;
+  void GetElementFormAndFieldDataForDevToolsNodeId(
+      int backend_node_id,
+      GetElementFormAndFieldDataForDevToolsNodeIdCallback callback) override;
+  void SetAssistantKeyboardSuppressState(bool suppress) override;
+  void EnableHeavyFormDataScraping() override;
+  void SetFieldsEligibleForManualFilling(
+      const std::vector<FieldRendererId>& fields) override;
 
-  void FormControlElementClicked(const blink::WebFormControlElement& element,
-                                 bool was_focused);
+  void FormControlElementClicked(const blink::WebFormControlElement& element);
 
   base::WeakPtr<AutofillAgent> GetWeakPtr() {
     return weak_ptr_factory_.GetWeakPtr();
@@ -117,59 +140,54 @@ class AutofillAgent : public content::RenderFrameObserver,
   void AddFormObserver(Observer* observer);
   void RemoveFormObserver(Observer* observer);
 
+  // Instructs `form_tracker_` to track the autofilled `element`.
+  void TrackAutofilledElement(const blink::WebFormControlElement& element);
+
   FormTracker* form_tracker_for_testing() { return &form_tracker_; }
 
-  void SelectWasUpdated(const blink::WebFormControlElement& element);
+  bool is_heavy_form_data_scraping_enabled() {
+    return is_heavy_form_data_scraping_enabled_;
+  }
+
+  bool IsPrerendering() const;
 
  protected:
   // blink::WebAutofillClient:
   void DidAssociateFormControlsDynamically() override;
 
  private:
+  class DeferringAutofillDriver;
   friend class FormControlClickDetectionTest;
-
-  // Functor used as a simplified comparison function for FormData. Only
-  // compares forms at a high level (notably name, origin, action).
-  struct FormDataCompare {
-    bool operator()(const FormData& lhs, const FormData& rhs) const;
-  };
+  friend class AutofillAgentTestApi;
 
   // Flags passed to ShowSuggestions.
   struct ShowSuggestionsOptions {
-    // All fields are default initialized to false.
-    ShowSuggestionsOptions();
-
     // Specifies that suggestions should be shown when |element| contains no
     // text.
-    bool autofill_on_empty_values;
+    bool autofill_on_empty_values{false};
 
     // Specifies that suggestions should be shown when the caret is not
     // after the last character in the element.
-    bool requires_caret_at_end;
-
-    // Specifies that all of <datalist> suggestions and no autofill suggestions
-    // are shown. |autofill_on_empty_values| and |requires_caret_at_end| are
-    // ignored if |datalist_only| is true.
-    bool datalist_only;
+    bool requires_caret_at_end{false};
 
     // Specifies that all autofill suggestions should be shown and none should
     // be elided because of the current value of |element| (relevant for inline
     // autocomplete).
-    bool show_full_suggestion_list;
-
-    // Specifies that only show a suggestions box if |element| is part of a
-    // password form, otherwise show no suggestions.
-    bool show_password_suggestions_only;
+    bool show_full_suggestion_list{false};
 
     // Specifies that the first suggestion must be auto-selected when the
     // dropdown is shown. Enabled when the user presses ARROW_DOWN on a field.
-    bool autoselect_first_suggestion;
+    bool autoselect_first_suggestion{false};
+
+    // Signals that suggestions are triggered due to a click on an input
+    // element. The signal is used to understand whether other surfaces (e.g.
+    // TouchToFill, FastCheckout) can be triggered.
+    FormElementWasClicked form_element_was_clicked{false};
   };
 
   // content::RenderFrameObserver:
-  void DidCommitProvisionalLoad(bool is_same_document_navigation,
-                                ui::PageTransition transition) override;
-  void DidFinishDocumentLoad() override;
+  void DidCommitProvisionalLoad(ui::PageTransition transition) override;
+  void DidDispatchDOMContentLoadedEvent() override;
   void DidChangeScrollOffset() override;
   void FocusedElementChanged(const blink::WebElement& element) override;
   void AccessibilityModeChanged(const ui::AXMode& mode) override;
@@ -197,6 +215,9 @@ class AutofillAgent : public content::RenderFrameObserver,
   void DataListOptionsChanged(const blink::WebInputElement& element) override;
   void UserGestureObserved() override;
   void AjaxSucceeded() override;
+  void JavaScriptChangedAutofilledValue(
+      const blink::WebFormControlElement& element,
+      const blink::WebString& old_value) override;
   void DidCompleteFocusChangeInFrame() override;
   void DidReceiveLeftMouseDownOrGestureTapInNode(
       const blink::WebNode& node) override;
@@ -204,15 +225,17 @@ class AutofillAgent : public content::RenderFrameObserver,
       const blink::WebFormControlElement& element) override;
   void SelectControlDidChange(
       const blink::WebFormControlElement& element) override;
-  bool TryToShowTouchToFill(
+  bool ShouldSuppressKeyboard(
       const blink::WebFormControlElement& element) override;
+  void FormElementReset(const blink::WebFormElement& form) override;
+  void PasswordFieldReset(const blink::WebInputElement& element) override;
 
   void HandleFocusChangeComplete();
 
   // Helper method which collects unowned elements (i.e., those not inside a
   // form tag) and writes them into |output|. Returns true if the process is
   // successful, and all conditions for firing events are true.
-  bool CollectFormlessElements(FormData* output);
+  bool CollectFormlessElements(FormData* output) const;
   FRIEND_TEST_ALL_PREFIXES(FormAutocompleteTest, CollectFormlessElements);
 
   void OnTextFieldDidChange(const blink::WebInputElement& element);
@@ -227,54 +250,40 @@ class AutofillAgent : public content::RenderFrameObserver,
   // Queries the browser for Autocomplete and Autofill suggestions for the given
   // |element|.
   void QueryAutofillSuggestions(const blink::WebFormControlElement& element,
-                                bool autoselect_first_suggestion);
+                                bool autoselect_first_suggestion,
+                                FormElementWasClicked form_element_was_clicked);
 
-  // Sets the element value to reflect the selected |suggested_value|.
-  void DoAcceptDataListSuggestion(const base::string16& suggested_value);
+  // Sets the selected value of the the field identified by |field_id| to
+  // |suggested_value|.
+  void DoAcceptDataListSuggestion(FieldRendererId field_id,
+                                  const std::u16string& suggested_value);
 
-  // Fills |form| and |field| with the FormData and FormField corresponding to
-  // |node|. Returns true if the data was found; and false otherwise.
-  bool FindFormAndFieldForNode(const blink::WebNode& node,
-                               FormData* form,
-                               FormFieldData* field) WARN_UNUSED_RESULT;
-
-  // Set |node| to display the given |value|.
-  void DoFillFieldWithValue(const base::string16& value,
-                            blink::WebInputElement* node);
+  // Set `element` to display the given `value`.
+  void DoFillFieldWithValue(const std::u16string& value,
+                            blink::WebFormControlElement& element,
+                            blink::WebAutofillState autofill_state);
 
   // Set |node| to display the given |value| as a preview.  The preview is
   // visible on screen to the user, but not visible to the page via the DOM or
   // JavaScript.
-  void DoPreviewFieldWithValue(const base::string16& value,
-                               blink::WebInputElement* node);
+  void DoPreviewFieldWithValue(const std::u16string& value,
+                               blink::WebInputElement& node);
 
   // Notifies browser of new fillable forms in |render_frame|.
   void ProcessForms();
 
-  // Sends a message to the browser that the form is about to be submitted,
-  // only if the particular message has not been previously submitted for the
-  // form in the current frame.
-  // Additionally, depending on |send_submitted_event| a message is sent to the
-  // browser that the form was submitted.
-  void SendFormEvents(const blink::WebFormElement& form,
-                      bool send_submitted_event);
-
   // Hides any currently showing Autofill popup.
   void HidePopup();
 
-  // TODO(crbug.com/785524): Investigate why this method need to be mocked in
-  // chrome_render_view_test.cc, this isn't called now, but this is no test
-  // failed.
-  // Returns true if the text field change is due to a user gesture. Can be
-  // overriden in tests.
-  virtual bool IsUserGesture() const;
-
   // Attempt to get submitted FormData from last_interacted_form_ or
   // provisionally_saved_form_, return true if |form| is set.
-  bool GetSubmittedForm(FormData* form);
+  absl::optional<FormData> GetSubmittedForm() const;
+
+  // Pushes the value of GetSubmittedForm() to the AutofillDriver.
+  void SendPotentiallySubmittedFormToBrowser();
 
   void ResetLastInteractedElements();
-  void UpdateLastInteractedForm(blink::WebFormElement form);
+  void UpdateLastInteractedForm(const blink::WebFormElement& form);
 
   // Called when current form is no longer submittable, submitted_forms_ is
   // cleared in this method.
@@ -303,11 +312,11 @@ class AutofillAgent : public content::RenderFrameObserver,
   // label, visibility, control type) have changed after an autofill.
   void TriggerRefillIfNeeded(const FormData& form);
 
-  // Find the unique element given by |selectors| in the associated web frame.
-  // Empty blink::WebElement is returned if there is no matching element or
-  // there are multiple matching elements.
-  blink::WebElement FindUniqueWebElement(
-      const std::vector<std::string>& selectors);
+  // Helpers for SelectFieldOptionsChanged() and DataListOptionsChanged(), which
+  // get called after a timer that is restarted when another event of the same
+  // type started.
+  void BatchSelectOptionChange(const blink::WebFormControlElement& element);
+  void BatchDataListOptionChange(const blink::WebFormControlElement& element);
 
   // Formerly cached forms for all frames, now only caches forms for the current
   // frame.
@@ -315,6 +324,7 @@ class AutofillAgent : public content::RenderFrameObserver,
 
   PasswordAutofillAgent* password_autofill_agent_;      // Weak reference.
   PasswordGenerationAgent* password_generation_agent_;  // Weak reference.
+  AutofillAssistantAgent* autofill_assistant_agent_;    // Weak reference.
 
   // The ID of the last request sent for form field Autofill.  Used to ignore
   // out of date responses.
@@ -323,35 +333,32 @@ class AutofillAgent : public content::RenderFrameObserver,
   // The element corresponding to the last request sent for form field Autofill.
   blink::WebFormControlElement element_;
 
-  // The form element currently requesting an interactive autocomplete.
-  blink::WebFormElement in_flight_request_form_;
+  // The elements that currently are being previewed.
+  std::vector<blink::WebFormControlElement> previewed_elements_;
 
   // Last form which was interacted with by the user.
   blink::WebFormElement last_interacted_form_;
 
-  // When dealing with forms that don't use a <form> tag, we keep track of the
-  // elements the user has modified so we can determine when submission occurs.
-  std::set<blink::WebFormControlElement> formless_elements_user_edited_;
+  // When dealing with an unowned form, we keep track of the unowned fields
+  // the user has modified so we can determine when submission occurs.
+  // An additional sufficient condition for the form submission detection is
+  // that the form has been autofilled.
+  std::set<FieldRendererId> formless_elements_user_edited_;
+  bool formless_elements_were_autofilled_ = false;
 
   // The form user interacted, it is used if last_interacted_form_ or formless
   // form can't be converted to FormData at the time of form submission.
-  std::unique_ptr<FormData> provisionally_saved_form_;
+  absl::optional<FormData> provisionally_saved_form_;
 
   // Keeps track of the forms for which form submitted event has been sent to
   // AutofillDriver. We use it to avoid fire duplicated submission event when
   // WILL_SEND_SUBMIT_EVENT and form submitted are both fired for same form.
   // The submitted_forms_ is cleared when we know no more submission could
   // happen for that form.
-  // We use a simplified comparison function.
-  std::set<FormData, FormDataCompare> submitted_forms_;
+  std::set<FormRendererId> submitted_forms_;
 
   // The query node autofill state prior to previewing the form.
   blink::WebAutofillState query_node_autofill_state_;
-
-  // Whether or not to ignore text changes.  Useful for when we're committing
-  // a composition when we are defocusing the WebView and we don't want to
-  // trigger an autofill popup to show.
-  bool ignore_text_changes_;
 
   // Whether the Autofill popup is possibly visible.  This is tracked as a
   // performance improvement, so that the IPC channel isn't flooded with
@@ -378,9 +385,7 @@ class AutofillAgent : public content::RenderFrameObserver,
   bool query_password_suggestion_ = false;
 
   bool focused_node_was_last_clicked_ = false;
-  bool was_focused_before_now_ = false;
-  blink::WebFormControlElement last_clicked_form_control_element_for_testing_;
-  bool last_clicked_form_control_element_was_focused_for_testing_ = false;
+  FieldRendererId last_clicked_form_control_element_for_testing_;
 
   FormTracker form_tracker_;
 
@@ -391,17 +396,27 @@ class AutofillAgent : public content::RenderFrameObserver,
 
   mojo::AssociatedRemote<mojom::AutofillDriver> autofill_driver_;
 
+  // For deferring messages to the browser process while prerendering.
+  std::unique_ptr<DeferringAutofillDriver> deferring_autofill_driver_;
+
   bool was_last_action_fill_ = false;
 
-  base::OneShotTimer on_select_update_timer_;
+  // Timers for throttling handling of frequent events.
+  base::OneShotTimer select_option_change_batch_timer_;
+  base::OneShotTimer datalist_option_change_batch_timer_;
+  base::OneShotTimer reparse_timer_;
 
   // Will be set when accessibility mode changes, depending on what the new mode
   // is.
   bool is_screen_reader_enabled_ = false;
 
-  base::WeakPtrFactory<AutofillAgent> weak_ptr_factory_{this};
+  // Whether agents should enable heavy scraping of form data (e.g., button
+  // titles for unowned forms).
+  bool is_heavy_form_data_scraping_enabled_ = false;
 
-  DISALLOW_COPY_AND_ASSIGN(AutofillAgent);
+  const scoped_refptr<FieldDataManager> field_data_manager_;
+
+  base::WeakPtrFactory<AutofillAgent> weak_ptr_factory_{this};
 };
 
 }  // namespace autofill

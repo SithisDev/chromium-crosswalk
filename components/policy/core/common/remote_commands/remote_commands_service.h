@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,25 +6,29 @@
 #define COMPONENTS_POLICY_CORE_COMMON_REMOTE_COMMANDS_REMOTE_COMMANDS_SERVICE_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/containers/circular_deque.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/core/common/cloud/policy_invalidation_scope.h"
 #include "components/policy/core/common/remote_commands/remote_command_job.h"
 #include "components/policy/core/common/remote_commands/remote_commands_queue.h"
 #include "components/policy/policy_export.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 
 namespace base {
+class Clock;
 class TickClock;
 }  // namespace base
 
 namespace policy {
 
 class CloudPolicyClient;
+class CloudPolicyStore;
 class RemoteCommandsFactory;
 
 // Service class which will connect to a CloudPolicyClient in order to fetch
@@ -33,8 +37,55 @@ class RemoteCommandsFactory;
 class POLICY_EXPORT RemoteCommandsService
     : public RemoteCommandsQueue::Observer {
  public:
+  // Represents received remote command status to be recorded.
+  // This enum is used to define the buckets for an enumerated UMA histogram.
+  // Hence,
+  //   (a) existing enumerated constants should never be deleted or reordered
+  //   (b) new constants should only be appended at the end of the enumeration
+  //       (update RemoteCommandReceivedStatus in
+  //       tools/metrics/histograms/enums.xml as well).
+  enum class MetricReceivedRemoteCommand {
+    // Invalid remote commands.
+    kInvalidSignature = 0,
+    kInvalid = 1,
+    kUnknownType = 2,
+    kDuplicated = 3,
+    kInvalidScope = 4,
+    // Remote commands type.
+    kCommandEchoTest = 5,
+    kDeviceReboot = 6,
+    kDeviceScreenshot = 7,
+    kDeviceSetVolume = 8,
+    kDeviceFetchStatus = 9,
+    kUserArcCommand = 10,
+    kDeviceWipeUsers = 11,
+    kDeviceStartCrdSession = 12,
+    kDeviceRemotePowerwash = 13,
+    kDeviceRefreshEnterpriseMachineCertificate = 14,
+    kDeviceGetAvailableDiagnosticRoutines = 15,
+    kDeviceRunDiagnosticRoutine = 16,
+    kDeviceGetDiagnosticRoutineUpdate = 17,
+    kBrowserClearBrowsingData = 18,
+    kDeviceResetEuicc = 19,
+    kBrowserRotateAttestationCredential = 20,
+    // Used by UMA histograms. Shall refer to the last enumeration.
+    kMaxValue = kBrowserRotateAttestationCredential
+  };
+
+  // Returns the metric name to report received commands.
+  static const char* GetMetricNameReceivedRemoteCommand(
+      PolicyInvalidationScope scope);
+  // Returns the metric name to report status of executed commands.
+  static std::string GetMetricNameExecutedRemoteCommand(
+      PolicyInvalidationScope scope,
+      enterprise_management::RemoteCommand_Type command_type);
+
   RemoteCommandsService(std::unique_ptr<RemoteCommandsFactory> factory,
-                        CloudPolicyClient* client);
+                        CloudPolicyClient* client,
+                        CloudPolicyStore* store,
+                        PolicyInvalidationScope scope);
+  RemoteCommandsService(const RemoteCommandsService&) = delete;
+  RemoteCommandsService& operator=(const RemoteCommandsService&) = delete;
   ~RemoteCommandsService() override;
 
   // Attempts to fetch remote commands, mainly supposed to be called by
@@ -51,14 +102,26 @@ class POLICY_EXPORT RemoteCommandsService
     return command_fetch_in_progress_;
   }
 
-  // Set an alternative clock for testing.
-  void SetClockForTesting(const base::TickClock* clock);
+  // Set alternative clocks for testing.
+  void SetClocksForTesting(const base::Clock* clock,
+                           const base::TickClock* tick_clock);
 
+  // Sets a callback that will be invoked the next time we receive a response
+  // from the server.
   virtual void SetOnCommandAckedCallback(base::OnceClosure callback);
 
  private:
-  // Helper function to enqueue a command which we get from server.
-  void EnqueueCommand(const enterprise_management::RemoteCommand& command);
+  // Helper functions to enqueue a command which we get from server.
+  // |VerifyAndEnqueueSignedCommand| is used for the case of secure remote
+  // commands; it verifies the command, decodes it, and passes it onto
+  // |EnqueueCommand|.  The latter one does some additional checks and then
+  // creates the correct job for the particular remote command (it also takes
+  // the original |signed_command| so it can pass it to the job for caching in
+  // case the particular job needs to do additional signature verification).
+  void VerifyAndEnqueueSignedCommand(
+      const enterprise_management::SignedData& signed_command);
+  void EnqueueCommand(const enterprise_management::RemoteCommand& command,
+                      const enterprise_management::SignedData& signed_command);
 
   // RemoteCommandsQueue::Observer:
   void OnJobStarted(RemoteCommandJob* command) override;
@@ -67,7 +130,12 @@ class POLICY_EXPORT RemoteCommandsService
   // Callback to handle commands we get from the server.
   void OnRemoteCommandsFetched(
       DeviceManagementStatus status,
-      const std::vector<enterprise_management::RemoteCommand>& commands);
+      const std::vector<enterprise_management::SignedData>& signed_commands);
+
+  // Records UMA metric of received remote command.
+  void RecordReceivedRemoteCommand(MetricReceivedRemoteCommand metric) const;
+  // Records UMA metric of executed remote command.
+  void RecordExecutedRemoteCommand(const RemoteCommandJob& command) const;
 
   // Whether there is a command fetch on going or not.
   bool command_fetch_in_progress_ = false;
@@ -97,15 +165,17 @@ class POLICY_EXPORT RemoteCommandsService
 
   RemoteCommandsQueue queue_;
   std::unique_ptr<RemoteCommandsFactory> factory_;
-  CloudPolicyClient* const client_;
+  const raw_ptr<CloudPolicyClient> client_;
+  const raw_ptr<CloudPolicyStore> store_;
 
   // Callback which gets called after the last command got ACK'd to the server
   // as executed.
   base::OnceClosure on_command_acked_callback_;
 
-  base::WeakPtrFactory<RemoteCommandsService> weak_factory_{this};
+  // Represents remote commands scope covered by service.
+  const PolicyInvalidationScope scope_;
 
-  DISALLOW_COPY_AND_ASSIGN(RemoteCommandsService);
+  base::WeakPtrFactory<RemoteCommandsService> weak_factory_{this};
 };
 
 }  // namespace policy

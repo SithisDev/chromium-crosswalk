@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include <jni.h>
 #include <stdint.h>
-#include <vector>
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
@@ -30,7 +29,7 @@ std::unique_ptr<variations::SeedResponse> GetVariationsFirstRunSeed() {
       Java_VariationsSeedBridge_getVariationsFirstRunSeedSignature(env);
   ScopedJavaLocalRef<jstring> j_seed_country =
       Java_VariationsSeedBridge_getVariationsFirstRunSeedCountry(env);
-  ScopedJavaLocalRef<jstring> j_response_date =
+  jlong j_response_date =
       Java_VariationsSeedBridge_getVariationsFirstRunSeedDate(env);
   jboolean j_is_gzip_compressed =
       Java_VariationsSeedBridge_getVariationsFirstRunSeedIsGzipCompressed(env);
@@ -41,7 +40,7 @@ std::unique_ptr<variations::SeedResponse> GetVariationsFirstRunSeed() {
   }
   seed->signature = ConvertJavaStringToUTF8(j_seed_signature);
   seed->country = ConvertJavaStringToUTF8(j_seed_country);
-  seed->date = ConvertJavaStringToUTF8(j_response_date);
+  seed->date = static_cast<long>(j_response_date);
   seed->is_gzip_compressed = static_cast<bool>(j_is_gzip_compressed);
   return seed;
 }
@@ -59,15 +58,20 @@ void MarkVariationsSeedAsStored() {
 void SetJavaFirstRunPrefsForTesting(const std::string& seed_data,
                                     const std::string& seed_signature,
                                     const std::string& seed_country,
-                                    const std::string& response_date,
+                                    long response_date,
                                     bool is_gzip_compressed) {
   JNIEnv* env = AttachCurrentThread();
   Java_VariationsSeedBridge_setVariationsFirstRunSeed(
       env, base::android::ToJavaByteArray(env, seed_data),
       ConvertUTF8ToJavaString(env, seed_signature),
       ConvertUTF8ToJavaString(env, seed_country),
-      ConvertUTF8ToJavaString(env, response_date),
+      static_cast<jlong>(response_date),
       static_cast<jboolean>(is_gzip_compressed));
+}
+
+bool HasMarkedPrefsForTesting() {
+  JNIEnv* env = AttachCurrentThread();
+  return Java_VariationsSeedBridge_hasNativePref(env);
 }
 
 }  // namespace android

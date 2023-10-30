@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,8 @@
 #include "base/files/scoped_file.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/crx_file/crx_verifier.h"
 #include "components/update_client/component_patcher.h"
@@ -29,7 +27,7 @@
 
 namespace update_client {
 
-ComponentUnpacker::Result::Result() {}
+ComponentUnpacker::Result::Result() = default;
 
 ComponentUnpacker::ComponentUnpacker(const std::vector<uint8_t>& pk_hash,
                                      const base::FilePath& path,
@@ -47,7 +45,7 @@ ComponentUnpacker::ComponentUnpacker(const std::vector<uint8_t>& pk_hash,
       error_(UnpackerError::kNone),
       extended_error_(0) {}
 
-ComponentUnpacker::~ComponentUnpacker() {}
+ComponentUnpacker::~ComponentUnpacker() = default;
 
 void ComponentUnpacker::Unpack(Callback callback) {
   callback_ = std::move(callback);
@@ -57,14 +55,16 @@ void ComponentUnpacker::Unpack(Callback callback) {
 
 bool ComponentUnpacker::Verify() {
   VLOG(1) << "Verifying component: " << path_.value();
-  if (pk_hash_.empty() || path_.empty()) {
+  if (path_.empty()) {
     error_ = UnpackerError::kInvalidParams;
     return false;
   }
-  const std::vector<std::vector<uint8_t>> required_keys = {pk_hash_};
-  const crx_file::VerifierResult result =
-      crx_file::Verify(path_, crx_format_, required_keys,
-                       std::vector<uint8_t>(), &public_key_, nullptr);
+  std::vector<std::vector<uint8_t>> required_keys;
+  if (!pk_hash_.empty())
+    required_keys.push_back(pk_hash_);
+  const crx_file::VerifierResult result = crx_file::Verify(
+      path_, crx_format_, required_keys, std::vector<uint8_t>(), &public_key_,
+      nullptr, /*compressed_verified_contents=*/nullptr);
   if (result != crx_file::VerifierResult::OK_FULL &&
       result != crx_file::VerifierResult::OK_DELTA) {
     error_ = UnpackerError::kInvalidFile;
@@ -102,28 +102,27 @@ void ComponentUnpacker::EndUnzipping(bool result) {
   BeginPatching();
 }
 
-bool ComponentUnpacker::BeginPatching() {
+void ComponentUnpacker::BeginPatching() {
   if (is_delta_) {  // Package is a diff package.
     // Use a different temp directory for the patch output files.
     if (!base::CreateNewTempDirectory(base::FilePath::StringType(),
                                       &unpack_path_)) {
-      error_ = UnpackerError::kUnzipPathError;
-      return false;
+      base::SequencedTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE, base::BindOnce(&ComponentUnpacker::EndPatching, this,
+                                    UnpackerError::kUnzipPathError, 0));
+      return;
     }
     patcher_ = base::MakeRefCounted<ComponentPatcher>(
         unpack_diff_path_, unpack_path_, installer_, patcher_tool_);
     base::SequencedTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(&ComponentPatcher::Start, patcher_,
-                       base::BindOnce(&ComponentUnpacker::EndPatching,
-                                      scoped_refptr<ComponentUnpacker>(this))));
+                       base::BindOnce(&ComponentUnpacker::EndPatching, this)));
   } else {
     base::SequencedTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(&ComponentUnpacker::EndPatching,
-                                  scoped_refptr<ComponentUnpacker>(this),
+        FROM_HERE, base::BindOnce(&ComponentUnpacker::EndPatching, this,
                                   UnpackerError::kNone, 0));
   }
-  return true;
 }
 
 void ComponentUnpacker::EndPatching(UnpackerError error, int extended_error) {
@@ -136,9 +135,9 @@ void ComponentUnpacker::EndPatching(UnpackerError error, int extended_error) {
 
 void ComponentUnpacker::EndUnpacking() {
   if (!unpack_diff_path_.empty())
-    base::DeleteFile(unpack_diff_path_, true);
+    base::DeletePathRecursively(unpack_diff_path_);
   if (error_ != UnpackerError::kNone && !unpack_path_.empty())
-    base::DeleteFile(unpack_path_, true);
+    base::DeletePathRecursively(unpack_path_);
 
   Result result;
   result.error = error_;

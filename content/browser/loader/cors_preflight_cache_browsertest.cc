@@ -1,16 +1,16 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <string>
+
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
+#include "base/callback_helpers.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/thread_annotations.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -20,7 +20,6 @@
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
 #include "services/network/public/cpp/cors/cors.h"
-#include "services/network/public/cpp/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -29,16 +28,17 @@ namespace content {
 namespace {
 
 const char kTestPath[] = "/loader/cors_preflight.html";
-const base::string16 kTestDone = base::string16(base::ASCIIToUTF16("DONE"));
+const std::u16string kTestDone = std::u16string(u"DONE");
 
 // Tests end to end behaviors on CORS preflight and its cache.
 class CorsPreflightCacheBrowserTest : public ContentBrowserTest {
+ public:
+  CorsPreflightCacheBrowserTest(const CorsPreflightCacheBrowserTest&) = delete;
+  CorsPreflightCacheBrowserTest& operator=(
+      const CorsPreflightCacheBrowserTest&) = delete;
+
  protected:
-  CorsPreflightCacheBrowserTest() {
-    scoped_feature_list_.InitWithFeatures({network::features::kOutOfBlinkCors,
-                                           network::features::kNetworkService},
-                                          {});
-  }
+  CorsPreflightCacheBrowserTest() = default;
   ~CorsPreflightCacheBrowserTest() override = default;
 
   void SetUpOnMainThread() override {
@@ -85,14 +85,11 @@ class CorsPreflightCacheBrowserTest : public ContentBrowserTest {
     return response;
   }
 
-  base::test::ScopedFeatureList scoped_feature_list_;
   net::EmbeddedTestServer cross_origin_test_server_;
   base::Lock lock_;
 
   size_t options_count_ GUARDED_BY(lock_) = 0;
   size_t get_count_ GUARDED_BY(lock_) = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(CorsPreflightCacheBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(CorsPreflightCacheBrowserTest, Default) {
@@ -105,6 +102,7 @@ IN_PROC_BROWSER_TEST_F(CorsPreflightCacheBrowserTest, Default) {
   EXPECT_EQ(1u, options_count());
   EXPECT_EQ(1u, get_count());
 
+  // Make another fetch request, and OPTIONS request hits the preflight cache.
   std::unique_ptr<TitleWatcher> watcher2 =
       std::make_unique<TitleWatcher>(shell()->web_contents(), kTestDone);
   EXPECT_TRUE(NavigateToURL(
@@ -114,6 +112,8 @@ IN_PROC_BROWSER_TEST_F(CorsPreflightCacheBrowserTest, Default) {
   EXPECT_EQ(1u, options_count());
   EXPECT_EQ(2u, get_count());
 
+  // Make another fetch request with reload cache mode, and it should not hit
+  // the preflight cache.
   std::unique_ptr<TitleWatcher> watcher3 =
       std::make_unique<TitleWatcher>(shell()->web_contents(), kTestDone);
   EXPECT_TRUE(NavigateToURL(

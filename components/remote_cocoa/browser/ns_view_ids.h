@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include "components/remote_cocoa/browser/remote_cocoa_browser_export.h"
 
 namespace remote_cocoa {
+
+constexpr uint64_t kInvalidNSViewId = 0;
 
 // Return a new unique is to be used with ScopedNSViewIdMapping and
 // GetNSViewFromId in various app shim processes.

@@ -1,13 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/ntp_snippets/remote/cached_image_fetcher.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "components/image_fetcher/core/image_decoder.h"
 #include "components/image_fetcher/core/image_fetcher.h"
 #include "components/ntp_snippets/remote/remote_suggestions_database.h"
@@ -108,6 +107,7 @@ void CachedImageFetcher::OnImageFetchedFromDatabase(
         data,
         // We're not dealing with multi-frame images.
         /*desired_image_frame_size=*/gfx::Size(),
+        /*data_decoder=*/nullptr,
         base::BindOnce(&CachedImageFetcher::OnImageDecodedFromDatabase,
                        weak_ptr_factory_.GetWeakPtr(),
                        std::move(image_callback), suggestion_id, url));

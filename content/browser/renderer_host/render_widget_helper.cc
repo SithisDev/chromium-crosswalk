@@ -1,20 +1,15 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/renderer_host/render_widget_helper.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/lazy_instance.h"
-#include "base/posix/eintr_wrapper.h"
-#include "base/task/post_task.h"
-#include "base/threading/thread.h"
-#include "base/threading/thread_restrictions.h"
-#include "content/browser/loader/resource_dispatcher_host_impl.h"
-#include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace content {
 namespace {
@@ -33,8 +28,20 @@ void AddWidgetHelper(int render_process_id,
 
 }  // namespace
 
-RenderWidgetHelper::RenderWidgetHelper()
-    : render_process_id_(-1), resource_dispatcher_host_(nullptr) {}
+RenderWidgetHelper::FrameTokens::FrameTokens(
+    const blink::LocalFrameToken& frame_token,
+    const base::UnguessableToken& devtools_frame_token)
+    : frame_token(frame_token), devtools_frame_token(devtools_frame_token) {}
+
+RenderWidgetHelper::FrameTokens::FrameTokens(const FrameTokens& other) =
+    default;
+
+RenderWidgetHelper::FrameTokens& RenderWidgetHelper::FrameTokens::operator=(
+    const FrameTokens& other) = default;
+
+RenderWidgetHelper::FrameTokens::~FrameTokens() = default;
+
+RenderWidgetHelper::RenderWidgetHelper() : render_process_id_(-1) {}
 
 RenderWidgetHelper::~RenderWidgetHelper() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -46,72 +53,44 @@ RenderWidgetHelper::~RenderWidgetHelper() {
     widget_map.erase(it);
 }
 
-void RenderWidgetHelper::Init(
-    int render_process_id,
-    ResourceDispatcherHostImpl* resource_dispatcher_host) {
+void RenderWidgetHelper::Init(int render_process_id) {
   render_process_id_ = render_process_id;
-  resource_dispatcher_host_ = resource_dispatcher_host;
 
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
-                           base::BindOnce(&AddWidgetHelper, render_process_id_,
-                                          base::WrapRefCounted(this)));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&AddWidgetHelper, render_process_id_,
+                                base::WrapRefCounted(this)));
 }
 
 int RenderWidgetHelper::GetNextRoutingID() {
-  return next_routing_id_.GetNext() + 1;
+  int next_routing_id = next_routing_id_.GetNext();
+  CHECK_LT(next_routing_id, std::numeric_limits<int>::max());
+  return next_routing_id + 1;
 }
 
-// static
-RenderWidgetHelper* RenderWidgetHelper::FromProcessHostID(
-    int render_process_host_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  WidgetHelperMap::const_iterator ci = g_widget_helpers.Get().find(
-      render_process_host_id);
-  return (ci == g_widget_helpers.Get().end())? NULL : ci->second;
+bool RenderWidgetHelper::TakeFrameTokensForFrameRoutingID(
+    int32_t routing_id,
+    blink::LocalFrameToken& frame_token,
+    base::UnguessableToken& devtools_frame_token) {
+  base::AutoLock lock(frame_token_map_lock_);
+  auto iter = frame_token_routing_id_map_.find(routing_id);
+  if (iter == frame_token_routing_id_map_.end())
+    return false;
+  frame_token = iter->second.frame_token;
+  devtools_frame_token = iter->second.devtools_frame_token;
+  frame_token_routing_id_map_.erase(iter);
+  return true;
 }
 
-void RenderWidgetHelper::CreateNewWidget(int opener_id,
-                                         mojom::WidgetPtr widget,
-                                         int* route_id) {
-  *route_id = GetNextRoutingID();
-
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&RenderWidgetHelper::OnCreateWidgetOnUI, this, opener_id,
-                     *route_id, widget.PassInterface()));
-}
-
-void RenderWidgetHelper::CreateNewFullscreenWidget(int opener_id,
-                                                   mojom::WidgetPtr widget,
-                                                   int* route_id) {
-  *route_id = GetNextRoutingID();
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
-      base::BindOnce(&RenderWidgetHelper::OnCreateFullscreenWidgetOnUI, this,
-                     opener_id, *route_id, widget.PassInterface()));
-}
-
-void RenderWidgetHelper::OnCreateWidgetOnUI(int32_t opener_id,
-                                            int32_t route_id,
-                                            mojom::WidgetPtrInfo widget_info) {
-  mojom::WidgetPtr widget;
-  widget.Bind(std::move(widget_info));
-  RenderViewHostImpl* host = RenderViewHostImpl::FromID(
-      render_process_id_, opener_id);
-  if (host)
-    host->CreateNewWidget(route_id, std::move(widget));
-}
-
-void RenderWidgetHelper::OnCreateFullscreenWidgetOnUI(
-    int32_t opener_id,
-    int32_t route_id,
-    mojom::WidgetPtrInfo widget_info) {
-  mojom::WidgetPtr widget;
-  widget.Bind(std::move(widget_info));
-  RenderViewHostImpl* host = RenderViewHostImpl::FromID(
-      render_process_id_, opener_id);
-  if (host)
-    host->CreateNewFullscreenWidget(route_id, std::move(widget));
+void RenderWidgetHelper::StoreNextFrameRoutingID(
+    int32_t routing_id,
+    const blink::LocalFrameToken& frame_token,
+    const base::UnguessableToken& devtools_frame_token) {
+  base::AutoLock lock(frame_token_map_lock_);
+  bool result =
+      frame_token_routing_id_map_
+          .emplace(routing_id, FrameTokens(frame_token, devtools_frame_token))
+          .second;
+  DCHECK(result);
 }
 
 }  // namespace content

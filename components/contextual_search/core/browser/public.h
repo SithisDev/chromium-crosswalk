@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,21 +27,20 @@ extern const int kContextualCardsUrlActionsIntegration;
 extern const int kContextualCardsDefinitionsIntegration;
 // Support of translations in the bar as part of the resolve request.
 extern const int kContextualCardsTranslationsIntegration;
-// Support of unlimited cards with diagnostics enabled, for development.
+
+// Development-level CoCa integration codes.
+
+// Generates diagnostics on the client and uses the ENTRYPOINT_UNSPECIFIED for
+// CoCa to return unlimited cards with diagnostics enabled.
 extern const int kContextualCardsDiagnosticIntegration;
 
-// Can be mixed in with one of the above.
-extern const int kContextualCardsSimplifiedServerMixin;
-extern const char kContextualCardsSimplifiedServerMixinChar[];
+// Mixin values. You must choose only one of the above, but any combination
+// of these mixin values.
 
-// String form of kContextualCardsSimplifiedServerMixin +
-// kContextualCardsDiagnosticIntegration.
-extern const char kContextualCardsSimplifiedServerWithDiagnosticChar[];
-
-// Longpress resolve variations:
-extern const char kLongpressResolveParamName[];
-extern const char kLongpressResolveHideOnScroll[];
-extern const char kLongpressResolvePrivacyAggressive[];
+// Deprecated value that might be sent by an old client.
+extern const int kSimplifiedServerDeprecatedMixin;
+// Activates server-side debugging.
+extern const int kContextualCardsServerDebugMixin;
 
 }  // namespace contextual_search
 

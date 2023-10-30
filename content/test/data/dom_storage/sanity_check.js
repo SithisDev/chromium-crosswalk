@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,7 @@ function sanityCheck(storage) {
   checkEqual(0, storage.length,
              "storage.length != 0 after clear");
 
-  var tooLarge =  makeLargeString((5 * 1024 * 1024) + 1);
+  var tooLarge = "X".repeat((5 * 1024 * 1024) + 1);
   try {
     storage.setItem("tooLarge", tooLarge);
     throw "failed to throw exception for very large value";
@@ -81,8 +81,4 @@ function sanityCheck(storage) {
 function checkEqual(lhs, rhs, errorMessage) {
   if (lhs !== rhs)
     throw errorMessage;
-}
-
-function makeLargeString(minimumSize) {
-  return Array(minimumSize).join("X");
 }

@@ -97,9 +97,6 @@ Here is a summary of the core responsibilities of the classes and interfaces:
   to offer password saving or updating existing credentials after a successful
   form submission.
 
-  Note: At the moment [`NewPasswordFormManager`] is the relevant class to look
-  at. This will soon replace the old [`PasswordFormManager`] implementation.
-
 * `*::PasswordManagerDriver` (1 per frame)
 
   The `*::PasswordManagerDriver` is the browser-side communication end-point for
@@ -107,7 +104,7 @@ Here is a summary of the core responsibilities of the classes and interfaces:
 
   This is actually a collection of two interfaces named
   `*::PasswordManagerDriver`. The first one ([`mojom::PasswordManagerDriver`])
-  is a [mojo](https://chromium.googlesource.com/chromium/src/+/master/mojo/)
+  is a [mojo](https://chromium.googlesource.com/chromium/src/+/main/mojo/)
   interface that allows renderers to talk to the browser. The second one
   ([`password_manager::PasswordManagerDriver`]) allows the browser to talk to
   renderers.
@@ -117,7 +114,7 @@ Here is a summary of the core responsibilities of the classes and interfaces:
     This is the [content](https://www.chromium.org/developers/content-module)
     specific implementation of the `PasswordManagerDriver` interfaces.
 
-  * [`IOSChromePasswordManagerDriver`]
+  * [`IOSPasswordManagerDriver`]
 
     This is the iOS specific implementation.
 
@@ -150,12 +147,12 @@ Here is a summary of the core responsibilities of the classes and interfaces:
 [`ChromePasswordManagerClient`]: https://cs.chromium.org/search?q=file:/chrome_password_manager_client.h$
 [`ContentPasswordManagerDriver`]: https://cs.chromium.org/search?q=file:/content_password_manager_driver.h$
 [`IOSChromePasswordManagerClient`]: https://cs.chromium.org/search?q=file:/ios_chrome_password_manager_client.h$
-[`IOSChromePasswordManagerDriver`]: https://cs.chromium.org/search?q=file:/ios_chrome_password_manager_driver.h$
+[`IOSPasswordManagerDriver`]: https://cs.chromium.org/search?q=file:/ios_password_manager_driver.h$
 [`mojom::AutofillAgent`]: https://cs.chromium.org/search?q=file:autofill_agent.mojom+"interface+AutofillAgent"
 [`mojom::PasswordAutofillAgent`]: https://cs.chromium.org/search?q=file:autofill_agent.mojom+"interface+PasswordAutofillAgent"
 [`mojom::PasswordGenerationAgent`]: https://cs.chromium.org/search?q=file:autofill_agent.mojom+"interface+PasswordGenerationAgent"
 [`mojom::PasswordManagerDriver`]: https://cs.chromium.org/search?q=file:autofill_driver.mojom+"interface+PasswordManagerDriver"
-[`NewPasswordFormManager`]: https://cs.chromium.org/search?q=file:/new_password_form_manager.h$
+[`PasswordFormManager`]: https://cs.chromium.org/search?q=file:/password_form_manager.h$
 [`password_manager::PasswordManagerDriver`]: https://cs.chromium.org/search?q=file:/password_manager_driver.h$
 [`password_manager::PasswordManagerDriver`]: https://cs.chromium.org/search?q=file:/password_manager_driver.h$
 [`PasswordAutofillAgent`]: https://cs.chromium.org/search?q=file:/password_autofill_agent.h$

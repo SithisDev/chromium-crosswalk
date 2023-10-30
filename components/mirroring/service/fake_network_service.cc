@@ -1,20 +1,27 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/mirroring/service/fake_network_service.h"
 
 #include "media/cast/test/utility/net_utility.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/test/test_url_loader_factory.h"
 
 namespace mirroring {
 
-MockUdpSocket::MockUdpSocket(network::mojom::UDPSocketRequest request,
-                             network::mojom::UDPSocketReceiverPtr receiver)
-    : binding_(this, std::move(request)), receiver_(std::move(receiver)) {}
+MockUdpSocket::MockUdpSocket(
+    mojo::PendingReceiver<network::mojom::UDPSocket> receiver,
+    mojo::PendingRemote<network::mojom::UDPSocketListener> listener)
+    : receiver_(this, std::move(receiver)), listener_(std::move(listener)) {}
 
 MockUdpSocket::~MockUdpSocket() {}
+
+void MockUdpSocket::Bind(const net::IPEndPoint& local_addr,
+                         network::mojom::UDPSocketOptionsPtr options,
+                         BindCallback callback) {
+  std::move(callback).Run(net::OK, media::cast::test::GetFreeLocalPort());
+}
 
 void MockUdpSocket::Connect(const net::IPEndPoint& remote_addr,
                             network::mojom::UDPSocketOptionsPtr options,
@@ -24,6 +31,17 @@ void MockUdpSocket::Connect(const net::IPEndPoint& remote_addr,
 
 void MockUdpSocket::ReceiveMore(uint32_t num_additional_datagrams) {
   num_ask_for_receive_ += num_additional_datagrams;
+}
+
+void MockUdpSocket::SendTo(
+    const net::IPEndPoint& dest_addr,
+    base::span<const uint8_t> data,
+    const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+    SendToCallback callback) {
+  sending_packet_ =
+      std::make_unique<media::cast::Packet>(data.begin(), data.end());
+  std::move(callback).Run(net::OK);
+  OnSendTo();
 }
 
 void MockUdpSocket::Send(
@@ -38,8 +56,8 @@ void MockUdpSocket::Send(
 
 void MockUdpSocket::OnReceivedPacket(const media::cast::Packet& packet) {
   if (num_ask_for_receive_) {
-    receiver_->OnReceived(
-        net::OK, base::nullopt,
+    listener_->OnReceived(
+        net::OK, absl::nullopt,
         base::span<const uint8_t>(
             reinterpret_cast<const uint8_t*>(packet.data()), packet.size()));
     ASSERT_LT(0, num_ask_for_receive_);
@@ -53,24 +71,24 @@ void MockUdpSocket::VerifySendingPacket(const media::cast::Packet& packet) {
 }
 
 MockNetworkContext::MockNetworkContext(
-    network::mojom::NetworkContextRequest request)
-    : binding_(this, std::move(request)) {}
+    mojo::PendingReceiver<network::mojom::NetworkContext> receiver)
+    : receiver_(this, std::move(receiver)) {}
 MockNetworkContext::~MockNetworkContext() {}
 
 void MockNetworkContext::CreateUDPSocket(
-    network::mojom::UDPSocketRequest request,
-    network::mojom::UDPSocketReceiverPtr receiver) {
+    mojo::PendingReceiver<network::mojom::UDPSocket> receiver,
+    mojo::PendingRemote<network::mojom::UDPSocketListener> listener) {
   udp_socket_ =
-      std::make_unique<MockUdpSocket>(std::move(request), std::move(receiver));
+      std::make_unique<MockUdpSocket>(std::move(receiver), std::move(listener));
   OnUDPSocketCreated();
 }
 
 void MockNetworkContext::CreateURLLoaderFactory(
-    network::mojom::URLLoaderFactoryRequest request,
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver,
     network::mojom::URLLoaderFactoryParamsPtr params) {
   ASSERT_TRUE(params);
-  mojo::MakeStrongBinding(std::make_unique<network::TestURLLoaderFactory>(),
-                          std::move(request));
+  mojo::MakeSelfOwnedReceiver(std::make_unique<network::TestURLLoaderFactory>(),
+                              std::move(receiver));
 }
 
 }  // namespace mirroring

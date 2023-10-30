@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@ package org.chromium.net.smoke;
 import static org.chromium.net.smoke.TestSupport.Protocol.QUIC;
 
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.support.test.runner.AndroidJUnit4;
+
+import androidx.test.filters.SmallTest;
 
 import org.json.JSONObject;
 import org.junit.After;
@@ -72,7 +73,8 @@ public class QuicTest {
             requestBuilder.build().start();
             callback.blockForDone();
             NativeCronetTestRule.assertSuccessfulNonEmptyResponse(callback, urlString);
-            if (callback.getResponseInfo().getNegotiatedProtocol().startsWith("http/2+quic/")) {
+            if (callback.getResponseInfo().getNegotiatedProtocol().startsWith("http/2+quic")
+                    || callback.getResponseInfo().getNegotiatedProtocol().startsWith("h3")) {
                 quicNegotiated = true;
                 break;
             }

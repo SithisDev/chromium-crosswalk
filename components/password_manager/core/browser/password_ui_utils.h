@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,15 +12,13 @@
 
 #include "base/strings/string_piece.h"
 
-#include "url/gurl.h"
-
-namespace autofill {
-struct PasswordForm;
-}
+#include "url/origin.h"
 
 namespace password_manager {
 
 class PasswordFormManagerForUI;
+struct PasswordForm;
+struct CredentialUIEntry;
 
 // Reverses order of labels in hostname.
 std::string SplitByDotAndReverse(base::StringPiece host);
@@ -35,20 +33,39 @@ std::string SplitByDotAndReverse(base::StringPiece host);
 //  For Android credentials the returned origin is set to the Play Store name
 //  if available, otherwise it is the reversed package name (e.g.
 //  com.example.android gets transformed to android.example.com).
+// TODO(crbug.com/1330906) Replace the usage with GetShownOrigin and GetShownUrl
 std::pair<std::string, GURL> GetShownOriginAndLinkUrl(
-    const autofill::PasswordForm& password_form);
+    const PasswordForm& password_form);
+
+// Together have the same result as |GetShownOriginAndLinkUrl| but works with
+// |CredentialUIEntry|.
+std::string GetShownOrigin(const CredentialUIEntry& credential);
+GURL GetShownUrl(const CredentialUIEntry& credential);
 
 // Returns a string suitable for security display to the user (just like
 // |FormatUrlForSecurityDisplay| with OMIT_HTTP_AND_HTTPS) based on origin of
 // |password_form|) and without prefixes "m.", "mobile." or "www.".
-std::string GetShownOrigin(const GURL& origin);
+std::string GetShownOrigin(const url::Origin& origin);
 
 // Updates the |form_manager| pending credentials with |username| and
 // |password|.
 void UpdatePasswordFormUsernameAndPassword(
-    const base::string16& username,
-    const base::string16& password,
+    const std::u16string& username,
+    const std::u16string& password,
     PasswordFormManagerForUI* form_manager);
+
+// Returns all the usernames for credentials saved for `signon_realm`. If
+// `is_using_account_store` is true, this method will only consider
+// credentials saved in the account store. Otherwise it will only consider
+// credentials saved in the profile store.
+std::vector<std::u16string> GetUsernamesForRealm(
+    const std::vector<password_manager::CredentialUIEntry>& credentials,
+    const std::string& signon_realm,
+    bool is_using_account_store);
+
+// Returns the resource identifier for the label describing the platform
+// authenticator, e.g. "Use TouchID".
+int GetPlatformAuthenticatorLabel();
 
 }  // namespace password_manager
 

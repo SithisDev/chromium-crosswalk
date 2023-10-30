@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "base/mac/bundle_locations.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/mac/sdk_forward_declarations.h"
 
 namespace {
 
@@ -129,7 +128,7 @@ base::scoped_nsobject<NSMenu> BuildMainMenu() {
 
 namespace content {
 
-void ShellBrowserMainParts::PreMainMessageLoopStart() {
+void ShellBrowserMainParts::PreCreateMainMessageLoop() {
   base::scoped_nsobject<NSMenu> main_menu = BuildMainMenu();
   [[NSApplication sharedApplication] setMainMenu:main_menu];
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,12 +11,13 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "components/cast_channel/cast_channel_enum.h"
 #include "net/base/io_buffer.h"
 
+#include "third_party/openscreen/src/cast/common/channel/proto/cast_channel.pb.h"
+
 namespace cast_channel {
-class CastMessage;
+using ::cast::channel::CastMessage;
 
 // Class for constructing and parsing CastMessage packet data.
 class MessageFramer {
@@ -26,6 +27,10 @@ class MessageFramer {
   // |input_buffer|: The input buffer used by all socket read operations that
   //                 feed data into the framer.
   explicit MessageFramer(scoped_refptr<net::GrowableIOBuffer> input_buffer);
+
+  MessageFramer(const MessageFramer&) = delete;
+  MessageFramer& operator=(const MessageFramer&) = delete;
+
   ~MessageFramer();
 
   // The number of bytes required from |input_buffer| to complete the
@@ -96,8 +101,6 @@ class MessageFramer {
 
   // Disables Ingest functionality is the parser receives invalid data.
   bool error_;
-
-  DISALLOW_COPY_AND_ASSIGN(MessageFramer);
 };
 }  // namespace cast_channel
 #endif  // COMPONENTS_CAST_CHANNEL_CAST_FRAMER_H_

@@ -1,21 +1,22 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/test/test_gpu_service_holder.h"
 
+#include <tuple>
 #include <utility>
 
 #include "base/at_exit.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/macros.h"
-#include "base/memory/singleton.h"
 #include "base/no_destructor.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "components/viz/service/gl/gpu_service_impl.h"
 #include "gpu/command_buffer/service/service_utils.h"
 #include "gpu/config/gpu_feature_info.h"
@@ -23,10 +24,10 @@
 #include "gpu/config/gpu_info_collector.h"
 #include "gpu/config/gpu_preferences.h"
 #include "gpu/config/gpu_util.h"
-#include "gpu/ipc/gpu_in_process_thread_service.h"
 #include "gpu/ipc/service/gpu_watchdog_thread.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gl/gl_bindings.h"
+#include "ui/gl/gl_utils.h"
 #include "ui/gl/init/gl_factory.h"
 
 #if BUILDFLAG(ENABLE_VULKAN)
@@ -34,29 +35,71 @@
 #include "gpu/vulkan/vulkan_implementation.h"
 #endif
 
+#if defined(USE_OZONE)
+#include "ui/ozone/public/gpu_platform_support_host.h"
+#include "ui/ozone/public/ozone_platform.h"
+#endif
+
 namespace viz {
 
 namespace {
+
+#if defined(USE_OZONE) && !BUILDFLAG(IS_FUCHSIA)
+namespace {
+constexpr int kGpuProcessHostId = 1;
+}  // namespace
+#endif
 
 base::Lock& GetLock() {
   static base::NoDestructor<base::Lock> lock;
   return *lock;
 }
 
-// We expect |GetLock()| to be acquired before accessing this variable.
+// We expect GetLock() to be acquired before accessing these variables.
 TestGpuServiceHolder* g_holder = nullptr;
+bool g_disallow_feature_list_overrides = true;
+bool g_should_register_listener = true;
+bool g_registered_listener = false;
 
-class InstanceResetter : public testing::EmptyTestEventListener {
+class InstanceResetter
+    : public testing::EmptyTestEventListener,
+      public base::test::TaskEnvironment::DestructionObserver {
  public:
-  InstanceResetter() = default;
-  ~InstanceResetter() override = default;
+  InstanceResetter() {
+    base::test::TaskEnvironment::AddDestructionObserver(this);
+  }
 
+  InstanceResetter(const InstanceResetter&) = delete;
+  InstanceResetter& operator=(const InstanceResetter&) = delete;
+
+  ~InstanceResetter() override {
+    base::test::TaskEnvironment::RemoveDestructionObserver(this);
+  }
+
+  // testing::EmptyTestEventListener:
   void OnTestEnd(const testing::TestInfo& test_info) override {
+    {
+      base::AutoLock locked(GetLock());
+      // Make sure the TestGpuServiceHolder instance is not re-created after
+      // WillDestroyCurrentTaskEnvironment().
+      // Otherwise we'll end up with GPU tasks weirdly running in a different
+      // context after the test.
+      DCHECK(!(reset_by_task_env && g_holder))
+          << "TestGpuServiceHolder was re-created after "
+             "base::test::TaskEnvironment was destroyed.";
+    }
+    reset_by_task_env = false;
+    TestGpuServiceHolder::ResetInstance();
+  }
+
+  // base::test::TaskEnvironment::DestructionObserver:
+  void WillDestroyCurrentTaskEnvironment() override {
+    reset_by_task_env = true;
     TestGpuServiceHolder::ResetInstance();
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(InstanceResetter);
+  bool reset_by_task_env = false;
 };
 
 }  // namespace
@@ -65,14 +108,23 @@ class InstanceResetter : public testing::EmptyTestEventListener {
 TestGpuServiceHolder* TestGpuServiceHolder::GetInstance() {
   base::AutoLock locked(GetLock());
 
-  // Make sure all TestGpuServiceHolders are deleted at process exit.
+  // Make sure the global TestGpuServiceHolder is delete after each test. The
+  // listener will always be registered with gtest even if gtest isn't
+  // otherwised used. This should do nothing in the non-gtest case.
+  if (!g_registered_listener && g_should_register_listener) {
+    g_registered_listener = true;
+    testing::TestEventListeners& listeners =
+        testing::UnitTest::GetInstance()->listeners();
+    // |listeners| assumes ownership of InstanceResetter.
+    listeners.Append(new InstanceResetter);
+  }
+
+  // Make sure the global TestGpuServiceHolder is deleted at process exit.
   static bool registered_cleanup = false;
   if (!registered_cleanup) {
     registered_cleanup = true;
-    base::AtExitManager::RegisterTask(base::BindOnce([]() {
-      if (g_holder)
-        delete g_holder;
-    }));
+    base::AtExitManager::RegisterTask(
+        base::BindOnce(&TestGpuServiceHolder::ResetInstance));
   }
 
   if (!g_holder) {
@@ -92,20 +144,49 @@ void TestGpuServiceHolder::ResetInstance() {
 }
 
 // static
-void TestGpuServiceHolder::DestroyInstanceAfterEachTest() {
-  static bool registered_listener = false;
-  if (!registered_listener) {
-    registered_listener = true;
-    testing::TestEventListeners& listeners =
-        testing::UnitTest::GetInstance()->listeners();
-    listeners.Append(new InstanceResetter);
-  }
+void TestGpuServiceHolder::DoNotResetOnTestExit() {
+  base::AutoLock locked(GetLock());
+
+  // This must be called before GetInstance() is ever called.
+  DCHECK(!g_registered_listener);
+  g_should_register_listener = false;
+}
+
+TestGpuServiceHolder::ScopedAllowRacyFeatureListOverrides::
+    ScopedAllowRacyFeatureListOverrides() {
+  base::AutoLock locked(GetLock());
+
+  // This must be called before GetInstance() is ever called.
+  DCHECK(!g_holder);
+  DCHECK(g_disallow_feature_list_overrides);
+  g_disallow_feature_list_overrides = false;
+}
+
+TestGpuServiceHolder::ScopedAllowRacyFeatureListOverrides::
+    ~ScopedAllowRacyFeatureListOverrides() {
+  base::AutoLock locked(GetLock());
+
+  DCHECK(!g_disallow_feature_list_overrides);
+  g_disallow_feature_list_overrides = true;
 }
 
 TestGpuServiceHolder::TestGpuServiceHolder(
     const gpu::GpuPreferences& gpu_preferences)
     : gpu_thread_("GPUMainThread"), io_thread_("GPUIOThread") {
-  CHECK(gpu_thread_.Start());
+  if (g_disallow_feature_list_overrides) {
+    disallow_feature_overrides_.emplace(
+        "FeatureList overrides must happen before the GPU service thread has "
+        "been started.");
+  }
+
+  base::Thread::Options gpu_thread_options;
+#if defined(USE_OZONE)
+    gpu_thread_options.message_pump_type = ui::OzonePlatform::GetInstance()
+                                               ->GetPlatformProperties()
+                                               .message_pump_type_for_gpu;
+#endif
+
+  CHECK(gpu_thread_.StartWithOptions(std::move(gpu_thread_options)));
   CHECK(io_thread_.Start());
 
   base::WaitableEvent completion;
@@ -114,15 +195,41 @@ TestGpuServiceHolder::TestGpuServiceHolder(
       base::BindOnce(&TestGpuServiceHolder::InitializeOnGpuThread,
                      base::Unretained(this), gpu_preferences, &completion));
   completion.Wait();
+
+#if defined(USE_OZONE) && !BUILDFLAG(IS_FUCHSIA)
+  if (auto* gpu_platform_support_host =
+          ui::OzonePlatform::GetInstance()->GetGpuPlatformSupportHost()) {
+    auto interface_binder = base::BindRepeating(
+        &TestGpuServiceHolder::BindInterface, base::Unretained(this));
+    gpu_platform_support_host->OnGpuServiceLaunched(
+        kGpuProcessHostId, interface_binder, base::DoNothing());
+  }
+#endif
 }
 
 TestGpuServiceHolder::~TestGpuServiceHolder() {
+#if defined(USE_OZONE) && !BUILDFLAG(IS_FUCHSIA)
+  if (auto* gpu_platform_support_host =
+          ui::OzonePlatform::GetInstance()->GetGpuPlatformSupportHost()) {
+    gpu_platform_support_host->OnChannelDestroyed(kGpuProcessHostId);
+  }
+#endif
+
   // Ensure members created on GPU thread are destroyed there too.
   gpu_thread_.task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&TestGpuServiceHolder::DeleteOnGpuThread,
                                 base::Unretained(this)));
   gpu_thread_.Stop();
   io_thread_.Stop();
+}
+
+scoped_refptr<gpu::SharedContextState>
+TestGpuServiceHolder::GetSharedContextState() {
+  return gpu_service_->GetContextState();
+}
+
+scoped_refptr<gl::GLShareGroup> TestGpuServiceHolder::GetShareGroup() {
+  return gpu_service_->share_group();
 }
 
 void TestGpuServiceHolder::ScheduleGpuTask(base::OnceClosure callback) {
@@ -135,19 +242,14 @@ void TestGpuServiceHolder::InitializeOnGpuThread(
     base::WaitableEvent* completion) {
   DCHECK(gpu_thread_.task_runner()->BelongsToCurrentThread());
 
+#if defined(USE_OZONE) && !BUILDFLAG(IS_FUCHSIA)
+  ui::OzonePlatform::GetInstance()->AddInterfaces(&binders_);
+#endif
+
   if (gpu_preferences.use_vulkan != gpu::VulkanImplementationName::kNone) {
 #if BUILDFLAG(ENABLE_VULKAN)
     bool use_swiftshader = gpu_preferences.use_vulkan ==
                            gpu::VulkanImplementationName::kSwiftshader;
-
-#ifndef USE_X11
-    // TODO(samans): Support Swiftshader on more platforms.
-    // https://crbug.com/963988
-    LOG_IF(ERROR, use_swiftshader)
-        << "Unable to use Vulkan Swiftshader on this platform. Falling back to "
-           "GPU.";
-    use_swiftshader = false;
-#endif
     vulkan_implementation_ = gpu::CreateVulkanImplementation(use_swiftshader);
     if (!vulkan_implementation_ ||
         !vulkan_implementation_->InitializeVulkanInstance(
@@ -159,7 +261,7 @@ void TestGpuServiceHolder::InitializeOnGpuThread(
 #endif
   }
 
-  // Always enable gpu and oop raster, regardless of platform and blacklist.
+  // Always enable gpu and oop raster, regardless of platform and blocklist.
   // The latter instructs GpuChannelManager::GetSharedContextState to create a
   // GrContext, which is required by SkiaRenderer as well as OOP-R.
   gpu::GPUInfo gpu_info;
@@ -168,10 +270,22 @@ void TestGpuServiceHolder::InitializeOnGpuThread(
       /*needs_more_info=*/nullptr);
   gpu_feature_info.status_values[gpu::GPU_FEATURE_TYPE_GPU_RASTERIZATION] =
       gpu::kGpuFeatureStatusEnabled;
-  gpu_feature_info.status_values[gpu::GPU_FEATURE_TYPE_OOP_RASTERIZATION] =
-      gpu::kGpuFeatureStatusEnabled;
 
-  // TODO(sgilhuly): Investigate why creating a GPUInfo and GpuFeatureInfo from
+  // On MacOS, the default texture target for native GpuMemoryBuffers is
+  // GL_TEXTURE_RECTANGLE_ARB. This is due to CGL's requirements for creating
+  // a GL surface. However, when ANGLE is used on top of SwiftShader or Metal,
+  // it's necessary to use GL_TEXTURE_2D instead.
+  // TODO(crbug.com/1056312): The proper behavior is to check the config
+  // parameter set by the EGL_ANGLE_iosurface_client_buffer extension
+#if BUILDFLAG(IS_MAC)
+  if (gl::GetGLImplementation() == gl::kGLImplementationEGLANGLE &&
+      (gl::GetANGLEImplementation() == gl::ANGLEImplementation::kSwiftShader ||
+       gl::GetANGLEImplementation() == gl::ANGLEImplementation::kMetal)) {
+    gpu::SetMacOSSpecificTextureTarget(GL_TEXTURE_2D);
+  }
+#endif  // BUILDFLAG(IS_MAC)
+
+  // TODO(rivr): Investigate why creating a GPUInfo and GpuFeatureInfo from
   // the command line causes the test SkiaOutputSurfaceImplTest.SubmitPaint to
   // fail on Android.
   gpu_service_ = std::make_unique<GpuServiceImpl>(
@@ -179,7 +293,7 @@ void TestGpuServiceHolder::InitializeOnGpuThread(
       gpu_feature_info, gpu_preferences,
       /*gpu_info_for_hardware_gpu=*/gpu::GPUInfo(),
       /*gpu_feature_info_for_hardware_gpu=*/gpu::GpuFeatureInfo(),
-      /*gpu_extra_info=*/gpu::GpuExtraInfo(),
+      /*gpu_extra_info=*/gfx::GpuExtraInfo(),
 #if BUILDFLAG(ENABLE_VULKAN)
       vulkan_implementation_.get(),
 #else
@@ -190,25 +304,23 @@ void TestGpuServiceHolder::InitializeOnGpuThread(
   // Use a disconnected mojo remote for GpuHost, we don't need to receive any
   // messages.
   mojo::PendingRemote<mojom::GpuHost> gpu_host_proxy;
-  ignore_result(gpu_host_proxy.InitWithNewPipeAndPassReceiver());
+  std::ignore = gpu_host_proxy.InitWithNewPipeAndPassReceiver();
   gpu_service_->InitializeWithHost(
       std::move(gpu_host_proxy), gpu::GpuProcessActivityFlags(),
-      gl::init::CreateOffscreenGLSurface(gfx::Size()),
+      gl::init::CreateOffscreenGLSurface(gl::GetDefaultDisplay(), gfx::Size()),
       /*sync_point_manager=*/nullptr, /*shared_image_manager=*/nullptr,
-      /*shutdown_event=*/nullptr);
+      /*scheduler=*/nullptr, /*shutdown_event=*/nullptr);
 
   task_executor_ = std::make_unique<gpu::GpuInProcessThreadService>(
-      gpu_thread_.task_runner(), gpu_service_->scheduler(),
+      this, gpu_thread_.task_runner(), gpu_service_->GetGpuScheduler(),
       gpu_service_->sync_point_manager(), gpu_service_->mailbox_manager(),
-      gpu_service_->share_group(),
       gpu_service_->gpu_channel_manager()
           ->default_offscreen_surface()
           ->GetFormat(),
       gpu_service_->gpu_feature_info(),
       gpu_service_->gpu_channel_manager()->gpu_preferences(),
       gpu_service_->shared_image_manager(),
-      gpu_service_->gpu_channel_manager()->program_cache(),
-      gpu_service_->GetContextState());
+      gpu_service_->gpu_channel_manager()->program_cache());
 
   // TODO(weiliangc): Since SkiaOutputSurface should not depend on command
   // buffer, the |gpu_task_sequence_| should be coming from
@@ -225,5 +337,28 @@ void TestGpuServiceHolder::DeleteOnGpuThread() {
   gpu_task_sequence_.reset();
   gpu_service_.reset();
 }
+
+#if defined(USE_OZONE) && !BUILDFLAG(IS_FUCHSIA)
+void TestGpuServiceHolder::BindInterface(
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  // The interfaces must be bound on the gpu to ensure the mojo calls happen
+  // on the correct sequence (same happens when the browser runs with a real
+  // gpu service).
+  gpu_thread_.task_runner()->PostTask(
+      FROM_HERE, base::BindOnce(&TestGpuServiceHolder::BindInterfaceOnGpuThread,
+                                base::Unretained(this), interface_name,
+                                std::move(interface_pipe)));
+}
+
+void TestGpuServiceHolder::BindInterfaceOnGpuThread(
+    const std::string& interface_name,
+    mojo::ScopedMessagePipeHandle interface_pipe) {
+  mojo::GenericPendingReceiver receiver =
+      mojo::GenericPendingReceiver(interface_name, std::move(interface_pipe));
+  CHECK(binders_.TryBind(&receiver))
+      << "Unable to find mojo interface " << interface_name;
+}
+#endif  // defined(USE_OZONE) && !BUILDFLAG(IS_FUCHSIA)
 
 }  // namespace viz

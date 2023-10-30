@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@ class LeScannerImpl {
   virtual void SetDelegate(LeScanner::Delegate* delegate) = 0;
   virtual bool StartScan() = 0;
   virtual bool StopScan() = 0;
+  virtual bool SetScanParameters(int scan_interval_ms, int scan_window_ms) = 0;
 };
 
 }  // namespace bluetooth_v2_shlib

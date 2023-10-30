@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,19 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "components/omnibox/browser/in_memory_url_index.h"
 
 // HistoryIndexRestoreObserver is used when blocking until the InMemoryURLIndex
 // finishes restoring. As soon as the InMemoryURLIndex finishes restoring the
-// provided Closure is invoked.
+// provided OnceClosure is invoked.
 class HistoryIndexRestoreObserver
     : public InMemoryURLIndex::RestoreCacheObserver {
  public:
-  explicit HistoryIndexRestoreObserver(const base::Closure& task);
+  explicit HistoryIndexRestoreObserver(base::OnceClosure task);
   ~HistoryIndexRestoreObserver() override;
+  HistoryIndexRestoreObserver(const HistoryIndexRestoreObserver&) = delete;
+  HistoryIndexRestoreObserver& operator=(const HistoryIndexRestoreObserver&) =
+      delete;
 
   bool succeeded() const { return succeeded_; }
 
@@ -25,10 +27,8 @@ class HistoryIndexRestoreObserver
   void OnCacheRestoreFinished(bool success) override;
 
  private:
-  base::Closure task_;
+  base::OnceClosure task_;
   bool succeeded_;
-
-  DISALLOW_COPY_AND_ASSIGN(HistoryIndexRestoreObserver);
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_HISTORY_INDEX_RESTORE_OBSERVER_H_

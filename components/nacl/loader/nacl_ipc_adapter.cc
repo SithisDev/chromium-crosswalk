@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,8 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/macros.h"
-#include "base/memory/shared_memory.h"
-#include "base/task_runner_util.h"
+#include "base/memory/platform_shared_memory_region.h"
+#include "base/memory/raw_ptr.h"
 #include "base/tuple.h"
 #include "build/build_config.h"
 #include "ipc/ipc_channel.h"
@@ -69,11 +68,12 @@ struct DescThunker {
       : adapter(adapter_arg) {
   }
 
+  DescThunker(const DescThunker&) = delete;
+  DescThunker& operator=(const DescThunker&) = delete;
+
   ~DescThunker() { adapter->CloseChannel(); }
 
   scoped_refptr<NaClIPCAdapter> adapter;
-
-  DISALLOW_COPY_AND_ASSIGN(DescThunker);
 };
 
 NaClIPCAdapter* ToAdapter(void* handle) {
@@ -225,6 +225,10 @@ int TranslatePepperFileReadWriteOpenFlags(int32_t pp_open_flags) {
 class NaClDescWrapper {
  public:
   explicit NaClDescWrapper(NaClDesc* desc): desc_(desc) {}
+
+  NaClDescWrapper(const NaClDescWrapper&) = delete;
+  NaClDescWrapper& operator=(const NaClDescWrapper&) = delete;
+
   ~NaClDescWrapper() {
     NaClDescUnref(desc_);
   }
@@ -232,27 +236,8 @@ class NaClDescWrapper {
   NaClDesc* desc() { return desc_; }
 
  private:
-  NaClDesc* desc_;
-  DISALLOW_COPY_AND_ASSIGN(NaClDescWrapper);
+  raw_ptr<NaClDesc> desc_;
 };
-
-std::unique_ptr<NaClDescWrapper> MakeShmNaClDesc(
-    const base::SharedMemoryHandle& handle,
-    size_t size) {
-#if defined(OS_MACOSX)
-  return std::unique_ptr<NaClDescWrapper>(new NaClDescWrapper(
-      NaClDescImcShmMachMake(handle.GetMemoryObject(), size)));
-#else
-  return std::unique_ptr<NaClDescWrapper>(
-      new NaClDescWrapper(NaClDescImcShmMake(
-#if defined(OS_WIN)
-          handle.GetHandle(),
-#else
-          base::SharedMemory::GetFdFromSharedMemoryHandle(handle),
-#endif
-          size)));
-#endif
-}
 
 std::unique_ptr<NaClDescWrapper> MakeShmRegionNaClDesc(
     base::subtle::PlatformSharedMemoryRegion region) {
@@ -260,12 +245,12 @@ std::unique_ptr<NaClDescWrapper> MakeShmRegionNaClDesc(
   DCHECK_NE(region.GetMode(),
             base::subtle::PlatformSharedMemoryRegion::Mode::kWritable);
   size_t size = region.GetSize();
-  base::subtle::PlatformSharedMemoryRegion::ScopedPlatformHandle handle =
+  base::subtle::ScopedPlatformSharedMemoryHandle handle =
       region.PassPlatformHandle();
   return std::make_unique<NaClDescWrapper>(
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_APPLE)
       NaClDescImcShmMachMake(handle.release(),
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
       NaClDescImcShmMake(handle.Take(),
 #else
       NaClDescImcShmMake(handle.fd.release(),
@@ -374,8 +359,8 @@ NaClIPCAdapter::NaClIPCAdapter(
     : lock_(),
       cond_var_(&lock_),
       task_runner_(runner),
-      resolve_file_token_cb_(resolve_file_token_cb),
-      open_resource_cb_(open_resource_cb),
+      resolve_file_token_cb_(std::move(resolve_file_token_cb)),
+      open_resource_cb_(std::move(open_resource_cb)),
       locked_data_() {
   io_thread_data_.channel_ = IPC::Channel::CreateServer(handle, this, runner);
   // Note, we can not PostTask for ConnectChannelOnIOThread here. If we did,
@@ -545,11 +530,8 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
 
       // resolve_file_token_cb_ must be invoked from the I/O thread.
       resolve_file_token_cb_.Run(
-          token_lo,
-          token_hi,
-          base::Bind(&NaClIPCAdapter::SaveOpenResourceMessage,
-                     this,
-                     msg));
+          token_lo, token_hi,
+          base::BindOnce(&NaClIPCAdapter::SaveOpenResourceMessage, this, msg));
 
       // In this case, we don't release the message to NaCl untrusted code
       // immediately. We defer it until we get an async message back from the
@@ -578,30 +560,25 @@ bool NaClIPCAdapter::RewriteMessage(const IPC::Message& msg, uint32_t type) {
     for (ppapi::proxy::SerializedHandle& handle : handles) {
       std::unique_ptr<NaClDescWrapper> nacl_desc;
       switch (handle.type()) {
-        case ppapi::proxy::SerializedHandle::SHARED_MEMORY: {
-          nacl_desc = MakeShmNaClDesc(handle.shmem(),
-                                      static_cast<size_t>(handle.size()));
-          break;
-        }
         case ppapi::proxy::SerializedHandle::SHARED_MEMORY_REGION: {
           nacl_desc = MakeShmRegionNaClDesc(handle.TakeSharedMemoryRegion());
           break;
         }
         case ppapi::proxy::SerializedHandle::SOCKET: {
-          nacl_desc.reset(new NaClDescWrapper(NaClDescSyncSocketMake(
-#if defined(OS_WIN)
+          nacl_desc = std::make_unique<NaClDescWrapper>(NaClDescSyncSocketMake(
+#if BUILDFLAG(IS_WIN)
               handle.descriptor().GetHandle()
 #else
               handle.descriptor().fd
 #endif
-                  )));
+                  ));
           break;
         }
         case ppapi::proxy::SerializedHandle::FILE: {
           // Create the NaClDesc for the file descriptor. If quota checking is
           // required, wrap it in a NaClDescQuota.
           NaClDesc* desc = NaClDescIoMakeFromHandle(
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
               handle.descriptor().GetHandle(),
 #else
               handle.descriptor().fd,
@@ -612,7 +589,7 @@ bool NaClIPCAdapter::RewriteMessage(const IPC::Message& msg, uint32_t type) {
                 locked_data_.nacl_msg_scanner_.GetFile(handle.file_io()), desc);
           }
           if (desc)
-            nacl_desc.reset(new NaClDescWrapper(desc));
+            nacl_desc = std::make_unique<NaClDescWrapper>(desc);
           break;
         }
 
@@ -671,7 +648,7 @@ void NaClIPCAdapter::SaveOpenResourceMessage(
     ppapi::proxy::SerializedHandle orig_sh;
 
     // These CHECKs could fail if the renderer sends this process a malformed
-    // message, but that's OK becuase in general the renderer can cause the NaCl
+    // message, but that's OK because in general the renderer can cause the NaCl
     // loader process to exit.
     CHECK(IPC::ReadParam(&orig_msg, &iter, &token_lo));
     CHECK(IPC::ReadParam(&orig_msg, &iter, &token_hi));
@@ -680,7 +657,7 @@ void NaClIPCAdapter::SaveOpenResourceMessage(
 
     std::unique_ptr<NaClDescWrapper> desc_wrapper(
         new NaClDescWrapper(NaClDescIoMakeFromHandle(
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
             orig_sh.descriptor().GetHandle(),
 #else
             orig_sh.descriptor().fd,
@@ -764,8 +741,8 @@ bool NaClIPCAdapter::SendCompleteMessage(const char* buffer,
   // Length of the message not including the body. The data passed to us by the
   // plugin should match that in the message header. This should have already
   // been validated by GetBufferStatus.
-  int body_len = static_cast<int>(buffer_len - sizeof(NaClMessageHeader));
-  DCHECK(body_len == static_cast<int>(header->payload_size));
+  size_t body_len = buffer_len - sizeof(NaClMessageHeader);
+  CHECK(body_len == header->payload_size);
 
   // We actually discard the flags and only copy the ones we care about. This
   // is just because message doesn't have a constructor that takes raw flags.
@@ -841,7 +818,7 @@ void NaClIPCAdapter::SendMessageOnIOThread(
     // from the I/O thread.
     if (open_resource_cb_.Run(
             *message.get(), key,
-            base::Bind(&NaClIPCAdapter::SaveOpenResourceMessage, this))) {
+            base::BindOnce(&NaClIPCAdapter::SaveOpenResourceMessage, this))) {
       // The callback sent a reply to the untrusted side.
       return;
     }

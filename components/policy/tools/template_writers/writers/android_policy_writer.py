@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2015 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -20,9 +20,17 @@ def _EscapeResource(resource):
   '''Escape the resource for usage in an Android resource XML file.
   This includes standard XML escaping as well as those specific to Android.
   '''
-  if type(resource) == int:
+  if resource == None or type(resource) in (int, bool):
     return str(resource)
-  return xml_escape.escape(resource, {"'": "\\'", '"': '\\"', '\\': '\\\\'})
+  return xml_escape.escape(
+      resource,
+      {
+          # Written order is matter to prevent "'" becomes "\\\\'" instead of
+          # "\\'".
+          "\\": "\\\\",
+          "'": "\\'",
+          '"': '\\"',
+      })
 
 
 class AndroidPolicyWriter(xml_formatted_writer.XMLFormattedWriter):
@@ -73,6 +81,11 @@ class AndroidPolicyWriter(xml_formatted_writer.XMLFormattedWriter):
 
     items = policy.get('items')
     if items is not None:
+      items = [
+          item for item in items
+          if ('supported_on' not in item or
+              self.IsPolicyOrItemSupportedOnPlatform(item, 'android'))
+      ]
       entries = [item['caption'] for item in items]
       values = [item['value'] for item in items]
       self.AddStringArrayResource(name + 'Entries', entries)

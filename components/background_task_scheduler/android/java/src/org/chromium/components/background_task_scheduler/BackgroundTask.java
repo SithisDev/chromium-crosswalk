@@ -1,12 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.background_task_scheduler;
 
 import android.content.Context;
-import android.support.annotation.AnyThread;
-import android.support.annotation.MainThread;
+
+import androidx.annotation.AnyThread;
+import androidx.annotation.MainThread;
 
 /**
  * Entry point for callbacks from {@link BackgroundTaskScheduler}. Any classes implementing

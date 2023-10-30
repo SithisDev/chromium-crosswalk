@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,10 @@
 #include <stdint.h>
 
 #include "base/time/time.h"
-#include "content/common/content_export.h"
 
 namespace content {
 
-struct CONTENT_EXPORT ServiceWorkerConsts {
+struct ServiceWorkerConsts {
   static const char kBadMessageFromNonWindow[];
   static const char kBadMessageGetRegistrationForReadyDuplicated[];
   static const char kBadMessageImproperOrigins[];
@@ -43,15 +42,15 @@ struct CONTENT_EXPORT ServiceWorkerConsts {
   static const char kServiceWorkerRedirectError[];
   static const char kServiceWorkerAllowed[];
   static const char kServiceWorkerCopyScriptError[];
+  static const char kServiceWorkerInvalidVersionError[];
 
   // Constants for invalid identifiers.
   static const int kInvalidEmbeddedWorkerThreadId;
-  static const int64_t kInvalidServiceWorkerResourceId;
 
   // The HTTP cache is bypassed for Service Worker scripts if the last network
   // fetch occurred over 24 hours ago.
   static constexpr base::TimeDelta kServiceWorkerScriptMaxCacheAge =
-      base::TimeDelta::FromHours(24);
+      base::Hours(24);
 };
 
 }  // namespace content

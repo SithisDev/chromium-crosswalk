@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -79,33 +79,6 @@ public class TestCallbackHelperContainer {
     }
 
     /**
-     * CallbackHelper for OnReceivedError.
-     */
-    public static class OnReceivedErrorHelper extends CallbackHelper {
-        private int mErrorCode;
-        private String mDescription;
-        private String mFailingUrl;
-        public void notifyCalled(int errorCode, String description, String failingUrl) {
-            mErrorCode = errorCode;
-            mDescription = description;
-            mFailingUrl = failingUrl;
-            notifyCalled();
-        }
-        public int getErrorCode() {
-            assert getCallCount() > 0;
-            return mErrorCode;
-        }
-        public String getDescription() {
-            assert getCallCount() > 0;
-            return mDescription;
-        }
-        public String getFailingUrl() {
-            assert getCallCount() > 0;
-            return mFailingUrl;
-        }
-    }
-
-    /**
      * CallbackHelper for OnEvaluateJavaScriptResult.
      * This class wraps the evaluation of JavaScript code allowing test code to
      * synchronously evaluate JavaScript and then test the result.
@@ -131,7 +104,25 @@ public class TestCallbackHelperContainer {
         }
 
         /**
-         * Returns true if the evaluation started by evaluateJavaScriptForTests() has completed.
+         * Starts evaluation of a given JavaScript code on a given webContents, acting as if a user
+         * gesture is present.
+         * @param webContents A WebContents instance to be used.
+         * @param code A JavaScript code to be evaluated.
+         */
+        public void evaluateJavaScriptWithUserGestureForTests(
+                WebContents webContents, String code) {
+            JavaScriptCallback callback = new JavaScriptCallback() {
+                @Override
+                public void handleJavaScriptResult(String jsonResult) {
+                    notifyCalled(jsonResult);
+                }
+            };
+            mJsonResult = null;
+            WebContentsUtils.evaluateJavaScriptWithUserGesture(webContents, code, callback);
+        }
+
+        /**
+         * Returns true if a started JavaScript evaluation has completed.
          */
         public boolean hasValue() {
             return mJsonResult != null;
@@ -153,8 +144,7 @@ public class TestCallbackHelperContainer {
          * Waits till the JavaScript evaluation finishes and returns true if a value was returned,
          * false if it timed-out.
          */
-        public boolean waitUntilHasValue(long timeout, TimeUnit unit)
-                throws InterruptedException, TimeoutException {
+        public boolean waitUntilHasValue(long timeout, TimeUnit unit) throws TimeoutException {
             int count = getCallCount();
             // Reads and writes are atomic for reference variables in java, this is thread safe
             if (hasValue()) return true;
@@ -162,7 +152,7 @@ public class TestCallbackHelperContainer {
             return hasValue();
         }
 
-        public boolean waitUntilHasValue() throws InterruptedException, TimeoutException {
+        public boolean waitUntilHasValue() throws TimeoutException {
             return waitUntilHasValue(CallbackHelper.WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         }
 
@@ -181,7 +171,7 @@ public class TestCallbackHelperContainer {
         return mTestWebContentsObserver.getOnPageFinishedHelper();
     }
 
-    public OnReceivedErrorHelper getOnReceivedErrorHelper() {
-        return mTestWebContentsObserver.getOnReceivedErrorHelper();
+    public CallbackHelper getOnFirstVisuallyNonEmptyPaintHelper() {
+        return mTestWebContentsObserver.getOnFirstVisuallyNonEmptyPaintHelper();
     }
 }

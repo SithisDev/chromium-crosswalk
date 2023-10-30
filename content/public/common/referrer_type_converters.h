@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "content/common/content_export.h"
 #include "content/public/common/referrer.h"
 #include "mojo/public/cpp/bindings/type_converter.h"
-#include "third_party/blink/public/mojom/referrer.mojom.h"
+#include "third_party/blink/public/mojom/loader/referrer.mojom.h"
 
 namespace mojo {
 // TODO(leonhsl): Remove these converters once we remove content::Referrer.

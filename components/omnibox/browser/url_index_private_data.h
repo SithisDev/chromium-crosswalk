@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,8 @@
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/time/time.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/omnibox/browser/in_memory_url_index_cache.pb.h"
 #include "components/omnibox/browser/in_memory_url_index_types.h"
 #include "components/omnibox/browser/scored_history_match.h"
 
@@ -27,17 +27,10 @@ namespace bookmarks {
 class BookmarkModel;
 }
 
-namespace in_memory_url_index {
-class InMemoryURLIndexCacheItem;
-}
-
 namespace history {
 class HistoryDatabase;
 class InMemoryURLIndex;
 }
-
-// Current version of the cache file.
-static const int kCurrentCacheFileVersion = 5;
 
 // A structure private to InMemoryURLIndex describing its internal data and
 // providing for restoring, rebuilding and updating that internal data. As
@@ -56,7 +49,7 @@ class URLIndexPrivateData
 
   URLIndexPrivateData();
 
-  // Given a base::string16 in |term_string|, scans the history index and
+  // Given a std::u16string in |term_string|, scans the history index and
   // returns a vector with all scored, matching history items. The
   // |term_string| is broken down into individual terms (words), each of which
   // must occur in the candidate history item's URL or page title for the item
@@ -75,7 +68,7 @@ class URLIndexPrivateData
   // to this function. In total, |max_matches| of items will be returned in the
   // |ScoredHistoryMatches| vector.
   ScoredHistoryMatches HistoryItemsForTerms(
-      base::string16 term_string,
+      std::u16string term_string,
       size_t cursor_position,
       size_t max_matches,
       bookmarks::BookmarkModel* bookmark_model,
@@ -85,12 +78,12 @@ class URLIndexPrivateData
   // exist and it meets the minimum 'quick' criteria. If the row already exists
   // in the index then the index will be updated if the row still meets the
   // criteria, otherwise the row will be removed from the index. Returns true
-  // if the index was actually updated. |scheme_whitelist| is used to filter
+  // if the index was actually updated. |scheme_allowlist| is used to filter
   // non-qualifying schemes. |history_service| is used to schedule an update to
   // the recent visits component of this URL's entry in the index.
   bool UpdateURL(history::HistoryService* history_service,
                  const history::URLRow& row,
-                 const std::set<std::string>& scheme_whitelist,
+                 const std::set<std::string>& scheme_allowlist,
                  base::CancelableTaskTracker* tracker);
 
   // Updates the entry for |url_id| in the index, replacing its
@@ -113,24 +106,12 @@ class URLIndexPrivateData
   // was actually updated.
   bool DeleteURL(const GURL& url);
 
-  // Constructs a new object by restoring its contents from the cache file
-  // at |path|. Returns the new URLIndexPrivateData which on success will
-  // contain the restored data but upon failure will be empty.
-  // This function should be run on the the file thread.
-  static scoped_refptr<URLIndexPrivateData> RestoreFromFile(
-      const base::FilePath& path);
-
   // Constructs a new object by rebuilding its contents from the history
   // database in |history_db|. Returns the new URLIndexPrivateData which on
   // success will contain the rebuilt data but upon failure will be empty.
   static scoped_refptr<URLIndexPrivateData> RebuildFromHistory(
       history::HistoryDatabase* history_db,
-      const std::set<std::string>& scheme_whitelist);
-
-  // Writes |private_data| as a cache file to |file_path| and returns success.
-  static bool WritePrivateDataToCacheFileTask(
-      scoped_refptr<URLIndexPrivateData> private_data,
-      const base::FilePath& file_path);
+      const std::set<std::string>& scheme_allowlist);
 
   // Creates a copy of ourself.
   scoped_refptr<URLIndexPrivateData> Duplicate() const;
@@ -152,18 +133,16 @@ class URLIndexPrivateData
 
   friend class ::HistoryQuickProviderTest;
   friend class InMemoryURLIndexTest;
-  FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, CacheSaveRestore);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, CalculateWordStartsOffsets);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest,
                            CalculateWordStartsOffsetsUnderscore);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, HugeResultSet);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, ReadVisitsFromHistory);
-  FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, RebuildFromHistoryIfCacheOld);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, Scoring);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, TitleSearch);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, TrimHistoryIds);
   FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, TypedCharacterCaching);
-  FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, WhitelistedURLs);
+  FRIEND_TEST_ALL_PREFIXES(InMemoryURLIndexTest, AllowlistedURLs);
   FRIEND_TEST_ALL_PREFIXES(LimitedInMemoryURLIndexTest, Initialization);
 
   // Support caching of term results so that we can optimize searches which
@@ -200,7 +179,7 @@ class URLIndexPrivateData
     HistoryIDSet history_id_set_;
     bool used_;  // True if this item has been used for the current term search.
   };
-  typedef std::map<base::string16, SearchTermCacheItem> SearchTermCacheMap;
+  typedef std::map<std::u16string, SearchTermCacheItem> SearchTermCacheMap;
 
   // A helper predicate class used to filter excess history items when the
   // candidate results set is too large.
@@ -231,7 +210,7 @@ class URLIndexPrivateData
 
   // Helper function to HistoryIDSetFromWords which composes a set of history
   // ids for the given term given in |term|.
-  HistoryIDSet HistoryIDsForTerm(const base::string16& term);
+  HistoryIDSet HistoryIDsForTerm(const std::u16string& term);
 
   // Given a set of Char16s, finds words containing those characters.
   WordIDSet WordIDSetForTermChars(const Char16Set& term_chars);
@@ -239,7 +218,7 @@ class URLIndexPrivateData
   // Helper function for HistoryItemsForTerms().  Fills in |scored_items| from
   // the matches listed in |history_ids|.
   void HistoryIdsToScoredMatches(HistoryIDVector history_ids,
-                                 const base::string16& lower_raw_string,
+                                 const std::u16string& lower_raw_string,
                                  const TemplateURLService* template_url_service,
                                  bookmarks::BookmarkModel* bookmark_model,
                                  ScoredHistoryMatches* scored_items) const;
@@ -251,7 +230,7 @@ class URLIndexPrivateData
       WordStarts* terms_to_word_starts_offsets);
 
   // Indexes one URL history item as described by |row|. Returns true if the
-  // row was actually indexed. |scheme_whitelist| is used to filter
+  // row was actually indexed. |scheme_allowlist| is used to filter
   // non-qualifying schemes.  If |history_db| is not NULL then this function
   // uses the history database synchronously to get the URL's recent visits
   // information.  This mode should/ only be used on the historyDB thread.
@@ -261,7 +240,7 @@ class URLIndexPrivateData
   bool IndexRow(history::HistoryDatabase* history_db,
                 history::HistoryService* history_service,
                 const history::URLRow& row,
-                const std::set<std::string>& scheme_whitelist,
+                const std::set<std::string>& scheme_allowlist,
                 base::CancelableTaskTracker* tracker);
 
   // Parses and indexes the words in the URL and page title of |row| and
@@ -271,11 +250,11 @@ class URLIndexPrivateData
 
   // Given a single word in |uni_word|, adds a reference for the containing
   // history item identified by |history_id| to the index.
-  void AddWordToIndex(const base::string16& uni_word, HistoryID history_id);
+  void AddWordToIndex(const std::u16string& uni_word, HistoryID history_id);
 
   // Adds a new entry to |word_list_|. Uses previously freed positions if
   // available.
-  WordID AddNewWordToWordList(const base::string16& term);
+  WordID AddNewWordToWordList(const std::u16string& term);
 
   // Removes |row| and all associated words and characters from the index.
   void RemoveRowFromIndex(const history::URLRow& row);
@@ -286,45 +265,9 @@ class URLIndexPrivateData
   // Clears |used_| for each item in the search term cache.
   void ResetSearchTermCache();
 
-  // Caches the index private data and writes the cache file to the profile
-  // directory.  Called by WritePrivateDataToCacheFileTask.
-  bool SaveToFile(const base::FilePath& file_path);
-
-  // Encode a data structure into the protobuf |cache|.
-  void SavePrivateData(
-      in_memory_url_index::InMemoryURLIndexCacheItem* cache) const;
-  void SaveWordList(
-      in_memory_url_index::InMemoryURLIndexCacheItem* cache) const;
-  void SaveWordMap(in_memory_url_index::InMemoryURLIndexCacheItem* cache) const;
-  void SaveCharWordMap(
-      in_memory_url_index::InMemoryURLIndexCacheItem* cache) const;
-  void SaveWordIDHistoryMap(
-      in_memory_url_index::InMemoryURLIndexCacheItem* cache) const;
-  void SaveHistoryInfoMap(
-      in_memory_url_index::InMemoryURLIndexCacheItem* cache) const;
-  void SaveWordStartsMap(
-      in_memory_url_index::InMemoryURLIndexCacheItem* cache) const;
-
-  // Decode a data structure from the protobuf |cache|. Return false if there
-  // is any kind of failure.
-  bool RestorePrivateData(
-      const in_memory_url_index::InMemoryURLIndexCacheItem& cache);
-  bool RestoreWordList(
-      const in_memory_url_index::InMemoryURLIndexCacheItem& cache);
-  bool RestoreWordMap(
-      const in_memory_url_index::InMemoryURLIndexCacheItem& cache);
-  bool RestoreCharWordMap(
-      const in_memory_url_index::InMemoryURLIndexCacheItem& cache);
-  bool RestoreWordIDHistoryMap(
-      const in_memory_url_index::InMemoryURLIndexCacheItem& cache);
-  bool RestoreHistoryInfoMap(
-      const in_memory_url_index::InMemoryURLIndexCacheItem& cache);
-  bool RestoreWordStartsMap(
-      const in_memory_url_index::InMemoryURLIndexCacheItem& cache);
-
-  // Determines if |gurl| has a whitelisted scheme and returns true if so.
-  static bool URLSchemeIsWhitelisted(const GURL& gurl,
-                                     const std::set<std::string>& whitelist);
+  // Determines if |gurl| has a allowlisted scheme and returns true if so.
+  static bool URLSchemeIsAllowlisted(const GURL& gurl,
+                                     const std::set<std::string>& allowlist);
 
   // Returns true if the URL associated with |history_id| is missing, malformed,
   // or otherwise should not be displayed.  (Results from the default search
@@ -334,16 +277,6 @@ class URLIndexPrivateData
 
   // Cache of search terms.
   SearchTermCacheMap search_term_cache_;
-
-  // Start of data members that are cached -------------------------------------
-
-  // The version of the cache file most recently used to restore this instance
-  // of the private data. If the private data was rebuilt from the history
-  // database this will be 0.
-  int restored_cache_version_;
-
-  // The last time the data was rebuilt from the history database.
-  base::Time last_time_rebuilt_from_history_;
 
   // A list of all of indexed words. The index of a word in this list is the
   // ID of the word in the word_map_. It reduces the memory overhead by
@@ -384,13 +317,6 @@ class URLIndexPrivateData
   // A one-to-one mapping from HistoryID to the word starts detected in each
   // item's URL and page title.
   WordStartsMap word_starts_map_;
-
-  // End of data members that are cached ---------------------------------------
-
-  // For unit testing only. Specifies the version of the cache file to be saved.
-  // Used only for testing upgrading of an older version of the cache upon
-  // restore.
-  int saved_cache_version_;
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_URL_INDEX_PRIVATE_DATA_H_

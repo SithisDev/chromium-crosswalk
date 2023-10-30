@@ -1,16 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 package org.chromium.content_public.browser;
 
-import android.annotation.TargetApi;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewStructure;
 import android.view.accessibility.AccessibilityNodeProvider;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.RequiresApi;
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.content.browser.accessibility.WebContentsAccessibilityImpl;
 
 /**
@@ -48,6 +50,18 @@ public interface WebContentsAccessibility {
     void setAccessibilityEnabledForTesting();
 
     /**
+     * Enables a11y service mask flags in the BrowserAccessibilityState for testing.
+     */
+    @VisibleForTesting
+    void setBrowserAccessibilityStateForTesting();
+
+    /**
+     *  Add a spelling error.
+     */
+    @VisibleForTesting
+    void addSpellingErrorForTesting(int virtualViewId, int startOffset, int endOffset);
+
+    /**
      * Attempts to perform an accessibility action on the web content.  If the accessibility action
      * cannot be processed, it returns {@code null}, allowing the caller to know to call the
      * super {@link View#performAccessibilityAction(int, Bundle)} method and use that return value.
@@ -71,7 +85,7 @@ public interface WebContentsAccessibility {
     /**
      * @see View#onProvideVirtualStructure().
      */
-    @TargetApi(Build.VERSION_CODES.M)
+    @RequiresApi(Build.VERSION_CODES.M)
     void onProvideVirtualStructure(ViewStructure structure, boolean ignoreScrollOffset);
 
     /**
@@ -103,6 +117,11 @@ public interface WebContentsAccessibility {
     void setShouldFocusOnPageLoad(boolean on);
 
     /**
+     * Sets whether or not the image descriptions feature should be allowed.
+     */
+    void setAllowImageDescriptions(boolean allowImageDescriptions);
+
+    /**
      * Called when autofill popup is displayed. Used to upport navigation through the view.
      * @param autofillPopupView The displayed autofill popup view.
      */
@@ -117,4 +136,15 @@ public interface WebContentsAccessibility {
      * Called when the a11y focus gets cleared on the autofill popup.
      */
     void onAutofillPopupAccessibilityFocusCleared();
+
+    /**
+     * Called directly from A {@link View} in the absence of a WebView and renderer.
+     * @return Whether the hover event was consumed.
+     */
+    boolean onHoverEventNoRenderer(MotionEvent event);
+
+    /**
+     * Called to reset focus state to nothing.
+     */
+    void resetFocus();
 }

@@ -1,20 +1,16 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/net/browser_online_state_observer.h"
 
-#include "content/common/view_messages.h"
-#include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
+#include "content/common/renderer.mojom.h"
+#include "content/public/browser/render_process_host.h"
 
 namespace content {
 
 BrowserOnlineStateObserver::BrowserOnlineStateObserver() {
   net::NetworkChangeNotifier::AddMaxBandwidthObserver(this);
-  registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
-                 content::NotificationService::AllSources());
 }
 
 BrowserOnlineStateObserver::~BrowserOnlineStateObserver() {
@@ -35,14 +31,8 @@ void BrowserOnlineStateObserver::OnMaxBandwidthChanged(
   }
 }
 
-void BrowserOnlineStateObserver::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(NOTIFICATION_RENDERER_PROCESS_CREATED, type);
-
-  content::RenderProcessHost* rph =
-      content::Source<content::RenderProcessHost>(source).ptr();
+void BrowserOnlineStateObserver::OnRenderProcessHostCreated(
+    content::RenderProcessHost* rph) {
   double max_bandwidth_mbps;
   net::NetworkChangeNotifier::ConnectionType connection_type;
   net::NetworkChangeNotifier::GetMaxBandwidthAndConnectionType(

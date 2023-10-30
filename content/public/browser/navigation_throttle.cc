@@ -1,10 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/browser/navigation_throttle.h"
 
-#include "content/browser/frame_host/navigation_handle_impl.h"
+#include "content/browser/renderer_host/navigation_request.h"
 
 namespace content {
 
@@ -35,19 +35,19 @@ NavigationThrottle::ThrottleCheckResult::ThrottleCheckResult(
     NavigationThrottle::ThrottleAction action)
     : NavigationThrottle::ThrottleCheckResult(action,
                                               DefaultNetErrorCode(action),
-                                              base::nullopt) {}
+                                              absl::nullopt) {}
 
 NavigationThrottle::ThrottleCheckResult::ThrottleCheckResult(
     NavigationThrottle::ThrottleAction action,
     net::Error net_error_code)
     : NavigationThrottle::ThrottleCheckResult(action,
                                               net_error_code,
-                                              base::nullopt) {}
+                                              absl::nullopt) {}
 
 NavigationThrottle::ThrottleCheckResult::ThrottleCheckResult(
     NavigationThrottle::ThrottleAction action,
     net::Error net_error_code,
-    base::Optional<std::string> error_page_content)
+    absl::optional<std::string> error_page_content)
     : action_(action),
       net_error_code_(net_error_code),
       error_page_content_(error_page_content) {}
@@ -85,9 +85,7 @@ void NavigationThrottle::Resume() {
     resume_callback_.Run();
     return;
   }
-  static_cast<NavigationHandleImpl*>(navigation_handle_)
-      ->navigation_request()
-      ->Resume(this);
+  NavigationRequest::From(navigation_handle_)->Resume(this);
 }
 
 void NavigationThrottle::CancelDeferredNavigation(
@@ -96,8 +94,7 @@ void NavigationThrottle::CancelDeferredNavigation(
     cancel_deferred_navigation_callback_.Run(result);
     return;
   }
-  static_cast<NavigationHandleImpl*>(navigation_handle_)
-      ->navigation_request()
+  NavigationRequest::From(navigation_handle_)
       ->CancelDeferredNavigation(this, result);
 }
 

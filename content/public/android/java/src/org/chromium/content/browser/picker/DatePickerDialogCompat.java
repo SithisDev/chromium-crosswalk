@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@ package org.chromium.content.browser.picker;
 import android.app.DatePickerDialog;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.os.Build;
 import android.widget.DatePicker;
 
 /**
@@ -48,9 +47,7 @@ class DatePickerDialogCompat extends DatePickerDialog {
         // On Android L+, the dialog shouldn't have a title. This works around a bug in
         // DatePickerDialog where calling updateDate() before the dialog has been shown causes
         // a title to appear. http://crbug.com/541350
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            title = "";
-        }
+        title = "";
         super.setTitle(title);
     }
 }

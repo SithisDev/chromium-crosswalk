@@ -1,18 +1,21 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
 
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/time/time.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_proxy.h"
@@ -30,19 +33,16 @@ class SignalSenderVerificationTest : public testing::Test {
   }
 
   void SetUp() override {
-    // Make the main thread not to allow IO.
-    base::ThreadRestrictions::SetIOAllowed(false);
-
     // Start the D-Bus thread.
-    dbus_thread_.reset(new base::Thread("D-Bus Thread"));
+    dbus_thread_ = std::make_unique<base::Thread>("D-Bus Thread");
     base::Thread::Options thread_options;
-    thread_options.message_loop_type = base::MessageLoop::TYPE_IO;
-    ASSERT_TRUE(dbus_thread_->StartWithOptions(thread_options));
+    thread_options.message_pump_type = base::MessagePumpType::IO;
+    ASSERT_TRUE(dbus_thread_->StartWithOptions(std::move(thread_options)));
 
     // Create the test service, using the D-Bus thread.
     TestService::Options options;
     options.dbus_task_runner = dbus_thread_->task_runner();
-    test_service_.reset(new TestService(options));
+    test_service_ = std::make_unique<TestService>(options);
 
     // Create the client, using the D-Bus thread.
     Bus::Options bus_options;
@@ -55,22 +55,20 @@ class SignalSenderVerificationTest : public testing::Test {
         ObjectPath("/org/chromium/TestObject"));
     ASSERT_TRUE(bus_->HasDBusThread());
 
-    object_proxy_->SetNameOwnerChangedCallback(
-        base::Bind(&SignalSenderVerificationTest::OnNameOwnerChanged,
-                   base::Unretained(this),
-                   &on_name_owner_changed_called_));
+    object_proxy_->SetNameOwnerChangedCallback(base::BindRepeating(
+        &SignalSenderVerificationTest::OnNameOwnerChanged,
+        base::Unretained(this), &on_name_owner_changed_called_));
 
     // Connect to the "Test" signal of "org.chromium.TestInterface" from
     // the remote object.
     object_proxy_->ConnectToSignal(
-        "org.chromium.TestInterface",
-        "Test",
-        base::Bind(&SignalSenderVerificationTest::OnTestSignal,
-                   base::Unretained(this)),
-        base::Bind(&SignalSenderVerificationTest::OnConnected,
-                   base::Unretained(this)));
+        "org.chromium.TestInterface", "Test",
+        base::BindRepeating(&SignalSenderVerificationTest::OnTestSignal,
+                            base::Unretained(this)),
+        base::BindOnce(&SignalSenderVerificationTest::OnConnected,
+                       base::Unretained(this)));
     // Wait until the object proxy is connected to the signal.
-    run_loop_.reset(new base::RunLoop);
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
 
     // Start the test service.
@@ -82,7 +80,7 @@ class SignalSenderVerificationTest : public testing::Test {
     // Same setup for the second TestService. This service should not have the
     // ownership of the name at this point.
     options.service_name = test_service_->service_name();
-    test_service2_.reset(new TestService(options));
+    test_service2_ = std::make_unique<TestService>(options);
     ASSERT_TRUE(test_service2_->StartService());
     test_service2_->WaitUntilServiceIsStarted();
     ASSERT_TRUE(test_service2_->HasDBusThread());
@@ -90,7 +88,7 @@ class SignalSenderVerificationTest : public testing::Test {
 
     // The name should be owned and known at this point.
     if (!on_name_owner_changed_called_) {
-      run_loop_.reset(new base::RunLoop);
+      run_loop_ = std::make_unique<base::RunLoop>();
       run_loop_->Run();
     }
     ASSERT_FALSE(latest_name_owner_.empty());
@@ -103,19 +101,14 @@ class SignalSenderVerificationTest : public testing::Test {
     test_service_->ShutdownAndBlock();
     test_service2_->ShutdownAndBlock();
 
-    // Reset to the default.
-    base::ThreadRestrictions::SetIOAllowed(true);
-
-    // Stopping a thread is considered an IO operation, so do this after
-    // allowing IO.
-    test_service_->Stop();
-    test_service2_->Stop();
+    SafeServiceStop(test_service_.get());
+    SafeServiceStop(test_service2_.get());
   }
 
   void OnOwnership(bool expected, bool success) {
     ASSERT_EQ(expected, success);
     // PostTask to quit the RunLoop as this is called from D-Bus thread.
-    scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
+    task_environment_.GetMainThreadTaskRunner()->PostTask(
         FROM_HERE,
         base::BindOnce(&SignalSenderVerificationTest::OnOwnershipInternal,
                        base::Unretained(this)));
@@ -154,23 +147,24 @@ class SignalSenderVerificationTest : public testing::Test {
   // Wait for the hey signal to be received.
   void WaitForTestSignal() {
     // OnTestSignal() will quit the message loop.
-    run_loop_.reset(new base::RunLoop);
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
 
-  // Stopping a thread is considered an IO operation, so we need to fiddle with
-  // thread restrictions before and after calling Stop() on a TestService.
+  // Stopping a thread is a blocking IO operation, so we need to fiddle with
+  // thread restrictions to call Stop() on a TestService.
   void SafeServiceStop(TestService* test_service) {
-    base::ThreadRestrictions::SetIOAllowed(true);
+    base::ScopedAllowBlockingForTesting allow_blocking;
     test_service->Stop();
-    base::ThreadRestrictions::SetIOAllowed(false);
   }
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
+  // Make the main thread not to allow IO.
+  base::ScopedDisallowBlocking disallow_blocking_;
   std::unique_ptr<base::RunLoop> run_loop_;
   std::unique_ptr<base::Thread> dbus_thread_;
   scoped_refptr<Bus> bus_;
-  ObjectProxy* object_proxy_;
+  raw_ptr<ObjectProxy> object_proxy_;
   std::unique_ptr<TestService> test_service_;
   std::unique_ptr<TestService> test_service2_;
   // Text message from "Test" signal.
@@ -221,7 +215,7 @@ TEST_F(SignalSenderVerificationTest, DISABLED_TestOwnerChanged) {
   ASSERT_FALSE(latest_name_owner_.empty());
   test_service_->ShutdownAndBlock();
   // OnNameOwnerChanged will PostTask to quit the message loop.
-  run_loop_.reset(new base::RunLoop);
+  run_loop_ = std::make_unique<base::RunLoop>();
   run_loop_->Run();
   // latest_name_owner_ should be empty as the owner is gone.
   ASSERT_TRUE(latest_name_owner_.empty());
@@ -230,14 +224,14 @@ TEST_F(SignalSenderVerificationTest, DISABLED_TestOwnerChanged) {
   on_name_owner_changed_called_ = false;
   on_ownership_called_ = false;
   test_service2_->RequestOwnership(
-      base::Bind(&SignalSenderVerificationTest::OnOwnership,
-                 base::Unretained(this), true));
+      base::BindOnce(&SignalSenderVerificationTest::OnOwnership,
+                     base::Unretained(this), true));
   // Both of OnNameOwnerChanged() and OnOwnership() should quit the MessageLoop,
   // but there's no expected order of those 2 event.
-  run_loop_.reset(new base::RunLoop);
+  run_loop_ = std::make_unique<base::RunLoop>();
   run_loop_->Run();
   if (!on_name_owner_changed_called_ || !on_ownership_called_) {
-    run_loop_.reset(new base::RunLoop);
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
   ASSERT_TRUE(on_name_owner_changed_called_);
@@ -261,7 +255,7 @@ TEST_F(SignalSenderVerificationTest, DISABLED_TestOwnerStealing) {
   ASSERT_FALSE(latest_name_owner_.empty());
   test_service_->ShutdownAndBlock();
   // OnNameOwnerChanged will PostTask to quit the message loop.
-  run_loop_.reset(new base::RunLoop);
+  run_loop_ = std::make_unique<base::RunLoop>();
   run_loop_->Run();
   // latest_name_owner_ should be empty as the owner is gone.
   ASSERT_TRUE(latest_name_owner_.empty());
@@ -280,7 +274,7 @@ TEST_F(SignalSenderVerificationTest, DISABLED_TestOwnerStealing) {
   ASSERT_TRUE(stealable_test_service.has_ownership());
 
   // OnNameOwnerChanged will PostTask to quit the message loop.
-  run_loop_.reset(new base::RunLoop);
+  run_loop_ = std::make_unique<base::RunLoop>();
   run_loop_->Run();
 
   // Send a signal to check that the service is correctly owned.
@@ -296,14 +290,14 @@ TEST_F(SignalSenderVerificationTest, DISABLED_TestOwnerStealing) {
   // Reset the flag as NameOwnerChanged was called above.
   on_name_owner_changed_called_ = false;
   test_service2_->RequestOwnership(
-      base::Bind(&SignalSenderVerificationTest::OnOwnership,
-                 base::Unretained(this), true));
+      base::BindOnce(&SignalSenderVerificationTest::OnOwnership,
+                     base::Unretained(this), true));
   // Both of OnNameOwnerChanged() and OnOwnership() should quit the MessageLoop,
   // but there's no expected order of those 2 event.
-  run_loop_.reset(new base::RunLoop);
+  run_loop_ = std::make_unique<base::RunLoop>();
   run_loop_->Run();
   if (!on_name_owner_changed_called_ || !on_ownership_called_) {
-    run_loop_.reset(new base::RunLoop);
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
   ASSERT_TRUE(on_name_owner_changed_called_);
@@ -328,22 +322,20 @@ TEST_F(SignalSenderVerificationTest, DISABLED_TestMultipleObjects) {
       ObjectPath("/org/chromium/DifferentObject"));
 
   bool second_name_owner_changed_called = false;
-  object_proxy2->SetNameOwnerChangedCallback(
-      base::Bind(&SignalSenderVerificationTest::OnNameOwnerChanged,
-                 base::Unretained(this),
-                 &second_name_owner_changed_called));
+  object_proxy2->SetNameOwnerChangedCallback(base::BindRepeating(
+      &SignalSenderVerificationTest::OnNameOwnerChanged, base::Unretained(this),
+      &second_name_owner_changed_called));
 
   // Connect to a signal on the additional remote object to trigger the
   // name owner matching.
   object_proxy2->ConnectToSignal(
-      "org.chromium.DifferentTestInterface",
-      "Test",
-      base::Bind(&SignalSenderVerificationTest::OnTestSignal,
-                 base::Unretained(this)),
-      base::Bind(&SignalSenderVerificationTest::OnConnected,
-                 base::Unretained(this)));
+      "org.chromium.DifferentTestInterface", "Test",
+      base::BindRepeating(&SignalSenderVerificationTest::OnTestSignal,
+                          base::Unretained(this)),
+      base::BindOnce(&SignalSenderVerificationTest::OnConnected,
+                     base::Unretained(this)));
   // Wait until the object proxy is connected to the signal.
-  run_loop_.reset(new base::RunLoop);
+  run_loop_ = std::make_unique<base::RunLoop>();
   run_loop_->Run();
 
   // Send the test signal from the exported object.
@@ -358,7 +350,7 @@ TEST_F(SignalSenderVerificationTest, DISABLED_TestMultipleObjects) {
   ASSERT_FALSE(latest_name_owner_.empty());
   test_service_->ShutdownAndBlock();
   // OnNameOwnerChanged will PostTask to quit the message loop.
-  run_loop_.reset(new base::RunLoop);
+  run_loop_ = std::make_unique<base::RunLoop>();
   run_loop_->Run();
   // latest_name_owner_ should be empty as the owner is gone.
   ASSERT_TRUE(latest_name_owner_.empty());
@@ -367,13 +359,13 @@ TEST_F(SignalSenderVerificationTest, DISABLED_TestMultipleObjects) {
   on_name_owner_changed_called_ = false;
   second_name_owner_changed_called = false;
   test_service2_->RequestOwnership(
-      base::Bind(&SignalSenderVerificationTest::OnOwnership,
-                 base::Unretained(this), true));
+      base::BindOnce(&SignalSenderVerificationTest::OnOwnership,
+                     base::Unretained(this), true));
   // Both of OnNameOwnerChanged() and OnOwnership() should quit the MessageLoop,
   // but there's no expected order of those 2 event.
   while (!on_name_owner_changed_called_ || !second_name_owner_changed_called ||
          !on_ownership_called_) {
-    run_loop_.reset(new base::RunLoop);
+    run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
   }
   ASSERT_TRUE(on_name_owner_changed_called_);

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/message_loop/message_pump_type.h"
 #include "base/task/single_thread_task_executor.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -20,6 +21,7 @@
 #include "chromecast/crash/linux/minidump_uploader.h"
 #include "chromecast/public/cast_sys_info.h"
 #include "chromecast/system/reboot/reboot_util.h"
+#include "third_party/crashpad/crashpad/client/crashpad_info.h"
 
 namespace {
 
@@ -31,8 +33,14 @@ const int kUploadRetryIntervalDefault = 60;
 int main(int argc, char** argv) {
   base::AtExitManager exit_manager;
   base::CommandLine::Init(argc, argv);
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  chromecast::RebootUtil::Initialize(command_line->argv());
   chromecast::RegisterPathProvider();
   logging::InitLogging(logging::LoggingSettings());
+
+  // Allow the system crash handler to handle our own crashes.
+  crashpad::CrashpadInfo::GetCrashpadInfo()
+      ->set_system_crash_reporter_forwarding(crashpad::TriState::kEnabled);
 
   LOG(INFO) << "Starting crash uploader...";
 
@@ -41,12 +49,11 @@ int main(int argc, char** argv) {
   setpriority(PRIO_PROCESS, 0, 19);
 
   // Create the main task executor.
-  base::SingleThreadTaskExecutor io_task_executor(base::MessagePump::Type::IO);
+  base::SingleThreadTaskExecutor io_task_executor(base::MessagePumpType::IO);
 
   std::unique_ptr<chromecast::CastSysInfo> sys_info =
       chromecast::CreateSysInfo();
 
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   std::string server_url(
       command_line->GetSwitchValueASCII(switches::kCrashServerUrl));
   chromecast::MinidumpUploader uploader(sys_info.get(), server_url);
@@ -58,8 +65,7 @@ int main(int argc, char** argv) {
       chromecast::RebootUtil::RebootNow(
           chromecast::RebootShlib::CRASH_UPLOADER);
 
-    base::PlatformThread::Sleep(
-        base::TimeDelta::FromSeconds(kUploadRetryIntervalDefault));
+    base::PlatformThread::Sleep(base::Seconds(kUploadRetryIntervalDefault));
   }
 
   return EXIT_SUCCESS;

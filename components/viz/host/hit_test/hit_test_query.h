@@ -1,14 +1,14 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_VIZ_HOST_HIT_TEST_HIT_TEST_QUERY_H_
 #define COMPONENTS_VIZ_HOST_HIT_TEST_HIT_TEST_QUERY_H_
 
+#include <string>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "components/viz/common/hit_test/aggregated_hit_test_region.h"
 #include "components/viz/host/viz_host_export.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -19,7 +19,7 @@ struct Target {
   FrameSinkId frame_sink_id;
   // Coordinates in the coordinate system of the target FrameSinkId.
   gfx::PointF location_in_target;
-  // Different flags are defined in services/viz/public/interfaces/hit_test/
+  // Different flags are defined in services/viz/public/mojom/hit_test/
   // hit_test_region_list.mojom.
   uint32_t flags = 0;
 };
@@ -35,8 +35,11 @@ enum class EventSource {
 // TODO(crbug.com/966939): Handle 3d space cases correctly.
 class VIZ_HOST_EXPORT HitTestQuery {
  public:
-  explicit HitTestQuery(
-      base::RepeatingClosure shut_down_gpu_callback = base::RepeatingClosure());
+  HitTestQuery();
+
+  HitTestQuery(const HitTestQuery&) = delete;
+  HitTestQuery& operator=(const HitTestQuery&) = delete;
+
   virtual ~HitTestQuery();
 
   // HitTestAggregator has sent the most recent |hit_test_data| for targeting/
@@ -110,6 +113,10 @@ class VIZ_HOST_EXPORT HitTestQuery {
     return hit_test_data_;
   }
 
+  // Returns true if |id| is present in |hit_test_data|. If |id| is present
+  // |index| is set accordingly.
+  bool FindIndexOfFrameSink(const FrameSinkId& id, size_t* index) const;
+
  protected:
   // The FindTargetForLocation() functions call into this.
   // If |is_location_relative_to_parent| is true, |location| is relative to
@@ -131,6 +138,7 @@ class VIZ_HOST_EXPORT HitTestQuery {
                                      const gfx::PointF& location,
                                      size_t region_index,
                                      bool is_location_relative_to_parent,
+                                     const FrameSinkId& root_view_frame_sink_id,
                                      Target* target) const;
 
   // Transform |location_in_target| to be in |region_index|'s coordinate space.
@@ -146,20 +154,7 @@ class VIZ_HOST_EXPORT HitTestQuery {
                                        size_t region_index,
                                        gfx::Transform* transform) const;
 
-  void ReceivedBadMessageFromGpuProcess() const;
-
-  void RecordSlowPathHitTestReasons(uint32_t) const;
-
-  // Returns true if |id| is present in |hit_test_data|. If |id| is present
-  // |index| is set accordingly.
-  bool FindIndexOfFrameSink(const FrameSinkId& id, size_t* index) const;
-
   std::vector<AggregatedHitTestRegion> hit_test_data_;
-
-  // Log bad message and shut down Viz process when it is compromised.
-  base::RepeatingClosure bad_message_gpu_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(HitTestQuery);
 };
 
 }  // namespace viz

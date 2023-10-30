@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@ namespace security_interstitials {
 
 extern const char kChromeUIConnectionHelpHost[];
 extern const char kChromeUIConnectionHelpURL[];
+
+extern const char kChromeUIConnectionMonitoringDetectedHost[];
 
 }  // namespace security_interstitials
 

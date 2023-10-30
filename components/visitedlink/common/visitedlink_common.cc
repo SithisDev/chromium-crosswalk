@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,12 @@
 
 #include <string.h>  // for memset()
 
+#include <ostream>
+
 #include "base/bit_cast.h"
+#include "base/check.h"
 #include "base/hash/md5.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "url/gurl.h"
 
 namespace visitedlink {
@@ -25,7 +28,7 @@ VisitedLinkCommon::~VisitedLinkCommon() {
 }
 
 // FIXME: this uses linear probing, it should be replaced with quadratic
-// probing or something better. See VisitedLinkMaster::AddFingerprint
+// probing or something better. See VisitedLinkWriter::AddFingerprint
 bool VisitedLinkCommon::IsVisited(const char* canonical_url,
                                   size_t url_len) const {
   if (url_len == 0)
@@ -95,7 +98,7 @@ VisitedLinkCommon::Fingerprint VisitedLinkCommon::ComputeURLFingerprint(
   // on arbitrary alignment on some processors. This reinterpret_casts it
   // down to a char array of the same size as fingerprint, and then does the
   // bit cast, which amounts to a memcpy. This does not handle endian issues.
-  return bit_cast<Fingerprint, uint8_t[8]>(
+  return base::bit_cast<Fingerprint, uint8_t[8]>(
       *reinterpret_cast<uint8_t(*)[8]>(&digest.a));
 }
 

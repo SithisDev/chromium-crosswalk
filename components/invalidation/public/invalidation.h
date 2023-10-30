@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,37 +11,35 @@
 #include <string>
 
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/values.h"
 #include "components/invalidation/public/ack_handle.h"
 #include "components/invalidation/public/invalidation_export.h"
-#include "google/cacheinvalidation/include/types.h"
+#include "components/invalidation/public/invalidation_util.h"
 
-namespace syncer {
+namespace invalidation {
 
 class AckHandler;
 
-// Represents a local invalidation, and is roughly analogous to
-// invalidation::Invalidation.  Unlike invalidation::Invalidation, this class
-// supports "local" ack-tracking and simple serialization to pref values.
+// Represents a local invalidation. This class supports "local" ack-tracking
+// and simple serialization to pref values.
 class INVALIDATION_EXPORT Invalidation {
  public:
   // Factory functions.
-  static Invalidation Init(const invalidation::ObjectId& id,
+  static Invalidation Init(const Topic& topic,
                            int64_t version,
                            const std::string& payload);
-  static Invalidation InitUnknownVersion(const invalidation::ObjectId& id);
+  static Invalidation InitUnknownVersion(const Topic& topic);
   static Invalidation InitFromDroppedInvalidation(const Invalidation& dropped);
-  static std::unique_ptr<Invalidation> InitFromValue(
-      const base::DictionaryValue& value);
 
   Invalidation(const Invalidation& other);
+  Invalidation& operator=(const Invalidation& other);
   ~Invalidation();
 
   // Compares two invalidations.  The comparison ignores ack-tracking state.
-  bool Equals(const Invalidation& other) const;
+  bool operator==(const Invalidation& other) const;
 
-  invalidation::ObjectId object_id() const;
+  Topic topic() const;
   bool is_unknown_version() const;
 
   // Safe to call only if is_unknown_version() returns false.
@@ -91,18 +89,18 @@ class INVALIDATION_EXPORT Invalidation {
   // Acknowledge() on the most recently dropped inavlidation.
   void Drop();
 
-  std::unique_ptr<base::DictionaryValue> ToValue() const;
+  base::Value::Dict ToValue() const;
   std::string ToString() const;
 
  private:
-  Invalidation(const invalidation::ObjectId& id,
+  Invalidation(const Topic& topic,
                bool is_unknown_version,
                int64_t version,
                const std::string& payload,
                AckHandle ack_handle);
 
-  // The ObjectId to which this invalidation belongs.
-  invalidation::ObjectId id_;
+  // The Topic to which this invalidation belongs.
+  Topic topic_;
 
   // This flag is set to true if this is an unknown version invalidation.
   bool is_unknown_version_;
@@ -123,6 +121,6 @@ class INVALIDATION_EXPORT Invalidation {
   scoped_refptr<base::SequencedTaskRunner> ack_handler_task_runner_;
 };
 
-}  // namespace syncer
+}  // namespace invalidation
 
 #endif  // COMPONENTS_INVALIDATION_PUBLIC_INVALIDATION_H_

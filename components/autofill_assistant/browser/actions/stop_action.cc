@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ void StopAction::InternalProcessAction(ProcessActionCallback callback) {
   if (proto_.stop().close_cct()) {
     delegate_->Close();
   } else {
-    delegate_->Shutdown();
+    delegate_->Shutdown(proto_.stop().show_feedback_chip());
   }
   UpdateProcessedAction(ACTION_APPLIED);
   std::move(callback).Run(std::move(processed_action_proto_));

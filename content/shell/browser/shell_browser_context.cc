@@ -1,9 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/shell/browser/shell_browser_context.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -12,7 +13,6 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
@@ -24,20 +24,15 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
+#include "content/shell/browser/shell_content_browser_client.h"
+#include "content/shell/browser/shell_content_index_provider.h"
 #include "content/shell/browser/shell_download_manager_delegate.h"
+#include "content/shell/browser/shell_federated_permission_context.h"
+#include "content/shell/browser/shell_paths.h"
 #include "content/shell/browser/shell_permission_manager.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/test/mock_background_sync_controller.h"
-
-#if defined(OS_WIN)
-#include "base/base_paths_win.h"
-#elif defined(OS_LINUX)
-#include "base/nix/xdg_util.h"
-#elif defined(OS_MACOSX)
-#include "base/base_paths_mac.h"
-#elif defined(OS_FUCHSIA)
-#include "base/base_paths_fuchsia.h"
-#endif
+#include "content/test/mock_reduce_accept_language_controller_delegate.h"
 
 namespace content {
 
@@ -48,10 +43,8 @@ ShellBrowserContext::ShellResourceContext::~ShellResourceContext() {
 
 ShellBrowserContext::ShellBrowserContext(bool off_the_record,
                                          bool delay_services_creation)
-    : resource_context_(new ShellResourceContext),
-      ignore_certificate_errors_(false),
-      off_the_record_(off_the_record),
-      guest_manager_(nullptr) {
+    : resource_context_(std::make_unique<ShellResourceContext>()),
+      off_the_record_(off_the_record) {
   InitWhileIOAllowed();
   if (!delay_services_creation) {
     BrowserContextDependencyManager::GetInstance()
@@ -60,7 +53,7 @@ ShellBrowserContext::ShellBrowserContext(bool off_the_record,
 }
 
 ShellBrowserContext::~ShellBrowserContext() {
-  NotifyWillBeDestroyed(this);
+  NotifyWillBeDestroyed();
 
   // The SimpleDependencyManager should always be passed after the
   // BrowserContextDependencyManager. This is because the KeyedService instances
@@ -77,16 +70,10 @@ ShellBrowserContext::~ShellBrowserContext() {
   // outstanding request while URLRequestContext's destructor ensures that there
   // are no more outstanding requests.
   if (resource_context_) {
-    BrowserThread::DeleteSoon(
-      BrowserThread::IO, FROM_HERE, resource_context_.release());
+    GetIOThreadTaskRunner({})->DeleteSoon(FROM_HERE,
+                                          resource_context_.release());
   }
   ShutdownStoragePartitions();
-  if (url_request_getter_) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
-        base::BindOnce(&ShellURLRequestContextGetter::NotifyContextShuttingDown,
-                       url_request_getter_));
-  }
 }
 
 void ShellBrowserContext::InitWhileIOAllowed() {
@@ -102,6 +89,8 @@ void ShellBrowserContext::InitWhileIOAllowed() {
         path_ = base::MakeAbsoluteFilePath(path_);
       if (!path_.empty()) {
         FinishInitWhileIOAllowed();
+        base::PathService::OverrideAndCreateIfNeeded(
+            SHELL_DIR_USER_DATA, path_, /*is_absolute=*/true, /*create=*/false);
         return;
       }
     } else {
@@ -109,47 +98,20 @@ void ShellBrowserContext::InitWhileIOAllowed() {
     }
   }
 
-#if defined(OS_WIN)
-  CHECK(base::PathService::Get(base::DIR_LOCAL_APP_DATA, &path_));
-  path_ = path_.Append(std::wstring(L"content_shell"));
-#elif defined(OS_LINUX)
-  std::unique_ptr<base::Environment> env(base::Environment::Create());
-  base::FilePath config_dir(
-      base::nix::GetXDGDirectory(env.get(),
-                                 base::nix::kXdgConfigHomeEnvVar,
-                                 base::nix::kDotConfigDir));
-  path_ = config_dir.Append("content_shell");
-#elif defined(OS_MACOSX)
-  CHECK(base::PathService::Get(base::DIR_APP_DATA, &path_));
-  path_ = path_.Append("Chromium Content Shell");
-#elif defined(OS_ANDROID)
-  CHECK(base::PathService::Get(base::DIR_ANDROID_APP_DATA, &path_));
-  path_ = path_.Append(FILE_PATH_LITERAL("content_shell"));
-#elif defined(OS_FUCHSIA)
-  CHECK(base::PathService::Get(base::DIR_APP_DATA, &path_));
-  path_ = path_.Append(FILE_PATH_LITERAL("content_shell"));
-#else
-  NOTIMPLEMENTED();
-#endif
-
-  if (!base::PathExists(path_))
-    base::CreateDirectory(path_);
+  CHECK(base::PathService::Get(SHELL_DIR_USER_DATA, &path_));
 
   FinishInitWhileIOAllowed();
 }
 
 void ShellBrowserContext::FinishInitWhileIOAllowed() {
-  BrowserContext::Initialize(this, path_);
   key_ = std::make_unique<SimpleFactoryKey>(path_, off_the_record_);
   SimpleKeyMap::GetInstance()->Associate(this, key_.get());
 }
 
-#if !defined(OS_ANDROID)
 std::unique_ptr<ZoomLevelDelegate> ShellBrowserContext::CreateZoomLevelDelegate(
     const base::FilePath&) {
-  return std::unique_ptr<ZoomLevelDelegate>();
+  return nullptr;
 }
-#endif  // !defined(OS_ANDROID)
 
 base::FilePath ShellBrowserContext::GetPath() {
   return path_;
@@ -161,37 +123,12 @@ bool ShellBrowserContext::IsOffTheRecord() {
 
 DownloadManagerDelegate* ShellBrowserContext::GetDownloadManagerDelegate()  {
   if (!download_manager_delegate_.get()) {
-    download_manager_delegate_.reset(new ShellDownloadManagerDelegate());
-    download_manager_delegate_->SetDownloadManager(
-        BrowserContext::GetDownloadManager(this));
+    download_manager_delegate_ =
+        std::make_unique<ShellDownloadManagerDelegate>();
+    download_manager_delegate_->SetDownloadManager(GetDownloadManager());
   }
 
   return download_manager_delegate_.get();
-}
-
-ShellURLRequestContextGetter*
-ShellBrowserContext::CreateURLRequestContextGetter(
-    ProtocolHandlerMap* protocol_handlers,
-    URLRequestInterceptorScopedVector request_interceptors) {
-  return new ShellURLRequestContextGetter(
-      ignore_certificate_errors_, off_the_record_, GetPath(),
-      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}),
-      protocol_handlers, std::move(request_interceptors));
-}
-
-net::URLRequestContextGetter* ShellBrowserContext::CreateRequestContext(
-    ProtocolHandlerMap* protocol_handlers,
-    URLRequestInterceptorScopedVector request_interceptors) {
-  DCHECK(!url_request_getter_.get());
-  url_request_getter_ = CreateURLRequestContextGetter(
-      protocol_handlers, std::move(request_interceptors));
-  return url_request_getter_.get();
-}
-
-net::URLRequestContextGetter*
-    ShellBrowserContext::CreateMediaRequestContext()  {
-  DCHECK(url_request_getter_.get());
-  return url_request_getter_.get();
 }
 
 ResourceContext* ShellBrowserContext::GetResourceContext()  {
@@ -199,14 +136,24 @@ ResourceContext* ShellBrowserContext::GetResourceContext()  {
 }
 
 BrowserPluginGuestManager* ShellBrowserContext::GetGuestManager() {
-  return guest_manager_;
+  return nullptr;
 }
 
 storage::SpecialStoragePolicy* ShellBrowserContext::GetSpecialStoragePolicy() {
   return nullptr;
 }
 
+PlatformNotificationService*
+ShellBrowserContext::GetPlatformNotificationService() {
+  return nullptr;
+}
+
 PushMessagingService* ShellBrowserContext::GetPushMessagingService() {
+  return nullptr;
+}
+
+StorageNotificationService*
+ShellBrowserContext::GetStorageNotificationService() {
   return nullptr;
 }
 
@@ -217,13 +164,13 @@ SSLHostStateDelegate* ShellBrowserContext::GetSSLHostStateDelegate() {
 PermissionControllerDelegate*
 ShellBrowserContext::GetPermissionControllerDelegate() {
   if (!permission_manager_.get())
-    permission_manager_.reset(new ShellPermissionManager());
+    permission_manager_ = std::make_unique<ShellPermissionManager>();
   return permission_manager_.get();
 }
 
 ClientHintsControllerDelegate*
 ShellBrowserContext::GetClientHintsControllerDelegate() {
-  return nullptr;
+  return client_hints_controller_delegate_;
 }
 
 BackgroundFetchDelegate* ShellBrowserContext::GetBackgroundFetchDelegate() {
@@ -231,14 +178,56 @@ BackgroundFetchDelegate* ShellBrowserContext::GetBackgroundFetchDelegate() {
 }
 
 BackgroundSyncController* ShellBrowserContext::GetBackgroundSyncController() {
-  if (!background_sync_controller_)
-    background_sync_controller_.reset(new MockBackgroundSyncController());
+  if (!background_sync_controller_) {
+    background_sync_controller_ =
+        std::make_unique<MockBackgroundSyncController>();
+  }
   return background_sync_controller_.get();
 }
 
 BrowsingDataRemoverDelegate*
 ShellBrowserContext::GetBrowsingDataRemoverDelegate() {
   return nullptr;
+}
+
+ContentIndexProvider* ShellBrowserContext::GetContentIndexProvider() {
+  if (!content_index_provider_)
+    content_index_provider_ = std::make_unique<ShellContentIndexProvider>();
+  return content_index_provider_.get();
+}
+
+FederatedIdentityApiPermissionContextDelegate*
+ShellBrowserContext::GetFederatedIdentityApiPermissionContext() {
+  if (!federated_permission_context_)
+    federated_permission_context_ =
+        std::make_unique<ShellFederatedPermissionContext>();
+  return federated_permission_context_.get();
+}
+
+FederatedIdentitySharingPermissionContextDelegate*
+ShellBrowserContext::GetFederatedIdentitySharingPermissionContext() {
+  if (!federated_permission_context_)
+    federated_permission_context_ =
+        std::make_unique<ShellFederatedPermissionContext>();
+  return federated_permission_context_.get();
+}
+
+FederatedIdentityActiveSessionPermissionContextDelegate*
+ShellBrowserContext::GetFederatedIdentityActiveSessionPermissionContext() {
+  if (!federated_permission_context_)
+    federated_permission_context_ =
+        std::make_unique<ShellFederatedPermissionContext>();
+  return federated_permission_context_.get();
+}
+
+ReduceAcceptLanguageControllerDelegate*
+ShellBrowserContext::GetReduceAcceptLanguageControllerDelegate() {
+  if (!reduce_accept_lang_controller_delegate_) {
+    reduce_accept_lang_controller_delegate_ =
+        std::make_unique<MockReduceAcceptLanguageControllerDelegate>(
+            GetShellLanguage());
+  }
+  return reduce_accept_lang_controller_delegate_.get();
 }
 
 }  // namespace content

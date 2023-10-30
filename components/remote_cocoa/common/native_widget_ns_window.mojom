@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,12 @@ module remote_cocoa.mojom;
 
 import "components/remote_cocoa/common/select_file_dialog.mojom";
 import "mojo/public/mojom/base/string16.mojom";
+import "services/network/public/mojom/network_param.mojom";
+import "ui/base/cursor/mojom/cursor.mojom";
 import "ui/base/mojom/ui_base_types.mojom";
-import "ui/gfx/geometry/mojo/geometry.mojom";
-import "ui/gfx/mojo/ca_layer_params.mojom";
+import "ui/events/mojom/event_constants.mojom";
+import "ui/gfx/geometry/mojom/geometry.mojom";
+import "ui/gfx/mojom/ca_layer_params.mojom";
 
 // The window class (subclass of kNativeWidgetMacNSWindow) to use for a given
 // window.
@@ -65,18 +68,27 @@ struct NativeWidgetNSWindowInitParams {
   ui.mojom.ModalType modal_type;
   // If true, the underlying window potentially be seen through.
   bool is_translucent;
-  // True if the widget is considered top level widget.
-  bool widget_is_top_level;
-  // True if the bounds specified to SetBounds should be treated as though they
-  // are in screen coordinates.
-  bool position_window_in_screen_coords;
   // If true, then the NSWindow is set to have a shadow using
   // -[NSWindow setHasShadow:YES].
   bool has_window_server_shadow;
   // If true, the NSWindow's collection behavior is set to include
   // NSWindowCollectionBehaviorParticipatesInCycle (this is not the
-  // default for NSWindows with NSBorderlessWindowMask).
+  // default for NSWindows with NSWindowStyleMaskBorderless).
   bool force_into_collection_cycle;
+  // If true, the window was created in headless mode.
+  bool is_headless_mode_window;
+  // An opaque blob of AppKit data which includes, among other things, a
+  // window's workspace and fullscreen state, and can be retrieved from or
+  // applied to a window.
+  array<uint8> state_restoration_data;
+  // If true, this window is functionally a tooltip, and shouldn't be presented
+  // as a new window to the accessibility system.
+  bool is_tooltip;
+};
+
+enum WindowControlsOverlayNSViewType {
+  kCaptionButtonContainer,
+  kWebAppFrameToolbar,
 };
 
 // The interface through which a NativeWidgetMac may interact with an NSWindow
@@ -90,7 +102,10 @@ interface NativeWidgetNSWindow {
   SetParent(uint64 parent_id);
 
   // Open a panel for file selection or creation.
-  CreateSelectFileDialog(SelectFileDialog& dialog);
+  CreateSelectFileDialog(pending_receiver<SelectFileDialog> dialog);
+
+  // Open a panel to display the specified certificate.
+  ShowCertificateViewer(network.mojom.X509Certificate certificate);
 
   // Places this NativeWidgetNSWindow in front of the NativeWidgetNSWindow
   // indicated by |sibling_id| in z-order.
@@ -106,8 +121,9 @@ interface NativeWidgetNSWindow {
 
   // Initialize the view to display compositor output. This will send the
   // current visibility and dimensions (and any future updates) to the
-  // NativeWidgetNSWindowHost.
-  InitCompositorView();
+  // NativeWidgetNSWindowHost. Returns the CGWindowID to associate with
+  // the compositor's FrameSinkId.
+  InitCompositorView() => (uint32 cg_window_id);
 
   // Create the NSView to be the content view for the window. Use |ns_view_id|
   // to look up this NSView in other functions (e.g, to specify a parent view).
@@ -159,9 +175,13 @@ interface NativeWidgetNSWindow {
   // on all spaces.
   SetVisibleOnAllSpaces(bool always_visible);
 
-  // Called by NativeWidgetMac to initiate a transition to the specified target
-  // fullscreen state.
-  SetFullscreen(bool fullscreen);
+  // Initiate a transition to fullscreen on the specified display.  If
+  // `target_display_id` is invalid, then fullscreen should be entered on the
+  // current display.
+  EnterFullscreen(int64 target_display_id);
+
+  // Initiate a transition out of fullscreen.
+  ExitFullscreen();
 
   // Called by NativeWidgetMac; sets whether the window can share fullscreen
   // windows' spaces by changing the NSWindow's collectionBehavior.
@@ -180,8 +200,11 @@ interface NativeWidgetNSWindow {
   // Set the opacity of the NSWindow.
   SetOpacity(float opacity);
 
-  // Set the content aspect ratio of the NSWindow.
-  SetContentAspectRatio(gfx.mojom.SizeF aspect_ratio);
+  // Set the window level of the NSWindow.
+  SetWindowLevel(int32 level);
+
+  // Set the aspect ratio of the NSWindow. |aspect_ratio| must not be empty.
+  SetAspectRatio(gfx.mojom.SizeF aspect_ratio);
 
   // Specify the content to draw in the NSView.
   SetCALayerParams(gfx.mojom.CALayerParams ca_layer_params);
@@ -189,8 +212,16 @@ interface NativeWidgetNSWindow {
   // Set the NSWindow's title text.
   SetWindowTitle(mojo_base.mojom.String16 title);
 
+  // Ignore or accept mouse events on the NSWindow.
+  SetIgnoresMouseEvents(bool ignores_mouse_events);
+
   // Make the content view be the first responder for the NSWindow.
   MakeFirstResponder();
+
+  // Sort the subviews of the content view of this window. The sorted ids of
+  // the NSViews attached by NativeViewHost::Attach are listed in
+  // |attached_subview_ids|.
+  SortSubviews(array<uint64> attached_subview_ids);
 
   // Clear the touchbar.
   ClearTouchBar();
@@ -205,4 +236,50 @@ interface NativeWidgetNSWindow {
 
   // Redispatch a keyboard event using the widget's window's CommandDispatcher.
   RedispatchKeyEvent(array<uint8> native_event_data);
+
+  // Enable or disable this widget's local event monitor.
+  SetLocalEventMonitorEnabled(bool enabled);
+
+  // Add the overlay NSView for a PWA with window controls overlay
+  // display override given a |overlay_type|.
+  CreateWindowControlsOverlayNSView(
+      WindowControlsOverlayNSViewType overlay_type);
+
+  // Update the overlay NSView with |bounds| for a PWA with window controls
+  // overlay display override for a |overlay_type|.
+  UpdateWindowControlsOverlayNSView(
+    gfx.mojom.Rect bounds, WindowControlsOverlayNSViewType overlay_type);
+
+  // Remove the overlay NSView with |bounds| for a PWA with window controls
+  // overlay display override for a |overlay_type|.
+  RemoveWindowControlsOverlayNSView(
+      WindowControlsOverlayNSViewType overlay_type);
+
+  // Set the cursor type to display.
+  SetCursor(ui.mojom.Cursor cursor);
+
+  // Enables immersive fullscreen. Pass the id of the overlay widget which is
+  // hosting top chrome. The callback is run once the top chrome NSView has
+  // been reparented into the AppKit controlled fullscreen NSWindow, indicating
+  // the immersive transition has started.
+  EnableImmersiveFullscreen(uint64 fullscreen_overlay_widget_id) => ();
+
+  // Rollback the immersive transition. The top chrome NSView is reparented into
+  // the overlay widget.
+  DisableImmersiveFullscreen();
+
+  // Update the visibility of the toolbar (top chrome) while in immersive
+  // fullscreen. Typically this is used in response to the
+  // View -> "Always Show Toolbar in Full Screen" menu changing.
+  UpdateToolbarVisibility(bool always_show);
+
+  // Also used during immersive fullscreen. Update the bounds of the AppKit
+  // NSWindow hosting top chrome.
+  OnTopContainerViewBoundsChanged(gfx.mojom.Rect bounds);
+
+  // Set whether can go back to the previous page.
+  SetCanGoBack(bool can_go_back);
+
+  // Set whether can go forward to the following page.
+  SetCanGoForward(bool can_go_forward);
 };

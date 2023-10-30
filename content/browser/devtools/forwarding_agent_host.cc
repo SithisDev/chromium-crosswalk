@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,10 +17,10 @@ ForwardingAgentHost::ForwardingAgentHost(
   NotifyCreated();
 }
 
-ForwardingAgentHost::~ForwardingAgentHost() {
-}
+ForwardingAgentHost::~ForwardingAgentHost() = default;
 
-bool ForwardingAgentHost::AttachSession(DevToolsSession* session) {
+bool ForwardingAgentHost::AttachSession(DevToolsSession* session,
+                                        bool acquire_wake_lock) {
   session->TurnIntoExternalProxy(delegate_.get());
   return true;
 }
@@ -61,6 +61,10 @@ bool ForwardingAgentHost::Close() {
 
 base::TimeTicks ForwardingAgentHost::GetLastActivityTime() {
   return delegate_->GetLastActivityTime();
+}
+
+std::string ForwardingAgentHost::GetDescription() {
+  return delegate_->GetDescription();
 }
 
 }  // content

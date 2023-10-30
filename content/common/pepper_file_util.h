@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,12 @@
 #include "base/sync_socket.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "ppapi/c/pp_file_info.h"
-#include "storage/common/fileapi/file_system_types.h"
 
 #if !BUILDFLAG(ENABLE_PLUGINS)
 #error "Plugins should be enabled"
 #endif
 
 namespace content {
-
-storage::FileSystemType PepperFileSystemTypeToFileSystemType(
-    PP_FileSystemType type);
 
 int IntegerFromSyncSocketHandle(
     const base::SyncSocket::Handle& socket_handle);

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,8 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/policy/core/browser/configuration_policy_handler_list.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_service_impl.h"
@@ -22,6 +21,12 @@ class PolicyMap;
 class ConfigurationPolicyPrefStore;
 
 class ConfigurationPolicyPrefStoreTest : public testing::Test {
+ public:
+  ConfigurationPolicyPrefStoreTest(const ConfigurationPolicyPrefStoreTest&) =
+      delete;
+  ConfigurationPolicyPrefStoreTest& operator=(
+      const ConfigurationPolicyPrefStoreTest&) = delete;
+
  protected:
   ConfigurationPolicyPrefStoreTest();
   ~ConfigurationPolicyPrefStoreTest() override;
@@ -35,13 +40,10 @@ class ConfigurationPolicyPrefStoreTest : public testing::Test {
 
   PolicyServiceImpl::Providers providers_;
   ConfigurationPolicyHandlerList handler_list_;
-  MockConfigurationPolicyProvider provider_;
+  testing::NiceMock<MockConfigurationPolicyProvider> provider_;
   std::unique_ptr<PolicyServiceImpl> policy_service_;
   scoped_refptr<ConfigurationPolicyPrefStore> store_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ConfigurationPolicyPrefStoreTest);
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 }  // namespace policy

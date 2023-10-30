@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,17 @@
 #include "build/build_config.h"
 #include "content/browser/media/session/media_session_impl.h"
 #include "content/browser/media/session/mock_media_session_player_observer.h"
-#include "content/public/browser/system_connector.h"
+#include "content/public/browser/media_session_service.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/shell/browser/shell.h"
 #include "media/base/media_content_type.h"
 #include "media/base/media_switches.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/media_session/public/cpp/features.h"
 #include "services/media_session/public/cpp/test/audio_focus_test_util.h"
 #include "services/media_session/public/cpp/test/mock_media_session.h"
 #include "services/media_session/public/mojom/audio_focus.mojom.h"
-#include "services/media_session/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace content {
 
@@ -36,8 +36,8 @@ class AudioFocusDelegateDefaultBrowserTest : public ContentBrowserTest {
   void SetUpOnMainThread() override {
     ContentBrowserTest::SetUpOnMainThread();
 
-    GetSystemConnector()->BindInterface(media_session::mojom::kServiceName,
-                                        mojo::MakeRequest(&audio_focus_ptr_));
+    GetMediaSessionService().BindAudioFocusManager(
+        audio_focus_.BindNewPipeAndPassReceiver());
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -48,21 +48,22 @@ class AudioFocusDelegateDefaultBrowserTest : public ContentBrowserTest {
   }
 
   void CheckSessionSourceName() {
-    audio_focus_ptr_->GetFocusRequests(base::BindOnce(
+    audio_focus_->GetFocusRequests(base::BindOnce(
         [](std::vector<media_session::mojom::AudioFocusRequestStatePtr>
                requests) {
           for (auto& request : requests)
             EXPECT_EQ(kExpectedSourceName, request->source_name.value());
         }));
 
-    audio_focus_ptr_.FlushForTesting();
+    audio_focus_.FlushForTesting();
   }
 
   void Run(WebContents* start_contents,
            WebContents* interrupt_contents,
            bool use_separate_group_id) {
-    std::unique_ptr<MockMediaSessionPlayerObserver>
-        player_observer(new MockMediaSessionPlayerObserver);
+    std::unique_ptr<MockMediaSessionPlayerObserver> player_observer(
+        new MockMediaSessionPlayerObserver(
+            nullptr, media::MediaContentType::Persistent));
 
     MediaSessionImpl* media_session = MediaSessionImpl::Get(start_contents);
     EXPECT_TRUE(media_session);
@@ -79,8 +80,7 @@ class AudioFocusDelegateDefaultBrowserTest : public ContentBrowserTest {
 
     {
       std::unique_ptr<TestAudioFocusObserver> observer = CreateObserver();
-      media_session->AddPlayer(player_observer.get(), 0,
-                               media::MediaContentType::Persistent);
+      media_session->AddPlayer(player_observer.get(), 0);
       observer->WaitForGainedEvent();
     }
 
@@ -104,8 +104,7 @@ class AudioFocusDelegateDefaultBrowserTest : public ContentBrowserTest {
 
     {
       std::unique_ptr<TestAudioFocusObserver> observer = CreateObserver();
-      other_media_session->AddPlayer(player_observer.get(), 1,
-                                     media::MediaContentType::Persistent);
+      other_media_session->AddPlayer(player_observer.get(), 1);
       observer->WaitForGainedEvent();
     }
 
@@ -155,12 +154,12 @@ class AudioFocusDelegateDefaultBrowserTest : public ContentBrowserTest {
   std::unique_ptr<TestAudioFocusObserver> CreateObserver() {
     std::unique_ptr<TestAudioFocusObserver> observer =
         std::make_unique<TestAudioFocusObserver>();
-    audio_focus_ptr_->AddObserver(observer->BindNewPipeAndPassRemote());
-    audio_focus_ptr_.FlushForTesting();
+    audio_focus_->AddObserver(observer->BindNewPipeAndPassRemote());
+    audio_focus_.FlushForTesting();
     return observer;
   }
 
-  media_session::mojom::AudioFocusManagerPtr audio_focus_ptr_;
+  mojo::Remote<media_session::mojom::AudioFocusManager> audio_focus_;
 
   base::test::ScopedFeatureList scoped_feature_list_;
 };

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,10 +17,7 @@ interface MirroringServiceHost {
   // the messages from the mirroring receiver to the Mirroring Service.
   // To stop the session, just close the message pipe.
   Start(SessionParameters params,
-        SessionObserver observer,
-        CastMessageChannel outbound_channel,
-        CastMessageChannel& inbound_channel);
-
-  // TODO(xjz): Add interfaces to get the streaming events/stats and mirroring
-  // logs.
+        pending_remote<SessionObserver> observer,
+        pending_remote<CastMessageChannel> outbound_channel,
+        pending_receiver<CastMessageChannel> inbound_channel);
 };

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,8 +34,8 @@ class VideoCaptureDeviceLauncherSwitcher : public VideoCaptureDeviceLauncher {
       // Use of Unretained() is safe, because |media_device_launcher_| is owned
       // by |this|.
       abort_launch_cb_ =
-          base::Bind(&VideoCaptureDeviceLauncher::AbortLaunch,
-                     base::Unretained(media_device_launcher_.get()));
+          base::BindOnce(&VideoCaptureDeviceLauncher::AbortLaunch,
+                         base::Unretained(media_device_launcher_.get()));
       return media_device_launcher_->LaunchDeviceAsync(
           device_id, stream_type, params, std::move(receiver),
           std::move(connection_lost_cb), callbacks, std::move(done_cb));
@@ -43,15 +43,15 @@ class VideoCaptureDeviceLauncherSwitcher : public VideoCaptureDeviceLauncher {
     // Use of Unretained() is safe, because |other_types_launcher_| is owned by
     // |this|.
     abort_launch_cb_ =
-        base::Bind(&VideoCaptureDeviceLauncher::AbortLaunch,
-                   base::Unretained(other_types_launcher_.get()));
+        base::BindOnce(&VideoCaptureDeviceLauncher::AbortLaunch,
+                       base::Unretained(other_types_launcher_.get()));
     return other_types_launcher_->LaunchDeviceAsync(
         device_id, stream_type, params, std::move(receiver),
         std::move(connection_lost_cb), callbacks, std::move(done_cb));
   }
 
   void AbortLaunch() override {
-    if (abort_launch_cb_.is_null())
+    if (!abort_launch_cb_)
       return;
     std::move(abort_launch_cb_).Run();
   }

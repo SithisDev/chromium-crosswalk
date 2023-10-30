@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/notreached.h"
 #include "courgette/image_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -155,14 +154,6 @@ TEST(LabelManagerTest, Basic) {
   EXPECT_EQ(nullptr, label_manager.Find(RVA(0x5F3759DF)));
   EXPECT_EQ(nullptr, label_manager.Find(RVA(0xFEEDFFF0)));
   EXPECT_EQ(nullptr, label_manager.Find(RVA(0xFFFFFFFF)));
-
-  // Remove Labels with |count_| < 2.
-  label_manager.RemoveUnderusedLabels(2);
-  static const std::pair<RVA, int32_t> kExpected2Raw[] = {
-      {0x04000010, 3}, {0x04000030, 2}, {0xFEEDF00D, 2}};
-  std::map<RVA, int32_t> expected2(std::begin(kExpected2Raw),
-                                   std::end(kExpected2Raw));
-  CheckLabelManagerContent(&label_manager, expected2);
 }
 
 TEST(LabelManagerTest, Single) {
@@ -324,8 +315,8 @@ TEST(LabelManagerTest, AssignRemainingIndexes) {
     {"....AC", "BDEFAC"},
     {"ED...C...B....A", "EDFGHCIJKBLMNOA"},
     // Forward fill and infill.
-    {"E..", "EBA"},  // Forward: "A"; in: "B".
-    {"Z....", "ZDABC"},  // Forward: "ABC"; in: "D".
+    {"E..", "EBA"},          // Forward: "A"; in: "B".
+    {"Z....", "ZDABC"},      // Forward: "ABC"; in: "D".
     {".E.....", "AEFGBCD"},  // Forward: "A", "FG"; in: "BCD".
     {"....C..", "ABFGCDE"},  // Forward: "AB", "DE"; in: "FG".
     {"...Z...", "ABCZDEF"},  // Forward: "ABC"; in: "DEF".
@@ -337,7 +328,7 @@ TEST(LabelManagerTest, AssignRemainingIndexes) {
     {"ANM..Z....L...T", "ANMXYZHIJKLQRST"},
     {"....G..Z...LAH", "CDEFGXYZIJKLAH"},
     // Forward fill and backward fill.
-    {"..ZA..", "XYZABC"},  // Forward: "BC"; backward: "XY".
+    {"..ZA..", "XYZABC"},    // Forward: "BC"; backward: "XY".
     {".....ZD", "ABCXYZD"},  // Forward: "ABC"; backward: "XY".
     {"DA.....", "DABCEFG"},  // Forward: "BC"; backward: "EFG".
     // Backward fill and infill.
@@ -346,7 +337,7 @@ TEST(LabelManagerTest, AssignRemainingIndexes) {
     // All.
     {".....ZED.", "ABCXYZEDF"},  // Forward: "ABC"; backward: "XY"; in: "F".
     {".....GD.", "ABCHFGDE"},  // Forward: "ABC", "E"; backward: "F"; in: "H".
-    {"..FE..GD..", "ABFECHGDIJ"}, // Forward: "AB"; backward: "IJ"; in: "CH".
+    {"..FE..GD..", "ABFECHGDIJ"},  // Forward: "AB"; backward: "IJ"; in: "CH".
   };
   for (const auto& test_case : kTestCases) {
     TestLabelManager label_manager;

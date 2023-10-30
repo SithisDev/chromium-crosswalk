@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@
 #include <stddef.h>
 
 #include <iterator>
+#include <memory>
 #include <sstream>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/time/time.h"
 #include "components/nacl/renderer/plugin/plugin.h"
 #include "components/nacl/renderer/plugin/plugin_error.h"
-#include "content/public/common/sandbox_init.h"
 #include "ppapi/c/ppb_file_io.h"
 #include "ppapi/cpp/var.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -59,18 +59,18 @@ void GetSubzeroCommandLine(std::vector<std::string>* args,
 }  // namespace
 
 PnaclTranslateThread::PnaclTranslateThread()
-    : compiler_subprocess_(NULL),
-      ld_subprocess_(NULL),
+    : compiler_subprocess_(nullptr),
+      ld_subprocess_(nullptr),
       compiler_subprocess_active_(false),
       ld_subprocess_active_(false),
       buffer_cond_(&cond_mu_),
       done_(false),
       compile_time_(0),
-      obj_files_(NULL),
+      obj_files_(nullptr),
       num_threads_(0),
-      nexe_file_(NULL),
-      coordinator_error_info_(NULL),
-      coordinator_(NULL) {}
+      nexe_file_(nullptr),
+      coordinator_error_info_(nullptr),
+      coordinator_(nullptr) {}
 
 void PnaclTranslateThread::SetupState(
     const pp::CompletionCallback& finish_callback,
@@ -112,7 +112,7 @@ void PnaclTranslateThread::RunCompile(
   compiler_channel_filter_ = compiler_channel_->CreateSyncMessageFilter();
 
   compile_finished_callback_ = compile_finished_callback;
-  translate_thread_.reset(new CompileThread(this));
+  translate_thread_ = std::make_unique<CompileThread>(this);
   translate_thread_->Start();
 }
 
@@ -131,13 +131,13 @@ void PnaclTranslateThread::RunLink() {
 
   // Tear down the previous thread.
   translate_thread_->Join();
-  translate_thread_.reset(new LinkThread(this));
+  translate_thread_ = std::make_unique<LinkThread>(this);
   translate_thread_->Start();
 }
 
 // Called from main thread to send bytes to the translator.
 void PnaclTranslateThread::PutBytes(const void* bytes, int32_t count) {
-  CHECK(bytes != NULL);
+  CHECK(bytes);
   base::AutoLock lock(cond_mu_);
   data_buffers_.push_back(std::string());
   data_buffers_.back().insert(data_buffers_.back().end(),
@@ -363,14 +363,14 @@ void PnaclTranslateThread::TranslateFailed(
 void PnaclTranslateThread::AbortSubprocesses() {
   {
     base::AutoLock lock(subprocess_mu_);
-    if (compiler_subprocess_ != NULL && compiler_subprocess_active_) {
+    if (compiler_subprocess_ && compiler_subprocess_active_) {
       // We only run the service_runtime's Shutdown and do not run the
       // NaClSubprocess Shutdown, which would otherwise nullify some
       // pointers that could still be in use (srpc_client, etc.).
       compiler_subprocess_->service_runtime()->Shutdown();
       compiler_subprocess_active_ = false;
     }
-    if (ld_subprocess_ != NULL && ld_subprocess_active_) {
+    if (ld_subprocess_ && ld_subprocess_active_) {
       ld_subprocess_->service_runtime()->Shutdown();
       ld_subprocess_active_ = false;
     }

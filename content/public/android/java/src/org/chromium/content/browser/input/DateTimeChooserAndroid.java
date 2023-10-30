@@ -1,14 +1,15 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content.browser.input;
 
-import android.app.Activity;
 import android.content.Context;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.content.browser.picker.DateTimeSuggestion;
 import org.chromium.content.browser.picker.InputDialogContainer;
 import org.chromium.ui.base.WindowAndroid;
@@ -18,24 +19,29 @@ import org.chromium.ui.base.WindowAndroid;
  */
 @JNINamespace("content")
 class DateTimeChooserAndroid {
-
-    private final long mNativeDateTimeChooserAndroid;
+    private long mNativeDateTimeChooserAndroid;
     private final InputDialogContainer mInputDialogContainer;
 
-    private DateTimeChooserAndroid(Context context,
-            long nativeDateTimeChooserAndroid) {
+    private DateTimeChooserAndroid(Context context, long nativeDateTimeChooserAndroid) {
         mNativeDateTimeChooserAndroid = nativeDateTimeChooserAndroid;
-        mInputDialogContainer = new InputDialogContainer(context,
-                new InputDialogContainer.InputActionDelegate() {
-
+        mInputDialogContainer =
+                new InputDialogContainer(context, new InputDialogContainer.InputActionDelegate() {
                     @Override
                     public void replaceDateTime(double value) {
-                        nativeReplaceDateTime(mNativeDateTimeChooserAndroid, value);
+                        if (mNativeDateTimeChooserAndroid == 0) {
+                            return;
+                        }
+                        DateTimeChooserAndroidJni.get().replaceDateTime(
+                                mNativeDateTimeChooserAndroid, DateTimeChooserAndroid.this, value);
                     }
 
                     @Override
                     public void cancelDateTimeDialog() {
-                        nativeCancelDialog(mNativeDateTimeChooserAndroid);
+                        if (mNativeDateTimeChooserAndroid == 0) {
+                            return;
+                        }
+                        DateTimeChooserAndroidJni.get().cancelDialog(
+                                mNativeDateTimeChooserAndroid, DateTimeChooserAndroid.this);
                     }
                 });
     }
@@ -47,16 +53,25 @@ class DateTimeChooserAndroid {
     }
 
     @CalledByNative
+    private void dismissAndDestroy() {
+        mNativeDateTimeChooserAndroid = 0;
+        mInputDialogContainer.dismissDialog();
+    }
+
+    @CalledByNative
     private static DateTimeChooserAndroid createDateTimeChooser(
             WindowAndroid windowAndroid,
             long nativeDateTimeChooserAndroid,
             int dialogType, double dialogValue,
             double min, double max, double step,
             DateTimeSuggestion[] suggestions) {
-        Activity windowAndroidActivity = windowAndroid.getActivity().get();
-        if (windowAndroidActivity == null) return null;
+        Context windowAndroidContext = windowAndroid.getContext().get();
+        if (windowAndroidContext == null
+                || ContextUtils.activityFromContext(windowAndroidContext) == null) {
+            return null;
+        }
         DateTimeChooserAndroid chooser =
-                new DateTimeChooserAndroid(windowAndroidActivity, nativeDateTimeChooserAndroid);
+                new DateTimeChooserAndroid(windowAndroidContext, nativeDateTimeChooserAndroid);
         chooser.showDialog(dialogType, dialogValue, min, max, step, suggestions);
         return chooser;
     }
@@ -79,8 +94,10 @@ class DateTimeChooserAndroid {
         array[index] = new DateTimeSuggestion(value, localizedValue, label);
     }
 
-    private native void nativeReplaceDateTime(long nativeDateTimeChooserAndroid,
-                                              double dialogValue);
-
-    private native void nativeCancelDialog(long nativeDateTimeChooserAndroid);
+    @NativeMethods
+    interface Natives {
+        void replaceDateTime(long nativeDateTimeChooserAndroid, DateTimeChooserAndroid caller,
+                double dialogValue);
+        void cancelDialog(long nativeDateTimeChooserAndroid, DateTimeChooserAndroid caller);
+    }
 }

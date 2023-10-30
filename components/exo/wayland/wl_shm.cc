@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <wayland-server-protocol-core.h>
 
 #include "base/bind.h"
+#include "base/ranges/algorithm.h"
 #include "components/exo/buffer.h"
 #include "components/exo/display.h"
 #include "components/exo/shared_memory.h"
@@ -44,14 +45,9 @@ void shm_pool_create_buffer(wl_client* client,
                             int32_t height,
                             int32_t stride,
                             uint32_t format) {
-  const auto* supported_format =
-      std::find_if(shm_supported_formats,
-                   shm_supported_formats + base::size(shm_supported_formats),
-                   [format](const shm_supported_format& supported_format) {
-                     return supported_format.shm_format == format;
-                   });
-  if (supported_format ==
-      (shm_supported_formats + base::size(shm_supported_formats))) {
+  const auto* supported_format = base::ranges::find(
+      shm_supported_formats, format, &shm_supported_format::shm_format);
+  if (supported_format == std::end(shm_supported_formats)) {
     wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_FORMAT,
                            "invalid format 0x%x", format);
     return;
@@ -75,8 +71,8 @@ void shm_pool_create_buffer(wl_client* client,
   wl_resource* buffer_resource =
       wl_resource_create(client, &wl_buffer_interface, 1, id);
 
-  buffer->set_release_callback(base::Bind(&HandleBufferReleaseCallback,
-                                          base::Unretained(buffer_resource)));
+  buffer->set_release_callback(base::BindRepeating(
+      &HandleBufferReleaseCallback, base::Unretained(buffer_resource)));
 
   SetImplementation(buffer_resource, &buffer_implementation, std::move(buffer));
 }

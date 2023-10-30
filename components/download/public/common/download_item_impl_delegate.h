@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,21 @@
 
 #include <stdint.h>
 
+#include <memory>
+
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
-#include "base/optional.h"
 #include "components/download/public/common/download_export.h"
 #include "components/download/public/common/download_item.h"
+#include "components/download/public/common/download_item_rename_handler.h"
 #include "components/download/public/common/download_url_parameters.h"
-
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
+#include "components/download/public/common/quarantine_connection.h"
+#include "components/services/quarantine/public/mojom/quarantine.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "services/device/public/mojom/wake_lock_provider.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace download {
-struct DownloadEntry;
 class DownloadItemImpl;
 
 // Delegate for operations that a DownloadItemImpl can't do for itself.
@@ -31,39 +32,52 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImplDelegate {
  public:
   // The boolean argument indicates whether or not the download was
   // actually opened.
-  typedef base::Callback<void(bool)> ShouldOpenDownloadCallback;
+  using ShouldOpenDownloadCallback = base::OnceCallback<void(bool)>;
 
   DownloadItemImplDelegate();
+
+  DownloadItemImplDelegate(const DownloadItemImplDelegate&) = delete;
+  DownloadItemImplDelegate& operator=(const DownloadItemImplDelegate&) = delete;
+
   virtual ~DownloadItemImplDelegate();
 
   // Used for catching use-after-free errors.
   void Attach();
   void Detach();
 
-  using DownloadTargetCallback =
-      base::Callback<void(const base::FilePath& target_path,
-                          DownloadItem::TargetDisposition disposition,
-                          DownloadDangerType danger_type,
-                          const base::FilePath& intermediate_path,
-                          DownloadInterruptReason interrupt_reason)>;
+  using DownloadTargetCallback = base::OnceCallback<void(
+      const base::FilePath& target_path,
+      DownloadItem::TargetDisposition disposition,
+      DownloadDangerType danger_type,
+      DownloadItem::MixedContentStatus mixed_content_status,
+      const base::FilePath& intermediate_path,
+      const base::FilePath& display_name,
+      const std::string& mime_type,
+      DownloadInterruptReason interrupt_reason)>;
   // Request determination of the download target from the delegate.
   virtual void DetermineDownloadTarget(DownloadItemImpl* download,
-                                       const DownloadTargetCallback& callback);
+                                       DownloadTargetCallback callback);
 
   // Allows the delegate to delay completion of the download.  This function
   // will either return true (if the download may complete now) or will return
   // false and call the provided callback at some future point.  This function
   // may be called repeatedly.
   virtual bool ShouldCompleteDownload(DownloadItemImpl* download,
-                                      const base::Closure& complete_callback);
+                                      base::OnceClosure complete_callback);
 
   // Allows the delegate to override the opening of a download. If it returns
-  // true then it's reponsible for opening the item.
+  // true then it's responsible for opening the item, and the |callback| is not
+  // run.
   virtual bool ShouldOpenDownload(DownloadItemImpl* download,
-                                  const ShouldOpenDownloadCallback& callback);
+                                  ShouldOpenDownloadCallback callback);
 
   // Tests if a file type should be opened automatically.
-  virtual bool ShouldOpenFileBasedOnExtension(const base::FilePath& path);
+  virtual bool ShouldAutomaticallyOpenFile(const GURL& url,
+                                           const base::FilePath& path);
+
+  // Tests if a file type should be opened automatically by policy.
+  virtual bool ShouldAutomaticallyOpenFileByPolicy(const GURL& url,
+                                                   const base::FilePath& path);
 
   // Checks whether a downloaded file still exists and updates the
   // file's state if the file is already removed.
@@ -82,17 +96,13 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImplDelegate {
   // Called when an interrupted download is resumed.
   virtual void ResumeInterruptedDownload(
       std::unique_ptr<DownloadUrlParameters> params,
-      const GURL& site_url);
+      const std::string& serialized_embedder_data);
 
   // Update the persistent store with our information.
   virtual void UpdatePersistence(DownloadItemImpl* download);
 
   // Opens the file associated with this download.
   virtual void OpenDownload(DownloadItemImpl* download);
-
-  // Returns whether this is the most recent download in the rare event where
-  // multiple downloads are associated with the same file path.
-  virtual bool IsMostRecentDownloadItemAtFilePath(DownloadItemImpl* download);
 
   // Shows the download via the OS shell.
   virtual void ShowDownloadInShell(DownloadItemImpl* download);
@@ -104,10 +114,6 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImplDelegate {
   // Called when the download is interrupted.
   virtual void DownloadInterrupted(DownloadItemImpl* download);
 
-  // Get the in progress entry for the download item.
-  virtual base::Optional<DownloadEntry> GetInProgressEntry(
-      DownloadItemImpl* download);
-
   // Whether the download is off the record.
   virtual bool IsOffTheRecord() const;
 
@@ -117,14 +123,22 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImplDelegate {
   // Report extra bytes wasted during resumption.
   virtual void ReportBytesWasted(DownloadItemImpl* download);
 
-  // Gets the ServiceManager connector that can be used on UI thread.
-  virtual service_manager::Connector* GetServiceManagerConnector();
+  // Binds a device.mojom.WakeLockProvider receiver from the UI thread.
+  virtual void BindWakeLockProvider(
+      mojo::PendingReceiver<device::mojom::WakeLockProvider> receiver);
+
+  // Gets a callback that can connect to the Quarantine Service if available.
+  virtual QuarantineConnectionCallback GetQuarantineConnectionCallback();
+
+  // Gets a handler to perform the rename for a download item.  If no special
+  // rename handling is required, this function returns null and the default
+  // rename handling is performed.
+  virtual std::unique_ptr<DownloadItemRenameHandler>
+  GetRenameHandlerForDownload(DownloadItemImpl* download_item);
 
  private:
   // For "Outlives attached DownloadItemImpl" invariant assertion.
   int count_;
-
-  DISALLOW_COPY_AND_ASSIGN(DownloadItemImplDelegate);
 };
 
 }  // namespace download

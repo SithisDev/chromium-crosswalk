@@ -1,15 +1,22 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/values_test_util.h"
+#include "build/build_config.h"
+#include "content/browser/service_worker/service_worker_context_wrapper.h"
+#include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -18,7 +25,6 @@
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/test/content_browser_test_utils_internal.h"
-#include "net/base/escape.h"
 #include "net/base/url_util.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/ssl/ssl_server_config.h"
@@ -29,32 +35,32 @@ namespace content {
 
 namespace {
 
-void GetKey(const base::DictionaryValue& dict,
+void GetKey(const base::Value::Dict& dict,
             const std::string& key,
             std::string* out_value) {
-  auto* value = dict.FindKeyOfType(key, base::Value::Type::STRING);
+  const std::string* value = dict.FindString(key);
   ASSERT_TRUE(value);
-  *out_value = value->GetString();
+  *out_value = *value;
 }
 
-void GetKey(const base::DictionaryValue& dict,
+void GetKey(const base::Value::Dict& dict,
             const std::string& key,
             int* out_value) {
-  auto* value = dict.FindKeyOfType(key, base::Value::Type::INTEGER);
+  absl::optional<int> value = dict.FindInt(key);
   ASSERT_TRUE(value);
-  *out_value = value->GetInt();
+  *out_value = *value;
 }
 
 // Helper since the default output of EXPECT_EQ isn't useful when debugging
 // failures, it doesn't recurse into the dictionary.
-void ExpectEqual(const base::DictionaryValue& expected,
-                 const base::DictionaryValue& actual) {
+void ExpectEqual(const base::Value::Dict& expected,
+                 const base::Value::Dict& actual) {
   EXPECT_EQ(expected, actual)
       << "\nExpected: " << expected << "\nActual: " << actual;
 }
 
 const char kFileContent[] = "uploaded file content";
-const size_t kFileSize = base::size(kFileContent) - 1;
+const size_t kFileSize = std::size(kFileContent) - 1;
 }  // namespace
 
 // Tests POST requests that include a file and are intercepted by a service
@@ -64,9 +70,14 @@ const size_t kFileSize = base::size(kFileContent) - 1;
 // URLs while serving http resources from the http server, but this trick can
 // break the test when Site Isolation is enabled and content from different
 // origins end up in different processes.
-class ServiceWorkerFileUploadTest : public ContentBrowserTest {
+class ServiceWorkerFileUploadTest : public testing::WithParamInterface<bool>,
+                                    public ContentBrowserTest {
  public:
   ServiceWorkerFileUploadTest() = default;
+
+  ServiceWorkerFileUploadTest(const ServiceWorkerFileUploadTest&) = delete;
+  ServiceWorkerFileUploadTest& operator=(const ServiceWorkerFileUploadTest&) =
+      delete;
 
   void SetUp() override {
     ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
@@ -79,7 +90,15 @@ class ServiceWorkerFileUploadTest : public ContentBrowserTest {
     // be used for cross-origin URLs.
     host_resolver()->AddRule("*", "127.0.0.1");
     embedded_test_server()->StartAcceptingConnections();
+    StoragePartition* partition = shell()
+                                      ->web_contents()
+                                      ->GetBrowserContext()
+                                      ->GetDefaultStoragePartition();
+    wrapper_ = static_cast<ServiceWorkerContextWrapper*>(
+        partition->GetServiceWorkerContext());
   }
+
+  ServiceWorkerContextWrapper* wrapper() { return wrapper_.get(); }
 
   enum class TargetOrigin { kSameOrigin, kCrossOrigin };
 
@@ -135,8 +154,8 @@ class ServiceWorkerFileUploadTest : public ContentBrowserTest {
     base::FilePath file_path;
     ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
     ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir.GetPath(), &file_path));
-    ASSERT_EQ(static_cast<int>(kFileSize),
-              base::WriteFile(file_path, kFileContent, kFileSize));
+    ASSERT_TRUE(
+        base::WriteFile(file_path, base::StringPiece(kFileContent, kFileSize)));
 
     // Fill out the form to refer to the test file.
     base::RunLoop run_loop;
@@ -152,7 +171,7 @@ class ServiceWorkerFileUploadTest : public ContentBrowserTest {
     form_post_observer.Wait();
 
     // Extract the body payload.
-    EvalJsResult result = EvalJs(shell()->web_contents()->GetMainFrame(),
+    EvalJsResult result = EvalJs(shell()->web_contents()->GetPrimaryMainFrame(),
                                  "document.body.textContent");
     ASSERT_TRUE(result.error.empty());
 
@@ -164,13 +183,14 @@ class ServiceWorkerFileUploadTest : public ContentBrowserTest {
   void RunRespondWithTest(const std::string& target_query,
                           TargetOrigin target_origin,
                           std::string* out_filename,
-                          std::unique_ptr<base::DictionaryValue>* out_result) {
+                          base::Value::Dict& out_result) {
     std::string result;
     RunTest(BuildTargetUrl("/service_worker/upload", target_query),
             TargetOrigin::kSameOrigin, out_filename, &result);
-    *out_result =
-        base::DictionaryValue::From(base::test::ParseJsonDeprecated(result));
-    ASSERT_TRUE(*out_result);
+    absl::optional<base::Value> parsed_result = base::test::ParseJson(result);
+    ASSERT_TRUE(parsed_result);
+    ASSERT_TRUE(parsed_result->is_dict());
+    out_result = std::move(parsed_result->GetDict());
   }
 
   // Helper for tests where the service worker falls back to network.
@@ -190,6 +210,74 @@ class ServiceWorkerFileUploadTest : public ContentBrowserTest {
     EXPECT_THAT(result, ::testing::HasSubstr("form-data; name=\"file\""));
   }
 
+  WebContentsImpl* web_contents() {
+    return static_cast<WebContentsImpl*>(shell()->web_contents());
+  }
+
+  RenderFrameHostImpl* current_frame_host() {
+    return web_contents()->GetPrimaryFrameTree().root()->current_frame_host();
+  }
+
+  int GetServiceWorkerProcessId() {
+    const base::flat_map<int64_t, ServiceWorkerRunningInfo>& infos =
+        wrapper()->GetRunningServiceWorkerInfos();
+    EXPECT_EQ(1u, infos.size());
+    const ServiceWorkerRunningInfo& info = infos.begin()->second;
+    return info.render_process_id;
+  }
+
+  bool IsDifferentProcessForced() { return GetParam(); }
+
+  void RunSubresourceTest(const base::FilePath& file_path,
+                          std::string* out_result) {
+    // Install the service worker.
+    EXPECT_TRUE(NavigateToURL(
+        shell(), embedded_test_server()->GetURL(
+                     "/service_worker/create_service_worker.html")));
+    EXPECT_EQ("DONE", EvalJs(shell(), "register('file_upload_worker.js');"));
+
+    if (IsDifferentProcessForced()) {
+      // Stop the service worker.
+      base::RunLoop run_loop;
+      wrapper()->StopAllServiceWorkers(run_loop.QuitClosure());
+      run_loop.Run();
+
+      // Ensure that service worker will re-boot in a different process from the
+      // page.
+      ServiceWorkerProcessManager* process_manager =
+          wrapper()->process_manager();
+      process_manager->ForceNewProcessForTest(true);
+    }
+
+    // Generate the URL for the page with the file upload form. It will upload
+    // to |target_url|.
+    GURL page_url = embedded_test_server()->GetURL("/service_worker/form.html");
+    GURL target_url = BuildTargetUrl("/service_worker/upload", "getAs=text");
+    page_url = net::AppendQueryParameter(page_url, "target", target_url.spec());
+
+    // Navigate to the page with a file upload form.
+    EXPECT_TRUE(NavigateToURL(shell(), page_url));
+
+    if (IsDifferentProcessForced()) {
+      int page_process_id = current_frame_host()->GetProcess()->GetID();
+      int worker_process_id = GetServiceWorkerProcessId();
+      ASSERT_NE(page_process_id, worker_process_id);
+    }
+
+    // Fill out the form to refer to the test file.
+    base::RunLoop run_loop;
+    auto delegate = std::make_unique<FileChooserDelegate>(
+        file_path, run_loop.QuitClosure());
+    shell()->web_contents()->SetDelegate(delegate.get());
+    EXPECT_TRUE(ExecJs(shell(), "fileInput.click();"));
+    run_loop.Run();
+
+    // Submit the form using XHR.
+    EvalJsResult result = EvalJs(shell(), "submitXhr()");
+    ASSERT_TRUE(result.error.empty());
+    *out_result = result.ExtractString();
+  }
+
   std::string BuildExpectedBodyAsText(const std::string& boundary,
                                       const std::string& filename) {
     return "--" + boundary + "\r\n" +
@@ -203,8 +291,7 @@ class ServiceWorkerFileUploadTest : public ContentBrowserTest {
            "\r\n" + kFileContent + "\r\n" + "--" + boundary + "--\r\n";
   }
 
-  std::unique_ptr<base::DictionaryValue> BuildExpectedBodyAsFormData(
-      const std::string& filename) {
+  base::Value::Dict BuildExpectedBodyAsFormData(const std::string& filename) {
     std::string expectation = R"({
       "entries": [
         {
@@ -234,27 +321,25 @@ class ServiceWorkerFileUploadTest : public ContentBrowserTest {
     base::ReplaceFirstSubstringAfterOffset(&expectation, 0, "@PATH@", filename);
     base::ReplaceFirstSubstringAfterOffset(&expectation, 0, "@SIZE@",
                                            base::NumberToString(kFileSize));
-
-    return base::DictionaryValue::From(
-        base::test::ParseJsonDeprecated(expectation));
+    absl::optional<base::Value> result = base::test::ParseJson(expectation);
+    return std::move(result->GetDict());
   }
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerFileUploadTest);
+  scoped_refptr<ServiceWorkerContextWrapper> wrapper_;
 };
 
 // Tests using Request.text().
 IN_PROC_BROWSER_TEST_F(ServiceWorkerFileUploadTest, AsText) {
   std::string filename;
-  std::unique_ptr<base::DictionaryValue> dict;
-  RunRespondWithTest("getAs=text", TargetOrigin::kSameOrigin, &filename, &dict);
+  base::Value::Dict dict;
+  RunRespondWithTest("getAs=text", TargetOrigin::kSameOrigin, &filename, dict);
 
   std::string boundary;
-  GetKey(*dict, "boundary", &boundary);
+  GetKey(dict, "boundary", &boundary);
   std::string body;
-  GetKey(*dict, "body", &body);
+  GetKey(dict, "body", &body);
   std::string expected_body = BuildExpectedBodyAsText(boundary, filename);
   EXPECT_EQ(expected_body, body);
 }
@@ -262,13 +347,13 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerFileUploadTest, AsText) {
 // Tests using Request.blob().
 IN_PROC_BROWSER_TEST_F(ServiceWorkerFileUploadTest, AsBlob) {
   std::string filename;
-  std::unique_ptr<base::DictionaryValue> dict;
-  RunRespondWithTest("getAs=blob", TargetOrigin::kSameOrigin, &filename, &dict);
+  base::Value::Dict dict;
+  RunRespondWithTest("getAs=blob", TargetOrigin::kSameOrigin, &filename, dict);
 
   std::string boundary;
-  GetKey(*dict, "boundary", &boundary);
+  GetKey(dict, "boundary", &boundary);
   int size;
-  GetKey(*dict, "bodySize", &size);
+  GetKey(dict, "bodySize", &size);
   std::string expected_body = BuildExpectedBodyAsText(boundary, filename);
   EXPECT_EQ(base::MakeStrictNum(expected_body.size()), size);
 }
@@ -276,11 +361,11 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerFileUploadTest, AsBlob) {
 // Tests using Request.formData().
 IN_PROC_BROWSER_TEST_F(ServiceWorkerFileUploadTest, AsFormData) {
   std::string filename;
-  std::unique_ptr<base::DictionaryValue> dict;
+  base::Value::Dict dict;
   RunRespondWithTest("getAs=formData", TargetOrigin::kSameOrigin, &filename,
-                     &dict);
+                     dict);
 
-  ExpectEqual(*BuildExpectedBodyAsFormData(filename), *dict);
+  ExpectEqual(BuildExpectedBodyAsFormData(filename), dict);
 }
 
 // Tests network fallback.
@@ -292,11 +377,11 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerFileUploadTest, NetworkFallback) {
 // target. Regression test for https://crbug.com/916070.
 IN_PROC_BROWSER_TEST_F(ServiceWorkerFileUploadTest, AsFormData_CrossOrigin) {
   std::string filename;
-  std::unique_ptr<base::DictionaryValue> dict;
+  base::Value::Dict dict;
   RunRespondWithTest("getAs=formData", TargetOrigin::kCrossOrigin, &filename,
-                     &dict);
+                     dict);
 
-  ExpectEqual(*BuildExpectedBodyAsFormData(filename), *dict);
+  ExpectEqual(BuildExpectedBodyAsFormData(filename), dict);
 }
 
 // Tests network fallback when the form was submitted to a cross-origin target.
@@ -304,5 +389,64 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerFileUploadTest,
                        NetworkFallback_CrossOrigin) {
   RunNetworkFallbackTest(TargetOrigin::kCrossOrigin);
 }
+
+// Tests a subresource request.
+// Flaky on Android; see https://crbug.com/1320972.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Subresource DISABLED_Subresource
+#else
+#define MAYBE_Subresource Subresource
+#endif
+IN_PROC_BROWSER_TEST_P(ServiceWorkerFileUploadTest, MAYBE_Subresource) {
+  // Prepare a file for the upload form.
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  base::ScopedTempDir temp_dir;
+  base::FilePath file_path;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir.GetPath(), &file_path));
+  ASSERT_TRUE(
+      base::WriteFile(file_path, base::StringPiece(kFileContent, kFileSize)));
+
+  std::string result;
+  RunSubresourceTest(file_path, &result);
+
+  // Test that the file name and contents are present.
+  EXPECT_THAT(result,
+              ::testing::HasSubstr(file_path.BaseName().MaybeAsASCII()));
+  EXPECT_THAT(result, ::testing::HasSubstr(kFileContent));
+}
+
+// Tests a subresource request where the filename is non-ascii. Regression test
+// for https://crbug.com/1017184.
+// Flaky on Android; see https://crbug.com/1320972.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Subresource_NonAsciiFilename DISABLED_Subresource_NonAsciiFilename
+#else
+#define MAYBE_Subresource_NonAsciiFilename Subresource_NonAsciiFilename
+#endif
+IN_PROC_BROWSER_TEST_P(ServiceWorkerFileUploadTest,
+                       MAYBE_Subresource_NonAsciiFilename) {
+  // "こんにちは"
+  const base::FilePath::CharType nonAsciiFilename[] =
+      FILE_PATH_LITERAL("\u3053\u3093\u306B\u3061\u306F");
+
+  // Prepare a file for the upload form.
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  base::FilePath file_path = temp_dir.GetPath().Append(nonAsciiFilename);
+  ASSERT_TRUE(
+      base::WriteFile(file_path, base::StringPiece(kFileContent, kFileSize)));
+
+  std::string result;
+  RunSubresourceTest(file_path, &result);
+
+  // Test that the file name and contents are present. Repeat "こんにちは" here
+  // since HasSubstr() doesn't work with FilePath::CharType on Windows.
+  EXPECT_THAT(result, ::testing::HasSubstr("\u3053\u3093\u306B\u3061\u306F"));
+  EXPECT_THAT(result, ::testing::HasSubstr(kFileContent));
+}
+
+INSTANTIATE_TEST_SUITE_P(All, ServiceWorkerFileUploadTest, ::testing::Bool());
 
 }  // namespace content

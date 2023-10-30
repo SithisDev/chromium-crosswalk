@@ -1,27 +1,26 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/loader/cross_origin_read_blocking_checker.h"
 
 #include "base/callback.h"
-#include "base/task/post_task.h"
-#include "content/browser/loader/navigation_url_loader_impl.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
-#include "services/network/cross_origin_read_blocking.h"
+#include "services/network/public/cpp/corb/corb_api.h"
 #include "services/network/public/cpp/resource_request.h"
-#include "services/network/public/cpp/resource_response.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "storage/browser/blob/blob_reader.h"
 #include "url/origin.h"
 
 namespace content {
 
-// When NavigationLoaderOnUI is enabled, the CrossOriginReadBlockingChecker
-// lives on the UI thread, but blobs must be read on IO. This class handles all
-// blob access for CrossOriginReadBlockingChecker.
+// The CrossOriginReadBlockingChecker lives on the UI thread, but blobs must be
+// read on IO. This class handles all blob access for
+// CrossOriginReadBlockingChecker.
 class CrossOriginReadBlockingChecker::BlobIOState {
  public:
   BlobIOState(base::WeakPtr<CrossOriginReadBlockingChecker> checker,
@@ -72,13 +71,13 @@ class CrossOriginReadBlockingChecker::BlobIOState {
   }
 
   void OnNetError() {
-    NavigationURLLoaderImpl::RunOrPostTaskOnLoaderThread(
+    GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE, base::BindOnce(&CrossOriginReadBlockingChecker::OnNetError,
                                   checker_, blob_reader_->net_error()));
   }
 
   void OnReadComplete(int bytes_read) {
-    NavigationURLLoaderImpl::RunOrPostTaskOnLoaderThread(
+    GetUIThreadTaskRunner({})->PostTask(
         FROM_HERE,
         base::BindOnce(&CrossOriginReadBlockingChecker::OnReadComplete,
                        checker_, bytes_read, buffer_,
@@ -96,47 +95,41 @@ class CrossOriginReadBlockingChecker::BlobIOState {
 
 CrossOriginReadBlockingChecker::CrossOriginReadBlockingChecker(
     const network::ResourceRequest& request,
-    const network::ResourceResponseHead& response,
-    const url::Origin& request_initiator_site_lock,
+    const network::mojom::URLResponseHead& response,
     const storage::BlobDataHandle& blob_data_handle,
+    network::corb::PerFactoryState& corb_state,
     base::OnceCallback<void(Result)> callback)
     : callback_(std::move(callback)) {
   DCHECK(!callback_.is_null());
-  network::CrossOriginReadBlocking::LogAction(
-      network::CrossOriginReadBlocking::Action::kResponseStarted);
-  corb_analyzer_ =
-      std::make_unique<network::CrossOriginReadBlocking::ResponseAnalyzer>(
-          request.url, request.request_initiator, response,
-          request_initiator_site_lock, request.mode);
-  if (corb_analyzer_->ShouldBlock()) {
-    OnBlocked();
-    return;
-  }
-  if (corb_analyzer_->needs_sniffing()) {
-    blob_io_state_ = std::make_unique<BlobIOState>(
-        weak_factory_.GetWeakPtr(),
-        std::make_unique<storage::BlobDataHandle>(blob_data_handle));
-    if (NavigationURLLoaderImpl::IsNavigationLoaderOnUIEnabled()) {
+
+  corb_analyzer_ = network::corb::ResponseAnalyzer::Create(corb_state);
+  auto decision = corb_analyzer_->Init(request.url, request.request_initiator,
+                                       request.mode, response);
+  switch (decision) {
+    case network::corb::ResponseAnalyzer::Decision::kBlock:
+      OnBlocked();
+      return;
+
+    case network::corb::ResponseAnalyzer::Decision::kAllow:
+      OnAllowed();
+      return;
+
+    case network::corb::ResponseAnalyzer::Decision::kSniffMore:
+      blob_io_state_ = std::make_unique<BlobIOState>(
+          weak_factory_.GetWeakPtr(),
+          std::make_unique<storage::BlobDataHandle>(blob_data_handle));
       // base::Unretained is safe because |blob_io_state_| will be deleted on
       // the IO thread.
-      base::PostTaskWithTraits(
-          FROM_HERE, {BrowserThread::IO},
-          base::BindOnce(&BlobIOState::StartSniffing,
-                         base::Unretained(blob_io_state_.get())));
-    } else {
-      blob_io_state_->StartSniffing();
-    }
-    return;
+      GetIOThreadTaskRunner({})->PostTask(
+          FROM_HERE, base::BindOnce(&BlobIOState::StartSniffing,
+                                    base::Unretained(blob_io_state_.get())));
+      return;
   }
-  DCHECK(corb_analyzer_->ShouldAllow());
-  OnAllowed();
+  NOTREACHED();  // Unrecognized `decision` value?
 }
 
 CrossOriginReadBlockingChecker::~CrossOriginReadBlockingChecker() {
-  if (NavigationURLLoaderImpl::IsNavigationLoaderOnUIEnabled()) {
-    BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE,
-                              std::move(blob_io_state_));
-  }
+  GetIOThreadTaskRunner({})->DeleteSoon(FROM_HERE, std::move(blob_io_state_));
 }
 
 int CrossOriginReadBlockingChecker::GetNetError() {
@@ -144,12 +137,10 @@ int CrossOriginReadBlockingChecker::GetNetError() {
 }
 
 void CrossOriginReadBlockingChecker::OnAllowed() {
-  corb_analyzer_->LogAllowedResponse();
   std::move(callback_).Run(Result::kAllowed);
 }
 
 void CrossOriginReadBlockingChecker::OnBlocked() {
-  corb_analyzer_->LogBlockedResponse();
   std::move(callback_).Run(corb_analyzer_->ShouldReportBlockedResponse()
                                ? Result::kBlocked_ShouldReport
                                : Result::kBlocked_ShouldNotReport);
@@ -168,13 +159,39 @@ void CrossOriginReadBlockingChecker::OnReadComplete(
     OnNetError(net_error);
     return;
   }
+
   base::StringPiece data(buffer->data(), bytes_read);
-  corb_analyzer_->SniffResponseBody(data, 0);
-  if (corb_analyzer_->ShouldBlock()) {
-    OnBlocked();
-    return;
+  network::corb::ResponseAnalyzer::Decision corb_decision =
+      corb_analyzer_->Sniff(data);
+
+  // At OnReadComplete we are out of data, so fall back to
+  // HandleEndOfSniffableResponseBody if no allow/block `corb_decision` has been
+  // reached yet.
+  if (corb_decision == network::corb::ResponseAnalyzer::Decision::kSniffMore) {
+    corb_decision = corb_analyzer_->HandleEndOfSniffableResponseBody();
+    DCHECK_NE(network::corb::ResponseAnalyzer::Decision::kSniffMore,
+              corb_decision);
   }
-  OnAllowed();
+
+  switch (corb_decision) {
+    case network::corb::ResponseAnalyzer::Decision::kBlock:
+      OnBlocked();
+      return;
+
+    case network::corb::ResponseAnalyzer::Decision::kAllow:
+      OnAllowed();
+      return;
+
+    case network::corb::ResponseAnalyzer::Decision::kSniffMore:
+      // This should be impossible after going through
+      // HandleEndOfSniffableResponseBody above.
+      NOTREACHED();
+      break;
+  }
+  // Fall back to blocking after encountering an unexpected or unrecognized
+  // `corb_decision` in the `switch` statement above.
+  NOTREACHED();
+  OnBlocked();
 }
 
 }  // namespace content

@@ -1,8 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/nacl/browser/pnacl_translation_cache.h"
+
+#include <memory>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
@@ -11,7 +13,7 @@
 #include "build/build_config.h"
 #include "components/nacl/common/pnacl_types.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "net/base/io_buffer.h"
 #include "net/base/test_completion_callback.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,9 +28,9 @@ const int kTestDiskCacheSize = 16 * 1024 * 1024;
 class PnaclTranslationCacheTest : public testing::Test {
  protected:
   PnaclTranslationCacheTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
+      : task_environment_(content::BrowserTaskEnvironment::IO_MAINLOOP) {}
   ~PnaclTranslationCacheTest() override {}
-  void SetUp() override { cache_.reset(new PnaclTranslationCache()); }
+  void SetUp() override { cache_ = std::make_unique<PnaclTranslationCache>(); }
   void TearDown() override {
     // The destructor of PnaclTranslationCacheWriteEntry posts a task to the IO
     // thread to close the backend cache entry. We want to make sure the entries
@@ -44,7 +46,7 @@ class PnaclTranslationCacheTest : public testing::Test {
   std::string GetNexe(const std::string& key);
 
   std::unique_ptr<PnaclTranslationCache> cache_;
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   base::ScopedTempDir temp_dir_;
 };
 
@@ -86,8 +88,9 @@ class TestNexeCallback {
   TestNexeCallback()
       : have_result_(false),
         result_(-1),
-        cb_(base::Bind(&TestNexeCallback::SetResult, base::Unretained(this))) {}
-  GetNexeCallback callback() { return cb_; }
+        cb_(base::BindOnce(&TestNexeCallback::SetResult,
+                           base::Unretained(this))) {}
+  GetNexeCallback callback() { return std::move(cb_); }
   net::DrainableIOBuffer* GetResult(int* result) {
     while (!have_result_)
       base::RunLoop().RunUntilIdle();
@@ -105,7 +108,7 @@ class TestNexeCallback {
   bool have_result_;
   int result_;
   scoped_refptr<net::DrainableIOBuffer> buf_;
-  const GetNexeCallback cb_;
+  GetNexeCallback cb_;
 };
 
 std::string PnaclTranslationCacheTest::GetNexe(const std::string& key) {

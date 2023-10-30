@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "net/base/address_family.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 namespace mirroring {
 
@@ -53,7 +54,6 @@ UdpSocketClient::UdpSocketClient(const net::IPEndPoint& remote_endpoint,
     : remote_endpoint_(remote_endpoint),
       network_context_(context),
       error_callback_(std::move(error_callback)),
-      binding_(this),
       bytes_sent_(0),
       allow_sending_(false),
       num_packets_pending_receive_(0) {
@@ -63,13 +63,13 @@ UdpSocketClient::UdpSocketClient(const net::IPEndPoint& remote_endpoint,
 UdpSocketClient::~UdpSocketClient() {}
 
 bool UdpSocketClient::SendPacket(media::cast::PacketRef packet,
-                                 const base::RepeatingClosure& cb) {
+                                 base::OnceClosure cb) {
   DVLOG(3) << __func__;
   DCHECK(resume_send_callback_.is_null());
 
   bytes_sent_ += packet->data.size();
   if (!allow_sending_) {
-    resume_send_callback_ = cb;
+    resume_send_callback_ = std::move(cb);
     return false;
   }
 
@@ -102,13 +102,11 @@ int64_t UdpSocketClient::GetBytesSent() {
 }
 
 void UdpSocketClient::StartReceiving(
-    const media::cast::PacketReceiverCallbackWithStatus& packet_receiver) {
+    media::cast::PacketReceiverCallbackWithStatus packet_receiver) {
   DVLOG(1) << __func__;
-  packet_receiver_callback_ = packet_receiver;
-  network::mojom::UDPSocketReceiverPtr udp_socket_receiver;
-  binding_.Bind(mojo::MakeRequest(&udp_socket_receiver));
-  network_context_->CreateUDPSocket(mojo::MakeRequest(&udp_socket_),
-                                    std::move(udp_socket_receiver));
+  packet_receiver_callback_ = std::move(packet_receiver);
+  network_context_->CreateUDPSocket(udp_socket_.BindNewPipeAndPassReceiver(),
+                                    receiver_.BindNewPipeAndPassRemote());
   network::mojom::UDPSocketOptionsPtr options;
   udp_socket_->Connect(remote_endpoint_, std::move(options),
                        base::BindOnce(&UdpSocketClient::OnSocketConnected,
@@ -117,7 +115,7 @@ void UdpSocketClient::StartReceiving(
 
 void UdpSocketClient::OnSocketConnected(
     int result,
-    const base::Optional<net::IPEndPoint>& addr) {
+    const absl::optional<net::IPEndPoint>& addr) {
   DVLOG(2) << __func__ << ": result=" << result;
 
   if (result == net::OK) {
@@ -140,8 +138,8 @@ void UdpSocketClient::OnSocketConnected(
 
 void UdpSocketClient::StopReceiving() {
   packet_receiver_callback_.Reset();
-  if (binding_.is_bound())
-    binding_.Close();
+  if (receiver_.is_bound())
+    receiver_.reset();
   if (udp_socket_.is_bound())
     udp_socket_.reset();
   num_packets_pending_receive_ = 0;
@@ -149,8 +147,8 @@ void UdpSocketClient::StopReceiving() {
 
 void UdpSocketClient::OnReceived(
     int32_t result,
-    const base::Optional<net::IPEndPoint>& src_addr,
-    base::Optional<base::span<const uint8_t>> data) {
+    const absl::optional<net::IPEndPoint>& src_addr,
+    absl::optional<base::span<const uint8_t>> data) {
   DVLOG(3) << __func__ << ": result=" << result;
   DCHECK_GT(num_packets_pending_receive_, 0);
   DCHECK(!packet_receiver_callback_.is_null());

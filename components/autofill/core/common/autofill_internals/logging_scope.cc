@@ -1,10 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/core/common/autofill_internals/logging_scope.h"
 
 #include "base/logging.h"
+#include "base/notreached.h"
+#include "components/autofill/core/common/logging/log_buffer.h"
 
 namespace autofill {
 
@@ -27,6 +29,13 @@ const char* LoggingScopeToString(LoggingScope scope) {
 
   NOTREACHED();
   return "";
+}
+
+LogBuffer& operator<<(LogBuffer& buf, LoggingScope scope) {
+  if (!buf.active())
+    return buf;
+  return buf << Tag{"div"} << Attrib{"scope", LoggingScopeToString(scope)}
+             << Attrib{"class", "log-entry"};
 }
 
 }  // namespace autofill

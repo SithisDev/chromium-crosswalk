@@ -1,12 +1,8 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/gpu/content_gpu_client.h"
-
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-#include "media/cdm/cdm_proxy.h"
-#endif
 
 namespace content {
 
@@ -18,11 +14,13 @@ gpu::SharedImageManager* ContentGpuClient::GetSharedImageManager() {
   return nullptr;
 }
 
-#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
-std::unique_ptr<media::CdmProxy> ContentGpuClient::CreateCdmProxy(
-    const base::Token& cdm_guid) {
+gpu::Scheduler* ContentGpuClient::GetScheduler() {
   return nullptr;
 }
-#endif
+
+viz::VizCompositorThreadRunner*
+ContentGpuClient::GetVizCompositorThreadRunner() {
+  return nullptr;
+}
 
 }  // namespace content

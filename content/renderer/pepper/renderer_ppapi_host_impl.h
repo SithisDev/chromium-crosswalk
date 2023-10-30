@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "content/common/content_export.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "content/renderer/pepper/content_renderer_pepper_host_factory.h"
 #include "ppapi/host/ppapi_host.h"
@@ -33,6 +33,9 @@ class PluginModule;
 // This class is attached to a PluginModule which manages our lifetime.
 class RendererPpapiHostImpl : public RendererPpapiHost {
  public:
+  RendererPpapiHostImpl(const RendererPpapiHostImpl&) = delete;
+  RendererPpapiHostImpl& operator=(const RendererPpapiHostImpl&) = delete;
+
   ~RendererPpapiHostImpl() override;
 
   // Factory functions to create in process or out-of-process host impls. The
@@ -77,18 +80,15 @@ class RendererPpapiHostImpl : public RendererPpapiHost {
   bool IsValidInstance(PP_Instance instance) override;
   PepperPluginInstance* GetPluginInstance(PP_Instance instance) override;
   RenderFrame* GetRenderFrameForInstance(PP_Instance instance) override;
-  RenderView* GetRenderViewForInstance(PP_Instance instance) override;
   blink::WebPluginContainer* GetContainerForInstance(
       PP_Instance instance) override;
   bool HasUserGesture(PP_Instance instance) override;
-  int GetRoutingIDForWidget(PP_Instance instance) override;
+  int GetRoutingIDForFrame(PP_Instance instance) override;
   gfx::Point PluginPointToRenderFrame(PP_Instance instance,
                                       const gfx::Point& pt) override;
   IPC::PlatformFileForTransit ShareHandleWithRemote(
       base::PlatformFile handle,
       bool should_close_source) override;
-  base::SharedMemoryHandle ShareSharedMemoryHandleWithRemote(
-      const base::SharedMemoryHandle& handle) override;
   base::UnsafeSharedMemoryRegion ShareUnsafeSharedMemoryRegionWithRemote(
       const base::UnsafeSharedMemoryRegion& region) override;
   base::ReadOnlySharedMemoryRegion ShareReadOnlySharedMemoryRegionWithRemote(
@@ -151,8 +151,6 @@ class RendererPpapiHostImpl : public RendererPpapiHost {
 
   // The scale between the viewport and dip.
   float viewport_to_dip_scale_ = 1.0f;
-
-  DISALLOW_COPY_AND_ASSIGN(RendererPpapiHostImpl);
 };
 
 }  // namespace content

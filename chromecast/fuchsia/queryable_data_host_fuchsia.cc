@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,8 @@ QueryableDataHostFuchsia::~QueryableDataHostFuchsia() {}
 
 void QueryableDataHostFuchsia::SendQueryableValue(const std::string& key,
                                                   const base::Value& value) {
-  // TODO(elvin): async call to update queryable values when runner fidl exists
+  // TODO(b/169167391): async call to update queryable values when runner fidl
+  // exists.
   LOG(ERROR) << "Not Implemented: SendQueryableValue" << key << " " << value;
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -14,14 +15,13 @@
 #include "base/format_macros.h"
 #include "base/location.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/single_thread_task_runner.h"
-#include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/cast_channel/cast_framer.h"
 #include "components/cast_channel/cast_message_util.h"
 #include "components/cast_channel/logger.h"
-#include "components/cast_channel/proto/cast_channel.pb.h"
 #include "net/base/net_errors.h"
+#include "third_party/openscreen/src/cast/common/channel/proto/cast_channel.pb.h"
 
 #define VLOG_WITH_CONNECTION(level) \
   VLOG(level) << "[" << ip_endpoint_.ToString() << ", auth=SSL_VERIFIED] "
@@ -54,13 +54,11 @@ CastTransportImpl::CastTransportImpl(Channel* channel,
       channel_id_(channel_id),
       ip_endpoint_(ip_endpoint),
       logger_(logger) {
-  DCHECK(socket);
-
   // Buffer is reused across messages to minimize unnecessary buffer
   // [re]allocations.
   read_buffer_ = base::MakeRefCounted<net::GrowableIOBuffer>();
   read_buffer_->SetCapacity(MessageFramer::MessageHeader::max_message_size());
-  framer_.reset(new MessageFramer(read_buffer_));
+  framer_ = std::make_unique<MessageFramer>(read_buffer_);
 }
 
 CastTransportImpl::~CastTransportImpl() {

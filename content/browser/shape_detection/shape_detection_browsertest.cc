@@ -1,10 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/command_line.h"
 #include "base/strings/string_tokenizer.h"
+#include "build/build_config.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -26,7 +28,7 @@ struct TestParameters {
     {"FaceDetector", "/blank.jpg", std::vector<std::vector<float>>{}},
     {"FaceDetector",
      "/single_face.jpg",
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
      {{23, 20, 42, 42}}
 #else
      {{23, 26, 42, 42}}
@@ -49,9 +51,9 @@ class ShapeDetectionBrowserTest
       public ::testing::WithParamInterface<struct TestParameters> {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    // Flag to enable ShapeDetection API.
+    // Enable FaceDetector since it is still experimental.
     CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        switches::kEnableBlinkFeatures, "ShapeDetection");
+        switches::kEnableBlinkFeatures, "FaceDetector");
   }
 
  protected:
@@ -64,12 +66,12 @@ class ShapeDetectionBrowserTest
     const GURL html_url(
         embedded_test_server()->GetURL(kShapeDetectionTestHtml));
     const GURL image_url(embedded_test_server()->GetURL(image_path));
-    NavigateToURL(shell(), html_url);
+    EXPECT_TRUE(NavigateToURL(shell(), html_url));
     const std::string js_command = "detectShapesOnImageUrl('" + detector_name +
                                    "', '" + image_url.spec() + "')";
-    std::string response_string;
-    ASSERT_TRUE(
-        ExecuteScriptAndExtractString(shell(), js_command, &response_string));
+    std::string response_string =
+        EvalJs(shell(), js_command, EXECUTE_SCRIPT_USE_MANUAL_REPLY)
+            .ExtractString();
 
     base::StringTokenizer outer_tokenizer(response_string, "#");
     std::vector<std::vector<float>> detected_bounding_boxes;
@@ -96,7 +98,7 @@ class ShapeDetectionBrowserTest
 };
 
 // TODO(https://crbug.com/659138): Enable the test on other platforms.
-#if defined(OS_ANDROID) || defined(OS_MACOSX)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC)
 #define MAYBE_DetectShapesInImage DetectShapesInImage
 #else
 #define MAYBE_DetectShapesInImage DISABLED_DetectShapesInImage
@@ -111,7 +113,7 @@ IN_PROC_BROWSER_TEST_P(ShapeDetectionBrowserTest, MAYBE_DetectShapesInImage) {
                          GetParam().expected_bounding_boxes);
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          ShapeDetectionBrowserTest,
                          testing::ValuesIn(kTestParameters));
 

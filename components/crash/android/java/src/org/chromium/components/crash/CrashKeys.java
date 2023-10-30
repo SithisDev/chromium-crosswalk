@@ -1,13 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.crash;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.NativeMethods;
 
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
@@ -22,9 +23,9 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
  * The crash keys will only be included in browser process crash reports.
  */
 public class CrashKeys {
-    private static final String[] KEYS =
-            new String[] {"loaded_dynamic_module", "active_dynamic_module", "application_status",
-                    "installed_modules", "emulated_modules", "dynamic_module_dex_name"};
+    private static final String[] KEYS = new String[] {"loaded_dynamic_module",
+            "active_dynamic_module", "application_status", "installed_modules", "emulated_modules",
+            "dynamic_module_dex_name", "partner_customization_config", "first_run"};
 
     private final AtomicReferenceArray<String> mValues = new AtomicReferenceArray<>(KEYS.length);
 
@@ -59,7 +60,11 @@ public class CrashKeys {
      * @see #flushToNative
      */
     public AtomicReferenceArray<String> getValues() {
-        assert !mFlushed;
+        // TODO(smaier) this was causing infinite uploads of assertions. This caught a legitimate
+        // bug (uploading with Java-only crash keys when native is ready), but we need a bit of time
+        // to fix this, so doing a temporary workaround. Uncomment this as soon as possible. See
+        // crbug.com/1360834 for more details.
+        // assert !mFlushed;
         return mValues;
     }
 
@@ -74,7 +79,7 @@ public class CrashKeys {
     public void set(@CrashKeyIndex int keyIndex, @Nullable String value) {
         ThreadUtils.assertOnUiThread();
         if (mFlushed) {
-            nativeSet(keyIndex, value);
+            CrashKeysJni.get().set(CrashKeys.this, keyIndex, value);
             return;
         }
         mValues.set(keyIndex, value);
@@ -88,12 +93,19 @@ public class CrashKeys {
     public void flushToNative() {
         ThreadUtils.assertOnUiThread();
 
-        assert !mFlushed;
+        // TODO(smaier) this was causing infinite uploads of assertions. This caught a legitimate
+        // bug (uploading with Java-only crash keys when native is ready), but we need a bit of time
+        // to fix this, so doing a temporary workaround. Uncomment this as soon as possible. See
+        // crbug.com/1360834 for more details.
+        // assert !mFlushed;
         for (@CrashKeyIndex int i = 0; i < mValues.length(); i++) {
-            nativeSet(i, mValues.getAndSet(i, null));
+            CrashKeysJni.get().set(CrashKeys.this, i, mValues.getAndSet(i, null));
         }
         mFlushed = true;
     }
 
-    private native void nativeSet(int key, String value);
+    @NativeMethods
+    interface Natives {
+        void set(CrashKeys caller, int key, String value);
+    }
 }

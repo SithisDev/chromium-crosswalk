@@ -1,21 +1,24 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/scheduler/responsiveness/watcher.h"
 
 #include "base/bind.h"
+#include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/pending_task.h"
 #include "base/run_loop.h"
 #include "base/synchronization/lock.h"
-#include "base/task/post_task.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/browser/scheduler/responsiveness/calculator.h"
 #include "content/browser/scheduler/responsiveness/native_event_observer.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -23,34 +26,50 @@ namespace responsiveness {
 
 namespace {
 
+struct TaskTiming {
+  base::TimeTicks queue_time;
+  base::TimeTicks execution_start_time;
+  base::TimeTicks execution_finish_time;
+};
+
 class FakeCalculator : public Calculator {
  public:
-  void TaskOrEventFinishedOnUIThread(base::TimeTicks schedule_time,
-                                     base::TimeTicks finish_time) override {
-    queue_times_ui_.push_back(schedule_time);
+  void TaskOrEventFinishedOnUIThread(
+      base::TimeTicks queue_time,
+      base::TimeTicks execution_start_time,
+      base::TimeTicks execution_finish_time) override {
+    execution_times_ui_.push_back(
+        {queue_time, execution_start_time, execution_finish_time});
   }
 
-  void TaskOrEventFinishedOnIOThread(base::TimeTicks schedule_time,
-                                     base::TimeTicks finish_time) override {
+  void TaskOrEventFinishedOnIOThread(
+      base::TimeTicks queue_time,
+      base::TimeTicks execution_start_time,
+      base::TimeTicks execution_finish_time) override {
     base::AutoLock l(io_thread_lock_);
-    queue_times_io_.push_back(schedule_time);
+    execution_times_io_.push_back(
+        {queue_time, execution_start_time, execution_finish_time});
   }
 
-  int NumTasksOnUIThread() { return static_cast<int>(queue_times_ui_.size()); }
-  std::vector<base::TimeTicks>& QueueTimesUIThread() { return queue_times_ui_; }
+  int NumTasksOnUIThread() {
+    return static_cast<int>(execution_times_ui_.size());
+  }
+  std::vector<TaskTiming>& ExecutionTimesUIThread() {
+    return execution_times_ui_;
+  }
   int NumTasksOnIOThread() {
     base::AutoLock l(io_thread_lock_);
-    return static_cast<int>(queue_times_io_.size());
+    return static_cast<int>(execution_times_io_.size());
   }
-  std::vector<base::TimeTicks>& QueueTimesIOThread() {
+  std::vector<TaskTiming>& ExecutionTimesIOThread() {
     base::AutoLock l(io_thread_lock_);
-    return queue_times_io_;
+    return execution_times_io_;
   }
 
  private:
-  std::vector<base::TimeTicks> queue_times_ui_;
+  std::vector<TaskTiming> execution_times_ui_;
   base::Lock io_thread_lock_;
-  std::vector<base::TimeTicks> queue_times_io_;
+  std::vector<TaskTiming> execution_times_io_;
 };
 
 class FakeMetricSource : public MetricSource {
@@ -96,17 +115,17 @@ class FakeWatcher : public Watcher {
         register_message_loop_observer_(register_message_loop_observer) {}
 
   int NumTasksOnUIThread() { return calculator_->NumTasksOnUIThread(); }
-  std::vector<base::TimeTicks>& QueueTimesUIThread() {
-    return calculator_->QueueTimesUIThread();
+  std::vector<TaskTiming>& ExecutionTimesUIThread() {
+    return calculator_->ExecutionTimesUIThread();
   }
-  std::vector<base::TimeTicks>& QueueTimesIOThread() {
-    return calculator_->QueueTimesIOThread();
+  std::vector<TaskTiming>& ExecutionTimesIOThread() {
+    return calculator_->ExecutionTimesIOThread();
   }
   int NumTasksOnIOThread() { return calculator_->NumTasksOnIOThread(); }
 
  private:
   ~FakeWatcher() override {}
-  FakeCalculator* calculator_ = nullptr;
+  raw_ptr<FakeCalculator> calculator_ = nullptr;
   bool register_message_loop_observer_ = false;
 };
 
@@ -120,7 +139,7 @@ class ResponsivenessWatcherTest : public testing::Test {
     watcher_ = scoped_refptr<FakeWatcher>(
         new FakeWatcher(/*register_message_loop_observer=*/false));
     watcher_->SetUp();
-    test_browser_thread_bundle_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
   void TearDown() override {
@@ -131,7 +150,8 @@ class ResponsivenessWatcherTest : public testing::Test {
  protected:
   // This member sets up BrowserThread::IO and BrowserThread::UI. It must be the
   // first member, as other members may depend on these abstractions.
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_{
+      content::BrowserTaskEnvironment::TimeSource::MOCK_TIME};
 
   scoped_refptr<FakeWatcher> watcher_;
 };
@@ -139,18 +159,22 @@ class ResponsivenessWatcherTest : public testing::Test {
 // Test that tasks are forwarded to calculator.
 TEST_F(ResponsivenessWatcherTest, TaskForwarding) {
   for (int i = 0; i < 3; ++i) {
-    base::PendingTask task(FROM_HERE, base::OnceClosure());
-    task.queue_time = base::TimeTicks::Now();
-    watcher_->WillRunTaskOnUIThread(&task);
+    base::PendingTask task(FROM_HERE, base::OnceClosure(),
+                           /*queue_time=*/base::TimeTicks::Now(),
+                           /*delayed_run_time=*/base::TimeTicks());
+    watcher_->WillRunTaskOnUIThread(&task,
+                                    /* was_blocked_or_low_priority= */ false);
     watcher_->DidRunTaskOnUIThread(&task);
   }
   EXPECT_EQ(3, watcher_->NumTasksOnUIThread());
   EXPECT_EQ(0, watcher_->NumTasksOnIOThread());
 
   for (int i = 0; i < 4; ++i) {
-    base::PendingTask task(FROM_HERE, base::OnceClosure());
-    task.queue_time = base::TimeTicks::Now();
-    watcher_->WillRunTaskOnIOThread(&task);
+    base::PendingTask task(FROM_HERE, base::OnceClosure(),
+                           /*queue_time=*/base::TimeTicks::Now(),
+                           /*delayed_run_time=*/base::TimeTicks());
+    watcher_->WillRunTaskOnIOThread(&task,
+                                    /* was_blocked_or_low_priority= */ false);
     watcher_->DidRunTaskOnIOThread(&task);
   }
   EXPECT_EQ(3, watcher_->NumTasksOnUIThread());
@@ -159,19 +183,34 @@ TEST_F(ResponsivenessWatcherTest, TaskForwarding) {
 
 // Test that nested tasks are not forwarded to the calculator.
 TEST_F(ResponsivenessWatcherTest, TaskNesting) {
-  base::TimeTicks now = base::TimeTicks::Now();
+  base::PendingTask task1(FROM_HERE, base::OnceClosure(),
+                          /*queue_time=*/base::TimeTicks::Now(),
+                          /*delayed_run_time=*/base::TimeTicks());
+  base::PendingTask task2(FROM_HERE, base::OnceClosure(),
+                          /*queue_time=*/base::TimeTicks::Now(),
+                          /*delayed_run_time=*/base::TimeTicks());
+  task_environment_.FastForwardBy(base::Milliseconds(1));
+  base::PendingTask task3(FROM_HERE, base::OnceClosure(),
+                          /*queue_time=*/base::TimeTicks::Now(),
+                          /*delayed_run_time=*/base::TimeTicks());
 
-  base::PendingTask task1(FROM_HERE, base::OnceClosure());
-  task1.queue_time = now + base::TimeDelta::FromMilliseconds(1);
-  base::PendingTask task2(FROM_HERE, base::OnceClosure());
-  task2.queue_time = now + base::TimeDelta::FromMilliseconds(2);
-  base::PendingTask task3(FROM_HERE, base::OnceClosure());
-  task3.queue_time = now + base::TimeDelta::FromMilliseconds(3);
+  const base::TimeTicks task_1_execution_start_time = base::TimeTicks::Now();
+  watcher_->WillRunTaskOnUIThread(&task1,
+                                  /* was_blocked_or_low_priority= */ false);
+  watcher_->WillRunTaskOnUIThread(&task2,
+                                  /* was_blocked_or_low_priority= */ false);
 
-  watcher_->WillRunTaskOnUIThread(&task1);
-  watcher_->WillRunTaskOnUIThread(&task2);
-  watcher_->WillRunTaskOnUIThread(&task3);
+  task_environment_.FastForwardBy(base::Milliseconds(1));
+  const base::TimeTicks task_3_execution_start_time = base::TimeTicks::Now();
+  EXPECT_EQ(task_1_execution_start_time + base::Milliseconds(1),
+            task_3_execution_start_time);
+  watcher_->WillRunTaskOnUIThread(&task3,
+                                  /* was_blocked_or_low_priority= */ false);
+
+  task_environment_.FastForwardBy(base::Milliseconds(1));
+  const base::TimeTicks task_3_execution_finish_time = base::TimeTicks::Now();
   watcher_->DidRunTaskOnUIThread(&task3);
+  task_environment_.FastForwardBy(base::Milliseconds(1));
   watcher_->DidRunTaskOnUIThread(&task2);
   watcher_->DidRunTaskOnUIThread(&task1);
 
@@ -179,32 +218,90 @@ TEST_F(ResponsivenessWatcherTest, TaskNesting) {
 
   // The innermost task should be the one that is passed through, as it didn't
   // cause reentrancy.
-  EXPECT_EQ(now + base::TimeDelta::FromMilliseconds(3),
-            watcher_->QueueTimesUIThread()[0]);
+  const TaskTiming task_timing = watcher_->ExecutionTimesUIThread()[0];
+  EXPECT_EQ(task3.queue_time, task_timing.queue_time);
+  EXPECT_EQ(task_3_execution_start_time, task_timing.execution_start_time);
+  EXPECT_EQ(task_3_execution_finish_time, task_timing.execution_finish_time);
+
   EXPECT_EQ(0, watcher_->NumTasksOnIOThread());
 }
 
 // Test that native events use execution time instead of queue + execution time.
 TEST_F(ResponsivenessWatcherTest, NativeEvents) {
-  base::TimeTicks start_time = base::TimeTicks::Now();
+  const base::TimeTicks start_time = base::TimeTicks::Now();
 
   void* opaque_identifier = reinterpret_cast<void*>(0x1234);
   watcher_->WillRunEventOnUIThread(opaque_identifier);
+
+  task_environment_.FastForwardBy(base::Milliseconds(1));
+  const base::TimeTicks finish_time = base::TimeTicks::Now();
   watcher_->DidRunEventOnUIThread(opaque_identifier);
 
   ASSERT_EQ(1, watcher_->NumTasksOnUIThread());
+  const TaskTiming task_timing = watcher_->ExecutionTimesUIThread()[0];
+  EXPECT_EQ(task_timing.queue_time, start_time);
+  EXPECT_EQ(task_timing.execution_start_time, start_time);
+  EXPECT_EQ(task_timing.execution_finish_time, finish_time);
 
-  // The queue time should be after |start_time|, since we actually measure
-  // execution time rather than queue time + execution time for native events.
-  EXPECT_GE(watcher_->QueueTimesUIThread()[0], start_time);
+  EXPECT_EQ(0, watcher_->NumTasksOnIOThread());
+}
+
+// Test that the queue duration of a blocked or low priority task is zero.
+TEST_F(ResponsivenessWatcherTest, BlockedOrLowPriorityTask) {
+  base::PendingTask task(FROM_HERE, base::OnceClosure(),
+                         /*queue_time=*/base::TimeTicks::Now(),
+                         /*delayed_run_time=*/base::TimeTicks());
+  task_environment_.FastForwardBy(base::Seconds(1));
+
+  const base::TimeTicks execution_start_time = base::TimeTicks::Now();
+  watcher_->WillRunTaskOnUIThread(&task,
+                                  /* was_blocked_or_low_priority= */ true);
+  task_environment_.FastForwardBy(base::Milliseconds(1));
+  const base::TimeTicks execution_finish_time = base::TimeTicks::Now();
+  watcher_->DidRunTaskOnUIThread(&task);
+
+  ASSERT_EQ(1, watcher_->NumTasksOnUIThread());
+  const TaskTiming task_timing = watcher_->ExecutionTimesUIThread()[0];
+  // The queue time should be equal to the execution start time, to simulate
+  // that the task did not spend any time in a queue. This is the desired
+  // behavior for a task that was blocked or low priority.
+  EXPECT_EQ(task_timing.queue_time, execution_start_time);
+  EXPECT_EQ(task_timing.execution_start_time, execution_start_time);
+  EXPECT_EQ(task_timing.execution_finish_time, execution_finish_time);
+
+  EXPECT_EQ(0, watcher_->NumTasksOnIOThread());
+}
+
+// Test that the queue duration of a delayed task is zero.
+TEST_F(ResponsivenessWatcherTest, DelayedTask) {
+  base::PendingTask task(FROM_HERE, base::OnceClosure(),
+                         /*queue_time=*/base::TimeTicks(),
+                         /*delayed_run_time=*/base::TimeTicks::Now());
+  task_environment_.FastForwardBy(base::Seconds(1));
+
+  const base::TimeTicks execution_start_time = base::TimeTicks::Now();
+  watcher_->WillRunTaskOnUIThread(&task,
+                                  /* was_blocked_or_low_priority= */ false);
+  task_environment_.FastForwardBy(base::Milliseconds(1));
+  const base::TimeTicks execution_finish_time = base::TimeTicks::Now();
+  watcher_->DidRunTaskOnUIThread(&task);
+
+  ASSERT_EQ(1, watcher_->NumTasksOnUIThread());
+  const TaskTiming task_timing = watcher_->ExecutionTimesUIThread()[0];
+  // The queue time should be equal to the execution start time, to simulate
+  // that the task did not spend any time in a queue. This is the desired
+  // behavior for a delayed task.
+  EXPECT_EQ(task_timing.queue_time, execution_start_time);
+  EXPECT_EQ(task_timing.execution_start_time, execution_start_time);
+  EXPECT_EQ(task_timing.execution_finish_time, execution_finish_time);
+
   EXPECT_EQ(0, watcher_->NumTasksOnIOThread());
 }
 
 class ResponsivenessWatcherRealIOThreadTest : public testing::Test {
  public:
   ResponsivenessWatcherRealIOThreadTest()
-      : test_browser_thread_bundle_(
-            content::TestBrowserThreadBundle::REAL_IO_THREAD) {}
+      : task_environment_(content::BrowserTaskEnvironment::REAL_IO_THREAD) {}
 
   void SetUp() override {
     // Watcher's constructor posts a task to IO thread. We need to let those
@@ -212,7 +309,7 @@ class ResponsivenessWatcherRealIOThreadTest : public testing::Test {
     watcher_ = scoped_refptr<FakeWatcher>(
         new FakeWatcher(/*register_message_loop_observer=*/true));
     watcher_->SetUp();
-    test_browser_thread_bundle_.RunIOThreadUntilIdle();
+    task_environment_.RunIOThreadUntilIdle();
   }
 
   void TearDown() override {
@@ -221,44 +318,50 @@ class ResponsivenessWatcherRealIOThreadTest : public testing::Test {
 
     // Destroy a task onto the IO thread, which posts back to the UI thread
     // to complete destruction.
-    test_browser_thread_bundle_.RunIOThreadUntilIdle();
-    test_browser_thread_bundle_.RunUntilIdle();
+    task_environment_.RunIOThreadUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
  protected:
   // This member sets up BrowserThread::IO and BrowserThread::UI. It must be the
   // first member, as other members may depend on these abstractions.
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
 
   scoped_refptr<FakeWatcher> watcher_;
 };
 
 TEST_F(ResponsivenessWatcherRealIOThreadTest, MessageLoopObserver) {
   // Post a do-nothing task onto the UI thread.
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
-                           base::BindOnce([]() {}));
+  content::GetUIThreadTaskRunner({})->PostTask(FROM_HERE, base::DoNothing());
 
   // Post a do-nothing task onto the IO thread.
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
-                           base::BindOnce([]() {}));
+  content::GetIOThreadTaskRunner({})->PostTask(FROM_HERE, base::DoNothing());
 
   // Post a task onto the IO thread that hops back to the UI thread. This
   // guarantees that both of the do-nothing tasks have already been processed.
   base::RunLoop run_loop;
-  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
-                           base::BindOnce(
-                               [](base::OnceClosure quit_closure) {
-                                 base::PostTaskWithTraits(
-                                     FROM_HERE, {content::BrowserThread::UI},
-                                     std::move(quit_closure));
-                               },
-                               run_loop.QuitClosure()));
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(
+                     [](base::OnceClosure quit_closure) {
+                       content::GetUIThreadTaskRunner({})->PostTask(
+                           FROM_HERE, std::move(quit_closure));
+                     },
+                     run_loop.QuitClosure()));
   run_loop.Run();
 
   ASSERT_GE(watcher_->NumTasksOnUIThread(), 1);
-  EXPECT_FALSE(watcher_->QueueTimesUIThread()[0].is_null());
+  const TaskTiming ui_thread_task_timing =
+      watcher_->ExecutionTimesUIThread()[0];
+  EXPECT_FALSE(ui_thread_task_timing.queue_time.is_null());
+  EXPECT_FALSE(ui_thread_task_timing.execution_start_time.is_null());
+  EXPECT_FALSE(ui_thread_task_timing.execution_finish_time.is_null());
+
   ASSERT_GE(watcher_->NumTasksOnIOThread(), 1);
-  EXPECT_FALSE(watcher_->QueueTimesIOThread()[0].is_null());
+  const TaskTiming io_thread_task_timing =
+      watcher_->ExecutionTimesUIThread()[0];
+  EXPECT_FALSE(io_thread_task_timing.queue_time.is_null());
+  EXPECT_FALSE(io_thread_task_timing.execution_start_time.is_null());
+  EXPECT_FALSE(io_thread_task_timing.execution_finish_time.is_null());
 }
 
 }  // namespace responsiveness

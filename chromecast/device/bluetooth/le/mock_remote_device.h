@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,11 @@ class MockRemoteDevice : public RemoteDevice {
  public:
   explicit MockRemoteDevice(const bluetooth_v2_shlib::Addr& addr);
 
-  MOCK_METHOD0(Connect, bool());
-  void Connect(StatusCallback cb) override { std::move(cb).Run(Connect()); }
+  MOCK_METHOD0(Connect, ConnectStatus());
+  void Connect(ConnectCallback cb,
+               bluetooth_v2_shlib::Gatt::Client::Transport /* transport */) override {
+    std::move(cb).Run(Connect());
+  }
 
   MOCK_METHOD0(Disconnect, bool());
   void Disconnect(StatusCallback cb) override {
@@ -88,7 +91,9 @@ class MockRemoteDevice : public RemoteDevice {
   const bluetooth_v2_shlib::Addr addr_;
 
  private:
-  ~MockRemoteDevice();
+  friend testing::StrictMock<MockRemoteDevice>;
+
+  ~MockRemoteDevice() override;
 };
 
 }  // namespace bluetooth

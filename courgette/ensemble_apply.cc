@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,10 @@
 #include <memory>
 #include <utility>
 
+#include "base/check.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/files/memory_mapped_file.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "courgette/crc.h"
 #include "courgette/patcher_x86_32.h"
 #include "courgette/region.h"
@@ -30,6 +29,10 @@ namespace courgette {
 class EnsemblePatchApplication {
  public:
   EnsemblePatchApplication();
+
+  EnsemblePatchApplication(const EnsemblePatchApplication&) = delete;
+  EnsemblePatchApplication& operator=(const EnsemblePatchApplication&) = delete;
+
   ~EnsemblePatchApplication() = default;
 
   Status ReadHeader(SourceStream* header_stream);
@@ -76,8 +79,6 @@ class EnsemblePatchApplication {
 
   SinkStream corrected_parameters_storage_;
   SinkStream corrected_elements_storage_;
-
-  DISALLOW_COPY_AND_ASSIGN(EnsemblePatchApplication);
 };
 
 EnsemblePatchApplication::EnsemblePatchApplication()
@@ -141,9 +142,8 @@ Status EnsemblePatchApplication::ReadInitialParameters(
     switch (kind) {
       case EXE_WIN_32_X86:  // Fall through.
       case EXE_ELF_32_X86:
-      case EXE_ELF_32_ARM:
       case EXE_WIN_32_X64:
-        patcher.reset(new PatcherX86_32(base_region_));
+        patcher = std::make_unique<PatcherX86_32>(base_region_);
         break;
       default:
         return C_BAD_ENSEMBLE_HEADER;
@@ -420,19 +420,18 @@ Status ApplyEnsemblePatch(const base::FilePath::CharType* old_file_name,
                           const base::FilePath::CharType* patch_file_name,
                           const base::FilePath::CharType* new_file_name) {
   Status result = ApplyEnsemblePatch(
-      base::File(
-          base::FilePath(old_file_name),
-          base::File::FLAG_OPEN | base::File::FLAG_READ),
-      base::File(
-          base::FilePath(patch_file_name),
-          base::File::FLAG_OPEN | base::File::FLAG_READ),
-      base::File(
-          base::FilePath(new_file_name),
-          base::File::FLAG_CREATE_ALWAYS |
-              base::File::FLAG_WRITE |
-              base::File::FLAG_EXCLUSIVE_WRITE));
+      base::File(base::FilePath(old_file_name),
+                 base::File::FLAG_OPEN | base::File::FLAG_READ |
+                     base::File::FLAG_WIN_SHARE_DELETE),
+      base::File(base::FilePath(patch_file_name),
+                 base::File::FLAG_OPEN | base::File::FLAG_READ |
+                     base::File::FLAG_WIN_SHARE_DELETE),
+      base::File(base::FilePath(new_file_name),
+                 base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE |
+                     base::File::FLAG_WIN_EXCLUSIVE_WRITE |
+                     base::File::FLAG_WIN_SHARE_DELETE));
   if (result != C_OK)
-    base::DeleteFile(base::FilePath(new_file_name), false);
+    base::DeleteFile(base::FilePath(new_file_name));
   return result;
 }
 

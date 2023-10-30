@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@
 #include <string>
 #include <vector>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/browsing_data/core/counters/autofill_counter.h"
@@ -33,15 +34,14 @@ class FakeWebDataService : public autofill::AutofillWebDataService {
                                base::ThreadTaskRunnerHandle::Get()) {}
 
  protected:
-  ~FakeWebDataService() override {}
+  ~FakeWebDataService() override = default;
 };
 
 }  // namespace
 
 class BrowsingDataUtilsTest : public testing::Test {
  public:
-  BrowsingDataUtilsTest() {}
-  ~BrowsingDataUtilsTest() override {}
+  ~BrowsingDataUtilsTest() override = default;
 
   void SetUp() override {
     browsing_data::prefs::RegisterBrowserUserPrefs(prefs_.registry());
@@ -50,14 +50,13 @@ class BrowsingDataUtilsTest : public testing::Test {
   PrefService* prefs() { return &prefs_; }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
   sync_preferences::TestingPrefServiceSyncable prefs_;
 };
 
 // Tests the complex output of the Autofill counter.
 TEST_F(BrowsingDataUtilsTest, AutofillCounterResult) {
-  AutofillCounter counter(
-      scoped_refptr<FakeWebDataService>(new FakeWebDataService()), nullptr);
+  AutofillCounter counter(base::MakeRefCounted<FakeWebDataService>(), nullptr);
 
   // Test all configurations of zero and nonzero partial results for datatypes.
   // Test singular and plural for each datatype.
@@ -95,47 +94,60 @@ TEST_F(BrowsingDataUtilsTest, AutofillCounterResult) {
                            test_case.num_credit_cards, test_case.num_addresses,
                            test_case.num_suggestions));
 
-    base::string16 output = browsing_data::GetCounterTextFromResult(&result);
+    std::u16string output = browsing_data::GetCounterTextFromResult(&result);
     EXPECT_EQ(output, base::ASCIIToUTF16(test_case.expected_output));
   }
 }
 
 // Tests the output of the Passwords counter.
 TEST_F(BrowsingDataUtilsTest, PasswordsCounterResult) {
-  scoped_refptr<password_manager::TestPasswordStore> store(
-      new password_manager::TestPasswordStore());
+  auto store = base::MakeRefCounted<password_manager::TestPasswordStore>();
+  store->Init(prefs(), /*affiliated_match_helper=*/nullptr);
   PasswordsCounter counter(
-      scoped_refptr<password_manager::PasswordStore>(store), nullptr);
+      scoped_refptr<password_manager::PasswordStoreInterface>(store), nullptr,
+      nullptr);
 
-  const struct TestCase {
+  // Use a separate struct for input to make test cases easier to read after
+  // auto formatting.
+  struct TestInput {
     int num_passwords;
+    int num_account_passwords;
     int is_synced;
     std::vector<std::string> domain_examples;
+    std::vector<std::string> account_domain_examples;
+  };
+  const struct TestCase {
+    TestInput input;
     std::string expected_output;
   } kTestCases[] = {
-      {0, false, {}, "None"},
-      {0, true, {}, "None"},
-      {1, false, {"domain1.com"}, "1 password (for domain1.com)"},
-      {1, true, {"domain1.com"}, "1 password (for domain1.com, synced)"},
-      {5,
-       false,
-       {"domain1.com", "domain2.com", "domain3.com", "domain4.com"},
-       "5 passwords (for domain1.com, domain2.com, and 3 more)"},
-      {5,
-       true,
-       {"domain1.com", "domain2.com", "domain3.com", "domain4.com",
-        "domain5.com"},
-       "5 passwords (for domain1.com, domain2.com, and 3 more, synced)"},
+      {{0, 0, false, {}, {}}, "None"},
+      {{0, 0, true, {}, {}}, "None"},
+      {{1, 0, false, {"a.com"}, {}}, "1 password (for a.com)"},
+      {{1, 0, true, {"a.com"}, {}}, "1 password (for a.com, synced)"},
+      {{5, 0, false, {"a.com", "b.com", "c.com", "d.com"}, {}},
+       "5 passwords (for a.com, b.com, and 3 more)"},
+      {{2, 0, false, {"a.com", "b.com"}, {}}, "2 passwords (for a.com, b.com)"},
+      {{5, 0, true, {"a.com", "b.com", "c.com", "d.com", "e.com"}, {}},
+       "5 passwords (for a.com, b.com, and 3 more, synced)"},
+      {{0, 1, false, {}, {"a.com"}}, "1 password in your account (for a.com)"},
+      {{0, 2, false, {}, {"a.com", "b.com"}},
+       "2 passwords in your account (for a.com, b.com)"},
+      {{0, 3, false, {}, {"a.com", "b.com", "c.com"}},
+       "3 passwords in your account (for a.com, b.com, and 1 more)"},
+      {{2, 1, false, {"a.com", "b.com"}, {"c.com"}},
+       "2 passwords (for a.com, b.com); 1 password in your account (for "
+       "c.com)"},
   };
 
   for (const TestCase& test_case : kTestCases) {
-    PasswordsCounter::PasswordsResult result(&counter, test_case.num_passwords,
-                                             test_case.is_synced,
-                                             test_case.domain_examples);
-    SCOPED_TRACE(base::StringPrintf("Test params: %d password(s), %d is_synced",
-                                    test_case.num_passwords,
-                                    test_case.is_synced));
-    base::string16 output = browsing_data::GetCounterTextFromResult(&result);
+    auto& input = test_case.input;
+    PasswordsCounter::PasswordsResult result(
+        &counter, input.num_passwords, input.num_account_passwords,
+        input.is_synced, input.domain_examples, input.account_domain_examples);
+    SCOPED_TRACE(base::StringPrintf(
+        "Test params: %d password(s), %d account password(s), %d is_synced",
+        input.num_passwords, input.num_account_passwords, input.is_synced));
+    std::u16string output = browsing_data::GetCounterTextFromResult(&result);
     EXPECT_EQ(output, base::ASCIIToUTF16(test_case.expected_output));
   }
   store->ShutdownOnUIThread();
@@ -176,7 +188,7 @@ TEST_F(BrowsingDataUtilsTest, HistoryCounterResult) {
     SCOPED_TRACE(
         base::StringPrintf("Test params: %d history, %d has_synced_visits",
                            test_case.num_history, test_case.has_sync_visits));
-    base::string16 output = browsing_data::GetCounterTextFromResult(&result);
+    std::u16string output = browsing_data::GetCounterTextFromResult(&result);
     EXPECT_EQ(output, base::ASCIIToUTF16(test_case.expected_output));
   }
 }

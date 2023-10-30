@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,14 +10,15 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
 #include "content/common/content_export.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/audio_renderer_sink.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/platform/web_audio_device.h"
 #include "third_party/blink/public/platform/web_audio_latency_hint.h"
+#include "third_party/blink/public/platform/web_vector.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -32,6 +33,10 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
     : public blink::WebAudioDevice,
       public media::AudioRendererSink::RenderCallback {
  public:
+  RendererWebAudioDeviceImpl(const RendererWebAudioDeviceImpl&) = delete;
+  RendererWebAudioDeviceImpl& operator=(const RendererWebAudioDeviceImpl&) =
+      delete;
+
   ~RendererWebAudioDeviceImpl() override;
 
   static std::unique_ptr<RendererWebAudioDeviceImpl> Create(
@@ -39,7 +44,7 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
       int channels,
       const blink::WebAudioLatencyHint& latency_hint,
       blink::WebAudioDevice::RenderCallback* callback,
-      int session_id);
+      const base::UnguessableToken& session_id);
 
   // blink::WebAudioDevice implementation.
   void Start() override;
@@ -49,6 +54,10 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
   double SampleRate() override;
   int FramesPerBuffer() override;
 
+  // Sets the detect silence flag for SilentSinkSuspender. Invoked by Blink Web
+  // Audio.
+  void SetDetectSilence(bool enable_silence_detection) override;
+
   // AudioRendererSink::RenderCallback implementation.
   int Render(base::TimeDelta delay,
              base::TimeTicks delay_timestamp,
@@ -57,8 +66,8 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
 
   void OnRenderError() override;
 
-  void SetMediaTaskRunnerForTesting(
-      const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner);
+  void SetSuspenderTaskRunnerForTesting(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
   const media::AudioParameters& get_sink_params_for_testing() {
     return sink_params_;
@@ -66,24 +75,26 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
 
  protected:
   // Callback to get output device params (for tests).
-  using OutputDeviceParamsCallback =
-      base::OnceCallback<media::AudioParameters(int frame_id,
-                                                int session_id,
-                                                const std::string& device_id)>;
+  using OutputDeviceParamsCallback = base::OnceCallback<media::AudioParameters(
+      const blink::LocalFrameToken& frame_token,
+      const base::UnguessableToken& session_id,
+      const std::string& device_id)>;
 
-  // Callback get render frame ID for current context (for tests).
-  using RenderFrameIdCallback = base::OnceCallback<int()>;
+  // Callback get render frame token for current context (for tests).
+  using RenderFrameTokenCallback = base::OnceCallback<blink::LocalFrameToken()>;
 
   RendererWebAudioDeviceImpl(media::ChannelLayout layout,
                              int channels,
                              const blink::WebAudioLatencyHint& latency_hint,
                              blink::WebAudioDevice::RenderCallback* callback,
-                             int session_id,
+                             const base::UnguessableToken& session_id,
                              OutputDeviceParamsCallback device_params_cb,
-                             RenderFrameIdCallback render_frame_id_cb);
+                             RenderFrameTokenCallback render_frame_token_cb);
 
  private:
-  const scoped_refptr<base::SingleThreadTaskRunner>& GetMediaTaskRunner();
+  scoped_refptr<base::SingleThreadTaskRunner> GetSuspenderTaskRunner();
+
+  void SendLogMessage(const std::string& message);
 
   media::AudioParameters sink_params_;
 
@@ -91,6 +102,9 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
 
   // Weak reference to the callback into WebKit code.
   blink::WebAudioDevice::RenderCallback* const client_callback_;
+
+  // Used to wrap AudioBus to be passed into |client_callback_|.
+  blink::WebVector<float*> web_audio_dest_data_;
 
   // To avoid the need for locking, ensure the control methods of the
   // blink::WebAudioDevice implementation are called on the same thread.
@@ -100,18 +114,20 @@ class CONTENT_EXPORT RendererWebAudioDeviceImpl
   scoped_refptr<media::AudioRendererSink> sink_;
 
   // ID to allow browser to select the correct input device for unified IO.
-  int session_id_;
+  const base::UnguessableToken session_id_;
 
   // Used to suspend |sink_| usage when silence has been detected for too long.
   std::unique_ptr<media::SilentSinkSuspender> webaudio_suspender_;
 
-  // Render frame routing ID for the current context.
-  int frame_id_;
+  // Render frame token for the current context.
+  blink::LocalFrameToken frame_token_;
 
-  // Allow unit tests to set a custom MediaThreadTaskRunner.
-  scoped_refptr<base::SingleThreadTaskRunner> media_task_runner_;
+  // Allow unit tests to set a custom TaskRunner for |webaudio_suspender_|.
+  scoped_refptr<base::SingleThreadTaskRunner> suspender_task_runner_;
 
-  DISALLOW_COPY_AND_ASSIGN(RendererWebAudioDeviceImpl);
+  // Used to trigger one single textlog indicating that rendering started as
+  // intended. Set to true once in the first call to the Render callback.
+  bool is_rendering_ = false;
 };
 
 }  // namespace content

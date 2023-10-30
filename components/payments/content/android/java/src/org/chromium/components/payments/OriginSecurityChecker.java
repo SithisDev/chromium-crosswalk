@@ -1,10 +1,12 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.payments;
 
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.url.GURL;
 
 /** Helper for origin security. */
 @JNINamespace("payments")
@@ -16,8 +18,8 @@ public class OriginSecurityChecker {
      * @param url The URL to check.
      * @return Whether the origin of the URL is secure.
      */
-    public static boolean isOriginSecure(String url) {
-        return nativeIsOriginSecure(url);
+    public static boolean isOriginSecure(GURL url) {
+        return OriginSecurityCheckerJni.get().isOriginSecure(url);
     }
 
     /**
@@ -26,12 +28,15 @@ public class OriginSecurityChecker {
      * @param url The URL to check.
      * @return Whether the scheme of the URL is cryptographic.
      */
-    public static boolean isSchemeCryptographic(String url) {
-        return nativeIsSchemeCryptographic(url);
+    public static boolean isSchemeCryptographic(GURL url) {
+        return OriginSecurityCheckerJni.get().isSchemeCryptographic(url);
     }
 
     private OriginSecurityChecker() {}
 
-    private static native boolean nativeIsOriginSecure(String url);
-    private static native boolean nativeIsSchemeCryptographic(String url);
+    @NativeMethods
+    interface Natives {
+        boolean isOriginSecure(GURL url);
+        boolean isSchemeCryptographic(GURL url);
+    }
 }

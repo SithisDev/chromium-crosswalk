@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,12 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "content/public/browser/document_user_data.h"
+#include "content/public/browser/serial_delegate.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote_set.h"
 #include "services/device/public/mojom/serial.mojom.h"
 #include "third_party/blink/public/mojom/serial/serial.mojom.h"
 
@@ -20,21 +23,41 @@ class RenderFrameHost;
 class SerialChooser;
 
 class SerialService : public blink::mojom::SerialService,
-                      public device::mojom::SerialPortConnectionWatcher {
+                      public SerialDelegate::Observer,
+                      public device::mojom::SerialPortConnectionWatcher,
+                      public content::DocumentUserData<SerialService> {
  public:
   explicit SerialService(RenderFrameHost* render_frame_host);
+
+  SerialService(const SerialService&) = delete;
+  SerialService& operator=(const SerialService&) = delete;
+
   ~SerialService() override;
 
-  void Bind(blink::mojom::SerialServiceRequest request);
+  void Bind(mojo::PendingReceiver<blink::mojom::SerialService> receiver);
 
   // SerialService implementation
+  void SetClient(
+      mojo::PendingRemote<blink::mojom::SerialServiceClient> client) override;
   void GetPorts(GetPortsCallback callback) override;
   void RequestPort(std::vector<blink::mojom::SerialPortFilterPtr> filters,
                    RequestPortCallback callback) override;
-  void GetPort(const base::UnguessableToken& token,
-               device::mojom::SerialPortRequest request) override;
+  void OpenPort(const base::UnguessableToken& token,
+                device::mojom::SerialConnectionOptionsPtr options,
+                mojo::PendingRemote<device::mojom::SerialPortClient> client,
+                OpenPortCallback callback) override;
+  void ForgetPort(const base::UnguessableToken& token,
+                  ForgetPortCallback callback) override;
+
+  // SerialDelegate::Observer implementation
+  void OnPortAdded(const device::mojom::SerialPortInfo& port) override;
+  void OnPortRemoved(const device::mojom::SerialPortInfo& port) override;
+  void OnPortManagerConnectionError() override;
+  void OnPermissionRevoked(const url::Origin& origin) override;
 
  private:
+  friend class content::DocumentUserData<SerialService>;
+
   void FinishGetPorts(GetPortsCallback callback,
                       std::vector<device::mojom::SerialPortInfoPtr> ports);
   void FinishRequestPort(RequestPortCallback callback,
@@ -42,21 +65,23 @@ class SerialService : public blink::mojom::SerialService,
   void OnWatcherConnectionError();
   void DecrementActiveFrameCount();
 
-  // This raw pointer is safe because instances of this class are owned by
-  // RenderFrameHostImpl.
-  RenderFrameHost* const render_frame_host_;
-  mojo::BindingSet<blink::mojom::SerialService> bindings_;
+  mojo::ReceiverSet<blink::mojom::SerialService> receivers_;
+  mojo::RemoteSet<blink::mojom::SerialServiceClient> clients_;
 
   // The last shown serial port chooser UI.
   std::unique_ptr<SerialChooser> chooser_;
 
   // Each pipe here watches a connection created by GetPort() in order to notify
   // the WebContentsImpl when an active connection indicator should be shown.
-  mojo::BindingSet<device::mojom::SerialPortConnectionWatcher> watchers_;
+  mojo::ReceiverSet<device::mojom::SerialPortConnectionWatcher> watchers_;
+
+  // Maps every receiver to a token to allow closing particular connections when
+  // the user revokes a permission.
+  std::multimap<const base::UnguessableToken, mojo::ReceiverId> watcher_ids_;
 
   base::WeakPtrFactory<SerialService> weak_factory_{this};
 
-  DISALLOW_COPY_AND_ASSIGN(SerialService);
+  DOCUMENT_USER_DATA_KEY_DECL();
 };
 
 }  // namespace content

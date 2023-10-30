@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,11 @@
 #include <stddef.h>
 
 #include "build/build_config.h"
+#include "components/omnibox/browser/omnibox_popup_selection.h"
 
 class OmniboxPopupView {
  public:
-  virtual ~OmniboxPopupView() {}
+  virtual ~OmniboxPopupView() = default;
 
   // Returns true if the popup is currently open.
   virtual bool IsOpen() const = 0;
@@ -25,12 +26,18 @@ class OmniboxPopupView {
   // Invalidates one line of the autocomplete popup.
   virtual void InvalidateLine(size_t line) = 0;
 
-  // Invoked when the specified line has been selected.
-  virtual void OnLineSelected(size_t line) = 0;
+  // Invoked when the selection changes. The |line| field in either selection
+  // may be OmniboxPopupSelection::kNoMatch. This method is invoked by the
+  // model.
+  virtual void OnSelectionChanged(OmniboxPopupSelection old_selection,
+                                  OmniboxPopupSelection new_selection) {}
 
   // Redraws the popup window to match any changes in the result set; this may
   // mean opening or closing the window.
   virtual void UpdatePopupAppearance() = 0;
+
+  // Called to inform result view of button focus.
+  virtual void ProvideButtonFocusHint(size_t line) = 0;
 
   // Notification that the icon used for the given match has been updated.
   virtual void OnMatchIconUpdated(size_t match_index) = 0;

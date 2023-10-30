@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,26 +12,46 @@
 namespace spellcheck {
 
 #if BUILDFLAG(ENABLE_SPELLCHECK)
-extern const base::Feature kSpellingServiceRestApi;
-
-#if defined(OS_WIN)
-extern const base::Feature kWinUseBrowserSpellChecker;
-#endif  // defined(OS_WIN)
 
 bool UseBrowserSpellChecker();
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
+extern const base::Feature kWinUseBrowserSpellChecker;
+
+// If the kWinDelaySpellcheckServiceInit feature flag is enabled, don't
+// initialize the spellcheck dictionaries when the SpellcheckService is
+// instantiated. With this flag set: (1) Completing the initialization of the
+// spellcheck service is on-demand, invoked by calling
+// SpellcheckService::InitializeDictionaries with a callback to indicate when
+// the operation completes. (2) The call to create the spellcheck service in
+// ChromeBrowserMainParts::PreMainMessageLoopRunImpl will be skipped. Chromium
+// will still by default instantiate the spellcheck service on startup for
+// custom dictionary synchronization, but will not load Windows spellcheck
+// dictionaries. The command line for launching the browser with Windows hybrid
+// spellchecking enabled but no initialization of the spellcheck service is:
+//    chrome
+//    --enable-features=WinUseBrowserSpellChecker,WinDelaySpellcheckServiceInit
+// and if instantiation of the spellcheck service needs to be completely
+// disabled:
+//     chrome
+//    --enable-features=WinUseBrowserSpellChecker,WinDelaySpellcheckServiceInit
+//    --disable-sync-types="Dictionary"
+extern const base::Feature kWinDelaySpellcheckServiceInit;
+
+// When set, do not perform the expensive operation of retrieving suggestions
+// for all misspelled words while performing a text check. Instead retrieve
+// suggestions on demand when the context menu is brought up with a misspelled
+// word selected.
+extern const base::Feature kWinRetrieveSuggestionsOnlyOnDemand;
+
 bool WindowsVersionSupportsSpellchecker();
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_ANDROID)
+bool IsAndroidSpellCheckFeatureEnabled();
+#endif  // BUILDFLAG(IS_ANDROID)
 
 #endif  // BUILDFLAG(ENABLE_SPELLCHECK)
-
-#if BUILDFLAG(ENABLE_SPELLCHECK) && defined(OS_ANDROID)
-extern const base::Feature kAndroidSpellChecker;
-extern const base::Feature kAndroidSpellCheckerNonLowEnd;
-
-bool IsAndroidSpellCheckFeatureEnabled();
-#endif  // BUILDFLAG(ENABLE_SPELLCHECK) && defined(OS_ANDROID)
 
 }  // namespace spellcheck
 

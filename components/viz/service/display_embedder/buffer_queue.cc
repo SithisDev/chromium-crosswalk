@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,241 +6,173 @@
 
 #include <utility>
 
-#include "base/containers/adapters.h"
-#include "build/build_config.h"
-#include "gpu/GLES2/gl2extchromium.h"
-#include "gpu/command_buffer/client/gles2_interface.h"
-#include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
-#include "gpu/command_buffer/common/gpu_memory_buffer_support.h"
-#include "third_party/skia/include/core/SkRect.h"
-#include "third_party/skia/include/core/SkRegion.h"
-#include "ui/display/types/display_snapshot.h"
-#include "ui/gfx/gpu_memory_buffer.h"
-#include "ui/gfx/skia_util.h"
+#include "components/viz/common/resources/resource_format_utils.h"
+#include "components/viz/service/display/skia_output_surface.h"
+#include "gpu/command_buffer/common/shared_image_usage.h"
+#include "gpu/command_buffer/common/sync_token.h"
 
 namespace viz {
 
-BufferQueue::BufferQueue(gpu::gles2::GLES2Interface* gl,
-                         gfx::BufferFormat format,
-                         gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+BufferQueue::BufferQueue(SkiaOutputSurface* skia_output_surface,
                          gpu::SurfaceHandle surface_handle,
-                         const gpu::Capabilities& capabilities)
-    : gl_(gl),
-      allocated_count_(0),
-      texture_target_(gpu::GetBufferTextureTarget(gfx::BufferUsage::SCANOUT,
-                                                  format,
-                                                  capabilities)),
-      internal_format_(base::strict_cast<uint32_t>(
-          gpu::InternalFormatForGpuMemoryBufferFormat(format))),
-      format_(format),
-      gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
-      surface_handle_(surface_handle) {}
+                         size_t number_of_buffers)
+    : skia_output_surface_(skia_output_surface),
+      surface_handle_(surface_handle),
+      number_of_buffers_(number_of_buffers) {}
 
 BufferQueue::~BufferQueue() {
-  FreeAllSurfaces();
+  FreeAllBuffers();
 }
 
-unsigned BufferQueue::GetCurrentBuffer(unsigned* stencil) {
-  DCHECK(stencil);
-  if (!current_surface_)
-    current_surface_ = GetNextSurface();
-  if (current_surface_) {
-    *stencil = current_surface_->stencil;
-    return current_surface_->texture;
+gpu::Mailbox BufferQueue::GetCurrentBuffer() {
+  if (!current_buffer_) {
+    current_buffer_ = GetNextBuffer();
   }
-  *stencil = 0u;
-  return 0u;
-}
-
-void BufferQueue::CopyBufferDamage(unsigned texture,
-                                   unsigned source_texture,
-                                   const gfx::Rect& new_damage,
-                                   const gfx::Rect& old_damage) {
-  SkRegion region(gfx::RectToSkIRect(old_damage));
-  if (!region.op(gfx::RectToSkIRect(new_damage), SkRegion::kDifference_Op))
-    return;
-  for (SkRegion::Iterator it(region); !it.done(); it.next()) {
-    const SkIRect& rect = it.rect();
-    gl_->CopySubTextureCHROMIUM(
-        source_texture, 0, texture_target_, texture, 0, rect.x(), rect.y(),
-        rect.x(), rect.y(), rect.width(), rect.height(), false, false, false);
-  }
+  DCHECK(current_buffer_);
+  return current_buffer_->mailbox;
 }
 
 void BufferQueue::UpdateBufferDamage(const gfx::Rect& damage) {
-  if (displayed_surface_)
-    displayed_surface_->damage.Union(damage);
-  for (auto& surface : available_surfaces_)
-    surface->damage.Union(damage);
-  for (auto& surface : in_flight_surfaces_) {
-    if (surface)
-      surface->damage.Union(damage);
+  if (displayed_buffer_) {
+    displayed_buffer_->damage.Union(damage);
+  }
+  for (auto& buffer : available_buffers_) {
+    buffer->damage.Union(damage);
+  }
+  for (auto& buffer : in_flight_buffers_) {
+    if (buffer) {
+      buffer->damage.Union(damage);
+    }
   }
 }
 
-void BufferQueue::CopyDamageForCurrentSurface(const gfx::Rect& damage) {
-  if (!current_surface_)
-    return;
-
-  if (damage != gfx::Rect(size_)) {
-    // Copy damage from the most recently swapped buffer. In the event that
-    // the buffer was destroyed and failed to recreate, pick from the most
-    // recently available buffer.
-    unsigned texture_id = 0;
-    for (auto& surface : base::Reversed(in_flight_surfaces_)) {
-      if (surface) {
-        texture_id = surface->texture;
-        break;
-      }
-    }
-    if (!texture_id && displayed_surface_)
-      texture_id = displayed_surface_->texture;
-
-    if (texture_id) {
-      CopyBufferDamage(current_surface_->texture, texture_id, damage,
-                       current_surface_->damage);
-    }
+gfx::Rect BufferQueue::CurrentBufferDamage() const {
+  if (current_buffer_) {
+    return current_buffer_->damage;
   }
-  current_surface_->damage = gfx::Rect();
+
+  // In case there is no current_buffer_, we get the damage from the buffer
+  // that will be set as current_buffer_ by the next call to GetNextBuffer.
+  if (!available_buffers_.empty()) {
+    return available_buffers_.front()->damage;
+  }
+
+  // If we can't determine which buffer will be the next current_buffer_, we
+  // conservatively invalidate the whole buffer.
+  return gfx::Rect(size_);
 }
 
 void BufferQueue::SwapBuffers(const gfx::Rect& damage) {
-  if (damage.IsEmpty()) {
-    in_flight_surfaces_.push_back(std::move(current_surface_));
-    return;
+  UpdateBufferDamage(damage);
+  if (current_buffer_) {
+    current_buffer_->damage = gfx::Rect();
+  }
+  // Note: In the case of an empty-swap frame, GetCurrentBuffer() was not called
+  // this frame and current_buffer_ will be nullptr. We will still push nullptr
+  // into in_flight_buffers_ so the queue is kept in sync when
+  // SwapBuffersComplete() is called.
+  in_flight_buffers_.push_back(std::move(current_buffer_));
+}
+
+void BufferQueue::SwapBuffersComplete() {
+  DCHECK(!in_flight_buffers_.empty());
+
+  if (in_flight_buffers_.front()) {
+    if (displayed_buffer_) {
+      available_buffers_.push_back(std::move(displayed_buffer_));
+    }
+    displayed_buffer_ = std::move(in_flight_buffers_.front());
   }
 
-  DCHECK(!current_surface_ || current_surface_->damage.IsEmpty());
+  in_flight_buffers_.pop_front();
+}
+
+void BufferQueue::SwapBuffersSkipped(const gfx::Rect& damage) {
   UpdateBufferDamage(damage);
-  in_flight_surfaces_.push_back(std::move(current_surface_));
 }
 
 bool BufferQueue::Reshape(const gfx::Size& size,
-                          float scale_factor,
                           const gfx::ColorSpace& color_space,
-                          bool use_stencil) {
-  if (size == size_ && color_space == color_space_ &&
-      use_stencil == use_stencil_) {
+                          gfx::BufferFormat format) {
+  if (size == size_ && color_space == color_space_ && format == format_)
     return false;
-  }
-#if !defined(OS_MACOSX)
-  // TODO(ccameron): This assert is being hit on Mac try jobs. Determine if that
-  // is cause for concern or if it is benign.
-  // http://crbug.com/524624
-  DCHECK(!current_surface_);
-#endif
+
   size_ = size;
   color_space_ = color_space;
-  use_stencil_ = use_stencil;
+  format_ = format;
 
-  FreeAllSurfaces();
+  FreeAllBuffers();
+  AllocateBuffers(number_of_buffers_);
+
   return true;
 }
 
-void BufferQueue::PageFlipComplete() {
-  DCHECK(!in_flight_surfaces_.empty());
-  if (in_flight_surfaces_.front()) {
-    if (displayed_surface_)
-      available_surfaces_.push_back(std::move(displayed_surface_));
-    displayed_surface_ = std::move(in_flight_surfaces_.front());
-  }
+void BufferQueue::FreeAllBuffers() {
+  FreeBuffer(std::move(displayed_buffer_));
+  FreeBuffer(std::move(current_buffer_));
 
-  in_flight_surfaces_.pop_front();
-}
-
-void BufferQueue::FreeAllSurfaces() {
-  displayed_surface_.reset();
-  current_surface_.reset();
   // This is intentionally not emptied since the swap buffers acks are still
   // expected to arrive.
-  for (auto& surface : in_flight_surfaces_)
-    surface = nullptr;
-  available_surfaces_.clear();
-}
-
-void BufferQueue::FreeSurfaceResources(AllocatedSurface* surface) {
-  if (!surface->texture)
-    return;
-
-  gl_->BindTexture(texture_target_, surface->texture);
-  gl_->ReleaseTexImage2DCHROMIUM(texture_target_, surface->image);
-  gl_->DeleteTextures(1, &surface->texture);
-  gl_->DestroyImageCHROMIUM(surface->image);
-  if (surface->stencil)
-    gl_->DeleteRenderbuffers(1, &surface->stencil);
-  surface->buffer.reset();
-  allocated_count_--;
-}
-
-std::unique_ptr<BufferQueue::AllocatedSurface> BufferQueue::GetNextSurface() {
-  if (!available_surfaces_.empty()) {
-    std::unique_ptr<AllocatedSurface> surface =
-        std::move(available_surfaces_.back());
-    available_surfaces_.pop_back();
-    return surface;
+  for (auto& buffer : in_flight_buffers_) {
+    FreeBuffer(std::move(buffer));
   }
 
-  unsigned texture;
-  gl_->GenTextures(1, &texture);
-
-  unsigned stencil = 0;
-  if (use_stencil_) {
-    gl_->GenRenderbuffers(1, &stencil);
-    gl_->BindRenderbuffer(GL_RENDERBUFFER, stencil);
-    gl_->RenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, size_.width(),
-                             size_.height());
-    gl_->BindRenderbuffer(GL_RENDERBUFFER, 0);
+  for (auto& buffer : available_buffers_) {
+    FreeBuffer(std::move(buffer));
   }
+  available_buffers_.clear();
+}
 
-  // We don't want to allow anything more than triple buffering.
-  DCHECK_LT(allocated_count_, 3U);
-  std::unique_ptr<gfx::GpuMemoryBuffer> buffer(
-      gpu_memory_buffer_manager_->CreateGpuMemoryBuffer(
-          size_, format_, gfx::BufferUsage::SCANOUT, surface_handle_));
+void BufferQueue::FreeBuffer(std::unique_ptr<AllocatedBuffer> buffer) {
   if (!buffer) {
-    gl_->DeleteTextures(1, &texture);
-    DLOG(ERROR) << "Failed to allocate GPU memory buffer";
-    return nullptr;
+    return;
   }
-  buffer->SetColorSpace(color_space_);
-
-  unsigned id =
-      gl_->CreateImageCHROMIUM(buffer->AsClientBuffer(), size_.width(),
-                               size_.height(), internal_format_);
-  if (!id) {
-    LOG(ERROR) << "Failed to allocate backing image surface";
-    gl_->DeleteTextures(1, &texture);
-    return nullptr;
-  }
-
-  allocated_count_++;
-  gl_->BindTexture(texture_target_, texture);
-  gl_->BindTexImage2DCHROMIUM(texture_target_, id);
-
-  // The texture must be bound to the image before setting the color space.
-  gl_->SetColorSpaceMetadataCHROMIUM(
-      texture, reinterpret_cast<GLColorSpace>(&color_space_));
-
-  return std::make_unique<AllocatedSurface>(this, std::move(buffer), texture,
-                                            id, stencil, gfx::Rect(size_));
+  DCHECK(!buffer->mailbox.IsZero());
+  skia_output_surface_->DestroySharedImage(buffer->mailbox);
 }
 
-BufferQueue::AllocatedSurface::AllocatedSurface(
-    BufferQueue* buffer_queue,
-    std::unique_ptr<gfx::GpuMemoryBuffer> buffer,
-    unsigned texture,
-    unsigned image,
-    unsigned stencil,
-    const gfx::Rect& rect)
-    : buffer_queue(buffer_queue),
-      buffer(buffer.release()),
-      texture(texture),
-      image(image),
-      stencil(stencil),
-      damage(rect) {}
+void BufferQueue::AllocateBuffers(size_t n) {
+  DCHECK(format_);
+  const ResourceFormat format = GetResourceFormat(format_.value());
 
-BufferQueue::AllocatedSurface::~AllocatedSurface() {
-  buffer_queue->FreeSurfaceResources(this);
+  available_buffers_.reserve(available_buffers_.size() + n);
+  for (size_t i = 0; i < n; ++i) {
+    const gpu::Mailbox mailbox = skia_output_surface_->CreateSharedImage(
+        format, size_, color_space_,
+        gpu::SHARED_IMAGE_USAGE_SCANOUT | gpu::SHARED_IMAGE_USAGE_DISPLAY,
+        surface_handle_);
+    DCHECK(!mailbox.IsZero());
+
+    available_buffers_.push_back(
+        std::make_unique<AllocatedBuffer>(mailbox, gfx::Rect(size_)));
+  }
 }
+
+std::unique_ptr<BufferQueue::AllocatedBuffer> BufferQueue::GetNextBuffer() {
+  DCHECK(!available_buffers_.empty());
+
+  std::unique_ptr<AllocatedBuffer> buffer =
+      std::move(available_buffers_.front());
+  available_buffers_.pop_front();
+  return buffer;
+}
+
+void BufferQueue::EnsureMinNumberOfBuffers(size_t n) {
+  if (n <= number_of_buffers_) {
+    return;
+  }
+
+  // If Reshape hasn't been called yet we can't allocate the buffers.
+  if (!size_.IsEmpty()) {
+    AllocateBuffers(n - number_of_buffers_);
+  }
+  number_of_buffers_ = n;
+}
+
+BufferQueue::AllocatedBuffer::AllocatedBuffer(const gpu::Mailbox& mailbox,
+                                              const gfx::Rect& rect)
+    : mailbox(mailbox), damage(rect) {}
+
+BufferQueue::AllocatedBuffer::~AllocatedBuffer() = default;
 
 }  // namespace viz

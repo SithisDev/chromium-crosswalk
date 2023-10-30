@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "chromecast/media/cma/base/decoder_buffer_adapter.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/demuxer.h"
@@ -109,8 +110,8 @@ BufferList Mp3SegmenterForTest(const uint8_t* data, size_t data_size) {
         scoped_refptr<DecoderBufferBase>(new DecoderBufferAdapter(buffer)));
 
     // 1152 samples in an MP3 frame.
-    timestamp += base::TimeDelta::FromMicroseconds(
-        (UINT64_C(1152) * 1000 * 1000) / header.sampling_frequency);
+    timestamp += base::Microseconds((UINT64_C(1152) * 1000 * 1000) /
+                                    header.sampling_frequency);
   }
   return audio_frames;
 }
@@ -252,7 +253,7 @@ BufferList H264SegmenterForTest(const uint8_t* data, size_t data_size) {
   // Create the list of buffers.
   // Totally arbitrary decision: assume a delta POC of 1 is 20ms (50Hz field
   // rate).
-  base::TimeDelta poc_duration = base::TimeDelta::FromMilliseconds(20);
+  base::TimeDelta poc_duration = base::Milliseconds(20);
   for (std::list<H264AccessUnit>::iterator it = access_unit_list.begin();
        it != access_unit_list.end(); ++it) {
     scoped_refptr< ::media::DecoderBuffer> buffer(
@@ -273,7 +274,7 @@ void OnEncryptedMediaInitData(::media::EmeInitDataType init_data_type,
 void OnMediaTracksUpdated(std::unique_ptr<::media::MediaTracks> tracks) {}
 
 void OnNewBuffer(BufferList* buffer_list,
-                 const base::Closure& finished_cb,
+                 const base::RepeatingClosure& finished_cb,
                  ::media::DemuxerStream::Status status,
                  scoped_refptr<::media::DecoderBuffer> buffer) {
   CHECK_EQ(status, ::media::DemuxerStream::kOk);
@@ -333,9 +334,9 @@ DemuxResult FFmpegDemuxForTest(const base::FilePath& filepath,
   bool end_of_stream = false;
   while (!end_of_stream) {
     base::RunLoop run_loop;
-    stream->Read(base::Bind(&OnNewBuffer,
-                            base::Unretained(&demux_result.frames),
-                            run_loop.QuitClosure()));
+    stream->Read(base::BindOnce(&OnNewBuffer,
+                                base::Unretained(&demux_result.frames),
+                                run_loop.QuitClosure()));
     run_loop.Run();
     CHECK(!demux_result.frames.empty());
     end_of_stream = demux_result.frames.back()->end_of_stream();

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,16 @@
 #include <vector>
 
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/host/host_display_client.h"
 #include "components/viz/host/host_frame_sink_client.h"
 #include "components/viz/host/host_frame_sink_manager.h"
-#include "services/viz/privileged/interfaces/compositing/display_private.mojom.h"
-#include "services/viz/privileged/interfaces/compositing/frame_sink_manager.mojom.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "services/viz/privileged/mojom/compositing/display_private.mojom.h"
+#include "services/viz/privileged/mojom/compositing/frame_sink_manager.mojom.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace demo {
@@ -26,10 +30,16 @@ class DemoClient;
 // the service.
 class DemoHost : public viz::HostFrameSinkClient {
  public:
-  DemoHost(gfx::AcceleratedWidget widget,
-           const gfx::Size& size,
-           viz::mojom::FrameSinkManagerClientRequest client_request,
-           viz::mojom::FrameSinkManagerPtr frame_sink_manager_ptr);
+  DemoHost(
+      gfx::AcceleratedWidget widget,
+      const gfx::Size& size,
+      mojo::PendingReceiver<viz::mojom::FrameSinkManagerClient> client_receiver,
+      mojo::PendingRemote<viz::mojom::FrameSinkManager>
+          frame_sink_manager_remote);
+
+  DemoHost(const DemoHost&) = delete;
+  DemoHost& operator=(const DemoHost&) = delete;
+
   ~DemoHost() override;
 
   void Resize(const gfx::Size& size);
@@ -39,17 +49,19 @@ class DemoHost : public viz::HostFrameSinkClient {
 
   void EmbedClients(DemoClient* embedder_client, const gfx::Rect& child_bounds);
 
-  void Initialize(viz::mojom::FrameSinkManagerClientRequest request,
-                  viz::mojom::FrameSinkManagerPtrInfo ptr_info);
+  void Initialize(
+      mojo::PendingReceiver<viz::mojom::FrameSinkManagerClient> receiver,
+      mojo::PendingRemote<viz::mojom::FrameSinkManager> remote);
 
   // viz::HostFrameSinkClient:
   void OnFirstSurfaceActivation(const viz::SurfaceInfo& surface_info) override;
-  void OnFrameTokenChanged(uint32_t frame_token) override;
+  void OnFrameTokenChanged(uint32_t frame_token,
+                           base::TimeTicks activation_time) override;
 
   const gfx::AcceleratedWidget widget_;
   gfx::Size size_;
   viz::HostFrameSinkManager host_frame_sink_manager_;
-  viz::mojom::DisplayPrivateAssociatedPtr display_private_;
+  mojo::AssociatedRemote<viz::mojom::DisplayPrivate> display_private_;
   std::unique_ptr<viz::HostDisplayClient> display_client_;
   viz::ParentLocalSurfaceIdAllocator allocator_;
 
@@ -61,8 +73,6 @@ class DemoHost : public viz::HostFrameSinkClient {
   // and clients over mojo. The host does not need to have its own thread
   // though.
   base::Thread thread_;
-
-  DISALLOW_COPY_AND_ASSIGN(DemoHost);
 };
 
 }  // namespace demo

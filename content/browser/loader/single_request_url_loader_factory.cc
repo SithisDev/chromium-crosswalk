@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 
 namespace content {
@@ -24,9 +24,13 @@ class SingleRequestURLLoaderFactory::HandlerState
       : handler_(std::move(handler)),
         handler_task_runner_(base::SequencedTaskRunnerHandle::Get()) {}
 
-  void HandleRequest(const network::ResourceRequest& resource_request,
-                     network::mojom::URLLoaderRequest loader,
-                     network::mojom::URLLoaderClientPtr client) {
+  HandlerState(const HandlerState&) = delete;
+  HandlerState& operator=(const HandlerState&) = delete;
+
+  void HandleRequest(
+      const network::ResourceRequest& resource_request,
+      mojo::PendingReceiver<network::mojom::URLLoader> loader,
+      mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
     if (!handler_task_runner_->RunsTasksInCurrentSequence()) {
       handler_task_runner_->PostTask(
           FROM_HERE,
@@ -55,26 +59,26 @@ class SingleRequestURLLoaderFactory::HandlerState
 
   RequestHandler handler_;
   const scoped_refptr<base::SequencedTaskRunner> handler_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(HandlerState);
 };
 
-class SingleRequestURLLoaderFactory::FactoryInfo
-    : public network::SharedURLLoaderFactoryInfo {
+class SingleRequestURLLoaderFactory::PendingFactory
+    : public network::PendingSharedURLLoaderFactory {
  public:
-  explicit FactoryInfo(scoped_refptr<HandlerState> state)
+  explicit PendingFactory(scoped_refptr<HandlerState> state)
       : state_(std::move(state)) {}
-  ~FactoryInfo() override = default;
 
-  // SharedURLLoaderFactoryInfo:
+  PendingFactory(const PendingFactory&) = delete;
+  PendingFactory& operator=(const PendingFactory&) = delete;
+
+  ~PendingFactory() override = default;
+
+  // PendingSharedURLLoaderFactory:
   scoped_refptr<network::SharedURLLoaderFactory> CreateFactory() override {
     return new SingleRequestURLLoaderFactory(std::move(state_));
   }
 
  private:
   scoped_refptr<HandlerState> state_;
-
-  DISALLOW_COPY_AND_ASSIGN(FactoryInfo);
 };
 
 SingleRequestURLLoaderFactory::SingleRequestURLLoaderFactory(
@@ -82,24 +86,25 @@ SingleRequestURLLoaderFactory::SingleRequestURLLoaderFactory(
     : state_(base::MakeRefCounted<HandlerState>(std::move(handler))) {}
 
 void SingleRequestURLLoaderFactory::CreateLoaderAndStart(
-    network::mojom::URLLoaderRequest loader,
-    int32_t routing_id,
+    mojo::PendingReceiver<network::mojom::URLLoader> loader,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& request,
-    network::mojom::URLLoaderClientPtr client,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
   state_->HandleRequest(request, std::move(loader), std::move(client));
 }
 
 void SingleRequestURLLoaderFactory::Clone(
-    network::mojom::URLLoaderFactoryRequest request) {
-  NOTREACHED();
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver) {
+  // Pass |this| as the recevier context to make sure this object stays alive
+  // while it still has receivers.
+  receivers_.Add(this, std::move(receiver), this);
 }
 
-std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+std::unique_ptr<network::PendingSharedURLLoaderFactory>
 SingleRequestURLLoaderFactory::Clone() {
-  return std::make_unique<FactoryInfo>(state_);
+  return std::make_unique<PendingFactory>(state_);
 }
 
 SingleRequestURLLoaderFactory::SingleRequestURLLoaderFactory(

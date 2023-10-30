@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
 #include "components/viz/service/display/output_surface_client.h"
 #include "components/viz/service/display/output_surface_frame.h"
@@ -23,8 +24,13 @@
 namespace viz {
 
 SoftwareOutputSurface::SoftwareOutputSurface(
-    std::unique_ptr<SoftwareOutputDevice> software_device)
-    : OutputSurface(std::move(software_device)) {}
+    std::unique_ptr<SoftwareOutputDevice> device)
+    : OutputSurface(std::move(device)) {
+  capabilities_.pending_swap_params.max_pending_swaps =
+      software_device()->MaxFramesPending();
+  capabilities_.resize_based_on_root_surface =
+      software_device()->SupportsOverridePlatformSize();
+}
 
 SoftwareOutputSurface::~SoftwareOutputSurface() = default;
 
@@ -42,19 +48,8 @@ void SoftwareOutputSurface::DiscardBackbuffer() {
   software_device()->DiscardBackbuffer();
 }
 
-void SoftwareOutputSurface::BindFramebuffer() {
-  // Not used for software surfaces.
-  NOTREACHED();
-}
-
-void SoftwareOutputSurface::SetDrawRectangle(const gfx::Rect& draw_rectangle) {}
-
-void SoftwareOutputSurface::Reshape(const gfx::Size& size,
-                                    float device_scale_factor,
-                                    const gfx::ColorSpace& color_space,
-                                    bool has_alpha,
-                                    bool use_stencil) {
-  software_device()->Resize(size, device_scale_factor);
+void SoftwareOutputSurface::Reshape(const ReshapeParams& params) {
+  software_device()->Resize(params.size, params.device_scale_factor);
 }
 
 void SoftwareOutputSurface::SwapBuffers(OutputSurfaceFrame frame) {
@@ -67,10 +62,7 @@ void SoftwareOutputSurface::SwapBuffers(OutputSurfaceFrame frame) {
         ui::INPUT_EVENT_LATENCY_FRAME_SWAP_COMPONENT, swap_time);
   }
 
-  DCHECK(stored_latency_info_.empty())
-      << "A second frame is not expected to "
-      << "arrive before the previous latency info is processed.";
-  stored_latency_info_ = std::move(frame.latency_info);
+  stored_latency_info_.emplace(std::move(frame.latency_info));
 
   software_device()->OnSwapBuffers(
       base::BindOnce(&SoftwareOutputSurface::SwapBuffersCallback,
@@ -88,37 +80,20 @@ bool SoftwareOutputSurface::IsDisplayedAsOverlayPlane() const {
   return false;
 }
 
-unsigned SoftwareOutputSurface::GetOverlayTextureId() const {
-  return 0;
-}
-
-gfx::BufferFormat SoftwareOutputSurface::GetOverlayBufferFormat() const {
-  return gfx::BufferFormat::RGBX_8888;
-}
-
-bool SoftwareOutputSurface::HasExternalStencilTest() const {
-  return false;
-}
-
-void SoftwareOutputSurface::ApplyExternalStencil() {}
-
-uint32_t SoftwareOutputSurface::GetFramebufferCopyTextureFormat() {
-  // Not used for software surfaces.
-  NOTREACHED();
-  return 0;
-}
-
 void SoftwareOutputSurface::SwapBuffersCallback(base::TimeTicks swap_time,
                                                 const gfx::Size& pixel_size) {
-  latency_tracker_.OnGpuSwapBuffersCompleted(stored_latency_info_);
-  client_->DidFinishLatencyInfo(stored_latency_info_);
-  std::vector<ui::LatencyInfo>().swap(stored_latency_info_);
-  client_->DidReceiveSwapBuffersAck({swap_time, swap_time});
+  latency_tracker_.OnGpuSwapBuffersCompleted(
+      std::move(stored_latency_info_.front()));
+  stored_latency_info_.pop();
+  client_->DidReceiveSwapBuffersAck({swap_time, swap_time},
+                                    /*release_fence=*/gfx::GpuFenceHandle());
 
   base::TimeTicks now = base::TimeTicks::Now();
   base::TimeDelta interval_to_next_refresh =
       now.SnappedToNextTick(refresh_timebase_, refresh_interval_) - now;
-#if defined(USE_X11)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   if (needs_swap_size_notifications_)
     client_->DidSwapWithSize(pixel_size);
 #endif
@@ -134,10 +109,6 @@ void SoftwareOutputSurface::UpdateVSyncParameters(base::TimeTicks timebase,
   update_vsync_parameters_callback_.Run(timebase, interval);
 }
 
-unsigned SoftwareOutputSurface::UpdateGpuFence() {
-  return 0;
-}
-
 void SoftwareOutputSurface::SetUpdateVSyncParametersCallback(
     UpdateVSyncParametersCallback callback) {
   update_vsync_parameters_callback_ = std::move(callback);
@@ -147,11 +118,12 @@ gfx::OverlayTransform SoftwareOutputSurface::GetDisplayTransform() {
   return gfx::OVERLAY_TRANSFORM_NONE;
 }
 
-#if defined(USE_X11)
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
 void SoftwareOutputSurface::SetNeedsSwapSizeNotifications(
     bool needs_swap_size_notifications) {
   needs_swap_size_notifications_ = needs_swap_size_notifications;
 }
 #endif
-
 }  // namespace viz

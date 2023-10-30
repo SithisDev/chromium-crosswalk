@@ -1,10 +1,9 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.chromecast.cma.backend.android;
 
-import android.annotation.TargetApi;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -14,10 +13,12 @@ import android.os.Build;
 import android.util.SparseArray;
 import android.util.SparseIntArray;
 
+import org.chromium.base.BuildInfo;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
 import org.chromium.chromecast.media.AudioContentType;
 
 /**
@@ -35,7 +36,6 @@ import org.chromium.chromecast.media.AudioContentType;
  * intents and reports detected changes back to the native volume controller code.
  */
 @JNINamespace("chromecast::media")
-@TargetApi(Build.VERSION_CODES.M)
 class VolumeControl {
     /**
      * Helper class storing settings and reading/writing volume and mute settings from/to Android's
@@ -89,13 +89,8 @@ class VolumeControl {
         /** Sets the given mute state in AudioManager. */
         void setMuted(boolean muted) {
             if (DEBUG_LEVEL >= 1) Log.i(TAG, "setMuted: muted=" + muted);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                int direction = muted ? AudioManager.ADJUST_MUTE : AudioManager.ADJUST_UNMUTE;
-                int flag = 0;
-                mAudioManager.adjustStreamVolume(mStreamType, direction, flag);
-            } else {
-                mAudioManager.setStreamMute(mStreamType, muted);
-            }
+            mAudioManager.adjustStreamVolume(mStreamType,
+                    muted ? AudioManager.ADJUST_MUTE : AudioManager.ADJUST_UNMUTE, 0 /*flag*/);
         }
 
         /** Refreshes the stored mute state by reading it from AudioManager.
@@ -150,6 +145,13 @@ class VolumeControl {
 
     // Mapping from Cast's AudioContentType to their respective Settings instance.
     private SparseArray<Settings> mSettings;
+
+    @CalledByNative
+    private static boolean isSingleVolumeDevice() {
+        // Android TV devices map all stream types to STREAM_MUSIC, so they functionally have only
+        // one volume stream.
+        return BuildInfo.getInstance().isTV;
+    }
 
     /** Construction */
     @CalledByNative
@@ -217,7 +219,8 @@ class VolumeControl {
             if (DEBUG_LEVEL >= 1) {
                 Log.i(TAG, "New volume for castType " + castType + " is " + s.getVolumeLevel());
             }
-            nativeOnVolumeChange(mNativeVolumeControl, castType, s.getVolumeLevel());
+            VolumeControlJni.get().onVolumeChange(
+                    mNativeVolumeControl, VolumeControl.this, castType, s.getVolumeLevel());
         }
     }
 
@@ -232,7 +235,8 @@ class VolumeControl {
             if (DEBUG_LEVEL >= 1) {
                 Log.i(TAG, "New mute state for castType " + castType + " is " + s.isMuted());
             }
-            nativeOnMuteChange(mNativeVolumeControl, castType, s.isMuted());
+            VolumeControlJni.get().onMuteChange(
+                    mNativeVolumeControl, VolumeControl.this, castType, s.isMuted());
         }
     }
 
@@ -273,11 +277,12 @@ class VolumeControl {
         return 0;
     }
 
-    //
-    // JNI functions in native land.
-    //
-    private native void nativeOnVolumeChange(
-            long nativeVolumeControlAndroid, int type, float level);
-    private native void nativeOnMuteChange(
-            long nativeVolumeControlAndroid, int type, boolean muted);
+    @NativeMethods
+    interface Natives {
+        void onVolumeChange(
+                long nativeVolumeControlAndroid, VolumeControl caller, int type, float level);
+
+        void onMuteChange(
+                long nativeVolumeControlAndroid, VolumeControl caller, int type, boolean muted);
+    }
 }

@@ -1,17 +1,18 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 module remote_cocoa.mojom;
 
+import "mojo/public/mojom/base/process_id.mojom";
 import "mojo/public/mojom/base/string16.mojom";
-import "ui/base/accelerators/mojo/accelerator.mojom";
+import "ui/base/accelerators/mojom/accelerator.mojom";
 import "ui/base/mojom/ui_base_types.mojom";
 import "ui/base/mojom/window_open_disposition.mojom";
 import "ui/display/mojom/display.mojom";
-import "ui/events/mojo/event.mojom";
-import "ui/gfx/geometry/mojo/geometry.mojom";
-import "ui/gfx/mojo/ca_layer_params.mojom";
+import "ui/events/mojom/event.mojom";
+import "ui/gfx/geometry/mojom/geometry.mojom";
+import "ui/gfx/mojom/ca_layer_params.mojom";
 
 struct ValidateUserInterfaceItemResult {
   // Whether or not the specified sender should be enabled.
@@ -89,6 +90,11 @@ interface NativeWidgetNSWindowHost {
   DispatchKeyEventToMenuControllerRemote(ui.mojom.Event event) =>
       (bool event_swallowed, bool event_handled);
 
+  // Called when the NSEvent monitor observes an event. If `event_handled` is
+  // true, then do not continue dispatching the event.
+  [Sync]
+  DispatchMonitorEvent(ui.mojom.Event event) => (bool event_handled);
+
   // Synchronously return in  |has_menu_controller| whether or not a menu
   // controller exists for this widget.
   [Sync]
@@ -151,6 +157,10 @@ interface NativeWidgetNSWindowHost {
                            bool is_content_first_responder,
                            bool full_keyboard_access_enabled);
 
+  // Called when the blob of data that represents the NSWindow's restorable
+  // state has changed.
+  OnWindowStateRestorationDataChanged(array<uint8> data);
+
   // Accept or cancel the current dialog window (depending on the value of
   // |button|), if a current dialog exists.
   DoDialogButtonAction(ui.mojom.DialogButton button);
@@ -186,7 +196,7 @@ interface NativeWidgetNSWindowHost {
   // Synchronously query if the NSWindow should always render as if it is
   // the key window (is active, in views terminology).
   [Sync]
-  GetCanWindowClose() => (bool can_window_close);
+  OnWindowCloseRequested() => (bool can_window_close);
 
   // Synchronously query if the NSWindow's theme frame overrides the titlebar
   // height, and, if so, what the overridden height is.
@@ -205,7 +215,7 @@ interface NativeWidgetNSWindowHost {
   // view and in |host_pid| the pid for the host process.
   [Sync]
   GetRootViewAccessibilityToken() =>
-      (int64 host_pid, array<uint8> element_token);
+      (mojo_base.mojom.ProcessId host_pid, array<uint8> element_token);
 
   // Return the result for -[NSUserInterfaceValidations
   // validateUserInterfaceItem] for a given command, along with any state for

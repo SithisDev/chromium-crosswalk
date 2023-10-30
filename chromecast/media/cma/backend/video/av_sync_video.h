@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/timer/timer.h"
 #include "chromecast/media/cma/backend/av_sync.h"
@@ -18,10 +17,15 @@ class WeightedMovingLinearRegression;
 
 namespace media {
 class MediaPipelineBackendForMixer;
+class RateAdjuster;
 
 class AvSyncVideo : public AvSync {
  public:
   explicit AvSyncVideo(MediaPipelineBackendForMixer* const backend);
+
+  AvSyncVideo(const AvSyncVideo&) = delete;
+  AvSyncVideo& operator=(const AvSyncVideo&) = delete;
+
   ~AvSyncVideo() override;
 
   // AvSync implementation:
@@ -40,7 +44,9 @@ class AvSyncVideo : public AvSync {
   int GetVideoFrameRate();
 
   void HardCorrection(int64_t apts, int64_t desired_apts_timestamp);
-  void AudioRateUpkeep(int64_t error, int64_t timestamp);
+  double ChangeAudioRate(double desired_clock_rate,
+                         double error_slope,
+                         double current_error);
 
   void FlushAudioPts();
   void FlushVideoPts();
@@ -51,6 +57,7 @@ class AvSyncVideo : public AvSync {
 
   std::unique_ptr<WeightedMovingLinearRegression> apts_error_;
   std::unique_ptr<WeightedMovingLinearRegression> video_pts_;
+  std::unique_ptr<RateAdjuster> audio_rate_adjuster_;
 
   // This is the audio playback rate propagated from SetPlaybackRate, which is
   // exposed to the user to speed up or slow down their playback.
@@ -65,12 +72,6 @@ class AvSyncVideo : public AvSync {
 
   int64_t last_apts_value_ = INT64_MIN;
   int64_t last_apts_timestamp_ = INT64_MIN;
-
-  int64_t clock_rate_start_timestamp_ = INT64_MIN;
-  int64_t clock_rate_error_base_ = INT64_MIN;
-  int64_t apts_error_start_timestamp_ = INT64_MIN;
-
-  DISALLOW_COPY_AND_ASSIGN(AvSyncVideo);
 };
 
 }  // namespace media

@@ -1,28 +1,19 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/drive/drive_api_util.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
 #include <string>
 
 #include "base/files/file.h"
 #include "base/hash/md5.h"
-#include "base/logging.h"
-#include "base/stl_util.h"
-#include "base/strings/string16.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/atomic_flag.h"
-#include "base/task_runner_util.h"
-#include "base/values.h"
-#include "google_apis/drive/drive_api_parser.h"
 #include "third_party/re2/src/re2/re2.h"
-#include "url/gurl.h"
 
 namespace drive {
 namespace util {
@@ -64,13 +55,13 @@ std::string EscapeQueryStringValue(const std::string& str) {
 
 std::string TranslateQuery(const std::string& original_query) {
   // In order to handle non-ascii white spaces correctly, convert to UTF16.
-  base::string16 query = base::UTF8ToUTF16(original_query);
-  const base::string16 kDelimiter(
-      base::kWhitespaceUTF16 + base::ASCIIToUTF16("\""));
+  std::u16string query = base::UTF8ToUTF16(original_query);
+  const std::u16string kDelimiter =
+      base::StrCat({base::kWhitespaceUTF16, u"\""});
 
   std::string result;
   for (size_t index = query.find_first_not_of(base::kWhitespaceUTF16);
-       index != base::string16::npos;
+       index != std::u16string::npos;
        index = query.find_first_not_of(base::kWhitespaceUTF16, index)) {
     bool is_exclusion = (query[index] == '-');
     if (is_exclusion)
@@ -81,12 +72,12 @@ std::string TranslateQuery(const std::string& original_query) {
     }
 
     size_t begin_token = index;
-    base::string16 token;
+    std::u16string token;
     if (query[begin_token] == '"') {
       // Quoted query.
       ++begin_token;
       size_t end_token = query.find('"', begin_token);
-      if (end_token == base::string16::npos) {
+      if (end_token == std::u16string::npos) {
         // This is kind of syntax error, since quoted string isn't finished.
         // However, the query is built by user manually, so here we treat
         // whole remaining string as a token as a fallback, by appending
@@ -99,7 +90,7 @@ std::string TranslateQuery(const std::string& original_query) {
       index = end_token + 1;  // Consume last '"', too.
     } else {
       size_t end_token = query.find_first_of(kDelimiter, begin_token);
-      if (end_token == base::string16::npos) {
+      if (end_token == std::u16string::npos) {
         end_token = query.length();
       }
 
@@ -173,16 +164,8 @@ std::string GetMd5Digest(const base::FilePath& file_path,
   return base::MD5DigestToBase16(digest);
 }
 
-std::string GetHostedDocumentExtension(const std::string& mime_type) {
-  for (size_t i = 0; i < base::size(kHostedDocumentKinds); ++i) {
-    if (mime_type == kHostedDocumentKinds[i].mime_type)
-      return kHostedDocumentKinds[i].extension;
-  }
-  return kUnknownHostedDocumentExtension;
-}
-
 bool IsKnownHostedDocumentMimeType(const std::string& mime_type) {
-  for (size_t i = 0; i < base::size(kHostedDocumentKinds); ++i) {
+  for (size_t i = 0; i < std::size(kHostedDocumentKinds); ++i) {
     if (mime_type == kHostedDocumentKinds[i].mime_type)
       return true;
   }
@@ -191,20 +174,13 @@ bool IsKnownHostedDocumentMimeType(const std::string& mime_type) {
 
 bool HasHostedDocumentExtension(const base::FilePath& path) {
   const std::string extension = base::FilePath(path.Extension()).AsUTF8Unsafe();
-  for (size_t i = 0; i < base::size(kHostedDocumentKinds); ++i) {
+  for (size_t i = 0; i < std::size(kHostedDocumentKinds); ++i) {
     if (extension == kHostedDocumentKinds[i].extension)
       return true;
   }
   return extension == kUnknownHostedDocumentExtension;
 }
 
-void RunAsyncTask(base::TaskRunner* task_runner,
-                  const base::Location& from_here,
-                  base::OnceCallback<FileError()> task,
-                  base::OnceCallback<void(FileError)> reply) {
-  PostTaskAndReplyWithResult(task_runner, from_here, std::move(task),
-                             std::move(reply));
-}
 
 }  // namespace util
 }  // namespace drive

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,6 @@ namespace payments {
 
 class PaymentDetails;
 class PaymentMethodData;
-
-// Returns the card type associated with the given BasicCardType.
-autofill::CreditCard::CardType GetBasicCardType(
-    const mojom::BasicCardType& type);
 
 // Returns the card network name associated with a given BasicCardNetwork. Names
 // are inspired by https://www.w3.org/Payments/card-network-ids.

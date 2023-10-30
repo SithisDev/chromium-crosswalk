@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -104,6 +104,11 @@ class FeatureConfigEventStorageValidatorTest : public ::testing::Test {
     InitializeStorageFeatureConfigs();
   }
 
+  FeatureConfigEventStorageValidatorTest(
+      const FeatureConfigEventStorageValidatorTest&) = delete;
+  FeatureConfigEventStorageValidatorTest& operator=(
+      const FeatureConfigEventStorageValidatorTest&) = delete;
+
   void UseConfig(const FeatureConfig& foo_config) {
     FeatureVector features = {&kEventStorageTestFeatureFoo};
 
@@ -173,9 +178,6 @@ class FeatureConfigEventStorageValidatorTest : public ::testing::Test {
   FeatureConfigEventStorageValidator validator_;
   uint32_t current_day_;
   base::test::ScopedFeatureList scoped_feature_list_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FeatureConfigEventStorageValidatorTest);
 };
 
 }  // namespace

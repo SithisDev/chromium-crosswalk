@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/metrics/histogram_macros.h"
 #include "content/common/background_fetch/background_fetch_types.h"
 #include "content/public/common/content_switches.h"
@@ -18,15 +19,18 @@ BackgroundFetchRegistrationNotifier::~BackgroundFetchRegistrationNotifier() {}
 
 void BackgroundFetchRegistrationNotifier::AddObserver(
     const std::string& unique_id,
-    blink::mojom::BackgroundFetchRegistrationObserverPtr observer) {
+    mojo::PendingRemote<blink::mojom::BackgroundFetchRegistrationObserver>
+        observer) {
   // Observe connection errors, which occur when the JavaScript object or the
   // renderer hosting them goes away. (For example through navigation.) The
   // observer gets freed together with |this|, thus the Unretained is safe.
-  observer.set_connection_error_handler(
-      base::BindOnce(&BackgroundFetchRegistrationNotifier::OnConnectionError,
-                     base::Unretained(this), unique_id, observer.get()));
+  mojo::Remote<blink::mojom::BackgroundFetchRegistrationObserver>
+      registration_observer(std::move(observer));
+  registration_observer.set_disconnect_handler(base::BindOnce(
+      &BackgroundFetchRegistrationNotifier::OnConnectionError,
+      base::Unretained(this), unique_id, registration_observer.get()));
 
-  observers_.emplace(unique_id, std::move(observer));
+  observers_.emplace(unique_id, std::move(registration_observer));
 }
 
 void BackgroundFetchRegistrationNotifier::Notify(

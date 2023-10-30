@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ public interface MotionEventSynthesizer {
      * @param id Id property of the point.
      * @param toolType ToolType property of the point.
      */
-    void setPointer(int index, int x, int y, int id, int toolType);
+    void setPointer(int index, float x, float y, int id, int toolType);
 
     /**
      * Injects a synthetic action with the preset points and delta.

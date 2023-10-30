@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 #define CONTENT_BROWSER_RENDERER_HOST_DWRITE_FONT_UMA_LOGGING_WIN_H_
 
 namespace content {
-
-namespace dwrite_font_uma_logging {
 
 // This enum is used to define the buckets for an enumerated UMA histogram.
 // Hence,
@@ -53,7 +51,6 @@ void LogLastResortFontFileCount(size_t count);
 
 void LogMessageFilterError(MessageFilterError error);
 
-}  // namespace dwrite_font_uma_logging
 }  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_DWRITE_FONT_UMA_LOGGING_WIN_H_

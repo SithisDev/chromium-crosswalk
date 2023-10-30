@@ -1,17 +1,19 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/policy/core/common/configuration_policy_provider.h"
 
 #include "base/callback.h"
-#include "components/policy/core/common/extension_policy_migrator.h"
+#include "base/lazy_instance.h"
+#include "base/observer_list.h"
+#include "build/build_config.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/policy_map.h"
 
 namespace policy {
 
-ConfigurationPolicyProvider::Observer::~Observer() {}
+ConfigurationPolicyProvider::Observer::~Observer() = default;
 
 ConfigurationPolicyProvider::ConfigurationPolicyProvider()
     : initialized_(false), schema_registry_(nullptr) {}
@@ -41,17 +43,14 @@ bool ConfigurationPolicyProvider::IsInitializationComplete(
   return true;
 }
 
-void ConfigurationPolicyProvider::AddMigrator(
-    std::unique_ptr<ExtensionPolicyMigrator> migrator) {
-  DCHECK(migrator);
-  migrators_.push_back(std::move(migrator));
+bool ConfigurationPolicyProvider::IsFirstPolicyLoadComplete(
+    PolicyDomain domain) const {
+  return true;
 }
 
 void ConfigurationPolicyProvider::UpdatePolicy(
     std::unique_ptr<PolicyBundle> bundle) {
   if (bundle) {
-    for (const auto& migrator : migrators_)
-      migrator->Migrate(bundle.get());
     policy_bundle_.Swap(bundle.get());
   } else {
     policy_bundle_.Clear();
@@ -81,5 +80,12 @@ void ConfigurationPolicyProvider::OnSchemaRegistryUpdated(
     bool has_new_schemas) {}
 
 void ConfigurationPolicyProvider::OnSchemaRegistryReady() {}
+
+#if BUILDFLAG(IS_ANDROID)
+void ConfigurationPolicyProvider::ShutdownForTesting() {
+  observer_list_.Clear();
+  Shutdown();
+}
+#endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace policy

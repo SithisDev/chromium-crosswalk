@@ -1,16 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_ACTIONS_SET_ATTRIBUTE_ACTION_H_
 #define COMPONENTS_AUTOFILL_ASSISTANT_BROWSER_ACTIONS_SET_ATTRIBUTE_ACTION_H_
 
-#include <string>
-#include <vector>
-
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill_assistant/browser/actions/action.h"
+#include "components/autofill_assistant/browser/actions/action_delegate.h"
+#include "components/autofill_assistant/browser/client_status.h"
 
 namespace autofill_assistant {
 
@@ -19,6 +17,10 @@ class SetAttributeAction : public Action {
  public:
   explicit SetAttributeAction(ActionDelegate* delegate,
                               const ActionProto& proto);
+
+  SetAttributeAction(const SetAttributeAction&) = delete;
+  SetAttributeAction& operator=(const SetAttributeAction&) = delete;
+
   ~SetAttributeAction() override;
 
  private:
@@ -27,13 +29,11 @@ class SetAttributeAction : public Action {
 
   void OnWaitForElement(ProcessActionCallback callback,
                         const Selector& selector,
-                        bool element_found);
+                        const ClientStatus& element_status);
   void OnSetAttribute(ProcessActionCallback callback,
                       const ClientStatus& status);
 
-  base::WeakPtrFactory<SetAttributeAction> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(SetAttributeAction);
+  base::WeakPtrFactory<SetAttributeAction> weak_ptr_factory_{this};
 };
 
 }  // namespace autofill_assistant

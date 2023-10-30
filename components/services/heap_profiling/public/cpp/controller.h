@@ -1,26 +1,21 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_SERVICES_HEAP_PROFILING_PUBLIC_CPP_CONTROLLER_H_
 #define COMPONENTS_SERVICES_HEAP_PROFILING_PUBLIC_CPP_CONTROLLER_H_
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "components/services/heap_profiling/public/mojom/heap_profiling_client.mojom.h"
 #include "components/services/heap_profiling/public/mojom/heap_profiling_service.mojom.h"
-
-namespace service_manager {
-class Connector;
-}
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace heap_profiling {
 
-// This class is responsible for
-//   * Starting the Heap Profiling Service
-//   * Hooking up clients to the service
-//   * Getting information about profiled clients
+// This class is responsible for hooking up clients to the heap profiling
+// service and getting information about profiled clients.
 //
 // This class is sequence-affine. The public non-getter methods must be called
 // from a single sequence. Getters return const members set during the
@@ -30,7 +25,8 @@ namespace heap_profiling {
 // create OS pipes.
 class Controller {
  public:
-  // |connector| is used to connect to other services.
+  // |service| must be connected to an instance of the Heap Profiling service.
+  //
   // |stack_mode| describes the type of metadata to record for each allocation.
   // A |sampling_rate| of 1 indicates that all allocations should be recorded.
   // A |sampling_rate| greater than 1 describes the Poisson Process sampling
@@ -40,13 +36,17 @@ class Controller {
   // Note: The name |sampling_rate| is a bit confusing. A higher sampling rate
   // causes there to be fewer samples taken. This probably should have been
   // named |sampling_interval|.
-  Controller(std::unique_ptr<service_manager::Connector> connector,
+  Controller(mojo::PendingRemote<mojom::ProfilingService> service,
              mojom::StackMode stack_mode,
              uint32_t sampling_rate);
+
+  Controller(const Controller&) = delete;
+  Controller& operator=(const Controller&) = delete;
+
   ~Controller();
 
   // Starts Heap Profiling for the client.
-  void StartProfilingClient(mojom::ProfilingClientPtr client,
+  void StartProfilingClient(mojo::PendingRemote<mojom::ProfilingClient> client,
                             base::ProcessId pid,
                             mojom::ProcessType);
 
@@ -61,11 +61,8 @@ class Controller {
   // This method must be called from the same sequence the instance is bound to.
   base::WeakPtr<Controller> GetWeakPtr();
 
-  service_manager::Connector* GetConnector();
-
  private:
-  std::unique_ptr<service_manager::Connector> connector_;
-  mojom::ProfilingServicePtr heap_profiling_service_;
+  mojo::Remote<mojom::ProfilingService> heap_profiling_service_;
 
   // The same sampling rate and stack mode is used for each client.
   const uint32_t sampling_rate_ = 1;
@@ -73,7 +70,6 @@ class Controller {
 
   SEQUENCE_CHECKER(sequence_checker_);
   base::WeakPtrFactory<Controller> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(Controller);
 };
 
 }  // namespace heap_profiling

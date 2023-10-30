@@ -1,15 +1,15 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_FAKE_PROFILE_OAUTH2_TOKEN_SERVICE_H_
 #define COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_FAKE_PROFILE_OAUTH2_TOKEN_SERVICE_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
 #include "google_apis/gaia/fake_oauth2_access_token_manager.h"
 
@@ -39,6 +39,11 @@ class FakeProfileOAuth2TokenService : public ProfileOAuth2TokenService {
   FakeProfileOAuth2TokenService(
       PrefService* user_prefs,
       std::unique_ptr<ProfileOAuth2TokenServiceDelegate> delegate);
+
+  FakeProfileOAuth2TokenService(const FakeProfileOAuth2TokenService&) = delete;
+  FakeProfileOAuth2TokenService& operator=(
+      const FakeProfileOAuth2TokenService&) = delete;
+
   ~FakeProfileOAuth2TokenService() override;
 
   // Gets a list of active requests (can be used by tests to validate that the
@@ -47,17 +52,17 @@ class FakeProfileOAuth2TokenService : public ProfileOAuth2TokenService {
   GetPendingRequests();
 
   // Helper routines to issue tokens for pending requests.
-  void IssueAllTokensForAccount(const std::string& account_id,
+  void IssueAllTokensForAccount(const CoreAccountId& account_id,
                                 const std::string& access_token,
                                 const base::Time& expiration);
 
   // Helper routines to issue token for pending requests based on TokenResponse.
   void IssueAllTokensForAccount(
-      const std::string& account_id,
+      const CoreAccountId& account_id,
       const OAuth2AccessTokenConsumer::TokenResponse& token_response);
 
   void IssueErrorForAllPendingRequestsForAccount(
-      const std::string& account_id,
+      const CoreAccountId& account_id,
       const GoogleServiceAuthError& error);
 
   void IssueTokenForScope(const OAuth2AccessTokenManager::ScopeSet& scopes,
@@ -81,10 +86,10 @@ class FakeProfileOAuth2TokenService : public ProfileOAuth2TokenService {
 
   void set_auto_post_fetch_response_on_message_loop(bool auto_post_response);
 
+  bool IsFakeProfileOAuth2TokenServiceForTesting() const override;
+
  private:
   FakeOAuth2AccessTokenManager* GetFakeAccessTokenManager();
-
-  DISALLOW_COPY_AND_ASSIGN(FakeProfileOAuth2TokenService);
 };
 
 #endif  // COMPONENTS_SIGNIN_INTERNAL_IDENTITY_MANAGER_FAKE_PROFILE_OAUTH2_TOKEN_SERVICE_H_

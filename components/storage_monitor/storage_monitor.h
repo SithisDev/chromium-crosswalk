@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,13 +14,12 @@
 #include "base/files/file_path.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/sequence_checker.h"
-#include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/storage_monitor/storage_info.h"
-#include "services/service_manager/public/cpp/connector.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "services/device/public/mojom/mtp_manager.mojom-forward.h"
 #endif
 
@@ -72,7 +71,7 @@ class StorageMonitor {
   // Instantiates the StorageMonitor singleton. This function does not
   // guarantee the complete initialization of the object. For that, see
   // |EnsureInitialized|.
-  static void Create(std::unique_ptr<service_manager::Connector> connector);
+  static void Create();
 
   // Destroys the StorageMonitor singleton.
   static void Destroy();
@@ -95,7 +94,7 @@ class StorageMonitor {
   // |GetStorageInfoForPath| may not return the correct results. In addition,
   // registered observers will not be notified on device attachment/detachment.
   // Callbacks will run on the same sequence as the rest of the class.
-  void EnsureInitialized(base::Closure callback);
+  void EnsureInitialized(base::OnceClosure callback);
 
   // Return true if the storage monitor has already been initialized.
   bool IsInitialized() const;
@@ -109,7 +108,7 @@ class StorageMonitor {
 
 // TODO(gbillock): make this either unnecessary (implementation-specific) or
 // platform-independent.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Gets the MTP device storage information specified by |storage_device_id|.
   // On success, returns true and fills in |device_location| with device
   // interface details and |storage_object_id| with the string ID that
@@ -117,11 +116,11 @@ class StorageMonitor {
   // persistent across sessions.
   virtual bool GetMTPStorageInfoFromDeviceId(
       const std::string& storage_device_id,
-      base::string16* device_location,
-      base::string16* storage_object_id) const = 0;
+      std::wstring* device_location,
+      std::wstring* storage_object_id) const = 0;
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   virtual device::mojom::MtpManager* media_transfer_protocol_manager() = 0;
 #endif
 
@@ -135,9 +134,8 @@ class StorageMonitor {
   std::string GetTransientIdForDeviceId(const std::string& device_id);
   std::string GetDeviceIdForTransientId(const std::string& transient_id) const;
 
-  virtual void EjectDevice(
-      const std::string& device_id,
-      base::Callback<void(EjectStatus)> callback);
+  virtual void EjectDevice(const std::string& device_id,
+                           base::OnceCallback<void(EjectStatus)> callback);
 
  protected:
   friend class ::MediaFileSystemRegistryTest;
@@ -146,9 +144,6 @@ class StorageMonitor {
   friend class ::SystemStorageEjectApiTest;
 
   StorageMonitor();
-
-  // Provides the connector for service access.
-  service_manager::Connector* GetConnector();
 
   virtual Receiver* receiver() const;
 
@@ -181,15 +176,13 @@ class StorageMonitor {
 
   bool initializing_;
   bool initialized_;
-  std::vector<base::Closure> on_initialize_callbacks_;
+  std::vector<base::OnceClosure> on_initialize_callbacks_;
 
   // For manipulating storage_map_ structure.
   mutable base::Lock storage_lock_;
 
   // Map of all known storage devices,including fixed and removable storages.
   StorageMap storage_map_;
-
-  std::unique_ptr<service_manager::Connector> connector_;
 
   std::unique_ptr<TransientDeviceIds> transient_device_ids_;
 };

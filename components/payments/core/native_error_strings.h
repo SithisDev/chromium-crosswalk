@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,10 +71,6 @@ extern const char kCrossOriginWebAppManifestNotAllowed[];
 // to replace.
 extern const char kDetailedInvalidSslCertificateMessageFormat[];
 
-// Used when a HEAD request for URL A fails. This format should be used with
-// base::ReplaceStringPlaceholders(fmt, {A}, nullptr).
-extern const char kHttpHeadRequestFailed[];
-
 // Used for HTTP redirects that are prohibited for payment method manifests.
 // This format should be used with base::ReplaceStringPlaceholders(fmt,
 // {http_code, http_code_phrase, original_url}, nullptr).
@@ -83,6 +79,10 @@ extern const char kHttpStatusCodeNotAllowed[];
 // The "default_applications" list should contain exactly one URL for JIT
 // install feature to work.
 extern const char kInstallingMultipleDefaultAppsNotSupported[];
+
+// PaymentRequest::Init() is called when the initiating RenderFrameHost no
+// longer exists.
+extern const char kInvalidInitiatorFrame[];
 
 // Used to let the web developer know about an invalid payment manifest URL A.
 // This format should be used with base::ReplaceStringPlaceholders(fmt, {A},
@@ -99,28 +99,14 @@ extern const char kInvalidServiceWorkerUrl[];
 // invalid SSL certificate.
 extern const char kInvalidSslCertificate[];
 
-// Used when the {"supportedMethods": "", data: {}} is required, but not
-// provided.
-extern const char kMethodDataRequired[];
-
-// Used when non-empty "supportedMethods": "" is required, but not provided.
-extern const char kMethodNameRequired[];
-
-// The payment handler responded with an empty "details" field.
-extern const char kMissingDetailsFromPaymentApp[];
-
-// The payment handler responded with an empty "methodName" field.
-extern const char kMissingMethodNameFromPaymentApp[];
+// The downloaded web app icon should draw something for JIT install feature to
+// work.
+extern const char kInvalidWebAppIcon[];
 
 // The format for the message about multiple payment methods that are not
 // supported. This format should be used with base::ReplaceChars() function,
 // where "$" is the character to replace.
 extern const char kMultiplePaymentMethodsNotSupportedFormat[];
-
-// Used when the payment method URL A does not have a "Link:
-// rel=payment-method-manifest" HTTP header. This format should be used with
-// base::ReplaceStringPlaceholders(fmt, {A}, nullptr).
-extern const char kNoLinkRelPaymentMethodManifestHttpHeader[];
 
 // Payment handler did not respond to the "paymentrequest" event.
 extern const char kNoResponseToPaymentEvent[];
@@ -162,6 +148,15 @@ extern const char kPaymentEventTimeout[];
 // malicious content.
 extern const char kPaymentHandlerInsecureNavigation[];
 
+// Payment handler installation has failed.
+extern const char kPaymentHandlerInstallFailed[];
+
+// The payment handler is closed because the Android activity is destroyed.
+extern const char kPaymentHandlerActivityDied[];
+
+// The payment handler fails to load the page.
+extern const char kPaymentHandlerFailToLoadMainFrame[];
+
 // Payment handler encountered an internal error when handling the
 // "paymentrequest" event.
 extern const char kPaymentEventInternalError[];
@@ -177,6 +172,101 @@ extern const char kReachedMaximumNumberOfRedirects[];
 // supported. This format should be used with base::ReplaceChars() function,
 // where "$" is the character to replace.
 extern const char kSinglePaymentMethodNotSupportedFormat[];
+
+// The payment handler rejected the promise passed into
+// CanMakePaymentEvent.respondWith().
+extern const char kCanMakePaymentEventRejected[];
+
+// The payment handler timed out responding to "canmakepayment" event.
+extern const char kCanMakePaymentEventTimeout[];
+
+// The payment handler did not respond to the "canmakepayment" event.
+extern const char kCanMakePaymentEventNoResponse[];
+
+// The payment handler called CanMakePaymentEvent.respondWith(value) with a
+// non-boolean value.
+extern const char kCanMakePaymentEventBooleanConversionError[];
+
+// Browser encountered an error when firing the "canmakepayment" event.
+extern const char kCanMakePaymentEventBrowserError[];
+
+// The payment handler threw a JavaScript exception while handling the
+// "canmakepayment" event.
+extern const char kCanMakePaymentEventInternalError[];
+
+// Browser does not fire the "canmakepayment" event if the payment handler does
+// not support any URL-based payment methods.
+extern const char kCanMakePaymentEventNoUrlBasedPaymentMethods[];
+
+// Browser does not fire the "canmakepayment" event for just-in-time installable
+// payment handlers.
+extern const char kCanMakePaymentEventNotInstalled[];
+
+// Browser fires the "canmakepayment" event only for explicitly verified payment
+// methods, i.e., not when "supportedOrigins": "*".
+extern const char kCanMakePaymentEventNoExplicitlyVerifiedMethods[];
+
+// A message about unsupported payment method.
+extern const char kGenericPaymentMethodNotSupportedMessage[];
+
+// Used for errors downloading the payment method manifest. This format should
+// be used with base::ReplaceStringPlaceholders(fmt, {A}, nullptr).
+extern const char kNoContentAndNoLinkHeader[];
+
+// Used when the downloaded payment manifest A is empty. This format should be
+// used with base::ReplaceStringPlaceholders(fmt, {A}, nullptr).
+extern const char kNoContentInPaymentManifest[];
+
+// Used when it's impossible to invoke Android payment apps, e.g., when ARC is
+// disabled on Chrome OS.
+extern const char kUnableToInvokeAndroidPaymentApps[];
+
+// Used when the user has closed the payment app. For example, An Android app
+// indicates this by returning Activity.RESULT_CANCELED.
+extern const char kUserClosedPaymentApp[];
+
+// Used when an Android app declares more than one IS_READY_TO_PAY service.
+extern const char kMoreThanOneService[];
+
+// Used when no credential IDs are specified for the
+// "secure-payment-confirmation" method.
+extern const char kCredentialIdsRequired[];
+
+// Used when the timeout specified for the "secure-payment-confirmation" method
+// is too long.
+extern const char kTimeoutTooLong[];
+
+// Used when the challenge field was not specified for the
+// "secure-payment-confirmation" method.
+extern const char kChallengeRequired[];
+
+// Used when the instrument field was not specified for the
+// "secure-payment-confirmation" method.
+extern const char kInstrumentRequired[];
+
+// Used when the instrument.displayName field was not specified for the
+// "secure-payment-confirmation" method.
+extern const char kInstrumentDisplayNameRequired[];
+
+// Used when the instrument.icon field was not specified or was not a valid URL
+// in the "secure-payment-confirmation" method.
+extern const char kValidInstrumentIconRequired[];
+
+// Used when the icon that was either downloaded or read from user profile is
+// not valid.
+extern const char kInvalidIcon[];
+
+// Used when the rpId field was not specified for the
+// "secure-payment-confirmation" method.
+extern const char kRpIdRequired[];
+
+// Used when neither of the payeeOrigin or payeeName fields were specified for
+// the "secure-payment-confirmation" method.
+extern const char kPayeeOriginOrPayeeNameRequired[];
+
+// Used when the payeeOrigin field was specified but was non-https for the
+// "secure-payment-confirmation" method.
+extern const char kPayeeOriginMustBeHttps[];
 
 }  // namespace errors
 }  // namespace payments

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,11 +24,16 @@
 // than zero are profile or credit card identifiers.
 @property(assign, readonly, nonatomic) NSInteger identifier;
 
+// Indicates if the user should re-authenticate with the device before applying
+// the suggestion.
+@property(assign, readonly, nonatomic) BOOL requiresReauth;
+
 // Returns FormSuggestion (immutable) with given values.
 + (FormSuggestion*)suggestionWithValue:(NSString*)value
                     displayDescription:(NSString*)displayDescription
                                   icon:(NSString*)icon
-                            identifier:(NSInteger)identifier;
+                            identifier:(NSInteger)identifier
+                        requiresReauth:(BOOL)requiresReauth;
 
 @end
 

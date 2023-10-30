@@ -1,12 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_NACL_LOADER_NACL_TRUSTED_LISTENER_H_
 #define COMPONENTS_NACL_LOADER_NACL_TRUSTED_LISTENER_H_
 
-#include "base/macros.h"
 #include "components/nacl/common/nacl.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -14,8 +15,13 @@ class SingleThreadTaskRunner;
 
 class NaClTrustedListener {
  public:
-  NaClTrustedListener(nacl::mojom::NaClRendererHostPtr renderer_host,
-                      base::SingleThreadTaskRunner* io_task_runner);
+  NaClTrustedListener(
+      mojo::PendingRemote<nacl::mojom::NaClRendererHost> renderer_host,
+      base::SingleThreadTaskRunner* io_task_runner);
+
+  NaClTrustedListener(const NaClTrustedListener&) = delete;
+  NaClTrustedListener& operator=(const NaClTrustedListener&) = delete;
+
   ~NaClTrustedListener();
 
   nacl::mojom::NaClRendererHost* renderer_host() {
@@ -23,9 +29,7 @@ class NaClTrustedListener {
   }
 
  private:
-  nacl::mojom::NaClRendererHostPtr renderer_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(NaClTrustedListener);
+  mojo::Remote<nacl::mojom::NaClRendererHost> renderer_host_;
 };
 
 #endif  // COMPONENTS_NACL_LOADER_NACL_TRUSTED_LISTENER_H_

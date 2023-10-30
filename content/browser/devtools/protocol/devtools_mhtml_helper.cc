@@ -1,11 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/devtools/protocol/devtools_mhtml_helper.h"
 
 #include "base/bind.h"
-#include "base/task/post_task.h"
+#include "base/files/file_util.h"
+#include "base/task/thread_pool.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -17,40 +18,39 @@ namespace protocol {
 
 namespace {
 
-constexpr base::TaskTraits kBlockingSkippableTraits = {
-    // Requires IO.
-    base::MayBlock(),
-
-    // TaskShutdownBehavior: use SKIP_ON_SHUTDOWN so that the helper's
-    // fields do not suddenly become invalid.
-    base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN};
-
 void ClearFileReferenceOnIOThread(
     scoped_refptr<storage::ShareableFileReference>) {}
 
 }  // namespace
 
 DevToolsMHTMLHelper::DevToolsMHTMLHelper(
-    base::WeakPtr<PageHandler> page_handler,
+    const WebContents::Getter& web_contents_getter,
     std::unique_ptr<PageHandler::CaptureSnapshotCallback> callback)
-    : page_handler_(page_handler), callback_(std::move(callback)) {}
+    : web_contents_getter_(web_contents_getter),
+      callback_(std::move(callback)) {}
 
 DevToolsMHTMLHelper::~DevToolsMHTMLHelper() {
   if (mhtml_file_.get()) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
+    GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&ClearFileReferenceOnIOThread, std::move(mhtml_file_)));
   }
 }
 
 // static
 void DevToolsMHTMLHelper::Capture(
-    base::WeakPtr<PageHandler> page_handler,
+    const WebContents::Getter& web_contents_getter,
     std::unique_ptr<PageHandler::CaptureSnapshotCallback> callback) {
   scoped_refptr<DevToolsMHTMLHelper> helper =
-      new DevToolsMHTMLHelper(page_handler, std::move(callback));
-  base::PostTaskWithTraits(
-      FROM_HERE, kBlockingSkippableTraits,
+      new DevToolsMHTMLHelper(web_contents_getter, std::move(callback));
+  base::ThreadPool::PostTask(
+      FROM_HERE,
+      {// Requires IO.
+       base::MayBlock(),
+
+       // TaskShutdownBehavior: use SKIP_ON_SHUTDOWN so that the helper's
+       // fields do not suddenly become invalid.
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(&DevToolsMHTMLHelper::CreateTemporaryFile, helper));
 }
 
@@ -59,8 +59,8 @@ void DevToolsMHTMLHelper::CreateTemporaryFile() {
     ReportFailure("Unable to create temporary file");
     return;
   }
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&DevToolsMHTMLHelper::TemporaryFileCreatedOnIO, this));
 }
 
@@ -72,7 +72,7 @@ void DevToolsMHTMLHelper::TemporaryFileCreatedOnIO() {
   mhtml_file_ = storage::ShareableFileReference::GetOrCreate(
       mhtml_snapshot_path_,
       storage::ShareableFileReference::DELETE_ON_FINAL_RELEASE,
-      base::CreateSequencedTaskRunnerWithTraits(
+      base::ThreadPool::CreateSequencedTaskRunner(
           {// Requires IO.
            base::MayBlock(),
 
@@ -83,18 +83,14 @@ void DevToolsMHTMLHelper::TemporaryFileCreatedOnIO() {
            base::TaskShutdownBehavior::BLOCK_SHUTDOWN})
           .get());
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::UI},
+  GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&DevToolsMHTMLHelper::TemporaryFileCreatedOnUI, this));
 }
 
 void DevToolsMHTMLHelper::TemporaryFileCreatedOnUI() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (!page_handler_) {
-    ReportFailure("");
-    return;
-  }
-  WebContentsImpl* web_contents = page_handler_->GetWebContents();
+  WebContents* web_contents = web_contents_getter_.Run();
   if (!web_contents) {
     ReportFailure("No web contents");
     return;
@@ -111,8 +107,14 @@ void DevToolsMHTMLHelper::MHTMLGeneratedOnUI(int64_t mhtml_file_size) {
     ReportFailure("Failed to generate MHTML");
     return;
   }
-  base::PostTaskWithTraits(
-      FROM_HERE, kBlockingSkippableTraits,
+  base::ThreadPool::PostTask(
+      FROM_HERE,
+      {// Requires IO.
+       base::MayBlock(),
+
+       // TaskShutdownBehavior: use SKIP_ON_SHUTDOWN so that the
+       // helper's fields do not suddenly become invalid.
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(&DevToolsMHTMLHelper::ReadMHTML, this));
 }
 
@@ -130,23 +132,23 @@ void DevToolsMHTMLHelper::ReadMHTML() {
 
 void DevToolsMHTMLHelper::ReportFailure(const std::string& message) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::UI},
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE,
         base::BindOnce(&DevToolsMHTMLHelper::ReportFailure, this, message));
     return;
   }
   if (message.empty())
     callback_->sendFailure(Response::InternalError());
   else
-    callback_->sendFailure(Response::Error(message));
+    callback_->sendFailure(Response::ServerError(message));
 }
 
 void DevToolsMHTMLHelper::ReportSuccess(
     std::unique_ptr<std::string> mhtml_snapshot) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                             base::BindOnce(&DevToolsMHTMLHelper::ReportSuccess,
-                                            this, std::move(mhtml_snapshot)));
+    GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&DevToolsMHTMLHelper::ReportSuccess, this,
+                                  std::move(mhtml_snapshot)));
     return;
   }
   callback_->sendSuccess(*mhtml_snapshot);

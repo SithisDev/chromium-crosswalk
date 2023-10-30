@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,17 +7,16 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "build/build_config.h"
 #include "components/policy/core/common/policy_bundle.h"
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/schema_registry.h"
 #include "components/policy/policy_export.h"
 
 namespace policy {
-
-class ExtensionPolicyMigrator;
 
 // A mostly-abstract super class for platform-specific policy providers.
 // Platform-specific policy providers (Windows Group Policy, gconf,
@@ -32,6 +31,9 @@ class POLICY_EXPORT ConfigurationPolicyProvider
   };
 
   ConfigurationPolicyProvider();
+  ConfigurationPolicyProvider(const ConfigurationPolicyProvider&) = delete;
+  ConfigurationPolicyProvider& operator=(const ConfigurationPolicyProvider&) =
+      delete;
 
   // Policy providers can be deleted quite late during shutdown of the browser,
   // and it's not guaranteed that the message loops will still be running when
@@ -62,6 +64,12 @@ class POLICY_EXPORT ConfigurationPolicyProvider
   // case implementations need to do asynchronous operations for initialization.
   virtual bool IsInitializationComplete(PolicyDomain domain) const;
 
+  // Check whether this provider has loaded its first policies for the given
+  // policy |domain|. This is used to detect whether policies have been loaded
+  // is done in case implementations need to do asynchronous operations to get
+  // the policies.
+  virtual bool IsFirstPolicyLoadComplete(PolicyDomain domain) const;
+
   // Asks the provider to refresh its policies. All the updates caused by this
   // call will be visible on the next call of OnUpdatePolicy on the observers,
   // which are guaranteed to happen even if the refresh fails.
@@ -73,13 +81,13 @@ class POLICY_EXPORT ConfigurationPolicyProvider
   virtual void AddObserver(Observer* observer);
   virtual void RemoveObserver(Observer* observer);
 
-  // Adds an ExtensionPolicyMigrator to be run before OnUpdatePolicy() is
-  // called.
-  void AddMigrator(std::unique_ptr<ExtensionPolicyMigrator> migrator);
-
   // SchemaRegistry::Observer:
   void OnSchemaRegistryUpdated(bool has_new_schemas) override;
   void OnSchemaRegistryReady() override;
+
+#if BUILDFLAG(IS_ANDROID)
+  void ShutdownForTesting();
+#endif  // BUILDFLAG(IS_ANDROID)
 
  protected:
   // Subclasses must invoke this to update the policies currently served by
@@ -99,13 +107,9 @@ class POLICY_EXPORT ConfigurationPolicyProvider
   // Init() and cleared by Shutdown() and needs to be false in the destructor.
   bool initialized_;
 
-  SchemaRegistry* schema_registry_;
+  raw_ptr<SchemaRegistry> schema_registry_;
 
   base::ObserverList<Observer, true>::Unchecked observer_list_;
-
-  std::vector<std::unique_ptr<ExtensionPolicyMigrator>> migrators_;
-
-  DISALLOW_COPY_AND_ASSIGN(ConfigurationPolicyProvider);
 };
 
 }  // namespace policy

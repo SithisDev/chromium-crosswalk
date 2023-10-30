@@ -1,8 +1,9 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/remote_cocoa/app_shim/window_move_loop.h"
+#include <memory>
 
 #include "base/debug/stack_trace.h"
 #include "base/run_loop.h"
@@ -23,7 +24,7 @@
 // access.
 @interface WeakCocoaWindowMoveLoop : NSObject {
  @private
-  base::WeakPtr<remote_cocoa::CocoaWindowMoveLoop> weak_;
+  base::WeakPtr<remote_cocoa::CocoaWindowMoveLoop> _weak;
 }
 @end
 
@@ -31,13 +32,13 @@
 - (instancetype)initWithWeakPtr:
     (const base::WeakPtr<remote_cocoa::CocoaWindowMoveLoop>&)weak {
   if ((self = [super init])) {
-    weak_ = weak;
+    _weak = weak;
   }
   return self;
 }
 
 - (base::WeakPtr<remote_cocoa::CocoaWindowMoveLoop>&)weak {
-  return weak_;
+  return _weak;
 }
 @end
 
@@ -60,7 +61,7 @@ CocoaWindowMoveLoop::~CocoaWindowMoveLoop() {
   // Handle the pathological case, where |this| is destroyed while running.
   if (exit_reason_ref_) {
     *exit_reason_ref_ = WINDOW_DESTROYED;
-    quit_closure_.Run();
+    std::move(quit_closure_).Run();
   }
 
   owner_ = nullptr;
@@ -80,9 +81,13 @@ bool CocoaWindowMoveLoop::Run() {
       [[[WeakCocoaWindowMoveLoop alloc]
           initWithWeakPtr:weak_factory_.GetWeakPtr()] autorelease];
 
+  __block BOOL has_moved = NO;
+  screen_disabler_ = std::make_unique<gfx::ScopedCocoaDisableScreenUpdates>();
+
   // Esc keypress is handled by EscapeTracker, which is installed by
   // TabDragController.
-  NSEventMask mask = NSLeftMouseUpMask | NSLeftMouseDraggedMask;
+  NSEventMask mask = NSEventMaskLeftMouseUp | NSEventMaskLeftMouseDragged |
+                     NSEventMaskMouseMoved;
   auto handler = ^NSEvent*(NSEvent* event) {
     // The docs say this always runs on the main thread, but if it didn't,
     // it would explain https://crbug.com/876493, so let's make sure.
@@ -97,20 +102,32 @@ bool CocoaWindowMoveLoop::Run() {
       return event;
     }
 
-    if ([event type] == NSLeftMouseDragged) {
+    if ([event type] == NSEventTypeLeftMouseDragged) {
       const NSPoint mouse_in_screen = [NSEvent mouseLocation];
 
-      const NSRect ns_frame = NSOffsetRect(
+      NSRect ns_frame = NSOffsetRect(
           initial_frame, mouse_in_screen.x - initial_mouse_in_screen_.x,
           mouse_in_screen.y - initial_mouse_in_screen_.y);
       [window setFrame:ns_frame display:NO animate:NO];
+      // `setFrame:...` may have destroyed `this`, so do the weak check again.
+      bool is_valid = [weak_cocoa_window_move_loop weak].get() == strong;
+      if (is_valid && !has_moved) {
+        has_moved = YES;
+        strong->screen_disabler_.reset();
+      }
 
       return event;
     }
 
-    DCHECK_EQ([event type], NSLeftMouseUp);
-    *strong->exit_reason_ref_ = MOUSE_UP;
-    strong->quit_closure_.Run();
+    // In theory, we shouldn't see any kind of NSEventTypeMouseMoved, but if we
+    // see one and the left button isn't pressed, we know for a fact that we
+    // missed a NSEventTypeLeftMouseUp.
+    BOOL unexpectedMove = [event type] == NSEventTypeMouseMoved &&
+                          ([NSEvent pressedMouseButtons] & 1) != 1;
+    if (unexpectedMove || [event type] == NSEventTypeLeftMouseUp) {
+      *strong->exit_reason_ref_ = MOUSE_UP;
+      std::move(strong->quit_closure_).Run();
+    }
     return event;  // Process the MouseUp.
   };
   id monitor = [NSEvent addLocalMonitorForEventsMatchingMask:mask
@@ -128,11 +145,12 @@ bool CocoaWindowMoveLoop::Run() {
 }
 
 void CocoaWindowMoveLoop::End() {
+  screen_disabler_.reset();
   if (exit_reason_ref_) {
     DCHECK_EQ(*exit_reason_ref_, ENDED_EXTERNALLY);
     // Ensure the destructor doesn't replace the reason.
     exit_reason_ref_ = nullptr;
-    quit_closure_.Run();
+    std::move(quit_closure_).Run();
   }
 }
 

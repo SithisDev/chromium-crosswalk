@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,16 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/background_sync/background_sync_manager.h"
 #include "content/browser/background_sync/background_sync_registration_helper.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "content/common/content_export.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/public/mojom/background_sync/background_sync.mojom.h"
+#include "url/origin.h"
 
 namespace content {
 
@@ -28,8 +31,15 @@ class CONTENT_EXPORT PeriodicBackgroundSyncServiceImpl
  public:
   PeriodicBackgroundSyncServiceImpl(
       BackgroundSyncContextImpl* background_sync_context,
-      mojo::InterfaceRequest<blink::mojom::PeriodicBackgroundSyncService>
-          request);
+      const url::Origin& origin,
+      RenderProcessHost* render_process_host,
+      mojo::PendingReceiver<blink::mojom::PeriodicBackgroundSyncService>
+          receiver);
+
+  PeriodicBackgroundSyncServiceImpl(const PeriodicBackgroundSyncServiceImpl&) =
+      delete;
+  PeriodicBackgroundSyncServiceImpl& operator=(
+      const PeriodicBackgroundSyncServiceImpl&) = delete;
 
   ~PeriodicBackgroundSyncServiceImpl() override;
 
@@ -49,19 +59,19 @@ class CONTENT_EXPORT PeriodicBackgroundSyncServiceImpl
   void OnUnregisterResult(UnregisterCallback callback,
                           BackgroundSyncStatus status);
 
-  // Called when an error is detected on |binding_|.
-  void OnConnectionError();
+  // Called when a disconnection is detected on |receiver_|.
+  void OnMojoDisconnect();
 
   // |background_sync_context_| owns |this|.
-  BackgroundSyncContextImpl* background_sync_context_;
+  raw_ptr<BackgroundSyncContextImpl> background_sync_context_;
+
+  url::Origin origin_;
 
   std::unique_ptr<BackgroundSyncRegistrationHelper> registration_helper_;
-  mojo::Binding<blink::mojom::PeriodicBackgroundSyncService> binding_;
+  mojo::Receiver<blink::mojom::PeriodicBackgroundSyncService> receiver_;
 
   base::WeakPtrFactory<PeriodicBackgroundSyncServiceImpl> weak_ptr_factory_{
       this};
-
-  DISALLOW_COPY_AND_ASSIGN(PeriodicBackgroundSyncServiceImpl);
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,10 @@ class VIZ_SERVICE_EXPORT SurfaceManagerDelegate {
   // Returns the debug label associated with |frame_sink_id| if any.
   virtual base::StringPiece GetFrameSinkDebugLabel(
       const FrameSinkId& frame_sink_id) const = 0;
+
+  // Indicates that the set of frame sinks being aggregated for display has
+  // changed since the previous aggregation.
+  virtual void AggregatedFrameSinksChanged() = 0;
 };
 
 }  // namespace viz

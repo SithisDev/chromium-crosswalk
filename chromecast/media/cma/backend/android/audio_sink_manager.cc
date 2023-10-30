@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/logging.h"
 #include "base/no_destructor.h"
 #include "chromecast/media/cma/backend/android/audio_sink_android.h"
 
@@ -17,10 +18,11 @@ namespace {
 class AudioSinkManagerInstance : public AudioSinkManager {
  public:
   AudioSinkManagerInstance() {}
-  ~AudioSinkManagerInstance() override {}
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioSinkManagerInstance);
+  AudioSinkManagerInstance(const AudioSinkManagerInstance&) = delete;
+  AudioSinkManagerInstance& operator=(const AudioSinkManagerInstance&) = delete;
+
+  ~AudioSinkManagerInstance() override {}
 };
 
 }  // namespace
@@ -31,17 +33,6 @@ AudioSinkManager* AudioSinkManager::Get() {
   return sink_manager_instance.get();
 }
 
-// static
-AudioSinkAndroid::SinkType AudioSinkManager::GetDefaultSinkType() {
-  return AudioSinkAndroid::kSinkTypeJavaBased;
-}
-
-// static
-bool AudioSinkManager::GetSessionIds(int* media_id, int* communication_id) {
-  return AudioSinkAndroid::GetSessionIds(GetDefaultSinkType(), media_id,
-                                         communication_id);
-}
-
 AudioSinkManager::AudioSinkManager() {}
 AudioSinkManager::~AudioSinkManager() {}
 
@@ -50,7 +41,7 @@ void AudioSinkManager::Add(AudioSinkAndroid* sink) {
 
   LOG(INFO) << __func__ << " sink(" << sink << "): id=" << sink->device_id()
             << " primary=" << sink->primary()
-            << " type=" << sink->GetContentTypeName();
+            << " type=" << sink->content_type();
 
   base::AutoLock lock(lock_);
   UpdateLimiterMultiplier(sink);
@@ -61,7 +52,7 @@ void AudioSinkManager::Remove(AudioSinkAndroid* sink) {
   DCHECK(sink);
 
   LOG(INFO) << __func__ << " sink(" << sink << "): id=" << sink->device_id()
-            << " type=" << sink->GetContentTypeName();
+            << " type=" << sink->content_type();
 
   base::AutoLock lock(lock_);
 
@@ -74,8 +65,7 @@ void AudioSinkManager::Remove(AudioSinkAndroid* sink) {
 }
 
 void AudioSinkManager::SetTypeVolumeDb(AudioContentType type, float level_db) {
-  LOG(INFO) << __func__ << ": level_db=" << level_db
-            << " type=" << GetAudioContentTypeName(type);
+  LOG(INFO) << __func__ << ": level_db=" << level_db << " type=" << type;
   base::AutoLock lock(lock_);
   volume_info_[type].volume_db = level_db;
   // Since the type volume changed we need to reflect that in the limiter
@@ -84,8 +74,7 @@ void AudioSinkManager::SetTypeVolumeDb(AudioContentType type, float level_db) {
 }
 
 void AudioSinkManager::SetOutputLimitDb(AudioContentType type, float limit_db) {
-  LOG(INFO) << __func__ << ": limit_db=" << limit_db
-            << " type=" << GetAudioContentTypeName(type);
+  LOG(INFO) << __func__ << ": limit_db=" << limit_db << " type=" << type;
   base::AutoLock lock(lock_);
   volume_info_[type].limit_db = limit_db;
   UpdateAllLimiterMultipliers(type);

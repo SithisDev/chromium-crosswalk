@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,27 @@
 
 namespace autofill {
 
-// static
-FormType FormTypes::FieldTypeGroupToFormType(FieldTypeGroup field_type_group) {
+FormType FieldTypeGroupToFormType(FieldTypeGroup field_type_group) {
   switch (field_type_group) {
-    case CREDIT_CARD:
-      return CREDIT_CARD_FORM;
-    case USERNAME_FIELD:
-    case PASSWORD_FIELD:
-      return PASSWORD_FORM;
-    case NO_GROUP:
-    case TRANSACTION:
-      return UNKNOWN_FORM_TYPE;
-    default:
-      // Assuming it's an address form by process of elimination.
-      return ADDRESS_FORM;
+    case FieldTypeGroup::kName:
+    case FieldTypeGroup::kNameBilling:
+    case FieldTypeGroup::kEmail:
+    case FieldTypeGroup::kCompany:
+    case FieldTypeGroup::kAddressHome:
+    case FieldTypeGroup::kAddressBilling:
+    case FieldTypeGroup::kPhoneHome:
+    case FieldTypeGroup::kPhoneBilling:
+    case FieldTypeGroup::kBirthdateField:
+      return FormType::kAddressForm;
+    case FieldTypeGroup::kCreditCard:
+      return FormType::kCreditCardForm;
+    case FieldTypeGroup::kUsernameField:
+    case FieldTypeGroup::kPasswordField:
+      return FormType::kPasswordForm;
+    case FieldTypeGroup::kNoGroup:
+    case FieldTypeGroup::kTransaction:
+    case FieldTypeGroup::kUnfillable:
+      return FormType::kUnknownFormType;
   }
 }
 }  // namespace autofill

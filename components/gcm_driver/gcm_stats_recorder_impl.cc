@@ -1,10 +1,9 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/gcm_driver/gcm_stats_recorder_impl.h"
 
-#include <vector>
 
 #include "base/containers/circular_deque.h"
 #include "base/format_macros.h"
@@ -18,7 +17,6 @@
 namespace gcm {
 
 const uint32_t MAX_LOGGED_ACTIVITY_COUNT = 100;
-const int64_t RECEIVED_DATA_MESSAGE_BURST_LENGTH_SECONDS = 2;
 
 namespace {
 
@@ -118,9 +116,6 @@ std::string GetRegistrationStatusString(
       return "QUOTA_EXCEEDED";
     case gcm::RegistrationRequest::TOO_MANY_REGISTRATIONS:
       return "TOO_MANY_REGISTRATIONS";
-    case gcm::RegistrationRequest::STATUS_COUNT:
-      NOTREACHED();
-      break;
   }
   return "UNKNOWN_STATUS";
 }
@@ -164,9 +159,7 @@ std::string GetUnregistrationStatusString(
 }  // namespace
 
 GCMStatsRecorderImpl::GCMStatsRecorderImpl()
-    : is_recording_(false),
-      delegate_(nullptr),
-      received_data_message_burst_size_(0) {}
+    : is_recording_(false), delegate_(nullptr) {}
 
 GCMStatsRecorderImpl::~GCMStatsRecorderImpl() = default;
 
@@ -414,24 +407,6 @@ void GCMStatsRecorderImpl::RecordDataMessageReceived(
     const std::string& from,
     int message_byte_size,
     ReceivedMessageType message_type) {
-  base::TimeTicks new_timestamp = base::TimeTicks::Now();
-  if (last_received_data_message_burst_start_time_.is_null()) {
-    last_received_data_message_burst_start_time_ = new_timestamp;
-    received_data_message_burst_size_ = 1;
-  } else if ((new_timestamp - last_received_data_message_burst_start_time_) >=
-             base::TimeDelta::FromSeconds(
-                 RECEIVED_DATA_MESSAGE_BURST_LENGTH_SECONDS)) {
-    UMA_HISTOGRAM_LONG_TIMES(
-        "GCM.DataMessageBurstReceivedInterval",
-        (new_timestamp - last_received_data_message_burst_start_time_));
-    UMA_HISTOGRAM_COUNTS_1M("GCM.ReceivedDataMessageBurstSize",
-                            received_data_message_burst_size_);
-    last_received_data_message_burst_start_time_ = new_timestamp;
-    received_data_message_burst_size_ = 1;
-  } else {
-    ++received_data_message_burst_size_;
-  }
-
   if (!is_recording_)
     return;
 

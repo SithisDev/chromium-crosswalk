@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define CHROMECAST_BASE_SYSTEM_TIME_CHANGE_NOTIFIER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list_threadsafe.h"
@@ -30,10 +29,10 @@ class SystemTimeChangeNotifier {
     virtual ~Observer() {}
   };
 
-  virtual ~SystemTimeChangeNotifier();
+  SystemTimeChangeNotifier(const SystemTimeChangeNotifier&) = delete;
+  SystemTimeChangeNotifier& operator=(const SystemTimeChangeNotifier&) = delete;
 
-  virtual void Initialize() = 0;
-  virtual void Finalize() = 0;
+  virtual ~SystemTimeChangeNotifier();
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -46,8 +45,6 @@ class SystemTimeChangeNotifier {
 
  private:
   scoped_refptr<base::ObserverListThreadSafe<Observer>> observer_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(SystemTimeChangeNotifier);
 };
 
 // Default implementation of SystemTimeChangeNotifier for most platform.
@@ -61,11 +58,13 @@ class SystemTimeChangeNotifierPeriodicMonitor
  public:
   explicit SystemTimeChangeNotifierPeriodicMonitor(
       const scoped_refptr<base::SequencedTaskRunner>& task_runner);
-  ~SystemTimeChangeNotifierPeriodicMonitor() override;
 
-  // SystemTimeChangeNotifier implementation:
-  void Initialize() override;
-  void Finalize() override;
+  SystemTimeChangeNotifierPeriodicMonitor(
+      const SystemTimeChangeNotifierPeriodicMonitor&) = delete;
+  SystemTimeChangeNotifierPeriodicMonitor& operator=(
+      const SystemTimeChangeNotifierPeriodicMonitor&) = delete;
+
+  ~SystemTimeChangeNotifierPeriodicMonitor() override;
 
   // For unittests.
   void set_fake_now_for_testing(base::Time now) { fake_now_ = now; }
@@ -88,8 +87,6 @@ class SystemTimeChangeNotifierPeriodicMonitor
   base::Time fake_now_;
 
   base::WeakPtrFactory<SystemTimeChangeNotifierPeriodicMonitor> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(SystemTimeChangeNotifierPeriodicMonitor);
 };
 
 }  // namespace chromecast

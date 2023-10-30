@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,13 +29,19 @@ MockRenderWidgetHostDelegate::PreHandleKeyboardEvent(
 
 void MockRenderWidgetHostDelegate::ExecuteEditCommand(
     const std::string& command,
-    const base::Optional<base::string16>& value) {}
+    const absl::optional<std::u16string>& value) {}
+
+void MockRenderWidgetHostDelegate::Undo() {}
+
+void MockRenderWidgetHostDelegate::Redo() {}
 
 void MockRenderWidgetHostDelegate::Cut() {}
 
 void MockRenderWidgetHostDelegate::Copy() {}
 
 void MockRenderWidgetHostDelegate::Paste() {}
+
+void MockRenderWidgetHostDelegate::PasteAndMatchStyle() {}
 
 void MockRenderWidgetHostDelegate::SelectAll() {}
 
@@ -51,7 +57,7 @@ MockRenderWidgetHostDelegate::GetInputEventRouter() {
 
 RenderWidgetHostImpl* MockRenderWidgetHostDelegate::GetFocusedRenderWidgetHost(
     RenderWidgetHostImpl* widget_host) {
-  return !!focused_widget_ ? focused_widget_ : widget_host;
+  return !!focused_widget_ ? focused_widget_.get() : widget_host;
 }
 
 void MockRenderWidgetHostDelegate::SendScreenRects() {
@@ -63,12 +69,16 @@ TextInputManager* MockRenderWidgetHostDelegate::GetTextInputManager() {
   return &text_input_manager_;
 }
 
-bool MockRenderWidgetHostDelegate::IsFullscreenForCurrentTab() {
+bool MockRenderWidgetHostDelegate::IsFullscreen() {
   return is_fullscreen_;
 }
 
 RenderViewHostDelegateView* MockRenderWidgetHostDelegate::GetDelegateView() {
   return &rvh_delegate_view_;
+}
+
+bool MockRenderWidgetHostDelegate::ShouldIgnoreInputEvents() {
+  return should_ignore_input_events_;
 }
 
 }  // namespace content

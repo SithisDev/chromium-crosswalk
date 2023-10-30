@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,7 +50,12 @@ class CrashMetricsReporter {
     kRendererAllocationFailureAll = 16,
     kUtilityForegroundOom = 17,
     kUtilityCrashAll = 18,
-    kMaxValue = kUtilityCrashAll
+    kRendererProcessHostShutdown = 19,
+    kRendererForegroundInvisibleWithVisibleBindingKilled = 20,
+    kRendererForegroundInvisibleWithVisibleBindingOom = 21,
+    kRendererForegroundInvisibleWithNotPerceptibleBindingKilled = 22,
+    kRendererForegroundInvisibleWithNotPerceptibleBindingOom = 23,
+    kMaxValue = kRendererForegroundInvisibleWithNotPerceptibleBindingOom
   };
   using ReportedCrashTypeSet = base::flat_set<ProcessedCrashCounts>;
 
@@ -70,6 +75,9 @@ class CrashMetricsReporter {
 
   static CrashMetricsReporter* GetInstance();
 
+  CrashMetricsReporter(const CrashMetricsReporter&) = delete;
+  CrashMetricsReporter& operator=(const CrashMetricsReporter&) = delete;
+
   // Can be called on any thread.
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -85,8 +93,6 @@ class CrashMetricsReporter {
 
   scoped_refptr<base::ObserverListThreadSafe<CrashMetricsReporter::Observer>>
       async_observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(CrashMetricsReporter);
 };
 
 }  // namespace crash_reporter

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,8 @@
 #include <memory>
 #include <string>
 
-namespace base {
-struct Feature;
-}  // namespace base
+#include "base/feature_list.h"
+#include "chromecast/base/process_types.h"
 
 class PrefService;
 
@@ -22,11 +21,15 @@ namespace chromecast {
 class CastFeatureListCreator {
  public:
   CastFeatureListCreator();
+  CastFeatureListCreator(const CastFeatureListCreator&) = delete;
+  CastFeatureListCreator& operator=(const CastFeatureListCreator&) = delete;
   virtual ~CastFeatureListCreator();
 
   // Creates the |PrefService| and uses it to initialize |FeatureList|. Retains
-  // ownership of the |PrefService|.
-  void CreatePrefServiceAndFeatureList();
+  // ownership of the |PrefService|. Based on the given |ProcessType|, different
+  // files will be used to store prefs.
+  void CreatePrefServiceAndFeatureList(
+      ProcessType process_type = ProcessType::kCastService);
 
   // Takes ownership of the |PrefService| previously created.
   std::unique_ptr<PrefService> TakePrefService();

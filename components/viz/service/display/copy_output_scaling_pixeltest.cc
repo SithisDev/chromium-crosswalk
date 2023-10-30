@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,15 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "cc/test/pixel_test.h"
+#include "base/threading/sequenced_task_runner_handle.h"
+#include "build/build_config.h"
 #include "cc/test/pixel_test_utils.h"
 #include "cc/test/render_pass_test_utils.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "components/viz/common/frame_sinks/copy_output_util.h"
-#include "components/viz/common/quads/render_pass.h"
+#include "components/viz/common/quads/compositor_render_pass.h"
+#include "components/viz/service/display/viz_pixel_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libyuv/include/libyuv.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -28,20 +30,22 @@
 namespace viz {
 namespace {
 
-template <typename RendererType>
 class CopyOutputScalingPixelTest
-    : public cc::RendererPixelTest<RendererType>,
-      public testing::WithParamInterface<
-          std::tuple<gfx::Vector2d, gfx::Vector2d, CopyOutputResult::Format>> {
+    : public VizPixelTest,
+      public testing::WithParamInterface<std::tuple<RendererType,
+                                                    gfx::Vector2d,
+                                                    gfx::Vector2d,
+                                                    CopyOutputResult::Format>> {
  public:
-  // Include the public accessor method from the parent class.
-  using cc::RendererPixelTest<RendererType>::renderer;
+  CopyOutputScalingPixelTest() : VizPixelTest(std::get<0>(GetParam())) {}
+
+  DirectRenderer* renderer() { return renderer_.get(); }
 
   void SetUp() override {
-    cc::RendererPixelTest<RendererType>::SetUp();
-    scale_from_ = std::get<0>(GetParam());
-    scale_to_ = std::get<1>(GetParam());
-    result_format_ = std::get<2>(GetParam());
+    VizPixelTest::SetUp();
+    scale_from_ = std::get<1>(GetParam());
+    scale_to_ = std::get<2>(GetParam());
+    result_format_ = std::get<3>(GetParam());
   }
 
   // This tests that copy requests requesting scaled results execute correctly.
@@ -65,8 +69,11 @@ class CopyOutputScalingPixelTest
   // the resulting bitmap is compared against an expected bitmap.
   void RunTest() {
     const char* result_format_as_str = "<unknown>";
-    if (result_format_ == CopyOutputResult::Format::RGBA_BITMAP)
-      result_format_as_str = "RGBA_BITMAP";
+
+    // Tests only issue requests for system-memory destinations, no need to
+    // take the destination into account:
+    if (result_format_ == CopyOutputResult::Format::RGBA)
+      result_format_as_str = "RGBA";
     else if (result_format_ == CopyOutputResult::Format::I420_PLANES)
       result_format_as_str = "I420_PLANES";
     else
@@ -85,17 +92,18 @@ class CopyOutputScalingPixelTest
     constexpr gfx::Size viewport_size = gfx::Size(48, 20);
     constexpr int x_block = 8;
     constexpr int y_block = 4;
-    constexpr SkColor smaller_pass_colors[4] = {SK_ColorRED, SK_ColorGREEN,
-                                                SK_ColorBLUE, SK_ColorYELLOW};
-    constexpr SkColor root_pass_color = SK_ColorWHITE;
+    constexpr SkColor4f smaller_pass_colors[4] = {
+        SkColors::kRed, SkColors::kGreen, SkColors::kBlue, SkColors::kYellow};
+    constexpr SkColor4f root_pass_color = SkColors::kWhite;
 
-    RenderPassList list;
+    AggregatedRenderPassList list;
 
     // Create the render passes drawn on top of the root render pass.
-    RenderPass* smaller_passes[4];
+    AggregatedRenderPass* smaller_passes[4];
     gfx::Rect smaller_pass_rects[4];
-    int pass_id = 5;
-    for (int i = 0; i < 4; ++i, --pass_id) {
+    AggregatedRenderPassId pass_id{5};
+    for (int i = 0; i < 4;
+         ++i, pass_id = AggregatedRenderPassId{pass_id.value() - 1}) {
       smaller_pass_rects[i] = gfx::Rect(
           i % 2 == 0 ? x_block : (viewport_size.width() - 2 * x_block),
           i / 2 == 0 ? y_block : (viewport_size.height() - 2 * y_block),
@@ -108,14 +116,12 @@ class CopyOutputScalingPixelTest
     }
 
     // Create the root render pass and add all the child passes to it.
-    RenderPass* root_pass =
+    auto* root_pass =
         cc::AddRenderPass(&list, pass_id, gfx::Rect(viewport_size),
                           gfx::Transform(), cc::FilterOperations());
     for (int i = 0; i < 4; ++i)
       cc::AddRenderPassQuad(root_pass, smaller_passes[i]);
     cc::AddQuad(root_pass, gfx::Rect(viewport_size), root_pass_color);
-
-    renderer()->DecideRenderPassAllocationsForFrame(list);
 
     // Make a copy request and execute it by drawing a frame. A subset of the
     // viewport is requested, to test that scaled offsets are being computed
@@ -134,7 +140,7 @@ class CopyOutputScalingPixelTest
       // http://crbug.com/792734
       bool dummy_ran = false;
       auto request = std::make_unique<CopyOutputRequest>(
-          result_format_,
+          result_format_, CopyOutputRequest::ResultDestination::kSystemMemory,
           base::BindOnce(
               [](bool* dummy_ran, std::unique_ptr<CopyOutputResult> result) {
                 EXPECT_TRUE(!result->IsEmpty());
@@ -146,12 +152,14 @@ class CopyOutputScalingPixelTest
       // results of the main copy request (below) if the GL state is not
       // properly restored.
       request->SetUniformScaleRatio(1, 10);
+      // Ensure the result callback is run on test main thread.
+      request->set_result_task_runner(base::SequencedTaskRunnerHandle::Get());
       list.front()->copy_requests.push_back(std::move(request));
 
       // Add a copy request to the root RenderPass, to capture the results of
       // drawing all passes for this frame.
       request = std::make_unique<CopyOutputRequest>(
-          result_format_,
+          result_format_, CopyOutputRequest::ResultDestination::kSystemMemory,
           base::BindOnce(
               [](bool* dummy_ran,
                  std::unique_ptr<CopyOutputResult>* test_result,
@@ -165,9 +173,17 @@ class CopyOutputScalingPixelTest
       request->set_result_selection(
           copy_output::ComputeResultRect(copy_rect, scale_from_, scale_to_));
       request->SetScaleRatio(scale_from_, scale_to_);
+      // Ensure the result callback is run on test main thread.
+      request->set_result_task_runner(base::SequencedTaskRunnerHandle::Get());
       list.back()->copy_requests.push_back(std::move(request));
 
-      renderer()->DrawFrame(&list, 1.0f, viewport_size);
+      SurfaceDamageRectList surface_damage_rect_list;
+      renderer()->DrawFrame(&list, 1.0f, viewport_size,
+                            gfx::DisplayColorSpaces(),
+                            std::move(surface_damage_rect_list));
+      // Call SwapBuffersSkipped(), so the renderer can release related
+      // resources.
+      renderer()->SwapBuffersSkipped();
       loop.Run();
     }
 
@@ -177,11 +193,14 @@ class CopyOutputScalingPixelTest
         copy_output::ComputeResultRect(copy_rect, scale_from_, scale_to_);
     EXPECT_EQ(expected_result_rect, result->rect());
     EXPECT_EQ(result_format_, result->format());
+    absl::optional<CopyOutputResult::ScopedSkBitmap> scoped_bitmap;
     SkBitmap result_bitmap;
-    if (result_format_ == CopyOutputResult::Format::I420_PLANES)
+    if (result_format_ == CopyOutputResult::Format::I420_PLANES) {
       result_bitmap = ReadI420ResultToSkBitmap(*result);
-    else
-      result_bitmap = result->AsSkBitmap();
+    } else {
+      scoped_bitmap = result->ScopedAccessSkBitmap();
+      result_bitmap = scoped_bitmap->bitmap();
+    }
     ASSERT_TRUE(result_bitmap.readyToDraw());
     ASSERT_EQ(expected_result_rect.width(), result_bitmap.width());
     ASSERT_EQ(expected_result_rect.height(), result_bitmap.height());
@@ -195,7 +214,7 @@ class CopyOutputScalingPixelTest
       gfx::Rect rect = smaller_pass_rects[i] - copy_rect.OffsetFromOrigin();
       rect = copy_output::ComputeResultRect(rect, scale_from_, scale_to_);
       expected_bitmap.erase(
-          smaller_pass_colors[i],
+          smaller_pass_colors[i], nullptr /* SkColorSpace* colorSpace */,
           SkIRect{rect.x(), rect.y(), rect.right(), rect.bottom()});
     }
 
@@ -212,16 +231,12 @@ class CopyOutputScalingPixelTest
     gfx::Point first_failure_position;
     for (int y = 0; y < expected_bitmap.height(); ++y) {
       for (int x = 0; x < expected_bitmap.width(); ++x) {
-        const SkColor expected = expected_bitmap.getColor(x, y);
-        const SkColor actual = result_bitmap.getColor(x, y);
-        const bool red_bad =
-            (SkColorGetR(expected) < 0x80) != (SkColorGetR(actual) < 0x80);
-        const bool green_bad =
-            (SkColorGetG(expected) < 0x80) != (SkColorGetG(actual) < 0x80);
-        const bool blue_bad =
-            (SkColorGetB(expected) < 0x80) != (SkColorGetB(actual) < 0x80);
-        const bool alpha_bad =
-            (SkColorGetA(expected) < 0x80) != (SkColorGetA(actual) < 0x80);
+        const SkColor4f expected = expected_bitmap.getColor4f(x, y);
+        const SkColor4f actual = result_bitmap.getColor4f(x, y);
+        const bool red_bad = (expected.fR < 0.5f) != (actual.fR < 0.5f);
+        const bool green_bad = (expected.fG < 0.5f) != (actual.fG < 0.5f);
+        const bool blue_bad = (expected.fB < 0.5f) != (actual.fB < 0.5f);
+        const bool alpha_bad = (expected.fA < 0.5f) != (actual.fA < 0.5f);
         if (red_bad || green_bad || blue_bad || alpha_bad) {
           if (num_bad_pixels == 0)
             first_failure_position = gfx::Point(x, y);
@@ -283,35 +298,21 @@ class CopyOutputScalingPixelTest
 // Parameters common to all test instantiations. These are tuples consisting of
 // {scale_from, scale_to, i420_format}.
 const auto kParameters =
-    testing::Combine(testing::Values(gfx::Vector2d(1, 1),
+    testing::Combine(testing::ValuesIn(GetRendererTypesNoDawn()),
+                     testing::Values(gfx::Vector2d(1, 1),
                                      gfx::Vector2d(2, 1),
                                      gfx::Vector2d(1, 2),
                                      gfx::Vector2d(2, 2)),
                      testing::Values(gfx::Vector2d(1, 1),
                                      gfx::Vector2d(2, 1),
                                      gfx::Vector2d(1, 2)),
-                     testing::Values(CopyOutputResult::Format::RGBA_BITMAP,
+                     testing::Values(CopyOutputResult::Format::RGBA,
                                      CopyOutputResult::Format::I420_PLANES));
 
-using GLCopyOutputScalingPixelTest = CopyOutputScalingPixelTest<GLRenderer>;
-TEST_P(GLCopyOutputScalingPixelTest, ScaledCopyOfDrawnFrame) {
+TEST_P(CopyOutputScalingPixelTest, ScaledCopyOfDrawnFrame) {
   RunTest();
 }
-INSTANTIATE_TEST_SUITE_P(, GLCopyOutputScalingPixelTest, kParameters);
-
-// TODO(crbug.com/939442): Enable this test for SkiaRenderer.
-using SkiaCopyOutputScalingPixelTest = CopyOutputScalingPixelTest<SkiaRenderer>;
-TEST_P(SkiaCopyOutputScalingPixelTest, DISABLED_ScaledCopyOfDrawnFrame) {
-  RunTest();
-}
-INSTANTIATE_TEST_SUITE_P(, SkiaCopyOutputScalingPixelTest, kParameters);
-
-using SoftwareCopyOutputScalingPixelTest =
-    CopyOutputScalingPixelTest<SoftwareRenderer>;
-TEST_P(SoftwareCopyOutputScalingPixelTest, ScaledCopyOfDrawnFrame) {
-  RunTest();
-}
-INSTANTIATE_TEST_SUITE_P(, SoftwareCopyOutputScalingPixelTest, kParameters);
+INSTANTIATE_TEST_SUITE_P(, CopyOutputScalingPixelTest, kParameters);
 
 }  // namespace
 }  // namespace viz

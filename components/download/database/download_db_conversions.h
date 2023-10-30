@@ -1,11 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_DOWNLOAD_DATABASE_DOWNLOAD_DB_CONVERSIONS_H_
 #define COMPONENTS_DOWNLOAD_DATABASE_DOWNLOAD_DB_CONVERSIONS_H_
 
-#include "base/macros.h"
 #include "components/download/database/download_db_entry.h"
 #include "components/download/database/download_info.h"
 #include "components/download/database/download_namespace.h"

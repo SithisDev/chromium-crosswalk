@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,9 @@
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_sender.h"
+#include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #endif
 
@@ -21,13 +22,7 @@ class SingleThreadTaskRunner;
 struct UserMetricsAction;
 }
 
-namespace service_manager {
-class Connector;
-}
-
 namespace content {
-
-class ServiceManagerConnection;
 
 // An abstract base class that contains logic shared between most child
 // processes of the embedder.
@@ -58,13 +53,22 @@ class CONTENT_EXPORT ChildThread : public IPC::Sender {
   // actions in chrome/tools/extract_actions.py.
   virtual void RecordComputedAction(const std::string& action) = 0;
 
-  // Returns the ServiceManagerConnection for the thread (from which a
-  // service_manager::Connector can be obtained).
-  virtual ServiceManagerConnection* GetServiceManagerConnection() = 0;
-
-  // Returns a connector that can be used to bind interfaces exposed by other
-  // services.
-  virtual service_manager::Connector* GetConnector() = 0;
+  // Asks the browser-side process host object to bind |receiver|. Whether or
+  // not the interface type encapsulated by |receiver| is supported depends on
+  // the process type and potentially on the Content embedder.
+  //
+  // Receivers passed into this method arrive in the browser process and are
+  // taken through one of the following flows, stopping if any step decides to
+  // bind the receiver:
+  //
+  //   For renderers:
+  //       1. IO thread, IOThreadHostImpl::BindHostReceiver.
+  //       2. Main thread, RenderProcessHostImpl::BindHostReceiver.
+  //       3. Main thread, ContentBrowserClient::BindHostReceiverForRenderer.
+  //
+  // TODO(crbug.com/977637): Document behavior for other process types when
+  // their support is added.
+  virtual void BindHostReceiver(mojo::GenericPendingReceiver receiver) = 0;
 
   virtual scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() = 0;
 
@@ -72,7 +76,7 @@ class CONTENT_EXPORT ChildThread : public IPC::Sender {
   virtual void SetFieldTrialGroup(const std::string& trial_name,
                                   const std::string& group_name) = 0;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Request that the given font be loaded by the browser so it's cached by the
   // OS. Please see ChildProcessHost::PreCacheFont for details.
   virtual void PreCacheFont(const LOGFONT& log_font) = 0;

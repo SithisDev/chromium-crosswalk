@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 #define COMPONENTS_OMNIBOX_BROWSER_AUTOCOMPLETE_MATCH_TYPE_H_
 
 #include <string>
-
-#include "base/strings/string16.h"
 
 struct AutocompleteMatch;
 
@@ -69,9 +67,21 @@ struct AutocompleteMatchType {
     TAB_SEARCH_DEPRECATED       = 23,  // A suggested open tab, based on its
                                        // URL or title, via HQP (deprecated).
     DOCUMENT_SUGGESTION         = 24,  // A suggested document.
-    PEDAL                       = 25,  // An omnibox pedal suggestion.
+    PEDAL_DEPRECATED            = 25,  // An omnibox pedal match (deprecated).
+                                       // Pedals are now just action buttons
+                                       // attached to search matches.
     CLIPBOARD_TEXT              = 26,  // Text based on the clipboard.
     CLIPBOARD_IMAGE             = 27,  // An image based on the clipboard.
+    TILE_SUGGESTION             = 28,  // A suggestion containing query tiles.
+    TILE_NAVSUGGEST             = 29,  // A suggestion with navigation tiles.
+    OPEN_TAB                    = 30,  // A URL match amongst the currently open
+                                       // tabs.
+    HISTORY_CLUSTER             = 31,  // A history cluster suggestion.
+    NULL_RESULT_MESSAGE         = 32,  // A suggestion whose purpose is only to
+                                       // deliver a message. This suggestion
+                                       // cannot be opened or acted upon.
+    STARTER_PACK     = 33,  // A URL suggestion that a starter pack
+                                       // keyword mode chip attaches to.
     NUM_TYPES,
   };
   // clang-format on
@@ -79,29 +89,36 @@ struct AutocompleteMatchType {
   // Converts |type| to a string representation. Used in logging.
   static std::string ToString(AutocompleteMatchType::Type type);
 
+  // Use this function to convert integers to AutocompleteMatchType enum values.
+  // If you're sure it will be valid, you can call CHECK on the return value.
+  // Returns true if |value| was successfully converted to a valid enum value.
+  // The valid enum value will be written into |result|.
+  static bool FromInteger(int value, Type* result);
+
   // Returns the accessibility label for an AutocompleteMatch |match|
   // whose text is |match_text| The accessibility label describes the
   // match for use in a screenreader or other assistive technology.
+  //
+  // |total_matches|, if non-zero, is used in conjunction with |match_index|
+  // to append a ", n of m" positional message.
+  //
+  // |additional_message_id|, if non-zero, is the message ID for an additional
+  // message that the base message should be placed into as a parameter -
+  // this is used for describing a focused or available secondary button.
+  //
   // The |label_prefix_length| is an optional out param that provides the number
   // of characters in the label that were added before the actual match_text.
-  // This version appends ", n of m" positional info the the label:
-  static base::string16 ToAccessibilityLabel(
+  //
+  // TODO(tommycli): It seems odd that we are passing in both |match| and
+  // |match_text|. Using just |match.contents| or |match.fill_into_edit| seems
+  // like it could replace |match_text|. Investigate this.
+  static std::u16string ToAccessibilityLabel(
       const AutocompleteMatch& match,
-      const base::string16& match_text,
-      size_t match_index,
-      size_t total_matches,
-      bool is_tab_switch_button_focused,
+      const std::u16string& match_text,
+      size_t match_index = 0,
+      size_t total_matches = 0,
+      const std::u16string& additional_message_format = std::u16string(),
       int* label_prefix_length = nullptr);
-  // This version returns a plain label without ", n of m" positional info:
-  static base::string16 ToAccessibilityLabel(
-      const AutocompleteMatch& match,
-      const base::string16& match_text,
-      bool is_tab_switch_button_focused,
-      int* label_prefix_length = nullptr);
-
-  // Used for tab switch button message when reverse logic feature is selected.
-  static const char kAlternateTabSwitchButtonMessage[];
-  static const char kAlternateTabSwitchMessage[];
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_AUTOCOMPLETE_MATCH_TYPE_H_

@@ -1,13 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_VIZ_COMMON_QUADS_SURFACE_DRAW_QUAD_H_
 #define COMPONENTS_VIZ_COMMON_QUADS_SURFACE_DRAW_QUAD_H_
 
-#include <memory>
-
-#include "base/optional.h"
 #include "components/viz/common/quads/draw_quad.h"
 #include "components/viz/common/surfaces/surface_range.h"
 #include "components/viz/common/viz_common_export.h"
@@ -26,28 +23,27 @@ class VIZ_COMMON_EXPORT SurfaceDrawQuad : public DrawQuad {
   void SetNew(const SharedQuadState* shared_quad_state,
               const gfx::Rect& rect,
               const gfx::Rect& visible_rect,
-              const SurfaceRange& surface_range,
-              SkColor default_background_color,
-              bool stretch_content_to_fill_bounds,
-              bool ignores_input_event);
+              const SurfaceRange& range,
+              SkColor4f background_color,
+              bool stretch_content);
 
   void SetAll(const SharedQuadState* shared_quad_state,
               const gfx::Rect& rect,
               const gfx::Rect& visible_rect,
               bool needs_blending,
-              const SurfaceRange& surface_range,
-              SkColor default_background_color,
-              bool stretch_content_to_fill_bounds,
-              bool ignores_input_event,
-              bool is_reflection);
+              const SurfaceRange& range,
+              SkColor4f background_color,
+              bool stretch_content,
+              bool reflection,
+              bool merge);
 
   SurfaceRange surface_range;
-  SkColor default_background_color = SK_ColorWHITE;
+  SkColor4f default_background_color = SkColors::kWhite;
   bool stretch_content_to_fill_bounds = false;
-  // TODO(crbug.com/914530): Remove once VizHitTestSurfaceLayer is enabled by
-  // default.
-  bool ignores_input_event = false;
   bool is_reflection = false;
+  // If true, allows this surface to be merged into the embedding surface,
+  // avoiding an intermediate texture.
+  bool allow_merge = true;
 
   static const SurfaceDrawQuad* MaterialCast(const DrawQuad* quad);
 

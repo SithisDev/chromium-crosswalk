@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/signin/internal/identity_manager/accounts_mutator_impl.h"
 
-#include "base/optional.h"
+#include "build/chromeos_buildflags.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
 #include "components/signin/internal/identity_manager/primary_account_manager.h"
@@ -12,8 +12,10 @@
 #include "components/signin/public/base/device_id_helper.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/signin/public/identity_manager/account_info.h"
+#include "components/signin/public/identity_manager/tribool.h"
 #include "google_apis/gaia/core_account_id.h"
 #include "google_apis/gaia/gaia_constants.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace signin {
 
@@ -42,10 +44,19 @@ CoreAccountId AccountsMutatorImpl::AddOrUpdateAccount(
     const std::string& refresh_token,
     bool is_under_advanced_protection,
     signin_metrics::SourceForRefreshTokenOperation source) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  NOTREACHED();
+#endif
   CoreAccountId account_id =
       account_tracker_service_->SeedAccountInfo(gaia_id, email);
   account_tracker_service_->SetIsAdvancedProtectionAccount(
       account_id, is_under_advanced_protection);
+
+  // Flush the account changes to disk. Otherwise, in case of a browser crash,
+  // the account may be added to the token service but not to the account
+  // tracker, which is not intended.
+  account_tracker_service_->CommitPendingAccountChanges();
+
   token_service_->UpdateCredentials(account_id, refresh_token, source);
 
   return account_id;
@@ -53,35 +64,45 @@ CoreAccountId AccountsMutatorImpl::AddOrUpdateAccount(
 
 void AccountsMutatorImpl::UpdateAccountInfo(
     const CoreAccountId& account_id,
-    base::Optional<bool> is_child_account,
-    base::Optional<bool> is_under_advanced_protection) {
-  if (is_child_account.has_value()) {
-    account_tracker_service_->SetIsChildAccount(account_id,
-                                                is_child_account.value());
+    Tribool is_child_account,
+    Tribool is_under_advanced_protection) {
+  // kUnknown is used by callers when they do not want to update the value.
+  if (is_child_account != Tribool::kUnknown) {
+    account_tracker_service_->SetIsChildAccount(
+        account_id, is_child_account == Tribool::kTrue);
   }
 
-  if (is_under_advanced_protection.has_value()) {
+  if (is_under_advanced_protection != Tribool::kUnknown) {
     account_tracker_service_->SetIsAdvancedProtectionAccount(
-        account_id, is_under_advanced_protection.value());
+        account_id, is_under_advanced_protection == Tribool::kTrue);
   }
 }
 
 void AccountsMutatorImpl::RemoveAccount(
     const CoreAccountId& account_id,
     signin_metrics::SourceForRefreshTokenOperation source) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  NOTREACHED();
+#endif
   token_service_->RevokeCredentials(account_id, source);
 }
 
 void AccountsMutatorImpl::RemoveAllAccounts(
     signin_metrics::SourceForRefreshTokenOperation source) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  NOTREACHED();
+#endif
   token_service_->RevokeAllCredentials(source);
 }
 
 void AccountsMutatorImpl::InvalidateRefreshTokenForPrimaryAccount(
     signin_metrics::SourceForRefreshTokenOperation source) {
-  DCHECK(primary_account_manager_->IsAuthenticated());
-  AccountInfo primary_account_info =
-      primary_account_manager_->GetAuthenticatedAccountInfo();
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  NOTREACHED();
+#endif
+  DCHECK(primary_account_manager_->HasPrimaryAccount(ConsentLevel::kSync));
+  CoreAccountInfo primary_account_info =
+      primary_account_manager_->GetPrimaryAccountInfo(ConsentLevel::kSync);
   AddOrUpdateAccount(primary_account_info.gaia, primary_account_info.email,
                      GaiaConstants::kInvalidRefreshToken,
                      primary_account_info.is_under_advanced_protection, source);
@@ -106,11 +127,11 @@ void AccountsMutatorImpl::MoveAccount(AccountsMutator* target,
 }
 #endif
 
-void AccountsMutatorImpl::LegacySetRefreshTokenForSupervisedUser(
-    const std::string& refresh_token) {
-  token_service_->UpdateCredentials(
-      CoreAccountId("managed_user@localhost"), refresh_token,
-      signin_metrics::SourceForRefreshTokenOperation::kSupervisedUser_InitSync);
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+CoreAccountId AccountsMutatorImpl::SeedAccountInfo(const std::string& gaia_id,
+                                                   const std::string& email) {
+  return account_tracker_service_->SeedAccountInfo(gaia_id, email);
 }
+#endif
 
 }  // namespace signin

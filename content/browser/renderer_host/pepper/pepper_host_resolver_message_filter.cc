@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,21 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/task/post_task.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
 #include "content/browser/renderer_host/pepper/pepper_socket_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/socket_permission_request.h"
 #include "net/base/address_list.h"
+#include "net/base/network_isolation_key.h"
 #include "net/dns/public/dns_query_type.h"
+#include "net/dns/public/resolve_error_info.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_host_resolver_private.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
@@ -86,8 +89,7 @@ PepperHostResolverMessageFilter::PepperHostResolverMessageFilter(
     : external_plugin_(host->external_plugin()),
       private_api_(private_api),
       render_process_id_(0),
-      render_frame_id_(0),
-      binding_(this) {
+      render_frame_id_(0) {
   DCHECK(host);
 
   if (!host->GetRenderFrameIDsForInstance(
@@ -98,11 +100,11 @@ PepperHostResolverMessageFilter::PepperHostResolverMessageFilter(
 
 PepperHostResolverMessageFilter::~PepperHostResolverMessageFilter() {}
 
-scoped_refptr<base::TaskRunner>
+scoped_refptr<base::SequencedTaskRunner>
 PepperHostResolverMessageFilter::OverrideTaskRunnerForMessage(
     const IPC::Message& message) {
   if (message.type() == PpapiHostMsg_HostResolver_Resolve::ID)
-    return base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::UI});
+    return GetUIThreadTaskRunner({});
   return nullptr;
 }
 
@@ -133,11 +135,12 @@ int32_t PepperHostResolverMessageFilter::OnMsgResolve(
     return PP_ERROR_NOACCESS;
   }
 
-  RenderProcessHost* render_process_host =
-      RenderProcessHost::FromID(render_process_id_);
-  if (!render_process_host)
+  RenderFrameHost* render_frame_host =
+      RenderFrameHost::FromID(render_process_id_, render_frame_id_);
+  if (!render_frame_host)
     return PP_ERROR_FAILED;
-  auto* storage_partition = render_process_host->GetStoragePartition();
+  auto* storage_partition =
+      render_frame_host->GetProcess()->GetStoragePartition();
 
   // Grab a reference to this class to ensure that it's fully alive if a
   // connection error occurs (i.e. ref count is higher than 0 and there's no
@@ -145,19 +148,22 @@ int32_t PepperHostResolverMessageFilter::OnMsgResolve(
   // thread pending). Balanced in OnComplete();
   AddRef();
 
-  network::mojom::ResolveHostClientPtr client_ptr;
-  binding_.Bind(mojo::MakeRequest(&client_ptr));
-  binding_.set_connection_error_handler(
-      base::BindOnce(&PepperHostResolverMessageFilter::OnComplete,
-                     base::Unretained(this), net::ERR_FAILED, base::nullopt));
-
   network::mojom::ResolveHostParametersPtr parameters =
       network::mojom::ResolveHostParameters::New();
   PrepareRequestInfo(hint, parameters.get());
 
+  // Intentionally using a HostPortPair because scheme isn't specified.
   storage_partition->GetNetworkContext()->ResolveHost(
-      net::HostPortPair(host_port.host, host_port.port), std::move(parameters),
-      std::move(client_ptr));
+      network::mojom::HostResolverHost::NewHostPortPair(
+          net::HostPortPair(host_port.host, host_port.port)),
+      render_frame_host->GetIsolationInfoForSubresources()
+          .network_anonymization_key(),
+      std::move(parameters), receiver_.BindNewPipeAndPassRemote());
+  receiver_.set_disconnect_handler(base::BindOnce(
+      &PepperHostResolverMessageFilter::OnComplete, base::Unretained(this),
+      net::ERR_NAME_NOT_RESOLVED, net::ResolveErrorInfo(net::ERR_FAILED),
+      /*resolved_addresses=*/absl::nullopt,
+      /*endpoint_results_with_metadata=*/absl::nullopt));
   host_resolve_context_ = context->MakeReplyMessageContext();
 
   return PP_OK_COMPLETIONPENDING;
@@ -165,14 +171,17 @@ int32_t PepperHostResolverMessageFilter::OnMsgResolve(
 
 void PepperHostResolverMessageFilter::OnComplete(
     int result,
-    const base::Optional<net::AddressList>& resolved_addresses) {
+    const net::ResolveErrorInfo& resolve_error_info,
+    const absl::optional<net::AddressList>& resolved_addresses,
+    const absl::optional<net::HostResolverEndpointResults>&
+        endpoint_results_with_metadata) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  binding_.Close();
+  receiver_.reset();
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&PepperHostResolverMessageFilter::OnLookupFinished, this,
-                     result, std::move(resolved_addresses),
+                     resolve_error_info.error, std::move(resolved_addresses),
                      host_resolve_context_));
   host_resolve_context_ = ppapi::host::ReplyMessageContext();
 
@@ -181,12 +190,19 @@ void PepperHostResolverMessageFilter::OnComplete(
 
 void PepperHostResolverMessageFilter::OnLookupFinished(
     int net_result,
-    const base::Optional<net::AddressList>& addresses,
+    const absl::optional<net::AddressList>& addresses,
     const ReplyMessageContext& context) {
   if (net_result != net::OK) {
     SendResolveError(NetErrorToPepperError(net_result), context);
   } else {
-    const std::string& canonical_name = addresses.value().canonical_name();
+    // Ignore DNS aliases unless only one is received. Otherwise unknown which
+    // is the "canonical name" desired here. There is always expected to be at
+    // most 1 alias when the request is made with `include_canonical_name` (see
+    // `PrepareRequestInfo()`).
+    const std::string& canonical_name =
+        addresses.value().dns_aliases().size() == 1
+            ? addresses.value().dns_aliases().front()
+            : "";
     NetAddressList net_address_list;
     CreateNetAddressListFromAddressList(addresses.value(), &net_address_list);
     if (net_address_list.empty())

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,12 +28,11 @@ class RegionDataLoader {
       const std::vector<const ::i18n::addressinput::RegionData*>& regions)>
       RegionDataLoaded;
 
-  virtual ~RegionDataLoader() {}
-  // Calls |loaded_callback| when the region data for |country_code| is ready or
-  // when |timeout_ms| miliseconds have passed. This may happen synchronously.
+  virtual ~RegionDataLoader() = default;
+  // Calls |loaded_callback| when the region data for |country_code| is ready.
+  // This may happen synchronously.
   virtual void LoadRegionData(const std::string& country_code,
-                              RegionDataLoaded callback,
-                              int64_t timeout_ms) = 0;
+                              RegionDataLoaded callback) = 0;
   // To forget about the |callback| givent to LoadRegionData, in cases where
   // callback owner is destroyed before loader.
   virtual void ClearCallback() = 0;

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "components/sessions/content/content_platform_specific_tab_data.h"
+#include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 
 namespace {
 const char kContentLiveTabWebContentsUserDataKey[] = "content_live_tab";
@@ -64,8 +65,14 @@ ContentLiveTab::GetPlatformSpecificTabData() {
       web_contents());
 }
 
-const std::string& ContentLiveTab::GetUserAgentOverride() {
-  return web_contents()->GetUserAgentOverride();
+SerializedUserAgentOverride ContentLiveTab::GetUserAgentOverride() {
+  const blink::UserAgentOverride& ua_override =
+      web_contents()->GetUserAgentOverride();
+  SerializedUserAgentOverride serialized_ua_override;
+  serialized_ua_override.ua_string_override = ua_override.ua_string_override;
+  serialized_ua_override.opaque_ua_metadata_override =
+      blink::UserAgentMetadata::Marshal(ua_override.ua_metadata_override);
+  return serialized_ua_override;
 }
 
 }  // namespace sessions

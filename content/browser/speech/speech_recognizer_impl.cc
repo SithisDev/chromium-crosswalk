@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,27 +7,26 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 
 #include "base/bind.h"
-#include "base/macros.h"
-#include "base/task/post_task.h"
+#include "base/cxx17_backports.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/media/media_internals.h"
-#include "content/browser/service_manager/service_manager_context.h"
 #include "content/browser/speech/audio_buffer.h"
+#include "content/public/browser/audio_service.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
 #include "media/audio/audio_system.h"
 #include "media/base/audio_converter.h"
-#include "media/mojo/interfaces/audio_logging.mojom.h"
-#include "services/audio/public/cpp/audio_system_factory.h"
+#include "media/base/audio_parameters.h"
+#include "media/mojo/mojom/audio_logging.mojom.h"
 #include "services/audio/public/cpp/device_factory.h"
-#include "services/service_manager/public/mojom/connector.mojom.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "media/audio/win/core_audio_util_win.h"
 #endif
 
@@ -46,6 +45,10 @@ class SpeechRecognizerImpl::OnDataConverter
  public:
   OnDataConverter(const AudioParameters& input_params,
                   const AudioParameters& output_params);
+
+  OnDataConverter(const OnDataConverter&) = delete;
+  OnDataConverter& operator=(const OnDataConverter&) = delete;
+
   ~OnDataConverter() override;
 
   // Converts input audio |data| bus into an AudioChunk where the input format
@@ -68,8 +71,6 @@ class SpeechRecognizerImpl::OnDataConverter
   const AudioParameters input_parameters_;
   const AudioParameters output_parameters_;
   bool data_was_converted_;
-
-  DISALLOW_COPY_AND_ASSIGN(OnDataConverter);
 };
 
 namespace {
@@ -224,22 +225,24 @@ void SpeechRecognizerImpl::StartRecognition(const std::string& device_id) {
   DCHECK(!device_id.empty());
   device_id_ = device_id;
 
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
-                           base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
-                                          this, FSMEventArgs(EVENT_PREPARE)));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                FSMEventArgs(EVENT_PREPARE)));
 }
 
 void SpeechRecognizerImpl::AbortRecognition() {
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
-                           base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
-                                          this, FSMEventArgs(EVENT_ABORT)));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                FSMEventArgs(EVENT_ABORT)));
 }
 
 void SpeechRecognizerImpl::StopAudioCapture() {
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&SpeechRecognizerImpl::DispatchEvent, this,
-                     FSMEventArgs(EVENT_STOP_CAPTURE)));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                FSMEventArgs(EVENT_STOP_CAPTURE)));
 }
 
 bool SpeechRecognizerImpl::IsActive() const {
@@ -277,36 +280,38 @@ void SpeechRecognizerImpl::Capture(const AudioBus* data,
   // Convert audio from native format to fixed format used by WebSpeech.
   FSMEventArgs event_args(EVENT_AUDIO_DATA);
   event_args.audio_data = audio_converter_->Convert(data);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&SpeechRecognizerImpl::DispatchEvent, this, event_args));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
+                                weak_ptr_factory_.GetWeakPtr(), event_args));
   // See http://crbug.com/506051 regarding why one extra convert call can
   // sometimes be required. It should be a rare case.
   if (!audio_converter_->data_was_converted()) {
     event_args.audio_data = audio_converter_->Convert(data);
-    base::PostTaskWithTraits(
-        FROM_HERE, {BrowserThread::IO},
-        base::BindOnce(&SpeechRecognizerImpl::DispatchEvent, this, event_args));
+    GetIOThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
+                                  weak_ptr_factory_.GetWeakPtr(), event_args));
   }
   // Something is seriously wrong here and we are most likely missing some
   // audio segments.
   CHECK(audio_converter_->data_was_converted());
 }
 
-void SpeechRecognizerImpl::OnCaptureError(const std::string& message) {
+void SpeechRecognizerImpl::OnCaptureError(
+    media::AudioCapturerSource::ErrorCode code,
+    const std::string& message) {
   FSMEventArgs event_args(EVENT_AUDIO_ERROR);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&SpeechRecognizerImpl::DispatchEvent, this, event_args));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
+                                weak_ptr_factory_.GetWeakPtr(), event_args));
 }
 
 void SpeechRecognizerImpl::OnSpeechRecognitionEngineResults(
     const std::vector<blink::mojom::SpeechRecognitionResultPtr>& results) {
   FSMEventArgs event_args(EVENT_ENGINE_RESULT);
   event_args.engine_results = mojo::Clone(results);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&SpeechRecognizerImpl::DispatchEvent, this, event_args));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
+                                weak_ptr_factory_.GetWeakPtr(), event_args));
 }
 
 void SpeechRecognizerImpl::OnSpeechRecognitionEngineEndOfUtterance() {
@@ -318,9 +323,9 @@ void SpeechRecognizerImpl::OnSpeechRecognitionEngineError(
     const blink::mojom::SpeechRecognitionError& error) {
   FSMEventArgs event_args(EVENT_ENGINE_ERROR);
   event_args.engine_error = error;
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&SpeechRecognizerImpl::DispatchEvent, this, event_args));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&SpeechRecognizerImpl::DispatchEvent,
+                                weak_ptr_factory_.GetWeakPtr(), event_args));
 }
 
 // -----------------------  Core FSM implementation ---------------------------
@@ -535,7 +540,7 @@ void SpeechRecognizerImpl::ProcessAudioPipeline(const AudioChunk& raw_audio) {
 }
 
 void SpeechRecognizerImpl::OnDeviceInfo(
-    const base::Optional<media::AudioParameters>& params) {
+    const absl::optional<media::AudioParameters>& params) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   device_params_ = params.value_or(AudioParameters());
   DVLOG(1) << "Device parameters: " << device_params_.AsHumanReadableString();
@@ -580,7 +585,8 @@ SpeechRecognizerImpl::StartRecording(const FSMEventArgs&) {
   // Hard coded, WebSpeech specific parameters are utilized here.
   int frames_per_buffer = (kAudioSampleRate * chunk_duration_ms) / 1000;
   AudioParameters output_parameters =
-      AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY, kChannelLayout,
+      AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
+                      media::ChannelLayoutConfig::FromLayout<kChannelLayout>(),
                       kAudioSampleRate, frames_per_buffer);
   DVLOG(1) << "SRI::output_parameters: "
            << output_parameters.AsHumanReadableString();
@@ -592,7 +598,7 @@ SpeechRecognizerImpl::StartRecording(const FSMEventArgs&) {
   // TODO(henrika): this code should be moved to platform dependent audio
   // managers.
   bool use_native_audio_params = true;
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   use_native_audio_params = media::CoreAudioUtil::IsSupported();
   DVLOG_IF(1, !use_native_audio_params) << "Reverting to WaveIn for WebSpeech";
 #endif
@@ -617,8 +623,8 @@ SpeechRecognizerImpl::StartRecording(const FSMEventArgs&) {
 
   // Create an audio converter which converts data between native input format
   // and WebSpeech specific output format.
-  audio_converter_.reset(
-      new OnDataConverter(input_parameters, output_parameters));
+  audio_converter_ =
+      std::make_unique<OnDataConverter>(input_parameters, output_parameters);
 
   // The endpointer needs to estimate the environment/background noise before
   // starting to treat the audio as user input. We wait in the state
@@ -848,15 +854,14 @@ void SpeechRecognizerImpl::UpdateSignalAndNoiseLevels(const float& rms,
   // Perhaps it might be quite expensive on mobile.
   float level = (rms - kAudioMeterMinDb) /
       (kAudioMeterDbRange / kAudioMeterRangeMaxUnclipped);
-  level = std::min(std::max(0.0f, level), kAudioMeterRangeMaxUnclipped);
+  level = base::clamp(level, 0.0f, kAudioMeterRangeMaxUnclipped);
   const float smoothing_factor = (level > audio_level_) ? kUpSmoothingFactor :
                                                           kDownSmoothingFactor;
   audio_level_ += (level - audio_level_) * smoothing_factor;
 
   float noise_level = (endpointer_.NoiseLevelDb() - kAudioMeterMinDb) /
       (kAudioMeterDbRange / kAudioMeterRangeMaxUnclipped);
-  noise_level = std::min(std::max(0.0f, noise_level),
-                         kAudioMeterRangeMaxUnclipped);
+  noise_level = base::clamp(noise_level, 0.0f, kAudioMeterRangeMaxUnclipped);
 
   listener()->OnAudioLevelsChange(
       session_id(), clip_detected ? 1.0f : audio_level_, noise_level);
@@ -870,20 +875,20 @@ void SpeechRecognizerImpl::SetAudioEnvironmentForTesting(
 }
 
 media::AudioSystem* SpeechRecognizerImpl::GetAudioSystem() {
-  return audio_system_for_tests_ ? audio_system_for_tests_ : audio_system_;
+  return audio_system_for_tests_ ? audio_system_for_tests_
+                                 : audio_system_.get();
 }
 
 void SpeechRecognizerImpl::CreateAudioCapturerSource() {
-  service_manager::Connector* connector =
-      ServiceManagerContext::GetConnectorForIOThread();
-  if (connector) {
-    audio_capturer_source_ = audio::CreateInputDevice(
-        connector->Clone(), device_id_,
-        MediaInternals::GetInstance()
-            ->CreateMojoAudioLog(media::AudioLogFactory::AUDIO_INPUT_CONTROLLER,
-                                 0 /* component_id */)
-            .PassInterface());
-  }
+  mojo::PendingRemote<media::mojom::AudioStreamFactory> stream_factory;
+  GetAudioServiceStreamFactoryBinder().Run(
+      stream_factory.InitWithNewPipeAndPassReceiver());
+  audio_capturer_source_ = audio::CreateInputDevice(
+      std::move(stream_factory), device_id_,
+      audio::DeadStreamDetection::kEnabled,
+      MediaInternals::GetInstance()->CreateMojoAudioLog(
+          media::AudioLogFactory::AUDIO_INPUT_CONTROLLER,
+          0 /* component_id */));
 }
 
 media::AudioCapturerSource* SpeechRecognizerImpl::GetAudioCapturerSource() {

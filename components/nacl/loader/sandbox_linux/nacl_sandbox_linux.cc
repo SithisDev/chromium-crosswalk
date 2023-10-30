@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,11 +22,10 @@
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/rand_util.h"
 #include "build/build_config.h"
 #include "components/nacl/common/nacl_switches.h"
-#include "components/nacl/loader/nonsfi/nonsfi_sandbox.h"
 #include "components/nacl/loader/sandbox_linux/nacl_bpf_sandbox_linux.h"
-#include "content/public/common/content_switches.h"
 #include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
 #include "sandbox/linux/services/credentials.h"
 #include "sandbox/linux/services/namespace_sandbox.h"
@@ -34,7 +33,7 @@
 #include "sandbox/linux/services/resource_limits.h"
 #include "sandbox/linux/services/thread_helpers.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_client.h"
-#include "services/service_manager/sandbox/switches.h"
+#include "sandbox/policy/switches.h"
 
 namespace nacl {
 
@@ -54,7 +53,7 @@ bool MaybeSetProcessNonDumpable() {
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(
-          service_manager::switches::kAllowSandboxDebugging)) {
+          sandbox::policy::switches::kAllowSandboxDebugging)) {
     return true;
   }
 
@@ -67,12 +66,9 @@ bool MaybeSetProcessNonDumpable() {
 }
 
 void RestrictAddressSpaceUsage() {
-#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) || \
-    defined(THREAD_SANITIZER)
   // Sanitizers need to reserve huge chunks of the address space.
-  return;
-#endif
-
+#if !defined(ADDRESS_SANITIZER) && !defined(MEMORY_SANITIZER) && \
+    !defined(THREAD_SANITIZER)
   // Add a limit to the brk() heap that would prevent allocations that can't be
   // indexed by an int. This helps working around typical security bugs.
   // This could almost certainly be set to zero. GLibc's allocator and others
@@ -96,6 +92,7 @@ void RestrictAddressSpaceUsage() {
   const rlim_t kNewAddressSpaceLimit = std::numeric_limits<uint32_t>::max();
 #endif
   CHECK_EQ(0, sandbox::ResourceLimits::Lower(RLIMIT_AS, kNewAddressSpaceLimit));
+#endif
 }
 
 }  // namespace
@@ -104,7 +101,6 @@ NaClSandbox::NaClSandbox()
     : layer_one_enabled_(false),
       layer_one_sealed_(false),
       layer_two_enabled_(false),
-      layer_two_is_nonsfi_(false),
       proc_fd_(-1),
       setuid_sandbox_client_(sandbox::SetuidSandboxClient::Create()) {
   proc_fd_.reset(
@@ -128,6 +124,11 @@ bool NaClSandbox::HasOpenDirectory() {
 void NaClSandbox::InitializeLayerOneSandbox() {
   // Check that IsSandboxed() works. We should not be sandboxed at this point.
   CHECK(!IsSandboxed()) << "Unexpectedly sandboxed!";
+
+  // Open /dev/urandom while we can. This enables `base::RandBytes` to work. We
+  // don't need to store the resulting file descriptor; it's a singleton and
+  // subsequent calls to `GetUrandomFD` will return it.
+  CHECK_GE(base::GetUrandomFD(), 0);
 
   if (setuid_sandbox_client_->IsSuidSandboxChild()) {
     setuid_sandbox_client_->CloseDummyFile();
@@ -177,7 +178,7 @@ void NaClSandbox::CheckForExpectedNumberOfOpenFds() {
   CHECK_EQ(expected_num_fds, sandbox::ProcUtil::CountOpenFds(proc_fd_.get()));
 }
 
-void NaClSandbox::InitializeLayerTwoSandbox(bool uses_nonsfi_mode) {
+void NaClSandbox::InitializeLayerTwoSandbox() {
   // seccomp-bpf only applies to the current thread, so it's critical to only
   // have a single thread running here.
   DCHECK(!layer_one_sealed_);
@@ -189,14 +190,7 @@ void NaClSandbox::InitializeLayerTwoSandbox(bool uses_nonsfi_mode) {
   // Pass proc_fd_ ownership to the BPF sandbox, which guarantees it will
   // be closed. There is no point in keeping it around since the BPF policy
   // will prevent its usage.
-#if defined(OS_NACL_NONSFI)
-  CHECK(uses_nonsfi_mode);
-  layer_two_enabled_ = nacl::nonsfi::InitializeBPFSandbox(std::move(proc_fd_));
-  layer_two_is_nonsfi_ = true;
-#else
-  CHECK(!uses_nonsfi_mode);
   layer_two_enabled_ = nacl::InitializeBPFSandbox(std::move(proc_fd_));
-#endif
 }
 
 void NaClSandbox::SealLayerOneSandbox() {
@@ -210,41 +204,10 @@ void NaClSandbox::SealLayerOneSandbox() {
 }
 
 void NaClSandbox::CheckSandboxingStateWithPolicy() {
-  static const char kItIsDangerousMsg[] = " this is dangerous.";
-  static const char kItIsNotAllowedMsg[] =
-      " this is not allowed in this configuration.";
-
-  const bool no_sandbox_for_nonsfi_ok =
-#if defined(ADDRESS_SANITIZER) || defined(THREAD_SANITIZER) || \
-    defined(MEMORY_SANITIZER) || defined(LEAK_SANITIZER)
-      // Sanitizer tests run with --no-sandbox, but without
-      // --nacl-dangerous-no-sandbox-nonsfi. Allow that case.
-      true;
-#else
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kNaClDangerousNoSandboxNonSfi);
-#endif
-
-  const bool can_be_no_sandbox =
-      !layer_two_is_nonsfi_ || no_sandbox_for_nonsfi_ok;
-
-  if (!layer_one_enabled_ || !layer_one_sealed_) {
-    static const char kNoSuidMsg[] =
-        "The SUID sandbox is not engaged for NaCl:";
-    if (can_be_no_sandbox)
-      LOG(ERROR) << kNoSuidMsg << kItIsDangerousMsg;
-    else
-      LOG(FATAL) << kNoSuidMsg << kItIsNotAllowedMsg;
-  }
-
-  if (!layer_two_enabled_) {
-    static const char kNoBpfMsg[] =
-        "The seccomp-bpf sandbox is not engaged for NaCl:";
-    if (can_be_no_sandbox)
-      LOG(ERROR) << kNoBpfMsg << kItIsDangerousMsg;
-    else
-      LOG(FATAL) << kNoBpfMsg << kItIsNotAllowedMsg;
-  }
+  LOG_IF(ERROR, !layer_one_enabled_ || !layer_one_sealed_)
+      << "The SUID sandbox is not engaged for NaCl: this is dangerous.";
+  LOG_IF(ERROR, !layer_two_enabled_)
+      << "The seccomp-bpf sandbox is not engaged for NaCl: this is dangerous.";
 }
 
 }  // namespace nacl

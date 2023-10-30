@@ -1,11 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/error_page/common/net_error_info.h"
 
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/notreached.h"
 
 namespace error_page {
 
@@ -25,6 +25,8 @@ const char* DnsProbeStatusToString(int status) {
       return "DNS_PROBE_FINISHED_BAD_CONFIG";
     case DNS_PROBE_FINISHED_NXDOMAIN:
       return "DNS_PROBE_FINISHED_NXDOMAIN";
+    case DNS_PROBE_FINISHED_BAD_SECURE_CONFIG:
+      return "DNS_PROBE_FINISHED_BAD_SECURE_CONFIG";
     default:
       NOTREACHED();
       return "";

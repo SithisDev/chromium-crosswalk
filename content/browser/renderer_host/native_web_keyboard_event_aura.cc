@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/browser/native_web_keyboard_event.h"
 
-#include "base/logging.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/blink/web_input_event.h"
 #include "ui/events/event.h"
@@ -17,7 +16,7 @@ namespace {
 // RenderViewHostDelegate::HandledKeybardEvent after the original aura
 // event is destroyed.
 ui::Event* CopyEvent(const ui::Event* event) {
-  return event ? ui::Event::Clone(*event).release() : nullptr;
+  return event ? event->Clone().release() : nullptr;
 }
 
 int WebEventModifiersToEventFlags(int modifiers) {
@@ -60,11 +59,11 @@ class TranslatedKeyEvent : public ui::KeyEvent {
   static TranslatedKeyEvent* Create(const blink::WebKeyboardEvent& web_event) {
     ui::EventType type = ui::ET_KEY_RELEASED;
     bool is_char = false;
-    if (web_event.GetType() == blink::WebInputEvent::kChar) {
+    if (web_event.GetType() == blink::WebInputEvent::Type::kChar) {
       is_char = true;
       type = ui::ET_KEY_PRESSED;
-    } else if (web_event.GetType() == blink::WebInputEvent::kRawKeyDown ||
-               web_event.GetType() == blink::WebInputEvent::kKeyDown) {
+    } else if (web_event.GetType() == blink::WebInputEvent::Type::kRawKeyDown ||
+               web_event.GetType() == blink::WebInputEvent::Type::kKeyDown) {
       type = ui::ET_KEY_PRESSED;
     }
     // look up the DomCode in the table because we can't trust the
@@ -74,6 +73,11 @@ class TranslatedKeyEvent : public ui::KeyEvent {
         ui::KeycodeConverter::NativeKeycodeToDomCode(web_event.native_key_code),
         WebEventModifiersToEventFlags(web_event.GetModifiers()),
         web_event.dom_key, web_event.TimeStamp(), is_char);
+  }
+
+  // Event:
+  std::unique_ptr<ui::Event> Clone() const override {
+    return std::make_unique<TranslatedKeyEvent>(*this);
   }
 
  private:
@@ -126,11 +130,11 @@ NativeWebKeyboardEvent::NativeWebKeyboardEvent(
 }
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(const ui::KeyEvent& key_event,
-                                               base::char16 character)
+                                               char16_t character)
     : WebKeyboardEvent(ui::MakeWebKeyboardEvent(key_event)),
       os_event(nullptr),
       skip_in_browser(false) {
-  type_ = blink::WebInputEvent::kChar;
+  type_ = blink::WebInputEvent::Type::kChar;
   windows_key_code = character;
   text[0] = character;
   unmodified_text[0] = character;

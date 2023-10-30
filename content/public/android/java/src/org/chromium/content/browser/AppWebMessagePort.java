@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,26 +6,22 @@ package org.chromium.content.browser;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Message;
+import android.util.Pair;
+
+import androidx.annotation.MainThread;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.chromium.base.Log;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.blink.mojom.CloneableMessage;
-import org.chromium.blink.mojom.SerializedArrayBufferContents;
-import org.chromium.blink.mojom.SerializedBlob;
-import org.chromium.blink.mojom.TransferableMessage;
+import org.chromium.base.annotations.NativeMethods;
+import org.chromium.base.task.PostTask;
+import org.chromium.content_public.browser.MessagePayload;
 import org.chromium.content_public.browser.MessagePort;
-import org.chromium.mojo.bindings.Connector;
-import org.chromium.mojo.bindings.DeserializationException;
-import org.chromium.mojo.bindings.Message;
-import org.chromium.mojo.bindings.MessageHeader;
-import org.chromium.mojo.bindings.MessageReceiver;
-import org.chromium.mojo.system.Core;
-import org.chromium.mojo.system.MessagePipeHandle;
-import org.chromium.mojo.system.Pair;
-import org.chromium.mojo.system.impl.CoreImpl;
-import org.chromium.mojo_base.BigBufferUtil;
-import org.chromium.skia.mojom.Bitmap;
+import org.chromium.content_public.browser.UiThreadTaskTraits;
 
 /**
  * Represents the MessageChannel MessagePort object. Inspired from
@@ -76,122 +72,76 @@ import org.chromium.skia.mojom.Bitmap;
  * because an app can still create as many channels as it wants to and use it for
  * transferring data. As a return, it simplifies implementation and prevents hard
  * to debug, racy corner cases while receiving/sending data.
+ *
+ * This object is not thread safe but public methods may be called from any thread.
  */
-@JNINamespace("content")
+@JNINamespace("content::android")
 public class AppWebMessagePort implements MessagePort {
     private static final String TAG = "AppWebMessagePort";
 
-    private static final MessageHeader MESSAGE_HEADER = new MessageHeader(0);
-
-    // Implements the handler to handle messageport messages received from web.
-    // These messages are dispatched on the main thread by |mConnector|. Applications
-    // can pass a handler to setMessageCallback to have messages dispatched on a different
-    // thread.
-    private static class MessageHandler extends Handler implements MessageReceiver {
+    private static class MessageHandler extends Handler {
         // The |what| value for handleMessage.
         private static final int MESSAGE_RECEIVED = 1;
 
+        @NonNull
         private final MessageCallback mMessageCallback;
 
-        // Type for the |obj| value for handleMessage.
-        private static class MessagePortMessage {
-            public byte[] encodedMessage;
-            public AppWebMessagePort[] ports;
-        }
-
-        public MessageHandler(Looper looper, MessageCallback callback) {
-            super(looper);
+        MessageHandler(@NonNull MessageCallback callback, @Nullable Handler handler) {
+            super(handler == null ? Looper.getMainLooper() : handler.getLooper());
             mMessageCallback = callback;
         }
 
         @Override
-        public void handleMessage(android.os.Message msg) {
+        public void handleMessage(@NonNull final Message msg) {
             if (msg.what == MESSAGE_RECEIVED) {
-                MessagePortMessage message = (MessagePortMessage) msg.obj;
-                String decodedMessage = nativeDecodeStringMessage(message.encodedMessage);
-                if (decodedMessage == null) {
-                    Log.w(TAG, "Undecodable message received, dropping message");
-                    return;
-                }
-                mMessageCallback.onMessage(decodedMessage, message.ports);
+                final Pair<MessagePayload, MessagePort[]> obj =
+                        (Pair<MessagePayload, MessagePort[]>) msg.obj;
+                mMessageCallback.onMessage(obj.first, obj.second);
                 return;
             }
             throw new IllegalStateException("undefined message");
         }
 
-        @Override
-        public boolean accept(Message mojoMessage) {
-            try {
-                TransferableMessage msg = TransferableMessage.deserialize(
-                        mojoMessage.asServiceMessage().getPayload());
-                AppWebMessagePort[] ports = new AppWebMessagePort[msg.ports.length];
-                for (int i = 0; i < ports.length; ++i) {
-                    ports[i] = new AppWebMessagePort(msg.ports[i]);
-                }
-                MessagePortMessage portMsg = new MessagePortMessage();
-                portMsg.encodedMessage =
-                        BigBufferUtil.getBytesFromBigBuffer(msg.message.encodedMessage);
-                portMsg.ports = ports;
-                sendMessage(obtainMessage(MESSAGE_RECEIVED, portMsg));
-            } catch (DeserializationException e) {
-                Log.w(TAG, "Error deserializing message", e);
-                return false;
-            }
-            return true;
+        @MainThread
+        public void onMessage(final MessagePayload messagePayload, final MessagePort[] sentPorts) {
+            ThreadUtils.assertOnUiThread();
+            sendMessage(obtainMessage(MESSAGE_RECEIVED, Pair.create(messagePayload, sentPorts)));
         }
-
-        @Override
-        public void close() {}
     }
 
-    private boolean mClosed;
-    private boolean mTransferred;
-    private boolean mStarted;
-    private boolean mWatching;
+    // Accessed on UI thread only.
+    private long mNativeAppWebMessagePort;
+    private MessageHandler mMessageHandler;
 
-    private Core mMojoCore;
-    private Connector mConnector;
+    // Can be accessed from any thread, client needs to keep thread safe. Need volatile since they
+    // may be accessed concurrently from UI thread and client thread, which may be different.
+    private volatile boolean mClosed;
+    private volatile boolean mTransferred;
+    private volatile boolean mStarted;
 
-    private AppWebMessagePort(MessagePipeHandle messagePipeHandle) {
-        mMojoCore = messagePipeHandle.getCore();
-        mConnector = new Connector(messagePipeHandle);
+    @MainThread
+    @CalledByNative
+    private AppWebMessagePort(long nativeAppWebMessagePort) {
+        mNativeAppWebMessagePort = nativeAppWebMessagePort;
     }
 
     // Called to create an entangled pair of ports.
+    @MainThread
     public static AppWebMessagePort[] createPair() {
-        Pair<MessagePipeHandle, MessagePipeHandle> handles =
-                CoreImpl.getInstance().createMessagePipe(new MessagePipeHandle.CreateOptions());
-        AppWebMessagePort[] ports = new AppWebMessagePort[] {
-                new AppWebMessagePort(handles.first), new AppWebMessagePort(handles.second)};
-        return ports;
-    }
-
-    // Called to create a port from handle.
-    public static AppWebMessagePort create(MessagePipeHandle handle) {
-        return new AppWebMessagePort(handle);
-    }
-
-    private MessagePipeHandle passHandle() {
-        mTransferred = true;
-        MessagePipeHandle handle = mConnector.passHandle();
-        mConnector = null;
-        return handle;
-    }
-
-    @CalledByNative
-    private int releaseNativeHandle() {
-        return passHandle().releaseNativeHandle();
+        return AppWebMessagePortJni.get().createPair();
     }
 
     @Override
     public void close() {
-        if (mTransferred) {
+        if (isTransferred()) {
             throw new IllegalStateException("Port is already transferred");
         }
-        if (mClosed) return;
+        if (isClosed()) return;
         mClosed = true;
-        mConnector.close();
-        mConnector = null;
+        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
+            if (mNativeAppWebMessagePort == 0L) return;
+            AppWebMessagePortJni.get().closeAndDestroy(mNativeAppWebMessagePort);
+        });
     }
 
     @Override
@@ -209,32 +159,27 @@ public class AppWebMessagePort implements MessagePort {
         return mStarted;
     }
 
-    // Only called on UI thread
     @Override
     public void setMessageCallback(MessageCallback messageCallback, Handler handler) {
         if (isClosed() || isTransferred()) {
             throw new IllegalStateException("Port is already closed or transferred");
         }
         mStarted = true;
-        if (messageCallback == null) {
-            mConnector.setIncomingMessageReceiver(null);
-        } else {
-            mConnector.setIncomingMessageReceiver(new MessageHandler(
-                    handler == null ? Looper.getMainLooper() : handler.getLooper(),
-                    messageCallback));
-        }
-        if (!mWatching) {
-            mConnector.start();
-            mWatching = true;
-        }
+        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
+            if (mNativeAppWebMessagePort == 0L) return;
+            mMessageHandler =
+                    messageCallback == null ? null : new MessageHandler(messageCallback, handler);
+            AppWebMessagePortJni.get().setShouldReceiveMessages(
+                    mNativeAppWebMessagePort, messageCallback != null);
+        });
     }
 
     @Override
-    public void postMessage(String message, MessagePort[] sentPorts) throws IllegalStateException {
+    public void postMessage(MessagePayload messagePayload, MessagePort[] sentPorts)
+            throws IllegalStateException {
         if (isClosed() || isTransferred()) {
             throw new IllegalStateException("Port is already closed or transferred");
         }
-        MessagePipeHandle[] ports = new MessagePipeHandle[sentPorts == null ? 0 : sentPorts.length];
         if (sentPorts != null) {
             for (MessagePort port : sentPorts) {
                 if (port.equals(this)) {
@@ -246,25 +191,98 @@ public class AppWebMessagePort implements MessagePort {
                 if (port.isStarted()) {
                     throw new IllegalStateException("Port is already started");
                 }
-            }
-            for (int i = 0; i < sentPorts.length; ++i) {
-                ports[i] = ((AppWebMessagePort) sentPorts[i]).passHandle();
+                // It's safe to cast since AppWebMessagePort is the only impl.
+                // Port may be transferred over other MessageChannels (Like
+                // WebContents#PostMessageToMainFrame).
+                ((AppWebMessagePort) port).setTransferred();
             }
         }
         mStarted = true;
-
-        TransferableMessage msg = new TransferableMessage();
-        msg.message = new CloneableMessage();
-        msg.message.encodedMessage =
-                BigBufferUtil.createBigBufferFromBytes(nativeEncodeStringMessage(message));
-        msg.message.blobs = new SerializedBlob[0];
-        msg.arrayBufferContentsArray = new SerializedArrayBufferContents[0];
-        msg.imageBitmapContentsArray = new Bitmap[0];
-        msg.ports = ports;
-        msg.streamChannels = new MessagePipeHandle[0];
-        mConnector.accept(msg.serializeWithHeader(mMojoCore, MESSAGE_HEADER));
+        PostTask.runOrPostTask(UiThreadTaskTraits.DEFAULT, () -> {
+            if (mNativeAppWebMessagePort == 0L) return;
+            AppWebMessagePortJni.get().postMessage(
+                    mNativeAppWebMessagePort, messagePayload, sentPorts);
+        });
     }
 
-    private static native String nativeDecodeStringMessage(byte[] encodedData);
-    private static native byte[] nativeEncodeStringMessage(String message);
+    /**
+     * A finalizer is required to ensure that the native object associated with
+     * this descriptor gets torn down, otherwise there would be a memory leak.
+     *
+     * This is safe because posting a task is fast.
+     *
+     * TODO(chrisha): Chase down the existing offenders that don't call close,
+     * and flip this to use LifetimeAssert.
+     *
+     * @see java.lang.Object#finalize()
+     */
+    @Override
+    protected void finalize() throws Throwable {
+        try {
+            if (mNativeAppWebMessagePort == 0L) return;
+            Log.d(TAG, "AppWebMessagePort was not closed before finalization");
+            PostTask.postTask(UiThreadTaskTraits.DEFAULT, () -> {
+                if (mNativeAppWebMessagePort == 0L) return;
+                mClosed = true;
+                AppWebMessagePortJni.get().closeAndDestroy(mNativeAppWebMessagePort);
+            });
+        } finally {
+            super.finalize();
+        }
+    }
+
+    @MainThread
+    @CalledByNative
+    private long getNativeObj() {
+        ThreadUtils.assertOnUiThread();
+        assert mNativeAppWebMessagePort != 0L;
+        return mNativeAppWebMessagePort;
+    }
+
+    @MainThread
+    @CalledByNative
+    private void onMessage(@NonNull MessagePayload payload, @Nullable MessagePort[] ports) {
+        ThreadUtils.assertOnUiThread();
+        if (mMessageHandler != null) {
+            mMessageHandler.onMessage(payload, ports);
+        } else {
+            // Their will be a case that the Java listener is cleared, but listeners in C++ is not
+            // cleared yet. We can safely ignore those messages and close the ports to avoid
+            // relaying on GC.
+            if (ports != null) {
+                for (final MessagePort port : ports) {
+                    port.close();
+                }
+            }
+        }
+    }
+
+    // Called when native object is destroyed.
+    @MainThread
+    @CalledByNative
+    private void nativeDestroyed() {
+        ThreadUtils.assertOnUiThread();
+        assert mNativeAppWebMessagePort != 0L;
+        // When calling this method, the port must be closed or transferred.
+        assert mClosed || mTransferred;
+        mNativeAppWebMessagePort = 0L;
+    }
+
+    // Called when MessagePort is transferred. The native object will be destroyed later.
+    @CalledByNative
+    private void setTransferred() {
+        assert !mStarted;
+        mTransferred = true;
+    }
+
+    @NativeMethods
+    @MainThread
+    interface Natives {
+        @NonNull
+        AppWebMessagePort[] createPair();
+        void postMessage(long nativeAppWebMessagePort, MessagePayload messagePayload,
+                MessagePort[] sentPorts);
+        void setShouldReceiveMessages(long nativeAppWebMessagePort, boolean shouldReceiveMessage);
+        void closeAndDestroy(long nativeAppWebMessagePort);
+    }
 }

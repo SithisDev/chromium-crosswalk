@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -28,91 +28,83 @@ def GetConfigurationForBuild(defines):
     config = {
         'build': 'chromium',
         'app_name': 'Chromium',
+        'doc_url': 'https://chromeenterprise.google/policies/',
         'frame_name': 'Chromium Frame',
-        'os_name': 'Chromium OS',
+        'os_name': 'ChromiumOS',
         'webview_name': 'Chromium WebView',
         'win_config': {
             'win': {
-                'reg_mandatory_key_name':
-                    'Software\\Policies\\Chromium',
+                'reg_mandatory_key_name': 'Software\\Policies\\Chromium',
                 'reg_recommended_key_name':
-                    'Software\\Policies\\Chromium\\Recommended',
+                'Software\\Policies\\Chromium\\Recommended',
                 'mandatory_category_path': ['chromium'],
                 'recommended_category_path': ['chromium_recommended'],
                 'category_path_strings': {
                     'chromium': 'Chromium',
                     'chromium_recommended': 'Chromium - {doc_recommended}',
                 },
-                'namespace':
-                    'Chromium.Policies.Chromium',
+                'namespace': 'Chromium.Policies.Chromium',
             },
             'chrome_os': {
-                'reg_mandatory_key_name':
-                    'Software\\Policies\\ChromiumOS',
+                'reg_mandatory_key_name': 'Software\\Policies\\ChromiumOS',
                 'reg_recommended_key_name':
-                    'Software\\Policies\\ChromiumOS\\Recommended',
+                'Software\\Policies\\ChromiumOS\\Recommended',
                 'mandatory_category_path': ['chromium_os'],
                 'recommended_category_path': ['chromium_os_recommended'],
                 'category_path_strings': {
-                    'chromium_os':
-                        'Chromium OS',
-                    'chromium_os_recommended':
-                        'Chromium OS - {doc_recommended}',
+                    'chromium_os': 'ChromiumOS',
+                    'chromium_os_recommended': 'ChromiumOS - {doc_recommended}',
                 },
-                'namespace':
-                    'Chromium.Policies.ChromiumOS'
+                'namespace': 'Chromium.Policies.ChromiumOS'
             },
         },
         'admx_prefix': 'chromium',
         'linux_policy_path': '/etc/chromium/policies/',
+        'bundle_id': 'org.chromium',
     }
   elif '_google_chrome' in defines:
     config = {
         'build': 'chrome',
         'app_name': 'Google Chrome',
+        'doc_url': 'https://chromeenterprise.google/policies/',
         'frame_name': 'Google Chrome Frame',
-        'os_name': 'Google Chrome OS',
+        'os_name': 'Google ChromeOS',
         'webview_name': 'Android System WebView',
         'win_config': {
             'win': {
                 'reg_mandatory_key_name':
-                    'Software\\Policies\\Google\\Chrome',
+                'Software\\Policies\\Google\\Chrome',
                 'reg_recommended_key_name':
-                    'Software\\Policies\\Google\\Chrome\\Recommended',
-                'mandatory_category_path': [
-                    'Google:Cat_Google', 'googlechrome'
-                ],
-                'recommended_category_path': [
-                    'Google:Cat_Google', 'googlechrome_recommended'
-                ],
+                'Software\\Policies\\Google\\Chrome\\Recommended',
+                'mandatory_category_path':
+                ['Google:Cat_Google', 'googlechrome'],
+                'recommended_category_path':
+                ['Google:Cat_Google', 'googlechrome_recommended'],
                 'category_path_strings': {
-                    'googlechrome':
-                        'Google Chrome',
+                    'googlechrome': 'Google Chrome',
                     'googlechrome_recommended':
-                        'Google Chrome - {doc_recommended}'
+                    'Google Chrome - {doc_recommended}'
                 },
                 'namespace':
-                    'Google.Policies.Chrome',
+                'Google.Policies.Chrome',
             },
             'chrome_os': {
                 'reg_mandatory_key_name':
-                    'Software\\Policies\\Google\\ChromeOS',
+                'Software\\Policies\\Google\\ChromeOS',
                 'reg_recommended_key_name':
-                    'Software\\Policies\\Google\\ChromeOS\\Recommended',
-                'mandatory_category_path': [
-                    'Google:Cat_Google', 'googlechromeos'
-                ],
-                'recommended_category_path': [
-                    'Google:Cat_Google', 'googlechromeos_recommended'
-                ],
+                'Software\\Policies\\Google\\ChromeOS\\Recommended',
+                'mandatory_category_path':
+                ['Google:Cat_Google', 'googlechromeos'],
+                'recommended_category_path':
+                ['Google:Cat_Google', 'googlechromeos_recommended'],
                 'category_path_strings': {
                     'googlechromeos':
-                        'Google Chrome OS',
+                    'Google ChromeOS',
                     'googlechromeos_recommended':
-                        'Google Chrome OS - {doc_recommended}'
+                    'Google ChromeOS - {doc_recommended}'
                 },
                 'namespace':
-                    'Google.Policies.ChromeOS',
+                'Google.Policies.ChromeOS',
             },
         },
         # The string 'Google' is defined in google.adml for ADMX, but ADM
@@ -125,11 +117,14 @@ def GetConfigurationForBuild(defines):
             'Google': 'Google.Policies'  # prefix: namespace
         },
         'linux_policy_path': '/etc/opt/chrome/policies/',
+        'bundle_id': 'com.google.chrome.ios',
     }
   else:
     raise Exception('Unknown build')
   if 'version' in defines:
     config['version'] = defines['version']
+  if 'major_version' in defines:
+    config['major_version'] = defines['major_version']
   config['win_supported_os'] = 'SUPPORTED_WIN7'
   config['win_supported_os_win7'] = 'SUPPORTED_WIN7_ONLY'
   if 'mac_bundle_id' in defines:

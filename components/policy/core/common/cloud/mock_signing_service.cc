@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,12 +20,12 @@ FakeSigningService::FakeSigningService() {}
 FakeSigningService::~FakeSigningService() {}
 
 void FakeSigningService::SignData(const std::string& data,
-                                  const SigningCallback& callback) {
+                                  SigningCallback callback) {
   em::SignedData signed_data;
   if (success_) {
     SignDataSynchronously(data, &signed_data);
   }
-  callback.Run(success_, signed_data);
+  std::move(callback).Run(success_, signed_data);
 }
 
 void FakeSigningService::SignDataSynchronously(const std::string& data,

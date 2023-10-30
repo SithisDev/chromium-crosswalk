@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@
 
 #include <vector>
 
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/notreached.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
+#include "build/build_config.h"
+#include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_utils.h"
 
@@ -31,7 +32,7 @@ const ContentSettingsStringMapping kContentSettingsStringMapping[] = {
     {CONTENT_SETTING_SESSION_ONLY, "session_only"},
     {CONTENT_SETTING_DETECT_IMPORTANT_CONTENT, "detect_important_content"},
 };
-static_assert(base::size(kContentSettingsStringMapping) ==
+static_assert(std::size(kContentSettingsStringMapping) ==
                   CONTENT_SETTING_NUM_SETTINGS,
               "kContentSettingsToFromString should have "
               "CONTENT_SETTING_NUM_SETTINGS elements");
@@ -50,7 +51,7 @@ const ContentSetting kContentSettingOrder[] = {
     CONTENT_SETTING_BLOCK
 };
 
-static_assert(base::size(kContentSettingOrder) ==
+static_assert(std::size(kContentSettingOrder) ==
                   CONTENT_SETTING_NUM_SETTINGS - 1,
               "kContentSettingOrder should have CONTENT_SETTING_NUM_SETTINGS-1"
               "entries");
@@ -69,9 +70,9 @@ std::string ContentSettingToString(ContentSetting setting) {
 
 bool ContentSettingFromString(const std::string& name,
                               ContentSetting* setting) {
-  for (size_t i = 0; i < base::size(kContentSettingsStringMapping); ++i) {
-    if (name == kContentSettingsStringMapping[i].content_setting_str) {
-      *setting = kContentSettingsStringMapping[i].content_setting;
+  for (const auto& string_mapping : kContentSettingsStringMapping) {
+    if (name == string_mapping.content_setting_str) {
+      *setting = string_mapping.content_setting;
       return true;
     }
   }
@@ -119,32 +120,36 @@ PatternPair ParsePatternString(const std::string& pattern_str) {
 
 void GetRendererContentSettingRules(const HostContentSettingsMap* map,
                                     RendererContentSettingRules* rules) {
-#if !defined(OS_ANDROID)
-  map->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_IMAGES,
-      ResourceIdentifier(),
-      &(rules->image_rules));
+#if !BUILDFLAG(IS_ANDROID)
+  map->GetSettingsForOneType(ContentSettingsType::IMAGES,
+                             &(rules->image_rules));
+  map->GetSettingsForOneType(ContentSettingsType::MIXEDSCRIPT,
+                             &(rules->mixed_content_rules));
+  // Auto dark web content settings is available only for Android, so ALLOW rule
+  // is added for all origins.
+  rules->auto_dark_content_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      ContentSettingToValue(CONTENT_SETTING_ALLOW), std::string(),
+      map->IsOffTheRecord()));
 #else
   // Android doesn't use image content settings, so ALLOW rule is added for
   // all origins.
   rules->image_rules.push_back(ContentSettingPatternSource(
       ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
-      base::Value::FromUniquePtrValue(
-          ContentSettingToValue(CONTENT_SETTING_ALLOW)),
-      std::string(), map->IsOffTheRecord()));
+      ContentSettingToValue(CONTENT_SETTING_ALLOW), std::string(),
+      map->IsOffTheRecord()));
+  // In Android active mixed content is hard blocked, with no option to allow
+  // it.
+  rules->mixed_content_rules.push_back(ContentSettingPatternSource(
+      ContentSettingsPattern::Wildcard(), ContentSettingsPattern::Wildcard(),
+      ContentSettingToValue(CONTENT_SETTING_BLOCK), std::string(),
+      map->IsOffTheRecord()));
+  map->GetSettingsForOneType(ContentSettingsType::AUTO_DARK_WEB_CONTENT,
+                             &(rules->auto_dark_content_rules));
 #endif
-  map->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_JAVASCRIPT,
-      ResourceIdentifier(),
-      &(rules->script_rules));
-  map->GetSettingsForOneType(
-      CONTENT_SETTINGS_TYPE_AUTOPLAY,
-      ResourceIdentifier(),
-      &(rules->autoplay_rules));
-  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_CLIENT_HINTS,
-                             ResourceIdentifier(),
-                             &(rules->client_hints_rules));
-  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_POPUPS, ResourceIdentifier(),
+  map->GetSettingsForOneType(ContentSettingsType::JAVASCRIPT,
+                             &(rules->script_rules));
+  map->GetSettingsForOneType(ContentSettingsType::POPUPS,
                              &(rules->popup_redirect_rules));
 }
 
@@ -159,6 +164,46 @@ bool IsMorePermissive(ContentSetting a, ContentSetting b) {
   }
   NOTREACHED();
   return true;
+}
+
+// Currently only SessionModel::Durable constraints need to be persistent
+// as they are only bounded by time and can persist through multiple browser
+// sessions.
+bool IsConstraintPersistent(const ContentSettingConstraints& constraints) {
+  return constraints.session_model == SessionModel::Durable;
+}
+
+// Convenience helper to calculate the expiration time of a constraint given a
+// desired |duration|
+base::Time GetConstraintExpiration(const base::TimeDelta duration) {
+  DCHECK(!duration.is_zero());
+  return base::Time::Now() + duration;
+}
+
+bool CanTrackLastVisit(ContentSettingsType type) {
+#if BUILDFLAG(IS_ANDROID)
+  // The notification provider on Android does not support last visit tracking.
+  if (type == ContentSettingsType::NOTIFICATIONS)
+    return false;
+#endif
+  // Protocol handler don't actually use their content setting and don't have
+  // a valid "initial default" value.
+  if (type == ContentSettingsType::PROTOCOL_HANDLERS)
+    return false;
+
+  auto* info =
+      content_settings::ContentSettingsRegistry::GetInstance()->Get(type);
+  return info && info->GetInitialDefaultSetting() == CONTENT_SETTING_ASK;
+}
+
+base::Time GetCoarseTime(base::Time time) {
+  return base::Time::FromDeltaSinceWindowsEpoch(
+      time.ToDeltaSinceWindowsEpoch().FloorToMultiple(
+          GetCoarseTimePrecision()));
+}
+
+base::TimeDelta GetCoarseTimePrecision() {
+  return base::Days(7);
 }
 
 }  // namespace content_settings

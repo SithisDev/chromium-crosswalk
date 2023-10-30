@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,12 @@
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "base/values.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/log/net_log_capture_mode.h"
 #include "services/network/public/mojom/net_log.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
@@ -66,7 +66,7 @@ class NetExportFileWriter {
   // of NetExportFileWriter's state changes.
   class StateObserver {
    public:
-    virtual void OnNewState(const base::DictionaryValue& state) = 0;
+    virtual void OnNewState(const base::Value::Dict& state) = 0;
   };
 
   // Struct used to store the results of setting up the default log directory
@@ -77,12 +77,15 @@ class NetExportFileWriter {
     bool log_exists;
   };
 
-  using FilePathCallback = base::Callback<void(const base::FilePath&)>;
-  using DirectoryGetter = base::Callback<bool(base::FilePath*)>;
+  using FilePathCallback = base::OnceCallback<void(const base::FilePath&)>;
+  using DirectoryGetter = base::RepeatingCallback<bool(base::FilePath*)>;
 
   // Constructs a NetExportFileWriter. Only one instance is created in browser
   // process.
   NetExportFileWriter();
+
+  NetExportFileWriter(const NetExportFileWriter&) = delete;
+  NetExportFileWriter& operator=(const NetExportFileWriter&) = delete;
 
   ~NetExportFileWriter();
 
@@ -121,10 +124,10 @@ class NetExportFileWriter {
   //
   // |polled_data| is a JSON dictionary that will be appended to the end of the
   // log; it's for adding additional info to the log that aren't events.
-  void StopNetLog(std::unique_ptr<base::DictionaryValue> polled_data);
+  void StopNetLog(base::Value::Dict polled_data = base::Value::Dict());
 
   // Creates a DictionaryValue summary of the state of the NetExportFileWriter
-  std::unique_ptr<base::DictionaryValue> GetState() const;
+  base::Value::Dict GetState() const;
 
   // Gets the log filepath. |path_callback| will be used to notify the caller
   // when the filepath is retrieved. |path_callback| will be executed with an
@@ -132,11 +135,10 @@ class NetExportFileWriter {
   // (1) The NetExportFileWriter is not initialized.
   // (2) The log file does not exist.
   // (3) The NetExportFileWriter is currently logging.
-  // (4) The log file's permissions could not be set to all.
   //
   // |path_callback| will be executed at the end of GetFilePathToCompletedLog()
   // asynchronously.
-  void GetFilePathToCompletedLog(const FilePathCallback& path_callback) const;
+  void GetFilePathToCompletedLog(FilePathCallback path_callback) const;
 
   // Converts to/from the string representation of a capture mode used by
   // net_export.js.
@@ -181,7 +183,7 @@ class NetExportFileWriter {
   // logging after the output file has been created.
   void StartNetLogAfterCreateFile(net::NetLogCaptureMode capture_mode,
                                   uint64_t max_file_size,
-                                  base::Value custom_constants,
+                                  base::Value::Dict custom_constants,
                                   base::File log_file);
 
   void OnStartResult(net::NetLogCaptureMode capture_mode, int result);
@@ -214,7 +216,7 @@ class NetExportFileWriter {
   base::FilePath log_path_;  // base::FilePath to the NetLog file.
 
   // Used to ask the network service to do the actual exporting.
-  network::mojom::NetLogExporterPtr net_log_exporter_;
+  mojo::Remote<network::mojom::NetLogExporter> net_log_exporter_;
 
   // List of StateObservers to notify on state changes.
   base::ObserverList<StateObserver, true>::Unchecked state_observer_list_;
@@ -224,10 +226,8 @@ class NetExportFileWriter {
   DirectoryGetter default_log_base_dir_getter_;
 
   base::WeakPtrFactory<NetExportFileWriter> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(NetExportFileWriter);
 };
 
 }  // namespace net_log
 
-#endif  // COMPONENTS_NET_LOG_NET_LOG_FILE_WRITER_H_
+#endif  // COMPONENTS_NET_LOG_NET_EXPORT_FILE_WRITER_H_

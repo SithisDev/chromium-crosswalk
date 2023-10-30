@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,27 +6,29 @@
 
 #include "components/gwp_asan/client/guarded_page_allocator.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "build/build_config.h"
 
 namespace gwp_asan {
 namespace internal {
 
 void* GuardedPageAllocator::MapRegion() {
-  if (void* hint = MapRegionHint())
-    if (void* ptr =
-            VirtualAlloc(hint, RegionSize(), MEM_RESERVE, PAGE_NOACCESS))
+  // Number of times to try to map the region in high memory before giving up.
+  constexpr size_t kHintTries = 5;
+  for (size_t i = 0; i < kHintTries; i++) {
+    if (void* ptr = VirtualAlloc(MapRegionHint(), RegionSize(), MEM_RESERVE,
+                                 PAGE_NOACCESS))
       return ptr;
+  }
 
   return VirtualAlloc(nullptr, RegionSize(), MEM_RESERVE, PAGE_NOACCESS);
 }
 
 void GuardedPageAllocator::UnmapRegion() {
   CHECK(state_.pages_base_addr);
-  BOOL err = VirtualFree(reinterpret_cast<void*>(state_.pages_base_addr), 0,
-                         MEM_RELEASE);
+  [[maybe_unused]] BOOL err = VirtualFree(
+      reinterpret_cast<void*>(state_.pages_base_addr), 0, MEM_RELEASE);
   DPCHECK(err) << "VirtualFree";
-  (void)err;
 }
 
 void GuardedPageAllocator::MarkPageReadWrite(void* ptr) {

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,18 +14,22 @@ namespace chromecast {
 namespace media {
 
 struct AvPipelineClient {
-  typedef base::Callback<void(
-      base::TimeDelta, base::TimeDelta, base::TimeTicks)> TimeUpdateCB;
+  typedef base::RepeatingCallback<
+      void(base::TimeDelta, base::TimeDelta, base::TimeTicks)>
+      TimeUpdateCB;
 
   AvPipelineClient();
-  AvPipelineClient(const AvPipelineClient& other);
+  AvPipelineClient(AvPipelineClient&& other);
+  AvPipelineClient(const AvPipelineClient& other) = delete;
+  AvPipelineClient& operator=(AvPipelineClient&& other);
+  AvPipelineClient& operator=(const AvPipelineClient& other) = delete;
   ~AvPipelineClient();
 
   // Waiting status notification.
   ::media::WaitingCB waiting_cb;
 
   // End of stream notification.
-  base::Closure eos_cb;
+  base::RepeatingClosure eos_cb;
 
   // Asynchronous playback error notification.
   ::media::PipelineStatusCB playback_error_cb;

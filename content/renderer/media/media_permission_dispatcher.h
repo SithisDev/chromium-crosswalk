@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,11 @@
 #include <map>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "content/common/content_export.h"
 #include "content/renderer/render_frame_impl.h"
 #include "media/base/media_permission.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom.h"
 
 namespace base {
@@ -25,9 +24,14 @@ class SingleThreadTaskRunner;
 namespace content {
 
 // MediaPermission implementation using content PermissionService.
-class CONTENT_EXPORT MediaPermissionDispatcher : public media::MediaPermission {
+class MediaPermissionDispatcher : public media::MediaPermission {
  public:
   explicit MediaPermissionDispatcher(RenderFrameImpl* render_frame);
+
+  MediaPermissionDispatcher(const MediaPermissionDispatcher&) = delete;
+  MediaPermissionDispatcher& operator=(const MediaPermissionDispatcher&) =
+      delete;
+
   ~MediaPermissionDispatcher() override;
 
   // Called when the frame owning this MediaPermissionDispatcher is navigated.
@@ -63,7 +67,7 @@ class CONTENT_EXPORT MediaPermissionDispatcher : public media::MediaPermission {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   uint32_t next_request_id_;
   RequestMap requests_;
-  blink::mojom::PermissionServicePtr permission_service_;
+  mojo::Remote<blink::mojom::PermissionService> permission_service_;
 
   // The |RenderFrameImpl| that owns this MediaPermissionDispatcher.  It's okay
   // to hold a raw pointer here because the lifetime of this object is bounded
@@ -74,8 +78,6 @@ class CONTENT_EXPORT MediaPermissionDispatcher : public media::MediaPermission {
   base::WeakPtr<MediaPermissionDispatcher> weak_ptr_;
 
   base::WeakPtrFactory<MediaPermissionDispatcher> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MediaPermissionDispatcher);
 };
 
 }  // namespace content

@@ -1,4 +1,11 @@
 include_rules = [
+  "+components/speech",
   "+google_apis",  # Exception to general rule, see content/DEPS for details.
-  "+third_party/blink/public/platform/web_speech_synthesis_constants.h",
 ]
+
+specific_include_rules = {
+  "tts_controller_impl\.cc": [
+    # TtsControllerImpl uses GetLanguage(), which is not grd related.
+    "+ui/base/l10n/l10n_util.h",
+  ],
+}

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,20 @@
 
 namespace content {
 
-TestSynchronousCompositor::TestSynchronousCompositor(int process_id,
-                                                     int routing_id)
-    : client_(NULL), process_id_(process_id), routing_id_(routing_id) {}
+TestSynchronousCompositor::TestSynchronousCompositor(
+    const viz::FrameSinkId& frame_sink_id)
+    : client_(nullptr), frame_sink_id_(frame_sink_id) {}
 
 TestSynchronousCompositor::~TestSynchronousCompositor() {
-  SetClient(NULL);
+  SetClient(nullptr);
 }
 
 void TestSynchronousCompositor::SetClient(SynchronousCompositorClient* client) {
   if (client_)
-    client_->DidDestroyCompositor(this, process_id_, routing_id_);
+    client_->DidDestroyCompositor(this, frame_sink_id_);
   client_ = client;
   if (client_)
-    client_->DidInitializeCompositor(this, process_id_, routing_id_);
+    client_->DidInitializeCompositor(this, frame_sink_id_);
 }
 
 scoped_refptr<SynchronousCompositor::FrameFuture>
@@ -38,11 +38,11 @@ TestSynchronousCompositor::DemandDrawHwAsync(
 
 void TestSynchronousCompositor::ReturnResources(
     uint32_t layer_tree_frame_sink_id,
-    const std::vector<viz::ReturnedResource>& resources) {
+    std::vector<viz::ReturnedResource> resources) {
   ReturnedResources returned_resources;
   returned_resources.layer_tree_frame_sink_id = layer_tree_frame_sink_id;
-  returned_resources.resources = resources;
-  frame_ack_array_.push_back(returned_resources);
+  returned_resources.resources = std::move(resources);
+  frame_ack_array_.push_back(std::move(returned_resources));
 }
 
 void TestSynchronousCompositor::SwapReturnedResources(FrameAckArray* array) {
@@ -50,7 +50,8 @@ void TestSynchronousCompositor::SwapReturnedResources(FrameAckArray* array) {
   frame_ack_array_.swap(*array);
 }
 
-bool TestSynchronousCompositor::DemandDrawSw(SkCanvas* canvas) {
+bool TestSynchronousCompositor::DemandDrawSw(SkCanvas* canvas,
+                                             bool software_canvas) {
   DCHECK(canvas);
   return true;
 }
@@ -60,6 +61,8 @@ void TestSynchronousCompositor::SetHardwareFrame(
     std::unique_ptr<viz::CompositorFrame> frame) {
   hardware_frame_ = std::make_unique<Frame>();
   hardware_frame_->layer_tree_frame_sink_id = layer_tree_frame_sink_id;
+  hardware_frame_->local_surface_id =
+      viz::LocalSurfaceId(1, base::UnguessableToken::Create());
   hardware_frame_->frame = std::move(frame);
 }
 
@@ -67,7 +70,7 @@ TestSynchronousCompositor::ReturnedResources::ReturnedResources()
     : layer_tree_frame_sink_id(0u) {}
 
 TestSynchronousCompositor::ReturnedResources::ReturnedResources(
-    const ReturnedResources& other) = default;
+    ReturnedResources&&) = default;
 
 TestSynchronousCompositor::ReturnedResources::~ReturnedResources() {}
 

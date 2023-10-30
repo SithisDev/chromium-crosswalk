@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,8 +28,8 @@ const size_t kMaxVideoFrameSize = 1024 * 1024;
 }
 
 VideoPipelineImpl::VideoPipelineImpl(CmaBackend::VideoDecoder* decoder,
-                                     const VideoPipelineClient& client)
-    : AvPipelineImpl(decoder, client.av_pipeline_client),
+                                     VideoPipelineClient client)
+    : AvPipelineImpl(decoder, std::move(client.av_pipeline_client)),
       video_decoder_(decoder),
       natural_size_changed_cb_(client.natural_size_changed_cb) {
   DCHECK(video_decoder_);

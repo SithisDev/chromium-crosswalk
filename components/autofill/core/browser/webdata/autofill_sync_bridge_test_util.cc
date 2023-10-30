@@ -1,8 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/core/browser/webdata/autofill_sync_bridge_test_util.h"
+
+#include "components/sync/protocol/autofill_specifics.pb.h"
 
 namespace autofill {
 
@@ -17,8 +19,9 @@ CreditCard CreateServerCreditCard(const std::string& server_id) {
 }
 
 sync_pb::AutofillWalletSpecifics CreateAutofillWalletSpecificsForCard(
-    const std::string& specifics_id,
-    const std::string& billing_address_id) {
+    const std::string& client_tag,
+    const std::string& billing_address_id,
+    const std::string& nickname) {
   sync_pb::AutofillWalletSpecifics wallet_specifics;
   wallet_specifics.set_type(
       sync_pb::AutofillWalletSpecifics_WalletInfoType::
@@ -26,13 +29,15 @@ sync_pb::AutofillWalletSpecifics CreateAutofillWalletSpecificsForCard(
 
   sync_pb::WalletMaskedCreditCard* card_specifics =
       wallet_specifics.mutable_masked_card();
-  card_specifics->set_id(specifics_id);
+  card_specifics->set_id(client_tag);
   card_specifics->set_billing_address_id(billing_address_id);
+  if (!nickname.empty())
+    card_specifics->set_nickname(nickname);
   return wallet_specifics;
 }
 
 sync_pb::AutofillWalletSpecifics CreateAutofillWalletSpecificsForAddress(
-    const std::string& specifics_id) {
+    const std::string& client_tag) {
   sync_pb::AutofillWalletSpecifics wallet_specifics;
   wallet_specifics.set_type(
       sync_pb::AutofillWalletSpecifics_WalletInfoType::
@@ -40,13 +45,13 @@ sync_pb::AutofillWalletSpecifics CreateAutofillWalletSpecificsForAddress(
 
   sync_pb::WalletPostalAddress* profile_specifics =
       wallet_specifics.mutable_address();
-  profile_specifics->set_id(specifics_id);
+  profile_specifics->set_id(client_tag);
   return wallet_specifics;
 }
 
 sync_pb::AutofillWalletSpecifics
 CreateAutofillWalletSpecificsForPaymentsCustomerData(
-    const std::string& specifics_id) {
+    const std::string& client_tag) {
   sync_pb::AutofillWalletSpecifics wallet_specifics;
   wallet_specifics.set_type(
       sync_pb::AutofillWalletSpecifics_WalletInfoType::
@@ -54,7 +59,21 @@ CreateAutofillWalletSpecificsForPaymentsCustomerData(
 
   sync_pb::PaymentsCustomerData* customer_data_specifics =
       wallet_specifics.mutable_customer_data();
-  customer_data_specifics->set_id(specifics_id);
+  customer_data_specifics->set_id(client_tag);
+  return wallet_specifics;
+}
+
+sync_pb::AutofillWalletSpecifics
+CreateAutofillWalletSpecificsForCreditCardCloudTokenData(
+    const std::string& client_tag) {
+  sync_pb::AutofillWalletSpecifics wallet_specifics;
+  wallet_specifics.set_type(
+      sync_pb::AutofillWalletSpecifics_WalletInfoType::
+          AutofillWalletSpecifics_WalletInfoType_CREDIT_CARD_CLOUD_TOKEN_DATA);
+
+  sync_pb::WalletCreditCardCloudTokenData* cloud_token_data_specifics =
+      wallet_specifics.mutable_cloud_token_data();
+  cloud_token_data_specifics->set_instrument_token(client_tag);
   return wallet_specifics;
 }
 

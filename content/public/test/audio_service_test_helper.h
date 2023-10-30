@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,25 +7,24 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "mojo/public/cpp/bindings/binder_map.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "services/audio/public/mojom/testing_api.mojom.h"
-#include "services/service_manager/public/cpp/binder_map.h"
 
 namespace content {
 
-// Used by testing environments to inject test-only interface binders into an
+// Used by testing environments to inject test-only interface support into an
 // audio service instance. Test suites should create a long-lived instance of
-// this class and call RegisterAudioBinders() on a BinderMap which will be used
-// to fulfill interface requests within the audio service.
+// this class to ensure that instances of the Audio service in the process are
+// able to fulfill test API binding requests.
 class AudioServiceTestHelper {
  public:
   AudioServiceTestHelper();
-  ~AudioServiceTestHelper();
 
-  // Registers the helper's interfaces on |binders|. Note that this object must
-  // must outlive |binders|.
-  void RegisterAudioBinders(service_manager::BinderMap* binders);
+  AudioServiceTestHelper(const AudioServiceTestHelper&) = delete;
+  AudioServiceTestHelper& operator=(const AudioServiceTestHelper&) = delete;
+
+  ~AudioServiceTestHelper();
 
  private:
   class TestingApi;
@@ -34,8 +33,6 @@ class AudioServiceTestHelper {
       mojo::PendingReceiver<audio::mojom::TestingApi> receiver);
 
   std::unique_ptr<TestingApi> testing_api_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioServiceTestHelper);
 };
 
 }  // namespace content

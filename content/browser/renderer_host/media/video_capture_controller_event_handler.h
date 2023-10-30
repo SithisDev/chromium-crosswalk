@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@
 
 #include <memory>
 
-#include "base/memory/shared_memory.h"
-#include "content/common/content_export.h"
+#include "media/capture/mojom/video_capture_buffer.mojom.h"
 #include "media/capture/mojom/video_capture_types.mojom.h"
 #include "mojo/public/cpp/system/buffer.h"
 #include "ui/gfx/geometry/size.h"
@@ -19,7 +18,20 @@ class VideoFrame;
 
 namespace content {
 
-typedef int VideoCaptureControllerID;
+typedef base::UnguessableToken VideoCaptureControllerID;
+
+// Represents a buffer that is ready for consumption. Mirrors ReadyBuffer in
+// video_capture_types.mojom.
+struct ReadyBuffer {
+  ReadyBuffer(int buffer_id, media::mojom::VideoFrameInfoPtr frame_info);
+  ReadyBuffer(ReadyBuffer&& other);
+  ~ReadyBuffer();
+
+  ReadyBuffer& operator=(ReadyBuffer&& other);
+
+  int buffer_id;
+  media::mojom::VideoFrameInfoPtr frame_info;
+};
 
 // VideoCaptureControllerEventHandler is the interface for
 // VideoCaptureController to notify clients about the events such as
@@ -30,33 +42,42 @@ typedef int VideoCaptureControllerID;
 // Other methods can be forwarded synchronously.
 
 // TODO(mcasas): https://crbug.com/654176 merge back into VideoCaptureController
-class CONTENT_EXPORT VideoCaptureControllerEventHandler {
+class VideoCaptureControllerEventHandler {
  public:
   // An Error has occurred in the VideoCaptureDevice.
-  virtual void OnError(VideoCaptureControllerID id,
+  virtual void OnError(const VideoCaptureControllerID& id,
                        media::VideoCaptureError error) = 0;
 
-  virtual void OnNewBuffer(VideoCaptureControllerID id,
+  virtual void OnNewBuffer(const VideoCaptureControllerID& id,
                            media::mojom::VideoBufferHandlePtr buffer_handle,
                            int buffer_id) = 0;
 
   // A previously created buffer has been freed and will no longer be used.
-  virtual void OnBufferDestroyed(VideoCaptureControllerID id,
+  virtual void OnBufferDestroyed(const VideoCaptureControllerID& id,
                                  int buffer_id) = 0;
 
-  // A buffer has been filled with a captured VideoFrame.
+  // A buffer (and optionally scaled versions of it) has been filled with a
+  // captured VideoFrame.
   virtual void OnBufferReady(
-      VideoCaptureControllerID id,
-      int buffer_id,
-      const media::mojom::VideoFrameInfoPtr& frame_info) = 0;
+      const VideoCaptureControllerID& id,
+      const ReadyBuffer& buffer,
+      const std::vector<ReadyBuffer>& scaled_buffers) = 0;
+
+  // All subsequent buffers are guaranteed to have a crop version whose value
+  // is at least |crop_version|.
+  virtual void OnNewCropVersion(const VideoCaptureControllerID& id,
+                                uint32_t crop_version) = 0;
+
+  virtual void OnFrameWithEmptyRegionCapture(
+      const VideoCaptureControllerID& id) = 0;
 
   // The capture session has ended and no more frames will be sent.
-  virtual void OnEnded(VideoCaptureControllerID id) = 0;
+  virtual void OnEnded(const VideoCaptureControllerID& id) = 0;
 
   // VideoCaptureDevice has successfully started the device.
-  virtual void OnStarted(VideoCaptureControllerID id) = 0;
+  virtual void OnStarted(const VideoCaptureControllerID& id) = 0;
 
-  virtual void OnStartedUsingGpuDecode(VideoCaptureControllerID id) = 0;
+  virtual void OnStartedUsingGpuDecode(const VideoCaptureControllerID& id) = 0;
 
  protected:
   virtual ~VideoCaptureControllerEventHandler() {}

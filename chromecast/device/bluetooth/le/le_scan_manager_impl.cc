@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/stl_util.h"
+#include "base/containers/cxx20_erase.h"
+#include "base/logging.h"
 #include "chromecast/base/bind_to_task_runner.h"
 #include "chromecast/device/bluetooth/bluetooth_util.h"
 #include "chromecast/public/cast_media_shlib.h"
@@ -45,6 +46,13 @@ const int kMaxMessagesInQueue = 5;
 // static
 constexpr int LeScanManagerImpl::kMaxScanResultEntries;
 
+// static
+std::unique_ptr<LeScanManager> LeScanManager::Create(
+    BluetoothManagerPlatform* bluetooth_manager,
+    bluetooth_v2_shlib::LeScannerImpl* le_scanner) {
+  return std::make_unique<LeScanManagerImpl>(le_scanner);
+}
+
 class LeScanManagerImpl::ScanHandleImpl : public LeScanManager::ScanHandle {
  public:
   explicit ScanHandleImpl(LeScanManagerImpl* manager, int32_t id)
@@ -69,9 +77,15 @@ LeScanManagerImpl::~LeScanManagerImpl() = default;
 void LeScanManagerImpl::Initialize(
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner) {
   io_task_runner_ = std::move(io_task_runner);
+  InitializeOnIoThread();
 }
 
 void LeScanManagerImpl::Finalize() {}
+
+void LeScanManagerImpl::InitializeOnIoThread() {
+  MAKE_SURE_IO_THREAD(InitializeOnIoThread);
+  le_scanner_->SetDelegate(this);
+}
 
 void LeScanManagerImpl::AddObserver(Observer* observer) {
   observers_->AddObserver(observer);
@@ -103,7 +117,7 @@ void LeScanManagerImpl::RequestScan(RequestScanCallback cb) {
 }
 
 void LeScanManagerImpl::GetScanResults(GetScanResultsCallback cb,
-                                       base::Optional<ScanFilter> scan_filter) {
+                                       absl::optional<ScanFilter> scan_filter) {
   MAKE_SURE_IO_THREAD(GetScanResults, BindToCurrentSequence(std::move(cb)),
                       std::move(scan_filter));
   std::move(cb).Run(GetScanResultsInternal(std::move(scan_filter)));
@@ -112,6 +126,58 @@ void LeScanManagerImpl::GetScanResults(GetScanResultsCallback cb,
 void LeScanManagerImpl::ClearScanResults() {
   MAKE_SURE_IO_THREAD(ClearScanResults);
   addr_to_scan_results_.clear();
+}
+
+void LeScanManagerImpl::PauseScan() {
+  MAKE_SURE_IO_THREAD(PauseScan);
+  if (scan_handle_ids_.empty()) {
+    LOG(ERROR) << "Can't pause scan, no scan handle";
+    return;
+  }
+
+  if (!le_scanner_->StopScan()) {
+    LOG(ERROR) << "Failed to pause scanning";
+  }
+}
+
+void LeScanManagerImpl::ResumeScan() {
+  MAKE_SURE_IO_THREAD(ResumeScan);
+  if (scan_handle_ids_.empty()) {
+    LOG(ERROR) << "Can't restart scan, no scan handle";
+    return;
+  }
+
+  if (!le_scanner_->StartScan()) {
+    LOG(ERROR) << "Failed to restart scanning";
+  }
+}
+
+void LeScanManagerImpl::SetScanParameters(int scan_interval_ms,
+                                          int scan_window_ms) {
+  MAKE_SURE_IO_THREAD(SetScanParameters, scan_interval_ms, scan_window_ms);
+  if (scan_handle_ids_.empty()) {
+    LOG(ERROR) << "Can't set scan parameters, no scan handle";
+    return;
+  }
+
+  // We could only set scan parameters when scan is paused.
+  if (!le_scanner_->StopScan()) {
+    LOG(ERROR) << "Failed to pause scanning before setting scan parameters";
+    return;
+  }
+
+  if (!le_scanner_->SetScanParameters(scan_interval_ms, scan_window_ms)) {
+    LOG(ERROR) << "Failed to set scan parameters";
+    return;
+  }
+
+  if (!le_scanner_->StartScan()) {
+    LOG(ERROR) << "Failed to restart scanning after setting scan parameters";
+    return;
+  }
+
+  LOG(INFO) << __func__ << " scan_interval: " << scan_interval_ms
+            << "ms scan_window: " << scan_window_ms << "ms";
 }
 
 void LeScanManagerImpl::OnScanResult(
@@ -158,7 +224,7 @@ void LeScanManagerImpl::OnScanResult(
 
 // Returns a list of all scan results. The results are sorted by RSSI.
 std::vector<LeScanResult> LeScanManagerImpl::GetScanResultsInternal(
-    base::Optional<ScanFilter> scan_filter) {
+    absl::optional<ScanFilter> scan_filter) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   std::vector<LeScanResult> results;
   for (const auto& pair : addr_to_scan_results_) {

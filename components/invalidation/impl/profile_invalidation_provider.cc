@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,8 +22,7 @@ ProfileInvalidationProvider::ProfileInvalidationProvider(
       custom_sender_invalidation_service_factory_(
           std::move(custom_sender_invalidation_service_factory)) {}
 
-ProfileInvalidationProvider::~ProfileInvalidationProvider() {
-}
+ProfileInvalidationProvider::~ProfileInvalidationProvider() = default;
 
 InvalidationService* ProfileInvalidationProvider::GetInvalidationService() {
   return invalidation_service_.get();

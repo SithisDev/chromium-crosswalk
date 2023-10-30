@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,23 +26,5 @@ UrlDownloadRequestHandle& UrlDownloadRequestHandle::operator=(
 }
 
 UrlDownloadRequestHandle::~UrlDownloadRequestHandle() = default;
-
-void UrlDownloadRequestHandle::PauseRequest() {
-  downloader_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(&UrlDownloadHandler::PauseRequest, downloader_));
-}
-
-void UrlDownloadRequestHandle::ResumeRequest() {
-  downloader_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(&UrlDownloadHandler::ResumeRequest, downloader_));
-}
-
-void UrlDownloadRequestHandle::CancelRequest(bool user_cancel) {
-  downloader_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(&UrlDownloadHandler::CancelRequest, downloader_));
-}
 
 }  // namespace download

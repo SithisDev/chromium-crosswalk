@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/pickle.h"
@@ -23,18 +22,13 @@
 #include "components/download/public/common/download_interrupt_reasons_utils.h"
 #include "components/download/public/common/download_item.h"
 #include "components/download/public/common/download_stats.h"
-#include "components/download/quarantine/quarantine.h"
+#include "components/services/quarantine/quarantine.h"
 #include "crypto/secure_hash.h"
-#include "services/service_manager/public/cpp/connector.h"
 
-#if defined(OS_WIN)
-#include "components/services/quarantine/public/cpp/quarantine_features_win.h"
-#endif  // defined(OS_WIN)
-
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/content_uri_utils.h"
 #include "components/download/internal/common/android/download_collection_bridge.h"
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 #define CONDITIONAL_TRACE(trace)                  \
   do {                                            \
@@ -54,6 +48,9 @@ class FileErrorData : public base::trace_event::ConvertableToTraceFormat {
         os_error_(os_error),
         interrupt_reason_(interrupt_reason) {}
 
+  FileErrorData(const FileErrorData&) = delete;
+  FileErrorData& operator=(const FileErrorData&) = delete;
+
   ~FileErrorData() override = default;
 
   void AppendAsTraceFormat(std::string* out) const override {
@@ -71,29 +68,33 @@ class FileErrorData : public base::trace_event::ConvertableToTraceFormat {
   std::string operation_;
   int os_error_;
   DownloadInterruptReason interrupt_reason_;
-  DISALLOW_COPY_AND_ASSIGN(FileErrorData);
 };
 
 void InitializeFile(base::File* file, const base::FilePath& file_path) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (file_path.IsContentUri()) {
     *file = DownloadCollectionBridge::OpenIntermediateUri(file_path);
     return;
   }
-#endif  // defined(OS_ANDROID)
-  file->Initialize(file_path, base::File::FLAG_OPEN_ALWAYS |
-                                  base::File::FLAG_WRITE |
-                                  base::File::FLAG_READ);
+#endif  // BUILDFLAG(IS_ANDROID)
+
+  // Use exclusive write to prevent another process from writing the file.
+  file->Initialize(file_path,
+                   base::File::FLAG_OPEN_ALWAYS | base::File::FLAG_WRITE |
+                       base::File::FLAG_READ |
+                       // Don't allow other processes to write to the file while
+                       // Chrome is writing (Windows-specific).
+                       base::File::FLAG_WIN_EXCLUSIVE_WRITE);
 }
 
-void DeleteFile(const base::FilePath& file_path) {
-#if defined(OS_ANDROID)
+void DeleteFileWrapper(const base::FilePath& file_path) {
+#if BUILDFLAG(IS_ANDROID)
   if (file_path.IsContentUri()) {
     DownloadCollectionBridge::DeleteIntermediateUri(file_path);
     return;
   }
-#endif  // defined(OS_ANDROID)
-  base::DeleteFile(file_path, false);
+#endif  // BUILDFLAG(IS_ANDROID)
+  base::DeleteFile(file_path);
 }
 
 }  // namespace
@@ -226,7 +227,8 @@ bool BaseFile::ValidateDataInFile(int64_t offset,
     return true;
 
   std::unique_ptr<char[]> buffer(new char[data_len]);
-  if (file_.Read(offset, buffer.get(), data_len) <= 0)
+  int bytes_read = file_.Read(offset, buffer.get(), data_len);
+  if (bytes_read < 0 || static_cast<size_t>(bytes_read) < data_len)
     return false;
 
   return memcmp(data, buffer.get(), data_len) == 0;
@@ -251,7 +253,7 @@ DownloadInterruptReason BaseFile::Rename(const base::FilePath& new_path) {
                            full_path_.AsUTF8Unsafe(), "new_filename",
                            new_path.AsUTF8Unsafe()));
   bool need_to_move_file = true;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (new_path.IsContentUri()) {
     rename_result = DownloadCollectionBridge::MoveFileToIntermediateUri(
         full_path_, new_path);
@@ -302,7 +304,7 @@ void BaseFile::Cancel() {
   if (!full_path_.empty()) {
     CONDITIONAL_TRACE(
         INSTANT0("download", "DownloadFileDeleted", TRACE_EVENT_SCOPE_THREAD));
-    DeleteFile(full_path_);
+    DeleteFileWrapper(full_path_);
   }
 
   Detach();
@@ -510,7 +512,7 @@ DownloadInterruptReason BaseFile::LogInterruptReason(
   return reason;
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 DownloadInterruptReason BaseFile::PublishDownload() {
   Close();
   base::FilePath new_path =
@@ -521,7 +523,7 @@ DownloadInterruptReason BaseFile::PublishDownload() {
   }
   return DOWNLOAD_INTERRUPT_REASON_FILE_FAILED;
 }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 namespace {
 
@@ -584,6 +586,9 @@ GURL GetEffectiveAuthorityURL(const GURL& source_url,
     // ftp:// has an authority.
     if (source_url.SchemeIs(url::kFtpScheme))
       return source_url;
+
+    if (source_url.SchemeIs(url::kBlobScheme))
+      return url::Origin::Create(source_url).GetURL();
   }
 
   if (referrer_url.is_valid() && referrer_url.SchemeIsHTTPOrHTTPS())
@@ -593,33 +598,6 @@ GURL GetEffectiveAuthorityURL(const GURL& source_url,
 }
 
 }  // namespace
-
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
-
-DownloadInterruptReason BaseFile::AnnotateWithSourceInformationSync(
-    const std::string& client_guid,
-    const GURL& source_url,
-    const GURL& referrer_url) {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(!detached_);
-  DCHECK(!full_path_.empty());
-
-  CONDITIONAL_TRACE(BEGIN0("download", "DownloadFileAnnotate"));
-  QuarantineFileResult result = QuarantineFile(
-      full_path_, GetEffectiveAuthorityURL(source_url, referrer_url),
-      referrer_url, client_guid);
-  CONDITIONAL_TRACE(END0("download", "DownloadFileAnnotate"));
-
-  return QuarantineFileResultToReason(result);
-}
-#else  // !OS_WIN && !OS_MACOSX && !OS_LINUX
-DownloadInterruptReason BaseFile::AnnotateWithSourceInformationSync(
-    const std::string& client_guid,
-    const GURL& source_url,
-    const GURL& referrer_url) {
-  return DOWNLOAD_INTERRUPT_REASON_NONE;
-}
-#endif
 
 void BaseFile::OnFileQuarantined(
     bool connection_error,
@@ -635,41 +613,39 @@ void BaseFile::OnFileQuarantined(
 
 void BaseFile::OnQuarantineServiceError(const GURL& source_url,
                                         const GURL& referrer_url) {
-#if defined(OS_WIN)
-  if (base::FeatureList::IsEnabled(quarantine::kOutOfProcessQuarantine)) {
-    OnFileQuarantined(/*connection_error=*/true,
-                      quarantine::SetInternetZoneIdentifierDirectly(
-                          full_path_, source_url, referrer_url));
-    return;
-  }
-#endif  // defined(OS_WIN)
-
+#if BUILDFLAG(IS_WIN)
+  OnFileQuarantined(/*connection_error=*/true,
+                    quarantine::SetInternetZoneIdentifierDirectly(
+                        full_path_, source_url, referrer_url));
+#else   // !BUILDFLAG(IS_WIN)
   CHECK(false) << "In-process quarantine service should not have failed.";
+#endif  // !BUILDFLAG(IS_WIN)
 }
 
 void BaseFile::AnnotateWithSourceInformation(
     const std::string& client_guid,
     const GURL& source_url,
     const GURL& referrer_url,
-    std::unique_ptr<service_manager::Connector> connector,
+    mojo::PendingRemote<quarantine::mojom::Quarantine> remote_quarantine,
     OnAnnotationDoneCallback on_annotation_done_callback) {
   GURL authority_url = GetEffectiveAuthorityURL(source_url, referrer_url);
-  if (!connector) {
-#if defined(OS_WIN)
-    QuarantineFileResult result = quarantine::SetInternetZoneIdentifierDirectly(
-        full_path_, authority_url, referrer_url);
+  if (!remote_quarantine) {
+#if BUILDFLAG(IS_WIN)
+    quarantine::mojom::QuarantineFileResult result =
+        quarantine::SetInternetZoneIdentifierDirectly(full_path_, authority_url,
+                                                      referrer_url);
 #else
-    QuarantineFileResult result = QuarantineFileResult::ANNOTATION_FAILED;
+    quarantine::mojom::QuarantineFileResult result =
+        quarantine::mojom::QuarantineFileResult::ANNOTATION_FAILED;
 #endif
     std::move(on_annotation_done_callback)
         .Run(QuarantineFileResultToReason(result));
   } else {
-    connector->BindInterface(quarantine::mojom::kServiceName,
-                             mojo::MakeRequest(&quarantine_service_));
+    quarantine_service_.Bind(std::move(remote_quarantine));
 
     on_annotation_done_callback_ = std::move(on_annotation_done_callback);
 
-    quarantine_service_.set_connection_error_handler(base::BindOnce(
+    quarantine_service_.set_disconnect_handler(base::BindOnce(
         &BaseFile::OnQuarantineServiceError, weak_factory_.GetWeakPtr(),
         authority_url, referrer_url));
 

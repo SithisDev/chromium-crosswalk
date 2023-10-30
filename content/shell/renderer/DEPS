@@ -1,7 +1,5 @@
 include_rules = [
-  "+gin",
   "+components/cdm",
+  "+components/network_hints/renderer",
   "+components/web_cache/renderer",
-  "+components/plugins/renderer",
-  "+services/service_manager/public/cpp",
 ]

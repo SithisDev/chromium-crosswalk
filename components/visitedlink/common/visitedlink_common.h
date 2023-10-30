@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright 2006-2008 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 
 class GURL;
 
@@ -21,10 +21,10 @@ namespace visitedlink {
 
 // A multiprocess-safe database of the visited links for the browser. There
 // should be exactly one process that has write access (implemented by
-// VisitedLinkMaster), while all other processes should be read-only
-// (implemented by VisitedLinkSlave). These other processes add links by calling
-// the writer process to add them for it. The writer may also notify the readers
-// to replace their table when the table is resized.
+// VisitedLinkWriter), while all other processes should be read-only
+// (implemented by VisitedLinkReader). These other processes add links by
+// calling the writer process to add them for it. The writer may also notify the
+// readers to replace their table when the table is resized.
 //
 // IPC is not implemented in these classes. This is done through callback
 // functions supplied by the creator of these objects to allow more flexibility,
@@ -32,10 +32,10 @@ namespace visitedlink {
 //
 // This class defines the common base for these others. We implement accessors
 // for looking things up in the hash table, and for computing hash values and
-// fingerprints. Both the master and the slave inherit from this, and add their
+// fingerprints. Both the writer and the reader inherit from this, and add their
 // own code to set up and change these values as their design requires. The
-// slave pretty much just sets up the shared memory and saves the pointer. The
-// master does a lot of work to manage the table, reading and writing it to and
+// reader pretty much just sets up the shared memory and saves the pointer. The
+// writer does a lot of work to manage the table, reading and writing it to and
 // from disk, and resizing it when it gets too full.
 //
 // To ask whether a page is in history, we compute a 64-bit fingerprint of the
@@ -59,6 +59,10 @@ class VisitedLinkCommon {
   static const Hash null_hash_;
 
   VisitedLinkCommon();
+
+  VisitedLinkCommon(const VisitedLinkCommon&) = delete;
+  VisitedLinkCommon& operator=(const VisitedLinkCommon&) = delete;
+
   virtual ~VisitedLinkCommon();
 
   // Returns the fingerprint for the given URL.
@@ -84,7 +88,7 @@ class VisitedLinkCommon {
 #endif
 
  protected:
-  // This structure is at the beginning of the shared memory so that the slaves
+  // This structure is at the beginning of the shared memory so that the readers
   // can get stats on the table
   struct SharedHeader {
     // see goes into table_length_
@@ -125,16 +129,13 @@ class VisitedLinkCommon {
   }
 
   // pointer to the first item
-  VisitedLinkCommon::Fingerprint* hash_table_;
+  raw_ptr<VisitedLinkCommon::Fingerprint> hash_table_;
 
   // the number of items in the hash table
   int32_t table_length_;
 
   // salt used for each URL when computing the fingerprint
   uint8_t salt_[LINK_SALT_LENGTH];
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(VisitedLinkCommon);
 };
 
 }  // namespace visitedlink

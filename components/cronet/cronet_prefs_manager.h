@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
 
@@ -21,7 +20,6 @@ class SequencedTaskRunner;
 }  // namespace base
 
 namespace net {
-class HttpServerPropertiesManager;
 class HostCache;
 class NetLog;
 class NetworkQualitiesPrefsManager;
@@ -47,6 +45,9 @@ class CronetPrefsManager {
       net::NetLog* net_log,
       net::URLRequestContextBuilder* context_builder);
 
+  CronetPrefsManager(const CronetPrefsManager&) = delete;
+  CronetPrefsManager& operator=(const CronetPrefsManager&) = delete;
+
   virtual ~CronetPrefsManager();
 
   void SetupNqePersistence(net::NetworkQualityEstimator* nqe);
@@ -64,11 +65,6 @@ class CronetPrefsManager {
   std::unique_ptr<PrefService> pref_service_;
   scoped_refptr<JsonPrefStore> json_pref_store_;
 
-  // The ownership of this object is assumed by |net::URLRequestContextBuilder|
-  // in this class constructor. The ownership is later passed to
-  // |net::URLRequestContext|, which should outlive this class.
-  net::HttpServerPropertiesManager* http_server_properties_manager_;
-
   // Manages the writing and reading of the network quality prefs.
   std::unique_ptr<net::NetworkQualitiesPrefsManager>
       network_qualities_prefs_manager_;
@@ -81,8 +77,6 @@ class CronetPrefsManager {
 
   // Checks that all methods are called on the network thread.
   THREAD_CHECKER(thread_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(CronetPrefsManager);
 
 };  // class CronetPrefsManager
 

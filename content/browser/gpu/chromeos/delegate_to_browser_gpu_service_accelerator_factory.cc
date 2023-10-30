@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,10 @@
 namespace content {
 
 void DelegateToBrowserGpuServiceAcceleratorFactory::CreateJpegDecodeAccelerator(
-    chromeos_camera::mojom::MjpegDecodeAcceleratorRequest jda_request) {
-  VideoCaptureDependencies::CreateJpegDecodeAccelerator(std::move(jda_request));
+    mojo::PendingReceiver<chromeos_camera::mojom::MjpegDecodeAccelerator>
+        jda_receiver) {
+  VideoCaptureDependencies::CreateJpegDecodeAccelerator(
+      std::move(jda_receiver));
 }
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 
 #include <map>
 
-#include "base/logging.h"
-#include "base/test/bind_test_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/bind.h"
 #include "components/autofill/core/browser/proto/password_requirements.pb.h"
+#include "components/autofill/core/common/signatures.h"
 #include "components/password_manager/core/browser/generation/password_requirements_spec_fetcher.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -51,11 +52,11 @@ class PasswordRequirementsServiceTest : public testing::Test {
  protected:
   // Prepopulated test data.
   GURL test_origin_;
-  autofill::FormSignature test_form_signature_ = 123;
-  autofill::FieldSignature test_field_signature_ = 22;
+  autofill::FormSignature test_form_signature_{123};
+  autofill::FieldSignature test_field_signature_{22};
 
   // Weak pointer.
-  MockPasswordRequirementsSpecFetcher* fetcher_ptr_;
+  raw_ptr<MockPasswordRequirementsSpecFetcher> fetcher_ptr_;
   PasswordRequirementsService service_;
 };
 
@@ -81,9 +82,9 @@ TEST_F(PasswordRequirementsServiceTest, ExerciseEverything) {
 
   struct {
     const char* test_name;
-    autofill::PasswordRequirementsSpec* spec_for_signature = nullptr;
-    autofill::PasswordRequirementsSpec* spec_for_domain = nullptr;
-    autofill::PasswordRequirementsSpec* expected;
+    raw_ptr<autofill::PasswordRequirementsSpec> spec_for_signature = nullptr;
+    raw_ptr<autofill::PasswordRequirementsSpec> spec_for_domain = nullptr;
+    raw_ptr<autofill::PasswordRequirementsSpec> expected;
   } tests[] = {
       {
           .test_name = "No data prefechted", .expected = &spec_l0_p0,

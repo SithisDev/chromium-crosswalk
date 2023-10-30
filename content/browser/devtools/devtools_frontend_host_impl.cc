@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,17 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/ref_counted_memory.h"
 #include "build/build_config.h"
 #include "content/browser/bad_message.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+#include "ui/base/webui/resource_path.h"
 
-#if !defined(OS_FUCHSIA)
-#include "content/browser/devtools/grit/devtools_resources_map.h"  // nogncheck
-#endif
+extern const webui::ResourcePath kDevtoolsResources[];
+extern const size_t kDevtoolsResourcesSize;
 
 namespace content {
 
@@ -42,53 +43,55 @@ void DevToolsFrontendHost::SetupExtensionsAPI(
     RenderFrameHost* frame_host,
     const std::string& extension_api) {
   DCHECK(frame_host->GetParent());
-  blink::mojom::DevToolsFrontendAssociatedPtr frontend;
+  mojo::AssociatedRemote<blink::mojom::DevToolsFrontend> frontend;
   frame_host->GetRemoteAssociatedInterfaces()->GetInterface(&frontend);
   frontend->SetupDevToolsExtensionAPI(extension_api);
 }
 
 // static
-base::StringPiece DevToolsFrontendHost::GetFrontendResource(
-    const std::string& path) {
-#if !defined(OS_FUCHSIA)
+scoped_refptr<base::RefCountedMemory>
+DevToolsFrontendHost::GetFrontendResourceBytes(const std::string& path) {
   for (size_t i = 0; i < kDevtoolsResourcesSize; ++i) {
-    if (path == kDevtoolsResources[i].name) {
-      return GetContentClient()->GetDataResource(
-          kDevtoolsResources[i].value, ui::SCALE_FACTOR_NONE);
+    if (path == kDevtoolsResources[i].path) {
+      return GetContentClient()->GetDataResourceBytes(kDevtoolsResources[i].id);
     }
   }
-#endif  // defined(OS_FUCHSIA)
-  return std::string();
+  return nullptr;
+}
+
+// static
+std::string DevToolsFrontendHost::GetFrontendResource(const std::string& path) {
+  scoped_refptr<base::RefCountedMemory> bytes = GetFrontendResourceBytes(path);
+  if (!bytes)
+    return std::string();
+  return std::string(bytes->front_as<char>(), bytes->size());
 }
 
 DevToolsFrontendHostImpl::DevToolsFrontendHostImpl(
     RenderFrameHost* frame_host,
     const HandleMessageCallback& handle_message_callback)
     : web_contents_(WebContents::FromRenderFrameHost(frame_host)),
-      handle_message_callback_(handle_message_callback),
-      binding_(this) {
-  blink::mojom::DevToolsFrontendAssociatedPtr frontend;
+      handle_message_callback_(handle_message_callback) {
+  mojo::AssociatedRemote<blink::mojom::DevToolsFrontend> frontend;
   frame_host->GetRemoteAssociatedInterfaces()->GetInterface(&frontend);
   std::string api_script =
-      content::DevToolsFrontendHost::GetFrontendResource(kCompatibilityScript)
-          .as_string() +
+      content::DevToolsFrontendHost::GetFrontendResource(kCompatibilityScript) +
       kCompatibilityScriptSourceURL;
-  blink::mojom::DevToolsFrontendHostAssociatedPtrInfo host;
-  binding_.Bind(mojo::MakeRequest(&host));
-  frontend->SetupDevToolsFrontend(api_script, std::move(host));
+  frontend->SetupDevToolsFrontend(api_script,
+                                  receiver_.BindNewEndpointAndPassRemote());
 }
 
-DevToolsFrontendHostImpl::~DevToolsFrontendHostImpl() {
-}
+DevToolsFrontendHostImpl::~DevToolsFrontendHostImpl() = default;
 
-void DevToolsFrontendHostImpl::BadMessageRecieved() {
-  bad_message::ReceivedBadMessage(web_contents_->GetMainFrame()->GetProcess(),
-                                  bad_message::DFH_BAD_EMBEDDER_MESSAGE);
+void DevToolsFrontendHostImpl::BadMessageReceived() {
+  bad_message::ReceivedBadMessage(
+      web_contents_->GetPrimaryMainFrame()->GetProcess(),
+      bad_message::DFH_BAD_EMBEDDER_MESSAGE);
 }
 
 void DevToolsFrontendHostImpl::DispatchEmbedderMessage(
-    const std::string& message) {
-  handle_message_callback_.Run(message);
+    base::Value::Dict message) {
+  handle_message_callback_.Run(std::move(message));
 }
 
 }  // namespace content

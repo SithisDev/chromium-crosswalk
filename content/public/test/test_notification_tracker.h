@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,6 @@
 
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -36,14 +34,16 @@ class TestNotificationTracker : public NotificationObserver {
   // ListenFor for the notifications you are interested in.
   TestNotificationTracker();
 
+  TestNotificationTracker(const TestNotificationTracker&) = delete;
+  TestNotificationTracker& operator=(const TestNotificationTracker&) = delete;
+
   ~TestNotificationTracker() override;
 
   // Makes this object listen for the given notification with the given source.
+  //
+  // To listen for all sources, pass
+  // NotificationService::AllBrowserContextsAndSources() as the |source|.
   void ListenFor(int type, const NotificationSource& source);
-
-  // Makes this object listen for notifications of the given type coming from
-  // any source.
-  void ListenForAll(int type);
 
   // Clears the list of events.
   void Reset();
@@ -81,8 +81,6 @@ class TestNotificationTracker : public NotificationObserver {
 
   // Lists all received since last cleared, in the order they were received.
   std::vector<Event> events_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestNotificationTracker);
 };
 
 }  // namespace content

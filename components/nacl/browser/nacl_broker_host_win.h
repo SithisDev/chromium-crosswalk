@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,9 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/process/process.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
-#include "services/service_manager/public/mojom/service.mojom.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 
 namespace content {
 class BrowserChildProcessHost;
@@ -24,6 +23,10 @@ namespace nacl {
 class NaClBrokerHost : public content::BrowserChildProcessHostDelegate {
  public:
   NaClBrokerHost();
+
+  NaClBrokerHost(const NaClBrokerHost&) = delete;
+  NaClBrokerHost& operator=(const NaClBrokerHost&) = delete;
+
   ~NaClBrokerHost() override;
 
   // This function starts the broker process. It needs to be called
@@ -33,7 +36,7 @@ class NaClBrokerHost : public content::BrowserChildProcessHostDelegate {
   // Send a message to the broker process, causing it to launch
   // a Native Client loader process.
   bool LaunchLoader(int launch_id,
-                    service_manager::mojom::ServiceRequest service_request);
+                    mojo::ScopedMessagePipeHandle ipc_channel_handle);
 
   bool LaunchDebugExceptionHandler(int32_t pid,
                                    base::ProcessHandle process_handle,
@@ -59,8 +62,6 @@ class NaClBrokerHost : public content::BrowserChildProcessHostDelegate {
 
   std::unique_ptr<content::BrowserChildProcessHost> process_;
   bool is_terminating_;
-
-  DISALLOW_COPY_AND_ASSIGN(NaClBrokerHost);
 };
 
 }  // namespace nacl

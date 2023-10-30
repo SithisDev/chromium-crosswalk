@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,6 @@
 
 #include <map>
 
-#include "base/macros.h"
-#include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 #include "url/origin.h"
 
@@ -18,10 +16,15 @@ class BluetoothAllowedDevices;
 
 // Class for keeping track of which origins are allowed to access which
 // Bluetooth devices and their services.
-class CONTENT_EXPORT BluetoothAllowedDevicesMap
-    : public base::RefCountedThreadSafe<BluetoothAllowedDevicesMap> {
+class CONTENT_EXPORT BluetoothAllowedDevicesMap {
  public:
   BluetoothAllowedDevicesMap();
+
+  BluetoothAllowedDevicesMap(const BluetoothAllowedDevicesMap&) = delete;
+  BluetoothAllowedDevicesMap& operator=(const BluetoothAllowedDevicesMap&) =
+      delete;
+
+  ~BluetoothAllowedDevicesMap();
 
   // Gets a BluetoothAllowedDevices for each origin; creates one if it doesn't
   // exist.
@@ -32,12 +35,8 @@ class CONTENT_EXPORT BluetoothAllowedDevicesMap
   void Clear();
 
  private:
-  friend class base::RefCountedThreadSafe<BluetoothAllowedDevicesMap>;
-  ~BluetoothAllowedDevicesMap();
   std::map<url::Origin, content::BluetoothAllowedDevices>
       origin_to_allowed_devices_map_;
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothAllowedDevicesMap);
 };
 
 }  //  namespace content

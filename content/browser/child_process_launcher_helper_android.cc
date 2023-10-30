@@ -1,8 +1,9 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <memory>
+#include <tuple>
 
 #include "base/android/apk_assets.h"
 #include "base/android/application_status_listener.h"
@@ -11,7 +12,6 @@
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/task/post_task.h"
 #include "content/browser/child_process_launcher.h"
 #include "content/browser/child_process_launcher_helper.h"
 #include "content/browser/child_process_launcher_helper_posix.h"
@@ -22,9 +22,11 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_launcher_utils.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/site_isolation_policy.h"
 #include "content/public/common/content_descriptors.h"
 #include "content/public/common/content_switches.h"
-#include "services/service_manager/sandbox/switches.h"
+#include "sandbox/policy/features.h"
+#include "sandbox/policy/switches.h"
 
 using base::android::AttachCurrentThread;
 using base::android::JavaParamRef;
@@ -57,12 +59,12 @@ void ChildProcessLauncherHelper::BeforeLaunchOnClientThread() {
 
   // Non-sandboxed utility or renderer process are currently not supported.
   DCHECK(process_type == switches::kGpuProcess ||
-         !command_line()->HasSwitch(service_manager::switches::kNoSandbox));
+         !command_line()->HasSwitch(sandbox::policy::switches::kNoSandbox));
 }
 
-base::Optional<mojo::NamedPlatformChannel>
+absl::optional<mojo::NamedPlatformChannel>
 ChildProcessLauncherHelper::CreateNamedPlatformChannelOnClientThread() {
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 std::unique_ptr<PosixFileDescriptorInfo>
@@ -74,10 +76,9 @@ ChildProcessLauncherHelper::GetFilesToMap() {
   CHECK(!command_line()->HasSwitch(switches::kSingleProcess));
 
   std::unique_ptr<PosixFileDescriptorInfo> files_to_register =
-      CreateDefaultPosixFilesToMap(child_process_id(),
-                                   mojo_channel_->remote_endpoint(),
-                                   true /* include_service_required_files */,
-                                   GetProcessType(), command_line());
+      CreateDefaultPosixFilesToMap(
+          child_process_id(), mojo_channel_->remote_endpoint(),
+          file_data_->files_to_preload, GetProcessType(), command_line());
 
 #if ICU_UTIL_DATA_IMPL == ICU_UTIL_DATA_FILE
   base::MemoryMappedFile::Region icu_region;
@@ -91,6 +92,11 @@ ChildProcessLauncherHelper::GetFilesToMap() {
 bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
     PosixFileDescriptorInfo& files_to_register,
     base::LaunchOptions* options) {
+  for (const auto& remapped_fd : file_data_->additional_remapped_fds) {
+    options->fds_to_remap.emplace_back(remapped_fd.second.get(),
+                                       remapped_fd.first);
+  }
+
   return true;
 }
 
@@ -126,7 +132,7 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
     const auto& region = files_to_register->GetRegionAt(i);
     bool auto_close = files_to_register->OwnsFD(fd);
     if (auto_close) {
-      ignore_result(files_to_register->ReleaseFD(fd).release());
+      std::ignore = files_to_register->ReleaseFD(fd).release();
     }
 
     ScopedJavaLocalRef<jobject> j_file_info =
@@ -136,10 +142,11 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
     env->SetObjectArrayElement(j_file_infos.obj(), i, j_file_info.obj());
   }
 
+  AddRef();  // Balanced by OnChildProcessStarted.
   java_peer_.Reset(Java_ChildProcessLauncherHelperImpl_createAndStart(
       env, reinterpret_cast<intptr_t>(this), j_argv, j_file_infos,
       can_use_warm_up_connection));
-  AddRef();  // Balanced by OnChildProcessStarted.
+
   client_task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(
@@ -151,8 +158,7 @@ ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
 
 void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
     const ChildProcessLauncherHelper::Process& process,
-    const base::LaunchOptions& options) {
-}
+    const base::LaunchOptions& options) {}
 
 ChildProcessTerminationInfo ChildProcessLauncherHelper::GetTerminationInfo(
     const ChildProcessLauncherHelper::Process& process,
@@ -171,7 +177,7 @@ ChildProcessTerminationInfo ChildProcessLauncherHelper::GetTerminationInfo(
       app_state == base::android::APPLICATION_STATE_HAS_PAUSED_ACTIVITIES;
 
   if (app_foreground &&
-      (info.binding_state == base::android::ChildBindingState::MODERATE ||
+      (info.binding_state == base::android::ChildBindingState::VISIBLE ||
        info.binding_state == base::android::ChildBindingState::STRONG)) {
     info.status = base::TERMINATION_STATUS_OOM_PROTECTED;
   } else {
@@ -188,23 +194,25 @@ static void JNI_ChildProcessLauncherHelperImpl_SetTerminationInfo(
     jint binding_state,
     jboolean killed_by_us,
     jboolean clean_exit,
-    jint remaining_process_with_strong_binding,
-    jint remaining_process_with_moderate_binding,
-    jint remaining_process_with_waived_binding,
+    jboolean exception_during_init,
     jint reverse_rank) {
   ChildProcessTerminationInfo* info =
       reinterpret_cast<ChildProcessTerminationInfo*>(termination_info_ptr);
   info->binding_state =
       static_cast<base::android::ChildBindingState>(binding_state);
   info->was_killed_intentionally_by_browser = killed_by_us;
+  info->threw_exception_during_init = exception_during_init;
   info->clean_exit = clean_exit;
-  info->remaining_process_with_strong_binding =
-      remaining_process_with_strong_binding;
-  info->remaining_process_with_moderate_binding =
-      remaining_process_with_moderate_binding;
-  info->remaining_process_with_waived_binding =
-      remaining_process_with_waived_binding;
   info->best_effort_reverse_rank = reverse_rank;
+}
+
+static jboolean
+JNI_ChildProcessLauncherHelperImpl_ServiceGroupImportanceEnabled(JNIEnv* env) {
+  // Not this is called on the launcher thread, not UI thread.
+  return SiteIsolationPolicy::AreIsolatedOriginsEnabled() ||
+         SiteIsolationPolicy::UseDedicatedProcessesForAllSites() ||
+         SiteIsolationPolicy::AreDynamicIsolatedOriginsEnabled() ||
+         SiteIsolationPolicy::ArePreloadedIsolatedOriginsEnabled();
 }
 
 // static
@@ -237,21 +245,18 @@ void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
 }
 
 // static
-void ChildProcessLauncherHelper::SetRegisteredFilesForService(
-    const std::string& service_name,
-    std::map<std::string, base::FilePath> required_files) {
-  SetFilesToShareForServicePosix(service_name, std::move(required_files));
-}
-
-// static
-void ChildProcessLauncherHelper::ResetRegisteredFilesForTesting() {
-  ResetFilesToShareForTestingPosix();
-}
-
-// static
 base::File OpenFileToShare(const base::FilePath& path,
                            base::MemoryMappedFile::Region* region) {
   return base::File(base::android::OpenApkAsset(path.value(), region));
+}
+
+base::android::ChildBindingState
+ChildProcessLauncherHelper::GetEffectiveChildBindingState() {
+  JNIEnv* env = AttachCurrentThread();
+  DCHECK(env);
+  return static_cast<base::android::ChildBindingState>(
+      Java_ChildProcessLauncherHelperImpl_getEffectiveChildBindingState(
+          env, java_peer_));
 }
 
 void ChildProcessLauncherHelper::DumpProcessStack(
@@ -265,10 +270,7 @@ void ChildProcessLauncherHelper::DumpProcessStack(
 // Called from ChildProcessLauncher.java when the ChildProcess was started.
 // |handle| is the processID of the child process as originated in Java, 0 if
 // the ChildProcess could not be created.
-void ChildProcessLauncherHelper::OnChildProcessStarted(
-    JNIEnv*,
-    const base::android::JavaParamRef<jobject>& obj,
-    jint handle) {
+void ChildProcessLauncherHelper::OnChildProcessStarted(JNIEnv*, jint handle) {
   DCHECK(CurrentlyOnProcessLauncherTaskRunner());
   scoped_refptr<ChildProcessLauncherHelper> ref(this);
   Release();  // Balances with LaunchProcessOnLauncherThread.

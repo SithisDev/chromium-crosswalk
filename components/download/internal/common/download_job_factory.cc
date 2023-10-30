@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,14 @@
 
 #include <memory>
 
+#include "base/memory/weak_ptr.h"
 #include "components/download/internal/common/download_job_impl.h"
 #include "components/download/internal/common/parallel_download_job.h"
 #include "components/download/internal/common/parallel_download_utils.h"
 #include "components/download/internal/common/save_package_download_job.h"
 #include "components/download/public/common/download_features.h"
 #include "components/download/public/common/download_item.h"
-#include "components/download/public/common/download_stats.h"
-#include "components/download/public/common/download_url_loader_factory_getter.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "net/http/http_response_info.h"
 
 namespace download {
 
@@ -29,42 +28,14 @@ enum class ConnectionType {
 
 ConnectionType GetConnectionType(
     net::HttpResponseInfo::ConnectionInfo connection_info) {
-  switch (connection_info) {
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP0_9:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP1_0:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP1_1:
+  switch (net::HttpResponseInfo::ConnectionInfoToCoarse(connection_info)) {
+    case net::HttpResponseInfo::CONNECTION_INFO_COARSE_HTTP1:
       return ConnectionType::kHTTP;
-    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_SPDY2:
-    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_SPDY3:
-    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_HTTP2_14:
-    case net::HttpResponseInfo::CONNECTION_INFO_DEPRECATED_HTTP2_15:
-    case net::HttpResponseInfo::CONNECTION_INFO_HTTP2:
+    case net::HttpResponseInfo::CONNECTION_INFO_COARSE_HTTP2:
       return ConnectionType::kHTTP2;
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_UNKNOWN_VERSION:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_32:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_33:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_34:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_35:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_36:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_37:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_38:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_39:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_40:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_41:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_42:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_43:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_44:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_45:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_46:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_47:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_48:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_99:
-    case net::HttpResponseInfo::CONNECTION_INFO_QUIC_999:
+    case net::HttpResponseInfo::CONNECTION_INFO_COARSE_QUIC:
       return ConnectionType::kQUIC;
-    case net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN:
-      return ConnectionType::kUnknown;
-    case net::HttpResponseInfo::NUM_OF_CONNECTION_INFOS:
-      NOTREACHED();
+    case net::HttpResponseInfo::CONNECTION_INFO_COARSE_OTHER:
       return ConnectionType::kUnknown;
   }
   NOTREACHED();
@@ -103,53 +74,30 @@ bool IsParallelizableDownload(const DownloadCreateInfo& create_info,
        base::FeatureList::IsEnabled(features::kUseParallelRequestsForQUIC));
   bool http_get_method =
       create_info.method == "GET" && create_info.url().SchemeIsHTTPOrHTTPS();
-  bool partial_response_success =
-      download_item->GetReceivedSlices().empty() || create_info.offset != 0;
+  // If the file is empty, we always assume parallel download is supported.
+  // Otherwise, check if the download already has multiple slices and whether
+  // the http response offset is non-zero.
+  bool can_support_parallel_requests =
+      download_item->GetReceivedBytes() <= 0 ||
+      (download_item->GetReceivedSlices().size() > 0 &&
+       create_info.offset != 0);
+
   bool range_support_allowed =
       create_info.accept_range == RangeRequestSupportType::kSupport ||
-      (base::FeatureList::IsEnabled(
-           features::kUseParallelRequestsForUnknwonRangeSupport) &&
-       create_info.accept_range == RangeRequestSupportType::kUnknown);
+      create_info.accept_range == RangeRequestSupportType::kUnknown;
+
   bool is_parallelizable = has_strong_validator && range_support_allowed &&
                            has_content_length && satisfy_min_file_size &&
                            satisfy_connection_type && http_get_method &&
-                           partial_response_success;
-  RecordDownloadConnectionInfo(create_info.connection_info);
+                           can_support_parallel_requests;
 
-  if (!IsParallelDownloadEnabled())
-    return is_parallelizable;
-
-  RecordParallelDownloadCreationEvent(
-      is_parallelizable
-          ? ParallelDownloadCreationEvent::STARTED_PARALLEL_DOWNLOAD
-          : ParallelDownloadCreationEvent::FELL_BACK_TO_NORMAL_DOWNLOAD);
-  if (!has_strong_validator) {
-    RecordParallelDownloadCreationEvent(
-        ParallelDownloadCreationEvent::FALLBACK_REASON_STRONG_VALIDATORS);
-  }
-  if (!range_support_allowed) {
-    RecordParallelDownloadCreationEvent(
-        ParallelDownloadCreationEvent::FALLBACK_REASON_ACCEPT_RANGE_HEADER);
-    if (create_info.accept_range == RangeRequestSupportType::kUnknown) {
-      RecordParallelDownloadCreationEvent(
-          ParallelDownloadCreationEvent::FALLBACK_REASON_UNKNOWN_RANGE_SUPPORT);
-    }
-  }
-  if (!has_content_length) {
-    RecordParallelDownloadCreationEvent(
-        ParallelDownloadCreationEvent::FALLBACK_REASON_CONTENT_LENGTH_HEADER);
-  }
-  if (!satisfy_min_file_size) {
-    RecordParallelDownloadCreationEvent(
-        ParallelDownloadCreationEvent::FALLBACK_REASON_FILE_SIZE);
-  }
-  if (!satisfy_connection_type) {
-    RecordParallelDownloadCreationEvent(
-        ParallelDownloadCreationEvent::FALLBACK_REASON_CONNECTION_TYPE);
-  }
-  if (!http_get_method) {
-    RecordParallelDownloadCreationEvent(
-        ParallelDownloadCreationEvent::FALLBACK_REASON_HTTP_METHOD);
+  if (base::FeatureList::IsEnabled(features::kDownloadRange)) {
+    // Don't use parallel download if the caller wants to fetch with range
+    // request explicitly.
+    bool arbitrary_range_request =
+        create_info.save_info &&
+        create_info.save_info->IsArbitraryRangeRequest();
+    is_parallelizable = is_parallelizable && !arbitrary_range_request;
   }
 
   return is_parallelizable;
@@ -160,30 +108,29 @@ bool IsParallelizableDownload(const DownloadCreateInfo& create_info,
 // static
 std::unique_ptr<DownloadJob> DownloadJobFactory::CreateJob(
     DownloadItem* download_item,
-    std::unique_ptr<DownloadRequestHandleInterface> req_handle,
+    DownloadJob::CancelRequestCallback cancel_request_callback,
     const DownloadCreateInfo& create_info,
     bool is_save_package_download,
-    scoped_refptr<download::DownloadURLLoaderFactoryGetter>
-        url_loader_factory_getter,
-    net::URLRequestContextGetter* url_request_context_getter,
-    service_manager::Connector* connector) {
+    URLLoaderFactoryProvider::URLLoaderFactoryProviderPtr
+        url_loader_factory_provider,
+    WakeLockProviderBinder wake_lock_provider_binder) {
   if (is_save_package_download) {
-    return std::make_unique<SavePackageDownloadJob>(download_item,
-                                                    std::move(req_handle));
+    return std::make_unique<SavePackageDownloadJob>(
+        download_item, std::move(cancel_request_callback));
   }
 
   bool is_parallelizable = IsParallelizableDownload(create_info, download_item);
   // Build parallel download job.
   if (IsParallelDownloadEnabled() && is_parallelizable) {
     return std::make_unique<ParallelDownloadJob>(
-        download_item, std::move(req_handle), create_info,
-        std::move(url_loader_factory_getter), url_request_context_getter,
-        connector);
+        download_item, std::move(cancel_request_callback), create_info,
+        std::move(url_loader_factory_provider),
+        std::move(wake_lock_provider_binder));
   }
 
   // An ordinary download job.
-  return std::make_unique<DownloadJobImpl>(download_item, std::move(req_handle),
-                                           is_parallelizable);
+  return std::make_unique<DownloadJobImpl>(
+      download_item, std::move(cancel_request_callback), is_parallelizable);
 }
 
 }  // namespace download

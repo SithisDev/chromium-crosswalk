@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <memory>
 #include <string>
 
-#include "base/values.h"
 
 namespace signin_internals_util {
 
@@ -19,14 +18,9 @@ namespace signin_internals_util {
 extern const char kSigninPrefPrefix[];
 extern const char kTokenPrefPrefix[];
 
-// The length of strings returned by GetTruncatedHash() below.
-const size_t kTruncateTokenStringLength = 6;
-
-// Helper enums to access fields from SigninStatus (declared below).
-enum {
-  SIGNIN_FIELDS_BEGIN = 0,
-  UNTIMED_FIELDS_BEGIN_UNTYPED = SIGNIN_FIELDS_BEGIN
-};
+// Helper constants to access fields from SigninStatus (declared below).
+constexpr int SIGNIN_FIELDS_BEGIN = 0;
+constexpr int UNTIMED_FIELDS_BEGIN_UNTYPED = SIGNIN_FIELDS_BEGIN;
 
 enum UntimedSigninStatusField {
   UNTIMED_FIELDS_BEGIN = UNTIMED_FIELDS_BEGIN_UNTYPED,
@@ -36,10 +30,8 @@ enum UntimedSigninStatusField {
   UNTIMED_FIELDS_END
 };
 
-enum {
-  UNTIMED_FIELDS_COUNT = UNTIMED_FIELDS_END - UNTIMED_FIELDS_BEGIN,
-  TIMED_FIELDS_BEGIN_UNTYPED = UNTIMED_FIELDS_END
-};
+constexpr int UNTIMED_FIELDS_COUNT = UNTIMED_FIELDS_END - UNTIMED_FIELDS_BEGIN;
+constexpr int TIMED_FIELDS_BEGIN_UNTYPED = UNTIMED_FIELDS_END;
 
 enum TimedSigninStatusField {
   TIMED_FIELDS_BEGIN = TIMED_FIELDS_BEGIN_UNTYPED,
@@ -48,28 +40,13 @@ enum TimedSigninStatusField {
   TIMED_FIELDS_END
 };
 
-enum {
-  TIMED_FIELDS_COUNT = TIMED_FIELDS_END - TIMED_FIELDS_BEGIN,
-  SIGNIN_FIELDS_END = TIMED_FIELDS_END,
-  SIGNIN_FIELDS_COUNT = SIGNIN_FIELDS_END - SIGNIN_FIELDS_BEGIN
-};
-
-// Returns the root preference path for the service. The path should be
-// qualified with one of .value, .status or .time to get the respective
-// full preference path names.
-std::string TokenPrefPath(const std::string& service_name);
+constexpr int TIMED_FIELDS_COUNT = TIMED_FIELDS_END - TIMED_FIELDS_BEGIN;
+constexpr int SIGNIN_FIELDS_END = TIMED_FIELDS_END;
+constexpr int SIGNIN_FIELDS_COUNT = SIGNIN_FIELDS_END - SIGNIN_FIELDS_BEGIN;
 
 // Returns the name of a SigninStatus field.
 std::string SigninStatusFieldToString(UntimedSigninStatusField field);
 std::string SigninStatusFieldToString(TimedSigninStatusField field);
-
-// Gets the first 6 hex characters of the SHA256 hash of the passed in string.
-// These are enough to perform equality checks across a single users tokens,
-// while preventing outsiders from reverse-engineering the actual token from
-// the displayed value.
-// Note that for readability (in about:signin-internals), an empty string
-// is not hashed, but simply returned as an empty string.
-std::string GetTruncatedHash(const std::string& str);
 
 } // namespace signin_internals_util
 

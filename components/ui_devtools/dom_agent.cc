@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,14 @@
 #include <utility>
 
 #include "base/containers/adapters.h"
+#include "base/observer_list.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "components/ui_devtools/devtools_server.h"
 #include "components/ui_devtools/root_element.h"
+#include "components/ui_devtools/ui_devtools_features.h"
 #include "components/ui_devtools/ui_element.h"
+#include "ui/base/interaction/element_identifier.h"
 
 namespace {
 
@@ -31,17 +36,15 @@ using ui_devtools::protocol::Response;
 
 namespace {
 
-bool FoundMatchInStylesProperty(const std::string& query,
-                                ui_devtools::UIElement* node) {
+bool FindMatchInStylesProperty(const std::string& query,
+                               ui_devtools::UIElement* node) {
   for (UIElement::ClassProperties& class_properties :
        node->GetCustomPropertiesForMatchedStyle()) {
     for (UIElement::UIProperty& ui_property : class_properties.properties_) {
       protocol::String dataName = ui_property.name_;
       protocol::String dataValue = ui_property.value_;
-      std::transform(dataName.begin(), dataName.end(), dataName.begin(),
-                     ::tolower);
-      std::transform(dataValue.begin(), dataValue.end(), dataValue.begin(),
-                     ::tolower);
+      dataName = base::ToLowerASCII(dataName);
+      dataValue = base::ToLowerASCII(dataValue);
       protocol::String style_property_match = dataName + ": " + dataValue + ";";
       if (style_property_match.find(query) != protocol::String::npos) {
         return true;
@@ -51,20 +54,26 @@ bool FoundMatchInStylesProperty(const std::string& query,
   return false;
 }
 
-bool FoundMatchInDomProperties(const std::string& query,
-                               const std::string& tag_name_query,
-                               const std::string& attribute_query,
-                               bool exact_attribute_match,
-                               ui_devtools::UIElement* node) {
+bool FindMatchByID(const std::string& query, ui_devtools::UIElement* node) {
+  auto identifier = ui::ElementIdentifier::FromName(query.c_str());
+  if (!identifier)
+    return false;
+  return node->FindMatchByElementID(identifier);
+}
+
+bool FindMatchInDomProperties(const std::string& query,
+                              const std::string& tag_name_query,
+                              const std::string& attribute_query,
+                              bool exact_attribute_match,
+                              ui_devtools::UIElement* node) {
   protocol::String node_name = node->GetTypeName();
-  std::transform(node_name.begin(), node_name.end(), node_name.begin(),
-                 ::tolower);
+  node_name = base::ToLowerASCII(node_name);
   if (node_name.find(query) != protocol::String::npos ||
       node_name == tag_name_query) {
     return true;
   }
   for (std::string& data : node->GetAttributes()) {
-    std::transform(data.begin(), data.end(), data.begin(), ::tolower);
+    data = base::ToLowerASCII(data);
     if (data.find(query) != protocol::String::npos) {
       return true;
     }
@@ -79,21 +88,22 @@ bool FoundMatchInDomProperties(const std::string& query,
 }  // namespace
 
 struct DOMAgent::Query {
+  enum QueryType { Normal, Style, ID };
   Query(protocol::String query,
         protocol::String tag_name_query,
         protocol::String attribute_query,
         bool exact_attribute_match,
-        bool is_style_search)
+        QueryType query_type)
       : query_(query),
         tag_name_query_(tag_name_query),
         attribute_query_(attribute_query),
         exact_attribute_match_(exact_attribute_match),
-        is_style_search_(is_style_search) {}
+        query_type_(query_type) {}
   protocol::String query_;
   protocol::String tag_name_query_;
   protocol::String attribute_query_;
   bool exact_attribute_match_;
-  bool is_style_search_;
+  QueryType query_type_;
 };
 
 DOMAgent::DOMAgent() {}
@@ -104,21 +114,21 @@ DOMAgent::~DOMAgent() {
 
 Response DOMAgent::disable() {
   Reset();
-  return Response::OK();
+  return Response::Success();
 }
 
 Response DOMAgent::getDocument(std::unique_ptr<Node>* out_root) {
   element_root_->ResetNodeId();
   *out_root = BuildInitialTree();
   is_document_created_ = true;
-  return Response::OK();
+  return Response::Success();
 }
 
 Response DOMAgent::pushNodesByBackendIdsToFrontend(
     std::unique_ptr<protocol::Array<int>> backend_node_ids,
     std::unique_ptr<protocol::Array<int>>* result) {
   *result = std::move(backend_node_ids);
-  return Response::OK();
+  return Response::Success();
 }
 
 void DOMAgent::OnUIElementAdded(UIElement* parent, UIElement* child) {
@@ -160,16 +170,21 @@ void DOMAgent::OnUIElementReordered(UIElement* parent, UIElement* child) {
   auto iter = std::find(children.begin(), children.end(), child);
   int prev_node_id =
       (iter == children.begin()) ? 0 : (*std::prev(iter))->node_id();
-  RemoveDomNode(child);
+  RemoveDomNode(child, false);
   frontend()->childNodeInserted(parent->node_id(), prev_node_id,
                                 BuildDomNodeFromUIElement(child));
 }
 
 void DOMAgent::OnUIElementRemoved(UIElement* ui_element) {
-  DCHECK(node_id_to_ui_element_.count(ui_element->node_id()));
-
-  RemoveDomNode(ui_element);
-  node_id_to_ui_element_.erase(ui_element->node_id());
+  if (node_id_to_ui_element_.count(ui_element->node_id())) {
+    // Check if |ui_element| exists in DOM before asking the frontend to remove
+    // it. It is possible that this node is already removed along with its
+    // ancestor. This happens for example when a bubble closes.
+    // The DOM tree is first requested to be removed in
+    // |WidgetElement::OnWidgetDestroyed()| then in
+    // |ViewElement::OnChildViewRemoved()|.
+    RemoveDomNode(ui_element, true);
+  }
 }
 
 void DOMAgent::OnUIElementBoundsChanged(UIElement* ui_element) {
@@ -250,11 +265,14 @@ void DOMAgent::OnElementBoundsChanged(UIElement* ui_element) {
     observer.OnElementBoundsChanged(ui_element);
 }
 
-void DOMAgent::RemoveDomNode(UIElement* ui_element) {
+void DOMAgent::RemoveDomNode(UIElement* ui_element, bool update_node_id_map) {
   for (auto* child_element : ui_element->children())
-    RemoveDomNode(child_element);
+    RemoveDomNode(child_element, update_node_id_map);
   frontend()->childNodeRemoved(ui_element->parent()->node_id(),
                                ui_element->node_id());
+  if (update_node_id_map) {
+    node_id_to_ui_element_.erase(ui_element->node_id());
+  }
 }
 
 void DOMAgent::Reset() {
@@ -266,28 +284,33 @@ void DOMAgent::Reset() {
 }
 
 DOMAgent::Query DOMAgent::PreprocessQuery(protocol::String query) {
-  std::transform(query.begin(), query.end(), query.begin(), ::tolower);
-  constexpr char kSearchStylesPanelKeyword[] = "style:";
-  protocol::String tag_name_query = query;
-  protocol::String attribute_query = query;
+  constexpr char kSearchIDKeyword[] = "id:";
   bool exact_attribute_match = false;
+  if (query.find(kSearchIDKeyword) == 0) {
+    // remove whitespaces (if they exist) after the 'id:' keyword
+    base::TrimWhitespaceASCII(query.substr(strlen(kSearchIDKeyword)),
+                              base::TrimPositions::TRIM_ALL, &query);
+    return Query(query, query, query, exact_attribute_match,
+                 Query::QueryType::ID);
+  }
 
+  // If it's not query by id, transform query to lower case.
+  query = base::ToLowerASCII(query);
+
+  constexpr char kSearchStylesPanelKeyword[] = "style:";
   // Temporary Solution: search on styles panel if the keyword 'style:'
   // exists in the beginning of the query.
-  size_t style_keyword_pos = query.find(kSearchStylesPanelKeyword);
-  if (style_keyword_pos == 0) {
+  if (query.find(kSearchStylesPanelKeyword) == 0) {
     // remove whitespaces (if they exist) after the 'style:' keyword
-    size_t pos =
-        query.find_first_not_of(' ', strlen(kSearchStylesPanelKeyword));
-    if (pos != protocol::String::npos)
-      query = query.substr(pos);
-    else
-      query = query.substr(strlen(kSearchStylesPanelKeyword));
-    return Query(query, tag_name_query, attribute_query, exact_attribute_match,
-                 true);
+    base::TrimWhitespaceASCII(query.substr(strlen(kSearchStylesPanelKeyword)),
+                              base::TrimPositions::TRIM_ALL, &query);
+    return Query(query, query, query, exact_attribute_match,
+                 Query::QueryType::Style);
   }
 
   // Preprocessing for normal dom search.
+  protocol::String tag_name_query = query;
+  protocol::String attribute_query = query;
   unsigned query_length = query.length();
   bool start_tag_found = !query.find('<');
   bool end_tag_found = query.rfind('>') + 1 == query_length;
@@ -304,7 +327,7 @@ DOMAgent::Query DOMAgent::PreprocessQuery(protocol::String query) {
   if (end_quote_found)
     attribute_query = attribute_query.substr(0, attribute_query.length() - 1);
   return Query(query, tag_name_query, attribute_query, exact_attribute_match,
-               false);
+               Query::QueryType::Normal);
 }
 
 void DOMAgent::SearchDomTree(const DOMAgent::Query& query_data,
@@ -312,8 +335,7 @@ void DOMAgent::SearchDomTree(const DOMAgent::Query& query_data,
   std::vector<UIElement*> stack;
   // Root node from element_root() is not a real node from the DOM tree.
   // The children of the root node are the 'actual' roots of the DOM tree.
-  UIElement* root = element_root();
-  std::vector<UIElement*> root_list = root->children();
+  std::vector<UIElement*> root_list = element_root()->children();
   DCHECK(root_list.size());
   // Children are accessed from bottom to top. So iterate backwards.
   for (auto* root : base::Reversed(root_list))
@@ -328,10 +350,12 @@ void DOMAgent::SearchDomTree(const DOMAgent::Query& query_data,
     for (auto* child : base::Reversed(children_array))
       stack.push_back(child);
     bool found_match = false;
-    if (query_data.is_style_search_)
-      found_match = FoundMatchInStylesProperty(query_data.query_, node);
+    if (query_data.query_type_ == Query::QueryType::Style)
+      found_match = FindMatchInStylesProperty(query_data.query_, node);
+    else if (query_data.query_type_ == Query::QueryType::ID)
+      found_match = FindMatchByID(query_data.query_, node);
     else
-      found_match = FoundMatchInDomProperties(
+      found_match = FindMatchInDomProperties(
           query_data.query_, query_data.tag_name_query_,
           query_data.attribute_query_, query_data.exact_attribute_match_, node);
     if (found_match)
@@ -348,7 +372,7 @@ Response DOMAgent::performSearch(
     int* result_count) {
   Query query_data = PreprocessQuery(whitespace_trimmed_query);
   if (!query_data.query_.length())
-    return Response::OK();
+    return Response::Success();
 
   std::vector<int> result_collector;
   SearchDomTree(query_data, &result_collector);
@@ -357,7 +381,7 @@ Response DOMAgent::performSearch(
   *result_count = result_collector.size();
   search_results_.insert(
       std::make_pair(*search_id, std::move(result_collector)));
-  return Response::OK();
+  return Response::Success();
 }
 
 Response DOMAgent::getSearchResults(
@@ -367,21 +391,47 @@ Response DOMAgent::getSearchResults(
     std::unique_ptr<protocol::Array<int>>* node_ids) {
   SearchResults::iterator it = search_results_.find(search_id);
   if (it == search_results_.end())
-    return Response::Error("No search session with given id found");
+    return Response::ServerError("No search session with given id found");
 
   int size = it->second.size();
   if (from_index < 0 || to_index > size || from_index >= to_index)
-    return Response::Error("Invalid search result range");
+    return Response::ServerError("Invalid search result range");
 
   *node_ids = std::make_unique<protocol::Array<int>>();
   for (int i = from_index; i < to_index; ++i)
     (*node_ids)->emplace_back((it->second)[i]);
-  return Response::OK();
+  return Response::Success();
 }
 
 Response DOMAgent::discardSearchResults(const protocol::String& search_id) {
   search_results_.erase(search_id);
-  return Response::OK();
+  return Response::Success();
+}
+
+protocol::Response DOMAgent::dispatchMouseEvent(
+    int node_id,
+    std::unique_ptr<protocol::DOM::MouseEvent> event) {
+  if (!base::FeatureList::IsEnabled(
+          ui_devtools::kUIDebugToolsEnableSyntheticEvents))
+    return Response::ServerError("Dispatch mouse events is not enabled.");
+  if (node_id_to_ui_element_.count(node_id) == 0)
+    return Response::ServerError("Element not found on node id");
+  if (!node_id_to_ui_element_[node_id]->DispatchMouseEvent(event.get()))
+    return Response::ServerError("Failed to dispatch mouse event for node id");
+  return Response::Success();
+}
+
+protocol::Response DOMAgent::dispatchKeyEvent(
+    int node_id,
+    std::unique_ptr<protocol::DOM::KeyEvent> event) {
+  if (!base::FeatureList::IsEnabled(
+          ui_devtools::kUIDebugToolsEnableSyntheticEvents))
+    return Response::ServerError("Dispatch key events is not enabled.");
+  if (node_id_to_ui_element_.count(node_id) == 0)
+    return Response::ServerError("Element not found on node id");
+  if (!node_id_to_ui_element_[node_id]->DispatchKeyEvent(event.get()))
+    return Response::ServerError("Failed to dispatch key event for node id");
+  return Response::Success();
 }
 
 }  // namespace ui_devtools

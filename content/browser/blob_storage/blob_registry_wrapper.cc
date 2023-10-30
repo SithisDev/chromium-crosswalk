@@ -1,18 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/blob_storage/blob_registry_wrapper.h"
 
 #include "base/bind.h"
-#include "base/task/post_task.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/common/content_features.h"
 #include "storage/browser/blob/blob_registry_impl.h"
 #include "storage/browser/blob/blob_storage_context.h"
-#include "storage/browser/fileapi/file_system_context.h"
 
 namespace content {
 
@@ -20,32 +18,20 @@ namespace {
 
 class BindingDelegate : public storage::BlobRegistryImpl::Delegate {
  public:
-  explicit BindingDelegate(int process_id) : process_id_(process_id) {}
+  explicit BindingDelegate(
+      ChildProcessSecurityPolicyImpl::Handle security_policy_handle)
+      : security_policy_handle_(std::move(security_policy_handle)) {}
   ~BindingDelegate() override {}
 
   bool CanReadFile(const base::FilePath& file) override {
-    ChildProcessSecurityPolicyImpl* security_policy =
-        ChildProcessSecurityPolicyImpl::GetInstance();
-    return security_policy->CanReadFile(process_id_, file);
+    return security_policy_handle_.CanReadFile(file);
   }
-  bool CanReadFileSystemFile(const storage::FileSystemURL& url) override {
-    ChildProcessSecurityPolicyImpl* security_policy =
-        ChildProcessSecurityPolicyImpl::GetInstance();
-    return security_policy->CanReadFileSystemFile(process_id_, url);
-  }
-  bool CanCommitURL(const GURL& url) override {
-    ChildProcessSecurityPolicyImpl* security_policy =
-        ChildProcessSecurityPolicyImpl::GetInstance();
-    return security_policy->CanCommitURL(process_id_, url);
-  }
-  bool IsProcessValid() override {
-    ChildProcessSecurityPolicyImpl* security_policy =
-        ChildProcessSecurityPolicyImpl::GetInstance();
-    return security_policy->HasSecurityState(process_id_);
+  bool CanAccessDataForOrigin(const url::Origin& origin) override {
+    return security_policy_handle_.CanAccessDataForOrigin(origin);
   }
 
  private:
-  const int process_id_;
+  ChildProcessSecurityPolicyImpl::Handle security_policy_handle_;
 };
 
 }  // namespace
@@ -53,35 +39,38 @@ class BindingDelegate : public storage::BlobRegistryImpl::Delegate {
 // static
 scoped_refptr<BlobRegistryWrapper> BlobRegistryWrapper::Create(
     scoped_refptr<ChromeBlobStorageContext> blob_storage_context,
-    scoped_refptr<storage::FileSystemContext> file_system_context) {
+    base::WeakPtr<storage::BlobUrlRegistry> blob_url_registry) {
   scoped_refptr<BlobRegistryWrapper> result(new BlobRegistryWrapper());
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&BlobRegistryWrapper::InitializeOnIOThread, result,
-                     std::move(blob_storage_context),
-                     std::move(file_system_context)));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&BlobRegistryWrapper::InitializeOnIOThread,
+                                result, std::move(blob_storage_context),
+                                std::move(blob_url_registry)));
   return result;
 }
 
 BlobRegistryWrapper::BlobRegistryWrapper() {
 }
 
-void BlobRegistryWrapper::Bind(int process_id,
-                               blink::mojom::BlobRegistryRequest request) {
+void BlobRegistryWrapper::Bind(
+    int process_id,
+    mojo::PendingReceiver<blink::mojom::BlobRegistry> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  blob_registry_->Bind(std::move(request),
-                       std::make_unique<BindingDelegate>(process_id));
+  blob_registry_->Bind(
+      std::move(receiver),
+      std::make_unique<BindingDelegate>(
+          ChildProcessSecurityPolicyImpl::GetInstance()->CreateHandle(
+              process_id)));
 }
 
 BlobRegistryWrapper::~BlobRegistryWrapper() {}
 
 void BlobRegistryWrapper::InitializeOnIOThread(
     scoped_refptr<ChromeBlobStorageContext> blob_storage_context,
-    scoped_refptr<storage::FileSystemContext> file_system_context) {
+    base::WeakPtr<storage::BlobUrlRegistry> blob_url_registry) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   blob_registry_ = std::make_unique<storage::BlobRegistryImpl>(
       blob_storage_context->context()->AsWeakPtr(),
-      std::move(file_system_context));
+      std::move(blob_url_registry), GetUIThreadTaskRunner({}));
 }
 
 }  // namespace content

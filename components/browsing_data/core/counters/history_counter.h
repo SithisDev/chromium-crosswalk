@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
+#include "base/sequence_checker.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/timer/timer.h"
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
@@ -19,7 +21,7 @@ namespace browsing_data {
 
 class HistoryCounter : public browsing_data::BrowsingDataCounter {
  public:
-  typedef base::Callback<history::WebHistoryService*()>
+  typedef base::RepeatingCallback<history::WebHistoryService*()>
       GetUpdatedWebHistoryServiceCallback;
 
   class HistoryResult : public SyncResult {
@@ -37,14 +39,14 @@ class HistoryCounter : public browsing_data::BrowsingDataCounter {
   };
 
   explicit HistoryCounter(history::HistoryService* history_service,
-                          const GetUpdatedWebHistoryServiceCallback& callback,
+                          GetUpdatedWebHistoryServiceCallback callback,
                           syncer::SyncService* sync_service);
   ~HistoryCounter() override;
 
   void OnInitialized() override;
 
   // Whether there are counting tasks in progress. Only used for testing.
-  bool HasTrackedTasks();
+  bool HasTrackedTasksForTesting();
 
   const char* GetPrefName() const override;
 
@@ -53,7 +55,7 @@ class HistoryCounter : public browsing_data::BrowsingDataCounter {
 
   void OnGetLocalHistoryCount(history::HistoryCountResult result);
   void OnGetWebHistoryCount(history::WebHistoryService::Request* request,
-                            const base::DictionaryValue* result);
+                            const base::Value* result);
   void OnWebHistoryTimeout();
   void MergeResults();
 
@@ -61,7 +63,7 @@ class HistoryCounter : public browsing_data::BrowsingDataCounter {
 
   bool IsHistorySyncEnabled(const syncer::SyncService* sync_service);
 
-  history::HistoryService* history_service_;
+  raw_ptr<history::HistoryService> history_service_;
 
   GetUpdatedWebHistoryServiceCallback web_history_service_callback_;
 
@@ -76,7 +78,7 @@ class HistoryCounter : public browsing_data::BrowsingDataCounter {
   std::unique_ptr<history::WebHistoryService::Request> web_history_request_;
   base::OneShotTimer web_history_timeout_;
 
-  base::ThreadChecker thread_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
   BrowsingDataCounter::ResultInt local_result_;
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,12 +15,15 @@ using blink::mojom::BackgroundSyncType;
 class BackgroundSyncMetricsTest : public ::testing::Test {
  public:
   BackgroundSyncMetricsTest() = default;
+
+  BackgroundSyncMetricsTest(const BackgroundSyncMetricsTest&) = delete;
+  BackgroundSyncMetricsTest& operator=(const BackgroundSyncMetricsTest&) =
+      delete;
+
   ~BackgroundSyncMetricsTest() override = default;
 
  protected:
   base::HistogramTester histogram_tester_;
-
-  DISALLOW_COPY_AND_ASSIGN(BackgroundSyncMetricsTest);
 };
 
 TEST_F(BackgroundSyncMetricsTest, RecordEventStarted) {
@@ -65,18 +68,18 @@ TEST_F(BackgroundSyncMetricsTest, RecordEventResult) {
 
 TEST_F(BackgroundSyncMetricsTest, RecordBatchSyncEventComplete) {
   BackgroundSyncMetrics::RecordBatchSyncEventComplete(
-      BackgroundSyncType::ONE_SHOT, base::TimeDelta::FromSeconds(1),
+      BackgroundSyncType::ONE_SHOT, base::Seconds(1),
+      /* from_wakeup_task= */ false,
       /* number_of_batched_sync_events= */ 1);
-  histogram_tester_.ExpectUniqueSample(
-      "BackgroundSync.Event.Time",
-      base::TimeDelta::FromSeconds(1).InMilliseconds(), 1);
+  histogram_tester_.ExpectUniqueSample("BackgroundSync.Event.Time",
+                                       base::Seconds(1).InMilliseconds(), 1);
 
   BackgroundSyncMetrics::RecordBatchSyncEventComplete(
-      BackgroundSyncType::PERIODIC, base::TimeDelta::FromMinutes(1),
+      BackgroundSyncType::PERIODIC, base::Minutes(1),
+      /* from_wakeup_task= */ false,
       /* number_of_batched_sync_events= */ 10);
-  histogram_tester_.ExpectUniqueSample(
-      "PeriodicBackgroundSync.Event.Time",
-      base::TimeDelta::FromMinutes(1).InMilliseconds(), 1);
+  histogram_tester_.ExpectUniqueSample("PeriodicBackgroundSync.Event.Time",
+                                       base::Minutes(1).InMilliseconds(), 1);
 }
 
 TEST_F(BackgroundSyncMetricsTest, CountRegisterSuccess) {
@@ -110,6 +113,19 @@ TEST_F(BackgroundSyncMetricsTest, CountUnregisterPeriodicSync) {
   BackgroundSyncMetrics::CountUnregisterPeriodicSync(BACKGROUND_SYNC_STATUS_OK);
   histogram_tester_.ExpectUniqueSample("BackgroundSync.Unregistration.Periodic",
                                        BACKGROUND_SYNC_STATUS_OK, 1);
+}
+
+TEST_F(BackgroundSyncMetricsTest, EventsFiredFromWakeupTask) {
+  BackgroundSyncMetrics::RecordEventsFiredFromWakeupTask(
+      BackgroundSyncType::ONE_SHOT,
+      /* events_fired= */ false);
+  histogram_tester_.ExpectBucketCount(
+      "BackgroundSync.WakeupTaskFiredEvents.OneShot", false, 1);
+  BackgroundSyncMetrics::RecordEventsFiredFromWakeupTask(
+      BackgroundSyncType::PERIODIC,
+      /* events_fired= */ true);
+  histogram_tester_.ExpectBucketCount(
+      "BackgroundSync.WakeupTaskFiredEvents.Periodic", true, 1);
 }
 
 }  // namespace content

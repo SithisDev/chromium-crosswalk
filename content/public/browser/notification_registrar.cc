@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,11 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <ostream>
 
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check_op.h"
+#include "base/containers/contains.h"
+#include "base/memory/raw_ptr.h"
 #include "content/browser/notification_service_impl.h"
 
 namespace content {
@@ -17,7 +19,7 @@ namespace content {
 struct NotificationRegistrar::Record {
   bool operator==(const Record& other) const;
 
-  NotificationObserver* observer;
+  raw_ptr<NotificationObserver> observer;
   int type;
   NotificationSource source;
 };

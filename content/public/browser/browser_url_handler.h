@@ -1,9 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_PUBLIC_BROWSER_BROWSER_URL_HANDLER_H_
 #define CONTENT_PUBLIC_BROWSER_BROWSER_URL_HANDLER_H_
+
+#include <vector>
 
 #include "content/common/content_export.h"
 
@@ -33,20 +35,21 @@ class CONTENT_EXPORT BrowserURLHandler {
   static URLHandler null_handler();
 
   // Returns the singleton instance.
-  static  BrowserURLHandler* GetInstance();
+  static BrowserURLHandler* GetInstance();
 
   // RewriteURLIfNecessary gives all registered URLHandlers a shot at processing
   // the given URL, and modifies it in place.
-  // If the original URL needs to be adjusted if the modified URL is redirected,
-  // this function sets |reverse_on_redirect| to true.
   virtual void RewriteURLIfNecessary(GURL* url,
-                                     BrowserContext* browser_context,
-                                     bool* reverse_on_redirect) = 0;
+                                     BrowserContext* browser_context) = 0;
 
-  // Set the specified handler as a preliminary fixup phase to be done before
-  // rewriting.  This allows minor cleanup for the URL without having it affect
-  // the virtual URL.
-  virtual void SetFixupHandler(URLHandler handler) = 0;
+  // Returns the list of possible rewrites, in order of priority (i.e., index 0
+  // is the rewrite that would be used in RewriteURLIfNecessary()). Note that
+  // this only allows for one rewrite per registered URLHandler (and each gets a
+  // fresh copy of |url|), so it is not necessarily the complete set of all
+  // possible rewrites.
+  virtual std::vector<GURL> GetPossibleRewrites(
+      const GURL& url,
+      BrowserContext* browser_context) = 0;
 
   // Add the specified handler pair to the list of URL handlers.
   //

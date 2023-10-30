@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,10 @@
 #include <utility>
 
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
+#include "components/security_interstitials/content/settings_page_helper.h"
 #include "components/security_interstitials/core/metrics_helper.h"
-#include "content/public/browser/interstitial_page.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/referrer.h"
 
@@ -22,28 +23,22 @@ SecurityInterstitialControllerClient::SecurityInterstitialControllerClient(
     std::unique_ptr<MetricsHelper> metrics_helper,
     PrefService* prefs,
     const std::string& app_locale,
-    const GURL& default_safe_page)
+    const GURL& default_safe_page,
+    std::unique_ptr<SettingsPageHelper> settings_page_helper)
     : ControllerClient(std::move(metrics_helper)),
       web_contents_(web_contents),
-      interstitial_page_(nullptr),
       prefs_(prefs),
       app_locale_(app_locale),
-      default_safe_page_(default_safe_page) {}
+      default_safe_page_(default_safe_page),
+      settings_page_helper_(std::move(settings_page_helper)) {}
 
 SecurityInterstitialControllerClient::~SecurityInterstitialControllerClient() {}
 
-void SecurityInterstitialControllerClient::set_interstitial_page(
-    content::InterstitialPage* interstitial_page) {
-  interstitial_page_ = interstitial_page;
-}
-
-content::InterstitialPage*
-SecurityInterstitialControllerClient::interstitial_page() {
-  return interstitial_page_;
-}
-
 void SecurityInterstitialControllerClient::GoBack() {
-  interstitial_page_->DontProceed();
+  // TODO(crbug.com/1077074): This method is left so class can be non abstract
+  // since it is still instantiated in tests. This can be cleaned up by having
+  // tests use a subclass.
+  NOTREACHED();
 }
 
 bool SecurityInterstitialControllerClient::CanGoBack() {
@@ -64,7 +59,10 @@ void SecurityInterstitialControllerClient::GoBackAfterNavigationCommitted() {
 }
 
 void SecurityInterstitialControllerClient::Proceed() {
-  interstitial_page_->Proceed();
+  // TODO(crbug.com/1077074): This method is left so class can be non abstract
+  // since it is still instantiated in tests. This can be cleaned up by having
+  // tests use a subclass.
+  NOTREACHED();
 }
 
 void SecurityInterstitialControllerClient::Reload() {
@@ -85,6 +83,10 @@ void SecurityInterstitialControllerClient::OpenUrlInNewForegroundTab(
                                 WindowOpenDisposition::NEW_FOREGROUND_TAB,
                                 ui::PAGE_TRANSITION_LINK, false);
   web_contents_->OpenURL(params);
+}
+
+void SecurityInterstitialControllerClient::OpenEnhancedProtectionSettings() {
+  settings_page_helper_->OpenEnhancedProtectionSettings(web_contents_);
 }
 
 const std::string&
@@ -109,6 +111,16 @@ bool SecurityInterstitialControllerClient::CanLaunchDateAndTimeSettings() {
 
 void SecurityInterstitialControllerClient::LaunchDateAndTimeSettings() {
   NOTREACHED();
+}
+
+bool SecurityInterstitialControllerClient::CanGoBackBeforeNavigation() {
+  // If checking before navigating to the interstitial, back to safety is
+  // possible if there is already at least one prior entry that is not the
+  // initial entry. This preserves old behavior to when we return nullptr
+  // instead of the initial entry when no navigation has committed.
+  content::NavigationEntry* current_entry =
+      web_contents_->GetController().GetLastCommittedEntry();
+  return current_entry && !current_entry->IsInitialEntry();
 }
 
 }  // namespace security_interstitials

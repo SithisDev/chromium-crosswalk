@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,16 @@
 
 #include <stddef.h>
 
+#include "base/feature_list.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/strings/string_util.h"
+#include "content/public/common/content_features.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
 #include "content/renderer/pepper/renderer_ppapi_host_impl.h"
 #include "content/renderer/pepper/url_request_info_util.h"
 #include "content/renderer/pepper/url_response_info_util.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_request_headers.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/host/dispatch_host_message.h"
 #include "ppapi/host/host_message_context.h"
@@ -124,6 +129,24 @@ bool PepperURLLoaderHost::WillFollowRedirect(
     const WebURL& new_url,
     const WebURLResponse& redirect_response) {
   DCHECK(out_of_order_replies_.empty());
+  if (base::FeatureList::IsEnabled(
+          features::kPepperCrossOriginRedirectRestriction)) {
+    // Follows the Firefox approach
+    // (https://bugzilla.mozilla.org/show_bug.cgi?id=1436241) to disallow
+    // cross-origin 307/308 POST redirects for requests from plugins. But we try
+    // allowing only GET and HEAD methods rather than disallowing POST.
+    // See http://crbug.com/332023 for details.
+    int status = redirect_response.HttpStatusCode();
+    if ((status == 307 || status == 308)) {
+      std::string method = base::ToUpperASCII(request_data_.method);
+      // method can be an empty string for default behavior, GET.
+      if (!method.empty() && method != net::HttpRequestHeaders::kGetMethod &&
+          method != net::HttpRequestHeaders::kHeadMethod) {
+        return false;
+      }
+    }
+  }
+
   if (!request_data_.follow_redirects) {
     SaveResponse(redirect_response);
     SetDefersLoading(true);
@@ -161,7 +184,7 @@ void PepperURLLoaderHost::DidReceiveData(const char* data, int data_length) {
   UpdateProgress();
 
   auto message = std::make_unique<PpapiPluginMsg_URLLoader_SendData>();
-  message->WriteData(data, data_length);
+  message->WriteData(data, base::checked_cast<size_t>(data_length));
   SendUpdateToPlugin(std::move(message));
 }
 
@@ -251,11 +274,10 @@ int32_t PepperURLLoaderHost::InternalOnHostMsgOpen(
     return PP_ERROR_FAILED;
   }
 
-  web_request.SetRequestContext(blink::mojom::RequestContextType::PLUGIN);
-  web_request.SetPluginChildID(renderer_ppapi_host_->GetPluginChildId());
-
-  // Requests from plug-ins must skip service workers, see the comment in
-  // CreateWebURLRequest.
+  // Requests from plug-ins must be marked as PLUGIN, and must skip service
+  // workers, see the comment in CreateWebURLRequest.
+  DCHECK_EQ(blink::mojom::RequestContextType::PLUGIN,
+            web_request.GetRequestContext());
   DCHECK(web_request.GetSkipServiceWorker());
 
   WebAssociatedURLLoaderOptions options;
@@ -279,7 +301,7 @@ int32_t PepperURLLoaderHost::InternalOnHostMsgOpen(
     }
   }
 
-  loader_.reset(frame->CreateAssociatedURLLoader(options));
+  loader_ = frame->CreateAssociatedURLLoader(options);
   if (!loader_.get())
     return PP_ERROR_FAILED;
 
@@ -308,8 +330,7 @@ int32_t PepperURLLoaderHost::OnHostMsgClose(
 int32_t PepperURLLoaderHost::OnHostMsgGrantUniversalAccess(
     ppapi::host::HostMessageContext* context) {
   // Only plugins with permission can bypass same origin.
-  if (host()->permissions().HasPermission(ppapi::PERMISSION_PDF) ||
-      host()->permissions().HasPermission(ppapi::PERMISSION_FLASH)) {
+  if (host()->permissions().HasPermission(ppapi::PERMISSION_PDF)) {
     has_universal_access_ = true;
     return PP_OK;
   }
@@ -370,7 +391,7 @@ void PepperURLLoaderHost::Close() {
     // crbug.com/384197.
     WebLocalFrame* frame = GetFrame();
     if (frame)
-      frame->StopLoading();
+      frame->DeprecatedStopLoading();
   }
 }
 

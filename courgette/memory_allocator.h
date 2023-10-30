@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "base/compiler_specific.h"
 #include "base/files/file.h"
-#include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/process/memory.h"
+#include "build/build_config.h"
 
 #ifndef NDEBUG
 
@@ -85,7 +86,7 @@ struct UncheckedDeleter {
   inline void operator()(T* ptr) const { UncheckedDelete(ptr); }
 };
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 // Manages a read/write virtual mapping of a physical file.
 class FileMapping {
@@ -101,14 +102,14 @@ class FileMapping {
   bool valid() const;
 
   // Returns a writable pointer to the beginning of the memory mapped file.
-  // If Create has not been called successfully, return value is NULL.
+  // If Create has not been called successfully, return value is nullptr.
   void* view() const;
 
  protected:
   bool InitializeView(size_t size);
 
   HANDLE mapping_;
-  void* view_;
+  raw_ptr<void> view_;
 };
 
 // Manages a temporary file and a memory mapping of the temporary file.
@@ -142,7 +143,7 @@ class TempMapping {
 
 // A memory allocator class that allocates memory either from the heap or via a
 // temporary file.  The interface is STL inspired but the class does not throw
-// STL exceptions on allocation failure.  Instead it returns NULL.
+// STL exceptions on allocation failure.  Instead it returns nullptr.
 // A file allocation will be made if either the requested memory size exceeds
 // |kMaxHeapAllocationSize| or if a heap allocation fails.
 // Allocating the memory as a mapping of a temporary file solves the problem
@@ -214,10 +215,10 @@ class MemoryAllocator {
     count++;
 
     if (count > max_size())
-      return NULL;
+      return nullptr;
 
     size_type bytes = count * sizeof(T);
-    uint8_t* mem = NULL;
+    uint8_t* mem = nullptr;
 
     // First see if we can do this allocation on the heap.
     if (count < kMaxHeapAllocationSize &&
@@ -240,7 +241,7 @@ class MemoryAllocator {
     if (!mem && base::UncheckedMalloc(bytes, reinterpret_cast<void**>(&mem))) {
       mem[0] = static_cast<uint8_t>(HEAP_ALLOCATION);
     }
-    return mem ? reinterpret_cast<pointer>(mem + sizeof(T)) : NULL;
+    return mem ? reinterpret_cast<pointer>(mem + sizeof(T)) : nullptr;
   }
 
   pointer allocate(size_type count, const void* hint) {
@@ -261,7 +262,7 @@ class MemoryAllocator {
   }
 };
 
-#else  // OS_WIN
+#else  // BUILDFLAG(IS_WIN)
 
 // On Mac, Linux, we use a bare bones implementation that only does
 // heap allocations.
@@ -299,7 +300,7 @@ class MemoryAllocator {
 
   pointer allocate(size_type count) {
     if (count > max_size())
-      return NULL;
+      return nullptr;
     pointer result = nullptr;
     return base::UncheckedMalloc(count * sizeof(T),
                                  reinterpret_cast<void**>(&result))
@@ -325,7 +326,7 @@ class MemoryAllocator {
   }
 };
 
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
 
 // Manages a growable buffer.  The buffer allocation is done by the
 // MemoryAllocator class.  This class will not throw exceptions so call sites
@@ -339,8 +340,7 @@ class NoThrowBuffer {
   static const size_t kAllocationFailure = 0xffffffff;
   static const size_t kStartSize = sizeof(T) > 0x100 ? 1 : 0x100 / sizeof(T);
 
-  NoThrowBuffer() : buffer_(NULL), size_(0), alloc_size_(0) {
-  }
+  NoThrowBuffer() : buffer_(nullptr), size_(0), alloc_size_(0) {}
 
   ~NoThrowBuffer() {
     clear();
@@ -349,7 +349,7 @@ class NoThrowBuffer {
   void clear() {
     if (buffer_) {
       alloc_.deallocate(buffer_, alloc_size_);
-      buffer_ = NULL;
+      buffer_ = nullptr;
       size_ = 0;
       alloc_size_ = 0;
     }
@@ -359,7 +359,7 @@ class NoThrowBuffer {
     return size_ == 0;
   }
 
-  CheckBool reserve(size_t size) WARN_UNUSED_RESULT {
+  [[nodiscard]] CheckBool reserve(size_t size) {
     if (failed())
       return false;
 
@@ -385,7 +385,7 @@ class NoThrowBuffer {
     return !failed();
   }
 
-  CheckBool append(const T* data, size_t size) WARN_UNUSED_RESULT {
+  [[nodiscard]] CheckBool append(const T* data, size_t size) {
     if (failed())
       return false;
 
@@ -419,7 +419,7 @@ class NoThrowBuffer {
     return true;
   }
 
-  CheckBool resize(size_t size, const T& init_value) WARN_UNUSED_RESULT {
+  [[nodiscard]] CheckBool resize(size_t size, const T& init_value) {
     if (size > size_) {
       if (!reserve(size))
         return false;
@@ -435,9 +435,7 @@ class NoThrowBuffer {
     return true;
   }
 
-  CheckBool push_back(const T& item) WARN_UNUSED_RESULT {
-    return append(&item, 1);
-  }
+  [[nodiscard]] CheckBool push_back(const T& item) { return append(&item, 1); }
 
   const T& back() const {
     return buffer_[size_ - 1];
@@ -449,25 +447,25 @@ class NoThrowBuffer {
 
   const T* begin() const {
     if (!size_)
-      return NULL;
+      return nullptr;
     return buffer_;
   }
 
   T* begin() {
     if (!size_)
-      return NULL;
+      return nullptr;
     return buffer_;
   }
 
   const T* end() const {
     if (!size_)
-      return NULL;
+      return nullptr;
     return buffer_ + size_;
   }
 
   T* end() {
     if (!size_)
-      return NULL;
+      return nullptr;
     return buffer_ + size_;
   }
 
@@ -499,7 +497,7 @@ class NoThrowBuffer {
   }
 
  protected:
-  T* buffer_;
+  raw_ptr<T> buffer_;
   size_t size_;  // how much of the buffer we're using.
   size_t alloc_size_;  // how much space we have allocated.
   Allocator alloc_;

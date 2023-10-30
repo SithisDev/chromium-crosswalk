@@ -1,21 +1,22 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/unified_consent/url_keyed_data_collection_consent_helper.h"
 
+#include <map>
+#include <set>
+
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
+#include "base/observer_list.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_service_observer.h"
 #include "components/sync/driver/sync_service_utils.h"
-#include "components/unified_consent/feature.h"
 #include "components/unified_consent/pref_names.h"
-
-#include <map>
-#include <set>
 
 namespace unified_consent {
 
@@ -26,6 +27,12 @@ class PrefBasedUrlKeyedDataCollectionConsentHelper
  public:
   explicit PrefBasedUrlKeyedDataCollectionConsentHelper(
       PrefService* pref_service);
+
+  PrefBasedUrlKeyedDataCollectionConsentHelper(
+      const PrefBasedUrlKeyedDataCollectionConsentHelper&) = delete;
+  PrefBasedUrlKeyedDataCollectionConsentHelper& operator=(
+      const PrefBasedUrlKeyedDataCollectionConsentHelper&) = delete;
+
   ~PrefBasedUrlKeyedDataCollectionConsentHelper() override = default;
 
   // UrlKeyedDataCollectionConsentHelper:
@@ -33,10 +40,8 @@ class PrefBasedUrlKeyedDataCollectionConsentHelper
 
  private:
   void OnPrefChanged();
-  PrefService* pref_service_;  // weak (must outlive this)
+  raw_ptr<PrefService> pref_service_;  // weak (must outlive this)
   PrefChangeRegistrar pref_change_registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(PrefBasedUrlKeyedDataCollectionConsentHelper);
 };
 
 class SyncBasedUrlKeyedDataCollectionConsentHelper
@@ -46,6 +51,12 @@ class SyncBasedUrlKeyedDataCollectionConsentHelper
   SyncBasedUrlKeyedDataCollectionConsentHelper(
       syncer::SyncService* sync_service,
       std::set<syncer::ModelType> sync_data_types);
+
+  SyncBasedUrlKeyedDataCollectionConsentHelper(
+      const SyncBasedUrlKeyedDataCollectionConsentHelper&) = delete;
+  SyncBasedUrlKeyedDataCollectionConsentHelper& operator=(
+      const SyncBasedUrlKeyedDataCollectionConsentHelper&) = delete;
+
   ~SyncBasedUrlKeyedDataCollectionConsentHelper() override;
 
   // UrlKeyedDataCollectionConsentHelper:
@@ -58,10 +69,8 @@ class SyncBasedUrlKeyedDataCollectionConsentHelper
  private:
   void UpdateSyncDataTypeStates();
 
-  syncer::SyncService* sync_service_;
+  raw_ptr<syncer::SyncService> sync_service_;
   std::map<syncer::ModelType, syncer::UploadState> sync_data_type_states_;
-
-  DISALLOW_COPY_AND_ASSIGN(SyncBasedUrlKeyedDataCollectionConsentHelper);
 };
 
 PrefBasedUrlKeyedDataCollectionConsentHelper::
@@ -147,16 +156,9 @@ UrlKeyedDataCollectionConsentHelper::~UrlKeyedDataCollectionConsentHelper() =
 // static
 std::unique_ptr<UrlKeyedDataCollectionConsentHelper>
 UrlKeyedDataCollectionConsentHelper::NewAnonymizedDataCollectionConsentHelper(
-    PrefService* pref_service,
-    syncer::SyncService* sync_service) {
-  if (IsUnifiedConsentFeatureEnabled()) {
-    return std::make_unique<PrefBasedUrlKeyedDataCollectionConsentHelper>(
-        pref_service);
-  }
-
-  return std::make_unique<SyncBasedUrlKeyedDataCollectionConsentHelper>(
-      sync_service, std::set<syncer::ModelType>(
-                        {syncer::ModelType::HISTORY_DELETE_DIRECTIVES}));
+    PrefService* pref_service) {
+  return std::make_unique<PrefBasedUrlKeyedDataCollectionConsentHelper>(
+      pref_service);
 }
 
 // static

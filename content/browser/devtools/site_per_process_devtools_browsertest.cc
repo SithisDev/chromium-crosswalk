@@ -1,21 +1,23 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "content/browser/devtools/render_frame_devtools_agent_host.h"
-#include "content/browser/frame_host/frame_tree.h"
+#include "content/browser/renderer_host/frame_tree.h"
 #include "content/browser/site_per_process_browsertest.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_download_manager_delegate.h"
 #include "content/test/content_browser_test_utils_internal.h"
+#include "content/test/render_document_feature.h"
 #include "net/dns/mock_host_resolver.h"
 
 namespace content {
@@ -36,9 +38,8 @@ class TestClient: public DevToolsAgentHostClient {
 
   bool closed() { return closed_; }
 
-  void DispatchProtocolMessage(
-      DevToolsAgentHost* agent_host,
-      const std::string& message) override {
+  void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
+                               base::span<const uint8_t> message) override {
     if (waiting_for_reply_) {
       waiting_for_reply_ = false;
       base::RunLoop::QuitCurrentDeprecated();
@@ -59,24 +60,36 @@ class TestClient: public DevToolsAgentHostClient {
   bool waiting_for_reply_;
 };
 
+DevToolsAgentHost::List ExtractPageOrFrameTargets(
+    DevToolsAgentHost::List list) {
+  DevToolsAgentHost::List result;
+  for (auto& entry : list) {
+    if (entry->GetType() == DevToolsAgentHost::kTypePage ||
+        entry->GetType() == DevToolsAgentHost::kTypeFrame) {
+      result.push_back(std::move(entry));
+    }
+  }
+  return result;
+}
+
 // Fails on Android, http://crbug.com/464993.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #define MAYBE_CrossSiteIframeAgentHost DISABLED_CrossSiteIframeAgentHost
 #else
 #define MAYBE_CrossSiteIframeAgentHost CrossSiteIframeAgentHost
 #endif
-IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest,
+IN_PROC_BROWSER_TEST_P(SitePerProcessDevToolsBrowserTest,
                        MAYBE_CrossSiteIframeAgentHost) {
   DevToolsAgentHost::List list;
   GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
-  NavigateToURL(shell(), main_url);
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root =
-      static_cast<WebContentsImpl*>(shell()->web_contents())->
-          GetFrameTree()->root();
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetPrimaryFrameTree()
+                            .root();
 
-  list = DevToolsAgentHost::GetOrCreateAll();
+  list = ExtractPageOrFrameTargets(DevToolsAgentHost::GetOrCreateAll());
   EXPECT_EQ(1U, list.size());
   EXPECT_EQ(DevToolsAgentHost::kTypePage, list[0]->GetType());
   EXPECT_EQ(main_url.spec(), list[0]->GetURL().spec());
@@ -84,9 +97,9 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest,
   // Load same-site page into iframe.
   FrameTreeNode* child = root->child_at(0);
   GURL http_url(embedded_test_server()->GetURL("/title1.html"));
-  NavigateFrameToURL(child, http_url);
+  EXPECT_TRUE(NavigateToURLFromRenderer(child, http_url));
 
-  list = DevToolsAgentHost::GetOrCreateAll();
+  list = ExtractPageOrFrameTargets(DevToolsAgentHost::GetOrCreateAll());
   EXPECT_EQ(1U, list.size());
   EXPECT_EQ(DevToolsAgentHost::kTypePage, list[0]->GetType());
   EXPECT_EQ(main_url.spec(), list[0]->GetURL().spec());
@@ -96,9 +109,9 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest,
   GURL cross_site_url(embedded_test_server()->GetURL("/title2.html"));
   replace_host.SetHostStr("foo.com");
   cross_site_url = cross_site_url.ReplaceComponents(replace_host);
-  NavigateFrameToURL(root->child_at(0), cross_site_url);
+  EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), cross_site_url));
 
-  list = DevToolsAgentHost::GetOrCreateAll();
+  list = ExtractPageOrFrameTargets(DevToolsAgentHost::GetOrCreateAll());
   EXPECT_EQ(2U, list.size());
   EXPECT_EQ(DevToolsAgentHost::kTypePage, list[0]->GetType());
   EXPECT_EQ(main_url.spec(), list[0]->GetURL().spec());
@@ -117,16 +130,17 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest,
   parent_host->AttachClient(&parent_client);
 
   // Send message to parent and child frames and get result back.
-  char message[] = "{\"id\": 0, \"method\": \"incorrect.method\"}";
+  constexpr char kMsg[] = R"({"id":0,"method":"incorrect.method"})";
+  auto message = base::as_bytes(base::make_span(kMsg, strlen(kMsg)));
   child_host->DispatchProtocolMessage(&child_client, message);
   child_client.WaitForReply();
   parent_host->DispatchProtocolMessage(&parent_client, message);
   parent_client.WaitForReply();
 
   // Load back same-site page into iframe.
-  NavigateFrameToURL(root->child_at(0), http_url);
+  EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), http_url));
 
-  list = DevToolsAgentHost::GetOrCreateAll();
+  list = ExtractPageOrFrameTargets(DevToolsAgentHost::GetOrCreateAll());
   EXPECT_EQ(1U, list.size());
   EXPECT_EQ(DevToolsAgentHost::kTypePage, list[0]->GetType());
   EXPECT_EQ(main_url.spec(), list[0]->GetURL().spec());
@@ -138,17 +152,17 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest,
   parent_host = nullptr;
 }
 
-IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest, AgentHostForFrames) {
+IN_PROC_BROWSER_TEST_P(SitePerProcessDevToolsBrowserTest, AgentHostForFrames) {
   GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
-  NavigateToURL(shell(), main_url);
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   scoped_refptr<DevToolsAgentHost> page_agent =
       DevToolsAgentHost::GetOrCreateFor(shell()->web_contents());
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root =
-      static_cast<WebContentsImpl*>(shell()->web_contents())->
-          GetFrameTree()->root();
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetPrimaryFrameTree()
+                            .root();
 
   scoped_refptr<DevToolsAgentHost> main_frame_agent =
       RenderFrameDevToolsAgentHost::GetOrCreateFor(root);
@@ -157,7 +171,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest, AgentHostForFrames) {
   // Load same-site page into iframe.
   FrameTreeNode* child = root->child_at(0);
   GURL http_url(embedded_test_server()->GetURL("/title1.html"));
-  NavigateFrameToURL(child, http_url);
+  EXPECT_TRUE(NavigateToURLFromRenderer(child, http_url));
 
   scoped_refptr<DevToolsAgentHost> child_frame_agent =
       RenderFrameDevToolsAgentHost::GetOrCreateFor(child);
@@ -168,7 +182,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest, AgentHostForFrames) {
   GURL cross_site_url(embedded_test_server()->GetURL("/title2.html"));
   replace_host.SetHostStr("foo.com");
   cross_site_url = cross_site_url.ReplaceComponents(replace_host);
-  NavigateFrameToURL(root->child_at(0), cross_site_url);
+  EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), cross_site_url));
 
   child_frame_agent = RenderFrameDevToolsAgentHost::GetOrCreateFor(child);
   EXPECT_NE(page_agent.get(), child_frame_agent.get());
@@ -176,15 +190,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest, AgentHostForFrames) {
   EXPECT_NE(child_frame_agent->GetId(), page_agent->GetId());
 }
 
-IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest,
-    AgentHostForPageEqualsOneForMainFrame) {
+IN_PROC_BROWSER_TEST_P(SitePerProcessDevToolsBrowserTest,
+                       AgentHostForPageEqualsOneForMainFrame) {
   GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
-  NavigateToURL(shell(), main_url);
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root =
-      static_cast<WebContentsImpl*>(shell()->web_contents())->
-          GetFrameTree()->root();
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetPrimaryFrameTree()
+                            .root();
   FrameTreeNode* child = root->child_at(0);
 
   // Load cross-site page into iframe.
@@ -192,7 +206,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsBrowserTest,
   GURL cross_site_url(embedded_test_server()->GetURL("/title2.html"));
   replace_host.SetHostStr("foo.com");
   cross_site_url = cross_site_url.ReplaceComponents(replace_host);
-  NavigateFrameToURL(child, cross_site_url);
+  EXPECT_TRUE(NavigateToURLFromRenderer(child, cross_site_url));
 
   // First ask for child frame, then for main frame.
   scoped_refptr<DevToolsAgentHost> child_frame_agent =
@@ -217,8 +231,8 @@ class SitePerProcessDownloadDevToolsBrowserTest
   void SetUpOnMainThread() override {
     SitePerProcessBrowserTest::SetUpOnMainThread();
     ASSERT_TRUE(downloads_directory_.CreateUniqueTempDir());
-    DownloadManager* download_manager = BrowserContext::GetDownloadManager(
-        shell()->web_contents()->GetBrowserContext());
+    DownloadManager* download_manager =
+        shell()->web_contents()->GetBrowserContext()->GetDownloadManager();
     ShellDownloadManagerDelegate* download_delegate =
         static_cast<ShellDownloadManagerDelegate*>(
             download_manager->GetDelegate());
@@ -229,7 +243,7 @@ class SitePerProcessDownloadDevToolsBrowserTest
   base::ScopedTempDir downloads_directory_;
 };
 
-IN_PROC_BROWSER_TEST_F(SitePerProcessDownloadDevToolsBrowserTest,
+IN_PROC_BROWSER_TEST_P(SitePerProcessDownloadDevToolsBrowserTest,
                        NotCommittedNavigationDoesNotBlockAgent) {
   ASSERT_TRUE(
       NavigateToURL(shell(), embedded_test_server()->GetURL("/title1.html")));
@@ -237,7 +251,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDownloadDevToolsBrowserTest,
       DevToolsAgentHost::GetOrCreateFor(shell()->web_contents());
   TestClient client;
   agent->AttachClient(&client);
-  char message[] = "{\"id\": 0, \"method\": \"incorrect.method\"}";
+  constexpr char kMsg[] = R"({"id":0,"method":"incorrect.method"})";
+  auto message = base::as_bytes(base::make_span(kMsg, strlen(kMsg)));
   // Check that client is responsive.
   agent->DispatchProtocolMessage(&client, message);
   client.WaitForReply();
@@ -256,5 +271,12 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessDownloadDevToolsBrowserTest,
   client.WaitForReply();
   ASSERT_TRUE(agent->DetachClient(&client));
 }
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         SitePerProcessDevToolsBrowserTest,
+                         testing::ValuesIn(RenderDocumentFeatureLevelValues()));
+INSTANTIATE_TEST_SUITE_P(All,
+                         SitePerProcessDownloadDevToolsBrowserTest,
+                         testing::ValuesIn(RenderDocumentFeatureLevelValues()));
 
 }  // namespace content

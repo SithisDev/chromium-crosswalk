@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,7 @@ const char kAlwaysTrue[] = "alwaystrue";
 const char kNone[] = "none";
 }  // namespace reader_mode_heuristics
 
-namespace reader_mode_feedback {
-const char kOn[] = "on";
-const char kOff[] = "off";
-}  // namespace reader_mode_feedback
+const char kReaderModeDiscoverabilityParamName[] = "discoverability";
+const char kReaderModeOfferInSettings[] = "offer-in-settings";
 
 }  // namespace switches

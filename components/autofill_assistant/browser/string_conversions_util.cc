@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "base/i18n/char_iterator.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "third_party/icu/source/common/unicode/utf8.h"
 
@@ -15,10 +14,8 @@ namespace autofill_assistant {
 std::vector<UChar32> UTF8ToUnicode(const std::string& text) {
   std::vector<UChar32> codepoints;
   codepoints.reserve(text.length());  // upper bound
-  base::i18n::UTF8CharIterator iter(&text);
-  while (!iter.end()) {
+  for (base::i18n::UTF8CharIterator iter(text); !iter.end(); iter.Advance()) {
     codepoints.emplace_back(iter.get());
-    iter.Advance();
   }
   return codepoints;
 }
@@ -39,13 +36,13 @@ bool UnicodeToUTF8(const std::vector<UChar32>& source, std::string* target) {
 // |target|.
 bool AppendUnicodeToUTF8(const UChar32 source, std::string* target) {
   char bytes[4];
-  UBool error = FALSE;
+  UBool error = false;
   size_t offset = 0;
-  U8_APPEND(bytes, offset, base::size(bytes), source, error);
-  if (error == FALSE) {
+  U8_APPEND(bytes, offset, std::size(bytes), source, error);
+  if (error == false) {
     target->append(bytes, offset);
   }
-  return error == FALSE;
+  return !error;
 }
 
 }  // namespace autofill_assistant

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/result_codes.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -42,7 +43,7 @@ class ChildProcessSecurityPolicyInProcessBrowserTest
   }
 };
 
-#if !defined(NDEBUG) && defined(OS_MACOSX)
+#if !defined(NDEBUG) && BUILDFLAG(IS_MAC)
 IN_PROC_BROWSER_TEST_F(ChildProcessSecurityPolicyInProcessBrowserTest, DISABLED_NoLeak) {
 #else
 IN_PROC_BROWSER_TEST_F(ChildProcessSecurityPolicyInProcessBrowserTest, NoLeak) {
@@ -50,7 +51,7 @@ IN_PROC_BROWSER_TEST_F(ChildProcessSecurityPolicyInProcessBrowserTest, NoLeak) {
   GURL url = GetTestUrl("", "simple_page.html");
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
 
-  NavigateToURL(shell(), url);
+  EXPECT_TRUE(NavigateToURL(shell(), url));
   {
     base::AutoLock lock(policy->lock_);
     EXPECT_EQ(RenderProcessHostImpl::IsSpareProcessKeptAtAllTimes() ? 2u : 1u,
@@ -59,9 +60,10 @@ IN_PROC_BROWSER_TEST_F(ChildProcessSecurityPolicyInProcessBrowserTest, NoLeak) {
 
   WebContents* web_contents = shell()->web_contents();
   content::RenderProcessHostWatcher exit_observer(
-      web_contents->GetMainFrame()->GetProcess(),
+      web_contents->GetPrimaryMainFrame()->GetProcess(),
       content::RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  web_contents->GetMainFrame()->GetProcess()->Shutdown(RESULT_CODE_KILLED);
+  web_contents->GetPrimaryMainFrame()->GetProcess()->Shutdown(
+      RESULT_CODE_KILLED);
   exit_observer.Wait();
 
   web_contents->GetController().Reload(ReloadType::NORMAL, true);

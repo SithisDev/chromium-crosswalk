@@ -1,13 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_TEST_PPAPI_UNITTEST_H_
 #define CONTENT_TEST_PPAPI_UNITTEST_H_
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -18,6 +17,10 @@ class PluginModule;
 class PpapiUnittest : public testing::Test {
  public:
   PpapiUnittest();
+
+  PpapiUnittest(const PpapiUnittest&) = delete;
+  PpapiUnittest& operator=(const PpapiUnittest&) = delete;
+
   ~PpapiUnittest() override;
 
   void SetUp() override;
@@ -37,14 +40,12 @@ class PpapiUnittest : public testing::Test {
   void SetViewSize(int width, int height) const;
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
-  // Note: module must be declared right after |scoped_task_environment_| since
-  // we want it to get destroyed just before |scoped_task_environment_|.
+  // Note: module must be declared right after |task_environment_| since
+  // we want it to get destroyed just before |task_environment_|.
   scoped_refptr<PluginModule> module_;
   scoped_refptr<PepperPluginInstanceImpl> instance_;
-
-  DISALLOW_COPY_AND_ASSIGN(PpapiUnittest);
 };
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,12 @@
 namespace exo {
 namespace {
 using MimeUtilsTest = testing::Test;
+
+TEST_F(MimeUtilsTest, LegacyString) {
+  std::string mime_type("UTF8_STRING");
+  std::string expected("UTF-8");
+  EXPECT_EQ(GetCharset(mime_type), expected);
+}
 
 TEST_F(MimeUtilsTest, CharsetNotPresent) {
   std::string mime_type("text/plain");

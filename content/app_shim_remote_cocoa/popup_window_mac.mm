@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,16 @@
 @interface RenderWidgetPopupWindow : NSWindow {
   // The event tap that allows monitoring of all events, to properly close with
   // a click outside the bounds of the window.
-  id clickEventTap_;
+  id _clickEventTap;
 }
 @end
 
 @implementation RenderWidgetPopupWindow
 
-- (id)initWithContentRect:(NSRect)contentRect
-                styleMask:(NSUInteger)windowStyle
-                  backing:(NSBackingStoreType)bufferingType
-                    defer:(BOOL)deferCreation {
+- (instancetype)initWithContentRect:(NSRect)contentRect
+                          styleMask:(NSUInteger)windowStyle
+                            backing:(NSBackingStoreType)bufferingType
+                              defer:(BOOL)deferCreation {
   if (self = [super initWithContentRect:contentRect
                               styleMask:windowStyle
                                 backing:bufferingType
@@ -28,6 +28,11 @@
     [self startObservingClicks];
   }
   return self;
+}
+
+- (void)dealloc {
+  [self stopObservingClicks];
+  [super dealloc];
 }
 
 - (void)close {
@@ -43,14 +48,15 @@
 
 // Install the callback.
 - (void)startObservingClicks {
-  clickEventTap_ = [NSEvent
-      addLocalMonitorForEventsMatchingMask:NSAnyEventMask
+  _clickEventTap = [NSEvent
+      addLocalMonitorForEventsMatchingMask:NSEventMaskAny
                                    handler:^NSEvent*(NSEvent* event) {
                                      if ([event window] == self)
                                        return event;
                                      NSEventType eventType = [event type];
-                                     if (eventType == NSLeftMouseDown ||
-                                         eventType == NSRightMouseDown)
+                                     if (eventType ==
+                                             NSEventTypeLeftMouseDown ||
+                                         eventType == NSEventTypeRightMouseDown)
                                        [self close];
                                      return event;
                                    }];
@@ -65,11 +71,11 @@
 
 // Remove the callback.
 - (void)stopObservingClicks {
-  if (!clickEventTap_)
+  if (!_clickEventTap)
     return;
 
-  [NSEvent removeMonitor:clickEventTap_];
-  clickEventTap_ = nil;
+  [NSEvent removeMonitor:_clickEventTap];
+  _clickEventTap = nil;
 
   NSNotificationCenter* notificationCenter =
       [NSNotificationCenter defaultCenter];
@@ -90,9 +96,10 @@ PopupWindowMac::PopupWindowMac(const gfx::Rect& content_rect,
 
   popup_window_.reset([[RenderWidgetPopupWindow alloc]
       initWithContentRect:gfx::ScreenRectToNSRect(content_rect)
-                styleMask:NSBorderlessWindowMask
+                styleMask:NSWindowStyleMaskBorderless
                   backing:NSBackingStoreBuffered
                     defer:NO]);
+  [popup_window_ setHasShadow:YES];
   [popup_window_ setLevel:NSPopUpMenuWindowLevel];
   [popup_window_ setReleasedWhenClosed:NO];
   [popup_window_ makeKeyAndOrderFront:nil];

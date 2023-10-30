@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,24 +9,20 @@
 #include <queue>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "url/gurl.h"
-
-namespace content {
-class BrowserContext;
-}  // namespace content
 
 namespace network {
 struct ResourceRequest;
 class SimpleURLLoader;
-class SharedURLLoaderFactory;
 }  // namespace network
 
 namespace feedback {
@@ -39,20 +35,39 @@ class FeedbackReport;
 class FeedbackUploader : public KeyedService,
                          public base::SupportsWeakPtr<FeedbackUploader> {
  public:
+  // Some embedders want to delay the creation of the SharedURLLoaderFactory
+  // until it is required as the creation could be expensive. In that case,
+  // they can pass a callback that will be used to initialise the instance
+  // out of the object creation code path.
+  using SharedURLLoaderFactoryGetter =
+      base::OnceCallback<scoped_refptr<network::SharedURLLoaderFactory>()>;
+
   FeedbackUploader(
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      content::BrowserContext* context,
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+      bool is_off_the_record,
+      const base::FilePath& state_path,
+      SharedURLLoaderFactoryGetter shared_url_loader_factory_getter);
+  FeedbackUploader(
+      bool is_off_the_record,
+      const base::FilePath& state_path,
+      scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory);
+
+  FeedbackUploader(const FeedbackUploader&) = delete;
+  FeedbackUploader& operator=(const FeedbackUploader&) = delete;
+
   ~FeedbackUploader() override;
 
   static void SetMinimumRetryDelayForTesting(base::TimeDelta delay);
 
   // Queues a report for uploading.
-  void QueueReport(std::unique_ptr<std::string> data);
+  // |data|: The serialized userfeedback::ExtensionSubmit proto to send.
+  // |has_email|: True iff the user included their email address in the report.
+  // virtual for testing.
+  virtual void QueueReport(std::unique_ptr<std::string> data, bool has_email);
+
+  // Re-queues an existing report from disk for uploading.
+  void RequeueReport(scoped_refptr<FeedbackReport> report);
 
   bool QueueEmpty() const { return reports_queue_.empty(); }
-
-  content::BrowserContext* context() { return context_; }
 
   const base::FilePath& feedback_reports_path() const {
     return feedback_reports_path_;
@@ -97,6 +112,14 @@ class FeedbackUploader : public KeyedService,
                     const scoped_refptr<FeedbackReport>& b) const;
   };
 
+  // Internal constructor. Exactly one of |url_loader_factory_getter| and
+  // |url_loader_factory| can be non-null.
+  FeedbackUploader(
+      bool is_off_the_record,
+      const base::FilePath& state_path,
+      SharedURLLoaderFactoryGetter url_loader_factory_getter,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+
   // Called from DispatchReport() to give implementers a chance to add extra
   // headers to the upload request before it's sent.
   virtual void AppendExtraHeadersToUploadRequest(
@@ -113,14 +136,12 @@ class FeedbackUploader : public KeyedService,
   // Update our timer for uploading the next report.
   void UpdateUploadTimer();
 
-  void QueueReportWithDelay(std::unique_ptr<std::string> data,
-                            base::TimeDelta delay);
+  // Callback used to initialise |url_loader_factory_| lazily.
+  SharedURLLoaderFactoryGetter url_loader_factory_getter_;
 
-  // URLLoaderFactory used for network requests.
+  // URLLoaderFactory used for network requests. May be null initially if the
+  // creation is delayed (see |url_loader_factory_getter_|).
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
-
-  // Browser context this uploader was created for.
-  content::BrowserContext* context_;
 
   const base::FilePath feedback_reports_path_;
 
@@ -145,11 +166,12 @@ class FeedbackUploader : public KeyedService,
 
   // True when a report is currently being dispatched. Only a single report
   // at-a-time should be dispatched.
-  bool is_dispatching_;
+  bool is_dispatching_ = false;
+
+  // Whether the feedback is associated with off-the-record context.
+  const bool is_off_the_record_ = false;
 
   UrlLoaderList uploads_in_progress_;
-
-  DISALLOW_COPY_AND_ASSIGN(FeedbackUploader);
 };
 
 }  // namespace feedback

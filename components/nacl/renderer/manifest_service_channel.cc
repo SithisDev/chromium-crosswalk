@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "content/public/common/sandbox_init.h"
 #include "content/public/renderer/render_thread.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_platform_file.h"
@@ -22,10 +23,10 @@ namespace nacl {
 
 ManifestServiceChannel::ManifestServiceChannel(
     const IPC::ChannelHandle& handle,
-    const base::Callback<void(int32_t)>& connected_callback,
+    base::OnceCallback<void(int32_t)> connected_callback,
     std::unique_ptr<Delegate> delegate,
     base::WaitableEvent* waitable_event)
-    : connected_callback_(connected_callback),
+    : connected_callback_(std::move(connected_callback)),
       delegate_(std::move(delegate)),
       channel_(IPC::SyncChannel::Create(
           handle,
@@ -76,9 +77,8 @@ void ManifestServiceChannel::OnStartupInitializationComplete() {
 void ManifestServiceChannel::OnOpenResource(
     const std::string& key, IPC::Message* reply) {
   delegate_->OpenResource(
-      key,
-      base::Bind(&ManifestServiceChannel::DidOpenResource,
-                 weak_ptr_factory_.GetWeakPtr(), reply));
+      key, base::BindOnce(&ManifestServiceChannel::DidOpenResource,
+                          weak_ptr_factory_.GetWeakPtr(), reply));
 }
 
 void ManifestServiceChannel::DidOpenResource(IPC::Message* reply,

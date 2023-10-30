@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "base/process/process_handle.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "third_party/blink/public/mojom/mediastream/aec_dump.mojom.h"
 
@@ -22,9 +23,14 @@ namespace content {
 class AecDumpManagerImpl : public blink::mojom::AecDumpManager {
  public:
   AecDumpManagerImpl();
+
+  AecDumpManagerImpl(const AecDumpManagerImpl&) = delete;
+  AecDumpManagerImpl& operator=(const AecDumpManagerImpl&) = delete;
+
   ~AecDumpManagerImpl() override;
 
-  void AddRequest(mojo::InterfaceRequest<blink::mojom::AecDumpManager> request);
+  void AddReceiver(
+      mojo::PendingReceiver<blink::mojom::AecDumpManager> receiver);
 
   // Start generating AEC dumps using default settings.
   void AutoStart();
@@ -51,8 +57,6 @@ class AecDumpManagerImpl : public blink::mojom::AecDumpManager {
   mojo::ReceiverSet<blink::mojom::AecDumpManager> receiver_set_;
 
   base::WeakPtrFactory<AecDumpManagerImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(AecDumpManagerImpl);
 };
 
 }  // namespace content

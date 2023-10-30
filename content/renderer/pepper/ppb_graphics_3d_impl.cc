@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,25 +9,24 @@
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/gpu_stream_constants.h"
-#include "content/public/common/web_preferences.h"
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
-#include "content/renderer/pepper/plugin_instance_throttler_impl.h"
 #include "content/renderer/pepper/plugin_module.h"
 #include "content/renderer/render_thread_impl.h"
-#include "content/renderer/render_view_impl.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/ipc/client/command_buffer_proxy_impl.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "ppapi/c/ppp_graphics_3d.h"
 #include "ppapi/thunk/enter.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_document.h"
@@ -181,13 +180,13 @@ int32_t PPB_Graphics3D_Impl::DoSwapBuffers(const gpu::SyncToken& sync_token,
     bool is_overlay_candidate = use_image_chromium_;
     // TODO(reveman): Get texture target from browser process.
     uint32_t target = GL_TEXTURE_2D;
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
     if (use_image_chromium_)
       target = GL_TEXTURE_RECTANGLE_ARB;
 #endif
-    viz::TransferableResource resource = viz::TransferableResource::MakeGL(
+    viz::TransferableResource resource = viz::TransferableResource::MakeGpu(
         taken_front_buffer_, GL_LINEAR, target, sync_token, size,
-        is_overlay_candidate);
+        viz::RGBA_8888, is_overlay_candidate);
     HostGlobals::Get()
         ->GetInstance(pp_instance())
         ->CommitTransferableResource(resource);
@@ -217,15 +216,11 @@ bool PPB_Graphics3D_Impl::InitRaw(
   if (!render_frame)
     return false;
 
-  const WebPreferences& prefs = render_frame->GetWebkitPreferences();
+  const blink::web_pref::WebPreferences& prefs =
+      render_frame->GetBlinkPreferences();
 
   // 3D access might be disabled.
   if (!prefs.pepper_3d_enabled)
-    return false;
-
-  // Force SW rendering for keyframe extraction to avoid pixel reads from VRAM.
-  PluginInstanceThrottlerImpl* throttler = plugin_instance->throttler();
-  if (throttler && throttler->needs_representative_keyframe())
     return false;
 
   RenderThreadImpl* render_thread = RenderThreadImpl::current();
@@ -238,10 +233,10 @@ bool PPB_Graphics3D_Impl::InitRaw(
       render_thread->EstablishGpuChannelSync();
   if (!channel)
     return false;
-  // 3D access might be blacklisted.
+  // 3D access might be blocklisted.
   if (channel->gpu_feature_info()
           .status_values[gpu::GPU_FEATURE_TYPE_ACCELERATED_WEBGL] ==
-      gpu::kGpuFeatureStatusBlacklisted) {
+      gpu::kGpuFeatureStatusBlocklisted) {
     return false;
   }
 
@@ -252,8 +247,7 @@ bool PPB_Graphics3D_Impl::InitRaw(
   attrib_helper.context_type = gpu::CONTEXT_TYPE_OPENGLES2;
 
   gpu::CommandBufferProxyImpl* share_buffer = nullptr;
-  if (!plugin_instance->is_flash_plugin())
-    UMA_HISTOGRAM_BOOLEAN("Pepper.Graphics3DHasShareGroup", !!share_context);
+  UMA_HISTOGRAM_BOOLEAN("Pepper.Graphics3DHasShareGroup", !!share_context);
   if (share_context) {
     PPB_Graphics3D_Impl* share_graphics =
         static_cast<PPB_Graphics3D_Impl*>(share_context);
@@ -321,9 +315,6 @@ void PPB_Graphics3D_Impl::OnGpuControlLostContext() {
 void PPB_Graphics3D_Impl::OnGpuControlLostContextMaybeReentrant() {
   // No internal state to update on lost context.
 }
-
-void PPB_Graphics3D_Impl::OnGpuControlSwapBuffersCompleted(
-    const gpu::SwapBuffersCompleteParams& params) {}
 
 void PPB_Graphics3D_Impl::OnGpuControlReturnData(
     base::span<const uint8_t> data) {

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,10 @@ namespace chromecast {
 namespace media {
 
 MediaCapsObserverImpl::MediaCapsObserverImpl(
-    mojom::MediaCapsObserverPtr* proxy,
+    mojo::PendingRemote<mojom::MediaCapsObserver>* proxy,
     SupportedCodecProfileLevelsMemo* supported_profiles)
     : supported_profiles_(supported_profiles),
-      binding_(this, mojo::MakeRequest(proxy)) {}
+      receiver_(this, proxy->InitWithNewPipeAndPassReceiver()) {}
 
 MediaCapsObserverImpl::~MediaCapsObserverImpl() = default;
 

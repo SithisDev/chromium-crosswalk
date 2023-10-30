@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "content/shell/common/shell_switches.h"
 
 @interface ShellRenderWidgetHostViewMacDelegate () {
-  BOOL drop_events_;
+  BOOL _drop_events;
 }
 @end
 
@@ -18,12 +18,12 @@
   if ((self = [super init])) {
     // Throw out all native input events if we are running with web test
     // enabled.
-    drop_events_ = switches::IsRunWebTestsSwitchPresent();
+    _drop_events = switches::IsRunWebTestsSwitchPresent();
   }
   return self;
 }
 - (BOOL)handleEvent:(NSEvent*)event {
-  return drop_events_;
+  return _drop_events;
 }
 
 - (void)beginGestureWithEvent:(NSEvent*)event {

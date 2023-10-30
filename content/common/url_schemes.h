@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,22 +12,22 @@
 
 namespace content {
 
-// Note: ContentMainRunner calls this method internally as part of main
-// initialization, so this function generally should not be called by
-// embedders. It's exported to facilitate test harnesses that do not
-// utilize ContentMainRunner and that do not wish to lock the set
-// of standard schemes at init time.
-//
 // Called near the beginning of startup to register URL schemes that should be
-// parsed as "standard" or "referrer" with the src/url/ library. Optionally, the
-// sets of schemes are locked down. The embedder can add additional schemes by
-// overriding the ContentClient::AddAdditionalSchemes method.
-CONTENT_EXPORT void RegisterContentSchemes(bool lock_schemes);
+// parsed as "standard" or "referrer" with the src/url/ library, then locks the
+// sets of schemes down. The embedder can add additional schemes by
+// overriding the ContentClient::AddAdditionalSchemes method. Embedders can
+// optionally keep the scheme registry unlocked by setting should_lock_registry
+// to false, making it their responsibility to ensure that it is not accessed
+// in a way that would cause potential thread-safety issues.
+CONTENT_EXPORT void RegisterContentSchemes(bool should_lock_registry = true);
+
+// Re-initializes schemes for tests.
+CONTENT_EXPORT void ReRegisterContentSchemesForTests();
 
 // See comment in ContentClient::AddAdditionalSchemes for explanations. These
 // getters can be invoked on any thread.
-const std::vector<std::string>& GetSavableSchemes();
-const std::vector<std::string>& GetServiceWorkerSchemes();
+CONTENT_EXPORT const std::vector<std::string>& GetSavableSchemes();
+CONTENT_EXPORT const std::vector<std::string>& GetServiceWorkerSchemes();
 
 }  // namespace content
 

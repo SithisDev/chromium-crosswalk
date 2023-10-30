@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 #include "components/autofill_assistant/browser/actions/action.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
 #include "components/autofill_assistant/browser/client_status.h"
+#include "components/autofill_assistant/browser/wait_for_document_operation.h"
+#include "components/autofill_assistant/browser/wait_for_dom_operation.h"
 
 namespace autofill_assistant {
 
@@ -16,9 +18,36 @@ Action::Action(ActionDelegate* delegate, const ActionProto& proto)
 
 Action::~Action() {}
 
+Action::ActionData::ActionData() = default;
+Action::ActionData::~ActionData() = default;
+
+Action::ActionData& Action::GetActionData() {
+  return action_data_;
+}
+
 void Action::ProcessAction(ProcessActionCallback callback) {
+  action_stopwatch_.StartActiveTime();
+  delegate_->GetLogInfo().Clear();
   processed_action_proto_ = std::make_unique<ProcessedActionProto>();
-  InternalProcessAction(std::move(callback));
+  InternalProcessAction(base::BindOnce(&Action::RecordActionTimes,
+                                       weak_ptr_factory_.GetWeakPtr(),
+                                       std::move(callback)));
+}
+
+void Action::RecordActionTimes(
+    ProcessActionCallback callback,
+    std::unique_ptr<ProcessedActionProto> processed_action_proto) {
+  // Record times.
+  action_stopwatch_.Stop();
+
+  processed_action_proto->mutable_timing_stats()->set_delay_ms(
+      proto_.action_delay_ms());
+  processed_action_proto->mutable_timing_stats()->set_active_time_ms(
+      action_stopwatch_.TotalActiveTime().InMilliseconds());
+  processed_action_proto->mutable_timing_stats()->set_wait_time_ms(
+      action_stopwatch_.TotalWaitTime().InMilliseconds());
+
+  std::move(callback).Run(std::move(processed_action_proto));
 }
 
 void Action::UpdateProcessedAction(ProcessedActionStatusProto status_proto) {
@@ -29,6 +58,17 @@ void Action::UpdateProcessedAction(const ClientStatus& status) {
   // Safety check in case process action is run twice.
   *processed_action_proto_->mutable_action() = proto_;
   status.FillProto(processed_action_proto_.get());
+
+  auto& log_info = delegate_->GetLogInfo();
+  processed_action_proto_->mutable_status_details()->MergeFrom(log_info);
+}
+
+void Action::OnWaitForElementTimed(
+    base::OnceCallback<void(const ClientStatus&)> callback,
+    const ClientStatus& element_status,
+    base::TimeDelta wait_time) {
+  action_stopwatch_.TransferToWaitTime(wait_time);
+  std::move(callback).Run(element_status);
 }
 
 // static
@@ -53,12 +93,6 @@ std::ostream& operator<<(std::ostream& out,
   return out;
 #else
   switch (action_case) {
-    case ActionProto::ActionInfoCase::kClick:
-      out << "Click";
-      break;
-    case ActionProto::ActionInfoCase::kSetFormValue:
-      out << "KeyboardInput";
-      break;
     case ActionProto::ActionInfoCase::kSelectOption:
       out << "SelectOption";
       break;
@@ -71,8 +105,11 @@ std::ostream& operator<<(std::ostream& out,
     case ActionProto::ActionInfoCase::kTell:
       out << "Tell";
       break;
-    case ActionProto::ActionInfoCase::kFocusElement:
-      out << "FocusElement";
+    case ActionProto::ActionInfoCase::kUpdateClientSettings:
+      out << "UpdateClientSettings";
+      break;
+    case ActionProto::ActionInfoCase::kShowCast:
+      out << "ShowCast";
       break;
     case ActionProto::ActionInfoCase::kWaitForDom:
       out << "WaitForDom";
@@ -89,20 +126,14 @@ std::ostream& operator<<(std::ostream& out,
     case ActionProto::ActionInfoCase::kShowProgressBar:
       out << "ShowProgressBar";
       break;
-    case ActionProto::ActionInfoCase::kHighlightElement:
-      out << "HighlightElement";
-      break;
     case ActionProto::ActionInfoCase::kShowDetails:
       out << "ShowDetails";
-      break;
-    case ActionProto::ActionInfoCase::kReset:
-      out << "Reset";
       break;
     case ActionProto::ActionInfoCase::kStop:
       out << "Stop";
       break;
-    case ActionProto::ActionInfoCase::kGetPaymentInformation:
-      out << "GetPaymentInformation";
+    case ActionProto::ActionInfoCase::kCollectUserData:
+      out << "CollectUserData";
       break;
     case ActionProto::ActionInfoCase::kSetAttribute:
       out << "SetAttribute";
@@ -127,6 +158,141 @@ std::ostream& operator<<(std::ostream& out,
       break;
     case ActionProto::ActionInfoCase::kWaitForDocument:
       out << "WaitForDocument";
+      break;
+    case ActionProto::ActionInfoCase::kShowGenericUi:
+      out << "ShowGenericUi";
+      break;
+    case ActionProto::ActionInfoCase::kGeneratePasswordForFormField:
+      out << "GeneratePasswordForFormField";
+      break;
+    case ActionProto::kSaveGeneratedPassword:
+      out << "SaveGeneratedPassword";
+      break;
+    case ActionProto::ActionInfoCase::kConfigureUiState:
+      out << "ConfigureUiState";
+      break;
+    case ActionProto::ActionInfoCase::kPresaveGeneratedPassword:
+      out << "PresaveGeneratedPassword";
+      break;
+    case ActionProto::ActionInfoCase::kGetElementStatus:
+      out << "GetElementStatus";
+      break;
+    case ActionProto::ActionInfoCase::kScrollIntoView:
+      out << "ScrollIntoView";
+      break;
+    case ActionProto::ActionInfoCase::kWaitForDocumentToBecomeInteractive:
+      out << "WaitForDocumentToBecomeInteractive";
+      break;
+    case ActionProto::ActionInfoCase::kWaitForDocumentToBecomeComplete:
+      out << "WaitForDocumentToBecomeComplete";
+      break;
+    case ActionProto::ActionInfoCase::kSendClickEvent:
+      out << "SendClickEvent";
+      break;
+    case ActionProto::ActionInfoCase::kSendTapEvent:
+      out << "SendTapEvent";
+      break;
+    case ActionProto::ActionInfoCase::kJsClick:
+      out << "JsClick";
+      break;
+    case ActionProto::ActionInfoCase::kSendKeystrokeEvents:
+      out << "SendKeystrokeEvents";
+      break;
+    case ActionProto::ActionInfoCase::kSendChangeEvent:
+      out << "SendChangeEvent";
+      break;
+    case ActionProto::ActionInfoCase::kSetElementAttribute:
+      out << "SetElementAttribute";
+      break;
+    case ActionProto::ActionInfoCase::kSelectFieldValue:
+      out << "SelectFieldValue";
+      break;
+    case ActionProto::ActionInfoCase::kFocusField:
+      out << "FocusField";
+      break;
+    case ActionProto::ActionInfoCase::kWaitForElementToBecomeStable:
+      out << "WaitForElementToBecomeStable";
+      break;
+    case ActionProto::ActionInfoCase::kCheckElementIsOnTop:
+      out << "CheckElementIsOnTop";
+      break;
+    case ActionProto::ActionInfoCase::kReleaseElements:
+      out << "ReleaseElements";
+      break;
+    case ActionProto::ActionInfoCase::kDispatchJsEvent:
+      out << "DispatchJsEvent";
+      break;
+    case ActionProto::ActionInfoCase::kSendKeyEvent:
+      out << "SendKeyEvent";
+      break;
+    case ActionProto::ActionInfoCase::kSelectOptionElement:
+      out << "SelectOptionElement";
+      break;
+    case ActionProto::ActionInfoCase::kCheckElementTag:
+      out << "CheckElementTag";
+      break;
+    case ActionProto::ActionInfoCase::kCheckOptionElement:
+      out << "CheckOptionElement";
+      break;
+    case ActionProto::ActionInfoCase::kSetPersistentUi:
+      out << "SetPersistentUi";
+      break;
+    case ActionProto::ActionInfoCase::kClearPersistentUi:
+      out << "ClearPersistentUi";
+      break;
+    case ActionProto::ActionInfoCase::kScrollIntoViewIfNeeded:
+      out << "ScrollIntoViewIfNeeded";
+      break;
+    case ActionProto::ActionInfoCase::kScrollWindow:
+      out << "ScrollWindow";
+      break;
+    case ActionProto::ActionInfoCase::kScrollContainer:
+      out << "ScrollContainer";
+      break;
+    case ActionProto::ActionInfoCase::kSetTouchableArea:
+      out << "SetTouchableArea";
+      break;
+    case ActionProto::ActionInfoCase::kDeletePassword:
+      out << "DeletePassword";
+      break;
+    case ActionProto::ActionInfoCase::kEditPassword:
+      out << "EditPassword";
+      break;
+    case ActionProto::ActionInfoCase::kBlurField:
+      out << "BlurField";
+      break;
+    case ActionProto::ActionInfoCase::kResetPendingCredentials:
+      out << "ResetPendingCredentials";
+      break;
+    case ActionProto::ActionInfoCase::kSaveSubmittedPassword:
+      out << "SaveSubmittedPassword";
+      break;
+    case ActionProto::ActionInfoCase::kExecuteJs:
+      out << "ExecuteJs";
+      break;
+    case ActionProto::ActionInfoCase::kJsFlow:
+      out << "JsFlow";
+      break;
+    case ActionProto::ActionInfoCase::kExternalAction:
+      out << "ExternalAction";
+      break;
+    case ActionProto::ActionInfoCase::kRegisterPasswordResetRequest:
+      out << "RegisterPasswordResetRequest";
+      break;
+    case ActionProto::ActionInfoCase::kSetNativeValue:
+      out << "SetNativeValue";
+      break;
+    case ActionProto::ActionInfoCase::kSetNativeChecked:
+      out << "SetNativeChecked";
+      break;
+    case ActionProto::ActionInfoCase::kParseSingleTagXml:
+      out << "ParseSingleTagXml";
+      break;
+    case ActionProto::ActionInfoCase::kPromptQrCodeScan:
+      out << "PromptQrCodeScan";
+      break;
+    case ActionProto::ActionInfoCase::kReportProgress:
+      out << "ReportProgress";
       break;
     case ActionProto::ActionInfoCase::ACTION_INFO_NOT_SET:
       out << "ACTION_INFO_NOT_SET";

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
-#include "base/stl_util.h"
 #include "base/time/clock.h"
 #include "build/build_config.h"
 #include "components/ntp_snippets/category_rankers/click_based_category_ranker.h"
@@ -18,11 +17,11 @@ namespace ntp_snippets {
 namespace {
 // All platforms proxy for whether the simplified NTP is enabled.
 bool IsSimplifiedNtpEnabled() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return true;
 #else
   return false;
-#endif  // OS_ANDROID
+#endif  // BUILDFLAG(IS_ANDROID)
 }
 }  // namespace
 
@@ -72,12 +71,12 @@ const base::Feature kKeepPrefetchedContentSuggestions{
     "KeepPrefetchedContentSuggestions", base::FEATURE_ENABLED_BY_DEFAULT};
 
 const base::Feature kOptionalImagesEnabledFeature{
-    "NTPRemoteSuggestionsOptionalImages", base::FEATURE_DISABLED_BY_DEFAULT};
+    "NTPRemoteSuggestionsOptionalImages", base::FEATURE_ENABLED_BY_DEFAULT};
 
 std::vector<const base::Feature*> GetAllFeatures() {
   // Skip the last feature as it's a nullptr.
   return std::vector<const base::Feature*>(
-      kAllFeatures, kAllFeatures + base::size(kAllFeatures));
+      kAllFeatures, kAllFeatures + std::size(kAllFeatures));
 }
 
 // Default referrer for the content suggestions.
@@ -87,7 +86,7 @@ const char kDefaultReferrerUrl[] =
 // Provides ability to customize the referrer URL.
 // When specifying a referrer through a field trial, it must contain a path.
 // In case of default value above the path is empty, but it is specified.
-base::FeatureParam<std::string> kArticleSuggestionsReferrerURLParam{
+const base::FeatureParam<std::string> kArticleSuggestionsReferrerURLParam{
     &kArticleSuggestionsFeature, "referrer_url", kDefaultReferrerUrl};
 
 std::string GetContentSuggestionsReferrerURL() {

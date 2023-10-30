@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,13 +25,12 @@ class MockRemoteDescriptor : public RemoteDescriptor {
                  StatusCallback callback) override {}
   void Write(const std::vector<uint8_t>& value,
              StatusCallback callback) override {}
-  MOCK_CONST_METHOD0(descriptor, const bluetooth_v2_shlib::Gatt::Descriptor&());
   MOCK_CONST_METHOD0(uuid, const bluetooth_v2_shlib::Uuid());
-  MOCK_CONST_METHOD0(handle, uint16_t());
+  MOCK_CONST_METHOD0(handle, HandleId());
   MOCK_CONST_METHOD0(permissions, bluetooth_v2_shlib::Gatt::Permissions());
 
  private:
-  ~MockRemoteDescriptor();
+  ~MockRemoteDescriptor() override;
 };
 
 }  // namespace bluetooth

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,17 +12,18 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/presentation_screen_availability_listener.h"
 #include "content/public/browser/presentation_service_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/frame_navigate_params.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/presentation/presentation.mojom.h"
 #include "url/gurl.h"
 
@@ -59,18 +60,22 @@ class CONTENT_EXPORT PresentationServiceImpl
   static std::unique_ptr<PresentationServiceImpl> Create(
       RenderFrameHost* render_frame_host);
 
+  PresentationServiceImpl(const PresentationServiceImpl&) = delete;
+  PresentationServiceImpl& operator=(const PresentationServiceImpl&) = delete;
+
   ~PresentationServiceImpl() override;
 
-  // Creates a binding between this object and |request|. Note that a
-  // PresentationServiceImpl instance can be bound to multiple requests.
-  void Bind(blink::mojom::PresentationServiceRequest request);
+  // Creates a binding between this object and |receiver|. Note that a
+  // PresentationServiceImpl instance can be bound to multiple receivers.
+  void Bind(mojo::PendingReceiver<blink::mojom::PresentationService> receiver);
 
   // PresentationService implementation.
   void SetDefaultPresentationUrls(
       const std::vector<GURL>& presentation_urls) override;
-  void SetController(
-      blink::mojom::PresentationControllerPtr controller) override;
-  void SetReceiver(blink::mojom::PresentationReceiverPtr receiver) override;
+  void SetController(mojo::PendingRemote<blink::mojom::PresentationController>
+                         presentation_controller_remote) override;
+  void SetReceiver(mojo::PendingRemote<blink::mojom::PresentationReceiver>
+                       presentation_receiver_remote) override;
   void ListenForScreenAvailability(const GURL& url) override;
   void StopListeningForScreenAvailability(const GURL& url) override;
   void StartPresentation(const std::vector<GURL>& presentation_urls,
@@ -82,6 +87,9 @@ class CONTENT_EXPORT PresentationServiceImpl
                        const std::string& presentation_id) override;
   void Terminate(const GURL& presentation_url,
                  const std::string& presentation_id) override;
+
+  void SetControllerDelegateForTesting(
+      ControllerPresentationServiceDelegate* controller_delegate);
 
  private:
   friend class PresentationServiceImplTest;
@@ -101,6 +109,8 @@ class CONTENT_EXPORT PresentationServiceImpl
                            ReceiverPresentationServiceDelegate);
   FRIEND_TEST_ALL_PREFIXES(PresentationServiceImplTest,
                            ReceiverDelegateOnSubFrame);
+  FRIEND_TEST_ALL_PREFIXES(BackForwardCacheBrowserTest,
+                           PresentationConnectionClosed);
 
   // Maximum number of pending ReconnectPresentation requests at any given time.
   static const int kMaxQueuedRequests = 10;
@@ -123,7 +133,7 @@ class CONTENT_EXPORT PresentationServiceImpl
 
    private:
     const GURL availability_url_;
-    PresentationServiceImpl* const service_;
+    const raw_ptr<PresentationServiceImpl> service_;
   };
 
   // Ensures the provided NewPresentationCallback is invoked exactly once
@@ -131,6 +141,12 @@ class CONTENT_EXPORT PresentationServiceImpl
   class NewPresentationCallbackWrapper {
    public:
     explicit NewPresentationCallbackWrapper(NewPresentationCallback callback);
+
+    NewPresentationCallbackWrapper(const NewPresentationCallbackWrapper&) =
+        delete;
+    NewPresentationCallbackWrapper& operator=(
+        const NewPresentationCallbackWrapper&) = delete;
+
     ~NewPresentationCallbackWrapper();
 
     void Run(blink::mojom::PresentationConnectionResultPtr result,
@@ -138,8 +154,6 @@ class CONTENT_EXPORT PresentationServiceImpl
 
    private:
     NewPresentationCallback callback_;
-
-    DISALLOW_COPY_AND_ASSIGN(NewPresentationCallbackWrapper);
   };
 
   // Note: Use |PresentationServiceImpl::Create| instead. This constructor
@@ -208,8 +222,10 @@ class CONTENT_EXPORT PresentationServiceImpl
   // Calls |receiver_| to create a new PresentationConnection on receiver page.
   void OnReceiverConnectionAvailable(
       blink::mojom::PresentationInfoPtr presentation_info,
-      PresentationConnectionPtr controller_connection_ptr,
-      PresentationConnectionRequest receiver_connection_request);
+      mojo::PendingRemote<blink::mojom::PresentationConnection>
+          controller_connection_remote,
+      mojo::PendingReceiver<blink::mojom::PresentationConnection>
+          receiver_connection_receiver);
 
   // Associates a ReconnectPresentation |callback| with a unique request ID and
   // stores it in a map. Moves out |callback| object if |callback| is registered
@@ -235,23 +251,25 @@ class CONTENT_EXPORT PresentationServiceImpl
   PresentationServiceDelegate* GetPresentationServiceDelegate();
 
   // The RenderFrameHost associated with this object.
-  RenderFrameHost* const render_frame_host_;
+  const raw_ptr<RenderFrameHost> render_frame_host_;
 
   // Embedder-specific delegate for controller to forward Presentation requests
   // to. Must be nullptr if current page is receiver page or
   // embedder does not support Presentation API .
-  ControllerPresentationServiceDelegate* controller_delegate_;
+  raw_ptr<ControllerPresentationServiceDelegate> controller_delegate_;
 
   // Embedder-specific delegate for receiver to forward Presentation requests
   // to. Must be nullptr if current page is receiver page or
   // embedder does not support Presentation API.
-  ReceiverPresentationServiceDelegate* receiver_delegate_;
+  raw_ptr<ReceiverPresentationServiceDelegate> receiver_delegate_;
 
   // Pointer to the PresentationController implementation in the renderer.
-  blink::mojom::PresentationControllerPtr controller_;
+  mojo::Remote<blink::mojom::PresentationController>
+      presentation_controller_remote_;
 
   // Pointer to the PresentationReceiver implementation in the renderer.
-  blink::mojom::PresentationReceiverPtr receiver_;
+  mojo::Remote<blink::mojom::PresentationReceiver>
+      presentation_receiver_remote_;
 
   std::vector<GURL> default_presentation_urls_;
 
@@ -270,20 +288,18 @@ class CONTENT_EXPORT PresentationServiceImpl
   std::unordered_map<int, std::unique_ptr<NewPresentationCallbackWrapper>>
       pending_reconnect_presentation_cbs_;
 
-  // RAII binding of |this| to PresentationService request.
-  mojo::Binding<blink::mojom::PresentationService> binding_;
+  mojo::ReceiverSet<blink::mojom::PresentationService>
+      presentation_service_receivers_;
 
   // ID of the RenderFrameHost this object is associated with.
   int render_process_id_;
   int render_frame_id_;
 
-  // If current frame is top level frame.
-  bool is_main_frame_;
+  // If current frame is the outermost frame (not an iframe nor a fenced frame).
+  bool is_outermost_document_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<PresentationServiceImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PresentationServiceImpl);
 };
 
 }  // namespace content

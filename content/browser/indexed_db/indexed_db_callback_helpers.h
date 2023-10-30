@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,12 @@
 #define CONTENT_BROWSER_INDEXED_DB_INDEXED_DB_CALLBACK_HELPERS_H_
 
 #include <memory>
+#include <utility>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/indexed_db/indexed_db_transaction.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_database_exception.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-forward.h"
 #include "third_party/leveldatabase/env_chromium.h"
 
 // Since functions in this file use templates, they must be in a header file
@@ -33,12 +34,15 @@ template <typename R>
 R AbortCallback(base::WeakPtr<IndexedDBTransaction> transaction) {
   if (transaction)
     transaction->IncrementNumErrorsSent();
-  IndexedDBDatabaseError error(
-      blink::kWebIDBDatabaseExceptionIgnorableAbortError,
-      "Backend aborted error");
+  IndexedDBDatabaseError error(blink::mojom::IDBException::kIgnorableAbortError,
+                               "Backend aborted error");
   return R::Struct::NewErrorResult(
       blink::mojom::IDBError::New(error.code(), error.message()));
 }
+
+template <>
+mojo::PendingReceiver<blink::mojom::IDBDatabaseGetAllResultSink> AbortCallback(
+    base::WeakPtr<IndexedDBTransaction> transaction);
 
 template <typename R>
 base::OnceCallback<R()> CreateAbortCallback(
@@ -63,6 +67,10 @@ class CallbackAbortOnDestruct {
       : callback_(std::move(callback)),
         args_at_destroy_(CreateAbortCallback<R>(transaction)),
         called_(false) {}
+
+  CallbackAbortOnDestruct(const CallbackAbortOnDestruct&) = delete;
+  CallbackAbortOnDestruct& operator=(const CallbackAbortOnDestruct&) = delete;
+
   ~CallbackAbortOnDestruct() {
     if (called_)
       return;
@@ -79,7 +87,6 @@ class CallbackAbortOnDestruct {
   T callback_;
   base::OnceCallback<R()> args_at_destroy_;
   bool called_;
-  DISALLOW_COPY_AND_ASSIGN(CallbackAbortOnDestruct);
 };
 
 }  //  namespace indexed_db_callback_helpers_internal

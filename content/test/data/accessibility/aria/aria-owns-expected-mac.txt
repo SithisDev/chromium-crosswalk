@@ -1,14 +1,17 @@
 AXWebArea
-++AXList
+++AXList AXSubrole=AXContentList
 ++++AXGroup
-++++++AXListMarker AXValue='• '
+++++++AXListMarker AXValue='%E2%80%A2 '
 ++++++AXGroup
 ++++++++AXStaticText AXValue='One'
 ++++AXGroup
-++++++AXListMarker AXValue='• '
+++++++AXListMarker AXValue='%E2%80%A2'
 ++++++AXGroup
 ++++++++AXStaticText AXValue='Two'
+++++AXGroup
+++++++AXListMarker AXValue='%E2%80%A2 '
+++++++AXStaticText AXValue='Four'
 ++AXGroup
-++++AXListMarker AXValue='• '
+++++AXListMarker AXValue='%E2%80%A2'
 ++++AXGroup
 ++++++AXStaticText AXValue='Three'

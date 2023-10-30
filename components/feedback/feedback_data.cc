@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,14 +12,11 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "base/values.h"
 #include "components/feedback/feedback_util.h"
 #include "components/feedback/proto/extension.pb.h"
 #include "components/feedback/tracing_manager.h"
-#include "content/public/browser/browser_thread.h"
-
-using content::BrowserThread;
 
 namespace feedback {
 namespace {
@@ -34,52 +31,52 @@ const char kHistogramsAttachmentName[] = "histograms.zip";
 
 }  // namespace
 
-FeedbackData::FeedbackData(feedback::FeedbackUploader* uploader)
-    : uploader_(uploader),
-      context_(nullptr),
-      trace_id_(0),
-      pending_op_count_(1),
-      report_sent_(false),
-      from_assistant_(false),
-      assistant_debug_info_allowed_(false) {
-  CHECK(uploader_);
+FeedbackData::FeedbackData(base::WeakPtr<feedback::FeedbackUploader> uploader,
+                           TracingManager* tracing_manager)
+    : uploader_(std::move(uploader)) {
+  // If tracing is enabled, the tracing manager should have been created before
+  // sending the report. If it is created after this point, then the tracing is
+  // not relevant to this report.
+  if (tracing_manager) {
+    tracing_manager_ = base::AsWeakPtr(tracing_manager);
+  }
 }
 
-FeedbackData::~FeedbackData() {
-}
+FeedbackData::~FeedbackData() = default;
 
 void FeedbackData::OnFeedbackPageDataComplete() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   pending_op_count_--;
   SendReport();
 }
 
 void FeedbackData::CompressSystemInfo() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (trace_id_ != 0) {
-    TracingManager* manager = TracingManager::Get();
     ++pending_op_count_;
-    if (!manager ||
-        !manager->GetTraceData(
+    if (!tracing_manager_ ||
+        !tracing_manager_->GetTraceData(
             trace_id_,
-            base::Bind(&FeedbackData::OnGetTraceData, this, trace_id_))) {
+            base::BindOnce(&FeedbackData::OnGetTraceData, this, trace_id_))) {
       pending_op_count_--;
       trace_id_ = 0;
     }
   }
 
   ++pending_op_count_;
-  base::PostTaskWithTraitsAndReply(
+  base::ThreadPool::PostTaskAndReply(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&FeedbackData::CompressLogs, this),
       base::BindOnce(&FeedbackData::OnCompressComplete, this));
 }
 
 void FeedbackData::SetAndCompressHistograms(std::string histograms) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   ++pending_op_count_;
-  base::PostTaskWithTraitsAndReply(
+  base::ThreadPool::PostTaskAndReply(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&FeedbackData::CompressFile, this,
                      base::FilePath(kHistogramsFilename),
@@ -88,14 +85,14 @@ void FeedbackData::SetAndCompressHistograms(std::string histograms) {
 }
 
 void FeedbackData::AttachAndCompressFileData(std::string attached_filedata) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (attached_filedata.empty())
     return;
   ++pending_op_count_;
   base::FilePath attached_file =
-                  base::FilePath::FromUTF8Unsafe(attached_filename_);
-  base::PostTaskWithTraitsAndReply(
+      base::FilePath::FromUTF8Unsafe(attached_filename_);
+  base::ThreadPool::PostTaskAndReply(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&FeedbackData::CompressFile, this, attached_file,
                      std::string(), std::move(attached_filedata)),
@@ -105,10 +102,9 @@ void FeedbackData::AttachAndCompressFileData(std::string attached_filedata) {
 void FeedbackData::OnGetTraceData(
     int trace_id,
     scoped_refptr<base::RefCountedString> trace_data) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  TracingManager* manager = TracingManager::Get();
-  if (manager)
-    manager->DiscardTraceData(trace_id);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (tracing_manager_)
+    tracing_manager_->DiscardTraceData(trace_id);
 
   AddFile(kTraceFilename, std::move(trace_data->data()));
 
@@ -119,24 +115,26 @@ void FeedbackData::OnGetTraceData(
 }
 
 void FeedbackData::OnCompressComplete() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   --pending_op_count_;
   SendReport();
 }
 
 bool FeedbackData::IsDataComplete() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return pending_op_count_ == 0;
 }
 
 void FeedbackData::SendReport() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (IsDataComplete() && !report_sent_) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (uploader_ && IsDataComplete() && !report_sent_) {
     report_sent_ = true;
     userfeedback::ExtensionSubmit feedback_data;
     PrepareReport(&feedback_data);
     auto post_body = std::make_unique<std::string>();
     feedback_data.SerializeToString(post_body.get());
-    uploader_->QueueReport(std::move(post_body));
+    uploader_->QueueReport(std::move(post_body),
+                           /*has_email=*/!user_email().empty());
   }
 }
 

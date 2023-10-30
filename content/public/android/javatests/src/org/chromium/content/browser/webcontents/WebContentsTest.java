@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@ import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Parcel;
-import android.support.test.filters.SmallTest;
+
+import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Rule;
@@ -18,6 +19,8 @@ import org.junit.runner.RunWith;
 import org.chromium.base.process_launcher.ChildProcessConnection;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.ChildProcessLauncherHelperImpl;
 import org.chromium.content_public.browser.ChildProcessImportance;
@@ -31,6 +34,7 @@ import org.chromium.content_shell_apk.ChildProcessLauncherTestUtils;
 import org.chromium.content_shell_apk.ContentShellActivity;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 
@@ -43,7 +47,7 @@ public class WebContentsTest {
     @Rule
     public ContentShellActivityTestRule mActivityTestRule = new ContentShellActivityTestRule();
 
-    private static final String TEST_URL_1 = "about://blank";
+    private static final String TEST_URL_1 = "about:blank";
     private static final String TEST_URL_2 = UrlUtils.encodeHtmlDataUri("<html>1</html>");
     private static final String WEB_CONTENTS_KEY = "WEBCONTENTSKEY";
     private static final String PARCEL_STRING_TEST_DATA = "abcdefghijklmnopqrstuvwxyz";
@@ -53,12 +57,11 @@ public class WebContentsTest {
      * TODO(dtrainor): Test this using {@link WebContents#destroy()} instead once it is possible to
      * build a {@link WebContents} directly in the content/ layer.
      *
-     * @throws InterruptedException
      * @throws ExecutionException
      */
     @Test
     @SmallTest
-    public void testWebContentsIsDestroyedMethod() throws InterruptedException, ExecutionException {
+    public void testWebContentsIsDestroyedMethod() throws ExecutionException {
         final ContentShellActivity activity =
                 mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
@@ -79,11 +82,10 @@ public class WebContentsTest {
     /**
      * Check that it is possible to serialize and deserialize a WebContents object through Parcels.
      *
-     * @throws InterruptedException
      */
     @Test
     @SmallTest
-    public void testWebContentsSerializeDeserializeInParcel() throws InterruptedException {
+    public void testWebContentsSerializeDeserializeInParcel() {
         mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
         WebContents webContents = mActivityTestRule.getWebContents();
@@ -109,13 +111,12 @@ public class WebContentsTest {
 
     /**
      * Check that it is possible to serialize and deserialize a WebContents object through Bundles.
-     * @throws InterruptedException
      */
     @Test
     @SmallTest
     // TODO(crbug.com/635567): Fix this properly.
     @SuppressLint("ParcelClassLoader")
-    public void testWebContentsSerializeDeserializeInBundle() throws InterruptedException {
+    public void testWebContentsSerializeDeserializeInBundle() {
         mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
         WebContents webContents = mActivityTestRule.getWebContents();
@@ -151,13 +152,12 @@ public class WebContentsTest {
 
     /**
      * Check that it is possible to serialize and deserialize a WebContents object through Intents.
-     * @throws InterruptedException
      */
     @Test
     @SmallTest
     // TODO(crbug.com/635567): Fix this properly.
     @SuppressLint("ParcelClassLoader")
-    public void testWebContentsSerializeDeserializeInIntent() throws InterruptedException {
+    public void testWebContentsSerializeDeserializeInIntent() {
         mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
         WebContents webContents = mActivityTestRule.getWebContents();
@@ -194,12 +194,10 @@ public class WebContentsTest {
     /**
      * Check that attempting to deserialize a WebContents object from a Parcel from another process
      * instance fails.
-     * @throws InterruptedException
      */
     @Test
     @SmallTest
-    public void testWebContentsFailDeserializationAcrossProcessBoundary()
-            throws InterruptedException {
+    public void testWebContentsFailDeserializationAcrossProcessBoundary() {
         mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
         WebContents webContents = mActivityTestRule.getWebContents();
@@ -228,13 +226,11 @@ public class WebContentsTest {
     /**
      * Check that serializing a destroyed WebContents always results in a null deserialized
      * WebContents.
-     * @throws InterruptedException
      * @throws ExecutionException
      */
     @Test
     @SmallTest
-    public void testSerializingADestroyedWebContentsDoesNotDeserialize()
-            throws InterruptedException, ExecutionException {
+    public void testSerializingADestroyedWebContentsDoesNotDeserialize() throws ExecutionException {
         ContentShellActivity activity = mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
         WebContents webContents = activity.getActiveWebContents();
@@ -264,13 +260,12 @@ public class WebContentsTest {
     /**
      * Check that destroying a WebContents after serializing it always results in a null
      * deserialized WebContents.
-     * @throws InterruptedException
      * @throws ExecutionException
      */
     @Test
     @SmallTest
     public void testDestroyingAWebContentsAfterSerializingDoesNotDeserialize()
-            throws InterruptedException, ExecutionException {
+            throws ExecutionException {
         ContentShellActivity activity = mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
         WebContents webContents = activity.getActiveWebContents();
@@ -301,11 +296,10 @@ public class WebContentsTest {
     /**
      * Check that failing a WebContents deserialization doesn't corrupt subsequent data in the
      * Parcel.
-     * @throws InterruptedException
      */
     @Test
     @SmallTest
-    public void testFailedDeserializationDoesntCorruptParcel() throws InterruptedException {
+    public void testFailedDeserializationDoesntCorruptParcel() {
         mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
         WebContents webContents = mActivityTestRule.getWebContents();
@@ -342,11 +336,10 @@ public class WebContentsTest {
      * Check that the main frame associated with the WebContents is not null
      * and corresponds with the test URL.
      *
-     * @throws InterruptedException
      */
     @Test
     @SmallTest
-    public void testWebContentsMainFrame() throws InterruptedException {
+    public void testWebContentsMainFrame() {
         final ContentShellActivity activity =
                 mActivityTestRule.launchContentShellWithUrl(TEST_URL_2);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
@@ -360,13 +353,31 @@ public class WebContentsTest {
                 Assert.assertNotNull(frameHost);
 
                 Assert.assertEquals("RenderFrameHost has incorrect last committed URL", TEST_URL_2,
-                        frameHost.getLastCommittedURL());
+                        frameHost.getLastCommittedURL().getSpec());
 
                 WebContents associatedWebContents =
                         WebContentsStatics.fromRenderFrameHost(frameHost);
                 Assert.assertEquals("RenderFrameHost associated with different WebContents",
                         webContents, associatedWebContents);
             }
+        });
+    }
+
+    @Test
+    @SmallTest
+    public void testWebContentsGetAllRenderFrameHosts() {
+        String testUrl = UrlUtils.encodeHtmlDataUri("<html><body>"
+                + "   <iframe srcdoc='<body>frame1</body>'></iframe>"
+                + "   <iframe srcdoc='<body>frame2</body>'></iframe>"
+                + "</body></html>");
+
+        final ContentShellActivity activity = mActivityTestRule.launchContentShellWithUrl(testUrl);
+        mActivityTestRule.waitForActiveShellToBeDoneLoading();
+        final WebContentsImpl webContents = ((WebContentsImpl) activity.getActiveWebContents());
+
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            List<RenderFrameHost> frames = webContents.getAllRenderFrameHosts();
+            Assert.assertEquals(3, frames.size());
         });
     }
 
@@ -387,6 +398,10 @@ public class WebContentsTest {
 
     @Test
     @SmallTest
+    // This test may run with --site-per-process, which also enables a feature to maintain a
+    // spare renderer process. The test expects only one renderer process and may
+    // incorrectly check its assertions on the spare process instead, so disable it.
+    @CommandLineFlags.Add({"disable-features=SpareRendererForSitePerProcess"})
     public void testChildProcessImportance() {
         final ContentShellActivity activity =
                 mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
@@ -396,17 +411,24 @@ public class WebContentsTest {
         TestThreadUtils.runOnUiThreadBlocking(() -> webContents.onHide());
 
         final ChildProcessConnection connection = getSandboxedChildProcessConnection();
-        ChildProcessLauncherTestUtils.runOnLauncherThreadBlocking(
-                () -> Assert.assertFalse(connection.isModerateBindingBound()));
+        // Need to poll here because there is an intentional delay for removing binding.
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            return ChildProcessLauncherTestUtils.runOnLauncherAndGetResult(
+                    () -> !connection.isVisibleBindingBound());
+        }, "Failed to remove moderate binding");
 
         TestThreadUtils.runOnUiThreadBlocking(
                 () -> webContents.setImportance(ChildProcessImportance.MODERATE));
         ChildProcessLauncherTestUtils.runOnLauncherThreadBlocking(
-                () -> Assert.assertTrue(connection.isModerateBindingBound()));
+                () -> Assert.assertTrue(connection.isVisibleBindingBound()));
     }
 
     @Test
     @SmallTest
+    // This test may run with --site-per-process, which also enables a feature to maintain a
+    // spare renderer process. The test expects only one renderer process and may
+    // incorrectly check its assertions on the spare process instead, so disable it.
+    @CommandLineFlags.Add({"disable-features=SpareRendererForSitePerProcess"})
     public void testVisibilityControlsBinding() {
         final ContentShellActivity activity =
                 mActivityTestRule.launchContentShellWithUrl(TEST_URL_1);
@@ -418,8 +440,11 @@ public class WebContentsTest {
                 () -> Assert.assertTrue(connection.isStrongBindingBound()));
 
         TestThreadUtils.runOnUiThreadBlocking(() -> webContents.onHide());
-        ChildProcessLauncherTestUtils.runOnLauncherThreadBlocking(
-                () -> Assert.assertFalse(connection.isStrongBindingBound()));
+        CriteriaHelper.pollInstrumentationThread(
+                ()
+                        -> ChildProcessLauncherTestUtils.runOnLauncherAndGetResult(
+                                () -> !connection.isStrongBindingBound()),
+                "Failed to remove strong binding");
 
         TestThreadUtils.runOnUiThreadBlocking(() -> webContents.onShow());
         ChildProcessLauncherTestUtils.runOnLauncherThreadBlocking(
@@ -429,7 +454,7 @@ public class WebContentsTest {
     private boolean isWebContentsDestroyed(final WebContents webContents) {
         return TestThreadUtils.runOnUiThreadBlockingNoException(new Callable<Boolean>() {
             @Override
-            public Boolean call() throws Exception {
+            public Boolean call() {
                 return webContents.isDestroyed();
             }
         });

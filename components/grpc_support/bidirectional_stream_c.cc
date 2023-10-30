@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,11 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/grpc_support/bidirectional_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -30,7 +30,7 @@
 #include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
 #include "net/ssl/ssl_info.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_header_block.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/http2_header_block.h"
 #include "net/url_request/url_request_context.h"
 #include "url/gurl.h"
 
@@ -38,27 +38,45 @@ namespace {
 
 class HeadersArray : public bidirectional_stream_header_array {
  public:
-  explicit HeadersArray(const spdy::SpdyHeaderBlock& header_block);
+  explicit HeadersArray(const spdy::Http2HeaderBlock& header_block);
+
+  HeadersArray(const HeadersArray&) = delete;
+  HeadersArray& operator=(const HeadersArray&) = delete;
+
   ~HeadersArray();
 
  private:
   base::StringPairs headers_strings_;
-  DISALLOW_COPY_AND_ASSIGN(HeadersArray);
 };
 
-HeadersArray::HeadersArray(const spdy::SpdyHeaderBlock& header_block)
+HeadersArray::HeadersArray(const spdy::Http2HeaderBlock& header_block)
     : headers_strings_(header_block.size()) {
-  // Count and headers are inherited from parent structure.
-  count = capacity = header_block.size();
+  // Split coalesced headers by '\0' and copy them into |header_strings_|.
+  for (const auto& it : header_block) {
+    auto value = std::string(it.second);
+    size_t start = 0;
+    size_t end = 0;
+    do {
+      end = value.find('\0', start);
+      std::string split_value;
+      if (end != value.npos) {
+        split_value = value.substr(start, end - start);
+      } else {
+        split_value = value.substr(start);
+      }
+      // |headers_strings_| is initialized to the size of header_block, but
+      // split headers might take up more space.
+      headers_strings_.push_back(
+          std::make_pair(std::string(it.first), split_value));
+      start = end + 1;
+    } while (end != value.npos);
+  }
+  count = capacity = headers_strings_.size();
   headers = new bidirectional_stream_header[count];
   size_t i = 0;
-  // Copy headers into |headers_strings_| because string pieces are not
-  // '\0'-terminated.
-  for (const auto& it : header_block) {
-    headers_strings_[i].first = it.first.as_string();
-    headers_strings_[i].second = it.second.as_string();
-    headers[i].key = headers_strings_[i].first.c_str();
-    headers[i].value = headers_strings_[i].second.c_str();
+  for (const auto& it : headers_strings_) {
+    headers[i].key = it.first.c_str();
+    headers[i].value = it.second.c_str();
     ++i;
   }
 }
@@ -78,14 +96,15 @@ class BidirectionalStreamAdapter
 
   void OnStreamReady() override;
 
-  void OnHeadersReceived(const spdy::SpdyHeaderBlock& headers_block,
+  void OnHeadersReceived(const spdy::Http2HeaderBlock& headers_block,
                          const char* negotiated_protocol) override;
 
   void OnDataRead(char* data, int size) override;
 
   void OnDataSent(const char* data) override;
 
-  void OnTrailersReceived(const spdy::SpdyHeaderBlock& trailers_block) override;
+  void OnTrailersReceived(
+      const spdy::Http2HeaderBlock& trailers_block) override;
 
   void OnSucceeded() override;
 
@@ -104,11 +123,11 @@ class BidirectionalStreamAdapter
   void DestroyOnNetworkThread();
 
   // None of these objects are owned by |this|.
-  net::URLRequestContextGetter* request_context_getter_;
-  grpc_support::BidirectionalStream* bidirectional_stream_;
+  raw_ptr<net::URLRequestContextGetter> request_context_getter_;
+  raw_ptr<grpc_support::BidirectionalStream> bidirectional_stream_;
   // C side
   std::unique_ptr<bidirectional_stream> c_stream_;
-  bidirectional_stream_callback* c_callback_;
+  raw_ptr<bidirectional_stream_callback> c_callback_;
 };
 
 BidirectionalStreamAdapter::BidirectionalStreamAdapter(
@@ -134,7 +153,7 @@ void BidirectionalStreamAdapter::OnStreamReady() {
 }
 
 void BidirectionalStreamAdapter::OnHeadersReceived(
-    const spdy::SpdyHeaderBlock& headers_block,
+    const spdy::Http2HeaderBlock& headers_block,
     const char* negotiated_protocol) {
   DCHECK(c_callback_->on_response_headers_received);
   HeadersArray response_headers(headers_block);
@@ -153,7 +172,7 @@ void BidirectionalStreamAdapter::OnDataSent(const char* data) {
 }
 
 void BidirectionalStreamAdapter::OnTrailersReceived(
-    const spdy::SpdyHeaderBlock& trailers_block) {
+    const spdy::Http2HeaderBlock& trailers_block) {
   DCHECK(c_callback_->on_response_trailers_received);
   HeadersArray response_trailers(trailers_block);
   c_callback_->on_response_trailers_received(c_stream(), &response_trailers);

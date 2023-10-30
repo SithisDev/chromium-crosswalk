@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,77 +9,29 @@
 
 #include "base/files/file_util.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_feature_list.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_constants.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 
 namespace content {
 
-// Test that the Less comparison function is implemented properly to uniquely
-// identify storage partitions used as keys in a std::map.
-TEST(StoragePartitionConfigTest, OperatorLess) {
-  StoragePartitionImplMap::StoragePartitionConfig c1(
-      std::string(), std::string(), false);
-  StoragePartitionImplMap::StoragePartitionConfig c2(
-      std::string(), std::string(), false);
-  StoragePartitionImplMap::StoragePartitionConfig c3(
-      std::string(), std::string(), true);
-  StoragePartitionImplMap::StoragePartitionConfig c4("a", std::string(), true);
-  StoragePartitionImplMap::StoragePartitionConfig c5("b", std::string(), true);
-  StoragePartitionImplMap::StoragePartitionConfig c6(
-      std::string(), "abc", false);
-  StoragePartitionImplMap::StoragePartitionConfig c7(
-      std::string(), "abc", true);
-  StoragePartitionImplMap::StoragePartitionConfig c8("a", "abc", false);
-  StoragePartitionImplMap::StoragePartitionConfig c9("a", "abc", true);
-
-  StoragePartitionImplMap::StoragePartitionConfigLess less;
-
-  // Let's ensure basic comparison works.
-  EXPECT_TRUE(less(c1, c3));
-  EXPECT_TRUE(less(c1, c4));
-  EXPECT_TRUE(less(c3, c4));
-  EXPECT_TRUE(less(c4, c5));
-  EXPECT_TRUE(less(c4, c8));
-  EXPECT_TRUE(less(c6, c4));
-  EXPECT_TRUE(less(c6, c7));
-  EXPECT_TRUE(less(c8, c9));
-
-  // Now, ensure antisymmetry for each pair we've tested.
-  EXPECT_FALSE(less(c3, c1));
-  EXPECT_FALSE(less(c4, c1));
-  EXPECT_FALSE(less(c4, c3));
-  EXPECT_FALSE(less(c5, c4));
-  EXPECT_FALSE(less(c8, c4));
-  EXPECT_FALSE(less(c4, c6));
-  EXPECT_FALSE(less(c7, c6));
-  EXPECT_FALSE(less(c9, c8));
-
-  // Check for irreflexivity.
-  EXPECT_FALSE(less(c1, c1));
-
-  // Check for transitivity.
-  EXPECT_TRUE(less(c1, c4));
-
-  // Let's enforce that two identical elements obey strict weak ordering.
-  EXPECT_TRUE(!less(c1, c2) && !less(c2, c1));
-}
-
 TEST(StoragePartitionImplMapTest, GarbageCollect) {
-  TestBrowserThreadBundle thread_bundle;
+  BrowserTaskEnvironment task_environment;
   TestBrowserContext browser_context;
   StoragePartitionImplMap storage_partition_impl_map(&browser_context);
 
-  std::unique_ptr<std::unordered_set<base::FilePath>> active_paths(
-      new std::unordered_set<base::FilePath>);
+  std::unordered_set<base::FilePath> active_paths;
 
   base::FilePath active_path = browser_context.GetPath().Append(
       StoragePartitionImplMap::GetStoragePartitionPath(
           "active", std::string()));
   ASSERT_TRUE(base::CreateDirectory(active_path));
-  active_paths->insert(active_path);
+  active_paths.insert(active_path);
 
   base::FilePath inactive_path = browser_context.GetPath().Append(
       StoragePartitionImplMap::GetStoragePartitionPath(
@@ -94,6 +46,80 @@ TEST(StoragePartitionImplMapTest, GarbageCollect) {
 
   EXPECT_TRUE(base::PathExists(active_path));
   EXPECT_FALSE(base::PathExists(inactive_path));
+}
+
+TEST(StoragePartitionImplMapTest, AppCacheCleanup) {
+  BrowserTaskEnvironment task_environment;
+  TestBrowserContext browser_context;
+  base::FilePath appcache_path;
+
+  const auto kOnDiskConfig = content::StoragePartitionConfig::Create(
+      &browser_context, "foo", /*partition_name=*/"", /*in_memory=*/false);
+
+  {
+    // Creating the partition in the map also does the deletion, so
+    // create it once, so we can find out what path the partition
+    // with this name is.
+    StoragePartitionImplMap map(&browser_context);
+
+    auto* partition = map.Get(kOnDiskConfig, true);
+    appcache_path = partition->GetPath().Append(kAppCacheDirname);
+
+    task_environment.RunUntilIdle();
+  }
+
+  // Create an AppCache directory that would have existed.
+  EXPECT_FALSE(base::PathExists(appcache_path));
+  EXPECT_TRUE(base::CreateDirectory(appcache_path));
+
+  {
+    StoragePartitionImplMap map(&browser_context);
+    auto* partition = map.Get(kOnDiskConfig, true);
+
+    ASSERT_EQ(appcache_path, partition->GetPath().Append(kAppCacheDirname));
+
+    task_environment.RunUntilIdle();
+
+    // Verify that creating this partition deletes any AppCache directory it may
+    // have had.
+    EXPECT_FALSE(base::PathExists(appcache_path));
+  }
+}
+
+TEST(StoragePartitionImplMapTest, Dispose) {
+  BrowserTaskEnvironment task_environment;
+  TestBrowserContext browser_context;
+  StoragePartitionImplMap map(&browser_context);
+
+  // Start with no partitions.
+  ASSERT_EQ(map.size(), 0u);
+
+  // Create 1 in-memory partition.
+  const auto kInMemoryConfig = content::StoragePartitionConfig::Create(
+      &browser_context, "foo", /*partition_name=*/"", /*in_memory=*/true);
+  auto* partition = map.Get(kInMemoryConfig, /*can_create=*/true);
+  ASSERT_TRUE(partition);
+
+  // Dispose the in-memory partition.
+  map.DisposeInMemory(partition);
+  EXPECT_EQ(map.size(), 0u);
+
+  // No op to dispose the already disposed partition.
+  map.DisposeInMemory(partition);
+  EXPECT_EQ(map.size(), 0u);
+
+  // No op to dispose nullptr.
+  map.DisposeInMemory(nullptr);
+  EXPECT_EQ(map.size(), 0u);
+
+#if !BUILDFLAG(IS_ANDROID) && DCHECK_IS_ON()
+  // Death test for non-android and when DCHECK is on.
+  // Disposing an on-disk storage partition is not supported.
+  const auto kOnDiskConfig = content::StoragePartitionConfig::Create(
+      &browser_context, "foo", /*partition_name=*/"", /*in_memory=*/false);
+  auto* on_disk_partition = map.Get(kOnDiskConfig, /*can_create=*/true);
+  EXPECT_DEATH_IF_SUPPORTED(map.DisposeInMemory(on_disk_partition), "");
+#endif
 }
 
 }  // namespace content

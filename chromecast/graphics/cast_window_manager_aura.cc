@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,28 +6,32 @@
 
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
+#include "chromecast/base/cast_features.h"
+#include "chromecast/chromecast_buildflags.h"
 #include "chromecast/graphics/cast_focus_client_aura.h"
 #include "chromecast/graphics/cast_touch_activity_observer.h"
 #include "chromecast/graphics/cast_touch_event_gate.h"
+#include "chromecast/graphics/cast_window_manager.h"
+#include "chromecast/graphics/cast_window_tree_host_aura.h"
 #include "chromecast/graphics/gestures/cast_system_gesture_event_handler.h"
 #include "chromecast/graphics/gestures/side_swipe_detector.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/focus_change_observer.h"
-#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/layout_manager.h"
-#include "ui/aura/null_window_targeter.h"
 #include "ui/aura/window.h"
-#include "ui/aura/window_tree_host_platform.h"
 #include "ui/base/ime/init/input_method_factory.h"
 #include "ui/base/ime/input_method.h"
+#include "ui/compositor/compositor.h"
 #include "ui/display/display.h"
+#include "ui/display/display_transform.h"
 #include "ui/display/screen.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/platform_window/platform_window_init_properties.h"
+#include "ui/touch_selection/touch_selection_menu_runner.h"
 #include "ui/wm/core/default_screen_position_client.h"
 
-#if defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA)
 #include "ui/platform_window/fuchsia/initialize_presenter_api_view.h"
 #endif
 
@@ -35,32 +39,9 @@ namespace chromecast {
 namespace {
 
 gfx::Transform GetPrimaryDisplayRotationTransform() {
-  // NB: Using gfx::Transform::Rotate() introduces very small errors here
-  // which are later exacerbated by use of gfx::EnclosingRect() in
-  // WindowTreeHost::GetTransformedRootWindowBoundsInPixels().
-  const gfx::Transform rotate_90(0.f, -1.f, 0.f, 0.f,  //
-                                 1.f, 0.f, 0.f, 0.f,   //
-                                 0.f, 0.f, 1.f, 0.f,   //
-                                 0.f, 0.f, 0.f, 1.f);
-  const gfx::Transform rotate_180 = rotate_90 * rotate_90;
-  const gfx::Transform rotate_270 = rotate_180 * rotate_90;
-
-  gfx::Transform translation;
-  display::Display display(display::Screen::GetScreen()->GetPrimaryDisplay());
-  switch (display.rotation()) {
-    case display::Display::ROTATE_0:
-      return translation;
-    case display::Display::ROTATE_90:
-      translation.Translate(display.bounds().height(), 0);
-      return translation * rotate_90;
-    case display::Display::ROTATE_180:
-      translation.Translate(display.bounds().width(),
-                            display.bounds().height());
-      return translation * rotate_180;
-    case display::Display::ROTATE_270:
-      translation.Translate(0, display.bounds().width());
-      return translation * rotate_270;
-  }
+  display::Display display = display::Screen::GetScreen()->GetPrimaryDisplay();
+  return display::CreateRotationTransform(display.rotation(),
+                                          gfx::SizeF(display.size()));
 }
 
 gfx::Rect GetPrimaryDisplayHostBounds() {
@@ -80,39 +61,15 @@ gfx::Rect GetPrimaryDisplayHostBounds() {
   }
 }
 
-}  // namespace
-
-CastWindowTreeHost::CastWindowTreeHost(
-    bool enable_input,
-    ui::PlatformWindowInitProperties properties)
-    : WindowTreeHostPlatform(std::move(properties)),
-      enable_input_(enable_input) {
-  if (!enable_input)
-    window()->SetEventTargeter(std::make_unique<aura::NullWindowTargeter>());
-}
-
-CastWindowTreeHost::~CastWindowTreeHost() {}
-
-void CastWindowTreeHost::DispatchEvent(ui::Event* event) {
-  if (!enable_input_) {
-    return;
-  }
-
-  WindowTreeHostPlatform::DispatchEvent(event);
-}
-
-gfx::Rect CastWindowTreeHost::GetTransformedRootWindowBoundsInPixels(
-    const gfx::Size& host_size_in_pixels) const {
-  gfx::RectF new_bounds(WindowTreeHost::GetTransformedRootWindowBoundsInPixels(
-      host_size_in_pixels));
-  new_bounds.set_origin(gfx::PointF());
-  return gfx::ToEnclosingRect(new_bounds);
-}
-
 // A layout manager owned by the root window.
 class CastLayoutManager : public aura::LayoutManager {
  public:
-  CastLayoutManager();
+  CastLayoutManager(CastWindowManagerAura* window_manager,
+                    aura::Window* parent);
+
+  CastLayoutManager(const CastLayoutManager&) = delete;
+  CastLayoutManager& operator=(const CastLayoutManager&) = delete;
+
   ~CastLayoutManager() override;
 
  private:
@@ -126,10 +83,20 @@ class CastLayoutManager : public aura::LayoutManager {
   void SetChildBounds(aura::Window* child,
                       const gfx::Rect& requested_bounds) override;
 
-  DISALLOW_COPY_AND_ASSIGN(CastLayoutManager);
+  // Reorder child windows of the root window tree to reflect changes in layout.
+  void ReorderChildWindows(aura::Window* changed_window);
+
+  CastWindowManagerAura* const window_manager_;
+  aura::Window* const parent_;
 };
 
-CastLayoutManager::CastLayoutManager() {}
+CastLayoutManager::CastLayoutManager(CastWindowManagerAura* window_manager,
+                                     aura::Window* parent)
+    : window_manager_(window_manager), parent_(parent) {
+  DCHECK(window_manager_);
+  DCHECK(parent_);
+}
+
 CastLayoutManager::~CastLayoutManager() {}
 
 void CastLayoutManager::OnWindowResized() {
@@ -137,21 +104,25 @@ void CastLayoutManager::OnWindowResized() {
 }
 
 void CastLayoutManager::OnWindowAddedToLayout(aura::Window* child) {
-  // Invoked when a window is added to the window tree host.
+  ReorderChildWindows(child);
 }
 
-void CastLayoutManager::OnWillRemoveWindowFromLayout(aura::Window* child) {
-  // Invoked when the root window of the window tree host will be removed.
-}
+void CastLayoutManager::OnWillRemoveWindowFromLayout(aura::Window* child) {}
 
 void CastLayoutManager::OnWindowRemovedFromLayout(aura::Window* child) {
-  // Invoked when the root window of the window tree host has been removed.
+  ReorderChildWindows(child);
 }
 
 void CastLayoutManager::OnChildWindowVisibilityChanged(aura::Window* child,
                                                        bool visible) {
-  aura::Window* parent = child->parent();
-  if (!visible || !parent->IsRootWindow()) {
+  ReorderChildWindows(child);
+}
+
+void CastLayoutManager::ReorderChildWindows(aura::Window* changed_window) {
+  // Only update the window order if the child's parent matches the parent
+  // window for this layout. If the child has no parent, then that means it
+  // was removed from the layout and we should update the window ordering.
+  if (changed_window->parent() && changed_window->parent() != parent_) {
     return;
   }
 
@@ -162,29 +133,41 @@ void CastLayoutManager::OnChildWindowVisibilityChanged(aura::Window* child,
   // logic will execute infrequently.
 
   // Determine z-order relative to existing windows.
-  aura::Window::Windows windows = parent->children();
+  aura::Window::Windows windows = parent_->children();
   std::stable_sort(windows.begin(), windows.end(),
-                   [child](aura::Window* lhs, aura::Window* rhs) {
-                     // Promote |child| to the top of the stack of windows with
-                     // the same ID.
-                     if (lhs->id() == rhs->id() && rhs == child)
+                   [changed_window](aura::Window* lhs, aura::Window* rhs) {
+                     // Promote |changed_window| to the top of the stack of
+                     // windows with the same ID.
+                     if (lhs->GetId() == rhs->GetId() && rhs == changed_window)
                        return true;
 
-                     return lhs->id() < rhs->id();
+                     return lhs->GetId() < rhs->GetId();
                    });
 
+  std::vector<CastWindowManager::WindowId> visible_window_order;
   for (size_t i = 0; i < windows.size(); ++i) {
-    if (i == 0)
-      parent->StackChildAtBottom(windows[i]);
-    else
-      parent->StackChildAbove(windows[i], windows[i - 1]);
+    if (windows[i]->IsVisible()) {
+      // static_cast is safe since the window ID value is originally derived
+      // from CastWindowManager::WindowId.
+      visible_window_order.push_back(
+          static_cast<CastWindowManager::WindowId>(windows[i]->GetId()));
+    }
+    if (i == 0) {
+      parent_->StackChildAtBottom(windows[i]);
+    } else {
+      parent_->StackChildAbove(windows[i], windows[i - 1]);
+    }
   }
+
+  window_manager_->OnWindowOrderChanged(visible_window_order);
 }
 
 void CastLayoutManager::SetChildBounds(aura::Window* child,
                                        const gfx::Rect& requested_bounds) {
   SetChildBoundsDirect(child, requested_bounds);
 }
+
+}  // namespace
 
 CastWindowManagerAura::CastWindowManagerAura(bool enable_input)
     : enable_input_(enable_input) {}
@@ -204,7 +187,7 @@ void CastWindowManagerAura::Setup() {
   gfx::Rect host_bounds = GetPrimaryDisplayHostBounds();
   ui::PlatformWindowInitProperties properties(host_bounds);
 
-#if defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_FUCHSIA)
   // When using Scenic Ozone platform we need to supply a view_token to the
   // window. This is not necessary when using the headless ozone platform.
   if (ui::OzonePlatform::GetInstance()
@@ -216,28 +199,24 @@ void CastWindowManagerAura::Setup() {
 
   LOG(INFO) << "Starting window manager, bounds: " << host_bounds.ToString();
   CHECK(aura::Env::GetInstance());
-  window_tree_host_ = std::make_unique<CastWindowTreeHost>(
+  window_tree_host_ = std::make_unique<CastWindowTreeHostAura>(
       enable_input_, std::move(properties));
   window_tree_host_->InitHost();
-  window_tree_host_->window()->SetLayoutManager(new CastLayoutManager());
+  aura::Window* root_window = window_tree_host_->window();
+  root_window->SetLayoutManager(new CastLayoutManager(this, root_window));
   window_tree_host_->SetRootTransform(GetPrimaryDisplayRotationTransform());
 
   // Allow seeing through to the hardware video plane:
   window_tree_host_->compositor()->SetBackgroundColor(SK_ColorTRANSPARENT);
 
   focus_client_ = std::make_unique<CastFocusClientAura>();
-  aura::client::SetFocusClient(window_tree_host_->window(),
-                               focus_client_.get());
-  wm::SetActivationClient(window_tree_host_->window(), focus_client_.get());
-  aura::client::SetWindowParentingClient(window_tree_host_->window(), this);
-  capture_client_.reset(
-      new aura::client::DefaultCaptureClient(window_tree_host_->window()));
+  aura::client::SetFocusClient(root_window, focus_client_.get());
+  wm::SetActivationClient(root_window, focus_client_.get());
+  aura::client::SetWindowParentingClient(root_window, this);
+  capture_client_.reset(new aura::client::DefaultCaptureClient(root_window));
 
-  screen_position_client_ = std::make_unique<wm::DefaultScreenPositionClient>();
-
-  aura::Window* root_window = window_tree_host_->window()->GetRootWindow();
-  aura::client::SetScreenPositionClient(root_window,
-                                        screen_position_client_.get());
+  screen_position_client_ =
+      std::make_unique<wm::DefaultScreenPositionClient>(root_window);
 
   window_tree_host_->Show();
 
@@ -249,11 +228,29 @@ void CastWindowManagerAura::Setup() {
   system_gesture_event_handler_ =
       std::make_unique<CastSystemGestureEventHandler>(
           system_gesture_dispatcher_.get(), root_window);
+  // TODO(rdaum): Remove side swipe detection when all services requiring it
+  // have been rewritten.
   side_swipe_detector_ = std::make_unique<SideSwipeDetector>(
       system_gesture_dispatcher_.get(), root_window);
+
+#if BUILDFLAG(IS_CAST_AUDIO_ONLY)
+  window_tree_host_->compositor()->SetDisplayVSyncParameters(
+      base::TimeTicks(), base::Milliseconds(250));
+#endif
+
+  // Chromecast devices do not support cut/copy/paste.
+  DCHECK(!ui::TouchSelectionMenuRunner::GetInstance());
 }
 
-CastWindowTreeHost* CastWindowManagerAura::window_tree_host() const {
+void CastWindowManagerAura::OnWindowOrderChanged(
+    std::vector<WindowId> window_order) {
+  window_order_.swap(window_order);
+  for (auto& observer : observer_list_) {
+    observer.WindowOrderChanged();
+  }
+}
+
+CastWindowTreeHostAura* CastWindowManagerAura::window_tree_host() const {
   DCHECK(window_tree_host_);
   return window_tree_host_.get();
 }
@@ -267,15 +264,19 @@ void CastWindowManagerAura::TearDown() {
   capture_client_.reset();
   aura::client::SetWindowParentingClient(window_tree_host_->window(), nullptr);
   wm::SetActivationClient(window_tree_host_->window(), nullptr);
+  screen_position_client_.reset();
   aura::client::SetFocusClient(window_tree_host_->window(), nullptr);
   focus_client_.reset();
   system_gesture_event_handler_.reset();
   window_tree_host_.reset();
 }
 
-void CastWindowManagerAura::SetWindowId(gfx::NativeView window,
-                                        WindowId window_id) {
-  window->set_id(window_id);
+void CastWindowManagerAura::SetZOrder(gfx::NativeView window,
+                                      mojom::ZOrder z_order) {
+  // Use aura::Window ID to maintain z-order. When the window's visibility
+  // changes, we stack sibling windows based on this ID. Windows with higher
+  // IDs are stacked on top.
+  window->SetId(static_cast<int>(z_order));
 }
 
 void CastWindowManagerAura::InjectEvent(ui::Event* event) {
@@ -285,9 +286,22 @@ void CastWindowManagerAura::InjectEvent(ui::Event* event) {
   window_tree_host_->DispatchEvent(event);
 }
 
+void CastWindowManagerAura::AddObserver(Observer* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void CastWindowManagerAura::RemoveObserver(Observer* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
 gfx::NativeView CastWindowManagerAura::GetRootWindow() {
   Setup();
   return window_tree_host_->window();
+}
+
+std::vector<CastWindowManager::WindowId>
+CastWindowManagerAura::GetWindowOrder() {
+  return window_order_;
 }
 
 aura::Window* CastWindowManagerAura::GetDefaultParent(aura::Window* window,
@@ -297,7 +311,7 @@ aura::Window* CastWindowManagerAura::GetDefaultParent(aura::Window* window,
 }
 
 void CastWindowManagerAura::AddWindow(gfx::NativeView child) {
-  LOG(INFO) << "Adding window: " << child->id() << ": " << child->GetName();
+  LOG(INFO) << "Adding window: " << child->GetId() << ": " << child->GetName();
   Setup();
 
   DCHECK(child);

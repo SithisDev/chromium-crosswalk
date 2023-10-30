@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 
 #include <objbase.h>
 
-#include "base/macros.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/win/windows_version.h"
+#include "content/browser/renderer_host/direct_manipulation_test_helper_win.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/base/win/window_event_target.h"
@@ -29,7 +28,18 @@ class MockDirectManipulationViewport
  public:
   MockDirectManipulationViewport() {}
 
+  MockDirectManipulationViewport(const MockDirectManipulationViewport&) =
+      delete;
+  MockDirectManipulationViewport& operator=(
+      const MockDirectManipulationViewport&) = delete;
+
   ~MockDirectManipulationViewport() override {}
+
+  bool WasZoomToRectCalled() {
+    bool called = zoom_to_rect_called_;
+    zoom_to_rect_called_ = false;
+    return called;
+  }
 
   HRESULT STDMETHODCALLTYPE Enable() override { return S_OK; }
 
@@ -75,6 +85,7 @@ class MockDirectManipulationViewport
                                        _In_ const float right,
                                        _In_ const float bottom,
                                        _In_ BOOL animate) override {
+    zoom_to_rect_called_ = true;
     return S_OK;
   }
 
@@ -161,81 +172,7 @@ class MockDirectManipulationViewport
   HRESULT STDMETHODCALLTYPE Abandon() override { return S_OK; }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockDirectManipulationViewport);
-};
-
-class MockDirectManipulationContent
-    : public Microsoft::WRL::RuntimeClass<
-          Microsoft::WRL::RuntimeClassFlags<
-              Microsoft::WRL::RuntimeClassType::ClassicCom>,
-          Microsoft::WRL::Implements<
-              Microsoft::WRL::RuntimeClassFlags<
-                  Microsoft::WRL::RuntimeClassType::ClassicCom>,
-              Microsoft::WRL::FtmBase,
-              IDirectManipulationContent>> {
- public:
-  MockDirectManipulationContent() {}
-
-  ~MockDirectManipulationContent() override {}
-
-  void SetContentTransform(float scale, float scroll_x, float scroll_y) {
-    for (int i = 0; i < 6; ++i)
-      transforms_[i] = 0;
-    transforms_[0] = scale;
-    transforms_[4] = scroll_x;
-    transforms_[5] = scroll_y;
-  }
-
-  HRESULT STDMETHODCALLTYPE
-  GetContentTransform(_Out_writes_(point_count) float* transforms,
-                      _In_ DWORD point_count) override {
-    for (int i = 0; i < 6; ++i)
-      transforms[i] = transforms_[i];
-    return S_OK;
-  }
-
-  // Other Overrides
-  HRESULT STDMETHODCALLTYPE GetContentRect(_Out_ RECT* contentSize) override {
-    return S_OK;
-  }
-
-  HRESULT STDMETHODCALLTYPE
-  SetContentRect(_In_ const RECT* contentSize) override {
-    return S_OK;
-  }
-
-  HRESULT STDMETHODCALLTYPE GetViewport(_In_ REFIID riid,
-                                        _COM_Outptr_ void** object) override {
-    return S_OK;
-  }
-
-  HRESULT STDMETHODCALLTYPE GetTag(_In_ REFIID riid,
-                                   _COM_Outptr_opt_ void** object,
-                                   _Out_opt_ UINT32* id) override {
-    return S_OK;
-  }
-
-  HRESULT STDMETHODCALLTYPE SetTag(_In_opt_ IUnknown* object,
-                                   _In_ UINT32 id) override {
-    return S_OK;
-  }
-
-  HRESULT STDMETHODCALLTYPE
-  GetOutputTransform(_Out_writes_(point_count) float* matrix,
-                     _In_ DWORD point_count) override {
-    return S_OK;
-  }
-
-  HRESULT STDMETHODCALLTYPE
-  SyncContentTransform(_In_reads_(point_count) const float* matrix,
-                       _In_ DWORD point_count) override {
-    return S_OK;
-  }
-
- private:
-  float transforms_[6];
-
-  DISALLOW_COPY_AND_ASSIGN(MockDirectManipulationContent);
+  bool zoom_to_rect_called_ = false;
 };
 
 enum class EventGesture {
@@ -267,6 +204,9 @@ struct Event {
 class MockWindowEventTarget : public ui::WindowEventTarget {
  public:
   MockWindowEventTarget() {}
+
+  MockWindowEventTarget(const MockWindowEventTarget&) = delete;
+  MockWindowEventTarget& operator=(const MockWindowEventTarget&) = delete;
 
   ~MockWindowEventTarget() override {}
 
@@ -302,7 +242,7 @@ class MockWindowEventTarget : public ui::WindowEventTarget {
     events_.push_back(Event(EventGesture::kFlingEnd));
   }
 
-  void ApplyPanGestureScrollEnd() override {
+  void ApplyPanGestureScrollEnd(bool tranisitioning_to_pinch) override {
     events_.push_back(Event(EventGesture::kScrollEnd));
   }
 
@@ -341,6 +281,13 @@ class MockWindowEventTarget : public ui::WindowEventTarget {
     return S_OK;
   }
 
+  LRESULT HandleInputMessage(unsigned int message,
+                             WPARAM w_param,
+                             LPARAM l_param,
+                             bool* handled) override {
+    return S_OK;
+  }
+
   LRESULT HandleScrollMessage(unsigned int message,
                               WPARAM w_param,
                               LPARAM l_param,
@@ -359,8 +306,6 @@ class MockWindowEventTarget : public ui::WindowEventTarget {
 
  private:
   std::vector<Event> events_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockWindowEventTarget);
 };
 
 }  //  namespace
@@ -368,14 +313,16 @@ class MockWindowEventTarget : public ui::WindowEventTarget {
 class DirectManipulationUnitTest : public testing::Test {
  public:
   DirectManipulationUnitTest() {
-    scoped_feature_list_.InitAndEnableFeature(features::kPrecisionTouchpad);
-
     viewport_ = Microsoft::WRL::Make<MockDirectManipulationViewport>();
     content_ = Microsoft::WRL::Make<MockDirectManipulationContent>();
     direct_manipulation_helper_ =
         DirectManipulationHelper::CreateInstanceForTesting(&event_target_,
                                                            viewport_);
   }
+
+  DirectManipulationUnitTest(const DirectManipulationUnitTest&) = delete;
+  DirectManipulationUnitTest& operator=(const DirectManipulationUnitTest&) =
+      delete;
 
   ~DirectManipulationUnitTest() override {}
 
@@ -397,13 +344,7 @@ class DirectManipulationUnitTest : public testing::Test {
         viewport_.Get(), content_.Get());
   }
 
-  void SetNeedAnimation(bool need_poll_events) {
-    direct_manipulation_helper_->need_poll_events_ = need_poll_events;
-  }
-
-  bool NeedAnimation() {
-    return direct_manipulation_helper_->need_poll_events_;
-  }
+  bool WasZoomToRectCalled() { return viewport_->WasZoomToRectCalled(); }
 
   void SetDeviceScaleFactor(float factor) {
     direct_manipulation_helper_->SetDeviceScaleFactorForTesting(factor);
@@ -414,9 +355,6 @@ class DirectManipulationUnitTest : public testing::Test {
   Microsoft::WRL::ComPtr<MockDirectManipulationViewport> viewport_;
   Microsoft::WRL::ComPtr<MockDirectManipulationContent> content_;
   MockWindowEventTarget event_target_;
-  base::test::ScopedFeatureList scoped_feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(DirectManipulationUnitTest);
 };
 
 TEST_F(DirectManipulationUnitTest, HelperShouldCreateForWin10) {
@@ -721,21 +659,19 @@ TEST_F(DirectManipulationUnitTest,
 }
 
 TEST_F(DirectManipulationUnitTest,
-       NeedAnimtationShouldBeFalseAfterSecondReset) {
+       ZoomToRectShouldNotBeCalledInEmptyRunningReadySequence) {
   if (!GetDirectManipulationHelper())
     return;
 
-  // Direct Manipulation will set need_poll_events_ true when DM_POINTERTEST
-  // from touchpad.
-  SetNeedAnimation(true);
+  ContentUpdated(1.0f, 5, 0);
 
   // Receive first ready when gesture end.
   ViewportStatusChanged(DIRECTMANIPULATION_READY, DIRECTMANIPULATION_RUNNING);
-  EXPECT_TRUE(NeedAnimation());
+  EXPECT_TRUE(WasZoomToRectCalled());
 
   // Receive second ready from ZoomToRect.
   ViewportStatusChanged(DIRECTMANIPULATION_READY, DIRECTMANIPULATION_RUNNING);
-  EXPECT_FALSE(NeedAnimation());
+  EXPECT_FALSE(WasZoomToRectCalled());
 }
 
 TEST_F(DirectManipulationUnitTest, HiDPIScroll) {

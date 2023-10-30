@@ -1,18 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/infobars/core/infobar_delegate.h"
 
-#include "base/logging.h"
-#include "base/no_destructor.h"
 #include "build/build_config.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_manager.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/vector_icon_types.h"
 
-#if !defined(OS_IOS) && !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_ANDROID)
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
 #endif
@@ -34,24 +32,31 @@ int InfoBarDelegate::GetIconId() const {
 }
 
 const gfx::VectorIcon& InfoBarDelegate::GetVectorIcon() const {
-  static base::NoDestructor<gfx::VectorIcon> empty_icon;
-  return *empty_icon;
+  static gfx::VectorIcon empty_icon;
+  return empty_icon;
 }
 
-gfx::Image InfoBarDelegate::GetIcon() const {
-#if !defined(OS_IOS) && !defined(OS_ANDROID)
+ui::ImageModel InfoBarDelegate::GetIcon() const {
+#if !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_ANDROID)
   const gfx::VectorIcon& vector_icon = GetVectorIcon();
-  if (!vector_icon.is_empty()) {
-    return gfx::Image(
-        gfx::CreateVectorIcon(vector_icon, 20, gfx::kGoogleBlue500));
-  }
+  if (!vector_icon.is_empty())
+    return ui::ImageModel::FromVectorIcon(vector_icon, ui::kColorAccent, 20);
 #endif
 
   int icon_id = GetIconId();
   return icon_id == kNoIconID
-             ? gfx::Image()
-             : ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-                   icon_id);
+             ? ui::ImageModel()
+             : ui::ImageModel::FromImage(
+                   ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+                       icon_id));
+}
+
+std::u16string InfoBarDelegate::GetLinkText() const {
+  return std::u16string();
+}
+
+GURL InfoBarDelegate::GetLinkURL() const {
+  return GURL();
 }
 
 bool InfoBarDelegate::EqualsDelegate(InfoBarDelegate* delegate) const {
@@ -69,6 +74,11 @@ bool InfoBarDelegate::ShouldExpire(const NavigationDetails& details) const {
       ((nav_entry_id_ != details.entry_id) || details.is_reload);
 }
 
+bool InfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
+  infobar()->owner()->OpenURL(GetLinkURL(), disposition);
+  return false;
+}
+
 void InfoBarDelegate::InfoBarDismissed() {
 }
 
@@ -76,34 +86,16 @@ bool InfoBarDelegate::IsCloseable() const {
   return true;
 }
 
+bool InfoBarDelegate::ShouldAnimate() const {
+  return true;
+}
+
 ConfirmInfoBarDelegate* InfoBarDelegate::AsConfirmInfoBarDelegate() {
   return nullptr;
 }
 
-HungRendererInfoBarDelegate* InfoBarDelegate::AsHungRendererInfoBarDelegate() {
-  return nullptr;
-}
-
-InsecureContentInfoBarDelegate*
-    InfoBarDelegate::AsInsecureContentInfoBarDelegate() {
-  return nullptr;
-}
-
-NativeAppInfoBarDelegate* InfoBarDelegate::AsNativeAppInfoBarDelegate() {
-  return nullptr;
-}
-
-PopupBlockedInfoBarDelegate* InfoBarDelegate::AsPopupBlockedInfoBarDelegate() {
-  return nullptr;
-}
-
-RegisterProtocolHandlerInfoBarDelegate*
-    InfoBarDelegate::AsRegisterProtocolHandlerInfoBarDelegate() {
-  return nullptr;
-}
-
-ScreenCaptureInfoBarDelegate*
-    InfoBarDelegate::AsScreenCaptureInfoBarDelegate() {
+blocked_content::PopupBlockedInfoBarDelegate*
+InfoBarDelegate::AsPopupBlockedInfoBarDelegate() {
   return nullptr;
 }
 
@@ -112,23 +104,18 @@ ThemeInstalledInfoBarDelegate*
   return nullptr;
 }
 
-ThreeDAPIInfoBarDelegate* InfoBarDelegate::AsThreeDAPIInfoBarDelegate() {
-  return nullptr;
-}
-
 translate::TranslateInfoBarDelegate*
     InfoBarDelegate::AsTranslateInfoBarDelegate() {
   return nullptr;
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 offline_pages::OfflinePageInfoBarDelegate*
 InfoBarDelegate::AsOfflinePageInfoBarDelegate() {
   return nullptr;
 }
 #endif
 
-InfoBarDelegate::InfoBarDelegate() : nav_entry_id_(0) {
-}
+InfoBarDelegate::InfoBarDelegate() = default;
 
 }  // namespace infobars

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 namespace content {
 
 PresentationRequest::PresentationRequest(
-    const GlobalFrameRoutingId& render_frame_host_id,
+    const GlobalRenderFrameHostId& render_frame_host_id,
     const std::vector<GURL>& presentation_urls,
     const url::Origin& frame_origin)
     : render_frame_host_id(render_frame_host_id),
@@ -21,5 +21,11 @@ PresentationRequest::PresentationRequest(const PresentationRequest& other) =
 
 PresentationRequest& PresentationRequest::operator=(
     const PresentationRequest& other) = default;
+
+bool PresentationRequest::operator==(const PresentationRequest& other) const {
+  return render_frame_host_id == other.render_frame_host_id &&
+         presentation_urls == other.presentation_urls &&
+         frame_origin == other.frame_origin;
+}
 
 }  // namespace content

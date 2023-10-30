@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,13 +27,14 @@ void TestDownloader::AddTestServerURL(const std::string& prefix,
 }
 
 void TestDownloader::InitiateDownload(
+    const url::Origin& request_initiator,
     const GURL& url,
-    const std::string& method,
+    Download::Type download_type,
     int allowed_number_of_redirects,
     PaymentManifestDownloadCallback callback) {
-  PaymentManifestDownloader::InitiateDownload(FindTestServerURL(url), method,
-                                              allowed_number_of_redirects,
-                                              std::move(callback));
+  PaymentManifestDownloader::InitiateDownload(
+      request_initiator, FindTestServerURL(url), download_type,
+      allowed_number_of_redirects, std::move(callback));
 }
 
 GURL TestDownloader::FindTestServerURL(const GURL& url) const {

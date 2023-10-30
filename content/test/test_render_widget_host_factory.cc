@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,13 @@ TestRenderWidgetHostFactory::~TestRenderWidgetHostFactory() {
 
 std::unique_ptr<RenderWidgetHostImpl>
 TestRenderWidgetHostFactory::CreateRenderWidgetHost(
+    FrameTree* frame_tree,
     RenderWidgetHostDelegate* delegate,
-    RenderProcessHost* process,
+    base::SafeRef<SiteInstanceGroup> site_instance_group,
     int32_t routing_id,
-    mojom::WidgetPtr widget_interface,
     bool hidden) {
-  return TestRenderWidgetHost::Create(delegate, process, routing_id, hidden);
+  return TestRenderWidgetHost::Create(
+      frame_tree, delegate, std::move(site_instance_group), routing_id, hidden);
 }
 
 }  // namespace content

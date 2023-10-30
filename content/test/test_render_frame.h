@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,92 +7,87 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "base/optional.h"
-#include "content/common/frame.mojom.h"
-#include "content/common/input/input_handler.mojom.h"
+#include "content/common/frame.mojom-forward.h"
 #include "content/renderer/render_frame_impl.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
-
-namespace blink {
-class WebHistoryItem;
-}
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom-forward.h"
 
 namespace content {
 
-struct CommonNavigationParams;
 class MockFrameHost;
-struct CommitNavigationParams;
 
 // A test class to use in RenderViewTests.
 class TestRenderFrame : public RenderFrameImpl {
  public:
   static RenderFrameImpl* CreateTestRenderFrame(
       RenderFrameImpl::CreateParams params);
-  ~TestRenderFrame() override;
 
-  const blink::WebHistoryItem& current_history_item() {
-    return current_history_item_;
-  }
+  TestRenderFrame(const TestRenderFrame&) = delete;
+  TestRenderFrame& operator=(const TestRenderFrame&) = delete;
+
+  ~TestRenderFrame() override;
 
   // Overrides the content in the next navigation originating from the frame.
   // This will also short-circuit browser-side navigation,
   // FrameLoader will always carry out the load renderer-side.
   void SetHTMLOverrideForNextNavigation(const std::string& html);
 
-  void Navigate(const network::ResourceResponseHead& head,
-                const CommonNavigationParams& common_params,
-                const CommitNavigationParams& commit_params);
-  void Navigate(const CommonNavigationParams& common_params,
-                const CommitNavigationParams& commit_params);
-  void NavigateWithError(const CommonNavigationParams& common_params,
-                         const CommitNavigationParams& request_params,
+  void Navigate(network::mojom::URLResponseHeadPtr head,
+                blink::mojom::CommonNavigationParamsPtr common_params,
+                blink::mojom::CommitNavigationParamsPtr commit_params);
+  void Navigate(blink::mojom::CommonNavigationParamsPtr common_params,
+                blink::mojom::CommitNavigationParamsPtr commit_params);
+  void NavigateWithError(blink::mojom::CommonNavigationParamsPtr common_params,
+                         blink::mojom::CommitNavigationParamsPtr request_params,
                          int error_code,
-                         const base::Optional<std::string>& error_page_content);
-  void SwapOut(int proxy_routing_id,
-               bool is_loading,
-               const FrameReplicationState& replicated_frame_state);
-  void SetEditableSelectionOffsets(int start, int end);
-  void ExtendSelectionAndDelete(int before, int after);
-  void DeleteSurroundingText(int before, int after);
-  void DeleteSurroundingTextInCodePoints(int before, int after);
-  void CollapseSelection();
-  void SetAccessibilityMode(ui::AXMode new_mode);
-  void SetCompositionFromExistingText(
-      int start,
-      int end,
-      const std::vector<ui::ImeTextSpan>& ime_text_spans);
-
+                         const net::ResolveErrorInfo& resolve_error_info,
+                         const absl::optional<std::string>& error_page_content);
   void BeginNavigation(std::unique_ptr<blink::WebNavigationInfo> info) override;
 
-  std::unique_ptr<FrameHostMsg_DidCommitProvisionalLoad_Params>
-  TakeLastCommitParams();
+  mojom::DidCommitProvisionalLoadParamsPtr TakeLastCommitParams();
 
-  // Sets a callback to be run the next time DidAddMessageToConsole
-  // is called (e.g. window.console.log() is called).
-  void SetDidAddMessageToConsoleCallback(
-      base::OnceCallback<void(const base::string16& msg)> callback);
+  mojo::PendingReceiver<blink::mojom::BrowserInterfaceBroker>
+  TakeLastBrowserInterfaceBrokerReceiver();
 
-  service_manager::mojom::InterfaceProviderRequest
-  TakeLastInterfaceProviderRequest();
+  void SimulateBeforeUnload(bool is_reload);
 
-  blink::mojom::DocumentInterfaceBrokerRequest
-  TakeLastDocumentInterfaceBrokerRequest();
+  bool IsPageStateUpdated() const;
 
- private:
+  bool IsURLOpened() const;
+
+  // Returns a pending Frame receiver that represents a renderer-side connection
+  // from a non-existent browser, so no messages would ever be received on it.
+  static mojo::PendingAssociatedReceiver<mojom::Frame>
+  CreateStubFrameReceiver();
+
+  // Returns a pending BrowserInterfaceBroker remote that represents a
+  // connection to a non-existent browser, where all messages will go into the
+  // void.
+  static mojo::PendingRemote<blink::mojom::BrowserInterfaceBroker>
+  CreateStubBrowserInterfaceBrokerRemote();
+
+  // Returns a pending `AssociatedInterfaceProvider` remote that represents a
+  // connection to a non-existent browser, where all messages will go into the
+  // void.
+  static mojo::PendingAssociatedRemote<
+      blink::mojom::AssociatedInterfaceProvider>
+  CreateStubAssociatedInterfaceProviderRemote();
+
+ protected:
   explicit TestRenderFrame(RenderFrameImpl::CreateParams params);
 
+ private:
   mojom::FrameHost* GetFrameHost() override;
 
-  mojom::FrameInputHandler* GetFrameInputHandler();
-
   std::unique_ptr<MockFrameHost> mock_frame_host_;
-  base::Optional<std::string> next_navigation_html_override_;
-  mojom::FrameInputHandlerPtr frame_input_handler_;
+  absl::optional<std::string> next_navigation_html_override_;
 
-  mojom::NavigationClientAssociatedPtr mock_navigation_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestRenderFrame);
+  mojo::AssociatedRemote<mojom::NavigationClient> mock_navigation_client_;
 };
 
 }  // namespace content

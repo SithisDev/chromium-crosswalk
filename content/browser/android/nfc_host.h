@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,34 +6,50 @@
 #define CONTENT_BROWSER_ANDROID_NFC_HOST_H_
 
 #include "base/android/jni_android.h"
-#include "content/public/browser/web_contents.h"
+#include "base/memory/raw_ptr.h"
+#include "content/public/browser/permission_controller.h"
+#include "content/public/browser/web_contents_observer.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/nfc_provider.mojom.h"
+#include "third_party/blink/public/mojom/permissions/permission_status.mojom-forward.h"
 
 namespace content {
+
+class PermissionControllerImpl;
 
 // On Android, NFC requires the Activity associated with the context in order to
 // access the NFC system APIs. NFCHost provides this functionality by mapping
 // NFC context IDs to the WebContents associated with those IDs.
-class NFCHost {
+class NFCHost : public WebContentsObserver {
  public:
   explicit NFCHost(WebContents* web_contents);
-  ~NFCHost();
 
-  void GetNFC(device::mojom::NFCRequest request);
+  NFCHost(const NFCHost&) = delete;
+  NFCHost& operator=(const NFCHost&) = delete;
+
+  ~NFCHost() override;
+
+  void GetNFC(RenderFrameHost* render_frame_host,
+              mojo::PendingReceiver<device::mojom::NFC> receiver);
+
+  // WebContentsObserver implementation.
+  void RenderFrameHostChanged(RenderFrameHost* old_host,
+                              RenderFrameHost* new_host) override;
+  void OnVisibilityChanged(Visibility visibility) override;
 
  private:
-  // This instance's ID (passed to the NFC implementation via |nfc_provider_|
-  // and used from the implementation to map back to this object).
-  int id_;
+  void MaybeResumeOrSuspendOperations(Visibility visibility);
+  void OnPermissionStatusChange(blink::mojom::PermissionStatus status);
+  void Close();
 
-  // The WebContents that owns this instance.
-  WebContents* web_contents_;
+  // The permission controller for this browser context.
+  raw_ptr<PermissionControllerImpl> permission_controller_;
 
-  device::mojom::NFCProviderPtr nfc_provider_;
+  mojo::Remote<device::mojom::NFCProvider> nfc_provider_;
 
-  base::android::ScopedJavaGlobalRef<jobject> java_nfc_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(NFCHost);
+  // Permission change subscription ID provided by |permission_controller_|.
+  PermissionController::SubscriptionId subscription_id_;
 };
 
 }  // namespace content

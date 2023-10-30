@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 namespace storage {
 class BlobRegistryImpl;
-class FileSystemContext;
+class BlobUrlRegistry;
 }  // namespace storage
 
 namespace content {
@@ -29,9 +29,10 @@ class BlobRegistryWrapper
  public:
   static scoped_refptr<BlobRegistryWrapper> Create(
       scoped_refptr<ChromeBlobStorageContext> blob_storage_context,
-      scoped_refptr<storage::FileSystemContext> file_system_context);
+      base::WeakPtr<storage::BlobUrlRegistry> blob_url_registry);
 
-  void Bind(int process_id, blink::mojom::BlobRegistryRequest request);
+  void Bind(int process_id,
+            mojo::PendingReceiver<blink::mojom::BlobRegistry> receiver);
 
  private:
   BlobRegistryWrapper();
@@ -41,7 +42,7 @@ class BlobRegistryWrapper
 
   void InitializeOnIOThread(
       scoped_refptr<ChromeBlobStorageContext> blob_storage_context,
-      scoped_refptr<storage::FileSystemContext> file_system_context);
+      base::WeakPtr<storage::BlobUrlRegistry> blob_url_registry);
 
   std::unique_ptr<storage::BlobRegistryImpl> blob_registry_;
 };

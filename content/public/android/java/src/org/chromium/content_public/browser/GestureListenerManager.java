@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,10 @@ public interface GestureListenerManager {
 
     /**
      * Add a listener that gets alerted on gesture state changes.
+     *
+     * WARNING: attaching a listener results in extra IPC that impacts rendering performance. Only
+     * attach listeners when absolutely necessary and remove as soon as possible.
+     *
      * @param listener Listener to add.
      */
     void addListener(GestureStateListener listener);
@@ -31,6 +35,9 @@ public interface GestureListenerManager {
      * @param listener Listener to remove.
      */
     void removeListener(GestureStateListener listener);
+
+    /** Returns whether the provided listener has been added. */
+    boolean hasListener(GestureStateListener listener);
 
     /**
      * @return Whether a scroll targeting web content is in progress.

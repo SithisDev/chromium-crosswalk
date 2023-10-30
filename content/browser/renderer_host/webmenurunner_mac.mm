@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,13 @@
 
 #include <stddef.h>
 
+#include "base/base64.h"
 #include "base/strings/sys_string_conversions.h"
 
 @interface WebMenuRunner (PrivateAPI)
 
 // Worker function used during initialization.
-- (void)addItem:(const content::MenuItem&)item;
+- (void)addItem:(const blink::mojom::MenuItemPtr&)item;
 
 // A callback for the menu controller object to call when an item is selected
 // from the menu. This is not called if the menu is dismissed without a
@@ -22,62 +23,69 @@
 
 @implementation WebMenuRunner
 
-- (id)initWithItems:(const std::vector<content::MenuItem>&)items
+- (id)initWithItems:(const std::vector<blink::mojom::MenuItemPtr>&)items
            fontSize:(CGFloat)fontSize
        rightAligned:(BOOL)rightAligned {
   if ((self = [super init])) {
-    menu_.reset([[NSMenu alloc] initWithTitle:@""]);
-    [menu_ setAutoenablesItems:NO];
-    index_ = -1;
-    fontSize_ = fontSize;
-    rightAligned_ = rightAligned;
+    _menu.reset([[NSMenu alloc] initWithTitle:@""]);
+    [_menu setAutoenablesItems:NO];
+    _index = -1;
+    _fontSize = fontSize;
+    _rightAligned = rightAligned;
     for (size_t i = 0; i < items.size(); ++i)
       [self addItem:items[i]];
   }
   return self;
 }
 
-- (void)addItem:(const content::MenuItem&)item {
-  if (item.type == content::MenuItem::SEPARATOR) {
-    [menu_ addItem:[NSMenuItem separatorItem]];
+- (void)addItem:(const blink::mojom::MenuItemPtr&)item {
+  if (item->type == blink::mojom::MenuItem::Type::kSeparator) {
+    [_menu addItem:[NSMenuItem separatorItem]];
     return;
   }
 
-  NSString* title = base::SysUTF16ToNSString(item.label);
-  NSMenuItem* menuItem = [menu_ addItemWithTitle:title
+  NSString* title = base::SysUTF8ToNSString(item->label.value_or(""));
+  // https://crbug.com/1140620: SysUTF8ToNSString will return nil if the bits
+  // that it is passed cannot be turned into a CFString. If this nil value is
+  // passed to -[NSMenuItem addItemWithTitle:action:keyEquivalent], Chromium
+  // will crash. Therefore, for debugging, if the result is nil, substitute in
+  // the raw bytes, encoded for safety in base64, to allow for investigation.
+  if (!title) {
+    std::string base64;
+    base::Base64Encode(*item->label, &base64);
+    title = base::SysUTF8ToNSString(base64);
+  }
+  NSMenuItem* menuItem = [_menu addItemWithTitle:title
                                           action:@selector(menuItemSelected:)
                                    keyEquivalent:@""];
-  if (!item.tool_tip.empty()) {
-    NSString* toolTip = base::SysUTF16ToNSString(item.tool_tip);
+  if (item->tool_tip.has_value()) {
+    NSString* toolTip = base::SysUTF8ToNSString(item->tool_tip.value());
     [menuItem setToolTip:toolTip];
   }
-  [menuItem setEnabled:(item.enabled && item.type != content::MenuItem::GROUP)];
+  [menuItem setEnabled:(item->enabled &&
+                        item->type != blink::mojom::MenuItem::Type::kGroup)];
   [menuItem setTarget:self];
 
-  // Set various alignment/language attributes. Note that many (if not most) of
-  // these attributes are functional only on 10.6 and above.
+  // Set various alignment/language attributes.
   base::scoped_nsobject<NSMutableDictionary> attrs(
       [[NSMutableDictionary alloc] initWithCapacity:3]);
   base::scoped_nsobject<NSMutableParagraphStyle> paragraphStyle(
       [[NSMutableParagraphStyle alloc] init]);
-  [paragraphStyle setAlignment:rightAligned_ ? NSRightTextAlignment
-                                             : NSLeftTextAlignment];
+  [paragraphStyle
+      setAlignment:_rightAligned ? NSTextAlignmentRight : NSTextAlignmentLeft];
   NSWritingDirection writingDirection =
-      item.rtl ? NSWritingDirectionRightToLeft
-               : NSWritingDirectionLeftToRight;
+      item->text_direction == base::i18n::RIGHT_TO_LEFT
+          ? NSWritingDirectionRightToLeft
+          : NSWritingDirectionLeftToRight;
   [paragraphStyle setBaseWritingDirection:writingDirection];
   [attrs setObject:paragraphStyle forKey:NSParagraphStyleAttributeName];
 
-  if (item.has_directional_override) {
-    base::scoped_nsobject<NSNumber> directionValue(
-        [[NSNumber alloc] initWithInteger:
-            writingDirection + NSTextWritingDirectionOverride]);
-    base::scoped_nsobject<NSArray> directionArray(
-        [[NSArray alloc] initWithObjects:directionValue.get(), nil]);
-    [attrs setObject:directionArray forKey:NSWritingDirectionAttributeName];
+  if (item->has_text_direction_override) {
+    [attrs setObject:@[ @(long{writingDirection} | NSWritingDirectionOverride) ]
+              forKey:NSWritingDirectionAttributeName];
   }
 
-  [attrs setObject:[NSFont menuFontOfSize:fontSize_]
+  [attrs setObject:[NSFont menuFontOfSize:_fontSize]
             forKey:NSFontAttributeName];
 
   base::scoped_nsobject<NSAttributedString> attrTitle(
@@ -92,7 +100,7 @@
   NSCharacterSet* whitespaceSet = [NSCharacterSet whitespaceCharacterSet];
   [menuItem setTitle:[title stringByTrimmingCharactersInSet:whitespaceSet]];
 
-  [menuItem setTag:[menu_ numberOfItems] - 1];
+  [menuItem setTag:[_menu numberOfItems] - 1];
 }
 
 // Reflects the result of the user's interaction with the popup menu. If NO, the
@@ -100,11 +108,11 @@
 // user clicked outside the menu region or hit the escape key. If YES, the user
 // selected an item from the menu.
 - (BOOL)menuItemWasChosen {
-  return menuItemWasChosen_;
+  return _menuItemWasChosen;
 }
 
 - (void)menuItemSelected:(id)sender {
-  menuItemWasChosen_ = YES;
+  _menuItemWasChosen = YES;
 }
 
 - (void)runMenuInView:(NSView*)view
@@ -115,28 +123,16 @@
   // popup button, which is the expected Mac popup menu behavior.
   base::scoped_nsobject<NSPopUpButtonCell> cell(
       [[NSPopUpButtonCell alloc] initTextCell:@"" pullsDown:NO]);
-  [cell setMenu:menu_];
+  [cell setMenu:_menu];
   // We use selectItemWithTag below so if the index is out-of-bounds nothing
   // bad happens.
   [cell selectItemWithTag:index];
 
-  if (rightAligned_) {
+  if (_rightAligned) {
     [cell setUserInterfaceLayoutDirection:
               NSUserInterfaceLayoutDirectionRightToLeft];
-    // setUserInterfaceLayoutDirection for NSMenu is supported on macOS 10.11+.
-    SEL sel = @selector(setUserInterfaceLayoutDirection:);
-    if ([menu_ respondsToSelector:sel]) {
-      NSUserInterfaceLayoutDirection direction =
-          NSUserInterfaceLayoutDirectionRightToLeft;
-      NSMethodSignature* signature =
-          [NSMenu instanceMethodSignatureForSelector:sel];
-      NSInvocation* invocation =
-          [NSInvocation invocationWithMethodSignature:signature];
-      [invocation setTarget:menu_.get()];
-      [invocation setSelector:sel];
-      [invocation setArgument:&direction atIndex:2];
-      [invocation invoke];
-    }
+    [_menu setUserInterfaceLayoutDirection:
+               NSUserInterfaceLayoutDirectionRightToLeft];
   }
 
   // When popping up a menu near the Dock, Cocoa restricts the menu
@@ -160,15 +156,15 @@
   [dummyView removeFromSuperview];
 
   if ([self menuItemWasChosen])
-    index_ = [cell indexOfSelectedItem];
+    _index = [cell indexOfSelectedItem];
 }
 
 - (void)hide {
-  [menu_ cancelTracking];
+  [_menu cancelTracking];
 }
 
 - (int)indexOfSelectedItem {
-  return index_;
+  return _index;
 }
 
 @end  // WebMenuRunner

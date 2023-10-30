@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,12 @@ namespace test {
 MockController::MockController() = default;
 MockController::~MockController() = default;
 
-void MockController::Initialize(const base::Closure& callback) {
-  init_callback_ = callback;
+void MockController::Initialize(base::OnceClosure callback) {
+  init_callback_ = std::move(callback);
 }
 
 void MockController::TriggerInitCompleted() {
-  init_callback_.Run();
+  std::move(init_callback_).Run();
 }
 
 }  // namespace test

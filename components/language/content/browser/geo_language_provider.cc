@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,33 +6,40 @@
 
 #include "base/bind.h"
 #include "base/memory/singleton.h"
-#include "base/task/post_task.h"
+#include "base/no_destructor.h"
+#include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/language/content/browser/language_code_locator_provider.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/device_service.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "services/device/public/mojom/constants.mojom.h"
-#include "services/device/public/mojom/geoposition.mojom.h"
-#include "services/device/public/mojom/public_ip_address_geolocation_provider.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace language {
 namespace {
 
 // Don't start requesting updates to IP-based approximation geolocation until
 // this long after receiving the last one.
-constexpr base::TimeDelta kMinUpdatePeriod = base::TimeDelta::FromDays(1);
+constexpr base::TimeDelta kMinUpdatePeriod = base::Days(1);
+
+GeoLanguageProvider::Binder& GetBinderOverride() {
+  static base::NoDestructor<GeoLanguageProvider::Binder> binder;
+  return *binder;
+}
 
 }  // namespace
 
 const char GeoLanguageProvider::kCachedGeoLanguagesPref[] =
     "language.geo_language_provider.cached_geo_languages";
 
+const char GeoLanguageProvider::kTimeOfLastGeoLanguagesUpdatePref[] =
+    "language.geo_language_provider.time_of_last_geo_languages_update";
+
 GeoLanguageProvider::GeoLanguageProvider()
     : creation_task_runner_(base::SequencedTaskRunnerHandle::Get()),
-      background_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      background_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
       prefs_(nullptr) {
@@ -61,31 +68,51 @@ GeoLanguageProvider* GeoLanguageProvider::GetInstance() {
 void GeoLanguageProvider::RegisterLocalStatePrefs(
     PrefRegistrySimple* const registry) {
   registry->RegisterListPref(kCachedGeoLanguagesPref);
+  registry->RegisterDoublePref(kTimeOfLastGeoLanguagesUpdatePref, 0);
 }
 
-void GeoLanguageProvider::StartUp(
-    std::unique_ptr<service_manager::Connector> service_manager_connector,
-    PrefService* const prefs) {
+void GeoLanguageProvider::StartUp(PrefService* const prefs) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(creation_sequence_checker_);
 
   prefs_ = prefs;
 
-  const base::ListValue* const cached_languages_list =
+  const base::Value::List& cached_languages_list =
       prefs_->GetList(kCachedGeoLanguagesPref);
-  for (const auto& language_value : *cached_languages_list) {
+  for (const auto& language_value : cached_languages_list) {
     languages_.push_back(language_value.GetString());
   }
 
-  service_manager_connector_ = std::move(service_manager_connector);
-  // Continue startup in the background.
-  background_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&GeoLanguageProvider::BackgroundStartUp,
-                                base::Unretained(this)));
+  const double last_update =
+      prefs_->GetDouble(kTimeOfLastGeoLanguagesUpdatePref);
+
+  base::TimeDelta time_passed_since_update =
+      base::Time::Now() - base::Time::FromTimeT(last_update);
+
+  // Delay startup if languages have been updated within |kMinUpdatePeriod|.
+  if (time_passed_since_update < kMinUpdatePeriod) {
+    base::TimeDelta time_till_next_update =
+        kMinUpdatePeriod - time_passed_since_update;
+    background_task_runner_->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&GeoLanguageProvider::BackgroundStartUp,
+                       base::Unretained(this)),
+        time_till_next_update);
+  } else {
+    // Continue startup in the background.
+    background_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&GeoLanguageProvider::BackgroundStartUp,
+                                  base::Unretained(this)));
+  }
 }
 
 std::vector<std::string> GeoLanguageProvider::CurrentGeoLanguages() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(creation_sequence_checker_);
   return languages_;
+}
+
+// static
+void GeoLanguageProvider::OverrideBinderForTesting(Binder binder) {
+  GetBinderOverride() = std::move(binder);
 }
 
 void GeoLanguageProvider::BackgroundStartUp() {
@@ -103,10 +130,16 @@ void GeoLanguageProvider::BindIpGeolocationService() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(background_sequence_checker_);
   DCHECK(!geolocation_provider_.is_bound());
 
-  // Bind a PublicIpAddressGeolocationProvider.
-  device::mojom::PublicIpAddressGeolocationProviderPtr ip_geolocation_provider;
-  service_manager_connector_->BindInterface(
-      device::mojom::kServiceName, mojo::MakeRequest(&ip_geolocation_provider));
+  mojo::Remote<device::mojom::PublicIpAddressGeolocationProvider>
+      ip_geolocation_provider;
+  auto receiver = ip_geolocation_provider.BindNewPipeAndPassReceiver();
+  const auto& binder = GetBinderOverride();
+  if (binder) {
+    binder.Run(std::move(receiver));
+  } else {
+    content::GetDeviceService().BindPublicIpAddressGeolocationProvider(
+        std::move(receiver));
+  }
 
   net::PartialNetworkTrafficAnnotationTag partial_traffic_annotation =
       net::DefinePartialNetworkTrafficAnnotation("geo_language_provider",
@@ -132,7 +165,7 @@ void GeoLanguageProvider::BindIpGeolocationService() {
   ip_geolocation_provider->CreateGeolocation(
       static_cast<net::MutablePartialNetworkTrafficAnnotationTag>(
           partial_traffic_annotation),
-      mojo::MakeRequest(&geolocation_provider_));
+      geolocation_provider_.BindNewPipeAndPassReceiver());
   // No error handler required: If the connection is broken, QueryNextPosition
   // will bind it again.
 }
@@ -140,7 +173,7 @@ void GeoLanguageProvider::BindIpGeolocationService() {
 void GeoLanguageProvider::QueryNextPosition() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(background_sequence_checker_);
 
-  if (geolocation_provider_.encountered_error())
+  if (geolocation_provider_.is_bound() && !geolocation_provider_.is_connected())
     geolocation_provider_.reset();
   if (!geolocation_provider_.is_bound())
     BindIpGeolocationService();
@@ -185,10 +218,12 @@ void GeoLanguageProvider::SetGeoLanguages(
   languages_ = languages;
 
   base::ListValue cache_list;
-  for (size_t i = 0; i < languages_.size(); ++i) {
-    cache_list.Set(i, std::make_unique<base::Value>(languages_[i]));
+  for (const std::string& language : languages_) {
+    cache_list.Append(language);
   }
   prefs_->Set(kCachedGeoLanguagesPref, cache_list);
+  prefs_->SetDouble(kTimeOfLastGeoLanguagesUpdatePref,
+                    base::Time::Now().ToDoubleT());
 }
 
 }  // namespace language

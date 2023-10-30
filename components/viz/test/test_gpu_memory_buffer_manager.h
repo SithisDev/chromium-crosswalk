@@ -1,13 +1,14 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_VIZ_TEST_TEST_GPU_MEMORY_BUFFER_MANAGER_H_
 #define COMPONENTS_VIZ_TEST_TEST_GPU_MEMORY_BUFFER_MANAGER_H_
 
+#include <map>
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/synchronization/lock.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 
@@ -16,6 +17,11 @@ namespace viz {
 class TestGpuMemoryBufferManager : public gpu::GpuMemoryBufferManager {
  public:
   TestGpuMemoryBufferManager();
+
+  TestGpuMemoryBufferManager(const TestGpuMemoryBufferManager&) = delete;
+  TestGpuMemoryBufferManager& operator=(const TestGpuMemoryBufferManager&) =
+      delete;
+
   ~TestGpuMemoryBufferManager() override;
 
   std::unique_ptr<TestGpuMemoryBufferManager>
@@ -33,9 +39,17 @@ class TestGpuMemoryBufferManager : public gpu::GpuMemoryBufferManager {
       const gfx::Size& size,
       gfx::BufferFormat format,
       gfx::BufferUsage usage,
-      gpu::SurfaceHandle surface_handle) override;
+      gpu::SurfaceHandle surface_handle,
+      base::WaitableEvent* shutdown_event) override;
   void SetDestructionSyncToken(gfx::GpuMemoryBuffer* buffer,
                                const gpu::SyncToken& sync_token) override;
+  void CopyGpuMemoryBufferAsync(
+      gfx::GpuMemoryBufferHandle buffer_handle,
+      base::UnsafeSharedMemoryRegion memory_region,
+      base::OnceCallback<void(bool)> callback) override;
+  bool CopyGpuMemoryBufferSync(
+      gfx::GpuMemoryBufferHandle buffer_handle,
+      base::UnsafeSharedMemoryRegion memory_region) override;
 
  private:
   // This class is called by multiple threads at the same time. Hold this lock
@@ -49,15 +63,14 @@ class TestGpuMemoryBufferManager : public gpu::GpuMemoryBufferManager {
 
   // Parent information for child managers.
   int client_id_ = -1;
-  TestGpuMemoryBufferManager* parent_gpu_memory_buffer_manager_ = nullptr;
+  raw_ptr<TestGpuMemoryBufferManager> parent_gpu_memory_buffer_manager_ =
+      nullptr;
 
   // Child infomration for parent managers.
   int last_client_id_ = 5000;
   std::map<int, TestGpuMemoryBufferManager*> clients_;
 
   bool fail_on_create_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(TestGpuMemoryBufferManager);
 };
 
 }  // namespace viz

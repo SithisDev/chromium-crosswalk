@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 
 #include "components/consent_auditor/consent_auditor.h"
 #include "components/consent_auditor/fake_consent_auditor.h"
+#include "components/sync/protocol/user_consent_specifics.pb.h"
+#include "components/sync/protocol/user_consent_types.pb.h"
 
 namespace {
 
@@ -27,12 +29,12 @@ consent_auditor::ConsentStatus ConvertConsentStatus(
 
 namespace consent_auditor {
 
-FakeConsentAuditor::FakeConsentAuditor() {}
+FakeConsentAuditor::FakeConsentAuditor() = default;
 
-FakeConsentAuditor::~FakeConsentAuditor() {}
+FakeConsentAuditor::~FakeConsentAuditor() = default;
 
 void FakeConsentAuditor::RecordSyncConsent(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const sync_pb::UserConsentTypes::SyncConsent& consent) {
   // TODO(markusheintz): Change the Fake to store the proto instead of calling
   // RecordGaiaConsent.
@@ -44,13 +46,34 @@ void FakeConsentAuditor::RecordSyncConsent(
 }
 
 void FakeConsentAuditor::RecordAssistantActivityControlConsent(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const sync_pb::UserConsentTypes::AssistantActivityControlConsent& consent) {
-  NOTIMPLEMENTED();
+  account_id_ = account_id;
+  sync_pb::UserConsentSpecifics consent_specifics;
+  *consent_specifics.mutable_assistant_activity_control_consent() = consent;
+  recorded_consents_.push_back(std::move(consent_specifics));
+}
+
+void FakeConsentAuditor::RecordAccountPasswordsConsent(
+    const CoreAccountId& account_id,
+    const sync_pb::UserConsentTypes::AccountPasswordsConsent& consent) {
+  account_id_ = account_id;
+  sync_pb::UserConsentSpecifics consent_specifics;
+  *consent_specifics.mutable_account_passwords_consent() = consent;
+  recorded_consents_.push_back(std::move(consent_specifics));
+}
+
+void FakeConsentAuditor::RecordAutofillAssistantConsent(
+    const CoreAccountId& account_id,
+    const sync_pb::UserConsentTypes::AutofillAssistantConsent& consent) {
+  account_id_ = account_id;
+  sync_pb::UserConsentSpecifics consent_specifics;
+  *consent_specifics.mutable_autofill_assistant_consent() = consent;
+  recorded_consents_.push_back(std::move(consent_specifics));
 }
 
 void FakeConsentAuditor::RecordGaiaConsent(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     consent_auditor::Feature feature,
     const std::vector<int>& description_grd_ids,
     int confirmation_grd_id,

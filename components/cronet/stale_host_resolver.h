@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,15 @@
 #include <memory>
 #include <unordered_map>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/default_tick_clock.h"
 #include "net/base/completion_once_callback.h"
+#include "net/base/network_anonymization_key.h"
 #include "net/dns/host_resolver.h"
+#include "net/log/net_log_with_source.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/scheme_host_port.h"
 
 namespace base {
 class TickClock;
@@ -66,9 +71,14 @@ class StaleHostResolver : public net::HostResolver {
   StaleHostResolver(std::unique_ptr<net::ContextHostResolver> inner_resolver,
                     const StaleOptions& stale_options);
 
+  StaleHostResolver(const StaleHostResolver&) = delete;
+  StaleHostResolver& operator=(const StaleHostResolver&) = delete;
+
   ~StaleHostResolver() override;
 
   // HostResolver implementation:
+
+  void OnShutdown() override;
 
   // Resolves as a regular HostResolver, but if stale data is available and
   // usable (according to the options passed to the constructor), and fresh data
@@ -77,15 +87,21 @@ class StaleHostResolver : public net::HostResolver {
   // If stale data is returned, the StaleHostResolver allows the underlying
   // request to continue in order to repopulate the cache.
   std::unique_ptr<ResolveHostRequest> CreateRequest(
+      url::SchemeHostPort host,
+      net::NetworkAnonymizationKey network_anonymization_key,
+      net::NetLogWithSource net_log,
+      absl::optional<ResolveHostParameters> optional_parameters) override;
+  std::unique_ptr<ResolveHostRequest> CreateRequest(
       const net::HostPortPair& host,
+      const net::NetworkAnonymizationKey& network_anonymization_key,
       const net::NetLogWithSource& net_log,
-      const base::Optional<ResolveHostParameters>& optional_parameters)
+      const absl::optional<ResolveHostParameters>& optional_parameters)
       override;
 
   // The remaining public methods pass through to the inner resolver:
 
   net::HostCache* GetHostCache() override;
-  std::unique_ptr<base::Value> GetDnsConfigAsValue() const override;
+  base::Value GetDnsConfigAsValue() const override;
   void SetRequestContext(net::URLRequestContext* request_context) override;
 
  private:
@@ -111,7 +127,8 @@ class StaleHostResolver : public net::HostResolver {
   std::unique_ptr<net::ContextHostResolver> inner_resolver_;
 
   // Shared instance of tick clock, overridden for testing.
-  const base::TickClock* tick_clock_ = base::DefaultTickClock::GetInstance();
+  raw_ptr<const base::TickClock> tick_clock_ =
+      base::DefaultTickClock::GetInstance();
 
   // Options that govern when a stale response can or can't be returned.
   const StaleOptions options_;
@@ -122,8 +139,6 @@ class StaleHostResolver : public net::HostResolver {
       detached_requests_;
 
   base::WeakPtrFactory<StaleHostResolver> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(StaleHostResolver);
 };
 
 }  // namespace cronet

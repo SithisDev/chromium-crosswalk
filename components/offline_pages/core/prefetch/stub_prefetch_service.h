@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,6 @@ namespace offline_pages {
 // Stub implementation of PrefetchService interface for testing.
 class StubPrefetchService : public PrefetchService {
  public:
-  void SetContentSuggestionsService(
-      ntp_snippets::ContentSuggestionsService* content_suggestions) override;
   void SetSuggestionProvider(
       SuggestionsProvider* suggestions_provider) override;
   void NewSuggestionsAvailable() override;
@@ -31,12 +29,9 @@ class StubPrefetchService : public PrefetchService {
   PrefetchStore* GetPrefetchStore() override;
   PrefetchImporter* GetPrefetchImporter() override;
   PrefetchBackgroundTaskHandler* GetPrefetchBackgroundTaskHandler() override;
-  ThumbnailFetcher* GetThumbnailFetcher() override;
   OfflinePageModel* GetOfflinePageModel() override;
   image_fetcher::ImageFetcher* GetImageFetcher() override;
   void SetEnabledByServer(PrefService* pref_service, bool enabled) override;
-
-  SuggestedArticlesObserver* GetSuggestedArticlesObserverForTesting() override;
 };
 
 }  // namespace offline_pages

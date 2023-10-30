@@ -1,12 +1,14 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/os_crypt/key_storage_kwallet.h"
 
+#include <tuple>
 #include <utility>
 
 #include "base/base64.h"
+#include "base/notreached.h"
 #include "base/rand_util.h"
 #include "components/os_crypt/kwallet_dbus.h"
 #include "dbus/bus.h"
@@ -19,7 +21,7 @@ KeyStorageKWallet::~KeyStorageKWallet() {
   // The handle is shared between programs that are using the same wallet.
   // Closing the wallet is a nop in the typical case.
   bool success = true;
-  ignore_result(kwallet_dbus_->Close(handle_, false, app_name_, &success));
+  std::ignore = kwallet_dbus_->Close(handle_, false, app_name_, &success);
   kwallet_dbus_->GetSessionBus()->ShutdownAndBlock();
 }
 
@@ -79,34 +81,36 @@ KeyStorageKWallet::InitResult KeyStorageKWallet::InitWallet() {
   return InitResult::PERMANENT_FAIL;
 }
 
-std::string KeyStorageKWallet::GetKeyImpl() {
+absl::optional<std::string> KeyStorageKWallet::GetKeyImpl() {
   // Get handle
   KWalletDBus::Error error =
       kwallet_dbus_->Open(wallet_name_, app_name_, &handle_);
   if (error || handle_ == kInvalidHandle)
-    return std::string();
+    return absl::nullopt;
 
   // Create folder
   if (!InitFolder())
-    return std::string();
+    return absl::nullopt;
 
   // Read password
-  std::string password;
+  absl::optional<std::string> password;
   error =
       kwallet_dbus_->ReadPassword(handle_, KeyStorageLinux::kFolderName,
                                   KeyStorageLinux::kKey, app_name_, &password);
   if (error)
-    return std::string();
+    return absl::nullopt;
 
   // If there is no entry, generate and write a new password.
-  if (password.empty()) {
-    base::Base64Encode(base::RandBytesAsString(16), &password);
+  if (!password.has_value()) {
+    std::string password_;
+    base::Base64Encode(base::RandBytesAsString(16), &password_);
     bool success;
     error = kwallet_dbus_->WritePassword(handle_, KeyStorageLinux::kFolderName,
-                                         KeyStorageLinux::kKey, password,
+                                         KeyStorageLinux::kKey, password_,
                                          app_name_, &success);
     if (error || !success)
-      return std::string();
+      return absl::nullopt;
+    password = std::move(password_);
   }
 
   return password;

@@ -1,6 +1,8 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+#include "base/memory/raw_ptr.h"
 
 #import <Foundation/Foundation.h>
 #import <ImageCaptureCore/ImageCaptureCore.h>
@@ -9,13 +11,12 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/mac/foundation_util.h"
-#include "base/mac/sdk_forward_declarations.h"
 #include "base/memory/weak_ptr.h"
 #include "components/storage_monitor/image_capture_device.h"
 #include "components/storage_monitor/image_capture_device_manager.h"
 #include "components/storage_monitor/test_storage_monitor.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -32,7 +33,7 @@ const char kTestFileContents[] = "test";
 
 @interface MockICCameraDevice : ICCameraDevice {
  @private
-  base::scoped_nsobject<NSMutableArray> allMediaFiles_;
+  base::scoped_nsobject<NSMutableArray> _allMediaFiles;
 }
 
 - (void)addMediaFile:(ICCameraFile*)file;
@@ -70,13 +71,13 @@ const char kTestFileContents[] = "test";
 }
 
 - (NSArray*)mediaFiles {
-  return allMediaFiles_;
+  return _allMediaFiles;
 }
 
 - (void)addMediaFile:(ICCameraFile*)file {
-  if (!allMediaFiles_.get())
-    allMediaFiles_.reset([[NSMutableArray alloc] init]);
-  [allMediaFiles_ addObject:file];
+  if (!_allMediaFiles.get())
+    _allMediaFiles.reset([[NSMutableArray alloc] init]);
+  [_allMediaFiles addObject:file];
 }
 
 // This method does approximately what the internal ImageCapture platform
@@ -115,7 +116,7 @@ const char kTestFileContents[] = "test";
 
 @interface MockICCameraFolder : ICCameraFolder {
  @private
-  base::scoped_nsobject<NSString> name_;
+  base::scoped_nsobject<NSString> _name;
 }
 
 - (instancetype)initWithName:(NSString*)name;
@@ -126,13 +127,13 @@ const char kTestFileContents[] = "test";
 
 - (instancetype)initWithName:(NSString*)name {
   if ((self = [super init])) {
-    name_.reset([name retain]);
+    _name.reset([name retain]);
   }
   return self;
 }
 
 - (NSString*)name {
-  return name_;
+  return _name;
 }
 
 - (ICCameraFolder*)parentFolder {
@@ -143,9 +144,9 @@ const char kTestFileContents[] = "test";
 
 @interface MockICCameraFile : ICCameraFile {
  @private
-  base::scoped_nsobject<NSString> name_;
-  base::scoped_nsobject<NSDate> date_;
-  base::scoped_nsobject<MockICCameraFolder> parent_;
+  base::scoped_nsobject<NSString> _name;
+  base::scoped_nsobject<NSDate> _date;
+  base::scoped_nsobject<MockICCameraFolder> _parent;
 }
 
 - (instancetype)init:(NSString*)name;
@@ -160,22 +161,22 @@ const char kTestFileContents[] = "test";
     base::scoped_nsobject<NSDateFormatter> iso8601day(
         [[NSDateFormatter alloc] init]);
     [iso8601day setDateFormat:@"yyyy-MM-dd"];
-    name_.reset([name retain]);
-    date_.reset([[iso8601day dateFromString:@"2012-12-12"] retain]);
+    _name.reset([name retain]);
+    _date.reset([[iso8601day dateFromString:@"2012-12-12"] retain]);
   }
   return self;
 }
 
 - (void)setParent:(NSString*)parent {
-  parent_.reset([[MockICCameraFolder alloc] initWithName:parent]);
+  _parent.reset([[MockICCameraFolder alloc] initWithName:parent]);
 }
 
 - (ICCameraFolder*)parentFolder {
-  return parent_.get();
+  return _parent.get();
 }
 
 - (NSString*)name {
-  return name_;
+  return _name;
 }
 
 - (NSString*)UTI {
@@ -183,11 +184,11 @@ const char kTestFileContents[] = "test";
 }
 
 - (NSDate*)modificationDate {
-  return date_.get();
+  return _date.get();
 }
 
 - (NSDate*)creationDate {
-  return date_.get();
+  return _date.get();
 }
 
 - (off_t)fileSize {
@@ -266,11 +267,11 @@ class ImageCaptureDeviceManagerTest : public testing::Test {
                   moreGoing:NO];
   }
 
-  void RunUntilIdle() { thread_bundle_.RunUntilIdle(); }
+  void RunUntilIdle() { task_environment_.RunUntilIdle(); }
 
  protected:
-  content::TestBrowserThreadBundle thread_bundle_;
-  TestStorageMonitor* monitor_;
+  content::BrowserTaskEnvironment task_environment_;
+  raw_ptr<TestStorageMonitor> monitor_;
   TestCameraListener listener_;
 };
 

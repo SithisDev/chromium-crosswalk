@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@ namespace dom_distiller {
 extern const char kDomDistillerScheme[];
 extern const char kEntryIdKey[];
 extern const char kUrlKey[];
+extern const char kTitleKey[];
 extern const char kTimeKey[];
 extern const char kViewerCssPath[];
 extern const char kViewerLoadingImagePath[];

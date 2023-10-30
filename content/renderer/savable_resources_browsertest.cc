@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,19 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_frame.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
-#include "content/renderer/savable_resources.h"
 #include "content/shell/browser/shell.h"
 #include "net/base/filename_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+#include "third_party/blink/public/mojom/frame/frame.mojom.h"
+#include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/public/web/web_savable_resources_test_support.h"
 
 namespace content {
 
@@ -28,7 +32,7 @@ class SavableResourcesTest : public ContentBrowserTest {
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSingleProcess);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // Don't want to try to create a GPU process.
     command_line->AppendSwitch(switches::kDisableGpu);
 #endif
@@ -44,13 +48,13 @@ class SavableResourcesTest : public ContentBrowserTest {
     // Convert local file path to file URL.
     GURL file_url = net::FilePathToFileURL(page_file_path);
     // Load the test file.
-    NavigateToURL(shell(), file_url);
+    EXPECT_TRUE(NavigateToURL(shell(), file_url));
 
     PostTaskToInProcessRendererAndWait(base::BindOnce(
         &SavableResourcesTest::CheckResources, base::Unretained(this),
         page_file_path, expected_resources_matcher,
         expected_subframe_urls_matcher, file_url,
-        shell()->web_contents()->GetMainFrame()->GetRoutingID()));
+        shell()->web_contents()->GetPrimaryMainFrame()->GetRoutingID()));
   }
 
   void CheckResources(const base::FilePath& page_file_path,
@@ -58,22 +62,36 @@ class SavableResourcesTest : public ContentBrowserTest {
                       const UrlVectorMatcher& expected_subframe_urls_matcher,
                       const GURL& file_url,
                       int render_frame_routing_id) {
-    // Get all savable resource links for the page.
-    std::vector<GURL> resources_list;
-    std::vector<SavableSubframe> subframes;
-    SavableResourcesResult result(&resources_list, &subframes);
-
     RenderFrame* render_frame =
         RenderFrame::FromRoutingID(render_frame_routing_id);
 
-    ASSERT_TRUE(GetSavableResourceLinksForFrame(
-        render_frame->GetWebFrame(), &result));
+    mojo::AssociatedRemote<blink::mojom::LocalFrame> local_frame;
+    render_frame->GetRemoteAssociatedInterfaces()->GetInterface(
+        local_frame.BindNewEndpointAndPassReceiver());
+    local_frame->GetSavableResourceLinks(
+        base::BindOnce(&SavableResourcesTest::GetSavableResourceLinksCallback,
+                       base::Unretained(this), expected_resources_matcher,
+                       expected_subframe_urls_matcher));
+  }
 
+  void GetSavableResourceLinksCallback(
+      const UrlVectorMatcher& expected_resources_matcher,
+      const UrlVectorMatcher& expected_subframe_urls_matcher,
+      blink::mojom::GetSavableResourceLinksReplyPtr reply) {
+    if (!reply) {
+      DCHECK(false)
+          << "blink::mojom::GetSavableResourceLinks returnes nullptr.";
+      return;
+    }
+
+    std::vector<GURL> resources_list;
+    for (auto url : reply->resources_list)
+      resources_list.push_back(url);
     EXPECT_THAT(resources_list, expected_resources_matcher);
 
     std::vector<GURL> subframe_original_urls;
-    for (const SavableSubframe& subframe : subframes) {
-      subframe_original_urls.push_back(subframe.original_url);
+    for (auto& subframe : reply->subframes) {
+      subframe_original_urls.push_back(subframe->original_url);
     }
     EXPECT_THAT(subframe_original_urls, expected_subframe_urls_matcher);
   }

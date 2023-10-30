@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -119,8 +119,9 @@ public final class FakeCronetController {
      * URL when requested by a {@link UrlRequest}.
      *
      * @param url the URL that triggers the successful response
+     * @param body the body of the response as a byte array
      */
-    public void addSuccessResponse(String url, String body) {
+    public void addSuccessResponse(String url, byte[] body) {
         addResponseForUrl(new FakeUrlResponse.Builder().setResponseBody(body).build(), url);
     }
 
@@ -177,14 +178,15 @@ public final class FakeCronetController {
      * @param url        the URL that the {@link UrlRequest} is connecting to
      * @param httpMethod the HTTP method that the {@link UrlRequest} is using to connect with
      * @param headers    the headers supplied by the {@link UrlRequest}
+     * @param body       the body of the fake HTTP request
      * @return a {@link FakeUrlResponse} if there is one, or a failed "404" response if none found
      */
     FakeUrlResponse getResponse(
-            String url, String httpMethod, List<Map.Entry<String, String>> headers) {
+            String url, String httpMethod, List<Map.Entry<String, String>> headers, byte[] body) {
         synchronized (mResponseMatchers) {
             for (ResponseMatcher responseMatcher : mResponseMatchers) {
                 FakeUrlResponse matchedResponse =
-                        responseMatcher.getMatchingResponse(url, httpMethod, headers);
+                        responseMatcher.getMatchingResponse(url, httpMethod, headers, body);
                 if (matchedResponse != null) {
                     return matchedResponse;
                 }

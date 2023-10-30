@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "components/autofill/core/browser/ui/suggestion_selection.h"
@@ -12,11 +12,11 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
-#include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/autofill_profile_comparator.h"
 #include "components/autofill/core/browser/geo/address_i18n.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/ui/suggestion.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_features.h"
@@ -34,10 +34,10 @@ using ::i18n::addressinput::STREET_ADDRESS;
 
 // In addition to just getting the values out of the autocomplete profile, this
 // function handles formatting of the street address into a single string.
-base::string16 GetInfoInOneLine(const AutofillProfile* profile,
+std::u16string GetInfoInOneLine(const AutofillProfile* profile,
                                 const AutofillType& type,
                                 const std::string& app_locale) {
-  std::vector<base::string16> results;
+  std::vector<std::u16string> results;
 
   AddressField address_field;
   if (i18n::FieldForType(type.GetStorableType(), &address_field) &&
@@ -61,14 +61,12 @@ constexpr size_t kMaxSuggestedProfilesCount = 50;
 // indices clicked by our users. The suggestions will also refine as they type.
 constexpr size_t kMaxUniqueSuggestionsCount = 10;
 
-// This is the maximum number of suggestions that will be displayed when the
-// kAutofillPruneSuggestions flag is enabled.
-constexpr size_t kMaxPrunedUniqueSuggestionsCount = 3;
-
 std::vector<Suggestion> GetPrefixMatchedSuggestions(
     const AutofillType& type,
-    const base::string16& field_contents_canon,
+    const std::u16string& raw_field_contents,
+    const std::u16string& field_contents_canon,
     const AutofillProfileComparator& comparator,
+    bool field_is_autofilled,
     const std::vector<AutofillProfile*>& profiles,
     std::vector<AutofillProfile*>* matched_profiles) {
   std::vector<Suggestion> suggestions;
@@ -78,31 +76,42 @@ std::vector<Suggestion> GetPrefixMatchedSuggestions(
        i++) {
     AutofillProfile* profile = profiles[i];
 
-    if (profile->ShouldSkipFillingOrSuggesting(type.GetStorableType()))
+      // Don't offer to fill the exact same value again. If detailed suggestions
+      // with different secondary data is available, it would appear to offer
+      // refilling the whole form with something else. E.g. the same name with a
+      // work and a home address would appear twice but a click would be a noop.
+      // TODO(fhorschig): Consider refilling form instead (at on least Android).
+#if BUILDFLAG(IS_ANDROID)
+    if (base::FeatureList::IsEnabled(features::kAutofillKeyboardAccessory) &&
+        field_is_autofilled &&
+        profile->GetRawInfo(type.GetStorableType()) == raw_field_contents) {
       continue;
+    }
+#endif  // BUILDFLAG(IS_ANDROID)
 
-    base::string16 value =
+    std::u16string value =
         GetInfoInOneLine(profile, type, comparator.app_locale());
     if (value.empty())
       continue;
 
     bool prefix_matched_suggestion;
-    base::string16 suggestion_canon = comparator.NormalizeForComparison(value);
+    std::u16string suggestion_canon = comparator.NormalizeForComparison(value);
     if (IsValidSuggestionForFieldContents(
             suggestion_canon, field_contents_canon, type,
-            /* is_masked_server_card= */ false, &prefix_matched_suggestion)) {
+            /* is_masked_server_card= */ false, field_is_autofilled,
+            &prefix_matched_suggestion)) {
       matched_profiles->push_back(profile);
 
-      if (type.group() == PHONE_HOME) {
+      if (type.group() == FieldTypeGroup::kPhoneHome) {
         bool format_phone;
 
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
         format_phone = base::FeatureList::IsEnabled(
-            autofill::features::kAutofillUseMobileLabelDisambiguation);
+            features::kAutofillUseMobileLabelDisambiguation);
 #else
         format_phone = base::FeatureList::IsEnabled(
-            autofill::features::kAutofillUseImprovedLabelDisambiguation);
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+            features::kAutofillUseImprovedLabelDisambiguation);
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 
         if (format_phone) {
           // Formats, e.g., the US phone numbers 15084880800, 508 488 0800, and
@@ -116,8 +125,8 @@ std::vector<Suggestion> GetPrefixMatchedSuggestions(
         }
       }
 
-      suggestions.push_back(Suggestion(value));
-      suggestions.back().backend_id = profile->guid();
+      suggestions.emplace_back(value);
+      suggestions.back().payload = Suggestion::BackendId(profile->guid());
       suggestions.back().match = prefix_matched_suggestion
                                      ? Suggestion::PREFIX_MATCH
                                      : Suggestion::SUBSTRING_MATCH;
@@ -144,18 +153,12 @@ std::vector<Suggestion> GetUniqueSuggestions(
     std::vector<AutofillProfile*>* unique_matched_profiles) {
   std::vector<Suggestion> unique_suggestions;
 
-  size_t max_num_suggestions =
-      base::FeatureList::IsEnabled(
-          autofill::features::kAutofillPruneSuggestions)
-          ? kMaxPrunedUniqueSuggestionsCount
-          : kMaxUniqueSuggestionsCount;
-
   // Limit number of unique profiles as having too many makes the
   // browser hang due to drawing calculations (and is also not
   // very useful for the user).
   ServerFieldTypeSet types(field_types.begin(), field_types.end());
   for (size_t i = 0; i < matched_profiles.size() &&
-                     unique_suggestions.size() < max_num_suggestions;
+                     unique_suggestions.size() < kMaxUniqueSuggestionsCount;
        ++i) {
     bool include = true;
     AutofillProfile* profile_a = matched_profiles[i];
@@ -163,7 +166,8 @@ std::vector<Suggestion> GetUniqueSuggestions(
       AutofillProfile* profile_b = matched_profiles[j];
       // Check if profile A is a subset of profile B. If not, continue.
       if (i == j ||
-          !comparator.Compare(suggestions[i].value, suggestions[j].value) ||
+          !comparator.Compare(suggestions[i].main_text.value,
+                              suggestions[j].main_text.value) ||
           !profile_a->IsSubsetOfForFieldSet(comparator, *profile_b, app_locale,
                                             types)) {
         continue;
@@ -188,30 +192,49 @@ std::vector<Suggestion> GetUniqueSuggestions(
   return unique_suggestions;
 }
 
-bool IsValidSuggestionForFieldContents(base::string16 suggestion_canon,
-                                       base::string16 field_contents_canon,
+bool IsValidSuggestionForFieldContents(std::u16string suggestion_canon,
+                                       std::u16string field_contents_canon,
                                        const AutofillType& type,
                                        bool is_masked_server_card,
+                                       bool field_is_autofilled,
                                        bool* is_prefix_matched) {
   *is_prefix_matched = true;
 
   // Phones should do a substring match because they can be trimmed to remove
   // the first parts (e.g. country code or prefix). It is still considered a
   // prefix match in order to put it at the top of the suggestions.
-  if ((type.group() == PHONE_HOME || type.group() == PHONE_BILLING) &&
-      suggestion_canon.find(field_contents_canon) != base::string16::npos) {
+  if ((type.group() == FieldTypeGroup::kPhoneHome ||
+       type.group() == FieldTypeGroup::kPhoneBilling) &&
+      suggestion_canon.find(field_contents_canon) != std::u16string::npos) {
     return true;
   }
 
   // For card number fields, suggest the card if:
   // - the number matches any part of the card, or
   // - it's a masked card and there are 6 or fewer typed so far.
+  // - it's a masked card, field is autofilled, and the last 4 digits in the
+  // field match the last 4 digits of the card.
   if (type.GetStorableType() == CREDIT_CARD_NUMBER) {
-    if (suggestion_canon.find(field_contents_canon) == base::string16::npos &&
-        (!is_masked_server_card || field_contents_canon.size() >= 6)) {
-      return false;
+    if (suggestion_canon.find(field_contents_canon) != std::u16string::npos) {
+      return true;
     }
-    return true;
+
+    if (is_masked_server_card) {
+      if (field_contents_canon.length() < 6) {
+        return true;
+      }
+      if (field_is_autofilled) {
+        int field_contents_length = field_contents_canon.length();
+        DCHECK(field_contents_length >= 4);
+        if (suggestion_canon.find(field_contents_canon.substr(
+                field_contents_length - 4, field_contents_length)) !=
+            std::u16string::npos) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   if (base::StartsWith(suggestion_canon, field_contents_canon,
@@ -222,7 +245,7 @@ bool IsValidSuggestionForFieldContents(base::string16 suggestion_canon,
   if (IsFeatureSubstringMatchEnabled() &&
       suggestion_canon.length() >= field_contents_canon.length() &&
       GetTextSelectionStart(suggestion_canon, field_contents_canon, false) !=
-          base::string16::npos) {
+          std::u16string::npos) {
     *is_prefix_matched = false;
     return true;
   }
@@ -245,7 +268,7 @@ void RemoveProfilesNotUsedSinceTimestamp(
       num_profiles_supressed);
 }
 
-void PrepareSuggestions(const std::vector<base::string16>& labels,
+void PrepareSuggestions(const std::vector<std::u16string>& labels,
                         std::vector<Suggestion>* suggestions,
                         const AutofillProfileComparator& comparator) {
   DCHECK_EQ(suggestions->size(), labels.size());
@@ -254,7 +277,7 @@ void PrepareSuggestions(const std::vector<base::string16>& labels,
   // example, a Suggestion with the value "John" and the label "400 Oak Rd" has
   // the normalized text "john400oakrd". This text can only be added to the set
   // once.
-  std::unordered_set<base::string16> suggestion_text;
+  std::unordered_set<std::u16string> suggestion_text;
   size_t index_to_add_suggestion = 0;
 
   // Dedupes Suggestions to show in the dropdown once values and labels have
@@ -266,14 +289,13 @@ void PrepareSuggestions(const std::vector<base::string16>& labels,
   // the normalized text "john400oakrd", and the Suggestion with the lower
   // ranking should be discarded.
   for (size_t i = 0; i < labels.size(); ++i) {
-    base::string16 label = labels[i];
+    std::u16string label = labels[i];
 
-    bool text_inserted =
-        suggestion_text
-            .insert(comparator.NormalizeForComparison(
-                (*suggestions)[i].value + label,
-                autofill::AutofillProfileComparator::DISCARD_WHITESPACE))
-            .second;
+    bool text_inserted = suggestion_text
+                             .insert(comparator.NormalizeForComparison(
+                                 (*suggestions)[i].main_text.value + label,
+                                 AutofillProfileComparator::DISCARD_WHITESPACE))
+                             .second;
 
     if (text_inserted) {
       if (index_to_add_suggestion != i) {
@@ -287,9 +309,12 @@ void PrepareSuggestions(const std::vector<base::string16>& labels,
       // cases, e.g. when a credit card form contains a zip code field and the
       // user clicks on the zip code, a suggestion's value and the label
       // produced for it may both be a zip code.
-      if (!comparator.Compare((*suggestions)[index_to_add_suggestion].value,
-                              labels[i])) {
-        (*suggestions)[index_to_add_suggestion].label = labels[i];
+      if (!comparator.Compare(
+              (*suggestions)[index_to_add_suggestion].main_text.value,
+              labels[i]) &&
+          !labels[i].empty()) {
+        (*suggestions)[index_to_add_suggestion].labels = {
+            {Suggestion::Text(labels[i])}};
       }
       ++index_to_add_suggestion;
     }

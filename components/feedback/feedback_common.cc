@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,26 +6,24 @@
 
 #include <utility>
 
+#include "base/files/file_path.h"
 #include "base/memory/ptr_util.h"
-#include "base/strings/string_util.h"
+#include "build/chromeos_buildflags.h"
 #include "components/feedback/feedback_report.h"
 #include "components/feedback/feedback_util.h"
 #include "components/feedback/proto/common.pb.h"
 #include "components/feedback/proto/dom.pb.h"
 #include "components/feedback/proto/extension.pb.h"
 #include "components/feedback/proto/math.pb.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 
 namespace {
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 constexpr int kChromeOSProductId = 208;
 #else
 constexpr int kChromeBrowserProductId = 237;
 #endif
-
-constexpr char kMultilineIndicatorString[] = "<multiline>\n";
-constexpr char kMultilineStartString[] = "---------- START ----------\n";
-constexpr char kMultilineEndString[] = "---------- END ----------\n\n";
 
 // The below thresholds were chosen arbitrarily to conveniently show small data
 // as part of the report itself without having to look into the system_logs.zip
@@ -51,34 +49,6 @@ bool BelowCompressionThreshold(const std::string& content) {
   if (line_count > kFeedbackMaxLineCount)
     return false;
   return true;
-}
-
-// Converts the system logs into a string that we can compress and send
-// with the report.
-std::string LogsToString(const FeedbackCommon::SystemLogsMap& sys_info) {
-  std::string syslogs_string;
-  for (const auto& iter : sys_info) {
-    std::string key = iter.first;
-    std::string value = iter.second;
-
-    base::TrimString(key, "\n ", &key);
-    base::TrimString(value, "\n ", &value);
-
-    // We must avoid adding the crash IDs to the system_logs.txt file for
-    // privacy reasons. They should just be part of the product specific data.
-    if (key == feedback::FeedbackReport::kCrashReportIdsKey ||
-        key == feedback::FeedbackReport::kAllCrashReportIdsKey)
-      continue;
-
-    if (value.find("\n") != std::string::npos) {
-      syslogs_string.append(key + "=" + kMultilineIndicatorString +
-                            kMultilineStartString + value + "\n" +
-                            kMultilineEndString);
-    } else {
-      syslogs_string.append(key + "=" + value + "\n");
-    }
-  }
-  return syslogs_string;
 }
 
 void AddFeedbackData(userfeedback::ExtensionSubmit* feedback_data,
@@ -144,6 +114,10 @@ void FeedbackCommon::AddLogs(SystemLogsMap logs) {
     logs.insert(logs.begin(), logs.end());
 }
 
+bool FeedbackCommon::RemoveLog(std::string name) {
+  return logs_.erase(name) == 1;
+}
+
 void FeedbackCommon::PrepareReport(
     userfeedback::ExtensionSubmit* feedback_data) const {
   // Unused field, needs to be 0 though.
@@ -151,7 +125,7 @@ void FeedbackCommon::PrepareReport(
 
   // Set whether we're reporting from ChromeOS or Chrome on another platform.
   userfeedback::ChromeData chrome_data;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   const userfeedback::ChromeData_ChromePlatform chrome_platform =
       userfeedback::ChromeData_ChromePlatform_CHROME_OS;
   const int default_product_id = kChromeOSProductId;
@@ -167,7 +141,7 @@ void FeedbackCommon::PrepareReport(
   chrome_browser_data.set_category(
       userfeedback::ChromeBrowserData_ChromeBrowserCategory_OTHER);
   *(chrome_data.mutable_chrome_browser_data()) = chrome_browser_data;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
   chrome_data.set_chrome_platform(chrome_platform);
   *(feedback_data->mutable_chrome_data()) = chrome_data;
 
@@ -207,7 +181,14 @@ void FeedbackCommon::PrepareReport(
     feedback_data->set_bucket(category_tag());
 }
 
-FeedbackCommon::~FeedbackCommon() {}
+// static
+bool FeedbackCommon::IncludeInSystemLogs(const std::string& key,
+                                         bool is_google_email) {
+  return is_google_email ||
+         key != feedback::FeedbackReport::kAllCrashReportIdsKey;
+}
+
+FeedbackCommon::~FeedbackCommon() = default;
 
 void FeedbackCommon::CompressFile(const base::FilePath& filename,
                                   const std::string& zipname,
@@ -227,7 +208,9 @@ void FeedbackCommon::CompressFile(const base::FilePath& filename,
 }
 
 void FeedbackCommon::CompressLogs() {
-  std::string logs = LogsToString(logs_);
+  // Convert the system logs into a string that we can compress and send with
+  // the report.
+  std::string logs = feedback_util::LogsToString(logs_);
   if (!logs.empty()) {
     CompressFile(base::FilePath(kLogsFilename), kLogsAttachmentName,
                  std::move(logs));
@@ -241,19 +224,17 @@ void FeedbackCommon::AddFilesAndLogsToReport(
     AddAttachment(feedback_data, file->name.c_str(), file->data);
   }
 
+  const bool is_google_email = gaia::IsGoogleInternalAccountEmail(user_email());
   for (const auto& iter : logs_) {
     if (BelowCompressionThreshold(iter.second)) {
       // We only send the list of all the crash report IDs if the user has a
       // @google.com email. We do this also in feedback_private_api, but not all
       // code paths go through that so we need to check again here.
-      if (iter.first == feedback::FeedbackReport::kAllCrashReportIdsKey &&
-          !feedback_util::IsGoogleEmail(user_email())) {
-        continue;
+      if (FeedbackCommon::IncludeInSystemLogs(iter.first, is_google_email)) {
+        // Small enough logs should end up in the report data itself. However,
+        // they're still added as part of the system_logs.zip file.
+        AddFeedbackData(feedback_data, iter.first, iter.second);
       }
-
-      // Small enough logs should end up in the report data itself. However,
-      // they're still added as part of the system_logs.zip file.
-      AddFeedbackData(feedback_data, iter.first, iter.second);
     }
   }
 }

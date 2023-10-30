@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,7 +50,7 @@ struct FuzzedData {
 // If necessary, performs minimal correction to ensure submission to a
 // CompositorFrameSink will not cause validation errors on deserialization.
 FuzzedData BuildFuzzedCompositorFrame(
-    const proto::RenderPass& render_pass_spec);
+    const proto::CompositorRenderPass& render_pass_spec);
 
 }  // namespace viz
 

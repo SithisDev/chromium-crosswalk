@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 
 #include "base/memory/weak_ptr.h"
 #include "components/storage_monitor/storage_monitor.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "services/device/public/mojom/mtp_manager.mojom.h"
 
 namespace base {
@@ -26,6 +26,10 @@ class MtpManagerClientChromeOS : public device::mojom::MtpManagerClient {
  public:
   MtpManagerClientChromeOS(StorageMonitor::Receiver* receiver,
                            device::mojom::MtpManager* mtp_manager);
+
+  MtpManagerClientChromeOS(const MtpManagerClientChromeOS&) = delete;
+  MtpManagerClientChromeOS& operator=(const MtpManagerClientChromeOS&) = delete;
+
   ~MtpManagerClientChromeOS() override;
 
   // Finds the storage that contains |path| and populates |storage_info|.
@@ -33,8 +37,9 @@ class MtpManagerClientChromeOS : public device::mojom::MtpManagerClient {
   bool GetStorageInfoForPath(const base::FilePath& path,
                              StorageInfo* storage_info) const;
 
-  void EjectDevice(const std::string& device_id,
-                   base::Callback<void(StorageMonitor::EjectStatus)> callback);
+  void EjectDevice(
+      const std::string& device_id,
+      base::OnceCallback<void(StorageMonitor::EjectStatus)> callback);
 
  protected:
   // device::mojom::MtpManagerClient implementation.
@@ -62,15 +67,13 @@ class MtpManagerClientChromeOS : public device::mojom::MtpManagerClient {
   // manager outlives this object.
   device::mojom::MtpManager* const mtp_manager_;
 
-  mojo::AssociatedBinding<device::mojom::MtpManagerClient> binding_;
+  mojo::AssociatedReceiver<device::mojom::MtpManagerClient> receiver_{this};
 
   // The notifications object to use to signal newly attached devices.
   // Guaranteed to outlive this class.
   StorageMonitor::Receiver* const notifications_;
 
-  base::WeakPtrFactory<MtpManagerClientChromeOS> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(MtpManagerClientChromeOS);
+  base::WeakPtrFactory<MtpManagerClientChromeOS> weak_ptr_factory_{this};
 };
 
 }  // namespace storage_monitor

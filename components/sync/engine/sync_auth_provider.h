@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,14 +18,14 @@ namespace syncer {
 class SyncAuthProvider {
  public:
   using RequestTokenCallback =
-      base::Callback<void(const GoogleServiceAuthError& error,
-                          const std::string& token)>;
+      base::OnceCallback<void(const GoogleServiceAuthError& error,
+                              const std::string& token)>;
 
-  virtual ~SyncAuthProvider() {}
+  virtual ~SyncAuthProvider() = default;
 
   // Request access token for sync. Callback will be called with error and
   // access token. If error is anything other than NONE then token is invalid.
-  virtual void RequestAccessToken(const RequestTokenCallback& callback) = 0;
+  virtual void RequestAccessToken(RequestTokenCallback callback) = 0;
 
   // Invalidate access token that was rejected by sync server.
   virtual void InvalidateAccessToken(const std::string& token) = 0;

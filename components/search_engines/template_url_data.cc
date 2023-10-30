@@ -1,12 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/search_engines/template_url_data.h"
 
+#include "base/check.h"
 #include "base/guid.h"
 #include "base/i18n/case_conversion.h"
-#include "base/logging.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -15,18 +16,24 @@
 
 namespace {
 
-// Returns a GUID used for sync, which is random except for prepopulated search
+// Returns a GUID used for sync, which is random except for built-in search
 // engines. The latter benefit from using a deterministic GUID, to make sure
 // sync doesn't incur in duplicates for prepopulated engines.
-std::string GenerateGUID(int prepopulate_id) {
+std::string GenerateGUID(int prepopulate_id, int starter_pack_id) {
+  // We compute a GUID deterministically given |prepopulate_id| or
+  // |starter_pack_id|, using an arbitrary base GUID.
+  std::string guid;
   // IDs above 1000 are reserved for distribution custom engines.
-  if (prepopulate_id <= 0 || prepopulate_id > 1000)
-    return base::GenerateGUID();
+  if (prepopulate_id > 0 && prepopulate_id <= 1000) {
+    guid = base::StringPrintf("485bf7d3-0215-45af-87dc-538868%06d",
+                              prepopulate_id);
+  } else if (starter_pack_id > 0) {
+    guid = base::StringPrintf("ec205736-edd7-4022-a9a3-b431fc%06d",
+                              starter_pack_id);
+  } else {
+    guid = base::GenerateGUID();
+  }
 
-  // We compute a GUID deterministically given |prepopulate_id|, using an
-  // arbitrary base GUID.
-  std::string guid =
-      base::StringPrintf("485bf7d3-0215-45af-87dc-538868%06d", prepopulate_id);
   DCHECK(base::IsValidGUID(guid));
   return guid;
 }
@@ -40,30 +47,40 @@ TemplateURLData::TemplateURLData()
       last_modified(base::Time::Now()),
       last_visited(base::Time()),
       created_by_policy(false),
+      created_from_play_api(false),
       usage_count(0),
       prepopulate_id(0),
       sync_guid(base::GenerateGUID()),
-      keyword_(base::ASCIIToUTF16("dummy")),
+      keyword_(u"dummy"),
       url_("x") {}
 
 TemplateURLData::TemplateURLData(const TemplateURLData& other) = default;
 
-TemplateURLData::TemplateURLData(const base::string16& name,
-                                 const base::string16& keyword,
-                                 base::StringPiece search_url,
-                                 base::StringPiece suggest_url,
-                                 base::StringPiece image_url,
-                                 base::StringPiece new_tab_url,
-                                 base::StringPiece contextual_search_url,
-                                 base::StringPiece logo_url,
-                                 base::StringPiece doodle_url,
-                                 base::StringPiece search_url_post_params,
-                                 base::StringPiece suggest_url_post_params,
-                                 base::StringPiece image_url_post_params,
-                                 base::StringPiece favicon_url,
-                                 base::StringPiece encoding,
-                                 const base::ListValue& alternate_urls_list,
-                                 int prepopulate_id)
+TemplateURLData& TemplateURLData::operator=(const TemplateURLData& other) =
+    default;
+
+TemplateURLData::TemplateURLData(
+    const std::u16string& name,
+    const std::u16string& keyword,
+    base::StringPiece search_url,
+    base::StringPiece suggest_url,
+    base::StringPiece image_url,
+    base::StringPiece new_tab_url,
+    base::StringPiece contextual_search_url,
+    base::StringPiece logo_url,
+    base::StringPiece doodle_url,
+    base::StringPiece search_url_post_params,
+    base::StringPiece suggest_url_post_params,
+    base::StringPiece image_url_post_params,
+    base::StringPiece side_search_param,
+    base::StringPiece side_image_search_param,
+    base::StringPiece favicon_url,
+    base::StringPiece encoding,
+    base::StringPiece16 image_search_branding_label,
+    const base::Value& alternate_urls_list,
+    bool preconnect_to_search_url,
+    bool prefetch_likely_navigations,
+    int prepopulate_id)
     : suggestions_url(suggest_url),
       image_url(image_url),
       new_tab_url(new_tab_url),
@@ -73,37 +90,47 @@ TemplateURLData::TemplateURLData(const base::string16& name,
       search_url_post_params(search_url_post_params),
       suggestions_url_post_params(suggest_url_post_params),
       image_url_post_params(image_url_post_params),
+      side_search_param(side_search_param),
+      side_image_search_param(side_image_search_param),
+      image_search_branding_label(image_search_branding_label),
       favicon_url(favicon_url),
       safe_for_autoreplace(true),
       id(0),
       date_created(base::Time()),
       last_modified(base::Time()),
       created_by_policy(false),
+      created_from_play_api(false),
       usage_count(0),
       prepopulate_id(prepopulate_id),
-      sync_guid(GenerateGUID(prepopulate_id)) {
+      sync_guid(GenerateGUID(prepopulate_id, 0)),
+      preconnect_to_search_url(preconnect_to_search_url),
+      prefetch_likely_navigations(prefetch_likely_navigations) {
   SetShortName(name);
   SetKeyword(keyword);
-  SetURL(search_url.as_string());
-  input_encodings.push_back(encoding.as_string());
-  for (size_t i = 0; i < alternate_urls_list.GetSize(); ++i) {
-    std::string alternate_url;
-    alternate_urls_list.GetString(i, &alternate_url);
-    DCHECK(!alternate_url.empty());
-    alternate_urls.push_back(alternate_url);
+  SetURL(std::string(search_url));
+  input_encodings.push_back(std::string(encoding));
+  if (alternate_urls_list.is_list()) {
+    auto alternate_urls_list_view = alternate_urls_list.GetListDeprecated();
+    for (size_t i = 0; i < alternate_urls_list_view.size(); ++i) {
+      const std::string* alternate_url =
+          alternate_urls_list_view[i].GetIfString();
+      DCHECK(alternate_url && !alternate_url->empty());
+      if (alternate_url) {
+        alternate_urls.push_back(*alternate_url);
+      }
+    }
   }
 }
 
-TemplateURLData::~TemplateURLData() {
-}
+TemplateURLData::~TemplateURLData() = default;
 
-void TemplateURLData::SetShortName(const base::string16& short_name) {
+void TemplateURLData::SetShortName(const std::u16string& short_name) {
   // Remove tabs, carriage returns, and the like, as they can corrupt
   // how the short name is displayed.
   short_name_ = base::CollapseWhitespace(short_name, true);
 }
 
-void TemplateURLData::SetKeyword(const base::string16& keyword) {
+void TemplateURLData::SetKeyword(const std::u16string& keyword) {
   DCHECK(!keyword.empty());
 
   // Case sensitive keyword matching is confusing. As such, we force all
@@ -119,7 +146,7 @@ void TemplateURLData::SetURL(const std::string& url) {
 }
 
 void TemplateURLData::GenerateSyncGUID() {
-  sync_guid = GenerateGUID(prepopulate_id);
+  sync_guid = GenerateGUID(prepopulate_id, starter_pack_id);
 }
 
 size_t TemplateURLData::EstimateMemoryUsage() const {
@@ -134,7 +161,10 @@ size_t TemplateURLData::EstimateMemoryUsage() const {
   res += base::trace_event::EstimateMemoryUsage(search_url_post_params);
   res += base::trace_event::EstimateMemoryUsage(suggestions_url_post_params);
   res += base::trace_event::EstimateMemoryUsage(image_url_post_params);
+  res += base::trace_event::EstimateMemoryUsage(side_search_param);
+  res += base::trace_event::EstimateMemoryUsage(side_image_search_param);
   res += base::trace_event::EstimateMemoryUsage(favicon_url);
+  res += base::trace_event::EstimateMemoryUsage(image_search_branding_label);
   res += base::trace_event::EstimateMemoryUsage(originating_url);
   res += base::trace_event::EstimateMemoryUsage(input_encodings);
   res += base::trace_event::EstimateMemoryUsage(sync_guid);

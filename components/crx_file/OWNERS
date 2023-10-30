@@ -1,4 +1,5 @@
-file://extensions/OWNERS
-
 waffles@chromium.org
 sorin@chromium.org
+
+# if the above are unavailable
+file://extensions/OWNERS

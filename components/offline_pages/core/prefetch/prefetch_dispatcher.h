@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,12 +74,10 @@ class PrefetchDispatcher {
       const std::string& name_space,
       const std::vector<PrefetchURL>& prefetch_urls) = 0;
 
-  // Zine/Feed: Only used with Feed.
   // Called when the set of suggestions provided has changed.
   virtual void NewSuggestionsAvailable(
       SuggestionsProvider* suggestions_provider) = 0;
 
-  // Zine/Feed: Only used with Feed.
   // Removes a suggested URL from the fetch pipeline and offline_pages store.
   virtual void RemoveSuggestion(const GURL& url) = 0;
 

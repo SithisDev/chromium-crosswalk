@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,11 @@
 #include <memory>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "chromecast/base/observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,9 +19,7 @@ namespace chromecast {
 
 class ObserverTest : public ::testing::Test {
  protected:
-  ObserverTest() : message_loop_(std::make_unique<base::MessageLoop>()) {}
-
-  const std::unique_ptr<base::MessageLoop> message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 struct NoDefaultConstructor {
@@ -36,6 +33,9 @@ class ThreadedObservable {
   ThreadedObservable() : thread_("ThreadedObservable"), value_(0) {
     thread_.Start();
   }
+
+  ThreadedObservable(const ThreadedObservable&) = delete;
+  ThreadedObservable& operator=(const ThreadedObservable&) = delete;
 
   Observer<int> Observe() { return value_.Observe(); }
 
@@ -53,8 +53,6 @@ class ThreadedObservable {
 
   base::Thread thread_;
   Observable<int> value_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadedObservable);
 };
 
 class ThreadedObserver {
@@ -65,6 +63,9 @@ class ThreadedObserver {
                    base::WaitableEvent::InitialState::NOT_SIGNALED) {
     thread_.Start();
   }
+
+  ThreadedObserver(const ThreadedObserver&) = delete;
+  ThreadedObserver& operator=(const ThreadedObserver&) = delete;
 
   ~ThreadedObserver() {
     thread_.task_runner()->PostTask(
@@ -106,8 +107,6 @@ class ThreadedObserver {
   base::Thread thread_;
   std::unique_ptr<Observer<int>> observer_;
   base::WaitableEvent observing_;
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadedObserver);
 };
 
 void RunCallback(std::function<void()> callback) {
@@ -350,4 +349,4 @@ TEST_F(ObserverTest, ObserveOnManyThreads) {
   observers.clear();
 }
 
-}  // chromecast
+}  // namespace chromecast

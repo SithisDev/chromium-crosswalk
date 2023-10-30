@@ -1,10 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/ios/form_util/form_activity_observer_bridge.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "components/autofill/ios/form_util/form_activity_tab_helper.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -41,18 +41,29 @@ void FormActivityObserverBridge::DocumentSubmitted(web::WebState* web_state,
                                                    web::WebFrame* sender_frame,
                                                    const std::string& form_name,
                                                    const std::string& form_data,
-                                                   bool has_user_gesture,
-                                                   bool form_in_main_frame) {
+                                                   bool has_user_gesture) {
   DCHECK_EQ(web_state, web_state_);
   if ([owner_ respondsToSelector:@selector
-              (webState:didSubmitDocumentWithFormNamed:withData:hasUserGesture
-                          :formInMainFrame:inFrame:)]) {
+              (webState:
+                  didSubmitDocumentWithFormNamed:withData:hasUserGesture:inFrame
+                                                :)]) {
     [owner_ webState:web_state
         didSubmitDocumentWithFormNamed:form_name
                               withData:form_data
                         hasUserGesture:has_user_gesture
-                       formInMainFrame:form_in_main_frame
                                inFrame:sender_frame];
+  }
+}
+
+void FormActivityObserverBridge::FormRemoved(web::WebState* web_state,
+                                             web::WebFrame* sender_frame,
+                                             const FormRemovalParams& params) {
+  DCHECK_EQ(web_state, web_state_);
+  if ([owner_ respondsToSelector:@selector(webState:
+                                     didRegisterFormRemoval:inFrame:)]) {
+    [owner_ webState:web_state
+        didRegisterFormRemoval:params
+                       inFrame:sender_frame];
   }
 }
 }  // namespace autofill

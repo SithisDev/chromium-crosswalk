@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "build/build_config.h"
 #include "content/browser/media/media_browsertest.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "media/base/media.h"
@@ -19,20 +20,36 @@
 #include "media/media_buildflags.h"
 #include "media/mojo/buildflags.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/build_info.h"
 #include "media/base/android/media_codec_util.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #endif
 
+// External Clear Key is a test-only key system that has mostly the same
+// functionality as Clear Key key system. Unlike Clear Key, which is implemented
+// by AesDecryptor in the render process directly, External Clear Key is
+// implemented by hosting a CDM that supports Clear Key (e.g. AesDecryptor) in a
+// remote processes to cover the code path used by a real production CDM, which
+// is otherwise hard to cover by tests.
+// - When ENABLE_LIBRARY_CDMS is true, a "Clear Key CDM" that implements the
+//   "Library CDM API" is hosted in the CDM/utility process to do decryption and
+//   decoding. This covers MojoCdm, MojoDecryptor, CdmAdapter, CdmFileIO etc.
+//   See //media/cdm/library_cdm/clear_key_cdm/README.md.
+// - Otherwise when ENABLE_MOJO_CDM is true, External Clear Key is supported in
+//   content/shell/ by using MojoCdm with AesDecryptor running in a remote
+//   process, e.g. GPU or Browser, as specified by |mojo_media_host|. The
+//   connection between the media pipeline and the CDM varies on different
+//   platforms. For example, the media pipeline could choose the default
+//   RendererImpl in the render process, which can use the remote CDM to do
+//   decryption via MojoDecryptor. The media pipeline could also choose
+//   MojoRenderer, which hosts a RendererImpl in the remote process, which uses
+//   the Decryptor exposed by the AesDecryptor directly in the remote process.
+//   See TestMojoMediaClient for details on this path.
 #if BUILDFLAG(ENABLE_MOJO_CDM) && !BUILDFLAG(ENABLE_LIBRARY_CDMS)
-// When mojo CDM is enabled, External Clear Key is supported in //content/shell/
-// by using mojo CDM with AesDecryptor running in the remote (e.g. GPU or
-// Browser) process. When pepper CDM is supported, External Clear Key is
-// supported in chrome/, which is tested in browser_tests.
 #define SUPPORTS_EXTERNAL_CLEAR_KEY_IN_CONTENT_SHELL
 #endif
 
@@ -46,8 +63,9 @@ const char kExternalClearKeyKeySystem[] = "org.chromium.externalclearkey";
 #endif
 
 // EME-specific test results and errors.
-const char kEmeKeyError[] = "KEYERROR";
+const char16_t kEmeKeyError[] = u"KEYERROR";
 const char kEmeNotSupportedError[] = "NOTSUPPORTEDERROR";
+const char16_t kEmeNotSupportedError16[] = u"NOTSUPPORTEDERROR";
 
 const char kDefaultEmePlayer[] = "eme_player.html";
 const char kDefaultMseOnlyEmePlayer[] = "mse_different_containers.html";
@@ -86,24 +104,22 @@ class EncryptedMediaTest
   void TestFrameSizeChange() {
     RunTest("encrypted_frame_size_change.html",
             "frame_size_change-av_enc-v.webm", CurrentKeySystem(),
-            CurrentSourceType(), media::kEnded);
+            CurrentSourceType(), media::kEndedTitle);
   }
 
   void TestConfigChange(ConfigChangeType config_change_type) {
     // TODO(xhwang): Even when config change is not supported we still start
     // content shell only to return directly here. We probably should not run
     // these test cases at all.
-    if (CurrentSourceType() != SrcType::MSE) {
-      DVLOG(0) << "Config change only happens when using MSE.";
-      return;
-    }
+    if (CurrentSourceType() != SrcType::MSE)
+      GTEST_SKIP() << "Config change only happens when using MSE.";
 
     base::StringPairs query_params;
     query_params.emplace_back("keySystem", CurrentKeySystem());
     query_params.emplace_back(
         "configChangeType",
         base::NumberToString(static_cast<int>(config_change_type)));
-    RunMediaTestPage("mse_config_change.html", query_params, media::kEnded,
+    RunMediaTestPage("mse_config_change.html", query_params, media::kEndedTitle,
                      true);
   }
 
@@ -125,16 +141,15 @@ class EncryptedMediaTest
   void RunSimplePlaybackTest(const std::string& media_file,
                              const std::string& key_system,
                              SrcType src_type) {
-    RunTest(kDefaultEmePlayer, media_file, key_system, src_type, media::kEnded);
+    RunTest(kDefaultEmePlayer, media_file, key_system, src_type,
+            media::kEndedTitle);
   }
 
   void RunMultipleFileTest(const std::string& video_file,
                            const std::string& audio_file,
                            const std::string& expected_title) {
-    if (CurrentSourceType() != SrcType::MSE) {
-      DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
-      return;
-    }
+    if (CurrentSourceType() != SrcType::MSE)
+      GTEST_SKIP() << "Can only play MP4 encrypted streams by MSE.";
 
     base::StringPairs query_params;
     query_params.emplace_back("keySystem", CurrentKeySystem());
@@ -158,8 +173,8 @@ class EncryptedMediaTest
   // We want to fail quickly when a test fails because an error is encountered.
   void AddTitlesToAwait(content::TitleWatcher* title_watcher) override {
     MediaBrowserTest::AddTitlesToAwait(title_watcher);
-    title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeNotSupportedError));
-    title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeKeyError));
+    title_watcher->AlsoWaitForTitle(kEmeNotSupportedError16);
+    title_watcher->AlsoWaitForTitle(kEmeKeyError);
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -206,7 +221,13 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioClearVideo_WebM) {
   TestSimplePlayback("bear-320x240-av_enc-a.webm");
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoAudio_WebM) {
+// TODO(https://crbug.com/1239633): Flaky on Android.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Playback_VideoAudio_WebM DISABLED_Playback_VideoAudio_WebM
+#else
+#define MAYBE_Playback_VideoAudio_WebM Playback_VideoAudio_WebM
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, MAYBE_Playback_VideoAudio_WebM) {
   TestSimplePlayback("bear-320x240-av_enc-av.webm");
 }
 
@@ -214,7 +235,9 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM) {
   TestSimplePlayback("bear-320x240-v_enc-v.webm");
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM_Fullsample) {
+// TODO(crbug.com/1045382): Flaky on multiple platforms.
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       DISABLED_Playback_VideoOnly_WebM_Fullsample) {
   TestSimplePlayback("bear-320x240-v-vp9_fullsample_enc-v.webm");
 }
 
@@ -226,84 +249,134 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoClearAudio_WebM) {
   TestSimplePlayback("bear-320x240-av_enc-v.webm");
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_WebM_Opus) {
-#if defined(OS_ANDROID)
+// TODO(https://crbug.com/1239633): Flaky on Android.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Playback_VideoAudio_WebM_Opus \
+  DISABLED_Playback_VideoAudio_WebM_Opus
+#else
+#define MAYBE_Playback_VideoAudio_WebM_Opus Playback_AudioOnly_WebM_Opus
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       MAYBE_Playback_VideoAudio_WebM_Opus) {
+#if BUILDFLAG(IS_ANDROID)
   if (!media::MediaCodecUtil::IsOpusDecoderAvailable())
-    return;
+    GTEST_SKIP() << "Opus decoder not available";
 #endif
   TestSimplePlayback("bear-320x240-opus-a_enc-a.webm");
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoAudio_WebM_Opus) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (!media::MediaCodecUtil::IsOpusDecoderAvailable())
-    return;
+    GTEST_SKIP() << "Opus decoder not available";
 #endif
   TestSimplePlayback("bear-320x240-opus-av_enc-av.webm");
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoClearAudio_WebM_Opus) {
-#if defined(OS_ANDROID)
+// TODO(crbug.com/1360765): Flaky on Android.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Playback_VideoClearAudio_WebM_Opus \
+  DISABLED_Playback_VideoClearAudio_WebM_Opus
+#else
+#define MAYBE_Playback_VideoClearAudio_WebM_Opus \
+  Playback_VideoClearAudio_WebM_Opus
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       MAYBE_Playback_VideoClearAudio_WebM_Opus) {
+#if BUILDFLAG(IS_ANDROID)
   if (!media::MediaCodecUtil::IsOpusDecoderAvailable())
-    return;
+    GTEST_SKIP() << "Opus decoder not available";
 #endif
   TestSimplePlayback("bear-320x240-opus-av_enc-v.webm");
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_MP4_FLAC) {
-  RunMultipleFileTest(std::string(), "bear-flac-cenc.mp4", media::kEnded);
+  RunMultipleFileTest(std::string(), "bear-flac-cenc.mp4", media::kEndedTitle);
+}
+
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_MP4_OPUS) {
+#if BUILDFLAG(IS_ANDROID)
+  if (!media::MediaCodecUtil::IsOpusDecoderAvailable())
+    GTEST_SKIP() << "Opus decoder not available";
+#endif
+  RunMultipleFileTest(std::string(), "bear-opus-cenc.mp4", media::kEndedTitle);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_MP4_VP9) {
   // MP4 without MSE is not support yet, http://crbug.com/170793.
-  if (CurrentSourceType() != SrcType::MSE) {
-    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
-    return;
-  }
+  if (CurrentSourceType() != SrcType::MSE)
+    GTEST_SKIP() << "Can only play MP4 encrypted streams by MSE.";
+
   TestSimplePlayback("bear-320x240-v_frag-vp9-cenc.mp4");
 }
 
 // TODO(crbug.com/707127): Decide when it's supported on Android.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_FUCHSIA) && defined(ARCH_CPU_ARM_FAMILY))
+// TODO(https://crbug.com/1222685): Failing on Mac.
+// TODO(https://crbug.com/1280308): Failing on Fuchsia arm.
+#define MAYBE_Playback_VideoOnly_WebM_VP9Profile2 \
+  DISABLED_Playback_VideoOnly_WebM_VP9Profile2
+#else
+#define MAYBE_Playback_VideoOnly_WebM_VP9Profile2 \
+  Playback_VideoOnly_WebM_VP9Profile2
+#endif
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
-                       Playback_VideoOnly_WebM_VP9Profile2) {
+                       MAYBE_Playback_VideoOnly_WebM_VP9Profile2) {
   TestSimplePlayback("bear-320x240-v-vp9_profile2_subsample_cenc-v.webm");
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_MP4_VP9Profile2) {
+#if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_FUCHSIA) && defined(ARCH_CPU_ARM_FAMILY))
+// TODO(https://crbug.com/1270792): Failing on Mac.
+// TODO(https://crbug.com/1280308): Failing on Fuchsia arm.
+#define MAYBE_Playback_VideoOnly_MP4_VP9Profile2 \
+  DISABLED_Playback_VideoOnly_MP4_VP9Profile2
+#else
+#define MAYBE_Playback_VideoOnly_MP4_VP9Profile2 \
+  Playback_VideoOnly_MP4_VP9Profile2
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       MAYBE_Playback_VideoOnly_MP4_VP9Profile2) {
   // MP4 without MSE is not support yet, http://crbug.com/170793.
-  if (CurrentSourceType() != SrcType::MSE) {
-    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
-    return;
-  }
+  if (CurrentSourceType() != SrcType::MSE)
+    GTEST_SKIP() << "Can only play MP4 encrypted streams by MSE.";
+
   TestSimplePlayback("bear-320x240-v-vp9_profile2_subsample_cenc-v.mp4");
 }
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(ENABLE_AV1_DECODER)
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM_AV1) {
   TestSimplePlayback("bear-av1-cenc.webm");
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_WebM_AV1_10bit) {
+// TODO(crbug.com/1360665): Flaky on Android.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Playback_VideoOnly_WebM_AV1_10bit \
+  DISABLED_Playback_VideoOnly_WebM_AV1_10bit
+#else
+#define MAYBE_Playback_VideoOnly_WebM_AV1_10bit \
+  Playback_VideoOnly_WebM_AV1_10bit
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       MAYBE_Playback_VideoOnly_WebM_AV1_10bit) {
   TestSimplePlayback("bear-av1-320x180-10bit-cenc.webm");
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_MP4_AV1) {
   // MP4 without MSE is not support yet, http://crbug.com/170793.
-  if (CurrentSourceType() != SrcType::MSE) {
-    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
-    return;
-  }
+  if (CurrentSourceType() != SrcType::MSE)
+    GTEST_SKIP() << "Can only play MP4 encrypted streams by MSE.";
+
   TestSimplePlayback("bear-av1-cenc.mp4");
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_MP4_AV1_10bit) {
   // MP4 without MSE is not support yet, http://crbug.com/170793.
-  if (CurrentSourceType() != SrcType::MSE) {
-    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
-    return;
-  }
+  if (CurrentSourceType() != SrcType::MSE)
+    GTEST_SKIP() << "Can only play MP4 encrypted streams by MSE.";
+
   TestSimplePlayback("bear-av1-320x180-10bit-cenc.mp4");
 }
 #endif  // BUILDFLAG(ENABLE_AV1_DECODER)
@@ -314,7 +387,16 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, ConfigChangeVideo_ClearToClear) {
   TestConfigChange(ConfigChangeType::CLEAR_TO_CLEAR);
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, ConfigChangeVideo_ClearToEncrypted) {
+// Failed on Android, see https://crbug.com/1014540.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_ConfigChangeVideo_ClearToEncrypted \
+  DISABLED_ConfigChangeVideo_ClearToEncrypted
+#else
+#define MAYBE_ConfigChangeVideo_ClearToEncrypted \
+  ConfigChangeVideo_ClearToEncrypted
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
+                       MAYBE_ConfigChangeVideo_ClearToEncrypted) {
   TestConfigChange(ConfigChangeType::CLEAR_TO_ENCRYPTED);
 }
 
@@ -327,57 +409,53 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
   TestConfigChange(ConfigChangeType::ENCRYPTED_TO_ENCRYPTED);
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, FrameSizeChangeVideo) {
-#if defined(OS_ANDROID)
-  // https://crbug.com/778245
-  if (base::android::BuildInfo::GetInstance()->sdk_int() <
-      base::android::SDK_VERSION_MARSHMALLOW) {
-    DVLOG(0) << "Skipping test - FrameSizeChange is flaky on KitKat and "
-                "Lollipop devices.";
-    return;
-  }
+// Fails on Android (https://crbug.com/778245 and https://crbug.com/1023638).
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_FrameSizeChangeVideo DISABLED_FrameSizeChangeVideo
+#else
+#define MAYBE_FrameSizeChangeVideo FrameSizeChangeVideo
 #endif
-
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, MAYBE_FrameSizeChangeVideo) {
   TestFrameSizeChange();
 }
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_Encryption_CENC) {
   RunMultipleFileTest("bear-640x360-v_frag-cenc.mp4",
-                      "bear-640x360-a_frag-cenc.mp4", media::kEnded);
+                      "bear-640x360-a_frag-cenc.mp4", media::kEndedTitle);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_Encryption_CBC1) {
   RunMultipleFileTest("bear-640x360-v_frag-cbc1.mp4", std::string(),
-                      media::kError);
+                      media::kErrorTitle);
 }
 
-IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_Encryption_CENS) {
+// TODO(crbug.com/1360698): Flaky on Android.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_Playback_Encryption_CENS DISABLED_Playback_Encryption_CENS
+#else
+#define MAYBE_Playback_Encryption_CENS Playback_Encryption_CENS
+#endif
+IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, MAYBE_Playback_Encryption_CENS) {
   RunMultipleFileTest("bear-640x360-v_frag-cens.mp4", std::string(),
-                      media::kError);
+                      media::kErrorTitle);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_Encryption_CBCS) {
-  std::string expected_result =
-      BUILDFLAG(ENABLE_CBCS_ENCRYPTION_SCHEME) ? media::kEnded : media::kError;
   RunMultipleFileTest("bear-640x360-v_frag-cbcs.mp4",
-                      "bear-640x360-a_frag-cbcs.mp4", expected_result);
+                      "bear-640x360-a_frag-cbcs.mp4", media::kEndedTitle);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
                        Playback_Encryption_CBCS_Video_CENC_Audio) {
-  std::string expected_result =
-      BUILDFLAG(ENABLE_CBCS_ENCRYPTION_SCHEME) ? media::kEnded : media::kError;
   RunMultipleFileTest("bear-640x360-v_frag-cbcs.mp4",
-                      "bear-640x360-a_frag-cenc.mp4", expected_result);
+                      "bear-640x360-a_frag-cenc.mp4", media::kEndedTitle);
 }
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest,
                        Playback_Encryption_CENC_Video_CBCS_Audio) {
-  std::string expected_result =
-      BUILDFLAG(ENABLE_CBCS_ENCRYPTION_SCHEME) ? media::kEnded : media::kError;
   RunMultipleFileTest("bear-640x360-v_frag-cenc.mp4",
-                      "bear-640x360-a_frag-cbcs.mp4", expected_result);
+                      "bear-640x360-a_frag-cbcs.mp4", media::kEndedTitle);
 }
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 

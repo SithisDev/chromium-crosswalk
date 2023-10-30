@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/containers/queue.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "base/threading/thread_checker.h"
@@ -16,6 +16,7 @@
 #include "components/cast_channel/logger.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/ip_endpoint.h"
+#include "third_party/openscreen/src/cast/common/channel/proto/cast_channel.pb.h"
 
 namespace net {
 class DrainableIOBuffer;
@@ -26,7 +27,8 @@ class Socket;
 }  // namespace net
 
 namespace cast_channel {
-class CastMessage;
+
+using ::cast::channel::CastMessage;
 class MessageFramer;
 
 class CastTransport {
@@ -96,6 +98,9 @@ class CastTransportImpl : public CastTransport {
                     int channel_id,
                     const net::IPEndPoint& ip_endpoint_,
                     scoped_refptr<Logger> logger);
+
+  CastTransportImpl(const CastTransportImpl&) = delete;
+  CastTransportImpl& operator=(const CastTransportImpl&) = delete;
 
   ~CastTransportImpl() override;
 
@@ -174,7 +179,7 @@ class CastTransportImpl : public CastTransport {
   std::unique_ptr<CastMessage> current_message_;
 
   // Channel used for I/O operations.
-  Channel* const channel_;
+  const raw_ptr<Channel> channel_;
 
   // Methods for communicating message receipt and error status to client code.
   std::unique_ptr<Delegate> delegate_;
@@ -199,8 +204,6 @@ class CastTransportImpl : public CastTransport {
   scoped_refptr<Logger> logger_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(CastTransportImpl);
 };
 }  // namespace cast_channel
 

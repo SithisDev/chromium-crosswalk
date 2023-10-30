@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,13 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/logging.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/autofill/core/browser/autofill_metrics.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/autofill_profile_comparator.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
 #include "components/autofill/core/browser/geo/autofill_country.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/payments/payments_customer_data.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
@@ -31,8 +30,7 @@ namespace {
 const int LOCAL_GUID_LENGTH = 36;
 
 // TODO(crbug.com/687975): Reuse MergeProfile in this function.
-// static
-std::string MergeServerAddressesIntoProfiles(
+std::string MergeServerAddressesIntoProfilesAndUpdateDb(
     const AutofillProfile& server_address,
     std::vector<std::unique_ptr<AutofillProfile>>* existing_profiles,
     const std::string& app_locale,
@@ -63,7 +61,7 @@ std::string MergeServerAddressesIntoProfiles(
 
   // Wallet addresses don't have an email address, use the one from the
   // currently signed-in account.
-  base::string16 email = base::UTF8ToUTF16(primary_account_email);
+  std::u16string email = base::UTF8ToUTF16(primary_account_email);
   if (!email.empty())
     existing_profiles->back()->SetRawInfo(EMAIL_ADDRESS, email);
 
@@ -94,7 +92,7 @@ bool ConvertWalletAddressesToLocalProfiles(
     if (!wallet_address->has_converted()) {
       // Try to merge the server address into a similar local profile, or create
       // a new local profile if no similar profile is found.
-      std::string address_guid = MergeServerAddressesIntoProfiles(
+      std::string address_guid = MergeServerAddressesIntoProfilesAndUpdateDb(
           *wallet_address, local_profiles, app_locale, primary_account_email,
           backend, db);
 
@@ -179,7 +177,7 @@ void UpdateCardsBillingAddressReference(
   for (std::unique_ptr<CreditCard>& credit_card : credit_cards) {
     // If the credit card is not associated with a billing address, skip it.
     if (credit_card->billing_address_id().empty())
-      break;
+      continue;
 
     // If the billing address profile associated with the card has been merged,
     // replace it by the id of the profile in which it was merged. Repeat the

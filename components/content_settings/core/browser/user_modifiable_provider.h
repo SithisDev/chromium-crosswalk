@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 #include "components/content_settings/core/browser/content_settings_observable_provider.h"
 #include "components/content_settings/core/common/content_settings.h"
 
-class ContentSettingsPattern;
+namespace base {
+class Clock;
+}
 
 namespace content_settings {
 
@@ -17,12 +19,14 @@ namespace content_settings {
 class UserModifiableProvider : public ObservableProvider {
  public:
   ~UserModifiableProvider() override {}
-  // Returns the timestamp that a particular setting was last modified.
-  virtual base::Time GetWebsiteSettingLastModified(
+  // Updates the last_visit time for the given setting. Returns true if the
+  // setting was found and updated.
+  virtual bool UpdateLastVisitTime(
       const ContentSettingsPattern& primary_pattern,
       const ContentSettingsPattern& secondary_pattern,
-      ContentSettingsType content_type,
-      const ResourceIdentifier& resource_identifier) = 0;
+      ContentSettingsType content_type) = 0;
+  // Sets the providers internal clock for testing purposes.
+  virtual void SetClockForTesting(base::Clock* clock) = 0;
 };
 
 }  // namespace content_settings

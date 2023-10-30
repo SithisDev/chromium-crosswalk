@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/omnibox_client.h"
@@ -20,6 +19,8 @@ class OmniboxControllerTest : public testing::Test {
  protected:
   OmniboxControllerTest();
   ~OmniboxControllerTest() override;
+  OmniboxControllerTest(const OmniboxControllerTest&) = delete;
+  OmniboxControllerTest& operator=(const OmniboxControllerTest&) = delete;
 
   void CreateController();
   void AssertProviders(int expected_providers);
@@ -33,11 +34,9 @@ class OmniboxControllerTest : public testing::Test {
   void SetUp() override;
   void TearDown() override;
 
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<TestOmniboxClient> omnibox_client_;
   std::unique_ptr<OmniboxController> omnibox_controller_;
-
-  DISALLOW_COPY_AND_ASSIGN(OmniboxControllerTest);
 };
 
 OmniboxControllerTest::OmniboxControllerTest() {}

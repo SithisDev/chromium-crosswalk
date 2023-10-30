@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,12 @@
 
 namespace viz {
 
-MockDisplayClient::MockDisplayClient() : binding_(this) {}
+MockDisplayClient::MockDisplayClient() = default;
 
 MockDisplayClient::~MockDisplayClient() = default;
 
-mojom::DisplayClientPtr MockDisplayClient::BindInterfacePtr() {
-  mojom::DisplayClientPtr ptr;
-  binding_.Bind(MakeRequest(&ptr));
-  return ptr;
+mojo::PendingRemote<mojom::DisplayClient> MockDisplayClient::BindRemote() {
+  return receiver_.BindNewPipeAndPassRemote();
 }
 
 }  // namespace viz

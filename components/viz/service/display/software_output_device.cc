@@ -1,12 +1,15 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/service/display/software_output_device.h"
 
+#include <utility>
+
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "skia/ext/legacy_display_globals.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/vsync_provider.h"
 
@@ -36,7 +39,8 @@ void SoftwareOutputDevice::Resize(const gfx::Size& viewport_pixel_size,
       SkImageInfo::MakeN32(viewport_pixel_size.width(),
                            viewport_pixel_size.height(), kOpaque_SkAlphaType);
   viewport_pixel_size_ = viewport_pixel_size;
-  surface_ = SkSurface::MakeRaster(info);
+  SkSurfaceProps props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
+  surface_ = SkSurface::MakeRaster(info, &props);
 }
 
 SkCanvas* SoftwareOutputDevice::BeginPaint(const gfx::Rect& damage_rect) {
@@ -54,6 +58,14 @@ void SoftwareOutputDevice::OnSwapBuffers(
     SwapBuffersCallback swap_ack_callback) {
   task_runner_->PostTask(FROM_HERE, base::BindOnce(std::move(swap_ack_callback),
                                                    viewport_pixel_size_));
+}
+
+int SoftwareOutputDevice::MaxFramesPending() const {
+  return 1;
+}
+
+bool SoftwareOutputDevice::SupportsOverridePlatformSize() const {
+  return false;
 }
 
 }  // namespace viz

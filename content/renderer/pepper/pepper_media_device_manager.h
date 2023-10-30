@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,19 +10,24 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
 #include "content/renderer/pepper/pepper_device_enumeration_host_helper.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "ppapi/c/pp_instance.h"
 #include "third_party/blink/public/common/mediastream/media_devices.h"
 #include "third_party/blink/public/mojom/mediastream/media_devices.mojom.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 
+namespace blink {
+class WebMediaStreamDeviceObserver;
+}  // namespace blink
+
+using blink::mojom::MediaDeviceType;
+
 namespace content {
-class MediaStreamDeviceObserver;
 
 class PepperMediaDeviceManager
     : public PepperDeviceEnumerationHostHelper::Delegate,
@@ -33,6 +38,10 @@ class PepperMediaDeviceManager
  public:
   static base::WeakPtr<PepperMediaDeviceManager> GetForRenderFrame(
       RenderFrame* render_frame);
+
+  PepperMediaDeviceManager(const PepperMediaDeviceManager&) = delete;
+  PepperMediaDeviceManager& operator=(const PepperMediaDeviceManager&) = delete;
+
   ~PepperMediaDeviceManager() override;
 
   // PepperDeviceEnumerationHostHelper::Delegate implementation:
@@ -45,7 +54,7 @@ class PepperMediaDeviceManager
 
   // blink::mojom::MediaDevicesListener implementation.
   void OnDevicesChanged(
-      blink::MediaDeviceType type,
+      MediaDeviceType type,
       const blink::WebMediaDeviceInfoArray& device_infos) override;
 
   using OpenDeviceCallback =
@@ -67,7 +76,8 @@ class PepperMediaDeviceManager
   void CancelOpenDevice(int request_id);
   void CloseDevice(const std::string& label);
   // Gets audio/video session ID given a label.
-  int GetSessionID(PP_DeviceType_Dev type, const std::string& label);
+  base::UnguessableToken GetSessionID(PP_DeviceType_Dev type,
+                                      const std::string& label);
 
   // Stream type conversion.
   static blink::mojom::MediaStreamType FromPepperDeviceType(
@@ -90,18 +100,16 @@ class PepperMediaDeviceManager
 
   void DevicesEnumerated(
       DevicesOnceCallback callback,
-      blink::MediaDeviceType type,
+      MediaDeviceType type,
       const std::vector<blink::WebMediaDeviceInfoArray>& enumeration,
       std::vector<blink::mojom::VideoInputDeviceCapabilitiesPtr>
           video_input_capabilities,
       std::vector<blink::mojom::AudioInputDeviceCapabilitiesPtr>
           audio_input_capabilities);
 
-  const blink::mojom::MediaStreamDispatcherHostPtr&
-  GetMediaStreamDispatcherHost();
-  MediaStreamDeviceObserver* GetMediaStreamDeviceObserver() const;
-  const blink::mojom::MediaDevicesDispatcherHostPtr&
-  GetMediaDevicesDispatcher();
+  blink::mojom::MediaStreamDispatcherHost* GetMediaStreamDispatcherHost();
+  blink::WebMediaStreamDeviceObserver* GetMediaStreamDeviceObserver() const;
+  blink::mojom::MediaDevicesDispatcherHost* GetMediaDevicesDispatcher();
 
   int next_id_ = 1;
   using OpenCallbackMap = std::map<int, OpenDeviceCallback>;
@@ -109,14 +117,14 @@ class PepperMediaDeviceManager
 
   using Subscription = std::pair<size_t, DevicesCallback>;
   using SubscriptionList = std::vector<Subscription>;
-  SubscriptionList device_change_subscriptions_[blink::NUM_MEDIA_DEVICE_TYPES];
+  SubscriptionList device_change_subscriptions_[static_cast<size_t>(
+      MediaDeviceType::NUM_MEDIA_DEVICE_TYPES)];
 
-  blink::mojom::MediaStreamDispatcherHostPtr dispatcher_host_;
-  blink::mojom::MediaDevicesDispatcherHostPtr media_devices_dispatcher_;
+  mojo::Remote<blink::mojom::MediaStreamDispatcherHost> dispatcher_host_;
+  mojo::Remote<blink::mojom::MediaDevicesDispatcherHost>
+      media_devices_dispatcher_;
 
-  mojo::BindingSet<blink::mojom::MediaDevicesListener> bindings_;
-
-  DISALLOW_COPY_AND_ASSIGN(PepperMediaDeviceManager);
+  mojo::ReceiverSet<blink::mojom::MediaDevicesListener> receivers_;
 };
 
 }  // namespace content

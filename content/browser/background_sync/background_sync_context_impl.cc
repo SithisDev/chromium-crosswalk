@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/stl_util.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "content/browser/background_sync/background_sync_launcher.h"
 #include "content/browser/background_sync/background_sync_manager.h"
 #include "content/browser/background_sync/one_shot_background_sync_service_impl.h"
@@ -24,17 +24,16 @@
 namespace content {
 
 BackgroundSyncContextImpl::BackgroundSyncContextImpl()
-    : base::RefCountedDeleteOnSequence<BackgroundSyncContextImpl>(
-          base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO})),
-      test_wakeup_delta_(
+    : test_wakeup_delta_(
           {{blink::mojom::BackgroundSyncType::ONE_SHOT, base::TimeDelta::Max()},
            {blink::mojom::BackgroundSyncType::PERIODIC,
-            base::TimeDelta::Max()}}) {}
+            base::TimeDelta::Max()}}) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+}
 
 BackgroundSyncContextImpl::~BackgroundSyncContextImpl() {
-  // The destructor must run on the IO thread because it implicitly accesses
-  // background_sync_manager_ and services_, when it runs their destructors.
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   DCHECK(!background_sync_manager_);
   DCHECK(one_shot_sync_services_.empty());
@@ -42,7 +41,7 @@ BackgroundSyncContextImpl::~BackgroundSyncContextImpl() {
 }
 
 // static
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 void BackgroundSyncContext::FireBackgroundSyncEventsAcrossPartitions(
     BrowserContext* browser_context,
     blink::mojom::BackgroundSyncType sync_type,
@@ -54,60 +53,49 @@ void BackgroundSyncContext::FireBackgroundSyncEventsAcrossPartitions(
 }
 #endif
 
-// static
-void BackgroundSyncContext::GetSoonestWakeupDeltaAcrossPartitions(
-    blink::mojom::BackgroundSyncType sync_type,
-    BrowserContext* browser_context,
-    base::OnceCallback<void(base::TimeDelta)> callback) {
-  DCHECK(browser_context);
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  BackgroundSyncLauncher::GetSoonestWakeupDelta(sync_type, browser_context,
-                                                std::move(callback));
-}
-
 void BackgroundSyncContextImpl::Init(
     const scoped_refptr<ServiceWorkerContextWrapper>& service_worker_context,
     const scoped_refptr<DevToolsBackgroundServicesContextImpl>&
         devtools_context) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&BackgroundSyncContextImpl::CreateBackgroundSyncManager,
-                     this, service_worker_context, devtools_context));
+  CreateBackgroundSyncManager(service_worker_context, devtools_context);
 }
 
 void BackgroundSyncContextImpl::Shutdown() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&BackgroundSyncContextImpl::ShutdownOnIO, this));
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  one_shot_sync_services_.clear();
+  periodic_sync_services_.clear();
+  background_sync_manager_.reset();
 }
 
 void BackgroundSyncContextImpl::CreateOneShotSyncService(
-    blink::mojom::OneShotBackgroundSyncServiceRequest request) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(
-          &BackgroundSyncContextImpl::CreateOneShotSyncServiceOnIOThread, this,
-          std::move(request)));
+    const url::Origin& origin,
+    RenderProcessHost* render_process_host,
+    mojo::PendingReceiver<blink::mojom::OneShotBackgroundSyncService>
+        receiver) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(background_sync_manager_);
+  one_shot_sync_services_.insert(
+      std::make_unique<OneShotBackgroundSyncServiceImpl>(
+          this, origin, render_process_host, std::move(receiver)));
 }
 
 void BackgroundSyncContextImpl::CreatePeriodicSyncService(
-    blink::mojom::PeriodicBackgroundSyncServiceRequest request) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(
-          &BackgroundSyncContextImpl::CreatePeriodicSyncServiceOnIOThread, this,
-          std::move(request)));
+    const url::Origin& origin,
+    RenderProcessHost* render_process_host,
+    mojo::PendingReceiver<blink::mojom::PeriodicBackgroundSyncService>
+        receiver) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(background_sync_manager_);
+  periodic_sync_services_.insert(
+      std::make_unique<PeriodicBackgroundSyncServiceImpl>(
+          this, origin, render_process_host, std::move(receiver)));
 }
 
 void BackgroundSyncContextImpl::OneShotSyncServiceHadConnectionError(
     OneShotBackgroundSyncServiceImpl* service) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(service);
 
   auto iter = one_shot_sync_services_.find(service);
@@ -117,7 +105,7 @@ void BackgroundSyncContextImpl::OneShotSyncServiceHadConnectionError(
 
 void BackgroundSyncContextImpl::PeriodicSyncServiceHadConnectionError(
     PeriodicBackgroundSyncServiceImpl* service) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(service);
 
   auto iter = periodic_sync_services_.find(service);
@@ -127,14 +115,14 @@ void BackgroundSyncContextImpl::PeriodicSyncServiceHadConnectionError(
 
 BackgroundSyncManager* BackgroundSyncContextImpl::background_sync_manager()
     const {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   return background_sync_manager_.get();
 }
 
 void BackgroundSyncContextImpl::set_background_sync_manager_for_testing(
     std::unique_ptr<BackgroundSyncManager> manager) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   background_sync_manager_ = std::move(manager);
 }
@@ -145,35 +133,10 @@ void BackgroundSyncContextImpl::set_wakeup_delta_for_testing(
   test_wakeup_delta_[sync_type] = wakeup_delta;
 }
 
-void BackgroundSyncContextImpl::GetSoonestWakeupDelta(
-    blink::mojom::BackgroundSyncType sync_type,
-    base::Time last_browser_wakeup_for_periodic_sync,
-    base::OnceCallback<void(base::TimeDelta)> callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(
-          &BackgroundSyncContextImpl::GetSoonestWakeupDeltaOnIOThread, this,
-          sync_type, last_browser_wakeup_for_periodic_sync),
-      base::BindOnce(&BackgroundSyncContextImpl::DidGetSoonestWakeupDelta, this,
-                     std::move(callback)));
-}
-
-void BackgroundSyncContextImpl::RevivePeriodicBackgroundSyncRegistrations(
-    url::Origin origin) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&BackgroundSyncContextImpl::
-                         RevivePeriodicBackgroundSyncRegistrationsOnIOThread,
-                     this, std::move(origin)));
-}
-
-base::TimeDelta BackgroundSyncContextImpl::GetSoonestWakeupDeltaOnIOThread(
+base::TimeDelta BackgroundSyncContextImpl::GetSoonestWakeupDelta(
     blink::mojom::BackgroundSyncType sync_type,
     base::Time last_browser_wakeup_for_periodic_sync) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   auto test_wakeup_delta = test_wakeup_delta_[sync_type];
   if (!test_wakeup_delta.is_max())
@@ -185,17 +148,9 @@ base::TimeDelta BackgroundSyncContextImpl::GetSoonestWakeupDeltaOnIOThread(
       sync_type, last_browser_wakeup_for_periodic_sync);
 }
 
-void BackgroundSyncContextImpl::DidGetSoonestWakeupDelta(
-    base::OnceCallback<void(base::TimeDelta)> callback,
-    base::TimeDelta soonest_wakeup_delta) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  std::move(callback).Run(soonest_wakeup_delta);
-}
-
-void BackgroundSyncContextImpl::
-    RevivePeriodicBackgroundSyncRegistrationsOnIOThread(url::Origin origin) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+void BackgroundSyncContextImpl::RevivePeriodicBackgroundSyncRegistrations(
+    url::Origin origin) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (!background_sync_manager_)
     return;
@@ -203,78 +158,38 @@ void BackgroundSyncContextImpl::
   background_sync_manager_->RevivePeriodicSyncRegistrations(std::move(origin));
 }
 
+void BackgroundSyncContextImpl::UnregisterPeriodicSyncForOrigin(
+    url::Origin origin) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!background_sync_manager_)
+    return;
+
+  background_sync_manager_->UnregisterPeriodicSyncForOrigin(origin);
+}
+
 void BackgroundSyncContextImpl::FireBackgroundSyncEvents(
     blink::mojom::BackgroundSyncType sync_type,
     base::OnceClosure done_closure) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(
-          &BackgroundSyncContextImpl::FireBackgroundSyncEventsOnIOThread, this,
-          sync_type, std::move(done_closure)));
-}
-
-void BackgroundSyncContextImpl::FireBackgroundSyncEventsOnIOThread(
-    blink::mojom::BackgroundSyncType sync_type,
-    base::OnceClosure done_closure) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!background_sync_manager_) {
-    std::move(done_closure).Run();
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  std::move(done_closure));
     return;
   }
 
-  background_sync_manager_->FireReadyEvents(
-      sync_type, /* reschedule= */ false,
-      base::BindOnce(
-          &BackgroundSyncContextImpl::DidFireBackgroundSyncEventsOnIOThread,
-          this, std::move(done_closure)));
-}
-
-void BackgroundSyncContextImpl::DidFireBackgroundSyncEventsOnIOThread(
-    base::OnceClosure done_closure) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
-                           std::move(done_closure));
+  background_sync_manager_->FireReadyEvents(sync_type, /* reschedule= */ false,
+                                            std::move(done_closure));
 }
 
 void BackgroundSyncContextImpl::CreateBackgroundSyncManager(
     scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
     scoped_refptr<DevToolsBackgroundServicesContextImpl> devtools_context) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!background_sync_manager_);
 
   background_sync_manager_ = BackgroundSyncManager::Create(
       std::move(service_worker_context), std::move(devtools_context));
-}
-
-void BackgroundSyncContextImpl::CreateOneShotSyncServiceOnIOThread(
-    mojo::InterfaceRequest<blink::mojom::OneShotBackgroundSyncService>
-        request) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(background_sync_manager_);
-  one_shot_sync_services_.insert(
-      std::make_unique<OneShotBackgroundSyncServiceImpl>(this,
-                                                         std::move(request)));
-}
-
-void BackgroundSyncContextImpl::CreatePeriodicSyncServiceOnIOThread(
-    mojo::InterfaceRequest<blink::mojom::PeriodicBackgroundSyncService>
-        request) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(background_sync_manager_);
-  periodic_sync_services_.insert(
-      std::make_unique<PeriodicBackgroundSyncServiceImpl>(this,
-                                                          std::move(request)));
-}
-
-void BackgroundSyncContextImpl::ShutdownOnIO() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  one_shot_sync_services_.clear();
-  periodic_sync_services_.clear();
-  background_sync_manager_.reset();
 }
 
 }  // namespace content

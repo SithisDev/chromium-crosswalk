@@ -10,9 +10,9 @@ include_rules = [
   "+sandbox/linux/suid",
   "+sandbox/linux/system_headers",
   "+sandbox/mac",
+  "+sandbox/policy",
   "+sandbox/sandbox_buildflags.h",
   "+sandbox/win/src",
-  "+services/service_manager/sandbox",
   "+ppapi/c",  # header files only
 
   "+mojo/core/embedder",
@@ -28,9 +28,6 @@ include_rules = [
   # For message scanning and handle conversion in nacl_ipc_adapter.cc:
   "+ppapi/proxy/nacl_message_scanner.h",
   "+ppapi/proxy/serialized_handle.h",
-
-  # For setting FDs in non-SFI mode.
-  "+ppapi/nacl_irt",
 
   # For sending PpapiHostMsg_ChannelCreated in nacl_ipc_adapter.cc:
   "+ppapi/proxy/ppapi_messages.h",

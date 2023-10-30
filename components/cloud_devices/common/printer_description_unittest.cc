@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,597 +7,586 @@
 #include <memory>
 #include <utility>
 
-#include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/strings/string_util.h"
+#include "base/test/values_test_util.h"
 #include "base/values.h"
+#include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace cloud_devices {
 
 namespace printer {
 
-// Replaces ' with " to allow readable JSON constants in tests.
 // Makes sure that same JSON value represented by same strings to simplify
 // comparison.
 std::string NormalizeJson(const std::string& json) {
-  std::string result = json;
-  base::ReplaceChars(result, "'", "\"", &result);
-  std::unique_ptr<base::Value> value = base::JSONReader::ReadDeprecated(result);
-  base::JSONWriter::Write(*value, &result);
+  std::string result;
+  base::JSONWriter::Write(base::test::ParseJson(json), &result);
   return result;
 }
 
-const char kCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'supported_content_type': [ {"
-    "      'content_type': 'image/pwg-raster'"
-    "    }, {"
-    "      'content_type': 'image/jpeg'"
-    "    } ],"
-    "    'pwg_raster_config': {"
-    "      'document_sheet_back': 'MANUAL_TUMBLE',"
-    "      'reverse_order_streaming': true"
-    "    },"
-    "    'color': {"
-    "      'option': [ {"
-    "        'is_default': true,"
-    "        'type': 'STANDARD_COLOR'"
-    "      }, {"
-    "        'type': 'STANDARD_MONOCHROME'"
-    "      }, {"
-    "        'type': 'CUSTOM_MONOCHROME',"
-    "        'vendor_id': '123',"
-    "        'custom_display_name': 'monochrome'"
-    "      } ]"
-    "    },"
-    "    'duplex': {"
-    "      'option': [ {"
-    "        'is_default': true,"
-    "        'type': 'LONG_EDGE'"
-    "       }, {"
-    "        'type': 'SHORT_EDGE'"
-    "       }, {"
-    "        'type': 'NO_DUPLEX'"
-    "       } ]"
-    "    },"
-    "    'page_orientation': {"
-    "      'option': [ {"
-    "        'type': 'PORTRAIT'"
-    "      }, {"
-    "        'type': 'LANDSCAPE'"
-    "      }, {"
-    "        'is_default': true,"
-    "        'type': 'AUTO'"
-    "      } ]"
-    "    },"
-    "    'copies': {"
-    "    },"
-    "    'margins': {"
-    "      'option': [ {"
-    "        'is_default': true,"
-    "        'type': 'BORDERLESS',"
-    "        'top_microns': 0,"
-    "        'right_microns': 0,"
-    "        'bottom_microns': 0,"
-    "        'left_microns': 0"
-    "      }, {"
-    "         'type': 'STANDARD',"
-    "         'top_microns': 100,"
-    "         'right_microns': 200,"
-    "         'bottom_microns': 300,"
-    "         'left_microns': 400"
-    "      }, {"
-    "         'type': 'CUSTOM',"
-    "         'top_microns': 1,"
-    "         'right_microns': 2,"
-    "         'bottom_microns': 3,"
-    "         'left_microns': 4"
-    "      } ]"
-    "    },"
-    "    'dpi': {"
-    "      'option': [ {"
-    "        'horizontal_dpi': 150,"
-    "        'vertical_dpi': 250"
-    "      }, {"
-    "        'is_default': true,"
-    "        'horizontal_dpi': 600,"
-    "        'vertical_dpi': 1600"
-    "      } ]"
-    "    },"
-    "    'fit_to_page': {"
-    "      'option': [ {"
-    "        'is_default': true,"
-    "        'type': 'NO_FITTING'"
-    "      }, {"
-    "        'type': 'FIT_TO_PAGE'"
-    "      }, {"
-    "        'type': 'GROW_TO_PAGE'"
-    "      }, {"
-    "        'type': 'SHRINK_TO_PAGE'"
-    "      }, {"
-    "        'type': 'FILL_PAGE'"
-    "      } ]"
-    "    },"
-    "    'page_range': {"
-    "    },"
-    "    'media_size': {"
-    "      'option': [ {"
-    "        'is_default': true,"
-    "        'name': 'NA_LETTER',"
-    "        'width_microns': 2222,"
-    "        'height_microns': 3333"
-    "      }, {"
-    "        'name': 'ISO_A6',"
-    "        'width_microns': 4444,"
-    "        'height_microns': 5555"
-    "      }, {"
-    "        'name': 'JPN_YOU4',"
-    "        'width_microns': 6666,"
-    "        'height_microns': 7777"
-    "      }, {"
-    "        'width_microns': 1111,"
-    "        'is_continuous_feed': true,"
-    "        'custom_display_name': 'Feed',"
-    "        'vendor_id': 'FEED'"
-    "      } ]"
-    "    },"
-    "    'collate': {"
-    "      'default': false"
-    "    },"
-    "    'reverse_order': {"
-    "      'default': true"
-    "    }"
-    "  }"
-    "}";
+const char kCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "supported_content_type": [ {
+          "content_type": "image/pwg-raster"
+        }, {
+          "content_type": "image/jpeg"
+        } ],
+        "pwg_raster_config": {
+          "document_sheet_back": "MANUAL_TUMBLE",
+          "reverse_order_streaming": true
+        },
+        "color": {
+          "option": [ {
+            "type": "STANDARD_COLOR"
+          }, {
+            "type": "STANDARD_MONOCHROME"
+          }, {
+            "type": "CUSTOM_MONOCHROME",
+            "vendor_id": "123",
+            "custom_display_name": "monochrome"
+          } ]
+        },
+        "duplex": {
+          "option": [ {
+            "is_default": true,
+            "type": "LONG_EDGE"
+           }, {
+            "type": "SHORT_EDGE"
+           }, {
+            "type": "NO_DUPLEX"
+           } ]
+        },
+        "page_orientation": {
+          "option": [ {
+            "type": "PORTRAIT"
+          }, {
+            "type": "LANDSCAPE"
+          }, {
+            "is_default": true,
+            "type": "AUTO"
+          } ]
+        },
+        "copies": {
+          "default": 1,
+          "max": 1
+        },
+        "margins": {
+          "option": [ {
+            "is_default": true,
+            "type": "BORDERLESS",
+            "top_microns": 0,
+            "right_microns": 0,
+            "bottom_microns": 0,
+            "left_microns": 0
+          }, {
+             "type": "STANDARD",
+             "top_microns": 100,
+             "right_microns": 200,
+             "bottom_microns": 300,
+             "left_microns": 400
+          }, {
+             "type": "CUSTOM",
+             "top_microns": 1,
+             "right_microns": 2,
+             "bottom_microns": 3,
+             "left_microns": 4
+          } ]
+        },
+        "dpi": {
+          "option": [ {
+            "horizontal_dpi": 150,
+            "vertical_dpi": 250
+          }, {
+            "is_default": true,
+            "horizontal_dpi": 600,
+            "vertical_dpi": 1600
+          } ]
+        },
+        "fit_to_page": {
+          "option": [ {
+            "is_default": true,
+            "type": "NO_FITTING"
+          }, {
+            "type": "FIT_TO_PAGE"
+          }, {
+            "type": "GROW_TO_PAGE"
+          }, {
+            "type": "SHRINK_TO_PAGE"
+          }, {
+            "type": "FILL_PAGE"
+          } ]
+        },
+        "page_range": {
+        },
+        "media_size": {
+          "option": [ {
+            "is_default": true,
+            "name": "NA_LETTER",
+            "width_microns": 2222,
+            "height_microns": 3333
+          }, {
+            "name": "ISO_A6",
+            "width_microns": 4444,
+            "height_microns": 5555
+          }, {
+            "name": "JPN_YOU4",
+            "width_microns": 6666,
+            "height_microns": 7777
+          }, {
+            "width_microns": 1111,
+            "is_continuous_feed": true,
+            "custom_display_name": "Feed",
+            "vendor_id": "FEED"
+          } ]
+        },
+        "collate": {
+          "default": false
+        },
+        "reverse_order": {
+          "default": true
+        }
+      }
+    })";
 
-const char kDefaultCdd[] =
-    "{"
-    "  'version': '1.0'"
-    "}";
+const char kDefaultCdd[] = R"(
+    {
+      "version": "1.0"
+    })";
 
-const char kBadVersionCdd[] =
-    "{"
-    "  'version': '1.1',"
-    "  'printer': {"
-    "  }"
-    "}";
+const char kBadVersionCdd[] = R"(
+    {
+      "version": "1.1",
+      "printer": {
+      }
+    })";
 
-const char kNoDefaultCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'color': {"
-    "      'option': [ {"
-    "        'type': 'STANDARD_COLOR'"
-    "      }, {"
-    "        'type': 'STANDARD_MONOCHROME'"
-    "      } ]"
-    "    }"
-    "  }"
-    "}";
+const char kMultyDefaultCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "color": {
+          "option": [ {
+            "is_default": true,
+            "type": "STANDARD_COLOR"
+          }, {
+            "is_default": true,
+            "type": "STANDARD_MONOCHROME"
+          } ]
+        }
+      }
+    })";
 
-const char kMultyDefaultCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'color': {"
-    "      'option': [ {"
-    "        'is_default': true,"
-    "        'type': 'STANDARD_COLOR'"
-    "      }, {"
-    "        'is_default': true,"
-    "        'type': 'STANDARD_MONOCHROME'"
-    "      } ]"
-    "    }"
-    "  }"
-    "}";
+const char kDocumentTypeColorOnlyCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "pwg_raster_config": {
+          "document_type_supported": [ "SRGB_8" ],
+          "document_sheet_back": "ROTATED"
+        }
+      }
+    })";
 
-const char kDocumentTypeColorOnlyCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'pwg_raster_config': {"
-    "      'document_type_supported': [ 'SRGB_8' ],"
-    "      'document_sheet_back': 'ROTATED'"
-    "    }"
-    "  }"
-    "}";
+const char kDocumentTypeGrayOnlyCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "pwg_raster_config": {
+          "document_type_supported": [ "SGRAY_8" ],
+          "document_sheet_back": "ROTATED"
+        }
+      }
+    })";
 
-const char kDocumentTypeGrayOnlyCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'pwg_raster_config': {"
-    "      'document_type_supported': [ 'SGRAY_8' ],"
-    "      'document_sheet_back': 'ROTATED'"
-    "    }"
-    "  }"
-    "}";
+const char kDocumentTypeColorAndGrayCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "pwg_raster_config": {
+          "document_type_supported": [ "SRGB_8", "SGRAY_8" ],
+          "document_sheet_back": "ROTATED"
+        }
+      }
+    })";
 
-const char kDocumentTypeColorAndGrayCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'pwg_raster_config': {"
-    "      'document_type_supported': [ 'SRGB_8', 'SGRAY_8' ],"
-    "      'document_sheet_back': 'ROTATED'"
-    "    }"
-    "  }"
-    "}";
+const char kDocumentTypeColorAndUnsupportedCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "pwg_raster_config": {
+          "document_type_supported": [ "SRGB_8", "SRGB_16" ],
+          "document_sheet_back": "ROTATED"
+        }
+      }
+    })";
 
-const char kDocumentTypeColorAndUnsupportedCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'pwg_raster_config': {"
-    "      'document_type_supported': [ 'SRGB_8', 'SRGB_16' ],"
-    "      'document_sheet_back': 'ROTATED'"
-    "    }"
-    "  }"
-    "}";
+const char kDocumentTypeNoneCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "pwg_raster_config": {
+          "document_sheet_back": "ROTATED"
+        }
+      }
+    })";
 
-const char kDocumentTypeNoneCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'pwg_raster_config': {"
-    "      'document_sheet_back': 'ROTATED'"
-    "    }"
-    "  }"
-    "}";
+const char kDocumentTypeNotStringCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "pwg_raster_config": {
+          "document_type_supported": [ 8, 16 ],
+          "document_sheet_back": "ROTATED"
+        }
+      }
+    })";
 
-const char kDocumentTypeNotStringCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'pwg_raster_config': {"
-    "      'document_type_supported': [ 8, 16 ],"
-    "      'document_sheet_back': 'ROTATED'"
-    "    }"
-    "  }"
-    "}";
+const char kDocumentTypeNotListCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "pwg_raster_config": {
+          "document_type_supported": "ROTATED",
+          "document_sheet_back": "ROTATED"
+        }
+      }
+    })";
 
-const char kDocumentTypeNotListCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'pwg_raster_config': {"
-    "      'document_type_supported': 'ROTATED',"
-    "      'document_sheet_back': 'ROTATED'"
-    "    }"
-    "  }"
-    "}";
+const char kIntegerRangeVendorCapabilityJson[] = R"(
+    {
+      "value_type": "INTEGER",
+      "min": "0",
+      "max": "10"
+    })";
 
-const char kIntegerRangeVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'INTEGER',"
-    "  'min': '0',"
-    "  'max': '10'"
-    "}";
+const char kFloatDefaultRangeVendorCapabilityJson[] = R"(
+    {
+      "value_type": "FLOAT",
+      "min": "0.0",
+      "max": "1.0",
+      "default": "0.5"
+    })";
 
-const char kFloatDefaultRangeVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'FLOAT',"
-    "  'min': '0.0',"
-    "  'max': '1.0',"
-    "  'default': '0.5'"
-    "}";
+const char kInvalidTypeRangeVendorCapabilityJson[] = R"(
+    {
+      "value_type": "BOOLEAN",
+      "min": "0.0",
+      "max": "1.0"
+    })";
 
-const char kInvalidTypeRangeVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'BOOLEAN',"
-    "  'min': '0.0',"
-    "  'max': '1.0'"
-    "}";
+const char kMissingMinValueRangeVendorCapabilityJson[] = R"(
+    {
+      "value_type": "INT",
+      "max": "10"
+    })";
 
-const char kMissingMinValueRangeVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'INT',"
-    "  'max': '10'"
-    "}";
+const char kInvalidBoundariesRangeVendorCapabilityJson[] = R"(
+    {
+      "value_type": "INT",
+      "min": "10",
+      "max": "0"
+    })";
 
-const char kInvalidBoundariesRangeVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'INT',"
-    "  'min': '10',"
-    "  'max': '0'"
-    "}";
+const char kInvalidDefaultValueRangeVendorCapabilityJson[] = R"(
+    {
+      "value_type": "FLOAT",
+      "min": "0.0",
+      "max": "5.0",
+      "default": "10.0"
+    })";
 
-const char kInvalidDefaultValueRangeVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'FLOAT',"
-    "  'min': '0.0',"
-    "  'max': '5.0',"
-    "  'default': '10.0'"
-    "}";
+const char kSelectVendorCapabilityJson[] = R"(
+    {
+      "option": [ {
+        "value": "value_1",
+        "display_name": "name_1"
+      }, {
+        "value": "value_2",
+        "display_name": "name_2",
+        "is_default": true
+      } ]
+    })";
 
-const char kSelectVendorCapabilityJson[] =
-    "{"
-    "  'option': [ {"
-    "    'value': 'value_1',"
-    "    'display_name': 'name_1'"
-    "  }, {"
-    "    'value': 'value_2',"
-    "    'display_name': 'name_2',"
-    "    'is_default': true"
-    "  } ]"
-    "}";
+const char kNotListSelectVendorCapabilityJson[] = R"(
+    {
+      "option": {
+        "value": "value",
+        "display_name": "name"
+      }
+    })";
 
-const char kNotListSelectVendorCapabilityJson[] =
-    "{"
-    "  'option': {"
-    "    'value': 'value',"
-    "    'display_name': 'name'"
-    "  }"
-    "}";
+const char kMissingValueSelectVendorCapabilityJson[] = R"(
+    {
+      "option": [ {
+        "display_name": "name"
+      } ]
+    })";
 
-const char kMissingValueSelectVendorCapabilityJson[] =
-    "{"
-    "  'option': [ {"
-    "    'display_name': 'name'"
-    "  } ]"
-    "}";
+const char kMissingDisplayNameSelectVendorCapabilityJson[] = R"(
+    {
+      "option": [ {
+        "value": "value"
+      } ]
+    })";
 
-const char kMissingDisplayNameSelectVendorCapabilityJson[] =
-    "{"
-    "  'option': [ {"
-    "    'value': 'value'"
-    "  } ]"
-    "}";
+const char kNoDefaultSelectVendorCapabilityJson[] = R"(
+    {
+      "option": [ {
+        "value": "value_1",
+        "display_name": "name_1"
+      }, {
+        "value": "value_2",
+        "display_name": "name_2"
+      } ]
+    })";
 
-const char kNoDefaultSelectVendorCapabilityJson[] =
-    "{"
-    "  'option': [ {"
-    "    'value': 'value',"
-    "    'display_name': 'name'"
-    "  } ]"
-    "}";
+const char kSeveralDefaultsSelectVendorCapabilityJson[] = R"(
+    {
+      "option": [ {
+        "value": "value_1",
+        "display_name": "name_1",
+        "is_default": true
+      }, {
+        "value": "value_2",
+        "display_name": "name_2",
+        "is_default": true
+      } ]
+    })";
 
-const char kSeveralDefaultsSelectVendorCapabilityJson[] =
-    "{"
-    "  'option': [ {"
-    "    'value': 'value_1',"
-    "    'display_name': 'name_1',"
-    "    'is_default': true"
-    "  }, {"
-    "    'value': 'value_2',"
-    "    'display_name': 'name_2',"
-    "    'is_default': true"
-    "  } ]"
-    "}";
+const char kBooleanTypedValueVendorCapabilityJson[] = R"(
+    {
+      "value_type": "BOOLEAN",
+      "default": "true"
+    })";
 
-const char kBooleanTypedValueVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'BOOLEAN',"
-    "  'default': 'true'"
-    "}";
+const char kFloatTypedValueVendorCapabilityJson[] = R"(
+    {
+      "value_type": "FLOAT",
+      "default": "1.0"
+    })";
 
-const char kFloatTypedValueVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'FLOAT',"
-    "  'default': '1.0'"
-    "}";
+const char kIntegerTypedValueVendorCapabilityJson[] = R"(
+    {
+      "value_type": "INTEGER",
+      "default": "10"
+    })";
 
-const char kIntegerTypedValueVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'INTEGER',"
-    "  'default': '10'"
-    "}";
+const char kStringTypedValueVendorCapabilityJson[] = R"(
+    {
+      "value_type": "STRING",
+      "default": "value"
+    })";
 
-const char kStringTypedValueVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'STRING',"
-    "  'default': 'value'"
-    "}";
+const char kMissingValueTypeTypedValueVendorCapabilityJson[] = R"(
+    {
+      "default": "value"
+    })";
 
-const char kMissingValueTypeTypedValueVendorCapabilityJson[] =
-    "{"
-    "  'default': 'value'"
-    "}";
+const char kInvalidBooleanTypedValueVendorCapabilityJson[] = R"(
+    {
+      "value_type": "BOOLEAN",
+      "default": "1"
+    })";
 
-const char kInvalidBooleanTypedValueVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'BOOLEAN',"
-    "  'default': '1'"
-    "}";
+const char kInvalidFloatTypedValueVendorCapabilityJson[] = R"(
+    {
+      "value_type": "FLOAT",
+      "default": "1.1.1.1"
+    })";
 
-const char kInvalidFloatTypedValueVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'FLOAT',"
-    "  'default': '1.1.1.1'"
-    "}";
+const char kInvalidIntegerTypedValueVendorCapabilityJson[] = R"(
+    {
+      "value_type": "INTEGER",
+      "default": "true"
+    })";
 
-const char kInvalidIntegerTypedValueVendorCapabilityJson[] =
-    "{"
-    "  'value_type': 'INTEGER',"
-    "  'default': 'true'"
-    "}";
+const char kVendorCapabilityOnlyCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "vendor_capability": [ {
+          "id": "id_1",
+          "display_name": "name_1",
+          "type": "RANGE",
+          "range_cap": {
+           "value_type": "INTEGER",
+           "min": "1",
+           "max": "10"
+          }
+        }, {
+          "id": "id_2",
+          "display_name": "name_2",
+          "type": "SELECT",
+          "select_cap": {
+            "option": [ {
+              "value": "value",
+              "display_name": "name",
+              "is_default": true
+             } ]
+          }
+        }, {
+          "id": "id_3",
+          "display_name": "name_3",
+          "type": "TYPED_VALUE",
+          "typed_value_cap": {
+           "value_type": "INTEGER",
+           "default": "1"
+          }
+        } ]
+      }
+    })";
 
-const char kVendorCapabilityOnlyCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'vendor_capability': [ {"
-    "      'id': 'id_1',"
-    "      'display_name': 'name_1',"
-    "      'type': 'RANGE',"
-    "      'range_cap': {"
-    "       'value_type': 'INTEGER',"
-    "       'min': '1',"
-    "       'max': '10'"
-    "      }"
-    "    }, {"
-    "      'id': 'id_2',"
-    "      'display_name': 'name_2',"
-    "      'type': 'SELECT',"
-    "      'select_cap': {"
-    "        'option': [ {"
-    "          'value': 'value',"
-    "          'display_name': 'name',"
-    "          'is_default': true"
-    "         } ]"
-    "      }"
-    "    }, {"
-    "      'id': 'id_3',"
-    "      'display_name': 'name_3',"
-    "      'type': 'TYPED_VALUE',"
-    "      'typed_value_cap': {"
-    "       'value_type': 'INTEGER',"
-    "       'default': '1'"
-    "      }"
-    "    } ]"
-    "  }"
-    "}";
+const char kMissingIdVendorCapabilityCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "vendor_capability": [ {
+          "display_name": "name_1",
+          "type": "RANGE",
+          "range_cap": {
+           "value_type": "INTEGER",
+           "min": "1",
+           "max": "10"
+          }
+        } ]
+      }
+    })";
 
-const char kMissingIdVendorCapabilityCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'vendor_capability': [ {"
-    "      'display_name': 'name_1',"
-    "      'type': 'RANGE',"
-    "      'range_cap': {"
-    "       'value_type': 'INTEGER',"
-    "       'min': '1',"
-    "       'max': '10'"
-    "      }"
-    "    } ]"
-    "  }"
-    "}";
+const char kInvalidInnerCapabilityVendorCapabilityCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "vendor_capability": [ {
+          "display_name": "name_1",
+          "type": "RANGE",
+          "range_cap": {
+           "value_type": "INTEGER",
+           "min": "10",
+           "max": "1"
+          }
+        } ]
+      }
+    })";
 
-const char kInvalidInnerCapabilityVendorCapabilityCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'vendor_capability': [ {"
-    "      'display_name': 'name_1',"
-    "      'type': 'RANGE',"
-    "      'range_cap': {"
-    "       'value_type': 'INTEGER',"
-    "       'min': '10',"
-    "       'max': '1'"
-    "      }"
-    "    } ]"
-    "  }"
-    "}";
+const char kNoInnerCapabilityVendorCapabilityCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "vendor_capability": [ {
+          "display_name": "name_1",
+          "type": "RANGE"
+        } ]
+      }
+    })";
 
-const char kNoInnerCapabilityVendorCapabilityCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'vendor_capability': [ {"
-    "      'display_name': 'name_1',"
-    "      'type': 'RANGE'"
-    "    } ]"
-    "  }"
-    "}";
+const char kSeveralInnerCapabilitiesVendorCapabilityCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "vendor_capability": [ {
+          "id": "id_1",
+          "display_name": "name_1",
+          "type": "RANGE",
+          "range_cap": {
+           "value_type": "INTEGER",
+           "min": "1",
+           "max": "10"
+          },
+          "select_cap": {
+            "option": [ {
+              "value": "value",
+              "display_name": "name",
+              "is_default": true
+             } ]
+          }
+        } ]
+      }
+    })";
 
-const char kSeveralInnerCapabilitiesVendorCapabilityCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'vendor_capability': [ {"
-    "      'id': 'id_1',"
-    "      'display_name': 'name_1',"
-    "      'type': 'RANGE',"
-    "      'range_cap': {"
-    "       'value_type': 'INTEGER',"
-    "       'min': '1',"
-    "       'max': '10'"
-    "      },"
-    "      'select_cap': {"
-    "        'option': [ {"
-    "          'value': 'value',"
-    "          'display_name': 'name',"
-    "          'is_default': true"
-    "         } ]"
-    "      }"
-    "    } ]"
-    "  }"
-    "}";
+#if BUILDFLAG(IS_CHROMEOS)
+const char kPinOnlyCdd[] = R"(
+    {
+      "version": "1.0",
+      "printer": {
+        "pin": {
+          "supported": true
+        }
+      }
+    })";
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
-#if defined(OS_CHROMEOS)
-const char kPinOnlyCdd[] =
-    "{"
-    "  'version': '1.0',"
-    "  'printer': {"
-    "    'pin': {"
-    "      'supported': true"
-    "    }"
-    "  }"
-    "}";
-#endif  // defined(OS_CHROMEOS)
+const char kCjt[] = R"(
+    {
+      "version": "1.0",
+      "print": {
+        "pwg_raster_config": {
+          "document_sheet_back": "MANUAL_TUMBLE",
+          "reverse_order_streaming": true
+        },
+        "color": {
+          "type": "STANDARD_MONOCHROME"
+        },
+        "duplex": {
+          "type": "NO_DUPLEX"
+        },
+        "page_orientation": {
+          "type": "LANDSCAPE"
+        },
+        "copies": {
+          "copies": 123
+        },
+        "margins": {
+           "type": "CUSTOM",
+           "top_microns": 7,
+           "right_microns": 6,
+           "bottom_microns": 3,
+           "left_microns": 1
+        },
+        "dpi": {
+          "horizontal_dpi": 562,
+          "vertical_dpi": 125
+        },
+        "fit_to_page": {
+          "type": "SHRINK_TO_PAGE"
+        },
+        "page_range": {
+          "interval": [ {
+            "start": 1,
+            "end": 99
+           }, {
+            "start": 150
+           } ]
+        },
+        "media_size": {
+          "name": "ISO_C7C6",
+          "width_microns": 4261,
+          "height_microns": 334
+        },
+        "collate": {
+          "collate": false
+        },
+        "reverse_order": {
+          "reverse_order": true
+        }
+      }
+    })";
 
-const char kCjt[] =
-    "{"
-    "  'version': '1.0',"
-    "  'print': {"
-    "    'pwg_raster_config': {"
-    "      'document_sheet_back': 'MANUAL_TUMBLE',"
-    "      'reverse_order_streaming': true"
-    "    },"
-    "    'color': {"
-    "      'type': 'STANDARD_MONOCHROME'"
-    "    },"
-    "    'duplex': {"
-    "      'type': 'NO_DUPLEX'"
-    "    },"
-    "    'page_orientation': {"
-    "      'type': 'LANDSCAPE'"
-    "    },"
-    "    'copies': {"
-    "      'copies': 123"
-    "    },"
-    "    'margins': {"
-    "       'type': 'CUSTOM',"
-    "       'top_microns': 7,"
-    "       'right_microns': 6,"
-    "       'bottom_microns': 3,"
-    "       'left_microns': 1"
-    "    },"
-    "    'dpi': {"
-    "      'horizontal_dpi': 562,"
-    "      'vertical_dpi': 125"
-    "    },"
-    "    'fit_to_page': {"
-    "      'type': 'SHRINK_TO_PAGE'"
-    "    },"
-    "    'page_range': {"
-    "      'interval': [ {"
-    "        'start': 1,"
-    "        'end': 99"
-    "       }, {"
-    "        'start': 150"
-    "       } ]"
-    "    },"
-    "    'media_size': {"
-    "      'name': 'ISO_C7C6',"
-    "      'width_microns': 4261,"
-    "      'height_microns': 334"
-    "    },"
-    "    'collate': {"
-    "      'collate': false"
-    "    },"
-    "    'reverse_order': {"
-    "      'reverse_order': true"
-    "    }"
-    "  }"
-    "}";
+const char kDefaultCjt[] = R"(
+    {
+      "version": "1.0"
+    })";
 
-const char kDefaultCjt[] =
-    "{"
-    "  'version': '1.0'"
-    "}";
-
-const char kBadVersionCjt[] =
-    "{"
-    "  'version': '1.1',"
-    "  'print': {"
-    "  }"
-    "}";
+const char kBadVersionCjt[] = R"(
+    {
+      "version": "1.1",
+      "print": {
+      }
+    })";
 
 const struct TestRangeCapabilities {
   const char* const json_name;
@@ -633,7 +622,8 @@ const struct TestTypedValueCapabilities {
 
 TEST(PrinterDescriptionTest, CddInit) {
   CloudDeviceDescription description;
-  EXPECT_EQ(NormalizeJson(kDefaultCdd), NormalizeJson(description.ToString()));
+  EXPECT_EQ(NormalizeJson(kDefaultCdd),
+            NormalizeJson(description.ToStringForTesting()));
 
   ContentTypesCapability content_types;
   PwgRasterConfigCapability pwg_raster;
@@ -669,12 +659,9 @@ TEST(PrinterDescriptionTest, CddInvalid) {
   CloudDeviceDescription description;
   ColorCapability color;
 
-  EXPECT_FALSE(description.InitFromString(NormalizeJson(kBadVersionCdd)));
+  EXPECT_FALSE(description.InitFromString(kBadVersionCdd));
 
-  EXPECT_TRUE(description.InitFromString(NormalizeJson(kNoDefaultCdd)));
-  EXPECT_FALSE(color.LoadFrom(description));
-
-  EXPECT_TRUE(description.InitFromString(NormalizeJson(kMultyDefaultCdd)));
+  EXPECT_TRUE(description.InitFromString(kMultyDefaultCdd));
   EXPECT_FALSE(color.LoadFrom(description));
 }
 
@@ -704,7 +691,7 @@ TEST(PrinterDescriptionTest, CddSetAll) {
   custom_raster.rotate_all_pages = false;
   pwg_raster_config.set_value(custom_raster);
 
-  color.AddDefaultOption(Color(ColorType::STANDARD_COLOR), true);
+  color.AddOption(Color(ColorType::STANDARD_COLOR));
   color.AddOption(Color(ColorType::STANDARD_MONOCHROME));
   Color custom(ColorType::CUSTOM_MONOCHROME);
   custom.vendor_id = "123";
@@ -732,10 +719,11 @@ TEST(PrinterDescriptionTest, CddSetAll) {
   fit_to_page.AddOption(FitToPageType::SHRINK_TO_PAGE);
   fit_to_page.AddOption(FitToPageType::FILL_PAGE);
 
-  media.AddDefaultOption(Media(MediaType::NA_LETTER, 2222, 3333), true);
-  media.AddOption(Media(MediaType::ISO_A6, 4444, 5555));
-  media.AddOption(Media(MediaType::JPN_YOU4, 6666, 7777));
-  media.AddOption(Media("Feed", "FEED", 1111, 0));
+  media.AddDefaultOption(Media(MediaType::NA_LETTER, gfx::Size(2222, 3333)),
+                         true);
+  media.AddOption(Media(MediaType::ISO_A6, gfx::Size(4444, 5555)));
+  media.AddOption(Media(MediaType::JPN_YOU4, gfx::Size(6666, 7777)));
+  media.AddOption(Media("Feed", "FEED", gfx::Size(1111, 0)));
 
   collate.set_default_value(false);
   reverse.set_default_value(true);
@@ -754,14 +742,14 @@ TEST(PrinterDescriptionTest, CddSetAll) {
   reverse.SaveTo(&description);
   pwg_raster_config.SaveTo(&description);
 
-  EXPECT_EQ(NormalizeJson(kCdd), NormalizeJson(description.ToString()));
+  EXPECT_EQ(NormalizeJson(kCdd),
+            NormalizeJson(description.ToStringForTesting()));
 }
 
 TEST(PrinterDescriptionTest, CddGetDocumentTypeSupported) {
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(
-        description.InitFromString(NormalizeJson(kDocumentTypeColorOnlyCdd)));
+    ASSERT_TRUE(description.InitFromString(kDocumentTypeColorOnlyCdd));
 
     PwgRasterConfigCapability pwg_raster;
     EXPECT_TRUE(pwg_raster.LoadFrom(description));
@@ -774,8 +762,7 @@ TEST(PrinterDescriptionTest, CddGetDocumentTypeSupported) {
   }
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(
-        description.InitFromString(NormalizeJson(kDocumentTypeGrayOnlyCdd)));
+    ASSERT_TRUE(description.InitFromString(kDocumentTypeGrayOnlyCdd));
 
     PwgRasterConfigCapability pwg_raster;
     EXPECT_TRUE(pwg_raster.LoadFrom(description));
@@ -788,8 +775,7 @@ TEST(PrinterDescriptionTest, CddGetDocumentTypeSupported) {
   }
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(description.InitFromString(
-        NormalizeJson(kDocumentTypeColorAndGrayCdd)));
+    ASSERT_TRUE(description.InitFromString(kDocumentTypeColorAndGrayCdd));
 
     PwgRasterConfigCapability pwg_raster;
     EXPECT_TRUE(pwg_raster.LoadFrom(description));
@@ -804,8 +790,8 @@ TEST(PrinterDescriptionTest, CddGetDocumentTypeSupported) {
   }
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(description.InitFromString(
-        NormalizeJson(kDocumentTypeColorAndUnsupportedCdd)));
+    ASSERT_TRUE(
+        description.InitFromString(kDocumentTypeColorAndUnsupportedCdd));
 
     PwgRasterConfigCapability pwg_raster;
     EXPECT_TRUE(pwg_raster.LoadFrom(description));
@@ -818,8 +804,7 @@ TEST(PrinterDescriptionTest, CddGetDocumentTypeSupported) {
   }
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(
-        description.InitFromString(NormalizeJson(kDocumentTypeNoneCdd)));
+    ASSERT_TRUE(description.InitFromString(kDocumentTypeNoneCdd));
 
     PwgRasterConfigCapability pwg_raster;
     EXPECT_TRUE(pwg_raster.LoadFrom(description));
@@ -830,16 +815,14 @@ TEST(PrinterDescriptionTest, CddGetDocumentTypeSupported) {
   }
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(
-        description.InitFromString(NormalizeJson(kDocumentTypeNotStringCdd)));
+    ASSERT_TRUE(description.InitFromString(kDocumentTypeNotStringCdd));
 
     PwgRasterConfigCapability pwg_raster;
     EXPECT_FALSE(pwg_raster.LoadFrom(description));
   }
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(
-        description.InitFromString(NormalizeJson(kDocumentTypeNotListCdd)));
+    ASSERT_TRUE(description.InitFromString(kDocumentTypeNotListCdd));
 
     PwgRasterConfigCapability pwg_raster;
     EXPECT_FALSE(pwg_raster.LoadFrom(description));
@@ -860,7 +843,7 @@ TEST(PrinterDescriptionTest, CddSetDocumentTypeSupported) {
     pwg_raster.SaveTo(&description);
 
     EXPECT_EQ(NormalizeJson(kDocumentTypeColorOnlyCdd),
-              NormalizeJson(description.ToString()));
+              NormalizeJson(description.ToStringForTesting()));
   }
   {
     CloudDeviceDescription description;
@@ -875,7 +858,7 @@ TEST(PrinterDescriptionTest, CddSetDocumentTypeSupported) {
     pwg_raster.SaveTo(&description);
 
     EXPECT_EQ(NormalizeJson(kDocumentTypeGrayOnlyCdd),
-              NormalizeJson(description.ToString()));
+              NormalizeJson(description.ToStringForTesting()));
   }
   {
     CloudDeviceDescription description;
@@ -892,7 +875,7 @@ TEST(PrinterDescriptionTest, CddSetDocumentTypeSupported) {
     pwg_raster.SaveTo(&description);
 
     EXPECT_EQ(NormalizeJson(kDocumentTypeColorAndGrayCdd),
-              NormalizeJson(description.ToString()));
+              NormalizeJson(description.ToStringForTesting()));
   }
   {
     CloudDeviceDescription description;
@@ -905,18 +888,16 @@ TEST(PrinterDescriptionTest, CddSetDocumentTypeSupported) {
     pwg_raster.SaveTo(&description);
 
     EXPECT_EQ(NormalizeJson(kDocumentTypeNoneCdd),
-              NormalizeJson(description.ToString()));
+              NormalizeJson(description.ToStringForTesting()));
   }
 }
 
 TEST(PrinterDescriptionTest, CddGetRangeVendorCapability) {
   for (const auto& capacity : kTestRangeCapabilities) {
-    std::unique_ptr<base::Value> value =
-        base::JSONReader::ReadDeprecated(NormalizeJson(capacity.json_name));
-    ASSERT_TRUE(value);
-    base::Value description = base::Value::FromUniquePtrValue(std::move(value));
+    base::Value description = base::test::ParseJson(capacity.json_name);
+    ASSERT_TRUE(description.is_dict());
     RangeVendorCapability range_capability;
-    EXPECT_TRUE(range_capability.LoadFrom(description));
+    EXPECT_TRUE(range_capability.LoadFrom(description.GetDict()));
     EXPECT_EQ(capacity.range_capability, range_capability);
   }
 
@@ -926,18 +907,16 @@ TEST(PrinterDescriptionTest, CddGetRangeVendorCapability) {
       kInvalidBoundariesRangeVendorCapabilityJson,
       kInvalidDefaultValueRangeVendorCapabilityJson};
   for (const char* invalid_json_name : kInvalidJsonNames) {
-    std::unique_ptr<base::Value> value =
-        base::JSONReader::ReadDeprecated(NormalizeJson(invalid_json_name));
-    ASSERT_TRUE(value);
-    base::Value description = base::Value::FromUniquePtrValue(std::move(value));
+    base::Value description = base::test::ParseJson(invalid_json_name);
+    ASSERT_TRUE(description.is_dict());
     RangeVendorCapability range_capability;
-    EXPECT_FALSE(range_capability.LoadFrom(description));
+    EXPECT_FALSE(range_capability.LoadFrom(description.GetDict()));
   }
 }
 
 TEST(PrinterDescriptionTest, CddSetRangeVendorCapability) {
   for (const auto& capacity : kTestRangeCapabilities) {
-    base::Value range_capability_value(base::Value::Type::DICTIONARY);
+    base::Value::Dict range_capability_value;
     capacity.range_capability.SaveTo(&range_capability_value);
     std::string range_capability_str;
     EXPECT_TRUE(base::JSONWriter::WriteWithOptions(
@@ -950,12 +929,11 @@ TEST(PrinterDescriptionTest, CddSetRangeVendorCapability) {
 
 TEST(PrinterDescriptionTest, CddGetSelectVendorCapability) {
   {
-    std::unique_ptr<base::Value> value = base::JSONReader::ReadDeprecated(
-        NormalizeJson(kSelectVendorCapabilityJson));
-    ASSERT_TRUE(value);
-    base::Value description = base::Value::FromUniquePtrValue(std::move(value));
+    base::Value description =
+        base::test::ParseJson(kSelectVendorCapabilityJson);
+    ASSERT_TRUE(description.is_dict());
     SelectVendorCapability select_capability;
-    EXPECT_TRUE(select_capability.LoadFrom(description));
+    EXPECT_TRUE(select_capability.LoadFrom(description.GetDict()));
     EXPECT_EQ(2u, select_capability.size());
     EXPECT_TRUE(select_capability.Contains(
         SelectVendorCapabilityOption("value_1", "name_1")));
@@ -964,47 +942,72 @@ TEST(PrinterDescriptionTest, CddGetSelectVendorCapability) {
     EXPECT_EQ(SelectVendorCapabilityOption("value_2", "name_2"),
               select_capability.GetDefault());
   }
-
+  {
+    base::Value description =
+        base::test::ParseJson(kNoDefaultSelectVendorCapabilityJson);
+    ASSERT_TRUE(description.is_dict());
+    SelectVendorCapability select_capability;
+    EXPECT_TRUE(select_capability.LoadFrom(description.GetDict()));
+    EXPECT_EQ(2u, select_capability.size());
+    EXPECT_TRUE(select_capability.Contains(
+        SelectVendorCapabilityOption("value_1", "name_1")));
+    EXPECT_TRUE(select_capability.Contains(
+        SelectVendorCapabilityOption("value_2", "name_2")));
+    EXPECT_EQ(SelectVendorCapabilityOption("value_1", "name_1"),
+              select_capability.GetDefault());
+  }
   const char* const kInvalidJsonNames[] = {
       kNotListSelectVendorCapabilityJson,
       kMissingValueSelectVendorCapabilityJson,
       kMissingDisplayNameSelectVendorCapabilityJson,
-      kNoDefaultSelectVendorCapabilityJson,
       kSeveralDefaultsSelectVendorCapabilityJson};
   for (const char* invalid_json_name : kInvalidJsonNames) {
-    std::unique_ptr<base::Value> value =
-        base::JSONReader::ReadDeprecated(NormalizeJson(invalid_json_name));
-    ASSERT_TRUE(value);
-    base::Value description = base::Value::FromUniquePtrValue(std::move(value));
+    base::Value description = base::test::ParseJson(invalid_json_name);
+    ASSERT_TRUE(description.is_dict());
     SelectVendorCapability select_capability;
-    EXPECT_FALSE(select_capability.LoadFrom(description));
+    EXPECT_FALSE(select_capability.LoadFrom(description.GetDict()));
   }
 }
 
 TEST(PrinterDescriptionTest, CddSetSelectVendorCapability) {
-  SelectVendorCapability select_capability;
-  select_capability.AddOption(
-      SelectVendorCapabilityOption("value_1", "name_1"));
-  select_capability.AddDefaultOption(
-      SelectVendorCapabilityOption("value_2", "name_2"), true);
-  base::Value select_capability_value(base::Value::Type::DICTIONARY);
-  select_capability.SaveTo(&select_capability_value);
-  std::string select_capability_str;
-  EXPECT_TRUE(base::JSONWriter::WriteWithOptions(
-      select_capability_value, base::JSONWriter::OPTIONS_PRETTY_PRINT,
-      &select_capability_str));
-  EXPECT_EQ(NormalizeJson(kSelectVendorCapabilityJson),
-            NormalizeJson(select_capability_str));
+  {
+    SelectVendorCapability select_capability;
+    select_capability.AddOption(
+        SelectVendorCapabilityOption("value_1", "name_1"));
+    select_capability.AddDefaultOption(
+        SelectVendorCapabilityOption("value_2", "name_2"), true);
+    base::Value::Dict select_capability_value;
+    select_capability.SaveTo(&select_capability_value);
+    std::string select_capability_str;
+    EXPECT_TRUE(base::JSONWriter::WriteWithOptions(
+        select_capability_value, base::JSONWriter::OPTIONS_PRETTY_PRINT,
+        &select_capability_str));
+    EXPECT_EQ(NormalizeJson(kSelectVendorCapabilityJson),
+              NormalizeJson(select_capability_str));
+  }
+  {
+    SelectVendorCapability select_capability;
+    select_capability.AddOption(
+        SelectVendorCapabilityOption("value_1", "name_1"));
+    select_capability.AddOption(
+        SelectVendorCapabilityOption("value_2", "name_2"));
+    base::Value::Dict select_capability_value;
+    select_capability.SaveTo(&select_capability_value);
+    std::string select_capability_str;
+    EXPECT_TRUE(base::JSONWriter::WriteWithOptions(
+        select_capability_value, base::JSONWriter::OPTIONS_PRETTY_PRINT,
+        &select_capability_str));
+    EXPECT_EQ(NormalizeJson(kNoDefaultSelectVendorCapabilityJson),
+              NormalizeJson(select_capability_str));
+  }
 }
 
 TEST(PrinterDescriptionTest, CddGetTypedValueVendorCapability) {
   for (const auto& capacity : kTestTypedValueCapabilities) {
-    std::unique_ptr<base::Value> value =
-        base::JSONReader::ReadDeprecated(NormalizeJson(capacity.json_name));
-    ASSERT_TRUE(value);
-    base::Value description = base::Value::FromUniquePtrValue(std::move(value));
+    base::Value description = base::test::ParseJson(capacity.json_name);
+    ASSERT_TRUE(description.is_dict());
     TypedValueVendorCapability typed_value_capability;
-    EXPECT_TRUE(typed_value_capability.LoadFrom(description));
+    EXPECT_TRUE(typed_value_capability.LoadFrom(description.GetDict()));
     EXPECT_EQ(capacity.typed_value_capability, typed_value_capability);
   }
 
@@ -1014,18 +1017,16 @@ TEST(PrinterDescriptionTest, CddGetTypedValueVendorCapability) {
       kInvalidFloatTypedValueVendorCapabilityJson,
       kInvalidIntegerTypedValueVendorCapabilityJson};
   for (const char* invalid_json_name : kInvalidJsonNames) {
-    std::unique_ptr<base::Value> value =
-        base::JSONReader::ReadDeprecated(NormalizeJson(invalid_json_name));
-    ASSERT_TRUE(value);
-    base::Value description = base::Value::FromUniquePtrValue(std::move(value));
+    base::Value description = base::test::ParseJson(invalid_json_name);
+    ASSERT_TRUE(description.is_dict());
     TypedValueVendorCapability typed_value_capability;
-    EXPECT_FALSE(typed_value_capability.LoadFrom(description));
+    EXPECT_FALSE(typed_value_capability.LoadFrom(description.GetDict()));
   }
 }
 
 TEST(PrinterDescriptionTest, CddSetTypedValueVendorCapability) {
   for (const auto& capacity : kTestTypedValueCapabilities) {
-    base::Value typed_value_capability_value(base::Value::Type::DICTIONARY);
+    base::Value::Dict typed_value_capability_value;
     capacity.typed_value_capability.SaveTo(&typed_value_capability_value);
     std::string typed_value_capability_str;
     EXPECT_TRUE(base::JSONWriter::WriteWithOptions(
@@ -1039,8 +1040,7 @@ TEST(PrinterDescriptionTest, CddSetTypedValueVendorCapability) {
 TEST(PrinterDescriptionTest, CddGetVendorCapability) {
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(
-        description.InitFromString(NormalizeJson(kVendorCapabilityOnlyCdd)));
+    ASSERT_TRUE(description.InitFromString(kVendorCapabilityOnlyCdd));
 
     VendorCapabilities vendor_capabilities;
     EXPECT_TRUE(vendor_capabilities.LoadFrom(description));
@@ -1066,7 +1066,7 @@ TEST(PrinterDescriptionTest, CddGetVendorCapability) {
       kSeveralInnerCapabilitiesVendorCapabilityCdd};
   for (const char* invalid_json_name : kInvalidJsonNames) {
     CloudDeviceDescription description;
-    ASSERT_TRUE(description.InitFromString(NormalizeJson(invalid_json_name)));
+    ASSERT_TRUE(description.InitFromString(invalid_json_name));
     VendorCapabilities vendor_capabilities;
     EXPECT_FALSE(vendor_capabilities.LoadFrom(description));
   }
@@ -1092,14 +1092,14 @@ TEST(PrinterDescriptionTest, CddSetVendorCapability) {
 
   vendor_capabilities.SaveTo(&description);
   EXPECT_EQ(NormalizeJson(kVendorCapabilityOnlyCdd),
-            NormalizeJson(description.ToString()));
+            NormalizeJson(description.ToStringForTesting()));
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS)
 TEST(PrinterDescriptionTest, CddGetPin) {
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(description.InitFromString(NormalizeJson(kPinOnlyCdd)));
+    ASSERT_TRUE(description.InitFromString(kPinOnlyCdd));
 
     PinCapability pin_capability;
     EXPECT_TRUE(pin_capability.LoadFrom(description));
@@ -1107,7 +1107,7 @@ TEST(PrinterDescriptionTest, CddGetPin) {
   }
   {
     CloudDeviceDescription description;
-    ASSERT_TRUE(description.InitFromString(NormalizeJson(kDefaultCdd)));
+    ASSERT_TRUE(description.InitFromString(kDefaultCdd));
     PinCapability pin_capability;
     EXPECT_FALSE(pin_capability.LoadFrom(description));
   }
@@ -1119,13 +1119,14 @@ TEST(PrinterDescriptionTest, CddSetPin) {
   PinCapability pin_capability;
   pin_capability.set_value(true);
   pin_capability.SaveTo(&description);
-  EXPECT_EQ(NormalizeJson(kPinOnlyCdd), NormalizeJson(description.ToString()));
+  EXPECT_EQ(NormalizeJson(kPinOnlyCdd),
+            NormalizeJson(description.ToStringForTesting()));
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 TEST(PrinterDescriptionTest, CddGetAll) {
   CloudDeviceDescription description;
-  ASSERT_TRUE(description.InitFromString(NormalizeJson(kCdd)));
+  ASSERT_TRUE(description.InitFromString(kCdd));
 
   ContentTypesCapability content_types;
   PwgRasterConfigCapability pwg_raster_config;
@@ -1201,21 +1202,26 @@ TEST(PrinterDescriptionTest, CddGetAll) {
   EXPECT_TRUE(fit_to_page.Contains(FitToPageType::FILL_PAGE));
   EXPECT_EQ(FitToPageType::NO_FITTING, fit_to_page.GetDefault());
 
-  EXPECT_TRUE(media.Contains(Media(MediaType::NA_LETTER, 2222, 3333)));
-  EXPECT_TRUE(media.Contains(Media(MediaType::ISO_A6, 4444, 5555)));
-  EXPECT_TRUE(media.Contains(Media(MediaType::JPN_YOU4, 6666, 7777)));
-  EXPECT_TRUE(media.Contains(Media("Feed", "FEED", 1111, 0)));
-  EXPECT_EQ(Media(MediaType::NA_LETTER, 2222, 3333), media.GetDefault());
+  EXPECT_TRUE(
+      media.Contains(Media(MediaType::NA_LETTER, gfx::Size(2222, 3333))));
+  EXPECT_TRUE(media.Contains(Media(MediaType::ISO_A6, gfx::Size(4444, 5555))));
+  EXPECT_TRUE(
+      media.Contains(Media(MediaType::JPN_YOU4, gfx::Size(6666, 7777))));
+  EXPECT_TRUE(media.Contains(Media("Feed", "FEED", gfx::Size(1111, 0))));
+  EXPECT_EQ(Media(MediaType::NA_LETTER, gfx::Size(2222, 3333)),
+            media.GetDefault());
 
   EXPECT_FALSE(collate.default_value());
   EXPECT_TRUE(reverse.default_value());
 
-  EXPECT_EQ(NormalizeJson(kCdd), NormalizeJson(description.ToString()));
+  EXPECT_EQ(NormalizeJson(kCdd),
+            NormalizeJson(description.ToStringForTesting()));
 }
 
 TEST(PrinterDescriptionTest, CjtInit) {
   CloudDeviceDescription description;
-  EXPECT_EQ(NormalizeJson(kDefaultCjt), NormalizeJson(description.ToString()));
+  EXPECT_EQ(NormalizeJson(kDefaultCjt),
+            NormalizeJson(description.ToStringForTesting()));
 
   PwgRasterConfigTicketItem pwg_raster_config;
   ColorTicketItem color;
@@ -1247,7 +1253,7 @@ TEST(PrinterDescriptionTest, CjtInit) {
 
 TEST(PrinterDescriptionTest, CjtInvalid) {
   CloudDeviceDescription ticket;
-  EXPECT_FALSE(ticket.InitFromString(NormalizeJson(kBadVersionCjt)));
+  EXPECT_FALSE(ticket.InitFromString(kBadVersionCjt));
 }
 
 TEST(PrinterDescriptionTest, CjtSetAll) {
@@ -1282,7 +1288,7 @@ TEST(PrinterDescriptionTest, CjtSetAll) {
   page_ranges.push_back(Interval(1, 99));
   page_ranges.push_back(Interval(150));
   page_range.set_value(page_ranges);
-  media.set_value(Media(MediaType::ISO_C7C6, 4261, 334));
+  media.set_value(Media(MediaType::ISO_C7C6, gfx::Size(4261, 334)));
   collate.set_value(false);
   reverse.set_value(true);
 
@@ -1299,12 +1305,13 @@ TEST(PrinterDescriptionTest, CjtSetAll) {
   collate.SaveTo(&description);
   reverse.SaveTo(&description);
 
-  EXPECT_EQ(NormalizeJson(kCjt), NormalizeJson(description.ToString()));
+  EXPECT_EQ(NormalizeJson(kCjt),
+            NormalizeJson(description.ToStringForTesting()));
 }
 
 TEST(PrinterDescriptionTest, CjtGetAll) {
   CloudDeviceDescription description;
-  ASSERT_TRUE(description.InitFromString(NormalizeJson(kCjt)));
+  ASSERT_TRUE(description.InitFromString(kCjt));
 
   ColorTicketItem color;
   DuplexTicketItem duplex;
@@ -1348,11 +1355,12 @@ TEST(PrinterDescriptionTest, CjtGetAll) {
   page_ranges.push_back(Interval(1, 99));
   page_ranges.push_back(Interval(150));
   EXPECT_EQ(page_range.value(), page_ranges);
-  EXPECT_EQ(media.value(), Media(MediaType::ISO_C7C6, 4261, 334));
+  EXPECT_EQ(media.value(), Media(MediaType::ISO_C7C6, gfx::Size(4261, 334)));
   EXPECT_FALSE(collate.value());
   EXPECT_TRUE(reverse.value());
 
-  EXPECT_EQ(NormalizeJson(kCjt), NormalizeJson(description.ToString()));
+  EXPECT_EQ(NormalizeJson(kCjt),
+            NormalizeJson(description.ToStringForTesting()));
 }
 
 }  // namespace printer

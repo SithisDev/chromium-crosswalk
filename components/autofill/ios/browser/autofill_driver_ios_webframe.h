@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include "components/autofill/ios/browser/autofill_driver_ios.h"
 #include "ios/web/public/js_messaging/web_frame_user_data.h"
-#include "ios/web/public/web_state/web_state_user_data.h"
+#import "ios/web/public/web_state_user_data.h"
 
 namespace web {
 class WebFrame;
@@ -31,7 +31,7 @@ class AutofillDriverIOSWebFrameFactory
       AutofillClient* client,
       id<AutofillDriverIOSBridge> bridge,
       const std::string& app_locale,
-      AutofillManager::AutofillDownloadManagerState enable_download_manager);
+      AutofillManager::EnableDownloadManager enable_download_manager);
   ~AutofillDriverIOSWebFrameFactory() override;
 
   AutofillDriverIOSWebFrameFactory(
@@ -39,7 +39,7 @@ class AutofillDriverIOSWebFrameFactory
       AutofillClient* client,
       id<AutofillDriverIOSBridge> bridge,
       const std::string& app_locale,
-      AutofillManager::AutofillDownloadManagerState enable_download_manager);
+      AutofillManager::EnableDownloadManager enable_download_manager);
 
   // Returns a AutofillDriverIOSFromWebFrame for |web_frame|, creating it if
   // needed.
@@ -53,7 +53,7 @@ class AutofillDriverIOSWebFrameFactory
   AutofillClient* client_ = nullptr;
   id<AutofillDriverIOSBridge> bridge_ = nil;
   std::string app_locale_;
-  AutofillManager::AutofillDownloadManagerState enable_download_manager_;
+  AutofillManager::EnableDownloadManager enable_download_manager_;
   WEB_STATE_USER_DATA_KEY_DECL();
 };
 
@@ -74,7 +74,7 @@ class AutofillDriverIOSRefCountable
       AutofillClient* client,
       id<AutofillDriverIOSBridge> bridge,
       const std::string& app_locale,
-      AutofillManager::AutofillDownloadManagerState enable_download_manager);
+      AutofillManager::EnableDownloadManager enable_download_manager);
 
  private:
   friend class base::RefCountedThreadSafe<AutofillDriverIOSRefCountable>;
@@ -93,7 +93,7 @@ class AutofillDriverIOSWebFrame
       AutofillClient* client,
       id<AutofillDriverIOSBridge> bridge,
       const std::string& app_locale,
-      AutofillManager::AutofillDownloadManagerState enable_download_manager);
+      AutofillManager::EnableDownloadManager enable_download_manager);
 
   ~AutofillDriverIOSWebFrame() override;
 
@@ -106,9 +106,9 @@ class AutofillDriverIOSWebFrame
       AutofillClient* client,
       id<AutofillDriverIOSBridge> bridge,
       const std::string& app_locale,
-      AutofillManager::AutofillDownloadManagerState enable_download_manager);
+      AutofillManager::EnableDownloadManager enable_download_manager);
   scoped_refptr<AutofillDriverIOSRefCountable> driver_;
 };
 }  // namespace autofill
 
-#endif  // COMPONENTS_AUTOFILL_CONTENT_BROWSER_AUTOFILL_DRIVER_IOS_WEBSTATE_H_
+#endif  // COMPONENTS_AUTOFILL_IOS_BROWSER_AUTOFILL_DRIVER_IOS_WEBFRAME_H_

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,11 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/update_client/update_client_errors.h"
+
+// TODO(crbug.com/1349158): Remove this class once Puffin patches are fully
+// implemented.
 
 namespace crx_file {
 enum class VerifierFormat;
@@ -84,14 +86,18 @@ class ComponentUnpacker : public base::RefCountedThreadSafe<ComponentUnpacker> {
   using Callback = base::OnceCallback<void(const Result& result)>;
 
   // Constructs an unpacker for a specific component unpacking operation.
-  // |pk_hash| is the expected/ public key SHA256 hash. |path| is the current
-  // location of the CRX.
+  // |pk_hash| is the expected public developer key's SHA256 hash. If empty,
+  // the unpacker accepts any developer key. |path| is the current location
+  // of the CRX.
   ComponentUnpacker(const std::vector<uint8_t>& pk_hash,
                     const base::FilePath& path,
                     scoped_refptr<CrxInstaller> installer,
                     std::unique_ptr<Unzipper> unzipper,
                     scoped_refptr<Patcher> patcher,
                     crx_file::VerifierFormat crx_format);
+
+  ComponentUnpacker(const ComponentUnpacker&) = delete;
+  ComponentUnpacker& operator=(const ComponentUnpacker&) = delete;
 
   // Begins the actual unpacking of the files. May invoke a patcher and the
   // component installer if the package is a differential update.
@@ -114,9 +120,8 @@ class ComponentUnpacker : public base::RefCountedThreadSafe<ComponentUnpacker> {
   void EndUnzipping(bool error);
 
   // The third step is to optionally patch files - this is a no-op for full
-  // (non-differential) updates. This step is asynchronous. Returns false if an
-  // error is encountered.
-  bool BeginPatching();
+  // (non-differential) updates. This step is asynchronous.
+  void BeginPatching();
   void EndPatching(UnpackerError error, int extended_error);
 
   // The final step is to do clean-up for things that can't be tidied as we go.
@@ -139,8 +144,6 @@ class ComponentUnpacker : public base::RefCountedThreadSafe<ComponentUnpacker> {
   UnpackerError error_;
   int extended_error_;
   std::string public_key_;
-
-  DISALLOW_COPY_AND_ASSIGN(ComponentUnpacker);
 };
 
 }  // namespace update_client

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #include "components/download/public/common/download_export.h"
 #include "components/download/public/common/download_stream.mojom.h"
 #include "components/download/public/common/input_stream.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
 
 namespace download {
@@ -20,6 +20,10 @@ class COMPONENTS_DOWNLOAD_EXPORT StreamHandleInputStream
  public:
   explicit StreamHandleInputStream(
       mojom::DownloadStreamHandlePtr stream_handle);
+
+  StreamHandleInputStream(const StreamHandleInputStream&) = delete;
+  StreamHandleInputStream& operator=(const StreamHandleInputStream&) = delete;
+
   ~StreamHandleInputStream() override;
 
   // InputStream
@@ -40,7 +44,7 @@ class COMPONENTS_DOWNLOAD_EXPORT StreamHandleInputStream
   // Objects for consuming a mojo data pipe.
   mojom::DownloadStreamHandlePtr stream_handle_;
   std::unique_ptr<mojo::SimpleWatcher> handle_watcher_;
-  std::unique_ptr<mojo::Binding<mojom::DownloadStreamClient>> binding_;
+  std::unique_ptr<mojo::Receiver<mojom::DownloadStreamClient>> receiver_;
 
   // Whether the producer has completed handling the response.
   bool is_response_completed_;
@@ -52,8 +56,6 @@ class COMPONENTS_DOWNLOAD_EXPORT StreamHandleInputStream
   base::OnceClosure completion_callback_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(StreamHandleInputStream);
 };
 
 }  // namespace download

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,15 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "base/memory/ref_counted.h"
+#include "base/gtest_prod_util.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "components/sync/base/cancelation_observer.h"
+#include "components/sync/engine/net/http_post_provider.h"
 #include "components/sync/engine/net/http_post_provider_factory.h"
-#include "components/sync/engine/net/http_post_provider_interface.h"
-#include "components/sync/engine/net/network_time_update_callback.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "url/gurl.h"
 
@@ -36,28 +35,26 @@ class SimpleURLLoader;
 
 namespace syncer {
 
-class CancelationSignal;
-
 // A bridge between the syncer and Chromium HTTP layers.
 // Provides a way for the sync backend to use Chromium directly for HTTP
 // requests rather than depending on a third party provider (e.g libcurl).
 // This is a one-time use bridge. Create one for each request you want to make.
-// It is RefCountedThreadSafe because it can PostTask to the io loop, and thus
-// needs to stick around across context switches, etc.
-class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
-                   public HttpPostProviderInterface {
+class HttpBridge : public HttpPostProvider {
  public:
   HttpBridge(const std::string& user_agent,
-             std::unique_ptr<network::SharedURLLoaderFactoryInfo>
-                 url_loader_factory_info,
-             const NetworkTimeUpdateCallback& network_time_update_callback);
+             std::unique_ptr<network::PendingSharedURLLoaderFactory>
+                 pending_url_loader_factory);
 
-  // HttpPostProviderInterface implementation.
+  HttpBridge(const HttpBridge&) = delete;
+  HttpBridge& operator=(const HttpBridge&) = delete;
+
+  // HttpPostProvider implementation.
   void SetExtraRequestHeaders(const char* headers) override;
-  void SetURL(const char* url, int port) override;
+  void SetURL(const GURL& url) override;
   void SetPostPayload(const char* content_type,
                       int content_length,
                       const char* content) override;
+  void SetAllowBatching(bool allow_batching) override;
   bool MakeSynchronousPost(int* net_error_code, int* http_status_code) override;
   void Abort() override;
 
@@ -88,7 +85,6 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
   }
 
  private:
-  friend class base::RefCountedThreadSafe<HttpBridge>;
   FRIEND_TEST_ALL_PREFIXES(SyncHttpBridgeTest,
                            AbortAndReleaseBeforeFetchComplete);
   // Test is disabled on Android.
@@ -114,9 +110,7 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
   // fetcher.
   void DestroyURLLoaderOnIOThread(
       std::unique_ptr<network::SimpleURLLoader> loader,
-      std::unique_ptr<base::OneShotTimer> loader_timer);
-
-  void UpdateNetworkTime();
+      std::unique_ptr<base::DelayTimer> loader_timer);
 
   // Helper method to abort the request if we timed out.
   void OnURLLoadTimedOut();
@@ -138,6 +132,11 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
   std::string content_type_;
   std::string request_content_;
   std::string extra_headers_;
+
+  // When true `fetch_state_.url_loader` is configured so that it can be
+  // batched in the network layer. See the comment in
+  // network::SimpleURLLoader::SetAllowBatching().
+  bool allow_batching_ = false;
 
   // A waitable event we use to provide blocking semantics to
   // MakeSynchronousPost. We block created_on_loop_ while the IO loop fetches
@@ -172,7 +171,7 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
 
     // Timer to ensure http requests aren't stalled. Reset every time upload or
     // download progress is made.
-    std::unique_ptr<base::OneShotTimer> http_request_timeout_timer;
+    std::unique_ptr<base::DelayTimer> http_request_timeout_timer;
   };
 
   // This lock synchronizes use of state involved in the flow to load a URL
@@ -185,48 +184,33 @@ class HttpBridge : public base::RefCountedThreadSafe<HttpBridge>,
   mutable base::Lock fetch_state_lock_;
   URLFetchState fetch_state_;
 
-  std::unique_ptr<network::SharedURLLoaderFactoryInfo> url_loader_factory_info_;
+  std::unique_ptr<network::PendingSharedURLLoaderFactory>
+      pending_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
   const scoped_refptr<base::SequencedTaskRunner> network_task_runner_;
-
-  // Callback for updating network time.
-  NetworkTimeUpdateCallback network_time_update_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(HttpBridge);
 };
 
-class HttpBridgeFactory : public HttpPostProviderFactory,
-                          public CancelationObserver {
+class HttpBridgeFactory : public HttpPostProviderFactory {
  public:
-  HttpBridgeFactory(
-      std::unique_ptr<network::SharedURLLoaderFactoryInfo>
-          url_loader_factory_info,
-      const NetworkTimeUpdateCallback& network_time_update_callback,
-      CancelationSignal* cancelation_signal);
+  HttpBridgeFactory(const std::string& user_agent,
+                    std::unique_ptr<network::PendingSharedURLLoaderFactory>
+                        pending_url_loader_factory);
+
+  HttpBridgeFactory(const HttpBridgeFactory&) = delete;
+  HttpBridgeFactory& operator=(const HttpBridgeFactory&) = delete;
+
   ~HttpBridgeFactory() override;
 
   // HttpPostProviderFactory:
-  void Init(const std::string& user_agent) override;
-  HttpPostProviderInterface* Create() override;
-  void Destroy(HttpPostProviderInterface* http) override;
-
-  // CancelationObserver implementation:
-  void OnSignalReceived() override;
+  scoped_refptr<HttpPostProvider> Create() override;
 
  private:
   // The user agent to use in all requests.
-  std::string user_agent_;
+  const std::string user_agent_;
 
   // The URL loader factory used for making all requests.
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
-
-  NetworkTimeUpdateCallback network_time_update_callback_;
-
-  CancelationSignal* const cancelation_signal_;
-  bool registered_for_cancelation_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(HttpBridgeFactory);
 };
 
 }  //  namespace syncer

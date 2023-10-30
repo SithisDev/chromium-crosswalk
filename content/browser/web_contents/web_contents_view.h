@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,25 +7,27 @@
 
 #include <string>
 
-#include "base/strings/string16.h"
 #include "build/build_config.h"
-#include "content/common/content_export.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace content {
+
 class RenderViewHost;
+class RenderViewHostDelegateView;
 class RenderWidgetHost;
 class RenderWidgetHostViewBase;
+class WebContentsImpl;
+class WebContentsViewDelegate;
 struct DropData;
 
-// The WebContentsView is an interface that is implemented by the platform-
-// dependent web contents views. The WebContents uses this interface to talk to
-// them.
+// The `WebContentsView` is an interface that is implemented by the platform-
+// dependent web contents views. The `WebContents` uses this interface to talk
+// to them.
 class WebContentsView {
  public:
-  virtual ~WebContentsView() {}
+  virtual ~WebContentsView() = default;
 
   // Returns the native widget that contains the contents of the tab.
   virtual gfx::NativeView GetNativeView() const = 0;
@@ -41,17 +43,7 @@ class WebContentsView {
 
   // Computes the rectangle for the native widget that contains the contents of
   // the tab in the screen coordinate system.
-  virtual void GetContainerBounds(gfx::Rect* out) const = 0;
-
-  // TODO(brettw) this is a hack. It's used in two places at the time of this
-  // writing: (1) when render view hosts switch, we need to size the replaced
-  // one to be correct, since it wouldn't have known about sizes that happened
-  // while it was hidden; (2) in constrained windows.
-  //
-  // (1) will be fixed once interstitials are cleaned up. (2) seems like it
-  // should be cleaned up or done some other way, since this works for normal
-  // WebContents without the special code.
-  virtual void SizeContents(const gfx::Size& size) = 0;
+  virtual gfx::Rect GetContainerBounds() const = 0;
 
   // Sets focus to the native widget for this tab.
   virtual void Focus() = 0;
@@ -78,19 +70,13 @@ class WebContentsView {
   // Get the bounds of the View, relative to the parent.
   virtual gfx::Rect GetViewBounds() const = 0;
 
-  virtual void CreateView(
-      const gfx::Size& initial_size, gfx::NativeView context) = 0;
+  virtual void CreateView(gfx::NativeView context) = 0;
 
   // Sets up the View that holds the rendered web page, receives messages for
   // it and contains page plugins. The host view should be sized to the current
   // size of the WebContents.
-  //
-  // |is_guest_view_hack| is temporary hack and will be removed once
-  // RenderWidgetHostViewGuest is not dependent on platform view.
-  // TODO(lazyboy): Remove |is_guest_view_hack| once http://crbug.com/330264 is
-  // fixed.
   virtual RenderWidgetHostViewBase* CreateViewForWidget(
-      RenderWidgetHost* render_widget_host, bool is_guest_view_hack) = 0;
+      RenderWidgetHost* render_widget_host) = 0;
 
   // Creates a new View that holds a non-top-level widget and receives messages
   // for it.
@@ -101,13 +87,10 @@ class WebContentsView {
   // is not strictly necessary and isn't expected to be displayed anywhere, but
   // can aid certain debugging tools such as Spy++ on Windows where you are
   // trying to find a specific window.
-  virtual void SetPageTitle(const base::string16& title) = 0;
+  virtual void SetPageTitle(const std::u16string& title) = 0;
 
-  // Invoked when the WebContents is notified that the RenderView has been
-  // fully created.
-  virtual void RenderViewCreated(RenderViewHost* host) = 0;
-
-  // Invoked when the WebContents is notified that the RenderView is ready.
+  // Invoked when the WebContents is notified that the `blink::WebView` is
+  // ready.
   virtual void RenderViewReady() = 0;
 
   // Invoked when the WebContents is notified that the RenderViewHost has been
@@ -118,7 +101,10 @@ class WebContentsView {
   // Invoked to enable/disable overscroll gesture navigation.
   virtual void SetOverscrollControllerEnabled(bool enabled) = 0;
 
-#if defined(OS_MACOSX)
+  // Called when the capturer-count of the WebContents changes.
+  virtual void OnCapturerCountChanged() = 0;
+
+#if BUILDFLAG(IS_MAC)
   // If we close the tab while a UI control is in an event-tracking loop, the
   // the control may message freed objects and crash. WebContents::Close will
   // call this. If it returns true, then WebContents::Close will early-out, and
@@ -126,7 +112,16 @@ class WebContentsView {
   // loop has ended.
   virtual bool CloseTabAfterEventTrackingIfNeeded() = 0;
 #endif
+
+  virtual void FullscreenStateChanged(bool is_fullscreen) = 0;
 };
+
+// Factory function to create `WebContentsView`s. Implemented in the platform
+// files.
+std::unique_ptr<WebContentsView> CreateWebContentsView(
+    WebContentsImpl* web_contents,
+    std::unique_ptr<WebContentsViewDelegate> delegate,
+    RenderViewHostDelegateView** render_view_host_delegate_view);
 
 }  // namespace content
 

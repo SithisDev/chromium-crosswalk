@@ -14,7 +14,7 @@ interstitial).
 
 ## High Level Description
 At a high level, the component uses a memory mapped file of filtering rules to
-filter subresource requests in Blink, as well as subframe navigations in the
+filter subresource requests in Blink, as well as child frame navigations in the
 browser process.
 
 For historical reasons (intention to support iOS), code is split into two
@@ -78,7 +78,7 @@ redirect URL speculatively, but makes an activation decision based on the last
 URL.
 
 ##### Document-level activation
-The ruleset has rules for whitelisting documents in specific ways. How a given
+The ruleset has rules for allowlisting documents in specific ways. How a given
 document is activated is codified in the `ActivationState` struct.
 
 In order to notify a document in the renderer about how it should be activated,
@@ -90,15 +90,23 @@ This logic is Handled by the `ActivationStateComputingNavigationThrottle`.
 This ownership is passed to the `ContentSubresourceFilterThrottleManager` at
 `ReadyToCommitNavigation` time.
 
-##### Subframe filtering
-This component also needs to filter subframes that match the ruleset. This is
-done by the `SubframeNavigationFilteringThrottle`, which consults its parent
+##### Child frame filtering
+This component also needs to filter child frames that match the ruleset. This is
+done by the `ChildFrameNavigationFilteringThrottle`, which consults its parent
 frame's `AsyncDocumentSubresourceFilter`.
+
+The code uses "root frame" and "child frame" terminology distinguish from the
+FrameTree-centric "main frame" and "subframe". Frame trees may be embedded so
+that a single "tab" may have multiple "main frames". In some cases (fenced
+frames) an embedded main frame is treated by the filter like a subframe; a main
+frame in a fenced frame is thus a subresource filter "child frame". In
+others (portals), the embedded main frame establishes a new subresource filter
+root so it is a subresource filter "root frame".
 
 ##### Throttle management
 The `ContentSubresourceFilterThrottleManager` is a `WebContentsObserver`, and manages both the
 `ActivationStateComputingNavigationThrottle` and the
-`SubframeNavigationFilteringThrottle`. It maintains a map of all the activated
+`ChildFrameNavigationFilteringThrottle`. It maintains a map of all the activated
 frames in the frame tree, along with that frame's current
 `AsyncDocumentSubresourceFilter`, taken from the
 `ActivationStateComputingNavigationThrottle`.

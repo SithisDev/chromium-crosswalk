@@ -1,101 +1,51 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/exo/seat.h"
 
-#if defined(OS_CHROMEOS)
-#include "ash/shell.h"
-#endif  // defined(OS_CHROMEOS)
+#include <memory>
 
+#include "ash/wm/window_util.h"
 #include "base/auto_reset.h"
 #include "base/barrier_closure.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/i18n/icu_string_conversions.h"
+#include "base/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
+#include "base/pickle.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
+#include "build/chromeos_buildflags.h"
+#include "components/exo/data_exchange_delegate.h"
 #include "components/exo/data_source.h"
+#include "components/exo/drag_drop_operation.h"
 #include "components/exo/mime_utils.h"
 #include "components/exo/seat_observer.h"
+#include "components/exo/shell_surface_base.h"
 #include "components/exo/shell_surface_util.h"
 #include "components/exo/surface.h"
 #include "components/exo/wm_helper.h"
+#include "components/exo/xkb_tracker.h"
 #include "services/data_decoder/public/cpp/decode_image.h"
-#include "third_party/icu/source/common/unicode/ucnv.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/base/clipboard/clipboard_monitor.h"
+#include "ui/base/clipboard/scoped_clipboard_writer.h"
+#include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
+#include "ui/base/data_transfer_policy/data_transfer_endpoint_serializer.h"
+#include "ui/display/screen.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/platform/platform_event_source.h"
+#include "ui/gfx/geometry/point_f.h"
 
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/shell.h"
+#include "ui/aura/env.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace exo {
-namespace {
 
-// The maximum number of different data types that we will write to the
-// clipboard (plain text, RTF, HTML, image)
-constexpr int kMaxClipboardDataTypes = 4;
-
-constexpr char kUTF16Unspecified[] = "UTF-16";
-constexpr char kUTF16LittleEndian[] = "UTF-16LE";
-constexpr char kUTF16BigEndian[] = "UTF-16BE";
-constexpr uint8_t kByteOrderMark[] = {0xFE, 0xFF};
-constexpr int kByteOrderMarkSize = sizeof(kByteOrderMark);
-
-Surface* GetEffectiveFocus(aura::Window* window) {
-  if (!window)
-    return nullptr;
-  Surface* const surface = Surface::AsSurface(window);
-  if (surface)
-    return surface;
-  // Fallback to main surface.
-  aura::Window* const top_level_window = window->GetToplevelWindow();
-  if (!top_level_window)
-    return nullptr;
-  return GetShellMainSurface(top_level_window);
-}
-
-base::string16 CodepageToUTF16(const std::vector<uint8_t>& data,
-                               const std::string& charset_input) {
-  base::string16 output;
-  base::StringPiece piece(reinterpret_cast<const char*>(data.data()),
-                          data.size());
-  const char* charset = charset_input.c_str();
-
-  // Despite claims in the documentation to the contrary, the ICU UTF-16
-  // converter does not automatically detect and interpret the byte order
-  // mark. Therefore, we must do this ourselves.
-  if (!ucnv_compareNames(charset, kUTF16Unspecified) &&
-      data.size() >= kByteOrderMarkSize) {
-    if (static_cast<uint8_t>(piece.data()[0]) == kByteOrderMark[0] &&
-        static_cast<uint8_t>(piece.data()[1]) == kByteOrderMark[1]) {
-      // BOM is in big endian format. Consume the BOM so it doesn't get
-      // interpreted as a character.
-      piece.remove_prefix(2);
-      charset = kUTF16BigEndian;
-    } else if (static_cast<uint8_t>(piece.data()[0]) == kByteOrderMark[1] &&
-               static_cast<uint8_t>(piece.data()[1]) == kByteOrderMark[0]) {
-      // BOM is in little endian format. Consume the BOM so it doesn't get
-      // interpreted as a character.
-      piece.remove_prefix(2);
-      charset = kUTF16LittleEndian;
-    }
-  }
-
-  base::CodepageToUTF16(
-      piece, charset, base::OnStringConversionError::Type::SUBSTITUTE, &output);
-  return output;
-}
-
-}  // namespace
-
-Seat::Seat()
+Seat::Seat(std::unique_ptr<DataExchangeDelegate> delegate)
     : changing_clipboard_data_to_selection_source_(false),
-      weak_ptr_factory_(this) {
+      data_exchange_delegate_(std::move(delegate)) {
   WMHelper::GetInstance()->AddFocusObserver(this);
   // Prepend handler as it's critical that we see all events.
   WMHelper::GetInstance()->PrependPreTargetHandler(this);
@@ -104,10 +54,33 @@ Seat::Seat()
   // null. https://crbug.com/856230
   if (ui::PlatformEventSource::GetInstance())
     ui::PlatformEventSource::GetInstance()->AddPlatformEventObserver(this);
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  ui_lock_controller_ = std::make_unique<UILockController>(this);
+
+  // Seat needs to be registered as observers before any Keyboard,
+  // because Keyboard expects that the XkbTracker is up-to-date when its
+  // observer method is called.
+  xkb_tracker_ = std::make_unique<XkbTracker>();
+  ash::ImeControllerImpl* ime_controller = ash::Shell::Get()->ime_controller();
+  xkb_tracker_->UpdateKeyboardLayout(ime_controller->keyboard_layout_name());
+  ime_controller->AddObserver(this);
+#endif
 }
 
+Seat::Seat() : Seat(nullptr) {}
+
 Seat::~Seat() {
+  Shutdown();
+}
+
+void Seat::Shutdown() {
+  if (was_shutdown_)
+    return;
+  was_shutdown_ = true;
   DCHECK(!selection_source_) << "DataSource must be released before Seat";
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  ash::Shell::Get()->ime_controller()->RemoveObserver(this);
+#endif
   WMHelper::GetInstance()->RemoveFocusObserver(this);
   WMHelper::GetInstance()->RemovePreTargetHandler(this);
   ui::ClipboardMonitor::GetInstance()->RemoveObserver(this);
@@ -115,22 +88,65 @@ Seat::~Seat() {
     ui::PlatformEventSource::GetInstance()->RemovePlatformEventObserver(this);
 }
 
-void Seat::AddObserver(SeatObserver* observer) {
-  observers_.AddObserver(observer);
+void Seat::AddObserver(SeatObserver* observer, int priority) {
+  for (const auto& observer_list : priority_observer_list_)
+    if (observer_list.HasObserver(observer))
+      return;
+
+  DCHECK(IsValidObserverPriority(priority));
+  priority_observer_list_[priority].AddObserver(observer);
 }
 
 void Seat::RemoveObserver(SeatObserver* observer) {
-  observers_.RemoveObserver(observer);
+  // We assume that the number of priority variations is small enough.
+  for (auto& observer_list : priority_observer_list_)
+    observer_list.RemoveObserver(observer);
+}
+
+void Seat::NotifyPointerCaptureEnabled(Pointer* pointer,
+                                       aura::Window* capture_window) {
+  for (auto& observer_list : priority_observer_list_) {
+    for (auto& observer : observer_list)
+      observer.OnPointerCaptureEnabled(pointer, capture_window);
+  }
+}
+
+void Seat::NotifyPointerCaptureDisabled(Pointer* pointer,
+                                        aura::Window* capture_window) {
+  for (auto& observer_list : priority_observer_list_) {
+    for (auto& observer : observer_list)
+      observer.OnPointerCaptureDisabled(pointer, capture_window);
+  }
 }
 
 Surface* Seat::GetFocusedSurface() {
-  return GetEffectiveFocus(WMHelper::GetInstance()->GetFocusedWindow());
+  return GetTargetSurfaceForKeyboardFocus(
+      WMHelper::GetInstance()->GetFocusedWindow());
+}
+
+void Seat::StartDrag(DataSource* source,
+                     Surface* origin,
+                     Surface* icon,
+                     ui::mojom::DragEventSource event_source) {
+  gfx::Point cursor_location = aura::Env::GetInstance()->GetLastPointerPoint(
+      event_source, origin->window(), /*fallback=*/absl::nullopt);
+  // DragDropOperation manages its own lifetime.
+  drag_drop_operation_ = DragDropOperation::Create(
+      data_exchange_delegate_.get(), source, origin, icon,
+      gfx::PointF(cursor_location), event_source);
+}
+
+void Seat::AbortPendingDragOperation() {
+  if (drag_drop_operation_)
+    drag_drop_operation_->AbortIfPending();
 }
 
 void Seat::SetSelection(DataSource* source) {
-  if (!source) {
-    ui::Clipboard::GetForCurrentThread()->Clear(ui::ClipboardType::kCopyPaste);
-    // selection_source_ is Cancelled() and reset() in OnClipboardDataChanged().
+  Surface* focused_surface = GetFocusedSurface();
+  if (!source || !focused_surface ||
+      !source->CanBeDataSourceForCopy(focused_surface)) {
+    if (source)
+      source->Cancelled();
     return;
   }
 
@@ -140,14 +156,35 @@ void Seat::SetSelection(DataSource* source) {
     selection_source_->get()->Cancelled();
   }
   selection_source_ = std::make_unique<ScopedDataSource>(source, this);
+  ui::EndpointType endpoint_type =
+      data_exchange_delegate_->GetDataTransferEndpointType(
+          focused_surface->window());
   scoped_refptr<RefCountedScopedClipboardWriter> writer =
-      base::MakeRefCounted<RefCountedScopedClipboardWriter>(
-          ui::ClipboardType::kCopyPaste);
+      base::MakeRefCounted<RefCountedScopedClipboardWriter>(endpoint_type);
+
+  size_t num_data_read_callbacks = DataSource::kMaxDataTypes;
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Lacros sends additional metadata, in a custom MIME type, to sync clipboard
+  // source metadata,
+  if (endpoint_type == ui::EndpointType::kLacros)
+    ++num_data_read_callbacks;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   base::RepeatingClosure data_read_callback = base::BarrierClosure(
-      kMaxClipboardDataTypes,
+      num_data_read_callbacks,
       base::BindOnce(&Seat::OnAllReadsFinished, weak_ptr_factory_.GetWeakPtr(),
                      writer));
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  if (endpoint_type == ui::EndpointType::kLacros) {
+    source->ReadDataTransferEndpoint(
+        base::BindOnce(&Seat::OnDataTransferEndpointRead,
+                       weak_ptr_factory_.GetWeakPtr(), writer,
+                       data_read_callback),
+        data_read_callback);
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   source->GetDataForPreferredMimeTypes(
       base::BindOnce(&Seat::OnTextRead, weak_ptr_factory_.GetWeakPtr(), writer,
@@ -158,15 +195,47 @@ void Seat::SetSelection(DataSource* source) {
                      data_read_callback),
       base::BindOnce(&Seat::OnImageRead, weak_ptr_factory_.GetWeakPtr(), writer,
                      data_read_callback),
+      base::BindOnce(&Seat::OnFilenamesRead, weak_ptr_factory_.GetWeakPtr(),
+                     endpoint_type, writer, data_read_callback),
+      DataSource::ReadFileContentsDataCallback(),
+      base::BindOnce(&Seat::OnWebCustomDataRead, weak_ptr_factory_.GetWeakPtr(),
+                     writer, data_read_callback),
       data_read_callback);
 }
+
+class Seat::RefCountedScopedClipboardWriter
+    : public ui::ScopedClipboardWriter,
+      public base::RefCounted<RefCountedScopedClipboardWriter> {
+ public:
+  explicit RefCountedScopedClipboardWriter(ui::EndpointType type)
+      : ScopedClipboardWriter(
+            ui::ClipboardBuffer::kCopyPaste,
+            std::make_unique<ui::DataTransferEndpoint>(type)) {}
+
+ private:
+  friend class base::RefCounted<RefCountedScopedClipboardWriter>;
+  virtual ~RefCountedScopedClipboardWriter() = default;
+};
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+void Seat::OnDataTransferEndpointRead(
+    scoped_refptr<RefCountedScopedClipboardWriter> writer,
+    base::OnceClosure callback,
+    const std::string& mime_type,
+    std::u16string data) {
+  std::string utf8_json = base::UTF16ToUTF8(data);
+  auto clipboard_source = ui::ConvertJsonToDataTransferEndpoint(utf8_json);
+
+  writer->SetDataSource(std::move(clipboard_source));
+  std::move(callback).Run();
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 void Seat::OnTextRead(scoped_refptr<RefCountedScopedClipboardWriter> writer,
                       base::OnceClosure callback,
                       const std::string& mime_type,
-                      const std::vector<uint8_t>& data) {
-  base::string16 output = CodepageToUTF16(data, GetCharset(mime_type));
-  writer->WriteText(output);
+                      std::u16string data) {
+  writer->WriteText(std::move(data));
   std::move(callback).Run();
 }
 
@@ -182,9 +251,8 @@ void Seat::OnRTFRead(scoped_refptr<RefCountedScopedClipboardWriter> writer,
 void Seat::OnHTMLRead(scoped_refptr<RefCountedScopedClipboardWriter> writer,
                       base::OnceClosure callback,
                       const std::string& mime_type,
-                      const std::vector<uint8_t>& data) {
-  base::string16 output = CodepageToUTF16(data, GetCharset(mime_type));
-  writer->WriteHTML(output, std::string());
+                      std::u16string data) {
+  writer->WriteHTML(std::move(data), std::string());
   std::move(callback).Run();
 }
 
@@ -192,19 +260,18 @@ void Seat::OnImageRead(scoped_refptr<RefCountedScopedClipboardWriter> writer,
                        base::OnceClosure callback,
                        const std::string& mime_type,
                        const std::vector<uint8_t>& data) {
-#if defined(OS_CHROMEOS)
-  data_decoder::DecodeImage(
-      ash::Shell::Get()->connector(), data,
-      data_decoder::mojom::ImageCodec::DEFAULT, false,
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  data_decoder::DecodeImageIsolated(
+      data, data_decoder::mojom::ImageCodec::kDefault, false,
       std::numeric_limits<int64_t>::max(), gfx::Size(),
       base::BindOnce(&Seat::OnImageDecoded, weak_ptr_factory_.GetWeakPtr(),
                      std::move(callback), writer));
 #else
   std::move(callback).Run();
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 void Seat::OnImageDecoded(base::OnceClosure callback,
                           scoped_refptr<RefCountedScopedClipboardWriter> writer,
                           const SkBitmap& bitmap) {
@@ -212,7 +279,30 @@ void Seat::OnImageDecoded(base::OnceClosure callback,
     writer->WriteImage(bitmap);
   std::move(callback).Run();
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+void Seat::OnFilenamesRead(
+    ui::EndpointType source,
+    scoped_refptr<RefCountedScopedClipboardWriter> writer,
+    base::OnceClosure callback,
+    const std::string& mime_type,
+    const std::vector<uint8_t>& data) {
+  std::vector<ui::FileInfo> filenames =
+      data_exchange_delegate_->GetFilenames(source, data);
+  writer->WriteFilenames(ui::FileInfosToURIList(filenames));
+  std::move(callback).Run();
+}
+
+void Seat::OnWebCustomDataRead(
+    scoped_refptr<RefCountedScopedClipboardWriter> writer,
+    base::OnceClosure callback,
+    const std::string& mime_type,
+    const std::vector<uint8_t>& data) {
+  base::Pickle pickle(reinterpret_cast<const char*>(data.data()), data.size());
+  writer->WritePickledData(pickle,
+                           ui::ClipboardFormatType::WebCustomDataType());
+  std::move(callback).Run();
+}
 
 void Seat::OnAllReadsFinished(
     scoped_refptr<RefCountedScopedClipboardWriter> writer) {
@@ -236,12 +326,15 @@ void Seat::OnAllReadsFinished(
 
 void Seat::OnWindowFocused(aura::Window* gained_focus,
                            aura::Window* lost_focus) {
-  Surface* const surface = GetEffectiveFocus(gained_focus);
-  for (auto& observer : observers_) {
-    observer.OnSurfaceFocusing(surface);
-  }
-  for (auto& observer : observers_) {
-    observer.OnSurfaceFocused(surface);
+  Surface* const gaining_focus_surface =
+      GetTargetSurfaceForKeyboardFocus(gained_focus);
+  Surface* const lost_focus_surface =
+      GetTargetSurfaceForKeyboardFocus(lost_focus);
+
+  for (auto& observer_list : priority_observer_list_) {
+    for (auto& observer : observer_list)
+      observer.OnSurfaceFocused(gaining_focus_surface, lost_focus_surface,
+                                !!gained_focus);
   }
 }
 
@@ -288,8 +381,9 @@ void Seat::OnKeyEvent(ui::KeyEvent* event) {
   if (physical_code_for_currently_processing_event_ != ui::DomCode::NONE) {
     switch (event->type()) {
       case ui::ET_KEY_PRESSED:
-        pressed_keys_.insert(
-            {physical_code_for_currently_processing_event_, event->code()});
+        pressed_keys_.emplace(
+            physical_code_for_currently_processing_event_,
+            KeyState{event->code(), /*consumed_by_ime=*/false});
         break;
       case ui::ET_KEY_RELEASED:
         pressed_keys_.erase(physical_code_for_currently_processing_event_);
@@ -299,7 +393,13 @@ void Seat::OnKeyEvent(ui::KeyEvent* event) {
         break;
     }
   }
-  modifier_flags_ = event->flags();
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  xkb_tracker_->UpdateKeyboardModifiers(event->flags());
+  for (auto& observer_list : priority_observer_list_) {
+    for (auto& observer : observer_list)
+      observer.OnKeyboardModifierUpdated();
+  }
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -311,6 +411,22 @@ void Seat::OnClipboardDataChanged() {
   selection_source_->get()->Cancelled();
   selection_source_.reset();
 }
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+
+UILockController* Seat::GetUILockControllerForTesting() {
+  return ui_lock_controller_.get();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ash::ImeControllerImpl::Observer overrides:
+
+void Seat::OnCapsLockChanged(bool enabled) {}
+
+void Seat::OnKeyboardLayoutNameChanged(const std::string& layout_name) {
+  xkb_tracker_->UpdateKeyboardLayout(layout_name);
+}
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // DataSourceObserver overrides:

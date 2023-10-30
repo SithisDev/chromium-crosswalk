@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
@@ -20,6 +19,7 @@
 #include "build/build_config.h"
 #include "components/services/heap_profiling/allocation.h"
 #include "components/services/heap_profiling/public/mojom/heap_profiling_service.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
 
 namespace heap_profiling {
@@ -46,21 +46,30 @@ class ConnectionManager {
 
  public:
   ConnectionManager();
+
+  ConnectionManager(const ConnectionManager&) = delete;
+  ConnectionManager& operator=(const ConnectionManager&) = delete;
+
   ~ConnectionManager();
 
   // Dumping is asynchronous so will not be complete when this function
   // returns. The dump is complete when the callback provided in the args is
   // fired.
   void DumpProcessesForTracing(bool strip_path_from_mapped_files,
+                               bool write_proto,
                                DumpProcessesForTracingCallback callback,
                                VmRegions vm_regions);
 
   void OnNewConnection(base::ProcessId pid,
-                       mojom::ProfilingClientPtr client,
+                       mojo::PendingRemote<mojom::ProfilingClient> client,
                        mojom::ProcessType process_type,
                        mojom::ProfilingParamsPtr params);
 
+  // Returns pids of clients that have started profiling.
   std::vector<base::ProcessId> GetConnectionPids();
+
+  // Returns pids of all connected clients that need vm regions, regardless of
+  // whether they've started profiling.
   std::vector<base::ProcessId> GetConnectionPidsThatNeedVmRegions();
 
  private:
@@ -79,11 +88,15 @@ class ConnectionManager {
                                     uint32_t sampling_rate,
                                     ExportParams* out_params);
 
-  // Notification that a connection is complete. Unlike OnNewConnection which
+  // Notification that the client has disconnected. Unlike OnNewConnection which
   // is signaled by the pipe server, this is signaled by the allocation tracker
   // to ensure that the pipeline for this process has been flushed of all
   // messages.
   void OnConnectionComplete(base::ProcessId pid);
+
+  // Indicates that the client has enabled profiling. Necessary for tests to
+  // know when initialization is complete.
+  void OnProfilingStarted(base::ProcessId pid);
 
   // Reports the ProcessTypes of the processes being profiled.
   void ReportMetrics();
@@ -100,8 +113,6 @@ class ConnectionManager {
 
   // Must be the last.
   base::WeakPtrFactory<ConnectionManager> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ConnectionManager);
 };
 
 }  // namespace heap_profiling

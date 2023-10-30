@@ -1,8 +1,9 @@
+# Primary OWNERS
+xiangdongkong@google.com
+jimmyxgong@chromium.org
+
+# Backup OWNERS
+zentaro@chromium.org
 afakhry@chromium.org
-bsimonnet@chromium.org
-jkardatzke@chromium.org
-zork@chromium.org
-
-per-file anonymizer_tool*=jkardatzke@chromium.org
-
-# COMPONENT: Platform>Apps>Feedback
+iby@chromium.org
+mutexlox@chromium.org

@@ -1,10 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/signin/internal/identity_manager/fake_profile_oauth2_token_service.h"
 
 #include <memory>
+#include <utility>
 
 #include "components/signin/internal/identity_manager/fake_profile_oauth2_token_service_delegate.h"
 
@@ -23,10 +24,10 @@ FakeProfileOAuth2TokenService::FakeProfileOAuth2TokenService(
           this /* OAuth2AccessTokenManager::Delegate* */));
 }
 
-FakeProfileOAuth2TokenService::~FakeProfileOAuth2TokenService() {}
+FakeProfileOAuth2TokenService::~FakeProfileOAuth2TokenService() = default;
 
 void FakeProfileOAuth2TokenService::IssueAllTokensForAccount(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const std::string& access_token,
     const base::Time& expiration) {
   GetFakeAccessTokenManager()->IssueAllTokensForAccount(
@@ -34,14 +35,14 @@ void FakeProfileOAuth2TokenService::IssueAllTokensForAccount(
 }
 
 void FakeProfileOAuth2TokenService::IssueAllTokensForAccount(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const OAuth2AccessTokenConsumer::TokenResponse& token_response) {
   GetFakeAccessTokenManager()->IssueAllTokensForAccount(account_id,
                                                         token_response);
 }
 
 void FakeProfileOAuth2TokenService::IssueErrorForAllPendingRequestsForAccount(
-    const std::string& account_id,
+    const CoreAccountId& account_id,
     const GoogleServiceAuthError& error) {
   GetFakeAccessTokenManager()->IssueErrorForAllPendingRequestsForAccount(
       account_id, error);
@@ -98,4 +99,9 @@ FakeProfileOAuth2TokenService::GetPendingRequests() {
 FakeOAuth2AccessTokenManager*
 FakeProfileOAuth2TokenService::GetFakeAccessTokenManager() {
   return static_cast<FakeOAuth2AccessTokenManager*>(GetAccessTokenManager());
+}
+
+bool FakeProfileOAuth2TokenService::IsFakeProfileOAuth2TokenServiceForTesting()
+    const {
+  return true;
 }

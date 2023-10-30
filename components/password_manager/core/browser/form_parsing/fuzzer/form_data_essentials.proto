@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@ message FormField {
 message Form {
   bool is_mode_filling = 1;
   bool is_form_tag = 2;
-  bool is_formless_checkout = 3;
   string name = 4;
   string action = 5;
   string origin = 6;

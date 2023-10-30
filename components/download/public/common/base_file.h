@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,11 @@
 
 #include "base/callback.h"
 #include "base/callback_forward.h"
+#include "base/check.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -27,12 +25,10 @@
 #include "components/download/public/common/download_interrupt_reasons.h"
 #include "components/services/quarantine/public/mojom/quarantine.mojom.h"
 #include "crypto/secure_hash.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/net_errors.h"
 #include "url/gurl.h"
-
-namespace service_manager {
-class Connector;
-}
 
 namespace download {
 
@@ -46,6 +42,10 @@ class COMPONENTS_DOWNLOAD_EXPORT BaseFile {
   // May be constructed on any thread.  All other routines (including
   // destruction) must occur on the same sequence.
   BaseFile(uint32_t download_id);
+
+  BaseFile(const BaseFile&) = delete;
+  BaseFile& operator=(const BaseFile&) = delete;
+
   ~BaseFile();
 
   // Returns DOWNLOAD_INTERRUPT_REASON_NONE on success, or a
@@ -148,8 +148,15 @@ class COMPONENTS_DOWNLOAD_EXPORT BaseFile {
   // will cause |secure_hash_| to get calculated.
   std::unique_ptr<crypto::SecureHash> Finish();
 
-  // Informs the OS that this file came from the internet. Returns a
-  // DownloadInterruptReason indicating the result of the operation.
+  // Callback used with AnnotateWithSourceInformation.
+  // Created by DownloadFileImpl::RenameWithRetryInternal
+  // to bind DownloadFileImpl::OnRenameComplete.
+  using OnAnnotationDoneCallback =
+      base::OnceCallback<void(DownloadInterruptReason)>;
+
+  // Informs the OS that this file came from the internet. Calls
+  // |on_annotation_done_callback| with DownloadInterruptReason indicating the
+  // result of the operation.
   //
   // |client_guid|: The client GUID which will be used to identify the caller to
   //     the system AV scanning function.
@@ -158,30 +165,14 @@ class COMPONENTS_DOWNLOAD_EXPORT BaseFile {
   //     that originated this download. Will be used to annotate source
   //     information and also to determine the relative danger level of the
   //     file.
-  DownloadInterruptReason AnnotateWithSourceInformationSync(
-      const std::string& client_guid,
-      const GURL& source_url,
-      const GURL& referrer_url);
-
-  // Callback used with AnnotateWithSourceInformation.
-  // Created by DownloadFileImpl::RenameWithRetryInternal
-  // to bind DownloadFileImpl::OnRenameComplete.
-  using OnAnnotationDoneCallback =
-      base::OnceCallback<void(DownloadInterruptReason)>;
-
-  // Called when a quarantine service is used,
-  // connector is used to populate a quarantine::mojom::QuarantinePtr,
-  // and the callback will be called from the service.
-  // TODO (crbug.com/973497): Remove non-service version when
-  // kPreventDownloadsWithSamePath feature is removed.
   void AnnotateWithSourceInformation(
       const std::string& client_guid,
       const GURL& source_url,
       const GURL& referrer_url,
-      std::unique_ptr<service_manager::Connector> connector,
+      mojo::PendingRemote<quarantine::mojom::Quarantine> remote_quarantine,
       OnAnnotationDoneCallback on_annotation_done_callback);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Publishes the intermediate download to public download collection.
   DownloadInterruptReason PublishDownload();
 #endif
@@ -304,8 +295,8 @@ class COMPONENTS_DOWNLOAD_EXPORT BaseFile {
   // ID of the download, used for trace events.
   uint32_t download_id_;
 
-  // Mojo pointer for quarantine service.
-  quarantine::mojom::QuarantinePtr quarantine_service_;
+  // Mojo remote for quarantine service.
+  mojo::Remote<quarantine::mojom::Quarantine> quarantine_service_;
 
   // Callback invoked after quarantine service finishes.
   OnAnnotationDoneCallback on_annotation_done_callback_;
@@ -313,8 +304,6 @@ class COMPONENTS_DOWNLOAD_EXPORT BaseFile {
   SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<BaseFile> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BaseFile);
 };
 
 }  // namespace download

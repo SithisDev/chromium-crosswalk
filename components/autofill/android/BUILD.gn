@@ -1,71 +1,68 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//build/config/android/rules.gni")
+import("//build/config/locales.gni")
+import("//tools/grit/grit_rule.gni")
 
 java_strings_grd("autofill_strings_grd") {
   grd_file = "java/strings/autofill_strings.grd"
-  outputs = [
-    "values/autofill_strings.xml",
-    "values-am/autofill_strings.xml",
-    "values-ar/autofill_strings.xml",
-    "values-bg/autofill_strings.xml",
-    "values-bn/autofill_strings.xml",
-    "values-ca/autofill_strings.xml",
-    "values-cs/autofill_strings.xml",
-    "values-da/autofill_strings.xml",
-    "values-de/autofill_strings.xml",
-    "values-el/autofill_strings.xml",
-    "values-en-rGB/autofill_strings.xml",
-    "values-es/autofill_strings.xml",
-    "values-es-rUS/autofill_strings.xml",
-    "values-et/autofill_strings.xml",
-    "values-fa/autofill_strings.xml",
-    "values-fi/autofill_strings.xml",
-    "values-fr/autofill_strings.xml",
-    "values-gu/autofill_strings.xml",
-    "values-hi/autofill_strings.xml",
-    "values-hr/autofill_strings.xml",
-    "values-hu/autofill_strings.xml",
-    "values-in/autofill_strings.xml",
-    "values-it/autofill_strings.xml",
-    "values-iw/autofill_strings.xml",
-    "values-ja/autofill_strings.xml",
-    "values-kn/autofill_strings.xml",
-    "values-ko/autofill_strings.xml",
-    "values-lt/autofill_strings.xml",
-    "values-lv/autofill_strings.xml",
-    "values-ml/autofill_strings.xml",
-    "values-mr/autofill_strings.xml",
-    "values-ms/autofill_strings.xml",
-    "values-nb/autofill_strings.xml",
-    "values-nl/autofill_strings.xml",
-    "values-pl/autofill_strings.xml",
-    "values-pt-rBR/autofill_strings.xml",
-    "values-pt-rPT/autofill_strings.xml",
-    "values-ro/autofill_strings.xml",
-    "values-ru/autofill_strings.xml",
-    "values-sk/autofill_strings.xml",
-    "values-sl/autofill_strings.xml",
-    "values-sr/autofill_strings.xml",
-    "values-sv/autofill_strings.xml",
-    "values-sw/autofill_strings.xml",
-    "values-ta/autofill_strings.xml",
-    "values-te/autofill_strings.xml",
-    "values-th/autofill_strings.xml",
-    "values-tl/autofill_strings.xml",
-    "values-tr/autofill_strings.xml",
-    "values-uk/autofill_strings.xml",
-    "values-vi/autofill_strings.xml",
-    "values-zh-rCN/autofill_strings.xml",
-    "values-zh-rTW/autofill_strings.xml",
+  outputs = [ "values/autofill_strings.xml" ] +
+            process_file_template(
+                android_bundle_locales_as_resources,
+                [ "values-{{source_name_part}}/autofill_strings.xml" ])
+}
+
+android_resources("autofill_payments_java_resources") {
+  sources = [
+    "payments/java/res/drawable-hdpi/amex_card.png",
+    "payments/java/res/drawable-hdpi/diners_card.png",
+    "payments/java/res/drawable-hdpi/jcb_card.png",
+    "payments/java/res/drawable-hdpi/mc_card.png",
+    "payments/java/res/drawable-hdpi/troy_card.png",
+    "payments/java/res/drawable-hdpi/unionpay_card.png",
+    "payments/java/res/drawable-mdpi/amex_card.png",
+    "payments/java/res/drawable-mdpi/diners_card.png",
+    "payments/java/res/drawable-mdpi/jcb_card.png",
+    "payments/java/res/drawable-mdpi/mc_card.png",
+    "payments/java/res/drawable-mdpi/troy_card.png",
+    "payments/java/res/drawable-mdpi/unionpay_card.png",
+    "payments/java/res/drawable-xhdpi/amex_card.png",
+    "payments/java/res/drawable-xhdpi/diners_card.png",
+    "payments/java/res/drawable-xhdpi/jcb_card.png",
+    "payments/java/res/drawable-xhdpi/mc_card.png",
+    "payments/java/res/drawable-xhdpi/troy_card.png",
+    "payments/java/res/drawable-xhdpi/unionpay_card.png",
+    "payments/java/res/drawable-xxhdpi/amex_card.png",
+    "payments/java/res/drawable-xxhdpi/diners_card.png",
+    "payments/java/res/drawable-xxhdpi/jcb_card.png",
+    "payments/java/res/drawable-xxhdpi/mc_card.png",
+    "payments/java/res/drawable-xxhdpi/troy_card.png",
+    "payments/java/res/drawable-xxhdpi/unionpay_card.png",
+    "payments/java/res/drawable-xxxhdpi/amex_card.png",
+    "payments/java/res/drawable-xxxhdpi/diners_card.png",
+    "payments/java/res/drawable-xxxhdpi/jcb_card.png",
+    "payments/java/res/drawable-xxxhdpi/mc_card.png",
+    "payments/java/res/drawable-xxxhdpi/troy_card.png",
+    "payments/java/res/drawable-xxxhdpi/unionpay_card.png",
+    "payments/java/res/drawable/discover_card.xml",
+    "payments/java/res/drawable/elo_card.xml",
+    "payments/java/res/drawable/ic_credit_card_black.xml",
+    "payments/java/res/drawable/mir_card.xml",
+    "payments/java/res/drawable/visa_card.xml",
   ]
+  deps = [ "//ui/android:ui_java_resources" ]
 }
 
 android_resources("autofill_java_resources") {
-  custom_package = "org.chromium.components.autofill"
-  resource_dirs = [ "java/res" ]
+  sources = [
+    "java/res/layout/autofill_dropdown_footer_item_refresh.xml",
+    "java/res/layout/autofill_dropdown_item.xml",
+    "java/res/layout/autofill_dropdown_item_refresh.xml",
+    "java/res/values/colors.xml",
+    "java/res/values/dimens.xml",
+  ]
   deps = [
     ":autofill_strings_grd",
     "//ui/android:ui_java_resources",
@@ -74,20 +71,37 @@ android_resources("autofill_java_resources") {
 
 java_cpp_enum("autofill_core_browser_java_enums") {
   sources = [
+    "../core/browser/data_model/credit_card.h",
+    "../core/browser/metrics/payments/virtual_card_enrollment_metrics.h",
     "../core/browser/ui/accessory_sheet_enums.h",
     "../core/browser/ui/popup_item_ids.h",
   ]
 }
 
-android_library("autofill_java") {
+java_cpp_features("java_features_srcjar") {
+  visibility = [ ":*" ]
+  sources = [
+    "//components/autofill/core/common/autofill_features.cc",
+    "//components/autofill/core/common/autofill_payments_features.cc",
+  ]
+  template =
+      "//components/autofill/android/java_templates/AutofillFeatures.java.tmpl"
+}
+
+# We intentionally do not include :autofill_payments_java_resources not to
+# bloat targets that may not require it.
+android_library("main_autofill_java") {
   deps = [
     ":autofill_java_resources",
-    "//base:base_java",
+    ":payments_autofill_java",
     "//content/public/android:content_java",
-    "//third_party/android_deps:android_support_v7_appcompat_java",
-    "//ui/android:ui_java",
+    "//third_party/androidx:androidx_annotation_annotation_java",
+    "//third_party/androidx:androidx_appcompat_appcompat_resources_java",
+    "//third_party/androidx:androidx_core_core_java",
+    "//ui/android:ui_no_recycler_view_java",
+    "//url:gurl_java",
   ]
-  java_files = [
+  sources = [
     "java/src/org/chromium/components/autofill/AutofillDelegate.java",
     "java/src/org/chromium/components/autofill/AutofillDropdownAdapter.java",
     "java/src/org/chromium/components/autofill/AutofillDropdownFooter.java",
@@ -95,42 +109,48 @@ android_library("autofill_java") {
     "java/src/org/chromium/components/autofill/AutofillSuggestion.java",
   ]
   srcjar_deps = [ ":autofill_core_browser_java_enums" ]
+  resources_package = "org.chromium.components.autofill"
 }
 
-android_library("provider_java") {
+android_library("prefeditor_autofill_java") {
   deps = [
+    ":autofill_java_resources",
     "//base:base_java",
-    "//components/autofill/core/common/mojom:mojo_types_java",
-    "//content/public/android:content_java",
-    "//third_party/android_deps:com_android_support_support_annotations_java",
+    "//components/browser_ui/widget/android:java",
+    "//components/payments/content/android:java_resources",
+    "//third_party/android_deps:material_design_java",
+    "//third_party/androidx:androidx_annotation_annotation_java",
+    "//third_party/androidx:androidx_appcompat_appcompat_resources_java",
+    "//third_party/androidx:androidx_core_core_java",
   ]
-  java_files = [
-    "java/src/org/chromium/components/autofill/AutofillProvider.java",
-    "java/src/org/chromium/components/autofill/FormData.java",
-    "java/src/org/chromium/components/autofill/FormFieldData.java",
+  sources = [
+    "java/src/org/chromium/components/autofill/prefeditor/EditorFieldModel.java",
+    "java/src/org/chromium/components/autofill/prefeditor/EditorFieldView.java",
+    "java/src/org/chromium/components/autofill/prefeditor/EditorObserverForTest.java",
+    "java/src/org/chromium/components/autofill/prefeditor/EditorTextField.java",
   ]
+
+  resources_package = "org.chromium.components.autofill"
 }
 
-generate_jni("jni_headers") {
-  sources = [
-    "java/src/org/chromium/components/autofill/AutofillProvider.java",
-    "java/src/org/chromium/components/autofill/FormData.java",
-    "java/src/org/chromium/components/autofill/FormFieldData.java",
-  ]
+# A minimal library used to expose autofill features to webview.
+android_library("autofill_features_java") {
+  srcjar_deps = [ ":java_features_srcjar" ]
 }
 
-static_library("provider") {
+# A library containing the minimal deps for payments, so that ui_java_resources
+# doesn't have to be pulled in.
+android_library("payments_autofill_java") {
   sources = [
-    "autofill_provider_android.cc",
-    "autofill_provider_android.h",
-    "form_data_android.cc",
-    "form_data_android.h",
-    "form_field_data_android.cc",
-    "form_field_data_android.h",
+    "java/src/org/chromium/components/autofill/Completable.java",
+    "java/src/org/chromium/components/autofill/EditableOption.java",
   ]
+  deps = [ "//third_party/androidx:androidx_annotation_annotation_java" ]
+}
+
+java_group("autofill_java") {
   deps = [
-    ":jni_headers",
-    "//components/autofill/core/browser:browser",
-    "//content/public/browser",
+    ":main_autofill_java",
+    ":payments_autofill_java",
   ]
 }

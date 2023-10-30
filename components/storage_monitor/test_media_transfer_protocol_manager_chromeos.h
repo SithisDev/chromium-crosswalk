@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,9 @@
 
 #include <string>
 
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/device/public/mojom/mtp_manager.mojom.h"
 
 namespace storage_monitor {
@@ -22,14 +23,20 @@ class TestMediaTransferProtocolManagerChromeOS
  public:
   static TestMediaTransferProtocolManagerChromeOS* GetFakeMtpManager();
   TestMediaTransferProtocolManagerChromeOS();
+
+  TestMediaTransferProtocolManagerChromeOS(
+      const TestMediaTransferProtocolManagerChromeOS&) = delete;
+  TestMediaTransferProtocolManagerChromeOS& operator=(
+      const TestMediaTransferProtocolManagerChromeOS&) = delete;
+
   ~TestMediaTransferProtocolManagerChromeOS() override;
 
-  void AddBinding(device::mojom::MtpManagerRequest request);
+  void AddReceiver(mojo::PendingReceiver<device::mojom::MtpManager> receiver);
 
  private:
   // device::mojom::MtpManager implementation.
   void EnumerateStoragesAndSetClient(
-      device::mojom::MtpManagerClientAssociatedPtrInfo client,
+      mojo::PendingAssociatedRemote<device::mojom::MtpManagerClient> client,
       EnumerateStoragesAndSetClientCallback callback) override;
   void GetStorageInfo(const std::string& storage_name,
                       GetStorageInfoCallback callback) override;
@@ -69,9 +76,7 @@ class TestMediaTransferProtocolManagerChromeOS
                     uint32_t object_id,
                     DeleteObjectCallback callback) override;
 
-  mojo::BindingSet<device::mojom::MtpManager> bindings_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestMediaTransferProtocolManagerChromeOS);
+  mojo::ReceiverSet<device::mojom::MtpManager> receivers_;
 };
 
 }  // namespace storage_monitor

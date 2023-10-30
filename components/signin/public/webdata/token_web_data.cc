@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,11 @@
 
 #include "base/bind.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "components/signin/public/webdata/token_service_table.h"
 #include "components/webdata/common/web_database_service.h"
 
-using base::Bind;
+using base::BindOnce;
 using base::Time;
 
 class TokenWebDataBackend
@@ -72,41 +71,41 @@ TokenResult::~TokenResult() {}
 TokenWebData::TokenWebData(
     scoped_refptr<WebDatabaseService> wdbs,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> db_task_runner,
-    const ProfileErrorCallback& callback)
-    : WebDataServiceBase(wdbs, callback, ui_task_runner),
-      token_backend_(new TokenWebDataBackend(db_task_runner)) {}
+    scoped_refptr<base::SingleThreadTaskRunner> db_task_runner)
+    : WebDataServiceBase(wdbs, std::move(ui_task_runner)),
+      token_backend_(new TokenWebDataBackend(std::move(db_task_runner))) {}
 
 void TokenWebData::SetTokenForService(const std::string& service,
                                       const std::string& token) {
-  wdbs_->ScheduleDBTask(
-      FROM_HERE, Bind(&TokenWebDataBackend::SetTokenForService, token_backend_,
-                      service, token));
+  wdbs_->ScheduleDBTask(FROM_HERE,
+                        BindOnce(&TokenWebDataBackend::SetTokenForService,
+                                 token_backend_, service, token));
 }
 
 void TokenWebData::RemoveAllTokens() {
   wdbs_->ScheduleDBTask(
-      FROM_HERE, Bind(&TokenWebDataBackend::RemoveAllTokens, token_backend_));
+      FROM_HERE,
+      BindOnce(&TokenWebDataBackend::RemoveAllTokens, token_backend_));
 }
 
 void TokenWebData::RemoveTokenForService(const std::string& service) {
   wdbs_->ScheduleDBTask(FROM_HERE,
-                        Bind(&TokenWebDataBackend::RemoveTokenForService,
-                             token_backend_, service));
+                        BindOnce(&TokenWebDataBackend::RemoveTokenForService,
+                                 token_backend_, service));
 }
 
 // Null on failure. Success is WDResult<std::string>
 WebDataServiceBase::Handle TokenWebData::GetAllTokens(
     WebDataServiceConsumer* consumer) {
   return wdbs_->ScheduleDBTaskWithResult(
-      FROM_HERE, Bind(&TokenWebDataBackend::GetAllTokens, token_backend_),
+      FROM_HERE, BindOnce(&TokenWebDataBackend::GetAllTokens, token_backend_),
       consumer);
 }
 
 TokenWebData::TokenWebData(
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> db_task_runner)
-    : WebDataServiceBase(nullptr, ProfileErrorCallback(), ui_task_runner),
-      token_backend_(new TokenWebDataBackend(db_task_runner)) {}
+    : WebDataServiceBase(nullptr, std::move(ui_task_runner)),
+      token_backend_(new TokenWebDataBackend(std::move(db_task_runner))) {}
 
 TokenWebData::~TokenWebData() {}

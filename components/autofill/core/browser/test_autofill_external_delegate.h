@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,15 @@ namespace autofill {
 
 class TestAutofillExternalDelegate : public AutofillExternalDelegate {
  public:
-  explicit TestAutofillExternalDelegate(AutofillManager* autofill_manager,
-                                        AutofillDriver* autofill_driver,
-                                        bool call_parent_methods);
+  explicit TestAutofillExternalDelegate(
+      BrowserAutofillManager* autofill_manager,
+      AutofillDriver* autofill_driver,
+      bool call_parent_methods);
+
+  TestAutofillExternalDelegate(const TestAutofillExternalDelegate&) = delete;
+  TestAutofillExternalDelegate& operator=(const TestAutofillExternalDelegate&) =
+      delete;
+
   ~TestAutofillExternalDelegate() override;
 
   // AutofillExternalDelegate overrides.
@@ -31,7 +37,7 @@ class TestAutofillExternalDelegate : public AutofillExternalDelegate {
                              bool autoselect_first_suggestion,
                              bool is_all_server_suggestions) override;
   bool HasActiveScreenReader() const override;
-  void OnAutofillAvailabilityEvent(bool has_suggestions) override;
+  void OnAutofillAvailabilityEvent(const mojom::AutofillState state) override;
 
   // Functions unique to TestAutofillExternalDelegate.
 
@@ -96,8 +102,6 @@ class TestAutofillExternalDelegate : public AutofillExternalDelegate {
   bool has_suggestions_available_on_field_focus_ = false;
 
   base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestAutofillExternalDelegate);
 };
 
 }  // namespace autofill

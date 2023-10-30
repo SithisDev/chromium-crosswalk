@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "crypto/openssl_util.h"
 #include "third_party/boringssl/src/include/openssl/bn.h"
 #include "third_party/boringssl/src/include/openssl/bytestring.h"
@@ -43,7 +43,7 @@ std::unique_ptr<ECPrivateKey> ECPrivateKey::Create() {
 
 // static
 std::unique_ptr<ECPrivateKey> ECPrivateKey::CreateFromPrivateKeyInfo(
-    const std::vector<uint8_t>& input) {
+    base::span<const uint8_t> input) {
   OpenSSLErrStackTracer err_tracer(FROM_HERE);
 
   CBS cbs;
@@ -59,7 +59,7 @@ std::unique_ptr<ECPrivateKey> ECPrivateKey::CreateFromPrivateKeyInfo(
 
 // static
 std::unique_ptr<ECPrivateKey> ECPrivateKey::CreateFromEncryptedPrivateKeyInfo(
-    const std::vector<uint8_t>& encrypted_private_key_info) {
+    base::span<const uint8_t> encrypted_private_key_info) {
   OpenSSLErrStackTracer err_tracer(FROM_HERE);
 
   CBS cbs;
@@ -135,7 +135,7 @@ bool ECPrivateKey::ExportEncryptedPrivateKey(
 
 bool ECPrivateKey::ExportPublicKey(std::vector<uint8_t>* output) const {
   OpenSSLErrStackTracer err_tracer(FROM_HERE);
-  uint8_t *der;
+  uint8_t* der;
   size_t der_len;
   bssl::ScopedCBB cbb;
   if (!CBB_init(cbb.get(), 0) ||
@@ -151,22 +151,16 @@ bool ECPrivateKey::ExportPublicKey(std::vector<uint8_t>* output) const {
 bool ECPrivateKey::ExportRawPublicKey(std::string* output) const {
   OpenSSLErrStackTracer err_tracer(FROM_HERE);
 
-  // Export the x and y field elements as 32-byte, big-endian numbers. (This is
-  // the same as X9.62 uncompressed form without the leading 0x04 byte.)
+  std::array<uint8_t, 65> buf;
   EC_KEY* ec_key = EVP_PKEY_get0_EC_KEY(key_.get());
-  bssl::UniquePtr<BIGNUM> x(BN_new());
-  bssl::UniquePtr<BIGNUM> y(BN_new());
-  uint8_t buf[64];
-  if (!x || !y ||
-      !EC_POINT_get_affine_coordinates_GFp(EC_KEY_get0_group(ec_key),
-                                           EC_KEY_get0_public_key(ec_key),
-                                           x.get(), y.get(), nullptr) ||
-      !BN_bn2bin_padded(buf, 32, x.get()) ||
-      !BN_bn2bin_padded(buf + 32, 32, y.get())) {
+  if (!EC_POINT_point2oct(EC_KEY_get0_group(ec_key),
+                          EC_KEY_get0_public_key(ec_key),
+                          POINT_CONVERSION_UNCOMPRESSED, buf.data(), buf.size(),
+                          /*ctx=*/nullptr)) {
     return false;
   }
 
-  output->assign(reinterpret_cast<const char*>(buf), sizeof(buf));
+  output->assign(buf.begin(), buf.end());
   return true;
 }
 

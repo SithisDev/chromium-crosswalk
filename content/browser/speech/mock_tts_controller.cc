@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,9 +24,12 @@ class MockTtsController : public TtsController {
 
   MockTtsController() {}
 
+  MockTtsController(const MockTtsController&) = delete;
+  MockTtsController& operator=(const MockTtsController&) = delete;
+
   bool IsSpeaking() override { return false; }
 
-  void SpeakOrEnqueue(TtsUtterance* utterance) override {}
+  void SpeakOrEnqueue(std::unique_ptr<TtsUtterance> utterance) override {}
 
   void Stop() override {}
 
@@ -68,7 +71,6 @@ class MockTtsController : public TtsController {
 
  private:
   friend struct base::DefaultSingletonTraits<MockTtsController>;
-  DISALLOW_COPY_AND_ASSIGN(MockTtsController);
 };
 
 // static

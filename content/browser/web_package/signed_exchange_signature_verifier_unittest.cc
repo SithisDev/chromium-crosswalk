@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@ const uint64_t kSignatureHeaderExpires = 1517895941;
 
 // See content/test/data/sxg/README on how to generate these data.
 // clang-format off
-constexpr char kSignatureHeaderECDSAP256[] = R"(label;cert-sha256=*4GTISmmaq+jCoSZ/qhWEoWh6+iqo1hVCKdN5eHQkZh4=*;cert-url="https://example.com/cert.msg";date=1517892341;expires=1517895941;integrity="digest/mi-sha256-03";sig=*MEUCIQCx3N8udHGUCu8NcUsTEbxAplnqERapkpXdkH0XhY0qKAIgPoRHJ71BnrFZ0CdRiMi6ULotqnyxFqH10YInyzHznVY=*;validity-url="https://test.example.org/resource.validity.msg")";
+constexpr char kSignatureHeaderECDSAP256[] = R"(label;cert-sha256=*4gNFIZRsc0QyiaUY/ekUZU6h3q/1mtQafd53/yaF5Ms=*;cert-url="https://example.com/cert.msg";date=1517892341;expires=1517895941;integrity="digest/mi-sha256-03";sig=*MEYCIQDLap5Ns9tI0JmCr1nc58GTHqzyfWJmTiZ+AIPt0OBE6gIhAJ8uHk3RyxX0/pnMmmKKdr63T0XHqyz00aaxuECJ4Ez/*;validity-url="https://test.example.org/resource.validity.msg")";
 constexpr uint8_t kCborHeadersECDSAP256[] = {
   0xa4, 0x46, 0x64, 0x69, 0x67, 0x65, 0x73, 0x74, 0x58, 0x39, 0x6d, 0x69,
   0x2d, 0x73, 0x68, 0x61, 0x32, 0x35, 0x36, 0x2d, 0x30, 0x33, 0x3d, 0x77,
@@ -40,7 +40,7 @@ constexpr uint8_t kCborHeadersECDSAP256[] = {
   0x69, 0x6e, 0x67, 0x4c, 0x6d, 0x69, 0x2d, 0x73, 0x68, 0x61, 0x32, 0x35,
   0x36, 0x2d, 0x30, 0x33
 };
-constexpr char kSignatureHeaderECDSAP384[] = R"(label;cert-sha256=*nHSZO9uYwVQ0touPzq+OfsaGRhUwkW4ZIZbQQMDXEjY=*;cert-url="https://example.com/cert.msg";date=1517892341;expires=1517895941;integrity="digest/mi-sha256-03";sig=*MGUCMQD1QotpssEQf54/3bIi/YE3TNuA9hzMFlK4C+jNPmKYkf7haC/+F1qWZ51ZtUa5FswCMCVpGGlO/ImAFhNtAdIdDEP+fFbSgD6Qg0CiHzrmS30NCFGfy4yFY8+ybzBAEvOZmw==*;validity-url="https://test.example.org/resource.validity.msg")";
+constexpr char kSignatureHeaderECDSAP384[] = R"(label;cert-sha256=*KrfLZg1xcHbdKYZ1nb8cnUjp/6iaEo6LeQrRSV6StKw=*;cert-url="https://example.com/cert.msg";date=1517892341;expires=1517895941;integrity="digest/mi-sha256-03";sig=*MGUCMBTSH0TpKGv5JSspWU+7hYeSDwaoRzYDzxxQaDQ2kV/IQS+3bQd4SFm0dPvsPzJH7AIxAPT1MXZoEiDhu45Ssr+ubU8n68QZZ92eI7TvtsEF1LEAXtx2YYC2UARu6ok9UxtrZQ==*;validity-url="https://test.example.org/resource.validity.msg")";
 // clang-format on
 
 // |expires| (1518497142) is more than 7 days (604800 seconds) after |date|
@@ -78,8 +78,7 @@ class SignedExchangeSignatureVerifierTest
   SignedExchangeSignatureVerifierTest() {}
 
   const base::Time VerificationTime() {
-    return base::Time::UnixEpoch() +
-           base::TimeDelta::FromSeconds(kSignatureHeaderDate);
+    return base::Time::UnixEpoch() + base::Seconds(kSignatureHeaderDate);
   }
 
   void TestVerifierGivenValidInput(
@@ -103,13 +102,13 @@ class SignedExchangeSignatureVerifierTest
     }
     {
       base::HistogramTester histogram_tester;
-      EXPECT_EQ(SignedExchangeSignatureVerifier::Result::kErrFutureDate,
-                SignedExchangeSignatureVerifier::Verify(
-                    GetParam(), envelope, &cert_chain,
-                    base::Time::UnixEpoch() +
-                        base::TimeDelta::FromSeconds(kSignatureHeaderDate - 1),
-                    nullptr /* devtools_proxy */
-                    ));
+      EXPECT_EQ(
+          SignedExchangeSignatureVerifier::Result::kErrFutureDate,
+          SignedExchangeSignatureVerifier::Verify(
+              GetParam(), envelope, &cert_chain,
+              base::Time::UnixEpoch() + base::Seconds(kSignatureHeaderDate - 1),
+              nullptr /* devtools_proxy */
+              ));
       histogram_tester.ExpectTotalCount("SignedExchange.TimeUntilExpiration",
                                         0);
       histogram_tester.ExpectUniqueSample(
@@ -120,13 +119,13 @@ class SignedExchangeSignatureVerifierTest
 
     {
       base::HistogramTester histogram_tester;
-      EXPECT_EQ(SignedExchangeSignatureVerifier::Result::kSuccess,
-                SignedExchangeSignatureVerifier::Verify(
-                    GetParam(), envelope, &cert_chain,
-                    base::Time::UnixEpoch() +
-                        base::TimeDelta::FromSeconds(kSignatureHeaderExpires),
-                    nullptr /* devtools_proxy */
-                    ));
+      EXPECT_EQ(
+          SignedExchangeSignatureVerifier::Result::kSuccess,
+          SignedExchangeSignatureVerifier::Verify(
+              GetParam(), envelope, &cert_chain,
+              base::Time::UnixEpoch() + base::Seconds(kSignatureHeaderExpires),
+              nullptr /* devtools_proxy */
+              ));
       histogram_tester.ExpectUniqueSample("SignedExchange.TimeUntilExpiration",
                                           0, 1);
       histogram_tester.ExpectTotalCount(
@@ -139,8 +138,8 @@ class SignedExchangeSignatureVerifierTest
       EXPECT_EQ(SignedExchangeSignatureVerifier::Result::kErrExpired,
                 SignedExchangeSignatureVerifier::Verify(
                     GetParam(), envelope, &cert_chain,
-                    base::Time::UnixEpoch() + base::TimeDelta::FromSeconds(
-                                                  kSignatureHeaderExpires + 1),
+                    base::Time::UnixEpoch() +
+                        base::Seconds(kSignatureHeaderExpires + 1),
                     nullptr /* devtools_proxy */
                     ));
       histogram_tester.ExpectTotalCount("SignedExchange.TimeUntilExpiration",

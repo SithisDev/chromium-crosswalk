@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@ import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 
-import org.chromium.base.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
 
 /**
  * An interface to help switch between AdapterInputConnection and ChromiumInputConnection.
@@ -22,7 +22,7 @@ public interface ChromiumBaseInputConnection extends InputConnection {
     public interface Factory {
         ChromiumBaseInputConnection initializeAndGet(View view, ImeAdapterImpl imeAdapter,
                 int inputType, int inputFlags, int inputMode, int inputAction, int selectionStart,
-                int selectionEnd, EditorInfo outAttrs);
+                int selectionEnd, String lastText, EditorInfo outAttrs);
 
         @VisibleForTesting
         Handler getHandler();

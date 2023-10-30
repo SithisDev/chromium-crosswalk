@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,12 @@
 
 namespace content {
 
-MockMojoIndexedDBCallbacks::MockMojoIndexedDBCallbacks() : binding_(this) {}
-MockMojoIndexedDBCallbacks::~MockMojoIndexedDBCallbacks() {}
+MockMojoIndexedDBCallbacks::MockMojoIndexedDBCallbacks() = default;
+MockMojoIndexedDBCallbacks::~MockMojoIndexedDBCallbacks() = default;
 
-blink::mojom::IDBCallbacksAssociatedPtrInfo
+mojo::PendingAssociatedRemote<blink::mojom::IDBCallbacks>
 MockMojoIndexedDBCallbacks::CreateInterfacePtrAndBind() {
-  blink::mojom::IDBCallbacksAssociatedPtrInfo ptr_info;
-  binding_.Bind(::mojo::MakeRequest(&ptr_info));
-  return ptr_info;
+  return receiver_.BindNewEndpointAndPassRemote();
 }
 
 }  // namespace content

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,101 +6,96 @@
 
 #include "base/callback.h"
 #include "base/feature_list.h"
+#include "content/browser/web_package/prefetched_signed_exchange_cache_entry.h"
 #include "content/browser/web_package/signed_exchange_devtools_proxy.h"
 #include "content/browser/web_package/signed_exchange_loader.h"
 #include "content/browser/web_package/signed_exchange_prefetch_metric_recorder.h"
 #include "content/browser/web_package/signed_exchange_reporter.h"
-#include "content/browser/web_package/signed_exchange_url_loader_factory_for_non_network_service.h"
 #include "content/public/common/content_features.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/early_hints.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace content {
 
 SignedExchangePrefetchHandler::SignedExchangePrefetchHandler(
-    base::RepeatingCallback<int(void)> frame_tree_node_id_getter,
+    int frame_tree_node_id,
     const network::ResourceRequest& resource_request,
-    const network::ResourceResponseHead& response_head,
+    network::mojom::URLResponseHeadPtr response_head,
     mojo::ScopedDataPipeConsumerHandle response_body,
-    network::mojom::URLLoaderPtr network_loader,
-    network::mojom::URLLoaderClientRequest network_client_request,
+    mojo::PendingRemote<network::mojom::URLLoader> network_loader,
+    mojo::PendingReceiver<network::mojom::URLLoaderClient>
+        network_client_receiver,
     scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory,
     URLLoaderThrottlesGetter loader_throttles_getter,
-    ResourceContext* resource_context,
-    scoped_refptr<net::URLRequestContextGetter> request_context_getter,
     network::mojom::URLLoaderClient* forwarding_client,
+    const net::NetworkAnonymizationKey& network_isolation_key,
     scoped_refptr<SignedExchangePrefetchMetricRecorder> metric_recorder,
-    const std::string& accept_langs)
-    : loader_client_binding_(this), forwarding_client_(forwarding_client) {
+    const std::string& accept_langs,
+    bool keep_entry_for_prefetch_cache)
+    : forwarding_client_(forwarding_client) {
   network::mojom::URLLoaderClientEndpointsPtr endpoints =
       network::mojom::URLLoaderClientEndpoints::New(
-          std::move(network_loader).PassInterface(),
-          std::move(network_client_request));
-  network::mojom::URLLoaderClientPtr client;
-  loader_client_binding_.Bind(mojo::MakeRequest(&client));
-  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory;
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService)) {
-    url_loader_factory = base::MakeRefCounted<
-        SignedExchangeURLLoaderFactoryForNonNetworkService>(
-        resource_context, request_context_getter.get());
-  } else {
-    url_loader_factory = std::move(network_loader_factory);
-  }
+          std::move(network_loader), std::move(network_client_receiver));
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory =
+      std::move(network_loader_factory);
+
+  auto reporter = SignedExchangeReporter::MaybeCreate(
+      resource_request.url, resource_request.referrer.spec(), *response_head,
+      network_isolation_key, frame_tree_node_id);
+  auto devtools_proxy = std::make_unique<SignedExchangeDevToolsProxy>(
+      resource_request.url, response_head.Clone(), frame_tree_node_id,
+      absl::nullopt /* devtools_navigation_token */,
+      resource_request.devtools_request_id.has_value());
   signed_exchange_loader_ = std::make_unique<SignedExchangeLoader>(
-      resource_request, response_head, std::move(response_body),
-      std::move(client), std::move(endpoints),
+      resource_request, std::move(response_head), std::move(response_body),
+      loader_client_receiver_.BindNewPipeAndPassRemote(), std::move(endpoints),
       network::mojom::kURLLoadOptionNone,
-      false /* should_redirect_to_fallback */,
-      std::make_unique<SignedExchangeDevToolsProxy>(
-          resource_request.url, response_head, frame_tree_node_id_getter,
-          base::nullopt /* devtools_navigation_token */,
-          resource_request.report_raw_headers),
-      SignedExchangeReporter::MaybeCreate(
-          resource_request.url, resource_request.referrer.spec(), response_head,
-          frame_tree_node_id_getter),
-      std::move(url_loader_factory), loader_throttles_getter,
-      frame_tree_node_id_getter, std::move(metric_recorder), accept_langs);
+      false /* should_redirect_to_fallback */, std::move(devtools_proxy),
+      std::move(reporter), std::move(url_loader_factory),
+      loader_throttles_getter, network_isolation_key, frame_tree_node_id,
+      std::move(metric_recorder), accept_langs, keep_entry_for_prefetch_cache);
 }
 
 SignedExchangePrefetchHandler::~SignedExchangePrefetchHandler() = default;
 
-network::mojom::URLLoaderClientRequest
+mojo::PendingReceiver<network::mojom::URLLoaderClient>
 SignedExchangePrefetchHandler::FollowRedirect(
-    network::mojom::URLLoaderRequest loader_request) {
+    mojo::PendingReceiver<network::mojom::URLLoader> loader_receiver) {
   DCHECK(signed_exchange_loader_);
-  network::mojom::URLLoaderClientPtr client;
-  auto pending_request = mojo::MakeRequest(&client);
+  mojo::PendingRemote<network::mojom::URLLoaderClient> client;
+  auto pending_receiver = client.InitWithNewPipeAndPassReceiver();
   signed_exchange_loader_->ConnectToClient(std::move(client));
-  mojo::MakeStrongBinding(std::move(signed_exchange_loader_),
-                          std::move(loader_request));
-  return pending_request;
+  mojo::MakeSelfOwnedReceiver(std::move(signed_exchange_loader_),
+                              std::move(loader_receiver));
+  return pending_receiver;
 }
 
-base::Optional<net::SHA256HashValue>
-SignedExchangePrefetchHandler::ComputeHeaderIntegrity() const {
-  if (!signed_exchange_loader_)
-    return base::nullopt;
-  return signed_exchange_loader_->ComputeHeaderIntegrity();
+std::unique_ptr<PrefetchedSignedExchangeCacheEntry>
+SignedExchangePrefetchHandler::TakePrefetchedSignedExchangeCacheEntry() {
+  DCHECK(signed_exchange_loader_);
+  return signed_exchange_loader_->TakePrefetchedSignedExchangeCacheEntry();
 }
 
-base::Time SignedExchangePrefetchHandler::GetSignatureExpireTime() const {
-  if (!signed_exchange_loader_)
-    return base::Time();
-  return signed_exchange_loader_->GetSignatureExpireTime();
+void SignedExchangePrefetchHandler::OnReceiveEarlyHints(
+    network::mojom::EarlyHintsPtr early_hints) {
+  NOTREACHED();
 }
 
 void SignedExchangePrefetchHandler::OnReceiveResponse(
-    const network::ResourceResponseHead& head) {
+    network::mojom::URLResponseHeadPtr head,
+    mojo::ScopedDataPipeConsumerHandle body,
+    absl::optional<mojo_base::BigBuffer> cached_metadata) {
   NOTREACHED();
 }
 
 void SignedExchangePrefetchHandler::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
-    const network::ResourceResponseHead& head) {
-  forwarding_client_->OnReceiveRedirect(redirect_info, head);
+    network::mojom::URLResponseHeadPtr head) {
+  forwarding_client_->OnReceiveRedirect(redirect_info, std::move(head));
 }
 
 void SignedExchangePrefetchHandler::OnUploadProgress(
@@ -110,18 +105,8 @@ void SignedExchangePrefetchHandler::OnUploadProgress(
   NOTREACHED();
 }
 
-void SignedExchangePrefetchHandler::OnReceiveCachedMetadata(
-    mojo_base::BigBuffer data) {
-  NOTREACHED();
-}
-
 void SignedExchangePrefetchHandler::OnTransferSizeUpdated(
     int32_t transfer_size_diff) {
-  NOTREACHED();
-}
-
-void SignedExchangePrefetchHandler::OnStartLoadingResponseBody(
-    mojo::ScopedDataPipeConsumerHandle body) {
   NOTREACHED();
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include <memory>
 #include <set>
 #include <string>
-#include <vector>
 
 #include "base/supports_user_data.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -191,7 +190,7 @@ class OfflinePageModel : public base::SupportsUserData, public KeyedService {
       PublishPageCallback publish_done_callback) = 0;
 
   // Get the archive directory based on client policy of the namespace.
-  virtual const base::FilePath& GetInternalArchiveDirectory(
+  virtual const base::FilePath& GetArchiveDirectory(
       const std::string& name_space) const = 0;
 
   // Returns whether given archive file is in the internal directory.

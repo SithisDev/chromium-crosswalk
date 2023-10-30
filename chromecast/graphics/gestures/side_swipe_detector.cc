@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,7 @@ constexpr int kDefaultSideGestureStartHeight = 35;
 // occurs inside the gesture margin will be valid as long as it occurs within
 // the time specified by this threshold.
 constexpr base::TimeDelta kGestureMarginEventsTimeLimit =
-    base::TimeDelta::FromMilliseconds(500);
+    base::Milliseconds(500);
 
 // Get the correct bottom gesture start height by checking both margin flags in
 // order, and then the default value if neither is set.
@@ -58,7 +58,7 @@ SideSwipeDetector::SideSwipeDetector(CastGestureHandler* gesture_handler,
       gesture_handler_(gesture_handler),
       root_window_(root_window),
       current_swipe_(CastSideSwipeOrigin::NONE),
-      current_pointer_id_(ui::PointerDetails::kUnknownPointerId) {
+      current_pointer_id_(ui::kPointerIdUnknown) {
   DCHECK(gesture_handler);
   DCHECK(root_window);
   root_window_->GetHost()->GetEventSource()->AddEventRewriter(this);
@@ -180,7 +180,7 @@ ui::EventDispatchDetails SideSwipeDetector::RewriteEvent(
     gesture_handler_->HandleSideSwipe(CastSideSwipeEvent::END, current_swipe_,
                                       touch_location);
     current_swipe_ = CastSideSwipeOrigin::NONE;
-    current_pointer_id_ = ui::PointerDetails::kUnknownPointerId;
+    current_pointer_id_ = ui::kPointerIdUnknown;
 
     // If the finger is still inside the touch margin at release, this is not
     // really a side swipe. Stream out events we stashed for later retrieval.

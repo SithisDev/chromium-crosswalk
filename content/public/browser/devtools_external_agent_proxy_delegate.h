@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "content/common/content_export.h"
+#include "base/containers/span.h"
 
 namespace content {
 
@@ -26,7 +26,7 @@ class DevToolsExternalAgentProxyDelegate {
 
   // Sends a message to the agent from a client.
   virtual void SendMessageToBackend(DevToolsExternalAgentProxy* proxy,
-                                    const std::string& message) = 0;
+                                    base::span<const uint8_t> message) = 0;
 
   // Returns agent host type.
   virtual std::string GetType() = 0;

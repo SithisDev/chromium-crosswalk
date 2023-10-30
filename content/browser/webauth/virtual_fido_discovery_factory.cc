@@ -1,163 +1,73 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/webauth/virtual_fido_discovery_factory.h"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
-#include "base/stl_util.h"
 #include "content/browser/webauth/virtual_authenticator.h"
 #include "content/browser/webauth/virtual_discovery.h"
 #include "device/fido/fido_discovery_base.h"
-#include "device/fido/virtual_ctap2_device.h"
-#include "device/fido/virtual_u2f_device.h"
 
 namespace content {
 
-namespace {
-
-blink::test::mojom::VirtualAuthenticatorPtr GetMojoPtrToVirtualAuthenticator(
-    VirtualAuthenticator* authenticator) {
-  blink::test::mojom::VirtualAuthenticatorPtr mojo_authenticator_ptr;
-  authenticator->AddBinding(mojo::MakeRequest(&mojo_authenticator_ptr));
-  return mojo_authenticator_ptr;
+VirtualFidoDiscoveryFactory::VirtualFidoDiscoveryFactory(
+    base::WeakPtr<VirtualAuthenticatorManagerImpl> authenticator_manager)
+    : weak_authenticator_manager_(authenticator_manager) {
+  DCHECK(weak_authenticator_manager_);
+  weak_authenticator_manager_->AddObserver(this);
 }
 
-}  // namespace
-
-VirtualFidoDiscoveryFactory::VirtualFidoDiscoveryFactory()
-    : virtual_device_state_(new device::VirtualFidoDevice::State) {}
-
-VirtualFidoDiscoveryFactory::~VirtualFidoDiscoveryFactory() = default;
-
-VirtualAuthenticator* VirtualFidoDiscoveryFactory::CreateAuthenticator(
-    device::ProtocolVersion protocol,
-    device::FidoTransportProtocol transport,
-    device::AuthenticatorAttachment attachment,
-    bool has_resident_key,
-    bool has_user_verification) {
-  if (protocol == device::ProtocolVersion::kU2f &&
-      !device::VirtualU2fDevice::IsTransportSupported(transport)) {
-    return nullptr;
+VirtualFidoDiscoveryFactory::~VirtualFidoDiscoveryFactory() {
+  if (weak_authenticator_manager_) {
+    weak_authenticator_manager_->RemoveObserver(this);
   }
-  auto authenticator = std::make_unique<VirtualAuthenticator>(
-      protocol, transport, attachment, has_resident_key, has_user_verification);
-  auto* authenticator_ptr = authenticator.get();
-  authenticators_.emplace(authenticator_ptr->unique_id(),
-                          std::move(authenticator));
-
-  for (auto* discovery : discoveries_) {
-    if (discovery->transport() != authenticator_ptr->transport())
-      continue;
-    discovery->AddVirtualDevice(authenticator_ptr->ConstructDevice());
-  }
-  return authenticator_ptr;
 }
 
-VirtualAuthenticator* VirtualFidoDiscoveryFactory::GetAuthenticator(
-    const std::string& id) {
-  auto authenticator = authenticators_.find(id);
-  if (authenticator == authenticators_.end())
-    return nullptr;
-  return authenticator->second.get();
-}
-
-bool VirtualFidoDiscoveryFactory::RemoveAuthenticator(const std::string& id) {
-  const bool removed = authenticators_.erase(id);
-  if (removed) {
-    for (auto* discovery : discoveries_)
-      discovery->RemoveVirtualDevice(id);
-  }
-
-  return removed;
-}
-
-void VirtualFidoDiscoveryFactory::AddReceiver(
-    mojo::PendingReceiver<blink::test::mojom::VirtualAuthenticatorManager>
-        receiver) {
-  receivers_.Add(this, std::move(receiver));
-}
-
-void VirtualFidoDiscoveryFactory::OnDiscoveryDestroyed(
-    VirtualFidoDiscovery* discovery) {
-  if (base::Contains(discoveries_, discovery))
-    discoveries_.erase(discovery);
-}
-
-std::unique_ptr<::device::FidoDiscoveryBase>
-VirtualFidoDiscoveryFactory::Create(device::FidoTransportProtocol transport,
-                                    ::service_manager::Connector* connector) {
+std::vector<std::unique_ptr<::device::FidoDiscoveryBase>>
+VirtualFidoDiscoveryFactory::Create(device::FidoTransportProtocol transport) {
   auto discovery = std::make_unique<VirtualFidoDiscovery>(transport);
 
-  if (receivers_.empty() && authenticators_.empty()) {
-    // If no bindings are active then create a virtual device. This is a
-    // stop-gap measure for web-platform tests which assume that they can make
-    // webauthn calls until the WebAuthn Testing API is released.
-    CreateAuthenticator(
-        ::device::ProtocolVersion::kCtap2,
-        ::device::FidoTransportProtocol::kUsbHumanInterfaceDevice,
-        ::device::AuthenticatorAttachment::kCrossPlatform,
-        false /* has_resident_key */, false /* has_user_verification */);
+  // The VirtualAuthenticatorManager may have gone away already at this point.
+  // The VirtualFidoDevices added into the discovery below hold a reference to a
+  // State shared with their VirtualAuthenticator. Since the state is
+  // ref-counted, they can tolerate the VirtualAuthenticator being freed along
+  // with the manager instance.
+  std::vector<VirtualAuthenticator*> authenticators;
+  if (weak_authenticator_manager_) {
+    authenticators = weak_authenticator_manager_->GetAuthenticators();
   }
-
-  for (auto& authenticator : authenticators_) {
-    if (discovery->transport() != authenticator.second->transport())
+  for (VirtualAuthenticator* authenticator : authenticators) {
+    if (discovery->transport() != authenticator->transport())
       continue;
-    discovery->AddVirtualDevice(authenticator.second->ConstructDevice());
+    discovery->AddVirtualDevice(authenticator->ConstructDevice());
   }
 
   discoveries_.insert(discovery.get());
-  return discovery;
+  return SingleDiscovery(std::move(discovery));
 }
 
-std::unique_ptr<::device::FidoDiscoveryBase>
-VirtualFidoDiscoveryFactory::CreateCable(
-    std::vector<device::CableDiscoveryData> cable_data) {
-  return Create(device::FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy,
-                nullptr);
-}
-
-void VirtualFidoDiscoveryFactory::CreateAuthenticator(
-    blink::test::mojom::VirtualAuthenticatorOptionsPtr options,
-    CreateAuthenticatorCallback callback) {
-  auto* authenticator = CreateAuthenticator(
-      options->protocol, options->transport, options->attachment,
-      options->has_resident_key, options->has_user_verification);
-
-  std::move(callback).Run(GetMojoPtrToVirtualAuthenticator(authenticator));
-}
-
-void VirtualFidoDiscoveryFactory::GetAuthenticators(
-    GetAuthenticatorsCallback callback) {
-  std::vector<blink::test::mojom::VirtualAuthenticatorPtrInfo>
-      mojo_authenticators;
-  for (auto& authenticator : authenticators_) {
-    mojo_authenticators.push_back(
-        GetMojoPtrToVirtualAuthenticator(authenticator.second.get())
-            .PassInterface());
-  }
-
-  std::move(callback).Run(std::move(mojo_authenticators));
-}
-
-void VirtualFidoDiscoveryFactory::RemoveAuthenticator(
-    const std::string& id,
-    RemoveAuthenticatorCallback callback) {
-  std::move(callback).Run(RemoveAuthenticator(id));
-}
-
-void VirtualFidoDiscoveryFactory::ClearAuthenticators(
-    ClearAuthenticatorsCallback callback) {
-  for (auto& authenticator : authenticators_) {
-    for (auto* discovery : discoveries_) {
-      discovery->RemoveVirtualDevice(authenticator.second->unique_id());
+void VirtualFidoDiscoveryFactory::AuthenticatorAdded(
+    VirtualAuthenticator* authenticator) {
+  for (auto* discovery : discoveries_) {
+    if (discovery->transport() == authenticator->transport()) {
+      discovery->AddVirtualDevice(authenticator->ConstructDevice());
     }
   }
-  authenticators_.clear();
+}
 
-  std::move(callback).Run();
+void VirtualFidoDiscoveryFactory::AuthenticatorRemoved(
+    const std::string& authenticator_id) {
+  for (auto* discovery : discoveries_) {
+    discovery->RemoveVirtualDevice(authenticator_id);
+  }
+}
+
+bool VirtualFidoDiscoveryFactory::IsTestOverride() {
+  return true;
 }
 
 }  // namespace content

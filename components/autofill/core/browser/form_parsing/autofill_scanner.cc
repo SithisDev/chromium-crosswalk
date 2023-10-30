@@ -1,10 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/core/browser/form_parsing/autofill_scanner.h"
 
-#include "base/logging.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "components/autofill/core/browser/autofill_field.h"
 
 namespace autofill {
@@ -21,7 +22,7 @@ AutofillScanner::AutofillScanner(
   Init(non_owning_);
 }
 
-AutofillScanner::~AutofillScanner() {}
+AutofillScanner::~AutofillScanner() = default;
 
 void AutofillScanner::Advance() {
   DCHECK(!IsEnd());
@@ -55,6 +56,10 @@ void AutofillScanner::RewindTo(size_t index) {
 
 size_t AutofillScanner::SaveCursor() {
   saved_cursor_ = cursor_;
+  return static_cast<size_t>(cursor_ - begin_);
+}
+
+size_t AutofillScanner::CursorPosition() {
   return static_cast<size_t>(cursor_ - begin_);
 }
 

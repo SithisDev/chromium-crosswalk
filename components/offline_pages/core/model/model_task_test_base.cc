@@ -1,14 +1,14 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/offline_pages/core/model/model_task_test_base.h"
 
 #include "base/files/file_util.h"
-#include "base/logging.h"
+#include "base/threading/thread_task_runner_handle.h"
 
 namespace offline_pages {
-ModelTaskTestBase::ModelTaskTestBase() : store_test_util_(task_runner()) {}
+ModelTaskTestBase::ModelTaskTestBase() {}
 ModelTaskTestBase::~ModelTaskTestBase() {}
 
 void ModelTaskTestBase::SetUp() {
@@ -17,7 +17,8 @@ void ModelTaskTestBase::SetUp() {
   ASSERT_TRUE(private_dir_.CreateUniqueTempDir());
   ASSERT_TRUE(public_dir_.CreateUniqueTempDir());
   archive_manager_ = std::make_unique<ArchiveManager>(
-      TemporaryDir(), PrivateDir(), PublicDir(), task_runner());
+      TemporaryDir(), PrivateDir(), PublicDir(),
+      base::ThreadTaskRunnerHandle::Get());
   generator()->SetArchiveDirectory(TemporaryDir());
   store_test_util_.BuildStoreInMemory();
 }
@@ -35,7 +36,7 @@ OfflinePageItem ModelTaskTestBase::AddPage() {
 
 OfflinePageItem ModelTaskTestBase::AddPageWithoutFile() {
   OfflinePageItem page = generator_.CreateItemWithTempFile();
-  EXPECT_TRUE(base::DeleteFile(page.file_path, false));
+  EXPECT_TRUE(base::DeleteFile(page.file_path));
   store_test_util_.InsertItem(page);
   return page;
 }

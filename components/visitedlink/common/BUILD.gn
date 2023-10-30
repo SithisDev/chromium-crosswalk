@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,9 +9,7 @@ static_library("common") {
     "visitedlink_common.cc",
     "visitedlink_common.h",
   ]
-  public_deps = [
-    ":interfaces",
-  ]
+  public_deps = [ ":interfaces" ]
 
   deps = [
     ":interfaces",
@@ -23,11 +21,7 @@ static_library("common") {
 }
 
 mojom("interfaces") {
-  sources = [
-    "visitedlink.mojom",
-  ]
+  sources = [ "visitedlink.mojom" ]
 
-  public_deps = [
-    "//mojo/public/mojom/base",
-  ]
+  public_deps = [ "//mojo/public/mojom/base" ]
 }

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,11 @@ import android.content.Context;
 import android.os.Bundle;
 import android.text.TextUtils;
 
+import androidx.annotation.VisibleForTesting;
+
 import com.google.android.gms.iid.InstanceID;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.VisibleForTesting;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -94,11 +95,6 @@ public class InstanceIDWithSubtype {
 
     public String getToken(String authorizedEntity, String scope) throws IOException {
         return mInstanceID.getToken(authorizedEntity, scope);
-    }
-
-    public String getToken(String authorizedEntity, String scope, Bundle extras)
-            throws IOException {
-        return mInstanceID.getToken(authorizedEntity, scope, extras);
     }
 
     /** Fake subclasses can set {@link #sFakeFactoryForTesting} to an implementation of this. */

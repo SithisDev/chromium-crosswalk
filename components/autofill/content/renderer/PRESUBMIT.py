@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
 for more details on the presubmit API built into depot_tools.
 """
+
+USE_PYTHON3 = True
 
 def _CheckNoDirectPasswordCalls(input_api, output_api):
   """Checks that no files call IsPasswordField() or FormControlType()."""
@@ -22,9 +24,9 @@ def _CheckNoDirectPasswordCalls(input_api, output_api):
         files.append(f)
 
   if len(files):
-    return [ output_api.PresubmitError(
-        'Do not call IsPasswordField() or FormControlType() directly but ' +
-        'use IsPasswordFieldForAutofill() and FormControlTypeForAutofill() ' +
+    return [ output_api.PresubmitPromptWarning(
+        'Consider to not call IsPasswordField() or FormControlType() directly ' +
+        'but use IsPasswordFieldForAutofill() and FormControlTypeForAutofill() ' +
         'respectively. These declare text input fields as password fields ' +
         'if they have been password fields in the past. This is relevant ' +
         'for websites that allow to reveal passwords with a button that ' +

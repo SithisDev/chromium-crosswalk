@@ -1,10 +1,16 @@
 [document web]
 ++[section]
 ++++[math]
-++++++[text] name='a'
-++++++[text] name='2'
-++++++[text] name=' '
-++++++[text] name='+'
-++++++[text] name=' '
-++++++[text] name='b'
-++++++[text] name='2'
+++++++[section]
+++++++++[section]
+++++++++++[static]
+++++++++++++[static] name='%F0%9D%90%B4'
+++++++++++[static]
+++++++++++++[static] name='2'
+++++++++[static]
+++++++++++[static] name='+'
+++++++++[section]
+++++++++++[static]
+++++++++++++[static] name='%F0%9D%90%B5'
+++++++++++[static]
+++++++++++++[static] name='2'

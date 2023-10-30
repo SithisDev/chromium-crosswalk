@@ -1,64 +1,57 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_VIZ_SERVICE_MAIN_VIZ_MAIN_IMPL_H_
 #define COMPONENTS_VIZ_SERVICE_MAIN_VIZ_MAIN_IMPL_H_
 
-#include <string>
+#include <memory>
 
-#include "base/single_thread_task_runner.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/unsafe_shared_memory_region.h"
+#include "base/process/process_handle.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "components/discardable_memory/client/client_discardable_shared_memory_manager.h"
-#include "components/viz/service/main/viz_compositor_thread_runner.h"
-#include "gpu/ipc/in_process_command_buffer.h"
-#include "mojo/public/cpp/bindings/associated_receiver_set.h"
-#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "components/viz/common/buildflags.h"
+#include "components/viz/service/gl/gpu_service_impl.h"
+#include "components/viz/service/main/viz_compositor_thread_runner_impl.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
-#include "services/viz/privileged/interfaces/gl/gpu_service.mojom.h"
-#include "services/viz/privileged/interfaces/viz_main.mojom.h"
+#include "services/viz/privileged/mojom/gl/gpu_service.mojom.h"
+#include "services/viz/privileged/mojom/viz_main.mojom.h"
 #include "ui/gfx/font_render_params.h"
 
-#if defined(USE_OZONE)
-#include "mojo/public/cpp/system/message_pipe.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
+#if BUILDFLAG(IS_WIN)
+#include "components/viz/service/gl/info_collection_gpu_service_impl.h"
+#include "services/viz/privileged/mojom/gl/info_collection_gpu_service.mojom.h"
 #endif
+
+namespace base {
+class PowerMonitorSource;
+class WaitableEvent;
+}
 
 namespace gpu {
 class GpuInit;
-class SyncPointManager;
+class Scheduler;
 class SharedImageManager;
+class SyncPointManager;
 }  // namespace gpu
-
-namespace service_manager {
-class Connector;
-}
 
 namespace ukm {
 class MojoUkmRecorder;
 }
 
 namespace viz {
-class GpuServiceImpl;
-
-#if defined(OS_ANDROID)
-using CompositorThreadType = base::android::JavaHandlerThread;
-#else
-using CompositorThreadType = base::Thread;
+#if BUILDFLAG(IS_WIN)
+class InfoCollectionGpuServiceImpl;
 #endif
 
 class VizMainImpl : public mojom::VizMain {
  public:
-  struct LogMessage {
-    int severity;
-    std::string header;
-    std::string message;
-  };
-  using LogMessages = std::vector<LogMessage>;
-
   class Delegate {
    public:
     virtual ~Delegate() = default;
@@ -74,48 +67,76 @@ class VizMainImpl : public mojom::VizMain {
    public:
     ExternalDependencies();
     ExternalDependencies(ExternalDependencies&& other);
+
+    ExternalDependencies(const ExternalDependencies&) = delete;
+    ExternalDependencies& operator=(const ExternalDependencies&) = delete;
+
     ~ExternalDependencies();
 
     ExternalDependencies& operator=(ExternalDependencies&& other);
 
-    bool create_display_compositor = false;
-    gpu::SyncPointManager* sync_point_manager = nullptr;
-    gpu::SharedImageManager* shared_image_manager = nullptr;
-    base::WaitableEvent* shutdown_event = nullptr;
+    // Note that, due to the design of |base::PowerMonitor|, it is inherently
+    // racy to decide to initialize or not based on a call to
+    // |base::PowerMonitor::IsInitialized|. This makes it difficult for
+    // VizMainImpl to know whether to call initialize or not as the correct
+    // choice depends on the context in which VizMainImpl will be used.
+    //
+    // To work around this, calling code must understand whether VizMainImpl
+    // should initialize |base::PowerMonitor| or not and can then use the
+    // |power_monitor_source| to signal its intent.
+    //
+    // If |power_monitor_source| is null, |PowerMonitor::Initialize| will not
+    // be called. If |power_monitor_source| is non-null, it will be std::move'd
+    // in to a call of |PowerMonitor::Initialize|.
+    //
+    // We use a |PowerMonitorSource| here instead of a boolean flag so that
+    // tests can use mocks and fakes for testing.
+    mutable std::unique_ptr<base::PowerMonitorSource> power_monitor_source;
+    raw_ptr<gpu::SyncPointManager> sync_point_manager = nullptr;
+    raw_ptr<gpu::SharedImageManager> shared_image_manager = nullptr;
+    raw_ptr<gpu::Scheduler> scheduler = nullptr;
+    raw_ptr<base::WaitableEvent> shutdown_event = nullptr;
     scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner;
-    service_manager::Connector* connector = nullptr;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(ExternalDependencies);
+    std::unique_ptr<ukm::MojoUkmRecorder> ukm_recorder;
+    raw_ptr<VizCompositorThreadRunner> viz_compositor_thread_runner = nullptr;
   };
 
   VizMainImpl(Delegate* delegate,
               ExternalDependencies dependencies,
               std::unique_ptr<gpu::GpuInit> gpu_init);
+
+  VizMainImpl(const VizMainImpl&) = delete;
+  VizMainImpl& operator=(const VizMainImpl&) = delete;
+
   // Destruction must happen on the GPU thread.
   ~VizMainImpl() override;
 
-  void SetLogMessagesForHost(LogMessages messages);
-
-  void BindAssociated(
-      mojo::PendingAssociatedReceiver<mojom::VizMain> pending_receiver);
-
-#if defined(USE_OZONE)
-  bool CanBindInterface(const std::string& interface_name) const;
-  void BindInterface(const std::string& interface_name,
-                     mojo::ScopedMessagePipeHandle interface_pipe);
-#endif
+  void Bind(mojo::PendingReceiver<mojom::VizMain> receiver);
 
   // mojom::VizMain implementation:
   void CreateGpuService(
       mojo::PendingReceiver<mojom::GpuService> pending_receiver,
       mojo::PendingRemote<mojom::GpuHost> pending_gpu_host,
-      discardable_memory::mojom::DiscardableSharedMemoryManagerPtr
+      mojo::PendingRemote<
+          discardable_memory::mojom::DiscardableSharedMemoryManager>
           discardable_memory_manager,
-      mojo::ScopedSharedBufferHandle activity_flags,
+      base::UnsafeSharedMemoryRegion activity_flags_region,
       gfx::FontRenderParams::SubpixelRendering subpixel_rendering) override;
+#if BUILDFLAG(IS_WIN)
+  void CreateInfoCollectionGpuService(
+      mojo::PendingReceiver<mojom::InfoCollectionGpuService> pending_receiver)
+      override;
+#endif
+#if BUILDFLAG(IS_ANDROID)
+  void SetHostProcessId(int32_t pid) override;
+#endif
   void CreateFrameSinkManager(mojom::FrameSinkManagerParamsPtr params) override;
-  void CreateVizDevTools(mojom::VizDevToolsParamsPtr params) override;
+#if BUILDFLAG(USE_VIZ_DEBUGGER)
+  void FilterDebugStream(base::Value filter_data) override;
+  void StartDebugStream(
+      mojo::PendingRemote<mojom::VizDebugOutput> debug_output) override;
+  void StopDebugStream() override;
+#endif
 
   GpuServiceImpl* gpu_service() { return gpu_service_.get(); }
   const GpuServiceImpl* gpu_service() const { return gpu_service_.get(); }
@@ -127,13 +148,11 @@ class VizMainImpl : public mojom::VizMain {
     return discardable_shared_memory_manager_.get();
   }
 
-  // Cleanly exits the process.
-  void ExitProcess();
+  // If it's in browser process, shut down the GPU main thread. Otherwise, the
+  // GPU process is terminated immediately with the specified exit code.
+  void ExitProcess(ExitCode immediate_exit_code);
 
  private:
-  // Initializes GPU's UkmRecorder if GPU is running in it's own process.
-  void CreateUkmRecorderIfNeeded(service_manager::Connector* connector);
-
   void CreateFrameSinkManagerInternal(mojom::FrameSinkManagerParamsPtr params);
 
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner() const {
@@ -141,7 +160,7 @@ class VizMainImpl : public mojom::VizMain {
                       : dependencies_.io_thread_task_runner;
   }
 
-  Delegate* const delegate_;
+  const raw_ptr<Delegate> delegate_;
 
   const ExternalDependencies dependencies_;
 
@@ -150,37 +169,33 @@ class VizMainImpl : public mojom::VizMain {
   // destroyed after they are.
   std::unique_ptr<base::Thread> io_thread_;
 
-  LogMessages log_messages_;
-
   std::unique_ptr<gpu::GpuInit> gpu_init_;
   std::unique_ptr<GpuServiceImpl> gpu_service_;
-
-  // This is created for OOP-D only. It allows the display compositor to use
-  // InProcessCommandBuffer to send GPU commands to the GPU thread from the
-  // compositor thread. This must outlive |viz_compositor_thread_runner_|.
-  std::unique_ptr<gpu::CommandBufferTaskExecutor> task_executor_;
+#if BUILDFLAG(IS_WIN)
+  std::unique_ptr<InfoCollectionGpuServiceImpl> info_collection_gpu_service_;
+#endif
 
   // If the gpu service is not yet ready then we stash pending
   // FrameSinkManagerParams.
   mojom::FrameSinkManagerParamsPtr pending_frame_sink_manager_params_;
 
-  // Runs the VizCompositorThread for the display compositor with OOP-D.
-  std::unique_ptr<VizCompositorThreadRunner> viz_compositor_thread_runner_;
+  bool has_created_frame_sink_manager_ = false;
+
+  // Runs the VizCompositorThread for the display compositor.
+  std::unique_ptr<VizCompositorThreadRunnerImpl>
+      viz_compositor_thread_runner_impl_;
+  // Note under Android WebView where VizCompositorThreadRunner is not created
+  // and owned by this, Viz does not interact with other objects in this class,
+  // such as GpuServiceImpl. Code should take care to avoid introducing such
+  // assumptions.
+  raw_ptr<VizCompositorThreadRunner> viz_compositor_thread_runner_ = nullptr;
 
   const scoped_refptr<base::SingleThreadTaskRunner> gpu_thread_task_runner_;
 
-  std::unique_ptr<ukm::MojoUkmRecorder> ukm_recorder_;
-  mojo::AssociatedReceiver<mojom::VizMain> receiver_{this};
+  mojo::Receiver<mojom::VizMain> receiver_{this};
 
-  std::unique_ptr<discardable_memory::ClientDiscardableSharedMemoryManager>
+  scoped_refptr<discardable_memory::ClientDiscardableSharedMemoryManager>
       discardable_shared_memory_manager_;
-
-#if defined(USE_OZONE)
-  // Registry for gpu-related interfaces needed by ozone.
-  service_manager::BinderRegistry registry_;
-#endif
-
-  DISALLOW_COPY_AND_ASSIGN(VizMainImpl);
 };
 
 }  // namespace viz

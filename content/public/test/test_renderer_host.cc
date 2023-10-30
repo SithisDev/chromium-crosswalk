@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,51 +6,57 @@
 
 #include <utility>
 
-#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/current_thread.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/compositor/test/test_image_transport_factory.h"
-#include "content/browser/frame_host/frame_tree_node.h"
-#include "content/browser/frame_host/navigation_entry_impl.h"
-#include "content/browser/frame_host/navigation_handle_impl.h"
-#include "content/browser/frame_host/navigation_request.h"
+#include "content/browser/gpu/gpu_data_manager_impl.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
+#include "content/browser/renderer_host/navigation_entry_impl.h"
+#include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host_input_event_router.h"
 #include "content/browser/site_instance_impl.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/navigation_policy.h"
-#include "content/public/test/browser_side_navigation_test_utils.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/test/content_browser_sanity_checker.h"
+#include "content/test/content_browser_consistency_checker.h"
+#include "content/test/test_navigation_url_loader_factory.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_frame_host_factory.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_render_view_host_factory.h"
 #include "content/test/test_render_widget_host_factory.h"
 #include "content/test/test_web_contents.h"
-#include "ui/base/material_design/material_design_controller.h"
+#include "net/base/mock_network_change_notifier.h"
+#include "third_party/blink/public/common/input/synthetic_web_input_event_builders.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 
-#if defined(OS_ANDROID)
-#include "ui/android/dummy_screen_android.h"
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID)
 #include "ui/display/screen.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_ANDROID)
+#include "ui/android/dummy_screen_android.h"
+#endif
+
+#if BUILDFLAG(IS_WIN)
 #include "ui/base/win/scoped_ole_initializer.h"
 #endif
 
 #if defined(USE_AURA)
 #include "ui/aura/test/aura_test_helper.h"
-#include "ui/wm/core/default_activation_client.h"
 #endif
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 #include "ui/accelerated_widget_mac/window_resize_helper_mac.h"
 #endif
 
@@ -77,8 +83,7 @@ void RenderFrameHostTester::CommitPendingLoad(
   // (rather than WebContentsImpl directly). It is not trivial to make
   // that change, so for now we have this extra function for
   // non-TestWebContents.
-  auto navigation =
-      NavigationSimulator::CreateFromPending(controller->GetWebContents());
+  auto navigation = NavigationSimulator::CreateFromPending(*controller);
   navigation->Commit();
 }
 
@@ -90,34 +95,48 @@ RenderViewHostTester* RenderViewHostTester::For(RenderViewHost* host) {
 }
 
 // static
-void RenderViewHostTester::SimulateFirstPaint(RenderViewHost* rvh) {
-  static_cast<RenderViewHostImpl*>(rvh)
-      ->GetWidget()
-      ->OnFirstVisuallyNonEmptyPaint();
+std::unique_ptr<content::InputMsgWatcher>
+RenderViewHostTester::CreateInputWatcher(RenderViewHost* rvh,
+                                         blink::WebInputEvent::Type type) {
+  RenderWidgetHostImpl* host_impl =
+      RenderWidgetHostImpl::From(rvh->GetWidget());
+  return std::make_unique<content::InputMsgWatcher>(host_impl, type);
 }
 
 // static
-bool RenderViewHostTester::HasTouchEventHandler(RenderViewHost* rvh) {
+void RenderViewHostTester::SendTouchEvent(
+    RenderViewHost* rvh,
+    blink::SyntheticWebTouchEvent* touch_event) {
   RenderWidgetHostImpl* host_impl =
       RenderWidgetHostImpl::From(rvh->GetWidget());
-  return host_impl->has_touch_handler();
+  auto* input_event_router = host_impl->delegate()->GetInputEventRouter();
+  input_event_router->RouteTouchEvent(host_impl->GetView(), touch_event,
+                                      ui::LatencyInfo());
 }
-
 
 // RenderViewHostTestEnabler --------------------------------------------------
 
-RenderViewHostTestEnabler::RenderViewHostTestEnabler()
+RenderViewHostTestEnabler::RenderViewHostTestEnabler(
+    NavigationURLLoaderFactoryType url_loader_factory_type)
     : rph_factory_(new MockRenderProcessHostFactory()),
-      rvh_factory_(new TestRenderViewHostFactory(rph_factory_.get())),
+      asgh_factory_(new MockAgentSchedulingGroupHostFactory()),
+      rvh_factory_(new TestRenderViewHostFactory(rph_factory_.get(),
+                                                 asgh_factory_.get())),
       rfh_factory_(new TestRenderFrameHostFactory()),
-      rwhi_factory_(new TestRenderWidgetHostFactory()) {
-  // A MessageLoop is needed for Mojo bindings to graphics services. Some
-  // tests have their own, so this only creates one when none exists. This
-  // means tests must ensure any MessageLoop they make is created before
-  // the RenderViewHostTestEnabler.
-  if (!base::MessageLoopCurrent::Get())
-    task_environment_ = std::make_unique<base::test::ScopedTaskEnvironment>();
-#if !defined(OS_ANDROID)
+      rwhi_factory_(new TestRenderWidgetHostFactory()),
+      loader_factory_(url_loader_factory_type ==
+                              NavigationURLLoaderFactoryType::kTest
+                          ? new TestNavigationURLLoaderFactory()
+                          : nullptr) {
+  // A TaskEnvironment is needed on the main thread for Mojo bindings to
+  // graphics services. Some tests have their own, so this only creates one
+  // (single-threaded) when none exists. This means tests must ensure any
+  // TaskEnvironment they make is created before the RenderViewHostTestEnabler.
+  if (!base::CurrentThread::Get()) {
+    task_environment_ =
+        std::make_unique<base::test::SingleThreadTaskEnvironment>();
+  }
+#if !BUILDFLAG(IS_ANDROID)
   ImageTransportFactory::SetFactory(
       std::make_unique<TestImageTransportFactory>());
 #else
@@ -125,17 +144,17 @@ RenderViewHostTestEnabler::RenderViewHostTestEnabler()
     screen_.reset(ui::CreateDummyScreenAndroid());
   display::Screen::SetScreenInstance(screen_.get());
 #endif
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   if (base::ThreadTaskRunnerHandle::IsSet())
     ui::WindowResizeHelperMac::Get()->Init(base::ThreadTaskRunnerHandle::Get());
-#endif  // OS_MACOSX
+#endif  // BUILDFLAG(IS_MAC)
 }
 
 RenderViewHostTestEnabler::~RenderViewHostTestEnabler() {
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   ui::WindowResizeHelperMac::Get()->ShutdownForTests();
-#endif  // OS_MACOSX
-#if !defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_ANDROID)
   // RenderWidgetHostView holds on to a reference to SurfaceManager, so it
   // must be shut down before the ImageTransportFactory.
   ImageTransportFactory::Terminate();
@@ -148,6 +167,7 @@ RenderViewHostTestEnabler::~RenderViewHostTestEnabler() {
 // RenderViewHostTestHarness --------------------------------------------------
 
 RenderViewHostTestHarness::~RenderViewHostTestHarness() {
+  DCHECK(!task_environment_) << "TearDown() was not called.";
 }
 
 NavigationController& RenderViewHostTestHarness::controller() {
@@ -159,25 +179,11 @@ WebContents* RenderViewHostTestHarness::web_contents() {
 }
 
 RenderViewHost* RenderViewHostTestHarness::rvh() {
-  RenderViewHost* result = web_contents()->GetRenderViewHost();
-  CHECK_EQ(result, web_contents()->GetMainFrame()->GetRenderViewHost());
-  return result;
-}
-
-RenderViewHost* RenderViewHostTestHarness::pending_rvh() {
-  return pending_main_rfh() ? pending_main_rfh()->GetRenderViewHost() : nullptr;
-}
-
-RenderViewHost* RenderViewHostTestHarness::active_rvh() {
-  return pending_rvh() ? pending_rvh() : rvh();
+  return web_contents()->GetPrimaryMainFrame()->GetRenderViewHost();
 }
 
 RenderFrameHost* RenderViewHostTestHarness::main_rfh() {
-  return web_contents()->GetMainFrame();
-}
-
-RenderFrameHost* RenderViewHostTestHarness::pending_main_rfh() {
-  return static_cast<TestWebContents*>(web_contents())->GetPendingMainFrame();
+  return web_contents()->GetPrimaryMainFrame();
 }
 
 BrowserContext* RenderViewHostTestHarness::browser_context() {
@@ -185,7 +191,8 @@ BrowserContext* RenderViewHostTestHarness::browser_context() {
 }
 
 MockRenderProcessHost* RenderViewHostTestHarness::process() {
-  return static_cast<MockRenderProcessHost*>(active_rvh()->GetProcess());
+  auto* contents = static_cast<TestWebContents*>(web_contents());
+  return contents->GetPrimaryMainFrame()->GetProcess();
 }
 
 void RenderViewHostTestHarness::DeleteContents() {
@@ -200,11 +207,11 @@ void RenderViewHostTestHarness::SetContents(
 std::unique_ptr<WebContents>
 RenderViewHostTestHarness::CreateTestWebContents() {
 // Make sure we ran SetUp() already.
-#if defined(OS_WIN)
-  DCHECK(ole_initializer_ != NULL);
+#if BUILDFLAG(IS_WIN)
+  DCHECK(ole_initializer_);
 #endif
 #if defined(USE_AURA)
-  DCHECK(aura_test_helper_ != nullptr);
+  DCHECK(aura_test_helper_);
 #endif
 
   scoped_refptr<SiteInstance> instance =
@@ -215,9 +222,9 @@ RenderViewHostTestHarness::CreateTestWebContents() {
 }
 void RenderViewHostTestHarness::FocusWebContentsOnMainFrame() {
   TestWebContents* contents = static_cast<TestWebContents*>(web_contents());
-  auto* root = contents->GetFrameTree()->root();
-  contents->GetFrameTree()->SetFocusedFrame(
-      root, root->current_frame_host()->GetSiteInstance());
+  auto* root = contents->GetPrimaryFrameTree().root();
+  contents->GetPrimaryFrameTree().SetFocusedFrame(
+      root, root->current_frame_host()->GetSiteInstance()->group());
 }
 
 void RenderViewHostTestHarness::NavigateAndCommit(
@@ -228,37 +235,37 @@ void RenderViewHostTestHarness::NavigateAndCommit(
 }
 
 void RenderViewHostTestHarness::SetUp() {
-  ui::MaterialDesignController::Initialize();
-
-  rvh_test_enabler_.reset(new RenderViewHostTestEnabler);
+  rvh_test_enabler_ = std::make_unique<RenderViewHostTestEnabler>();
   if (factory_)
     rvh_test_enabler_->rvh_factory_->set_render_process_host_factory(factory_);
 
-#if defined(OS_WIN)
-  ole_initializer_.reset(new ui::ScopedOleInitializer());
+#if BUILDFLAG(IS_WIN)
+  ole_initializer_ = std::make_unique<ui::ScopedOleInitializer>();
 #endif
+#if BUILDFLAG(IS_MAC)
+  screen_ = std::make_unique<display::ScopedNativeScreen>();
+#endif
+
 #if defined(USE_AURA)
-  ui::ContextFactory* context_factory =
-      ImageTransportFactory::GetInstance()->GetContextFactory();
-  ui::ContextFactoryPrivate* context_factory_private =
-      ImageTransportFactory::GetInstance()->GetContextFactoryPrivate();
-
-  aura_test_helper_.reset(new aura::test::AuraTestHelper());
-  aura_test_helper_->SetUp(context_factory, context_factory_private);
-  new wm::DefaultActivationClient(aura_test_helper_->root_window());
+  aura_test_helper_ = std::make_unique<aura::test::AuraTestHelper>(
+      ImageTransportFactory::GetInstance()->GetContextFactory());
+  aura_test_helper_->SetUp();
 #endif
 
-  sanity_checker_.reset(new ContentBrowserSanityChecker());
+  consistency_checker_ = std::make_unique<ContentBrowserConsistencyChecker>();
+
+  network_change_notifier_ = net::test::MockNetworkChangeNotifier::Create();
 
   DCHECK(!browser_context_);
-  browser_context_.reset(CreateBrowserContext());
+  browser_context_ = CreateBrowserContext();
 
   SetContents(CreateTestWebContents());
-  BrowserSideNavigationSetUp();
+
+  // Create GpuDataManagerImpl here so it always runs on the main thread.
+  GpuDataManagerImpl::GetInstance();
 }
 
 void RenderViewHostTestHarness::TearDown() {
-  BrowserSideNavigationTearDown();
   DeleteContents();
 #if defined(USE_AURA)
   aura_test_helper_->TearDown();
@@ -267,7 +274,7 @@ void RenderViewHostTestHarness::TearDown() {
   // before we destroy the browser context.
   base::RunLoop().RunUntilIdle();
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   ole_initializer_.reset();
 #endif
 
@@ -285,18 +292,18 @@ void RenderViewHostTestHarness::TearDown() {
   // queue. This is preferable to immediate deletion because it will behave
   // properly if the |rph_factory_| reset above enqueued any tasks which
   // depend on |browser_context_|.
-  BrowserThread::DeleteSoon(content::BrowserThread::UI,
-                            FROM_HERE,
-                            browser_context_.release());
+  content::GetUIThreadTaskRunner({})->DeleteSoon(FROM_HERE,
+                                                 browser_context_.release());
 
   // Although this isn't required by many, some subclasses members require that
   // the task environment is gone by the time that they are destroyed (akin to
   // browser shutdown).
-  thread_bundle_.reset();
+  task_environment_.reset();
 }
 
-BrowserContext* RenderViewHostTestHarness::CreateBrowserContext() {
-  return new TestBrowserContext();
+std::unique_ptr<BrowserContext>
+RenderViewHostTestHarness::CreateBrowserContext() {
+  return std::make_unique<TestBrowserContext>();
 }
 
 BrowserContext* RenderViewHostTestHarness::GetBrowserContext() {
@@ -312,7 +319,7 @@ void RenderViewHostTestHarness::SetRenderProcessHostFactory(
 }
 
 RenderViewHostTestHarness::RenderViewHostTestHarness(
-    std::unique_ptr<TestBrowserThreadBundle> thread_bundle)
-    : thread_bundle_(std::move(thread_bundle)) {}
+    std::unique_ptr<BrowserTaskEnvironment> task_environment)
+    : task_environment_(std::move(task_environment)) {}
 
 }  // namespace content

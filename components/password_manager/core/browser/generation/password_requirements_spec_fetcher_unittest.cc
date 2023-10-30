@@ -1,13 +1,13 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/password_manager/core/browser/generation/password_requirements_spec_fetcher_impl.h"
 
-#include "base/logging.h"
-#include "base/test/bind_test_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "components/autofill/core/browser/proto/password_requirements.pb.h"
 #include "components/autofill/core/browser/proto/password_requirements_shard.pb.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
@@ -71,7 +71,7 @@ TEST(PasswordRequirementsSpecFetcherTest, FetchData) {
     net::HttpStatusCode response_status = net::HTTP_OK;
 
     // Expected spec.
-    PasswordRequirementsSpec* expected_spec;
+    raw_ptr<PasswordRequirementsSpec> expected_spec;
     ResultCode expected_result;
   } tests[] = {
       {
@@ -207,8 +207,8 @@ TEST(PasswordRequirementsSpecFetcherTest, FetchData) {
     SCOPED_TRACE(test.test_name);
     base::HistogramTester histogram_tester;
 
-    base::test::ScopedTaskEnvironment environment(
-        base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME);
+    base::test::TaskEnvironment environment(
+        base::test::TaskEnvironment::TimeSource::MOCK_TIME);
     network::TestURLLoaderFactory loader_factory;
     loader_factory.AddResponse(test.requested_url, test.response_content,
                                test.response_status);
@@ -234,8 +234,7 @@ TEST(PasswordRequirementsSpecFetcherTest, FetchData) {
     if (test.timeout == kMagicTimeout) {
       // Make sure that the request takes longer than the timeout and gets
       // killed by the timer.
-      environment.FastForwardBy(
-          base::TimeDelta::FromMilliseconds(2 * kMagicTimeout));
+      environment.FastForwardBy(base::Milliseconds(2 * kMagicTimeout));
       environment.RunUntilIdle();
     }
 
@@ -262,8 +261,8 @@ TEST(PasswordRequirementsSpecFetcherTest, FetchDataInterleaved) {
     (*shard.mutable_specs())["b.com"].set_min_length(18);
     shard.SerializeToString(&serialized_shard);
 
-    base::test::ScopedTaskEnvironment environment(
-        base::test::ScopedTaskEnvironment::TimeSource::MOCK_TIME);
+    base::test::TaskEnvironment environment(
+        base::test::TaskEnvironment::TimeSource::MOCK_TIME);
     network::TestURLLoaderFactory loader_factory;
 
     // Target into which data will be written by the callback.
@@ -296,8 +295,7 @@ TEST(PasswordRequirementsSpecFetcherTest, FetchDataInterleaved) {
     EXPECT_EQ(1, loader_factory.NumPending());
 
     if (simulate_timeout) {
-      environment.FastForwardBy(
-          base::TimeDelta::FromMilliseconds(2 * kTimeout));
+      environment.FastForwardBy(base::Milliseconds(2 * kTimeout));
       environment.RunUntilIdle();
       EXPECT_FALSE(spec_for_a.has_min_length());
       EXPECT_FALSE(spec_for_b.has_min_length());
@@ -315,7 +313,7 @@ TEST(PasswordRequirementsSpecFetcherTest, FetchDataInterleaved) {
 // In case of incognito mode, we won't have a URL loader factory.
 // Test that an empty spec is returned by the spec fetcher in this case.
 TEST(PasswordRequirementsSpecFetcherTest, FetchDataWithoutURLLoaderFactory) {
-  base::test::ScopedTaskEnvironment environment;
+  base::test::TaskEnvironment environment;
 
   // Target into which data will be written by the callback.
   PasswordRequirementsSpec received_spec;

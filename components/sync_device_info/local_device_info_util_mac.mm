@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@ namespace syncer {
 // possible.  See http://www.cocoadev.com/index.pl?MacintoshModels for
 // an example list of models. If an error occurs trying to read the
 // model, this simply returns "Unknown".
-std::string GetSessionNameInternal() {
+std::string GetPersonalizableDeviceNameInternal() {
   // Do not use NSHost currentHost, as it's very slow. http://crbug.com/138570
   SCDynamicStoreContext context = {0, NULL, NULL, NULL};
   base::ScopedCFTypeRef<SCDynamicStoreRef> store(SCDynamicStoreCreate(

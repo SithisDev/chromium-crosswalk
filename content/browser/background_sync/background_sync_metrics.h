@@ -1,11 +1,10 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_BACKGROUND_SYNC_BACKGROUND_SYNC_METRICS_H_
 #define CONTENT_BROWSER_BACKGROUND_SYNC_BACKGROUND_SYNC_METRICS_H_
 
-#include "base/macros.h"
 #include "base/time/time.h"
 #include "content/browser/background_sync/background_sync.pb.h"
 #include "content/browser/background_sync/background_sync_status.h"
@@ -39,6 +38,10 @@ class CONTENT_EXPORT BackgroundSyncMetrics {
     REGISTRATION_IS_DUPLICATE
   };
 
+  BackgroundSyncMetrics() = delete;
+  BackgroundSyncMetrics(const BackgroundSyncMetrics&) = delete;
+  BackgroundSyncMetrics& operator=(const BackgroundSyncMetrics&) = delete;
+
   // Records the start of a sync event.
   static void RecordEventStarted(blink::mojom::BackgroundSyncType sync_type,
                                  bool startedin_foreground);
@@ -54,10 +57,12 @@ class CONTENT_EXPORT BackgroundSyncMetrics {
                                          int num_attempts_required);
 
   // Records the result of running a batch of sync events, including the total
-  // time spent, and the batch size.
+  // time spent, the batch size, and whether the operation originated from a
+  // wakeup task.
   static void RecordBatchSyncEventComplete(
       blink::mojom::BackgroundSyncType sync_type,
       const base::TimeDelta& time,
+      bool from_wakeup_task,
       int number_of_batched_sync_events);
 
   // Records the result of successfully registering a sync. |could_fire|
@@ -81,8 +86,11 @@ class CONTENT_EXPORT BackgroundSyncMetrics {
   // Sync registration.
   static void CountUnregisterPeriodicSync(BackgroundSyncStatus status);
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(BackgroundSyncMetrics);
+  // Records whether the Chrome wakeup task actually resulted in us firing
+  // any sync events corresponding to |sync_type|.
+  static void RecordEventsFiredFromWakeupTask(
+      blink::mojom::BackgroundSyncType sync_type,
+      bool fired_events);
 };
 
 }  // namespace content

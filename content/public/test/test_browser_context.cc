@@ -1,57 +1,31 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/test/test_browser_context.h"
 
+#include <memory>
 #include <utility>
 
+#include "base/check.h"
 #include "base/files/file_path.h"
-#include "base/logging.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task/thread_pool/thread_pool.h"
-#include "base/test/null_task_runner.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/permission_controller_delegate.h"
+#include "content/public/browser/platform_notification_service.h"
 #include "content/public/test/mock_resource_context.h"
+#include "content/public/test/test_utils.h"
 #include "content/test/mock_background_sync_controller.h"
+#include "content/test/mock_reduce_accept_language_controller_delegate.h"
 #include "content/test/mock_ssl_host_state_delegate.h"
-#include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_context_getter.h"
-#include "net/url_request/url_request_test_util.h"
 #include "storage/browser/quota/special_storage_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-namespace {
-
-class TestContextURLRequestContextGetter : public net::URLRequestContextGetter {
- public:
-  TestContextURLRequestContextGetter()
-      : null_task_runner_(new base::NullTaskRunner) {
-  }
-
-  net::URLRequestContext* GetURLRequestContext() override { return &context_; }
-
-  scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
-      const override {
-    return null_task_runner_;
-  }
-
- private:
-  ~TestContextURLRequestContextGetter() override {}
-
-  net::TestURLRequestContext context_;
-  scoped_refptr<base::SingleThreadTaskRunner> null_task_runner_;
-};
-
-}  // namespace
 
 namespace content {
 
 TestBrowserContext::TestBrowserContext(
     base::FilePath browser_context_dir_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI))
-      << "Please construct content::TestBrowserThreadBundle before "
+      << "Please construct content::BrowserTaskEnvironment before "
       << "constructing TestBrowserContext instances.  "
       << BrowserThread::GetDCheckCurrentlyOnErrorMessage(BrowserThread::UI);
 
@@ -60,28 +34,35 @@ TestBrowserContext::TestBrowserContext(
   } else {
     EXPECT_TRUE(browser_context_dir_.Set(browser_context_dir_path));
   }
-  BrowserContext::Initialize(this, browser_context_dir_.GetPath());
 }
 
 TestBrowserContext::~TestBrowserContext() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI))
       << "Please destruct content::TestBrowserContext before destructing "
-      << "the TestBrowserThreadBundle instance.  "
+      << "the BrowserTaskEnvironment instance.  "
       << BrowserThread::GetDCheckCurrentlyOnErrorMessage(BrowserThread::UI);
 
-  NotifyWillBeDestroyed(this);
+  NotifyWillBeDestroyed();
   ShutdownStoragePartitions();
 
-  // disk_cache::SimpleBackendImpl performs all disk IO on the ThreadPool
-  // threads. The cache is initialized in the directory owned by
-  // |browser_context_dir_| and so ScopedTempDir destructor may race with cache
-  // IO (see https://crbug.com/910029 for example). Let all pending IO
-  // operations finish before destroying |browser_context_dir_|.
-  base::ThreadPoolInstance::Get()->FlushForTesting();
+  // Various things that were just torn down above post tasks to other
+  // sequences that eventually bounce back to the main thread and out again.
+  // Run all such tasks now before the instance is destroyed so that the
+  // |browser_context_dir_| can be fully cleaned up.
+  RunAllPendingInMessageLoop(BrowserThread::IO);
+  RunAllTasksUntilIdle();
+
+  EXPECT_TRUE(!browser_context_dir_.IsValid() || browser_context_dir_.Delete())
+      << browser_context_dir_.GetPath();
 }
 
 base::FilePath TestBrowserContext::TakePath() {
   return browser_context_dir_.Take();
+}
+
+void TestBrowserContext::SetReduceAcceptLanguageControllerDelegate(
+    std::unique_ptr<MockReduceAcceptLanguageControllerDelegate> delegate) {
+  reduce_accept_language_controller_delegate_ = std::move(delegate);
 }
 
 void TestBrowserContext::SetSpecialStoragePolicy(
@@ -94,23 +75,19 @@ void TestBrowserContext::SetPermissionControllerDelegate(
   permission_controller_delegate_ = std::move(delegate);
 }
 
-net::URLRequestContextGetter* TestBrowserContext::GetRequestContext() {
-  if (!request_context_.get()) {
-    request_context_ = new TestContextURLRequestContextGetter();
-  }
-  return request_context_.get();
+void TestBrowserContext::SetPlatformNotificationService(
+    std::unique_ptr<PlatformNotificationService> service) {
+  platform_notification_service_ = std::move(service);
 }
 
 base::FilePath TestBrowserContext::GetPath() {
   return browser_context_dir_.GetPath();
 }
 
-#if !defined(OS_ANDROID)
 std::unique_ptr<ZoomLevelDelegate> TestBrowserContext::CreateZoomLevelDelegate(
     const base::FilePath& partition_path) {
-  return std::unique_ptr<ZoomLevelDelegate>();
+  return nullptr;
 }
-#endif  // !defined(OS_ANDROID)
 
 bool TestBrowserContext::IsOffTheRecord() {
   return is_off_the_record_;
@@ -122,7 +99,7 @@ DownloadManagerDelegate* TestBrowserContext::GetDownloadManagerDelegate() {
 
 ResourceContext* TestBrowserContext::GetResourceContext() {
   if (!resource_context_)
-    resource_context_.reset(new MockResourceContext);
+    resource_context_ = std::make_unique<MockResourceContext>();
   return resource_context_.get();
 }
 
@@ -134,13 +111,23 @@ storage::SpecialStoragePolicy* TestBrowserContext::GetSpecialStoragePolicy() {
   return special_storage_policy_.get();
 }
 
+PlatformNotificationService*
+TestBrowserContext::GetPlatformNotificationService() {
+  return platform_notification_service_.get();
+}
+
 PushMessagingService* TestBrowserContext::GetPushMessagingService() {
+  return nullptr;
+}
+
+StorageNotificationService*
+TestBrowserContext::GetStorageNotificationService() {
   return nullptr;
 }
 
 SSLHostStateDelegate* TestBrowserContext::GetSSLHostStateDelegate() {
   if (!ssl_host_state_delegate_)
-    ssl_host_state_delegate_.reset(new MockSSLHostStateDelegate());
+    ssl_host_state_delegate_ = std::make_unique<MockSSLHostStateDelegate>();
   return ssl_host_state_delegate_.get();
 }
 
@@ -159,8 +146,10 @@ BackgroundFetchDelegate* TestBrowserContext::GetBackgroundFetchDelegate() {
 }
 
 BackgroundSyncController* TestBrowserContext::GetBackgroundSyncController() {
-  if (!background_sync_controller_)
-    background_sync_controller_.reset(new MockBackgroundSyncController());
+  if (!background_sync_controller_) {
+    background_sync_controller_ =
+        std::make_unique<MockBackgroundSyncController>();
+  }
 
   return background_sync_controller_.get();
 }
@@ -172,15 +161,9 @@ TestBrowserContext::GetBrowsingDataRemoverDelegate() {
   return nullptr;
 }
 
-net::URLRequestContextGetter* TestBrowserContext::CreateRequestContext(
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors) {
-  request_interceptors_ = std::move(request_interceptors);
-  return GetRequestContext();
-}
-
-net::URLRequestContextGetter* TestBrowserContext::CreateMediaRequestContext() {
-  return nullptr;
+ReduceAcceptLanguageControllerDelegate*
+TestBrowserContext::GetReduceAcceptLanguageControllerDelegate() {
+  return reduce_accept_language_controller_delegate_.get();
 }
 
 }  // namespace content

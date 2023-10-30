@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,15 @@ import org.chromium.base.annotations.CalledByNative;
  */
 public class BookmarkId {
     public static final int INVALID_FOLDER_ID = -2;
-    public static final int ROOT_FOLDER_ID = -1;
+    public static final int INVALID_ID = -1;
+    public static final int SHOPPING_FILTER_ID = -3;
+    public static final BookmarkId SHOPPING_FOLDER =
+            new BookmarkId(SHOPPING_FILTER_ID, BookmarkType.NORMAL);
 
     private static final String LOG_TAG = "BookmarkId";
     private static final char TYPE_PARTNER = 'p';
+    private static final char TYPE_READING_LIST = 'r';
+    private static final int ROOT_FOLDER_ID = -1;
 
     private final long mId;
     private final int mType;
@@ -35,6 +40,8 @@ public class BookmarkId {
         switch (c) {
             case TYPE_PARTNER:
                 return BookmarkType.PARTNER;
+            case TYPE_READING_LIST:
+                return BookmarkType.READING_LIST;
             default:
                 return BookmarkType.NORMAL;
         }
@@ -45,7 +52,7 @@ public class BookmarkId {
      * @return Whether the char representing the bookmark type is a valid type.
      */
     private static boolean isValidBookmarkTypeFromChar(char c) {
-        return c == TYPE_PARTNER;
+        return c == TYPE_PARTNER || c == TYPE_READING_LIST;
     }
 
     /**
@@ -82,7 +89,7 @@ public class BookmarkId {
      * Returns the bookmark type: {@link BookmarkType#NORMAL} or {@link BookmarkType#PARTNER}.
      */
     @CalledByNative
-    public int getType() {
+    public @BookmarkType int getType() {
         return mType;
     }
 
@@ -100,6 +107,8 @@ public class BookmarkId {
         switch (mType) {
             case BookmarkType.PARTNER:
                 return String.valueOf(TYPE_PARTNER);
+            case BookmarkType.READING_LIST:
+                return String.valueOf(TYPE_READING_LIST);
             case BookmarkType.NORMAL:
             default:
                 return "";

@@ -1,8 +1,11 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/common/gpu/context_cache_controller.h"
+
+#include <utility>
+#include <vector>
 
 #include "base/test/test_mock_time_task_runner.h"
 #include "components/viz/test/test_context_provider.h"
@@ -11,7 +14,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPixmap.h"
-#include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 
 using ::testing::Mock;
 using ::testing::StrictMock;
@@ -110,7 +113,7 @@ TEST(ContextCacheControllerTest, ScopedBusyWhileVisible) {
 
   EXPECT_CALL(context_support, SetAggressivelyFreeResources(true));
   EXPECT_CALL(context_support, SetAggressivelyFreeResources(false));
-  task_runner->FastForwardBy(base::TimeDelta::FromSeconds(5));
+  task_runner->FastForwardBy(base::Seconds(5));
   Mock::VerifyAndClearExpectations(&context_support);
 
   EXPECT_CALL(context_support, SetAggressivelyFreeResources(true));
@@ -126,7 +129,7 @@ TEST(ContextCacheControllerTest, ScopedBusyWhileNotVisible) {
 
   // We are not visible, so becoming busy should not trigger an idle callback.
   cache_controller.ClientBecameNotBusy(std::move(busy));
-  task_runner->FastForwardBy(base::TimeDelta::FromSeconds(5));
+  task_runner->FastForwardBy(base::Seconds(5));
 }
 
 TEST(ContextCacheControllerTest, ScopedBusyMulitpleWhileVisible) {
@@ -146,7 +149,7 @@ TEST(ContextCacheControllerTest, ScopedBusyMulitpleWhileVisible) {
   // When we fast forward, only one cleanup should happen.
   EXPECT_CALL(context_support, SetAggressivelyFreeResources(true));
   EXPECT_CALL(context_support, SetAggressivelyFreeResources(false));
-  task_runner->FastForwardBy(base::TimeDelta::FromSeconds(5));
+  task_runner->FastForwardBy(base::Seconds(5));
   Mock::VerifyAndClearExpectations(&context_support);
 
   EXPECT_CALL(context_support, SetAggressivelyFreeResources(true));
@@ -176,8 +179,8 @@ TEST(ContextCacheControllerTest, CheckSkiaResourcePurgeAPI) {
     std::vector<uint8_t> image_data(image_info.computeMinByteSize());
     SkPixmap pixmap(image_info, image_data.data(), image_info.minRowBytes());
     auto image = SkImage::MakeRasterCopy(pixmap);
-    auto image_gpu = image->makeTextureImage(gr_context, nullptr);
-    gr_context->flush();
+    auto image_gpu = image->makeTextureImage(gr_context);
+    gr_context->flushAndSubmit();
   }
 
   // Ensure we see size taken up for the image (now released, but cached for
@@ -188,7 +191,7 @@ TEST(ContextCacheControllerTest, CheckSkiaResourcePurgeAPI) {
   cache_controller.ClientBecameNotBusy(std::move(busy));
   EXPECT_CALL(context_support, SetAggressivelyFreeResources(true));
   EXPECT_CALL(context_support, SetAggressivelyFreeResources(false));
-  task_runner->FastForwardBy(base::TimeDelta::FromSeconds(5));
+  task_runner->FastForwardBy(base::Seconds(5));
   Mock::VerifyAndClearExpectations(&context_support);
 
   // The Skia resource cache should now be empty.

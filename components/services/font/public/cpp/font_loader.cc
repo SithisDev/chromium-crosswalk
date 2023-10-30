@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,20 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/ref_counted.h"
 #include "base/trace_event/trace_event.h"
 #include "components/services/font/public/cpp/font_service_thread.h"
-#include "components/services/font/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "pdf/buildflags.h"
 
 namespace font_service {
 
-FontLoader::FontLoader(service_manager::Connector* connector) {
-  mojom::FontServicePtr font_service;
-  connector->BindInterface(font_service::mojom::kServiceName, &font_service);
-  thread_ = new internal::FontServiceThread(std::move(font_service));
+FontLoader::FontLoader(
+    mojo::PendingRemote<mojom::FontService> pending_font_service)
+    : thread_(base::MakeRefCounted<internal::FontServiceThread>()) {
+  thread_->Init(std::move(pending_font_service));
 }
 
-FontLoader::~FontLoader() {}
+FontLoader::~FontLoader() = default;
 
 bool FontLoader::matchFamilyName(const char family_name[],
                                  SkFontStyle requested,
@@ -99,6 +99,7 @@ bool FontLoader::MatchFontByPostscriptNameOrFullFontName(
       std::move(postscript_name_or_full_font_name), out_identity);
 }
 
+#if BUILDFLAG(ENABLE_PDF)
 void FontLoader::MatchFontWithFallback(std::string family,
                                        bool is_bold,
                                        bool is_italic,
@@ -108,6 +109,7 @@ void FontLoader::MatchFontWithFallback(std::string family,
   thread_->MatchFontWithFallback(std::move(family), is_bold, is_italic, charset,
                                  fallback_family_type, out_font_file_handle);
 }
+#endif  // BUILDFLAG(ENABLE_PDF)
 
 void FontLoader::OnMappedFontFileDestroyed(internal::MappedFontFile* f) {
   TRACE_EVENT1("fonts", "FontLoader::OnMappedFontFileDestroyed", "identity",

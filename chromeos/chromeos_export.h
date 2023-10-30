@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 #endif  // defined(CHROMEOS_IMPLEMENTATION)
 
 #else  // defined(WIN32)
-#if defined(CHROMEOS_IMPLEMENTATION)
+#if defined(CHROMEOS_IMPLEMENTATION) || defined(IS_CHROMEOS_SYSTEM_IMPL)
 #define CHROMEOS_EXPORT __attribute__((visibility("default")))
 #else
 #define CHROMEOS_EXPORT

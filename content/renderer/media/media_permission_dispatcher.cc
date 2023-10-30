@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "media/base/bind_to_current_loop.h"
-#include "third_party/blink/public/web/web_user_gesture_indicator.h"
+#include "third_party/blink/public/web/web_local_frame.h"
 #include "url/gurl.h"
 
 namespace {
@@ -106,8 +106,7 @@ void MediaPermissionDispatcher::RequestPermission(
 
   GetPermissionService()->RequestPermission(
       MediaPermissionTypeToPermissionDescriptor(type),
-      blink::WebUserGestureIndicator::IsProcessingUserGesture(
-          render_frame_->GetWebFrame()),
+      render_frame_->GetWebFrame()->HasTransientUserActivation(),
       base::BindOnce(&MediaPermissionDispatcher::OnPermissionStatus, weak_ptr_,
                      request_id));
 }
@@ -130,9 +129,9 @@ uint32_t MediaPermissionDispatcher::RegisterCallback(
 blink::mojom::PermissionService*
 MediaPermissionDispatcher::GetPermissionService() {
   if (!permission_service_) {
-    render_frame_->GetRemoteInterfaces()->GetInterface(
-        mojo::MakeRequest(&permission_service_));
-    permission_service_.set_connection_error_handler(base::BindOnce(
+    render_frame_->GetBrowserInterfaceBroker()->GetInterface(
+        permission_service_.BindNewPipeAndPassReceiver());
+    permission_service_.set_disconnect_handler(base::BindOnce(
         &MediaPermissionDispatcher::OnConnectionError, base::Unretained(this)));
   }
 

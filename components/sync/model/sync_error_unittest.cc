@@ -1,10 +1,12 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/sync/model/sync_error.h"
 
 #include "base/location.h"
+#include "base/logging.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace syncer {
@@ -12,8 +14,9 @@ namespace syncer {
 namespace {
 
 using std::string;
+using ::testing::HasSubstr;
 
-using SyncErrorTest = testing::Test;
+using SyncErrorTest = ::testing::Test;
 
 TEST_F(SyncErrorTest, Unset) {
   SyncError error;
@@ -130,12 +133,12 @@ TEST_F(SyncErrorTest, ToString) {
   base::Location location = FROM_HERE;
   std::string msg = "test";
   ModelType type = PREFERENCES;
-  std::string expected = std::string(ModelTypeToString(type)) +
+  std::string expected = std::string(ModelTypeToDebugString(type)) +
                          " datatype error was encountered: " + msg;
   LOG(INFO) << "Expect " << expected;
   SyncError error(location, SyncError::DATATYPE_ERROR, msg, type);
   EXPECT_TRUE(error.IsSet());
-  EXPECT_NE(string::npos, error.ToString().find(expected));
+  EXPECT_THAT(error.ToString(), HasSubstr(expected));
 
   SyncError error2;
   EXPECT_FALSE(error2.IsSet());
@@ -143,7 +146,7 @@ TEST_F(SyncErrorTest, ToString) {
 
   error2 = error;
   EXPECT_TRUE(error2.IsSet());
-  EXPECT_NE(string::npos, error.ToString().find(expected));
+  EXPECT_THAT(error.ToString(), HasSubstr(expected));
 }
 
 }  // namespace

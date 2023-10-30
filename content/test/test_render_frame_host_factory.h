@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,7 @@
 
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "content/browser/frame_host/render_frame_host_factory.h"
+#include "content/browser/renderer_host/render_frame_host_factory.h"
 
 namespace content {
 
@@ -23,6 +21,11 @@ namespace content {
 class TestRenderFrameHostFactory : public RenderFrameHostFactory {
  public:
   TestRenderFrameHostFactory();
+
+  TestRenderFrameHostFactory(const TestRenderFrameHostFactory&) = delete;
+  TestRenderFrameHostFactory& operator=(const TestRenderFrameHostFactory&) =
+      delete;
+
   ~TestRenderFrameHostFactory() override;
 
  protected:
@@ -34,12 +37,11 @@ class TestRenderFrameHostFactory : public RenderFrameHostFactory {
       FrameTree* frame_tree,
       FrameTreeNode* frame_tree_node,
       int32_t routing_id,
-      int32_t widget_routing_id,
-      bool hidden,
-      bool renderer_initiated_creation) override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestRenderFrameHostFactory);
+      mojo::PendingAssociatedRemote<mojom::Frame> frame_remote,
+      const blink::LocalFrameToken& frame_token,
+      bool renderer_initiated_creation,
+      RenderFrameHostImpl::LifecycleStateImpl lifecycle_state,
+      scoped_refptr<BrowsingContextState> browsing_context_state) override;
 };
 
 }  // namespace content

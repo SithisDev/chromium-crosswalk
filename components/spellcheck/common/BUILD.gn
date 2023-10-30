@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -34,23 +34,17 @@ source_set("spellcheck_result") {
     "spellcheck_result.h",
   ]
 
-  deps = [
-    "//base",
-  ]
+  deps = [ "//base" ]
 }
 
 mojom("interfaces") {
-  sources = [
-    "spellcheck.mojom",
-  ]
+  sources = [ "spellcheck.mojom" ]
 
   if (has_spellcheck_panel) {
     sources += [ "spellcheck_panel.mojom" ]
   }
 
-  public_deps = [
-    "//mojo/public/mojom/base",
-  ]
+  public_deps = [ "//mojo/public/mojom/base" ]
 
   enabled_features = []
   if (use_browser_spellchecker) {
@@ -60,4 +54,22 @@ mojom("interfaces") {
   if (use_renderer_spellchecker) {
     enabled_features += [ "USE_RENDERER_SPELLCHECKER" ]
   }
+
+  cpp_typemaps = [
+    {
+      types = [
+        {
+          mojom = "spellcheck.mojom.Decoration"
+          cpp = "::SpellCheckResult::Decoration"
+        },
+        {
+          mojom = "spellcheck.mojom.SpellCheckResult"
+          cpp = "::SpellCheckResult"
+        },
+      ]
+      traits_headers = [ "spellcheck_mojom_traits.h" ]
+      traits_sources = [ "spellcheck_mojom_traits.cc" ]
+      traits_public_deps = [ "//components/spellcheck:buildflags" ]
+    },
+  ]
 }

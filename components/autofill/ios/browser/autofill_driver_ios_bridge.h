@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 
 namespace autofill {
 struct FormData;
+class FormStructure;
 }
 
 namespace web {
@@ -24,6 +25,9 @@ class WebFrame;
 
 - (void)fillFormData:(const autofill::FormData&)form
              inFrame:(web::WebFrame*)frame;
+
+- (void)handleParsedForms:(const std::vector<autofill::FormStructure*>&)forms
+                  inFrame:(web::WebFrame*)frame;
 
 - (void)fillFormDataPredictions:
             (const std::vector<autofill::FormDataPredictions>&)forms

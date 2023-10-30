@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,8 @@ namespace syncer {
 // are modelled by {GetUpdates, Commit}x{Request,Response} objects.
 //
 // These objects are intended to be used for displaying information on
-// about:sync.  They should be considered to be immutable and opaque.  No
-// program behavior should depend on their contents.
+// chrome://sync-internals.  They should be considered to be immutable and
+// opaque.  No program behavior should depend on their contents.
 //
 // Each type of request can maintain its own set of additional metadata and have
 // its own custom serialization routines.  For example, the "configure"
@@ -37,7 +37,7 @@ class ProtocolEvent {
 
   // Assembles the data exposed through the ProtocolEvent's interface into a
   // single DictionaryValue.
-  std::unique_ptr<base::DictionaryValue> ToValue(bool include_specifics) const;
+  base::Value::Dict ToValue(bool include_specifics) const;
 
   // Returns the time when the request was sent or received.
   base::Time GetTimestampForTesting() const;

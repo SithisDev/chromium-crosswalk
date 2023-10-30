@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/raw_ptr.h"
 #include "components/gcm_driver/gcm_app_handler.h"
 #include "components/gcm_driver/instance_id/instance_id.h"
 #include "components/offline_pages/core/prefetch/prefetch_gcm_handler.h"
@@ -22,15 +23,11 @@ extern const char kPrefetchingOfflinePagesAppId[];
 class PrefetchGCMAppHandler : public gcm::GCMAppHandler,
                               public PrefetchGCMHandler {
  public:
-  class TokenFactory {
-   public:
-    virtual ~TokenFactory() = default;
+  explicit PrefetchGCMAppHandler();
 
-    virtual void GetGCMToken(
-        instance_id::InstanceID::GetTokenCallback callback) = 0;
-  };
+  PrefetchGCMAppHandler(const PrefetchGCMAppHandler&) = delete;
+  PrefetchGCMAppHandler& operator=(const PrefetchGCMAppHandler&) = delete;
 
-  explicit PrefetchGCMAppHandler(std::unique_ptr<TokenFactory> token_factory);
   ~PrefetchGCMAppHandler() override;
 
   // gcm::GCMAppHandler implementation.
@@ -50,14 +47,10 @@ class PrefetchGCMAppHandler : public gcm::GCMAppHandler,
   void SetService(PrefetchService* service) override;
   gcm::GCMAppHandler* AsGCMAppHandler() override;
   std::string GetAppId() const override;
-  void GetGCMToken(instance_id::InstanceID::GetTokenCallback callback) override;
 
  private:
-  // Not owned, PrefetchService owns |this.
-  PrefetchService* prefetch_service_;
-  std::unique_ptr<TokenFactory> token_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(PrefetchGCMAppHandler);
+  // Not owned, PrefetchService owns |this|.
+  raw_ptr<PrefetchService> prefetch_service_ = nullptr;
 };
 
 }  // namespace offline_pages

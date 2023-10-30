@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,14 @@
 
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
-#include "base/location.h"
+#include "chromecast/media/api/cast_audio_decoder.h"
 #include "chromecast/media/cma/backend/android/audio_sink_android.h"
 #include "chromecast/media/cma/backend/android/audio_sink_manager.h"
-#include "chromecast/media/cma/decoder/cast_audio_decoder.h"
 #include "chromecast/public/media/decoder_config.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "chromecast/public/media/media_pipeline_device_params.h"
 #include "media/base/audio_buffer.h"
+#include "media/base/media_util.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -40,7 +40,11 @@ class AudioDecoderAndroid : public MediaPipelineBackend::AudioDecoder,
  public:
   using BufferStatus = MediaPipelineBackend::BufferStatus;
 
-  explicit AudioDecoderAndroid(MediaPipelineBackendAndroid* backend);
+  AudioDecoderAndroid(MediaPipelineBackendAndroid* backend, bool is_apk_audio);
+
+  AudioDecoderAndroid(const AudioDecoderAndroid&) = delete;
+  AudioDecoderAndroid& operator=(const AudioDecoderAndroid&) = delete;
+
   ~AudioDecoderAndroid() override;
 
   void Initialize();
@@ -59,6 +63,8 @@ class AudioDecoderAndroid : public MediaPipelineBackend::AudioDecoder,
   bool SetConfig(const AudioConfig& config) override;
   bool SetVolume(float multiplier) override;
   RenderingDelay GetRenderingDelay() override;
+  AudioTrackTimestamp GetAudioTrackTimestamp() override;
+  int GetStartThresholdInFrames() override;
 
  private:
   struct RateShifterInfo {
@@ -70,15 +76,13 @@ class AudioDecoderAndroid : public MediaPipelineBackend::AudioDecoder,
   };
 
   // AudioSinkAndroid::Delegate implementation:
-  void OnWritePcmCompletion(BufferStatus status,
-                            const RenderingDelay& delay) override;
+  void OnWritePcmCompletion(BufferStatus status) override;
   void OnSinkError(SinkError error) override;
 
   void CleanUpPcm();
-  void ResetSinkForNewSampleRate(int sample_rate);
+  void ResetSinkForNewConfig(const AudioConfig& config);
   void CreateDecoder();
-  void CreateRateShifter(int samples_per_second);
-  void OnDecoderInitialized(bool success);
+  void CreateRateShifter(const AudioConfig& config);
   void OnBufferDecoded(uint64_t input_bytes,
                        CastAudioDecoder::Status status,
                        const AudioConfig& config,
@@ -92,6 +96,7 @@ class AudioDecoderAndroid : public MediaPipelineBackend::AudioDecoder,
   void UpdateStatistics(Statistics delta);
 
   MediaPipelineBackendAndroid* const backend_;
+  const bool is_apk_audio_;
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   MediaPipelineBackend::Decoder::Delegate* delegate_;
 
@@ -106,21 +111,19 @@ class AudioDecoderAndroid : public MediaPipelineBackend::AudioDecoder,
   std::unique_ptr<CastAudioDecoder> decoder_;
 
   std::unique_ptr<::media::AudioRendererAlgorithm> rate_shifter_;
+  ::media::NullMediaLog media_log_;
   base::circular_deque<RateShifterInfo> rate_shifter_info_;
   std::unique_ptr<::media::AudioBus> rate_shifter_output_;
 
   int64_t current_pts_;
 
   ManagedAudioSink sink_;
-  RenderingDelay last_sink_delay_;
   int64_t pending_output_frames_;
   float volume_multiplier_;
 
   scoped_refptr<::media::AudioBufferMemoryPool> pool_;
 
   base::WeakPtrFactory<AudioDecoderAndroid> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioDecoderAndroid);
 };
 
 }  // namespace media

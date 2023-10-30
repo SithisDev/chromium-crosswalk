@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,18 @@ struct wl_resource;
 
 namespace exo {
 namespace wayland {
+class SerialTracker;
 
 // Pointer delegate class that accepts events for surfaces owned by the same
 // client as a pointer resource.
 class WaylandPointerDelegate : public WaylandInputDelegate,
                                public PointerDelegate {
  public:
-  explicit WaylandPointerDelegate(wl_resource* pointer_resource);
+  explicit WaylandPointerDelegate(wl_resource* pointer_resource,
+                                  SerialTracker* serial_tracker);
+
+  WaylandPointerDelegate(const WaylandPointerDelegate&) = delete;
+  WaylandPointerDelegate& operator=(const WaylandPointerDelegate&) = delete;
 
   // Overridden from PointerDelegate:
   void OnPointerDestroying(Pointer* pointer) override;
@@ -43,13 +48,11 @@ class WaylandPointerDelegate : public WaylandInputDelegate,
   // The client who own this pointer instance.
   wl_client* client() const;
 
-  // Returns the next serial to use for pointer events.
-  uint32_t next_serial() const;
-
   // The pointer resource associated with the pointer.
   wl_resource* const pointer_resource_;
 
-  DISALLOW_COPY_AND_ASSIGN(WaylandPointerDelegate);
+  // Owned by Server, which always outlives this delegate.
+  SerialTracker* const serial_tracker_;
 };
 
 }  // namespace wayland

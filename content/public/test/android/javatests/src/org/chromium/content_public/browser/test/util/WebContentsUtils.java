@@ -1,21 +1,28 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.content_public.browser.test.util;
 
+import androidx.annotation.Nullable;
+
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.content.browser.input.SelectPopup;
 import org.chromium.content.browser.selection.SelectionPopupControllerImpl;
 import org.chromium.content.browser.webcontents.WebContentsImpl;
 import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.ImeAdapter;
+import org.chromium.content_public.browser.JavaScriptCallback;
 import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.ViewEventSink;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.WebContentsObserver;
 
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Collection of test-only WebContents utilities.
@@ -53,12 +60,10 @@ public class WebContentsUtils {
      * Issues a fake notification about the renderer being killed.
      *
      * @param webContents The WebContents in use.
-     * @param wasOomProtected True if the renderer was protected from the OS out-of-memory killer
-     *                        (e.g. renderer for the currently selected tab)
      */
-    public static void simulateRendererKilled(WebContents webContents, boolean wasOomProtected) {
-        TestThreadUtils.runOnUiThreadBlocking(() ->
-            ((WebContentsImpl) webContents).simulateRendererKilledForTesting(wasOomProtected));
+    public static void simulateRendererKilled(WebContents webContents) {
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> ((WebContentsImpl) webContents).simulateRendererKilledForTesting());
     }
 
     /**
@@ -105,10 +110,11 @@ public class WebContentsUtils {
      *
      * @param script The Javascript to execute.
      */
-    public static void evaluateJavaScriptWithUserGesture(WebContents webContents, String script) {
+    public static void evaluateJavaScriptWithUserGesture(
+            WebContents webContents, String script, @Nullable JavaScriptCallback callback) {
         if (script == null) return;
         TestThreadUtils.runOnUiThreadBlocking(
-                () -> nativeEvaluateJavaScriptWithUserGesture(webContents, script));
+                () -> nativeEvaluateJavaScriptWithUserGesture(webContents, script, callback));
     }
 
     /**
@@ -122,9 +128,44 @@ public class WebContentsUtils {
         return SelectionPopupControllerImpl.createForTesting(webContents);
     }
 
+    /**
+     * Checks if the given WebContents has a valid {@link ActionMode.Callback} set in place.
+     * @return {@code true} if WebContents (its SelectionPopupController) has a valid
+     *         action mode callback object.
+     */
+    public static boolean isActionModeSupported(WebContents webContents) {
+        SelectionPopupControllerImpl controller =
+                ((SelectionPopupControllerImpl) SelectionPopupController.fromWebContents(
+                        webContents));
+        return controller.isActionModeSupported();
+    }
+
+    /** Cause the renderer process for the given WebContents to crash. */
+    public static void crashTabAndWait(WebContents webContents) throws TimeoutException {
+        CallbackHelper callbackHelper = new CallbackHelper();
+        WebContentsObserver observer = new WebContentsObserver() {
+            @Override
+            public void renderProcessGone() {
+                callbackHelper.notifyCalled();
+            }
+        };
+        TestThreadUtils.runOnUiThreadBlocking(() -> {
+            webContents.addObserver(observer);
+            nativeCrashTab(webContents);
+        });
+        callbackHelper.waitForFirst();
+        TestThreadUtils.runOnUiThreadBlocking(() -> { webContents.removeObserver(observer); });
+    }
+
+    @CalledByNative
+    private static void onEvaluateJavaScriptResult(String jsonResult, JavaScriptCallback callback) {
+        callback.handleJavaScriptResult(jsonResult);
+    }
+
     private static native void nativeReportAllFrameSubmissions(
             WebContents webContents, boolean enabled);
     private static native RenderFrameHost nativeGetFocusedFrame(WebContents webContents);
     private static native void nativeEvaluateJavaScriptWithUserGesture(
-            WebContents webContents, String script);
+            WebContents webContents, String script, @Nullable JavaScriptCallback callback);
+    private static native void nativeCrashTab(WebContents webContents);
 }

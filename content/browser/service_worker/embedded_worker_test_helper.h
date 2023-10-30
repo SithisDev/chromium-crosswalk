@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,18 +11,29 @@
 #include "base/callback_forward.h"
 #include "base/containers/flat_set.h"
 #include "base/containers/unique_ptr_adapters.h"
-#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
+#include "components/services/storage/public/mojom/service_worker_storage_control.mojom.h"
 #include "content/browser/service_worker/fake_embedded_worker_instance_client.h"
 #include "content/browser/service_worker/fake_service_worker.h"
 #include "content/browser/service_worker/service_worker_test_utils.h"
+#include "content/browser/service_worker/service_worker_version.h"
 #include "content/browser/url_loader_factory_getter.h"
-#include "net/http/http_response_info.h"
+#include "content/test/fake_network_url_loader_factory.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "storage/browser/test/mock_quota_manager_proxy.h"
 #include "third_party/blink/public/mojom/service_worker/embedded_worker.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker.mojom.h"
 
+namespace network {
+class WeakWrapperSharedURLLoaderFactory;
+}  // namespace network
+
+namespace storage {
+class ServiceWorkerStorageControlImpl;
+}  // namespace storage
+
 namespace content {
 
-class FakeNetworkURLLoaderFactory;
 class FakeServiceWorker;
 class MockRenderProcessHost;
 class ServiceWorkerContextCore;
@@ -74,11 +85,20 @@ class EmbeddedWorkerTestHelper {
   // If |user_data_directory| is empty, the context makes storage stuff in
   // memory.
   explicit EmbeddedWorkerTestHelper(const base::FilePath& user_data_directory);
+  EmbeddedWorkerTestHelper(
+      const base::FilePath& user_data_directory,
+      scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy);
+
+  EmbeddedWorkerTestHelper(const EmbeddedWorkerTestHelper&) = delete;
+  EmbeddedWorkerTestHelper& operator=(const EmbeddedWorkerTestHelper&) = delete;
+
   virtual ~EmbeddedWorkerTestHelper();
 
   ServiceWorkerContextCore* context();
   ServiceWorkerContextWrapper* context_wrapper() { return wrapper_.get(); }
   void ShutdownContext();
+
+  void SimulateStorageRestartForTesting();
 
   int GetNextThreadId() { return next_thread_id_++; }
 
@@ -90,9 +110,16 @@ class EmbeddedWorkerTestHelper {
   // Only used for tests that force creating a new render process.
   int new_render_process_id() const { return new_mock_render_process_id_; }
 
+  storage::MockQuotaManager* quota_manager() { return quota_manager_.get(); }
+
+  storage::MockQuotaManagerProxy* quota_manager_proxy() {
+    return quota_manager_proxy_.get();
+  }
+
   TestBrowserContext* browser_context() { return browser_context_.get(); }
 
-  static net::HttpResponseInfo CreateHttpResponseInfo();
+  static std::unique_ptr<ServiceWorkerVersion::MainScriptResponse>
+  CreateMainScriptResponse();
 
   URLLoaderFactoryGetter* url_loader_factory_getter() {
     return url_loader_factory_getter_.get();
@@ -103,16 +130,16 @@ class EmbeddedWorkerTestHelper {
   void SetNetworkFactory(network::mojom::URLLoaderFactory* factory);
 
   // Adds the given client to the pending queue. The next time this helper
-  // receives a blink::mojom::EmbeddedWorkerInstanceClientRequest request (i.e.,
-  // on the next start worker attempt), it uses the first client from this
-  // queue.
+  // receives a
+  // mojo::PendingReceiver<blink::mojom::EmbeddedWorkerInstanceClient> (i.e., on
+  // the next start worker attempt), it uses the first client from this queue.
   void AddPendingInstanceClient(
       std::unique_ptr<FakeEmbeddedWorkerInstanceClient> instance_client);
 
   // Adds the given service worker to the pending queue. The next time this
-  // helper receives a blink::mojom::ServiceWorkerRequest request (i.e., on the
-  // next start worker attempt), it uses the first service worker from this
-  // queue.
+  // helper receives a mojo::PendingReceiver<blink::mojom::ServiceWorker>
+  // receiver (i.e., on the next start worker attempt), it uses the first
+  // service worker from this queue.
   void AddPendingServiceWorker(
       std::unique_ptr<FakeServiceWorker> service_worker);
 
@@ -131,11 +158,16 @@ class EmbeddedWorkerTestHelper {
   // The following are exposed to public so the fake embedded worker and service
   // worker implementations and their subclasses can call them.
 
-  // Called when |request| is received. It takes the object from a previous
+  // Called when |receiver| is received. It takes the object from a previous
   // AddPending*() call if any and calls Create*() otherwise.
-  void OnInstanceClientRequest(
-      blink::mojom::EmbeddedWorkerInstanceClientRequest request);
-  void OnServiceWorkerRequest(blink::mojom::ServiceWorkerRequest request);
+  void OnInstanceClientReceiver(
+      mojo::PendingReceiver<blink::mojom::EmbeddedWorkerInstanceClient>
+          receiver);
+  void OnServiceWorkerReceiver(
+      mojo::PendingReceiver<blink::mojom::ServiceWorker> receiver);
+  void OnInstanceClientRequest(mojo::ScopedMessagePipeHandle request_handle);
+  void OnServiceWorkerRequest(
+      mojo::PendingReceiver<blink::mojom::ServiceWorker> receiver);
 
   // Called by the fakes to destroy themselves.
   void RemoveInstanceClient(FakeEmbeddedWorkerInstanceClient* instance_client);
@@ -155,15 +187,25 @@ class EmbeddedWorkerTestHelper {
   virtual std::unique_ptr<FakeServiceWorker> CreateServiceWorker();
 
  private:
-  class MockRendererInterface;
+  void BindStorageControl(
+      mojo::PendingReceiver<storage::mojom::ServiceWorkerStorageControl>
+          receiver);
 
   std::unique_ptr<TestBrowserContext> browser_context_;
   std::unique_ptr<MockRenderProcessHost> render_process_host_;
   std::unique_ptr<MockRenderProcessHost> new_render_process_host_;
+  scoped_refptr<storage::MockQuotaManager> quota_manager_;
+  scoped_refptr<storage::MockQuotaManagerProxy> quota_manager_proxy_;
 
   scoped_refptr<ServiceWorkerContextWrapper> wrapper_;
 
-  std::unique_ptr<MockRendererInterface> mock_renderer_interface_;
+  FakeNetworkURLLoaderFactory fake_loader_factory_;
+  scoped_refptr<network::WeakWrapperSharedURLLoaderFactory>
+      fake_loader_factory_wrapper_;
+
+  const base::FilePath user_data_directory_;
+  scoped_refptr<base::SequencedTaskRunner> database_task_runner_;
+  std::unique_ptr<storage::ServiceWorkerStorageControlImpl> storage_control_;
 
   base::queue<std::unique_ptr<FakeEmbeddedWorkerInstanceClient>>
       pending_embedded_worker_instance_clients_;
@@ -180,9 +222,6 @@ class EmbeddedWorkerTestHelper {
   int new_mock_render_process_id_;
 
   scoped_refptr<URLLoaderFactoryGetter> url_loader_factory_getter_;
-  std::unique_ptr<FakeNetworkURLLoaderFactory> default_network_loader_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(EmbeddedWorkerTestHelper);
 };
 
 template <typename MockType, typename... Args>

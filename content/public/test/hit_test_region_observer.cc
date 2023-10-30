@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,7 @@
 #include "components/viz/host/hit_test/hit_test_query.h"
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "content/browser/compositor/surface_utils.h"
-#include "content/browser/frame_host/cross_process_frame_connector.h"
-#include "content/browser/frame_host/render_frame_host_impl.h"
-#include "content/browser/renderer_host/frame_connector_delegate.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/renderer_host/render_widget_host_view_child_frame.h"
@@ -23,7 +21,7 @@
 
 namespace content {
 
-void WaitForHitTestDataOrChildSurfaceReady(RenderFrameHost* child_frame) {
+void WaitForHitTestData(RenderFrameHost* child_frame) {
   RenderWidgetHostViewBase* child_view =
       static_cast<RenderFrameHostImpl*>(child_frame)
           ->GetRenderWidgetHost()
@@ -33,7 +31,7 @@ void WaitForHitTestDataOrChildSurfaceReady(RenderFrameHost* child_frame) {
   observer.WaitForHitTestData();
 }
 
-void WaitForHitTestDataOrGuestSurfaceReady(WebContents* guest_web_contents) {
+void WaitForHitTestData(WebContents* guest_web_contents) {
   DCHECK(static_cast<RenderWidgetHostViewBase*>(
              guest_web_contents->GetRenderWidgetHostView())
              ->IsRenderWidgetHostViewChildFrame());

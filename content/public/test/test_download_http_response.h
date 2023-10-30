@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,15 @@
 #include <string>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/containers/queue.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_response_info.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace net {
 class HttpByteRange;
@@ -32,24 +33,35 @@ class TestDownloadHttpResponse {
   static GURL GetNextURLForDownload();
 
   // OnPauseHandler can be used to pause the response until the enclosed
-  // callback is called.
-  using OnPauseHandler = base::Callback<void(const base::Closure&)>;
+  // callback is called. The OnPauseHandler is copyable for Parameters
+  // objects to be used repeatedly, though it will only be called once when
+  // given to a TestDownloadHttpResponse.
+  using OnPauseHandler = base::RepeatingCallback<void(base::OnceClosure)>;
 
   // Called when an injected error triggers.
-  using InjectErrorCallback = base::Callback<void(int64_t, int64_t)>;
+  using InjectErrorCallback = base::RepeatingCallback<void(int64_t, int64_t)>;
 
   struct HttpResponseData {
     HttpResponseData() = default;
     HttpResponseData(int64_t min_offset,
                      int64_t max_offset,
-                     const std::string& response);
+                     const std::string& response,
+                     bool is_transient,
+                     bool delay_response);
     HttpResponseData(const HttpResponseData& other) = default;
+    HttpResponseData& operator=(const HttpResponseData& other) = default;
 
     // The range for first byte position in range header to use this response.
     int64_t min_offset = -1;
     int64_t max_offset = -1;
 
     std::string response;
+
+    // Whether the response data is transient and will be invalidated after
+    // sending once.
+    bool is_transient = false;
+
+    bool delay_response = false;
   };
 
   struct Parameters {
@@ -65,21 +77,27 @@ class TestDownloadHttpResponse {
     // Last-Modified header and the server supports byte range requests.
     Parameters();
 
-    // Parameters is expected to be copyable and moveable.
-    Parameters(Parameters&&);
     Parameters(const Parameters&);
-    Parameters& operator=(Parameters&&);
     Parameters& operator=(const Parameters&);
+
     ~Parameters();
 
     // Clears the errors in injected_errors.
     void ClearInjectedErrors();
 
     // Sets the response for range request when the starting offset of
-    // the request falls into [min_offset, max_offset].
+    // the request falls into [min_offset, max_offset]. If |is_transient|
+    // is true, |response| will only be sent once for the given range. And
+    // later responses will be calculated from the parameters. If
+    // |is_transient| is false, the |response| will be applied to the
+    // given range request forever.
+    // if |delay_response| is true, the response body will be sent when
+    // SendDelayedResponse() is called.
     void SetResponseForRangeRequest(int64_t min_offset,
                                     int64_t max_offset,
-                                    const std::string& response);
+                                    const std::string& response,
+                                    bool is_transient = false,
+                                    bool delay_response = false);
 
     // Contents of the ETag header field of the response.  No Etag header is
     // sent if this field is empty.
@@ -166,13 +184,14 @@ class TestDownloadHttpResponse {
     // Callback to run when an injected error triggers.
     InjectErrorCallback inject_error_cb;
 
-    // If on_pause_handler is valid, it will be invoked when the
-    // |pause_condition| is reached.
+    // If on_pause_handler is valid, it will be invoked once when the
+    // |pause_condition| is reached. It is not a OnceCallback to allow
+    // Parameters to be reused.
     OnPauseHandler on_pause_handler;
 
     // Offset of body to pause the response sending. A -1 offset will pause
     // the response before header is sent.
-    base::Optional<int64_t> pause_offset;
+    absl::optional<int64_t> pause_offset;
   };
 
   // Information about completed requests.
@@ -189,7 +208,7 @@ class TestDownloadHttpResponse {
 
   // Called when response are sent to the client.
   using OnResponseSentCallback =
-      base::Callback<void(std::unique_ptr<CompletedRequest>)>;
+      base::OnceCallback<void(std::unique_ptr<CompletedRequest>)>;
 
   // Generate a pseudo random pattern.
   //
@@ -230,21 +249,26 @@ class TestDownloadHttpResponse {
   static void StartServingStaticResponse(const std::string& headers,
                                          const GURL& url);
 
-  TestDownloadHttpResponse(
-      const net::test_server::HttpRequest& request,
-      const Parameters& parameters,
-      const OnResponseSentCallback& on_response_sent_callback);
+  TestDownloadHttpResponse(const net::test_server::HttpRequest& request,
+                           const Parameters& parameters,
+                           OnResponseSentCallback on_response_sent_callback);
+
+  TestDownloadHttpResponse(const TestDownloadHttpResponse&) = delete;
+  TestDownloadHttpResponse& operator=(const TestDownloadHttpResponse&) = delete;
+
   ~TestDownloadHttpResponse();
 
   // Creates a shim HttpResponse object for embedded test server. This life time
   // of the object returned is short.
   std::unique_ptr<net::test_server::HttpResponse> CreateResponseForTestServer();
 
-  // Starts to send the response. |send| and |done| are functions to directly
-  // operate on HTTP connection in embedded test server, and will out live the
-  // shim HttpResponse object created by |CreateResponseForTestServer|.
-  void SendResponse(const net::test_server::SendBytesCallback& send,
-                    const net::test_server::SendCompleteCallback& done);
+  // Starts to send the response. |delegate| owns the shim HttpResponse object
+  // created by |CreateResponseForTestServer| and will outlive it.
+  void SendResponse(
+      base::WeakPtr<net::test_server::HttpResponseDelegate> delegate);
+
+  // Runs |delayed_response_callback_| to send the delayed response.
+  void SendDelayedResponse();
 
  private:
   // Parses the request headers.
@@ -265,9 +289,9 @@ class TestDownloadHttpResponse {
   std::string GetDefaultResponseHeaders();
 
   // Gets response header and body for range request starts from
-  // |first_byte_position|.
+  // |first_byte_position|, and whether to delay sending the response.
   // Returns false if no specific responses are found.
-  bool GetResponseForRangeRequest(std::string* output);
+  bool GetResponseForRangeRequest(std::string* output, bool* delay_response);
 
   // Gets response body chunk based on random seed in |parameters_|.
   std::string GetResponseChunk(const net::HttpByteRange& buffer_range);
@@ -287,12 +311,12 @@ class TestDownloadHttpResponse {
   // Will pause or throw error based on configuration in |paramters_|.
   void SendResponseBodyChunk();
   void SendBodyChunkInternal(const net::HttpByteRange& buffer_range,
-                             const base::RepeatingClosure& next);
-  net::test_server::SendCompleteCallback SendNextBodyChunkClosure();
+                             base::OnceClosure next);
+  base::OnceClosure SendNextBodyChunkClosure();
 
   // Generate CompletedRequest as result.
   void GenerateResult();
-  net::test_server::SendCompleteCallback GenerateResultClosure();
+  base::OnceClosure GenerateResultClosure();
 
   // The parsed range of the HTTP request. The last byte position can be larger
   // than the file size.
@@ -312,21 +336,22 @@ class TestDownloadHttpResponse {
   // Request received from the client.
   net::test_server::HttpRequest request_;
 
-  // The function to send bytes on the network.
-  net::test_server::SendBytesCallback bytes_sender_;
+  // The delegate responsible for sending bytes and finishing the connection
+  base::WeakPtr<net::test_server::HttpResponseDelegate> response_delegate_ =
+      nullptr;
 
   // The number of bytes transferred.
   int64_t transferred_bytes_;
 
-  // The callback that will close the HTTP connection to the test server.
-  net::test_server::SendCompleteCallback done_callback_;
-
   // Callback to run when the response is sent.
   OnResponseSentCallback on_response_sent_callback_;
 
-  base::WeakPtrFactory<TestDownloadHttpResponse> weak_ptr_factory_{this};
+  // If |delay_response| is true in SetResponseForRangeRequest(), this
+  // callback will be used to send the delayed response when
+  // SendDelayedResponse() is called.
+  base::OnceClosure delayed_response_callback_;
 
-  DISALLOW_COPY_AND_ASSIGN(TestDownloadHttpResponse);
+  base::WeakPtrFactory<TestDownloadHttpResponse> weak_ptr_factory_{this};
 };
 
 // Class for creating and monitoring the completed response from the server.
@@ -345,10 +370,15 @@ class TestDownloadHttpResponse {
 class TestDownloadResponseHandler {
  public:
   std::unique_ptr<net::test_server::HttpResponse> HandleTestDownloadRequest(
-      const TestDownloadHttpResponse::OnResponseSentCallback& callback,
+      TestDownloadHttpResponse::OnResponseSentCallback callback,
       const net::test_server::HttpRequest& request);
 
   TestDownloadResponseHandler();
+
+  TestDownloadResponseHandler(const TestDownloadResponseHandler&) = delete;
+  TestDownloadResponseHandler& operator=(const TestDownloadResponseHandler&) =
+      delete;
+
   ~TestDownloadResponseHandler();
 
   // Register to the embedded test |server|.
@@ -359,6 +389,9 @@ class TestDownloadResponseHandler {
 
   // Wait for a certain number of requests to complete.
   void WaitUntilCompletion(size_t request_count);
+
+  // Called to dispatch all delayed responses if there are any.
+  void DispatchDelayedResponses();
 
   using CompletedRequests =
       std::vector<std::unique_ptr<TestDownloadHttpResponse::CompletedRequest>>;
@@ -373,8 +406,6 @@ class TestDownloadResponseHandler {
   std::unique_ptr<base::RunLoop> run_loop_;
   scoped_refptr<base::SingleThreadTaskRunner> server_task_runner_;
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(TestDownloadResponseHandler);
 };
 
 }  // namespace content

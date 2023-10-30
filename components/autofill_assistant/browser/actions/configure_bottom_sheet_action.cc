@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/logging.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/viewport_mode.h"
@@ -14,7 +15,7 @@ namespace autofill_assistant {
 
 ConfigureBottomSheetAction::ConfigureBottomSheetAction(ActionDelegate* delegate,
                                                        const ActionProto& proto)
-    : Action(delegate, proto), weak_ptr_factory_(this) {}
+    : Action(delegate, proto) {}
 
 ConfigureBottomSheetAction::~ConfigureBottomSheetAction() {}
 
@@ -42,8 +43,7 @@ void ConfigureBottomSheetAction::InternalProcessAction(
     if (expect_resize) {
       callback_ = std::move(callback);
 
-      timer_.Start(FROM_HERE,
-                   base::TimeDelta::FromMilliseconds(proto.resize_timeout_ms()),
+      timer_.Start(FROM_HERE, base::Milliseconds(proto.resize_timeout_ms()),
                    base::BindOnce(&ConfigureBottomSheetAction::OnTimeout,
                                   weak_ptr_factory_.GetWeakPtr()));
 
@@ -71,6 +71,11 @@ void ConfigureBottomSheetAction::InternalProcessAction(
     delegate_->SetPeekMode(proto.peek_mode());
   }
 
+  if (proto.has_expand() && proto.expand())
+    delegate_->ExpandBottomSheet();
+  if (proto.has_collapse() && proto.collapse())
+    delegate_->CollapseBottomSheet();
+
   if (callback) {
     UpdateProcessedAction(OkClientStatus());
     std::move(callback).Run(std::move(processed_action_proto_));
@@ -91,9 +96,8 @@ void ConfigureBottomSheetAction::OnTimeout() {
   if (!callback_)
     return;
 
-  DVLOG(2)
-      << __func__
-      << " Timed out waiting for window height change. Continuing anyways.";
+  VLOG(2) << __func__
+          << " Timed out waiting for window height change. Continuing anyways.";
   UpdateProcessedAction(OkClientStatus());
   processed_action_proto_->mutable_status_details()->set_original_status(
       ProcessedActionStatusProto::TIMED_OUT);

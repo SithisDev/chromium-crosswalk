@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,14 @@ namespace syncer {
 
 // Enumerate the main sources that can turn off sync. This enum is used to
 // back a UMA histogram and should be treated as append-only.
-//
-// A Java counterpart will be generated for this enum.
-// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.sync
 enum StopSource {
-  PROFILE_DESTRUCTION,   // The user destroyed the profile.
-  SIGN_OUT,              // The user signed out of Chrome.
-  BIRTHDAY_ERROR,        // A dashboard stop-and-clear on the server.
-  CHROME_SYNC_SETTINGS,  // The on/off switch in settings for mobile Chrome.
-  ANDROID_CHROME_SYNC,   // Android's sync setting for Chrome.
-  ANDROID_MASTER_SYNC,   // Android's master sync setting.
-  STOP_SOURCE_LIMIT,
+  // Deprecated: PROFILE_DESTRUCTION = 0,
+  SIGN_OUT = 1,              // The user signed out of Chrome.
+  BIRTHDAY_ERROR = 2,        // A dashboard stop-and-clear on the server.
+  CHROME_SYNC_SETTINGS = 3,  // The on/off switch in settings for mobile Chrome.
+  // Deprecated: ANDROID_CHROME_SYNC = 4,
+  // Deprecated: ANDROID_MASTER_SYNC = 5,
+  STOP_SOURCE_LIMIT = 6,
 };
 
 }  // namespace syncer

@@ -1,6 +1,9 @@
-document
-++form
-++++group Name='Browser Engines:'
-++++++description
-++++++textbox
-++++++textbox
+Document
+++Group
+++++Group Name='Browser Engines:'
+++++++Text IsControlElement=false
+++++++++Text Name='Browser Engines:'
+++++++Text Name='Browser: '
+++++++Edit
+++++++Text Name=' Rendering Engine: '
+++++++Edit

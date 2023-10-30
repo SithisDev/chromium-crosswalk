@@ -1,9 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_WEB_MODAL_WEB_CONTENTS_MODAL_DIALOG_MANAGER_DELEGATE_H_
 #define COMPONENTS_WEB_MODAL_WEB_CONTENTS_MODAL_DIALOG_MANAGER_DELEGATE_H_
+
+#include "components/web_modal/web_modal_export.h"
 
 namespace content {
 class WebContents;
@@ -13,7 +15,7 @@ namespace web_modal {
 
 class WebContentsModalDialogHost;
 
-class WebContentsModalDialogManagerDelegate {
+class WEB_MODAL_EXPORT WebContentsModalDialogManagerDelegate {
  public:
   // Changes the blocked state of |web_contents|. WebContentses are considered
   // blocked while displaying a web contents modal dialog. During that time

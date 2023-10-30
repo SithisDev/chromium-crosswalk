@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,6 @@ Entry::Entry()
       bytes_uploaded(0u),
       attempt_count(0),
       resumption_count(0),
-      cleanup_attempt_count(0),
       has_upload_data(false),
       did_received_response(false),
       require_response_headers(true) {}
@@ -36,11 +35,11 @@ Entry::Entry(const DownloadParams& params)
       create_time(base::Time::Now()),
       scheduling_params(params.scheduling_params),
       request_params(params.request_params),
+      custom_data(params.custom_data),
       bytes_downloaded(0u),
       bytes_uploaded(0u),
       attempt_count(0),
       resumption_count(0),
-      cleanup_attempt_count(0),
       has_upload_data(false),
       traffic_annotation(params.traffic_annotation),
       did_received_response(false),
@@ -68,14 +67,14 @@ bool Entry::operator==(const Entry& other) const {
          bytes_uploaded == other.bytes_uploaded &&
          attempt_count == other.attempt_count &&
          resumption_count == other.resumption_count &&
-         cleanup_attempt_count == other.cleanup_attempt_count &&
          has_upload_data == other.has_upload_data &&
          traffic_annotation == other.traffic_annotation &&
          url_chain == other.url_chain &&
          AreHeadersEqual(response_headers.get(),
                          other.response_headers.get()) &&
          did_received_response == other.did_received_response &&
-         require_response_headers == other.require_response_headers;
+         require_response_headers == other.require_response_headers &&
+         custom_data == other.custom_data;
 }
 
 size_t Entry::EstimateMemoryUsage() const {
@@ -85,7 +84,8 @@ size_t Entry::EstimateMemoryUsage() const {
          base::trace_event::EstimateMemoryUsage(request_params.method) +
          base::trace_event::EstimateMemoryUsage(
              request_params.request_headers.ToString()) +
-         base::trace_event::EstimateMemoryUsage(target_file_path.value());
+         base::trace_event::EstimateMemoryUsage(target_file_path.value()) +
+         base::trace_event::EstimateMemoryUsage(custom_data);
 }
 
 }  // namespace download

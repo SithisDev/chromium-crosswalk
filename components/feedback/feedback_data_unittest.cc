@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,13 @@
 #include <memory>
 
 #include "base/bind.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "base/test/task_environment.h"
 #include "components/feedback/feedback_report.h"
 #include "components/feedback/feedback_uploader.h"
-#include "components/feedback/feedback_uploader_factory.h"
 #include "components/prefs/testing_pref_service.h"
-#include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -31,22 +30,32 @@ constexpr char kFileData[] = "File Data";
 class MockUploader : public FeedbackUploader {
  public:
   MockUploader(
+      bool is_off_the_record,
+      const base::FilePath& state_path,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      content::BrowserContext* context,
       base::OnceClosure on_report_sent)
-      : FeedbackUploader(url_loader_factory,
-                         context,
-                         FeedbackUploaderFactory::CreateUploaderTaskRunner()),
+      : FeedbackUploader(is_off_the_record, state_path, url_loader_factory),
         on_report_sent_(std::move(on_report_sent)) {}
-  ~MockUploader() override {}
+
+  MockUploader(const MockUploader&) = delete;
+  MockUploader& operator=(const MockUploader&) = delete;
 
   // feedback::FeedbackUploader:
   void StartDispatchingReport() override { std::move(on_report_sent_).Run(); }
 
+  void QueueReport(std::unique_ptr<std::string> data, bool has_email) override {
+    report_had_email_ = has_email;
+    called_queue_report_ = true;
+    FeedbackUploader::QueueReport(std::move(data), has_email);
+  }
+
+  bool called_queue_report() const { return called_queue_report_; }
+  bool report_had_email() const { return report_had_email_; }
+
  private:
   base::OnceClosure on_report_sent_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockUploader);
+  bool called_queue_report_ = false;
+  bool report_had_email_ = false;
 };
 
 }  // namespace
@@ -56,19 +65,22 @@ class FeedbackDataTest : public testing::Test {
   FeedbackDataTest()
       : test_shared_loader_factory_(
             base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
-                &test_url_loader_factory_)),
-        uploader_(test_shared_loader_factory_,
-                  &context_,
-                  base::BindOnce(&FeedbackDataTest::set_send_report_callback,
-                                 base::Unretained(this))),
-        data_(base::MakeRefCounted<FeedbackData>(&uploader_)) {}
-  ~FeedbackDataTest() override = default;
+                &test_url_loader_factory_)) {
+    EXPECT_TRUE(scoped_temp_dir_.CreateUniqueTempDir());
+    uploader_ = std::make_unique<MockUploader>(
+        /*is_off_the_record=*/false, scoped_temp_dir_.GetPath(),
+        test_shared_loader_factory_,
+        base::BindOnce(&FeedbackDataTest::set_send_report_callback,
+                       base::Unretained(this)));
+    base::WeakPtr<feedback::FeedbackUploader> wkptr_uploader =
+        base::AsWeakPtr(uploader_.get());
+    data_ =
+        base::MakeRefCounted<FeedbackData>(std::move(wkptr_uploader), nullptr);
+  }
 
   void Send() {
-    bool attached_file_completed =
-        data_->attached_file_uuid().empty();
-    bool screenshot_completed =
-        data_->screenshot_uuid().empty();
+    bool attached_file_completed = data_->attached_file_uuid().empty();
+    bool screenshot_completed = data_->screenshot_uuid().empty();
 
     if (screenshot_completed && attached_file_completed) {
       data_->OnFeedbackPageDataComplete();
@@ -76,20 +88,23 @@ class FeedbackDataTest : public testing::Test {
   }
 
   void RunMessageLoop() {
-    run_loop_.reset(new base::RunLoop());
+    run_loop_ = std::make_unique<base::RunLoop>();
     quit_closure_ = run_loop_->QuitClosure();
+    Send();
     run_loop_->Run();
   }
 
-  void set_send_report_callback() { quit_closure_.Run(); }
+  void set_send_report_callback() { std::move(quit_closure_).Run(); }
 
-  base::Closure quit_closure_;
+  base::test::TaskEnvironment task_environment_{
+      base::test::TaskEnvironment::TimeSource::MOCK_TIME};
+
+  base::OnceClosure quit_closure_;
   std::unique_ptr<base::RunLoop> run_loop_;
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  base::ScopedTempDir scoped_temp_dir_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
-  content::TestBrowserContext context_;
-  MockUploader uploader_;
+  std::unique_ptr<MockUploader> uploader_;
   scoped_refptr<FeedbackData> data_;
 };
 
@@ -97,9 +112,23 @@ TEST_F(FeedbackDataTest, ReportSending) {
   data_->SetAndCompressHistograms(kHistograms);
   data_->set_image(kImageData);
   data_->AttachAndCompressFileData(kFileData);
-  Send();
   RunMessageLoop();
+  EXPECT_EQ(data_->user_email(), "");
   EXPECT_TRUE(data_->IsDataComplete());
+  EXPECT_TRUE(uploader_->called_queue_report());
+  EXPECT_FALSE(uploader_->report_had_email());
+}
+
+TEST_F(FeedbackDataTest, ReportSendingWithEmail) {
+  data_->SetAndCompressHistograms(kHistograms);
+  data_->set_image(kImageData);
+  data_->AttachAndCompressFileData(kFileData);
+  data_->set_user_email("foo@bar.com");
+  RunMessageLoop();
+  EXPECT_EQ(data_->user_email(), "foo@bar.com");
+  EXPECT_TRUE(data_->IsDataComplete());
+  EXPECT_TRUE(uploader_->called_queue_report());
+  EXPECT_TRUE(uploader_->report_had_email());
 }
 
 }  // namespace feedback

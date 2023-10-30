@@ -1,12 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chromecast/media/audio/cast_audio_mixer.h"
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
 #include "chromecast/media/audio/cast_audio_manager.h"
 #include "chromecast/media/audio/cast_audio_output_stream.h"
 #include "media/base/audio_timestamp_helper.h"
@@ -36,14 +36,17 @@ class CastAudioMixer::MixerProxyStream
     DCHECK_CALLED_ON_VALID_THREAD(audio_thread_checker_);
   }
 
+  MixerProxyStream(const MixerProxyStream&) = delete;
+  MixerProxyStream& operator=(const MixerProxyStream&) = delete;
+
   ~MixerProxyStream() override {
     DCHECK_CALLED_ON_VALID_THREAD(audio_thread_checker_);
   }
 
-  void OnError() {
+  void OnError(ErrorType type) {
     DCHECK_CALLED_ON_VALID_THREAD(audio_thread_checker_);
     if (source_callback_)
-      source_callback_->OnError();
+      source_callback_->OnError(type);
   }
 
  private:
@@ -61,6 +64,9 @@ class CastAudioMixer::MixerProxyStream
       DETACH_FROM_THREAD(backend_thread_checker_);
     }
 
+    ResamplerProxy(const ResamplerProxy&) = delete;
+    ResamplerProxy& operator=(const ResamplerProxy&) = delete;
+
     ~ResamplerProxy() override {}
 
    private:
@@ -76,7 +82,6 @@ class CastAudioMixer::MixerProxyStream
     std::unique_ptr<::media::AudioConverter> resampler_;
 
     THREAD_CHECKER(backend_thread_checker_);
-    DISALLOW_COPY_AND_ASSIGN(ResamplerProxy);
   };
 
   // ::media::AudioOutputStream implementation
@@ -179,14 +184,13 @@ class CastAudioMixer::MixerProxyStream
   std::unique_ptr<ResamplerProxy> proxy_;
 
   THREAD_CHECKER(audio_thread_checker_);
-  DISALLOW_COPY_AND_ASSIGN(MixerProxyStream);
 };
 
 CastAudioMixer::CastAudioMixer(CastAudioManager* audio_manager)
     : audio_manager_(audio_manager), error_(false), output_stream_(nullptr) {
   output_params_ = ::media::AudioParameters(
       ::media::AudioParameters::Format::AUDIO_PCM_LOW_LATENCY,
-      ::media::CHANNEL_LAYOUT_STEREO, kSampleRate, kFramesPerBuffer);
+      ::media::ChannelLayoutConfig::Stereo(), kSampleRate, kFramesPerBuffer);
   mixer_.reset(
       new ::media::AudioConverter(output_params_, output_params_, false));
   DETACH_FROM_THREAD(audio_thread_checker_);
@@ -280,19 +284,19 @@ int CastAudioMixer::OnMoreData(base::TimeDelta delay,
   return dest->frames();
 }
 
-void CastAudioMixer::OnError() {
+void CastAudioMixer::OnError(ErrorType type) {
   // Called on backend thread.
   audio_manager_->GetTaskRunner()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&CastAudioMixer::HandleError, base::Unretained(this)));
+      FROM_HERE, base::BindOnce(&CastAudioMixer::HandleError,
+                                base::Unretained(this), type));
 }
 
-void CastAudioMixer::HandleError() {
+void CastAudioMixer::HandleError(ErrorType type) {
   DCHECK_CALLED_ON_VALID_THREAD(audio_thread_checker_);
 
   error_ = true;
   for (auto it = proxy_streams_.begin(); it != proxy_streams_.end(); ++it)
-    (*it)->OnError();
+    (*it)->OnError(type);
 }
 
 }  // namespace media

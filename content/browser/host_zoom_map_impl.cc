@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,24 +9,31 @@
 #include <memory>
 #include <utility>
 
+#include "base/containers/contains.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/default_clock.h"
 #include "base/values.h"
-#include "content/browser/frame_host/navigation_entry_impl.h"
+#include "build/build_config.h"
+#include "content/browser/renderer_host/navigation_entry_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
-#include "content/public/common/page_zoom.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/url_util.h"
+#include "third_party/blink/public/common/page/page_zoom.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "content/public/android/content_jni_headers/HostZoomMapImpl_jni.h"
+#include "content/public/browser/android/browser_context_handle.h"
+#endif
 
 namespace content {
 
@@ -65,16 +72,15 @@ GURL HostZoomMap::GetURLFromEntry(NavigationEntry* entry) {
 
 HostZoomMap* HostZoomMap::GetDefaultForBrowserContext(BrowserContext* context) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  StoragePartition* partition =
-      BrowserContext::GetDefaultStoragePartition(context);
+  StoragePartition* partition = context->GetDefaultStoragePartition();
   DCHECK(partition);
   return partition->GetHostZoomMap();
 }
 
 HostZoomMap* HostZoomMap::Get(SiteInstance* instance) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  StoragePartition* partition = BrowserContext::GetStoragePartition(
-      instance->GetBrowserContext(), instance);
+  StoragePartition* partition =
+      instance->GetBrowserContext()->GetStoragePartition(instance);
   DCHECK(partition);
   return partition->GetHostZoomMap();
 }
@@ -84,8 +90,8 @@ HostZoomMap* HostZoomMap::GetForWebContents(WebContents* contents) {
   // TODO(wjmaclean): Update this behaviour to work with OOPIF.
   // See crbug.com/528407.
   StoragePartition* partition =
-      BrowserContext::GetStoragePartition(contents->GetBrowserContext(),
-                                          contents->GetSiteInstance());
+      contents->GetBrowserContext()->GetStoragePartition(
+          contents->GetSiteInstance());
   DCHECK(partition);
   return partition->GetHostZoomMap();
 }
@@ -97,14 +103,6 @@ double HostZoomMap::GetZoomLevel(WebContents* web_contents) {
   HostZoomMapImpl* host_zoom_map = static_cast<HostZoomMapImpl*>(
       HostZoomMap::GetForWebContents(web_contents));
   return host_zoom_map->GetZoomLevelForWebContents(
-      static_cast<WebContentsImpl*>(web_contents));
-}
-
-bool HostZoomMap::PageScaleFactorIsOne(WebContents* web_contents) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  HostZoomMapImpl* host_zoom_map = static_cast<HostZoomMapImpl*>(
-      HostZoomMap::GetForWebContents(web_contents));
-  return host_zoom_map->PageScaleFactorIsOneForWebContents(
       static_cast<WebContentsImpl*>(web_contents));
 }
 
@@ -225,7 +223,7 @@ void HostZoomMapImpl::SetZoomLevelForHostInternal(const std::string& host,
                                                   base::Time last_modified) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  if (ZoomValuesEqual(level, default_zoom_level_)) {
+  if (blink::PageZoomValuesEqual(level, default_zoom_level_)) {
     host_zoom_levels_.erase(host);
   } else {
     ZoomLevel& zoomLevel = host_zoom_levels_[host];
@@ -273,14 +271,14 @@ double HostZoomMapImpl::GetDefaultZoomLevel() {
 void HostZoomMapImpl::SetDefaultZoomLevel(double level) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  if (ZoomValuesEqual(level, default_zoom_level_))
-      return;
+  if (blink::PageZoomValuesEqual(level, default_zoom_level_))
+    return;
 
   default_zoom_level_ = level;
 
   // First, remove all entries that match the new default zoom level.
   for (auto it = host_zoom_levels_.begin(); it != host_zoom_levels_.end();) {
-    if (ZoomValuesEqual(it->second.level, default_zoom_level_))
+    if (blink::PageZoomValuesEqual(it->second.level, default_zoom_level_))
       it = host_zoom_levels_.erase(it);
     else
       it++;
@@ -332,11 +330,10 @@ void HostZoomMapImpl::SetDefaultZoomLevel(double level) {
   }
 }
 
-std::unique_ptr<HostZoomMap::Subscription>
-HostZoomMapImpl::AddZoomLevelChangedCallback(
-    const ZoomLevelChangedCallback& callback) {
+base::CallbackListSubscription HostZoomMapImpl::AddZoomLevelChangedCallback(
+    ZoomLevelChangedCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  return zoom_level_changed_callbacks_.Add(callback);
+  return zoom_level_changed_callbacks_.Add(std::move(callback));
 }
 
 double HostZoomMapImpl::GetZoomLevelForWebContents(
@@ -359,8 +356,26 @@ double HostZoomMapImpl::GetZoomLevelForWebContents(
   // a navigation has occurred.
   if (entry)
     url = GetURLFromEntry(entry);
-  return GetZoomLevelForHostAndScheme(url.scheme(),
-                                      net::GetHostOrSpecFromURL(url));
+
+  double level = GetZoomLevelForHostAndScheme(url.scheme(),
+                                              net::GetHostOrSpecFromURL(url));
+
+#if BUILDFLAG(IS_ANDROID)
+  // If the Page Zoom feature is not enabled, return as normal.
+  if (!base::FeatureList::IsEnabled(features::kAccessibilityPageZoom))
+    return level;
+
+  // On Android, we will use a zoom level that considers the current OS-level
+  // setting. For this we pass the given |level| through JNI to the Java-side
+  // code, which can access the Android configuration and |fontScale|. This
+  // method will return the adjusted zoom level considering OS settings.
+  JNIEnv* env = base::android::AttachCurrentThread();
+  double adjusted_zoom_level =
+      Java_HostZoomMapImpl_getAdjustedZoomLevel(env, level);
+  return adjusted_zoom_level;
+#else
+  return level;
+#endif
 }
 
 void HostZoomMapImpl::SetZoomLevelForWebContents(
@@ -389,52 +404,18 @@ void HostZoomMapImpl::SetZoomLevelForWebContents(
   }
 }
 
-void HostZoomMapImpl::SetZoomLevelForView(int render_process_id,
-                                          int render_view_id,
-                                          double level,
-                                          const std::string& host) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (UsesTemporaryZoomLevel(render_process_id, render_view_id))
-    SetTemporaryZoomLevel(render_process_id, render_view_id, level);
-  else
-    SetZoomLevelForHost(host, level);
-}
-
-void HostZoomMapImpl::SetPageScaleFactorIsOneForView(int render_process_id,
-                                                     int render_view_id,
-                                                     bool is_one) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  view_page_scale_factors_are_one_[RenderViewKey(render_process_id,
-                                                 render_view_id)] = is_one;
-  HostZoomMap::ZoomLevelChange change;
-  change.mode = HostZoomMap::PAGE_SCALE_IS_ONE_CHANGED;
-  zoom_level_changed_callbacks_.Notify(change);
-}
-
-bool HostZoomMapImpl::PageScaleFactorIsOneForWebContents(
-    WebContentsImpl* web_contents_impl) const {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (!web_contents_impl->GetRenderViewHost()->GetProcess())
-    return true;
-
-  const auto it = view_page_scale_factors_are_one_.find(RenderViewKey(
-      web_contents_impl->GetRenderViewHost()->GetProcess()->GetID(),
-      web_contents_impl->GetRenderViewHost()->GetRoutingID()));
-  return it != view_page_scale_factors_are_one_.end() ? it->second : true;
-}
-
-void HostZoomMapImpl::ClearPageScaleFactorIsOneForView(int render_process_id,
-                                                       int render_view_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  view_page_scale_factors_are_one_.erase(
-      RenderViewKey(render_process_id, render_view_id));
-}
-
 bool HostZoomMapImpl::UsesTemporaryZoomLevel(int render_process_id,
                                              int render_view_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   RenderViewKey key(render_process_id, render_view_id);
   return base::Contains(temporary_zoom_levels_, key);
+}
+
+void HostZoomMapImpl::SetNoLongerUsesTemporaryZoomLevel(int render_process_id,
+                                                        int render_view_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  RenderViewKey key(render_process_id, render_view_id);
+  temporary_zoom_levels_.erase(key);
 }
 
 double HostZoomMapImpl::GetTemporaryZoomLevel(int render_process_id,
@@ -464,19 +445,6 @@ void HostZoomMapImpl::SetTemporaryZoomLevel(int render_process_id,
   change.zoom_level = level;
 
   zoom_level_changed_callbacks_.Notify(change);
-}
-
-double HostZoomMapImpl::GetZoomLevelForView(const GURL& url,
-                                            int render_process_id,
-                                            int render_view_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  RenderViewKey key(render_process_id, render_view_id);
-
-  if (base::Contains(temporary_zoom_levels_, key))
-    return temporary_zoom_levels_.find(key)->second;
-
-  return GetZoomLevelForHostAndScheme(url.scheme(),
-                                      net::GetHostOrSpecFromURL(url));
 }
 
 void HostZoomMapImpl::ClearZoomLevels(base::Time delete_begin,
@@ -540,7 +508,6 @@ void HostZoomMapImpl::WillCloseRenderView(int render_process_id,
                                           int render_view_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ClearTemporaryZoomLevel(render_process_id, render_view_id);
-  ClearPageScaleFactorIsOneForView(render_process_id, render_view_id);
 }
 
 HostZoomMapImpl::~HostZoomMapImpl() {
@@ -550,5 +517,94 @@ HostZoomMapImpl::~HostZoomMapImpl() {
 void HostZoomMapImpl::SetClockForTesting(base::Clock* clock) {
   clock_ = clock;
 }
+
+#if BUILDFLAG(IS_ANDROID)
+void HostZoomMapImpl::SetDefaultZoomLevelPrefCallback(
+    HostZoomMap::DefaultZoomChangedCallback callback) {
+  default_zoom_level_pref_callback_ = std::move(callback);
+}
+
+HostZoomMap::DefaultZoomChangedCallback*
+HostZoomMapImpl::GetDefaultZoomLevelPrefCallback() {
+  return &default_zoom_level_pref_callback_;
+}
+
+void JNI_HostZoomMapImpl_SetZoomLevel(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& j_web_contents,
+    jdouble new_zoom_level,
+    jdouble adjusted_zoom_level) {
+  WebContents* web_contents = WebContents::FromJavaWebContents(j_web_contents);
+  DCHECK(web_contents);
+
+  int render_process_id =
+      web_contents->GetRenderViewHost()->GetProcess()->GetID();
+  int routing_id = web_contents->GetRenderViewHost()->GetRoutingID();
+
+  // We want to set and save the new zoom level, but we want to actually render
+  // the adjusted level.
+  HostZoomMap::SetZoomLevel(web_contents, new_zoom_level);
+
+  HostZoomMapImpl* host_zoom_map = static_cast<HostZoomMapImpl*>(
+      HostZoomMap::GetForWebContents(web_contents));
+  host_zoom_map->SetTemporaryZoomLevel(render_process_id, routing_id,
+                                       adjusted_zoom_level);
+
+  // We must now remove this webcontents from the list of temporary zoom levels,
+  // this is so that any future request will continue to update the underlying
+  // host/scheme save, and will not be perceived as "temporary".
+  // i.e. once temporary is set for a web_contents, the call to
+  // SetZoomLevelForWebContents will keep updating what is rendered, but will no
+  // longer call SetZoomLevelForHost, which saves the choice for that host.
+  host_zoom_map->SetNoLongerUsesTemporaryZoomLevel(render_process_id,
+                                                   routing_id);
+}
+
+jdouble JNI_HostZoomMapImpl_GetZoomLevel(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& j_web_contents) {
+  WebContents* web_contents = WebContents::FromJavaWebContents(j_web_contents);
+  DCHECK(web_contents);
+
+  return HostZoomMap::GetZoomLevel(web_contents);
+}
+
+void JNI_HostZoomMapImpl_SetDefaultZoomLevel(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& j_context,
+    jdouble new_default_zoom_level) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  BrowserContext* context = BrowserContextFromJavaHandle(j_context);
+  if (!context)
+    return;
+
+  HostZoomMapImpl* host_zoom_map = static_cast<HostZoomMapImpl*>(
+      HostZoomMap::GetDefaultForBrowserContext(context));
+
+  // If a callback has been set (e.g. by chrome_zoom_level_prefs to store an
+  // updated value in Prefs), call this now with the chosen zoom level.
+  if (host_zoom_map->GetDefaultZoomLevelPrefCallback()) {
+    host_zoom_map->GetDefaultZoomLevelPrefCallback()->Run(
+        new_default_zoom_level);
+  }
+
+  // Update the default zoom level for existing tabs. This must be done after
+  // the Pref is updated due to guard clause in chrome_zoom_level_prefs.
+  host_zoom_map->SetDefaultZoomLevel(new_default_zoom_level);
+}
+
+jdouble JNI_HostZoomMapImpl_GetDefaultZoomLevel(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& j_context) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  BrowserContext* context = BrowserContextFromJavaHandle(j_context);
+  if (!context)
+    return 0.0;
+
+  HostZoomMapImpl* host_zoom_map = static_cast<HostZoomMapImpl*>(
+      HostZoomMap::GetDefaultForBrowserContext(context));
+  return host_zoom_map->GetDefaultZoomLevel();
+}
+#endif
 
 }  // namespace content

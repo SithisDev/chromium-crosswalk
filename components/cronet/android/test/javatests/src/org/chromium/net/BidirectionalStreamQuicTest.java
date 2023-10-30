@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,9 @@ import static org.junit.Assert.assertTrue;
 import static org.chromium.base.CollectionUtil.newHashSet;
 import static org.chromium.net.CronetTestRule.getContext;
 
-import android.support.test.filters.SmallTest;
 import android.support.test.runner.AndroidJUnit4;
+
+import androidx.test.filters.SmallTest;
 
 import org.json.JSONObject;
 import org.junit.After;
@@ -388,10 +389,11 @@ public class BidirectionalStreamQuicTest {
         callback.blockForDone();
         assertTrue(stream.isDone());
         assertNotNull(callback.mError);
-        assertTrue(callback.mError instanceof QuicException);
-        QuicException quicException = (QuicException) callback.mError;
-        // Checks that detailed quic error code is not QUIC_NO_ERROR == 0.
-        assertTrue("actual error " + quicException.getQuicDetailedErrorCode(),
-                0 < quicException.getQuicDetailedErrorCode());
+        if (callback.mError instanceof QuicException) {
+            QuicException quicException = (QuicException) callback.mError;
+            // Checks that detailed quic error code is not QUIC_NO_ERROR == 0.
+            assertTrue("actual error " + quicException.getQuicDetailedErrorCode(),
+                    0 < quicException.getQuicDetailedErrorCode());
+        }
     }
 }

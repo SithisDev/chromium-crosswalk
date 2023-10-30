@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@ remote_cocoa::ColorPanelBridge* g_current_panel_bridge = nullptr;
  @protected
   // We don't call DidChooseColor if the change wasn't caused by the user
   // interacting with the panel.
-  BOOL nonUserChange_;
+  BOOL _nonUserChange;
 }
 // Called from NSNotificationCenter.
 - (void)windowWillClose:(NSNotification*)notification;
@@ -39,13 +39,17 @@ remote_cocoa::ColorPanelBridge* g_current_panel_bridge = nullptr;
 @end
 
 @implementation ColorPanelListener
-- (id)init {
+- (instancetype)init {
   if ((self = [super init])) {
     NSColorPanel* panel = [NSColorPanel sharedColorPanel];
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
+    NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
+    [nc addObserver:self
            selector:@selector(windowWillClose:)
                name:NSWindowWillCloseNotification
+             object:panel];
+    [nc addObserver:self
+           selector:@selector(windowDidResignKey:)
+               name:NSWindowDidResignKeyNotification
              object:panel];
   }
   return self;
@@ -60,15 +64,21 @@ remote_cocoa::ColorPanelBridge* g_current_panel_bridge = nullptr;
 - (void)windowWillClose:(NSNotification*)notification {
   if (g_current_panel_bridge)
     g_current_panel_bridge->host()->DidCloseColorPanel();
-  nonUserChange_ = NO;
+  _nonUserChange = NO;
+}
+
+- (void)windowDidResignKey:(NSNotification*)notification {
+  // Close the color panel when the user clicks away.
+  [self windowWillClose:notification];
+  [[NSColorPanel sharedColorPanel] close];
 }
 
 - (void)didChooseColor:(NSColorPanel*)panel {
-  if (nonUserChange_) {
-    nonUserChange_ = NO;
+  if (_nonUserChange) {
+    _nonUserChange = NO;
     return;
   }
-  nonUserChange_ = NO;
+  _nonUserChange = NO;
   NSColor* color = [panel color];
   if ([[color colorSpaceName] isEqualToString:NSNamedColorSpace]) {
     color = [color colorUsingColorSpace:[NSColorSpace genericRGBColorSpace]];
@@ -109,14 +119,15 @@ remote_cocoa::ColorPanelBridge* g_current_panel_bridge = nullptr;
 }
 
 - (void)setColor:(NSColor*)color {
-  nonUserChange_ = YES;
+  _nonUserChange = YES;
   [[NSColorPanel sharedColorPanel] setColor:color];
 }
 @end
 
 namespace remote_cocoa {
 
-ColorPanelBridge::ColorPanelBridge(mojom::ColorPanelHostPtr host)
+ColorPanelBridge::ColorPanelBridge(
+    mojo::PendingRemote<mojom::ColorPanelHost> host)
     : host_(std::move(host)) {
   g_current_panel_bridge = this;
 }
@@ -126,15 +137,18 @@ ColorPanelBridge::~ColorPanelBridge() {
     g_current_panel_bridge = nullptr;
 }
 
-void ColorPanelBridge::Show(uint32_t initial_color) {
+void ColorPanelBridge::Show(uint32_t initial_color, ShowCallback callback) {
   ColorPanelListener* listener = [ColorPanelListener instance];
   [listener setColor:skia::SkColorToDeviceNSColor(initial_color)];
   [listener showColorPanel];
+  std::move(callback).Run();
 }
 
-void ColorPanelBridge::SetSelectedColor(uint32_t color) {
+void ColorPanelBridge::SetSelectedColor(uint32_t color,
+                                        SetSelectedColorCallback callback) {
   ColorPanelListener* listener = [ColorPanelListener instance];
   [listener setColor:skia::SkColorToDeviceNSColor(color)];
+  std::move(callback).Run();
 }
 
 }  // namespace remote_cocoa

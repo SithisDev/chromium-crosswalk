@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/browser_url_handler_impl.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -32,7 +33,7 @@ static bool BarRewriter(GURL* url, BrowserContext* browser_context) {
 }
 
 TEST_F(BrowserURLHandlerImplTest, BasicRewriteAndReverse) {
-  TestBrowserThreadBundle thread_bundle;
+  BrowserTaskEnvironment task_environment;
   TestBrowserContext browser_context;
   BrowserURLHandlerImpl handler;
 
@@ -62,7 +63,7 @@ TEST_F(BrowserURLHandlerImplTest, BasicRewriteAndReverse) {
 }
 
 TEST_F(BrowserURLHandlerImplTest, NullHandlerReverse) {
-  TestBrowserThreadBundle thread_bundle;
+  BrowserTaskEnvironment task_environment;
   TestBrowserContext browser_context;
   BrowserURLHandlerImpl handler;
 
@@ -85,7 +86,7 @@ TEST_F(BrowserURLHandlerImplTest, NullHandlerReverse) {
 // Verify that the reverse handler for view-source does not duplicate query
 // parameters.
 TEST_F(BrowserURLHandlerImplTest, ViewSourceReverse) {
-  TestBrowserThreadBundle thread_bundle;
+  BrowserTaskEnvironment task_environment;
   TestBrowserContext browser_context;
   BrowserURLHandlerImpl handler;
 
@@ -96,6 +97,34 @@ TEST_F(BrowserURLHandlerImplTest, ViewSourceReverse) {
                                             &browser_context);
   ASSERT_TRUE(reversed);
   ASSERT_EQ("view-source:http://foo/?a=1", url.spec());
+}
+
+// Verify that GetPossibleRewrites retrieves the rewrites from all handlers that
+// match, in order of priority.
+TEST_F(BrowserURLHandlerImplTest, GetPossibleRewrites) {
+  BrowserTaskEnvironment task_environment;
+  TestBrowserContext browser_context;
+  BrowserURLHandlerImpl handler;
+
+  auto rewriter1 = [](GURL* url, BrowserContext* context) {
+    *url = GURL("https://test1.example");
+    return true;
+  };
+  auto rewriter2 = [](GURL* url, BrowserContext* context) { return false; };
+  auto rewriter3 = [](GURL* url, BrowserContext* context) {
+    *url = GURL("https://test3.example");
+    return true;
+  };
+  handler.AddHandlerPair(rewriter1, BrowserURLHandlerImpl::null_handler());
+  handler.AddHandlerPair(rewriter2, BrowserURLHandlerImpl::null_handler());
+  handler.AddHandlerPair(rewriter3, BrowserURLHandlerImpl::null_handler());
+
+  GURL url("https://example.com");
+  std::vector<GURL> rewrites =
+      handler.GetPossibleRewrites(url, &browser_context);
+
+  EXPECT_THAT(rewrites, testing::ElementsAre(GURL("https://test1.example"),
+                                             GURL("https://test3.example")));
 }
 
 }  // namespace content

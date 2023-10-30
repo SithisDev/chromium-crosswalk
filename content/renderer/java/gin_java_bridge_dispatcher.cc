@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -105,12 +105,10 @@ std::unique_ptr<base::Value> GinJavaBridgeDispatcher::InvokeJavaMethod(
                                             arguments,
                                             &result_wrapper,
                                             error));
-  base::Value* result;
-  if (result_wrapper.Get(0, &result)) {
-    return std::unique_ptr<base::Value>(result->DeepCopy());
-  } else {
-    return std::unique_ptr<base::Value>();
-  }
+  const auto& list = result_wrapper.GetListDeprecated();
+  if (list.empty())
+    return nullptr;
+  return base::Value::ToUniquePtrValue(list[0].Clone());
 }
 
 GinJavaBridgeObject* GinJavaBridgeDispatcher::GetObject(ObjectID object_id) {

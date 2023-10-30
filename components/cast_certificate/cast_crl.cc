@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,28 +9,41 @@
 
 #include <memory>
 
-#include "base/base64.h"
+#include "base/containers/span.h"
+#include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "components/cast_certificate/proto/revocation.pb.h"
 #include "crypto/sha2.h"
-#include "net/cert/internal/cert_errors.h"
-#include "net/cert/internal/parse_certificate.h"
-#include "net/cert/internal/parsed_certificate.h"
-#include "net/cert/internal/path_builder.h"
-#include "net/cert/internal/signature_algorithm.h"
-#include "net/cert/internal/simple_path_builder_delegate.h"
-#include "net/cert/internal/trust_store_in_memory.h"
-#include "net/cert/internal/verify_certificate_chain.h"
-#include "net/cert/internal/verify_signed_data.h"
-#include "net/cert/x509_certificate.h"
+#include "net/cert/pki/cert_errors.h"
+#include "net/cert/pki/parse_certificate.h"
+#include "net/cert/pki/parsed_certificate.h"
+#include "net/cert/pki/path_builder.h"
+#include "net/cert/pki/simple_path_builder_delegate.h"
+#include "net/cert/pki/trust_store_in_memory.h"
+#include "net/cert/pki/verify_certificate_chain.h"
 #include "net/cert/x509_util.h"
 #include "net/der/encode_values.h"
 #include "net/der/input.h"
 #include "net/der/parse_values.h"
-#include "net/der/parser.h"
+#include "third_party/boringssl/src/include/openssl/bytestring.h"
+#include "third_party/boringssl/src/include/openssl/digest.h"
+#include "third_party/boringssl/src/include/openssl/evp.h"
+#include "third_party/openscreen/src/cast/common/certificate/proto/revocation.pb.h"
 
 namespace cast_certificate {
+
+using cast::certificate::Crl;
+using cast::certificate::CrlBundle;
+using cast::certificate::TbsCrl;
+
 namespace {
+
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+// During fuzz testing, we won't have valid hashes for certificate revocation,
+// so we use the empty string as a placeholder where a hash code is needed in
+// production.  This allows us to test the revocation logic without needing the
+// fuzzing engine to produce a valid hash code.
+constexpr char kFakeHashForFuzzing[] = "fake_hash_code";
+#endif
 
 enum CrlVersion {
   // version 0: Spki Hash Algorithm = SHA-256
@@ -58,6 +71,9 @@ class CastCRLTrustStore {
                                                   CastCRLTrustStore>>::get();
   }
 
+  CastCRLTrustStore(const CastCRLTrustStore&) = delete;
+  CastCRLTrustStore& operator=(const CastCRLTrustStore&) = delete;
+
   static net::TrustStore& Get() { return GetInstance()->store_; }
 
  private:
@@ -66,16 +82,16 @@ class CastCRLTrustStore {
   CastCRLTrustStore() {
     // Initialize the trust store with the root certificate.
     net::CertErrors errors;
-    scoped_refptr<net::ParsedCertificate> cert =
-        net::ParsedCertificate::CreateWithoutCopyingUnsafe(
-            kCastCRLRootCaDer, sizeof(kCastCRLRootCaDer), {}, &errors);
+    scoped_refptr<net::ParsedCertificate> cert = net::ParsedCertificate::Create(
+        net::x509_util::CreateCryptoBufferFromStaticDataUnsafe(
+            kCastCRLRootCaDer),
+        {}, &errors);
     CHECK(cert) << errors.ToDebugString();
     // Enforce pathlen constraints and policies defined on the root certificate.
     store_.AddTrustAnchorWithConstraints(std::move(cert));
   }
 
   net::TrustStoreInMemory store_;
-  DISALLOW_COPY_AND_ASSIGN(CastCRLTrustStore);
 };
 
 // Converts a uint64_t unix timestamp to net::der::GeneralizedTime.
@@ -83,7 +99,7 @@ bool ConvertTimeSeconds(uint64_t seconds,
                         net::der::GeneralizedTime* generalized_time) {
   base::Time unix_timestamp =
       base::Time::UnixEpoch() +
-      base::TimeDelta::FromSeconds(base::saturated_cast<int64_t>(seconds));
+      base::Seconds(base::saturated_cast<int64_t>(seconds));
   return net::der::EncodeTimeAsGeneralizedTime(unix_timestamp,
                                                generalized_time);
 }
@@ -99,7 +115,11 @@ bool VerifyCRL(const Crl& crl,
                const base::Time& time,
                net::TrustStore* trust_store,
                net::der::GeneralizedTime* overall_not_after) {
-  // Verify the trust of the CRL authority.
+  if (!crl.has_signature() || !crl.has_signer_cert()) {
+    VLOG(2) << "CRL - Missing fields";
+    return false;
+  }
+
   net::CertErrors parse_errors;
   scoped_refptr<net::ParsedCertificate> parsed_cert =
       net::ParsedCertificate::Create(
@@ -111,18 +131,32 @@ bool VerifyCRL(const Crl& crl,
     return false;
   }
 
-  // Wrap the signature in a BitString.
-  net::der::BitString signature_value_bit_string = net::der::BitString(
-      net::der::Input(base::StringPiece(crl.signature())), 0);
-
-  // Verify the signature.
-  std::unique_ptr<net::SignatureAlgorithm> signature_algorithm_type =
-      net::SignatureAlgorithm::CreateRsaPkcs1(net::DigestAlgorithm::Sha256);
-  if (!VerifySignedData(
-          *signature_algorithm_type, net::der::Input(&crl.tbs_crl()),
-          signature_value_bit_string, parsed_cert->tbs().spki_tlv)) {
-    VLOG(2) << "CRL - Signature verification failed";
+  CBS spki;
+  CBS_init(&spki, parsed_cert->tbs().spki_tlv.UnsafeData(),
+           parsed_cert->tbs().spki_tlv.Length());
+  bssl::UniquePtr<EVP_PKEY> pubkey(EVP_parse_public_key(&spki));
+  if (!pubkey || CBS_len(&spki) != 0) {
+    VLOG(2) << "CRL - Parsing public key failed";
+#ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
     return false;
+#endif
+  }
+
+  // Verify the signature in the CRL. It should be signed with RSASSA-PKCS1-v1_5
+  // and SHA-256.
+  auto signature_bytes = base::as_bytes(base::make_span(crl.signature()));
+  auto tbs_crl_bytes = base::as_bytes(base::make_span(crl.tbs_crl()));
+  bssl::ScopedEVP_MD_CTX ctx;
+  if (EVP_PKEY_id(pubkey.get()) != EVP_PKEY_RSA ||
+      !EVP_DigestVerifyInit(ctx.get(), nullptr, EVP_sha256(), nullptr,
+                            pubkey.get()) ||
+      !EVP_DigestVerify(ctx.get(), signature_bytes.data(),
+                        signature_bytes.size(), tbs_crl_bytes.data(),
+                        tbs_crl_bytes.size())) {
+    VLOG(2) << "CRL - Signature verification failed";
+#ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    return false;
+#endif
   }
 
   // Verify the issuer certificate.
@@ -137,17 +171,20 @@ bool VerifyCRL(const Crl& crl,
   net::SimplePathBuilderDelegate path_builder_delegate(
       2048, net::SimplePathBuilderDelegate::DigestPolicy::kWeakAllowSha1);
 
-  net::CertPathBuilder::Result result;
+  // Verify the trust of the CRL authority.
   net::CertPathBuilder path_builder(
       parsed_cert.get(), trust_store, &path_builder_delegate, verification_time,
       net::KeyPurpose::ANY_EKU, net::InitialExplicitPolicy::kFalse,
-      {net::AnyPolicy()}, net::InitialPolicyMappingInhibit::kFalse,
-      net::InitialAnyPolicyInhibit::kFalse, &result);
-  path_builder.Run();
+      {net::der::Input(net::kAnyPolicyOid)},
+      net::InitialPolicyMappingInhibit::kFalse,
+      net::InitialAnyPolicyInhibit::kFalse);
+  net::CertPathBuilder::Result result = path_builder.Run();
   if (!result.HasValidPath()) {
     VLOG(2) << "CRL - Issuer certificate verification failed.";
+#ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
     // TODO(crbug.com/634443): Log the error information.
     return false;
+#endif
   }
   // There are no requirements placed on the leaf certificate having any
   // particular KeyUsages. Leaf certificate checks are bypassed.
@@ -165,7 +202,9 @@ bool VerifyCRL(const Crl& crl,
   }
   if ((verification_time < not_before) || (verification_time > not_after)) {
     VLOG(2) << "CRL - Not time-valid.";
+#ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
     return false;
+#endif
   }
 
   // Set CRL expiry to the earliest of the cert chain expiry and CRL expiry.
@@ -173,7 +212,15 @@ bool VerifyCRL(const Crl& crl,
   // "expiration" of the trust anchor is handled instead by its
   // presence in the trust store.
   *overall_not_after = not_after;
-  for (const auto& cert : result.GetBestValidPath()->certs) {
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+  // We don't expect to have a valid path during fuzz testing, so just use a
+  // single cert.
+  const net::ParsedCertificateList path_certs = {parsed_cert};
+#else
+  const net::ParsedCertificateList& path_certs =
+      result.GetBestValidPath()->certs;
+#endif
+  for (const auto& cert : path_certs) {
     net::der::GeneralizedTime cert_not_after = cert->tbs().validity_not_after;
     if (cert_not_after < *overall_not_after)
       *overall_not_after = cert_not_after;
@@ -195,6 +242,10 @@ class CastCRLImpl : public CastCRL {
  public:
   CastCRLImpl(const TbsCrl& tbs_crl,
               const net::der::GeneralizedTime& overall_not_after);
+
+  CastCRLImpl(const CastCRLImpl&) = delete;
+  CastCRLImpl& operator=(const CastCRLImpl&) = delete;
+
   ~CastCRLImpl() override;
 
   bool CheckRevocation(const net::ParsedCertificateList& trusted_chain,
@@ -218,7 +269,6 @@ class CastCRLImpl : public CastCRL {
   // The value is a list of revoked serial number ranges.
   std::unordered_map<std::string, std::vector<SerialNumberRange>>
       revoked_serial_numbers_;
-  DISALLOW_COPY_AND_ASSIGN(CastCRLImpl);
 };
 
 CastCRLImpl::CastCRLImpl(const TbsCrl& tbs_crl,
@@ -234,11 +284,19 @@ CastCRLImpl::CastCRLImpl(const TbsCrl& tbs_crl,
   // Parse the revoked hashes.
   for (const auto& hash : tbs_crl.revoked_public_key_hashes()) {
     revoked_hashes_.insert(hash);
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    // Save fake hash code for later lookups.
+    revoked_hashes_.insert(kFakeHashForFuzzing);
+#endif
   }
 
   // Parse the revoked serial ranges.
   for (const auto& range : tbs_crl.revoked_serial_number_ranges()) {
     std::string issuer_hash = range.issuer_public_key_hash();
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    // Save range under fake hash code for later lookups.
+    issuer_hash = kFakeHashForFuzzing;
+#endif
 
     uint64_t first_serial_number = range.first_serial_number();
     uint64_t last_serial_number = range.last_serial_number();
@@ -275,6 +333,11 @@ bool CastCRLImpl::CheckRevocation(
 
     // Calculate the public key's hash to check for revocation.
     std::string spki_hash = crypto::SHA256HashString(spki_tlv.AsString());
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    // Revocation data (if any) was saved in the constructor using this fake
+    // hash code.
+    spki_hash = kFakeHashForFuzzing;
+#endif
     if (revoked_hashes_.find(spki_hash) != revoked_hashes_.end()) {
       VLOG(2) << "Public key is revoked.";
       return false;

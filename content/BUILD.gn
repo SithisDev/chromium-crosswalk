@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,10 +9,7 @@ import("//tools/grit/grit_rule.gni")
 # Applied by targets internal to content.
 config("content_implementation") {
   defines = [ "CONTENT_IMPLEMENTATION" ]
-  configs = [
-    "//build/config/compiler:noshadowing",
-    "//build/config/compiler:wexit_time_destructors",
-  ]
+  configs = [ "//build/config/compiler:wexit_time_destructors" ]
 }
 
 assert(!is_ios, "Chromium/iOS shouldn't use anything in //content")
@@ -62,45 +59,24 @@ assert(!is_ios, "Chromium/iOS shouldn't use anything in //content")
 # //content/browser target only in non-component builds (when there are no
 # linking problems) for when check is enabled.
 
-if (!is_nacl_nonsfi) {
-  content_shared_components = [
-    "//content/gpu:gpu_sources",
-    "//content/public/browser:browser_sources",
-    "//content/public/child:child_sources",
-    "//content/public/common:common_sources",
-    "//content/public/gpu:gpu_sources",
-    "//content/public/renderer:renderer_sources",
-    "//content/public/utility:utility_sources",
-  ]
+content_shared_components = [
+  "//content/gpu:gpu_sources",
+  "//content/public/browser:browser_sources",
+  "//content/public/child:child_sources",
+  "//content/public/common:common_sources",
+  "//content/public/gpu:gpu_sources",
+  "//content/public/renderer:renderer_sources",
+  "//content/public/utility:utility_sources",
+]
 
-  if (enable_plugins) {
-    content_shared_components +=
-        [ "//content/ppapi_plugin:ppapi_plugin_sources" ]
-  }
+if (enable_ppapi) {
+  content_shared_components += [ "//content/ppapi_plugin:ppapi_plugin_sources" ]
 }
 
 if (is_component_build) {
   component("content") {
     public_deps =
-        content_shared_components + [ "//content/public/app:both_sources" ]
-  }
-} else if (is_nacl_nonsfi) {
-  source_set("content") {
-    set_sources_assignment_filter([])
-    sources = [
-      "//services/service_manager/sandbox/linux/sandbox_seccomp_bpf_linux.cc",
-      "common/sandbox_init_linux.cc",
-      "public/common/content_switches.cc",
-      "public/common/content_switches.h",
-    ]
-    set_sources_assignment_filter(sources_assignment_filter)
-    deps = [
-      "//base",
-      "//media:media_buildflags",
-      "//sandbox:sandbox_buildflags",
-      "//sandbox/linux:sandbox",
-      "//services/service_manager/sandbox",
-    ]
+        content_shared_components + [ "//content/public/app:app_sources" ]
   }
 } else {
   group("content") {
@@ -108,11 +84,8 @@ if (is_component_build) {
   }
 }
 
-grit("resources") {
+grit("content_resources") {
   source = "content_resources.grd"
-
-  # The .grd contains references to generated files.
-  source_is_generated = true
 
   outputs = [
     "grit/content_resources.h",
@@ -120,13 +93,35 @@ grit("resources") {
     "grit/content_resources_map.h",
     "content_resources.pak",
   ]
-  grit_flags = [
-    "-E",
-    "root_gen_dir=" + rebase_path(root_gen_dir, root_build_dir),
+  deps = [
+    "//components/ukm/debug:build_ts",
+    "//content/browser/resources/histograms:build_ts",
+    "//gpu/ipc/common:vulkan_interface_webui_js",
+    "//ui/base/mojom:mojom_js",
+    "//ui/gfx/geometry/mojom:mojom_js",
+    "//ui/gfx/image/mojom:mojom_js",
+    "//ui/gfx/range/mojom:mojom_js",
+    "//url/mojom:url_mojom_origin_js",
+    "//url/mojom:url_mojom_origin_webui_js",
+  ]
+}
+
+grit("dev_ui_content_resources") {
+  source = "dev_ui_content_resources.grd"
+
+  outputs = [
+    "grit/dev_ui_content_resources.h",
+    "dev_ui_content_resources.pak",
   ]
   deps = [
-    "//content/browser/process_internals:mojo_bindings_js",
-    "//url/mojom:url_mojom_origin_js",
+    "//content/browser/aggregation_service:mojo_bindings_webui_js",
+    "//content/browser/attribution_reporting:mojo_bindings_webui_js",
+    "//content/browser/preloading/prerender:mojo_bindings_webui_js",
+    "//content/browser/resources/aggregation_service:build_ts",
+    "//content/browser/resources/attribution_reporting:build_ts",
+    "//content/browser/resources/gpu:html_wrapper_files",
+    "//content/browser/resources/process:build_ts",
+    "//storage/browser/quota:mojo_bindings_webui_js",
   ]
 }
 
@@ -135,9 +130,7 @@ grit("resources") {
 source_set("export") {
   # Must only be used inside of content.
   visibility = [ "//content/*" ]
-  sources = [
-    "common/content_export.h",
-  ]
+  sources = [ "common/content_export.h" ]
 }
 
 # In the GYP build, this file is listed in several targets. In GN just have
@@ -150,8 +143,6 @@ source_set("sandbox_helper_win") {
       "public/app/sandbox_helper_win.h",
     ]
 
-    deps = [
-      "//sandbox",
-    ]
+    deps = [ "//sandbox" ]
   }
 }

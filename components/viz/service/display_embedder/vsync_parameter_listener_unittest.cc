@@ -1,10 +1,11 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/service/display_embedder/vsync_parameter_listener.h"
 
 #include "base/time/time.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace viz {
@@ -12,9 +13,8 @@ namespace viz {
 class VSyncParameterListenerTestRunner {
  public:
   VSyncParameterListenerTestRunner(int64_t interval_us, int64_t timebase_us)
-      : interval_(base::TimeDelta::FromMicroseconds(interval_us)),
-        timebase_(base::TimeTicks() +
-                  base::TimeDelta::FromMicroseconds(timebase_us)) {}
+      : interval_(base::Microseconds(interval_us)),
+        timebase_(base::TimeTicks() + base::Microseconds(timebase_us)) {}
 
   void RunTests() {
     const uint64_t interval_us = interval_.InMicroseconds();
@@ -54,12 +54,11 @@ class VSyncParameterListenerTestRunner {
   // Checks if VSyncParameterListener will send an update when it sees
   // |timebase_| and then |timebase_| + |timebase_difference_us|.
   bool WillSendUpdate(int64_t timebase_difference_us) {
-    VSyncParameterListener listener(/*observer=*/nullptr);
+    VSyncParameterListener listener{/*observer=*/mojo::NullRemote()};
     EXPECT_TRUE(listener.ShouldSendUpdate(timebase_, interval_));
 
     return listener.ShouldSendUpdate(
-        timebase_ + base::TimeDelta::FromMicroseconds(timebase_difference_us),
-        interval_);
+        timebase_ + base::Microseconds(timebase_difference_us), interval_);
   }
 
   base::TimeDelta interval_;

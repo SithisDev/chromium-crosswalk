@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/sync/engine/model_type_processor.h"
 
 namespace syncer {
@@ -25,8 +25,11 @@ class ModelTypeProcessorProxy : public ModelTypeProcessor {
   void DisconnectSync() override;
   void GetLocalChanges(size_t max_entries,
                        GetLocalChangesCallback callback) override;
-  void OnCommitCompleted(const sync_pb::ModelTypeState& type_state,
-                         const CommitResponseDataList& response_list) override;
+  void OnCommitCompleted(
+      const sync_pb::ModelTypeState& type_state,
+      const CommitResponseDataList& committed_response_list,
+      const FailedCommitResponseDataList& error_response_list) override;
+  void OnCommitFailed(SyncCommitError commit_error) override;
   void OnUpdateReceived(const sync_pb::ModelTypeState& type_state,
                         UpdateResponseDataList updates) override;
 

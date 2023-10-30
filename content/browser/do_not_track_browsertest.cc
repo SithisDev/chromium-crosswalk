@@ -1,13 +1,16 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/barrier_closure.h"
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -15,9 +18,9 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
+#include "third_party/blink/public/common/renderer_preferences/renderer_preferences.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/system/sys_info.h"
 #endif
 
@@ -29,7 +32,7 @@ class MockContentBrowserClient final : public ContentBrowserClient {
  public:
   void UpdateRendererPreferencesForWorker(
       BrowserContext*,
-      blink::mojom::RendererPreferences* prefs) override {
+      blink::RendererPreferences* prefs) override {
     if (do_not_track_enabled_) {
       prefs->enable_do_not_track = true;
       prefs->enable_referrers = true;
@@ -45,7 +48,7 @@ class MockContentBrowserClient final : public ContentBrowserClient {
 class DoNotTrackTest : public ContentBrowserTest {
  protected:
   void SetUpOnMainThread() override {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     // TODO(crbug.com/864403): It seems that we call unsupported Android APIs on
     // KitKat when we set a ContentBrowserClient. Don't call such APIs and make
     // this test available on KitKat.
@@ -69,7 +72,7 @@ class DoNotTrackTest : public ContentBrowserTest {
     if (!original_client_)
       return false;
     client_.EnableDoNotTrack();
-    blink::mojom::RendererPreferences* prefs =
+    blink::RendererPreferences* prefs =
         shell()->web_contents()->GetMutableRendererPrefs();
     EXPECT_FALSE(prefs->enable_do_not_track);
     prefs->enable_do_not_track = true;
@@ -77,22 +80,13 @@ class DoNotTrackTest : public ContentBrowserTest {
   }
 
   void ExpectPageTextEq(const std::string& expected_content) {
-    std::string text;
-    ASSERT_TRUE(ExecuteScriptAndExtractString(
-        shell(),
-        "window.domAutomationController.send(document.body.innerText);",
-        &text));
-    EXPECT_EQ(expected_content, text);
+    EXPECT_EQ(expected_content, EvalJs(shell(), "document.body.innerText;"));
   }
 
   std::string GetDOMDoNotTrackProperty() {
-    std::string value;
-    EXPECT_TRUE(ExecuteScriptAndExtractString(
-        shell(),
-        "window.domAutomationController.send("
-        "    navigator.doNotTrack === null ? '' : navigator.doNotTrack)",
-        &value));
-    return value;
+    return EvalJs(shell(),
+                  "navigator.doNotTrack === null ? '' : navigator.doNotTrack")
+        .ExtractString();
   }
 
   GURL GetURL(std::string relative_url) {
@@ -100,7 +94,7 @@ class DoNotTrackTest : public ContentBrowserTest {
   }
 
  private:
-  ContentBrowserClient* original_client_ = nullptr;
+  raw_ptr<ContentBrowserClient> original_client_ = nullptr;
   MockContentBrowserClient client_;
 };
 
@@ -150,7 +144,7 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, Redirect) {
     return;
   // We don't check the result NavigateToURL as it returns true only if the
   // final URL is equal to the passed URL.
-  NavigateToURL(shell(), url);
+  EXPECT_TRUE(NavigateToURL(shell(), url, final_url /* expected_commit_url */));
   ExpectPageTextEq("1");
 }
 
@@ -175,8 +169,8 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, Worker) {
   ASSERT_TRUE(embedded_test_server()->Start());
   if (!EnableDoNotTrack())
     return;
-  NavigateToURL(shell(),
-                GetURL("/workers/create_worker.html?worker_url=/capture"));
+  EXPECT_TRUE(NavigateToURL(
+      shell(), GetURL("/workers/create_worker.html?worker_url=/capture")));
   loop.Run();
 
   EXPECT_TRUE(header_map.find("DNT") != header_map.end());
@@ -190,7 +184,7 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, Worker) {
 // Checks that the DNT header is sent in a request for shared worker script.
 // Disabled on Android since a shared worker is not available on Android:
 // crbug.com/869745.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #define MAYBE_SharedWorker DISABLED_SharedWorker
 #else
 #define MAYBE_SharedWorker SharedWorker
@@ -206,9 +200,9 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, MAYBE_SharedWorker) {
   ASSERT_TRUE(embedded_test_server()->Start());
   if (!EnableDoNotTrack())
     return;
-  NavigateToURL(
+  EXPECT_TRUE(NavigateToURL(
       shell(),
-      GetURL("/workers/create_shared_worker.html?worker_url=/capture"));
+      GetURL("/workers/create_shared_worker.html?worker_url=/capture")));
   loop.Run();
 
   EXPECT_TRUE(header_map.find("DNT") != header_map.end());
@@ -231,7 +225,8 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, ServiceWorker_Register) {
   ASSERT_TRUE(embedded_test_server()->Start());
   if (!EnableDoNotTrack())
     return;
-  NavigateToURL(shell(), GetURL("/service_worker/create_service_worker.html"));
+  EXPECT_TRUE(NavigateToURL(
+      shell(), GetURL("/service_worker/create_service_worker.html")));
 
   EXPECT_EQ("DONE", EvalJs(shell(), "register('/capture');"));
   loop.Run();
@@ -240,6 +235,66 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, ServiceWorker_Register) {
   EXPECT_EQ("1", header_map["DNT"]);
 
   // Service worker doesn't have to wait for onmessage event because
+  // navigator.serviceWorker.ready can ensure that the script load has
+  // been completed.
+}
+
+// Checks that the DNT header is sent in a request for a module service worker
+// script.
+IN_PROC_BROWSER_TEST_F(DoNotTrackTest, ModuleServiceWorker_Register) {
+  if (!EnableDoNotTrack())
+    return;
+  const std::string kWorkerScript = "// empty";
+  net::test_server::HttpRequest::HeaderMap header_map;
+  base::RunLoop loop;
+  embedded_test_server()->RegisterRequestHandler(
+      base::BindRepeating(&CaptureHeaderHandlerAndReturnScript, "/capture",
+                          &header_map, kWorkerScript, loop.QuitClosure()));
+  ASSERT_TRUE(embedded_test_server()->Start());
+  EXPECT_TRUE(NavigateToURL(
+      shell(), GetURL("/service_worker/create_service_worker.html")));
+
+  EXPECT_EQ("DONE", EvalJs(shell(), "register('/capture', '', 'module');"));
+  loop.Run();
+
+  EXPECT_TRUE(header_map.find("DNT") != header_map.end());
+  EXPECT_EQ("1", header_map["DNT"]);
+
+  // Module Service worker doesn't have to wait for onmessage event because
+  // navigator.serviceWorker.ready can ensure that the script load has
+  // been completed.
+}
+
+// Checks that the DNT header is sent in a request for a module service worker
+// script with a static import.
+IN_PROC_BROWSER_TEST_F(DoNotTrackTest,
+                       StaticImportModuleServiceWorker_Register) {
+  if (!EnableDoNotTrack())
+    return;
+  const std::string kModuleScript = "// empty";
+  const std::string kWorkerScript = "import './captureModule';";
+  net::test_server::HttpRequest::HeaderMap header_map;
+  base::RunLoop loop;
+
+  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
+      &CaptureHeaderHandlerAndReturnScript, "/captureModule", &header_map,
+      kModuleScript, loop.QuitClosure()));
+  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
+      &CaptureHeaderHandlerAndReturnScript, "/captureWorker", &header_map,
+      kWorkerScript, loop.QuitClosure()));
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+  EXPECT_TRUE(NavigateToURL(
+      shell(), GetURL("/service_worker/create_service_worker.html")));
+
+  EXPECT_EQ("DONE",
+            EvalJs(shell(), "register('/captureWorker','', 'module');"));
+  loop.Run();
+
+  EXPECT_TRUE(header_map.find("DNT") != header_map.end());
+  EXPECT_EQ("1", header_map["DNT"]);
+
+  // Module Service worker doesn't have to wait for onmessage event because
   // navigator.serviceWorker.ready can ensure that the script load has
   // been completed.
 }
@@ -260,7 +315,8 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, ServiceWorker_Update) {
 
   // Register a service worker, trigger update, then wait until the handler sees
   // the second request.
-  NavigateToURL(shell(), GetURL("/service_worker/create_service_worker.html"));
+  EXPECT_TRUE(NavigateToURL(
+      shell(), GetURL("/service_worker/create_service_worker.html")));
   EXPECT_EQ("DONE", EvalJs(shell(), "register('/capture');"));
   EXPECT_EQ("DONE", EvalJs(shell(), "update();"));
   loop.Run();
@@ -273,13 +329,77 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, ServiceWorker_Update) {
   // load has been completed.
 }
 
+// Checks that the DNT header is sent in a request for a module service worker
+// script during update checking.
+IN_PROC_BROWSER_TEST_F(DoNotTrackTest, ModuleServiceWorker_Update) {
+  if (!EnableDoNotTrack())
+    return;
+  const std::string kWorkerScript = "// empty";
+  net::test_server::HttpRequest::HeaderMap header_map;
+  base::RunLoop loop;
+  // Wait for two requests to capture the request header for updating.
+  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
+      &CaptureHeaderHandlerAndReturnScript, "/capture", &header_map,
+      kWorkerScript, base::BarrierClosure(2, loop.QuitClosure())));
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Register a module service worker, trigger update, then wait until the
+  // handler sees the second request.
+  EXPECT_TRUE(NavigateToURL(
+      shell(), GetURL("/service_worker/create_service_worker.html")));
+  EXPECT_EQ("DONE", EvalJs(shell(), "register('/capture','','module');"));
+  EXPECT_EQ("DONE", EvalJs(shell(), "update();"));
+  loop.Run();
+
+  EXPECT_TRUE(header_map.find("DNT") != header_map.end());
+  EXPECT_EQ("1", header_map["DNT"]);
+
+  // Module service worker doesn't have to wait for onmessage event because
+  // waiting for a promise by registration.update() can ensure that the script
+  // load has been completed.
+}
+
+// Checks that the DNT header is sent in a request for a module service worker
+// with static import script during update checking.
+IN_PROC_BROWSER_TEST_F(DoNotTrackTest, StaticImportModuleServiceWorker_Update) {
+  if (!EnableDoNotTrack())
+    return;
+  const std::string kModuleScript = "// empty";
+  const std::string kWorkerScript = "import '/captureModule';";
+  net::test_server::HttpRequest::HeaderMap header_map;
+  base::RunLoop loop;
+  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
+      &CaptureHeaderHandlerAndReturnScript, "/captureModule", &header_map,
+      kModuleScript, loop.QuitClosure()));
+  embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
+      &CaptureHeaderHandlerAndReturnScript, "/captureWorker", &header_map,
+      kWorkerScript, loop.QuitClosure()));
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Register a module service worker, trigger update, then wait until the
+  // handler sees the second request.
+  EXPECT_TRUE(NavigateToURL(
+      shell(), GetURL("/service_worker/create_service_worker.html")));
+  EXPECT_EQ("DONE", EvalJs(shell(), "register('/captureWorker','','module');"));
+  EXPECT_EQ("DONE", EvalJs(shell(), "update();"));
+  loop.Run();
+
+  EXPECT_TRUE(header_map.find("DNT") != header_map.end());
+  EXPECT_EQ("1", header_map["DNT"]);
+
+  // Module service worker doesn't have to wait for onmessage event because
+  // waiting for a promise by registration.update() can ensure that the script
+  // load has been completed.
+}
+
 // Checks that the DNT header is preserved when fetching from a dedicated
 // worker.
 IN_PROC_BROWSER_TEST_F(DoNotTrackTest, FetchFromWorker) {
   ASSERT_TRUE(embedded_test_server()->Start());
   if (!EnableDoNotTrack())
     return;
-  NavigateToURL(shell(), GetURL("/workers/fetch_from_worker.html"));
+  EXPECT_TRUE(
+      NavigateToURL(shell(), GetURL("/workers/fetch_from_worker.html")));
   EXPECT_EQ("1", EvalJs(shell(), "fetch_from_worker('/echoheader?DNT');"));
 }
 
@@ -287,7 +407,7 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, FetchFromWorker) {
 //
 // Disabled on Android since a shared worker is not available on Android:
 // crbug.com/869745.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #define MAYBE_FetchFromSharedWorker DISABLED_FetchFromSharedWorker
 #else
 #define MAYBE_FetchFromSharedWorker FetchFromSharedWorker
@@ -296,7 +416,8 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, MAYBE_FetchFromSharedWorker) {
   ASSERT_TRUE(embedded_test_server()->Start());
   if (!EnableDoNotTrack())
     return;
-  NavigateToURL(shell(), GetURL("/workers/fetch_from_shared_worker.html"));
+  EXPECT_TRUE(
+      NavigateToURL(shell(), GetURL("/workers/fetch_from_shared_worker.html")));
 
   EXPECT_EQ("1",
             EvalJs(shell(), "fetch_from_shared_worker('/echoheader?DNT');"));
@@ -307,8 +428,8 @@ IN_PROC_BROWSER_TEST_F(DoNotTrackTest, FetchFromServiceWorker) {
   ASSERT_TRUE(embedded_test_server()->Start());
   if (!EnableDoNotTrack())
     return;
-  NavigateToURL(shell(),
-                GetURL("/service_worker/fetch_from_service_worker.html"));
+  EXPECT_TRUE(NavigateToURL(
+      shell(), GetURL("/service_worker/fetch_from_service_worker.html")));
 
   EXPECT_EQ("ready", EvalJs(shell(), "setup();"));
   EXPECT_EQ("1",

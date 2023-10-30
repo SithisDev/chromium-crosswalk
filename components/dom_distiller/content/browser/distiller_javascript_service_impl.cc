@@ -1,43 +1,58 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/dom_distiller/content/browser/distiller_javascript_service_impl.h"
+#include "components/dom_distiller/core/dom_distiller_service.h"
 
-#include <memory>
-#include <utility>
-
-#include "base/metrics/user_metrics.h"
-#include "components/dom_distiller/content/browser/distiller_ui_handle.h"
-#include "components/dom_distiller/core/feedback_reporter.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 
 namespace dom_distiller {
 
 DistillerJavaScriptServiceImpl::DistillerJavaScriptServiceImpl(
-    content::RenderFrameHost* render_frame_host,
-    DistillerUIHandle* distiller_ui_handle)
-    : render_frame_host_(render_frame_host),
-      distiller_ui_handle_(distiller_ui_handle) {}
+    base::WeakPtr<DomDistillerService> distiller_service_weak_ptr)
+    : distiller_service_weak_ptr_(distiller_service_weak_ptr) {}
 
-DistillerJavaScriptServiceImpl::~DistillerJavaScriptServiceImpl() {}
+DistillerJavaScriptServiceImpl::~DistillerJavaScriptServiceImpl() = default;
 
 void DistillerJavaScriptServiceImpl::HandleDistillerOpenSettingsCall() {
-  if (!distiller_ui_handle_) {
+  if (distiller_service_weak_ptr_.WasInvalidated())
     return;
-  }
-  content::WebContents* contents =
-      content::WebContents::FromRenderFrameHost(render_frame_host_);
-  distiller_ui_handle_->OpenSettings(contents);
+
+  distiller_service_weak_ptr_.get()->GetDistillerUIHandle()->OpenSettings();
+}
+
+void DistillerJavaScriptServiceImpl::HandleStoreThemePref(mojom::Theme theme) {
+  if (distiller_service_weak_ptr_.WasInvalidated())
+    return;
+
+  distiller_service_weak_ptr_.get()->GetDistilledPagePrefs()->SetTheme(theme);
+}
+
+void DistillerJavaScriptServiceImpl::HandleStoreFontFamilyPref(
+    mojom::FontFamily font_family) {
+  if (distiller_service_weak_ptr_.WasInvalidated())
+    return;
+
+  distiller_service_weak_ptr_.get()->GetDistilledPagePrefs()->SetFontFamily(
+      font_family);
+}
+
+void DistillerJavaScriptServiceImpl::HandleStoreFontScalingPref(
+    float font_scale) {
+  if (distiller_service_weak_ptr_.WasInvalidated())
+    return;
+
+  distiller_service_weak_ptr_.get()->GetDistilledPagePrefs()->SetFontScaling(
+      font_scale);
 }
 
 void CreateDistillerJavaScriptService(
-    DistillerUIHandle* distiller_ui_handle,
-    mojom::DistillerJavaScriptServiceRequest request,
-    content::RenderFrameHost* render_frame_host) {
-  mojo::MakeStrongBinding(std::make_unique<DistillerJavaScriptServiceImpl>(
-                              render_frame_host, distiller_ui_handle),
-                          std::move(request));
+    base::WeakPtr<DomDistillerService> distiller_service_weak_ptr,
+    mojo::PendingReceiver<mojom::DistillerJavaScriptService> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<DistillerJavaScriptServiceImpl>(
+                                  distiller_service_weak_ptr),
+                              std::move(receiver));
 }
 
 }  // namespace dom_distiller

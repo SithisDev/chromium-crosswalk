@@ -1,16 +1,14 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_COMMON_INPUT_EVENT_WITH_LATENCY_INFO_H_
 #define CONTENT_COMMON_INPUT_EVENT_WITH_LATENCY_INFO_H_
 
-#include "base/compiler_specific.h"
-#include "base/logging.h"
-#include "content/common/content_export.h"
-#include "third_party/blink/public/platform/web_gesture_event.h"
-#include "third_party/blink/public/platform/web_mouse_wheel_event.h"
-#include "third_party/blink/public/platform/web_touch_event.h"
+#include "base/check_op.h"
+#include "third_party/blink/public/common/input/web_gesture_event.h"
+#include "third_party/blink/public/common/input/web_mouse_wheel_event.h"
+#include "third_party/blink/public/common/input/web_touch_event.h"
 #include "ui/events/blink/blink_event_util.h"
 #include "ui/events/blink/web_input_event_traits.h"
 #include "ui/latency/latency_info.h"
@@ -36,15 +34,11 @@ class EventWithLatencyInfo {
 
   EventWithLatencyInfo() {}
 
-  bool CanCoalesceWith(const EventWithLatencyInfo& other)
-      const WARN_UNUSED_RESULT {
+  [[nodiscard]] bool CanCoalesceWith(const EventWithLatencyInfo& other) const {
     if (other.event.GetType() != event.GetType())
       return false;
 
-    DCHECK_EQ(sizeof(T), event.size());
-    DCHECK_EQ(sizeof(T), other.event.size());
-
-    return ui::CanCoalesce(other.event, event);
+    return event.CanCoalesce(other.event);
   }
 
   void CoalesceWith(const EventWithLatencyInfo& other) {
@@ -55,7 +49,7 @@ class EventWithLatencyInfo {
     // New events get coalesced into older events, and the newer timestamp
     // should always be preserved.
     const base::TimeTicks time_stamp = other.event.TimeStamp();
-    ui::Coalesce(other.event, &event);
+    event.Coalesce(other.event);
     event.SetTimeStamp(time_stamp);
 
     // When coalescing two input events, we keep the oldest LatencyInfo

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,14 +13,15 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
-#include "base/strings/string16.h"
 #include "components/renderer_context_menu/context_menu_content_type.h"
 #include "components/renderer_context_menu/render_view_context_menu_observer.h"
 #include "components/renderer_context_menu/render_view_context_menu_proxy.h"
-#include "content/public/common/context_menu_params.h"
+#include "content/public/browser/context_menu_params.h"
+#include "content/public/browser/site_instance.h"
 #include "ppapi/buildflags/buildflags.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -47,7 +48,7 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
     virtual void UpdateMenuItem(int command_id,
                                 bool enabled,
                                 bool hidden,
-                                const base::string16& title) {}
+                                const std::u16string& title) {}
 
     // Recreates the menu using the |menu_model_|.
     virtual void RebuildMenu(){}
@@ -64,8 +65,12 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   // True if the given id is the one generated for content context menu.
   static bool IsContentCustomCommandId(int id);
 
-  RenderViewContextMenuBase(content::RenderFrameHost* render_frame_host,
+  RenderViewContextMenuBase(content::RenderFrameHost& render_frame_host,
                             const content::ContextMenuParams& params);
+
+  RenderViewContextMenuBase(const RenderViewContextMenuBase&) = delete;
+  RenderViewContextMenuBase& operator=(const RenderViewContextMenuBase&) =
+      delete;
 
   ~RenderViewContextMenuBase() override;
 
@@ -94,26 +99,27 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   void MenuClosed(ui::SimpleMenuModel* source) override;
 
   // RenderViewContextMenuProxy implementation.
-  void AddMenuItem(int command_id, const base::string16& title) override;
+  void AddMenuItem(int command_id, const std::u16string& title) override;
   void AddMenuItemWithIcon(int command_id,
-                           const base::string16& title,
-                           const gfx::ImageSkia& image) override;
-  void AddCheckItem(int command_id, const base::string16& title) override;
+                           const std::u16string& title,
+                           const ui::ImageModel& icon) override;
+  void AddCheckItem(int command_id, const std::u16string& title) override;
   void AddSeparator() override;
   void AddSubMenu(int command_id,
-                  const base::string16& label,
+                  const std::u16string& label,
                   ui::MenuModel* model) override;
   void AddSubMenuWithStringIdAndIcon(int command_id,
                                      int message_id,
                                      ui::MenuModel* model,
-                                     const gfx::ImageSkia& image) override;
+                                     const ui::ImageModel& icon) override;
   void UpdateMenuItem(int command_id,
                       bool enabled,
                       bool hidden,
-                      const base::string16& title) override;
-  void UpdateMenuIcon(int command_id, const gfx::Image& image) override;
+                      const std::u16string& title) override;
+  void UpdateMenuIcon(int command_id, const ui::ImageModel& icon) override;
   void RemoveMenuItem(int command_id) override;
   void RemoveAdjacentSeparators() override;
+  void RemoveSeparatorBeforeMenuItem(int command_id) override;
   content::RenderViewHost* GetRenderViewHost() const override;
   content::WebContents* GetWebContents() const override;
   content::BrowserContext* GetBrowserContext() const override;
@@ -143,7 +149,7 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   virtual void RecordUsedItem(int id) = 0;
 
   // Increments histogram value for visible context menu item specified by |id|.
-  virtual void RecordShownItem(int id) = 0;
+  virtual void RecordShownItem(int id, bool is_submenu) = 0;
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   virtual void HandleAuthorizeAllPlugins() = 0;
@@ -154,9 +160,10 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
 
   // TODO(oshima): Remove this.
   virtual void AppendPlatformEditableItems() {}
+  virtual void ExecOpenInReadAnything() = 0;
 
   // May return nullptr if the frame was deleted while the menu was open.
-  content::RenderFrameHost* GetRenderFrameHost();
+  content::RenderFrameHost* GetRenderFrameHost() const;
 
   bool IsCustomItemChecked(int id) const;
   bool IsCustomItemEnabled(int id) const;
@@ -176,16 +183,22 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
                                bool started_from_context_menu);
 
   content::ContextMenuParams params_;
-  content::WebContents* const source_web_contents_;
-  content::BrowserContext* const browser_context_;
+  const raw_ptr<content::WebContents> source_web_contents_;
+  const raw_ptr<content::BrowserContext> browser_context_;
 
   ui::SimpleMenuModel menu_model_;
 
   // Renderer's frame id.
   const int render_frame_id_;
 
+  // Renderer's frame token.
+  const blink::LocalFrameToken render_frame_token_;
+
   // The RenderFrameHost's IDs.
   const int render_process_id_;
+
+  // Renderer's frame SiteInstance.
+  scoped_refptr<content::SiteInstance> site_instance_;
 
   // Our observers.
   mutable base::ObserverList<RenderViewContextMenuObserver>::Unchecked
@@ -203,8 +216,6 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   std::unique_ptr<ToolkitDelegate> toolkit_delegate_;
 
   std::vector<std::unique_ptr<ui::SimpleMenuModel>> custom_submenus_;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderViewContextMenuBase);
 };
 
 #endif  // COMPONENTS_RENDERER_CONTEXT_MENU_RENDER_VIEW_CONTEXT_MENU_BASE_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include <algorithm>
 
-#include "base/macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "content/browser/renderer_host/pepper/pepper_truetype_font_list.h"
 #include "content/common/font_list.h"
@@ -27,8 +26,12 @@ class TrueTypeFontMessageFilter : public ppapi::host::ResourceMessageFilter {
  public:
   TrueTypeFontMessageFilter();
 
+  TrueTypeFontMessageFilter(const TrueTypeFontMessageFilter&) = delete;
+  TrueTypeFontMessageFilter& operator=(const TrueTypeFontMessageFilter&) =
+      delete;
+
   // ppapi::host::ResourceMessageFilter implementation.
-  scoped_refptr<base::TaskRunner> OverrideTaskRunnerForMessage(
+  scoped_refptr<base::SequencedTaskRunner> OverrideTaskRunnerForMessage(
       const IPC::Message& msg) override;
   int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
@@ -41,15 +44,13 @@ class TrueTypeFontMessageFilter : public ppapi::host::ResourceMessageFilter {
   int32_t OnHostMsgGetFontFamilies(ppapi::host::HostMessageContext* context);
   int32_t OnHostMsgGetFontsInFamily(ppapi::host::HostMessageContext* context,
                                     const std::string& family);
-
-  DISALLOW_COPY_AND_ASSIGN(TrueTypeFontMessageFilter);
 };
 
 TrueTypeFontMessageFilter::TrueTypeFontMessageFilter() {}
 
 TrueTypeFontMessageFilter::~TrueTypeFontMessageFilter() {}
 
-scoped_refptr<base::TaskRunner>
+scoped_refptr<base::SequencedTaskRunner>
 TrueTypeFontMessageFilter::OverrideTaskRunnerForMessage(
     const IPC::Message& msg) {
   // Use the font list SequencedTaskRunner to get the font list (currently the

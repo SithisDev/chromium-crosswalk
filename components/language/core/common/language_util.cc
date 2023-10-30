@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,13 @@
 #include <stddef.h>
 #include <algorithm>
 
-#include "base/stl_util.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_piece.h"
 #include "components/language/core/common/locale_util.h"
 
 namespace language {
+
+namespace {
 
 struct LanguageCodePair {
   // Code used in supporting list of Translate.
@@ -25,9 +28,9 @@ struct LanguageCodePair {
 //
 // If this table is updated, please sync this with the synonym table in
 // chrome/browser/resources/settings/languages_page/languages.js.
-const LanguageCodePair kLanguageCodeSimilitudes[] = {
+const LanguageCodePair kTranslateOnlySynonyms[] = {
     {"no", "nb"},
-    {"tl", "fil"},
+    {"id", "in"},
 };
 
 // Some languages have changed codes over the years and sometimes the older
@@ -38,6 +41,7 @@ const LanguageCodePair kLanguageCodeSimilitudes[] = {
 const LanguageCodePair kLanguageCodeSynonyms[] = {
     {"iw", "he"},
     {"jw", "jv"},
+    {"tl", "fil"},
 };
 
 // Some Chinese language codes are compatible with zh-TW or zh-CN in terms of
@@ -51,16 +55,11 @@ const LanguageCodePair kLanguageCodeChineseCompatiblePairs[] = {
     {"zh-CN", "zh-SG"},
 };
 
-void ToTranslateLanguageSynonym(std::string* language) {
-  for (size_t i = 0; i < base::size(kLanguageCodeSimilitudes); ++i) {
-    if (*language == kLanguageCodeSimilitudes[i].chrome_language) {
-      *language = kLanguageCodeSimilitudes[i].translate_language;
-      return;
-    }
-  }
+}  // namespace
 
-  std::string main_part, tail_part;
-  language::SplitIntoMainAndTail(*language, &main_part, &tail_part);
+void ToTranslateLanguageSynonym(std::string* language) {
+  // Get the base language (e.g. "es" for "es-MX")
+  base::StringPiece main_part = language::SplitIntoMainAndTail(*language).first;
   if (main_part.empty())
     return;
 
@@ -71,9 +70,9 @@ void ToTranslateLanguageSynonym(std::string* language) {
   // instead of the main_part.
   // Note that "zh" does not have any mapping and as such we leave it as is. See
   // https://crbug/798512 for more info.
-  for (size_t i = 0; i < base::size(kLanguageCodeChineseCompatiblePairs); ++i) {
-    if (*language == kLanguageCodeChineseCompatiblePairs[i].chrome_language) {
-      *language = kLanguageCodeChineseCompatiblePairs[i].translate_language;
+  for (const auto& language_pair : kLanguageCodeChineseCompatiblePairs) {
+    if (*language == language_pair.chrome_language) {
+      *language = language_pair.translate_language;
       return;
     }
   }
@@ -81,38 +80,39 @@ void ToTranslateLanguageSynonym(std::string* language) {
     return;
   }
 
-  // Apply linear search here because number of items in the list is just four.
-  for (size_t i = 0; i < base::size(kLanguageCodeSynonyms); ++i) {
-    if (main_part == kLanguageCodeSynonyms[i].chrome_language) {
-      main_part = std::string(kLanguageCodeSynonyms[i].translate_language);
-      break;
-    }
-  }
-
-  *language = main_part;
-}
-
-void ToChromeLanguageSynonym(std::string* language) {
-  for (size_t i = 0; i < base::size(kLanguageCodeSimilitudes); ++i) {
-    if (*language == kLanguageCodeSimilitudes[i].translate_language) {
-      *language = kLanguageCodeSimilitudes[i].chrome_language;
+  for (const auto& language_pair : kTranslateOnlySynonyms) {
+    if (main_part == language_pair.chrome_language) {
+      *language = language_pair.translate_language;
       return;
     }
   }
 
-  std::string main_part, tail_part;
-  language::SplitIntoMainAndTail(*language, &main_part, &tail_part);
+  // Apply linear search here because number of items in the list is just three.
+  for (const auto& language_pair : kLanguageCodeSynonyms) {
+    if (main_part == language_pair.chrome_language) {
+      *language = language_pair.translate_language;
+      return;
+    }
+  }
+
+  // By default use the base language as the translate synonym.
+  *language = std::string(main_part);
+}
+
+void ToChromeLanguageSynonym(std::string* language) {
+  auto [main_part, tail_part] = language::SplitIntoMainAndTail(*language);
   if (main_part.empty())
     return;
 
-  // Apply liner search here because number of items in the list is just four.
-  for (size_t i = 0; i < base::size(kLanguageCodeSynonyms); ++i) {
-    if (main_part == kLanguageCodeSynonyms[i].translate_language) {
-      main_part = std::string(kLanguageCodeSynonyms[i].chrome_language);
+  // Apply linear search here because number of items in the list is just three.
+  for (const auto& language_pair : kLanguageCodeSynonyms) {
+    if (main_part == language_pair.translate_language) {
+      main_part = language_pair.chrome_language;
       break;
     }
   }
 
-  *language = main_part + tail_part;
+  *language = base::StrCat({main_part, tail_part});
 }
+
 }  // namespace language

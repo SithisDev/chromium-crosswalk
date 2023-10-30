@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/infobars/core/infobar_delegate.h"
-#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/gfx/animation/animation_delegate_notifier.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -37,6 +37,10 @@ class InfoBarManager;
 class InfoBar : public gfx::AnimationDelegate {
  public:
   explicit InfoBar(std::unique_ptr<InfoBarDelegate> delegate);
+
+  InfoBar(const InfoBar&) = delete;
+  InfoBar& operator=(const InfoBar&) = delete;
+
   ~InfoBar() override;
 
   InfoBarManager* owner() { return owner_; }
@@ -47,6 +51,8 @@ class InfoBar : public gfx::AnimationDelegate {
   // only be called once as there's no way to extract an infobar from its owner
   // without deleting it, for reparenting in another tab.
   void SetOwner(InfoBarManager* owner);
+
+  void SetNotifier(std::unique_ptr<gfx::AnimationDelegate> notifier);
 
   // Makes the infobar visible.  If |animate| is true, the infobar is then
   // animated to full size.
@@ -104,16 +110,16 @@ class InfoBar : public gfx::AnimationDelegate {
   // itself.
   void MaybeDelete();
 
-  InfoBarManager* owner_;
+  raw_ptr<InfoBarManager> owner_;
   std::unique_ptr<InfoBarDelegate> delegate_;
-  InfoBarContainer* container_;
+  raw_ptr<InfoBarContainer> container_;
+
+  std::unique_ptr<gfx::AnimationDelegate> notifier_;
   gfx::SlideAnimation animation_;
 
   // The current and target heights.
   int height_;  // Includes both fill and bottom separator.
   int target_height_;
-
-  DISALLOW_COPY_AND_ASSIGN(InfoBar);
 };
 
 }  // namespace infobars

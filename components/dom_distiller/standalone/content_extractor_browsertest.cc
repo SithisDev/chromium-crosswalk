@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,16 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/containers/id_map.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
@@ -28,18 +29,16 @@
 #include "components/dom_distiller/core/distilled_page_prefs.h"
 #include "components/dom_distiller/core/distiller.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
-#include "components/dom_distiller/core/dom_distiller_store.h"
 #include "components/dom_distiller/core/proto/distilled_article.pb.h"
 #include "components/dom_distiller/core/proto/distilled_page.pb.h"
 #include "components/dom_distiller/core/task_tracker.h"
-#include "components/keyed_service/core/simple_key_map.h"
-#include "components/leveldb_proto/content/proto_database_provider_factory.h"
 #include "components/leveldb_proto/public/proto_database.h"
 #include "components/leveldb_proto/public/proto_database_provider.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/isolated_world_ids.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/shell/browser/shell.h"
 #include "google/protobuf/io/coded_stream.h"
@@ -129,32 +128,15 @@ const int kMaxExtractorTasks = 8;
 std::unique_ptr<DomDistillerService> CreateDomDistillerService(
     content::BrowserContext* context,
     sync_preferences::TestingPrefServiceSyncable* pref_service,
-    const base::FilePath& db_path,
     const FileToUrlMap& file_to_url_map) {
-  scoped_refptr<base::SequencedTaskRunner> background_task_runner =
-      base::CreateSequencedTaskRunnerWithTraits({base::MayBlock()});
-
   // Setting up PrefService for DistilledPagePrefs.
   DistilledPagePrefs::RegisterProfilePrefs(pref_service->registry());
-
-  SimpleFactoryKey* key =
-      SimpleKeyMap::GetInstance()->GetForBrowserContext(context);
-  auto* db_provider =
-      leveldb_proto::ProtoDatabaseProviderFactory::GetForKey(key);
-
-  // TODO(cjhopman): use an in-memory database instead of an on-disk one with
-  // temporary directory.
-  auto db = db_provider->GetDB<ArticleEntry>(
-      leveldb_proto::ProtoDbType::DOM_DISTILLER_STORE, db_path,
-      background_task_runner);
-
-  auto dom_distiller_store = std::make_unique<DomDistillerStore>(std::move(db));
 
   auto distiller_page_factory =
       std::make_unique<DistillerPageWebContentsFactory>(context);
   auto distiller_url_fetcher_factory =
       std::make_unique<DistillerURLFetcherFactory>(
-          content::BrowserContext::GetDefaultStoragePartition(context)
+          context->GetDefaultStoragePartition()
               ->GetURLLoaderFactoryForBrowserProcess());
 
   dom_distiller::proto::DomDistillerOptions options;
@@ -183,19 +165,19 @@ std::unique_ptr<DomDistillerService> CreateDomDistillerService(
       std::move(distiller_url_fetcher_factory), options, file_to_url_map);
 
   return std::make_unique<DomDistillerService>(
-      std::move(dom_distiller_store), std::move(distiller_factory),
-      std::move(distiller_page_factory),
-      std::make_unique<DistilledPagePrefs>(pref_service));
+      std::move(distiller_factory), std::move(distiller_page_factory),
+      std::make_unique<DistilledPagePrefs>(pref_service),
+      /* distiller_ui_handle */ nullptr);
 }
 
 void AddComponentsTestResources() {
   base::FilePath pak_file;
   base::FilePath pak_dir;
-  base::PathService::Get(base::DIR_MODULE, &pak_dir);
+  base::PathService::Get(base::DIR_ASSETS, &pak_dir);
   pak_file =
       pak_dir.Append(FILE_PATH_LITERAL("components_tests_resources.pak"));
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-      pak_file, ui::SCALE_FACTOR_NONE);
+      pak_file, ui::kScaleFactorNone);
 }
 
 bool WriteProtobufWithSize(
@@ -243,9 +225,10 @@ class ContentExtractionRequest : public ViewRequestDelegate {
  public:
   ContentExtractionRequest(const GURL& url) : url_(url) {}
 
-  void Start(DomDistillerService* service, const gfx::Size& render_view_size,
-             base::Closure finished_callback) {
-    finished_callback_ = finished_callback;
+  void Start(DomDistillerService* service,
+             const gfx::Size& render_view_size,
+             base::OnceClosure finished_callback) {
+    finished_callback_ = std::move(finished_callback);
     viewer_handle_ =
         service->ViewUrl(this,
                          service->CreateDefaultDistillerPage(render_view_size),
@@ -314,14 +297,14 @@ class ContentExtractionRequest : public ViewRequestDelegate {
   void OnArticleReady(const DistilledArticleProto* article_proto) override {
     article_proto_ = article_proto;
     CHECK(article_proto->pages_size()) << "Failed extracting " << url_;
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                  finished_callback_);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, std::move(finished_callback_));
   }
 
-  const DistilledArticleProto* article_proto_;
+  raw_ptr<const DistilledArticleProto> article_proto_;
   std::unique_ptr<ViewerHandle> viewer_handle_;
   GURL url_;
-  base::Closure finished_callback_;
+  base::OnceClosure finished_callback_;
 };
 
 class ContentExtractor : public ContentBrowserTest {
@@ -341,7 +324,6 @@ class ContentExtractor : public ContentBrowserTest {
     if (!base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableDnsSwitch)) {
       EnableDNSLookupForThisTest();
     }
-    CHECK(db_dir_.CreateUniqueTempDir());
     AddComponentsTestResources();
   }
 
@@ -362,16 +344,16 @@ class ContentExtractor : public ContentBrowserTest {
         std::make_unique<sync_preferences::TestingPrefServiceSyncable>();
 
     service_ = CreateDomDistillerService(context, pref_service_.get(),
-                                         db_dir_.GetPath(), file_to_url_map);
+                                         file_to_url_map);
     PumpQueue();
   }
 
   void PumpQueue() {
     while (pending_tasks_ < max_tasks_ && next_request_ < requests_.size()) {
       requests_[next_request_]->Start(
-          service_.get(),
-          shell()->web_contents()->GetContainerBounds().size(),
-          base::Bind(&ContentExtractor::FinishRequest, base::Unretained(this)));
+          service_.get(), shell()->web_contents()->GetContainerBounds().size(),
+          base::BindOnce(&ContentExtractor::FinishRequest,
+                         base::Unretained(this)));
       ++next_request_;
       ++pending_tasks_;
     }
@@ -438,7 +420,6 @@ class ContentExtractor : public ContentBrowserTest {
   size_t max_tasks_;
   size_t next_request_;
 
-  base::ScopedTempDir db_dir_;
   std::unique_ptr<net::ScopedDefaultHostResolverProc>
       mock_host_resolver_override_;
   std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> pref_service_;

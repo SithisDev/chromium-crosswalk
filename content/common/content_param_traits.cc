@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,112 +10,36 @@
 #include "base/unguessable_token.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "components/viz/common/surfaces/local_surface_id.h"
-#include "components/viz/common/surfaces/local_surface_id_allocation.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "components/viz/common/surfaces/surface_info.h"
-#include "content/common/frame_message_structs.h"
-#include "content/common/tab_switch_time_recorder.h"
 #include "ipc/ipc_mojo_message_helper.h"
 #include "ipc/ipc_mojo_param_traits.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "net/base/ip_endpoint.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
+#include "services/network/public/cpp/net_ipc_param_traits.h"
 #include "third_party/blink/public/common/messaging/message_port_channel.h"
+#include "third_party/blink/public/common/messaging/message_port_descriptor.h"
 #include "third_party/blink/public/common/messaging/transferable_message.h"
-#include "third_party/blink/public/mojom/messaging/transferable_message.mojom.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
+#include "third_party/blink/public/mojom/blob/blob.mojom.h"
+#include "third_party/blink/public/mojom/permissions_policy/policy_value.mojom.h"
 #include "ui/accessibility/ax_mode.h"
-#include "ui/events/blink/web_input_event_traits.h"
-#include "ui/gfx/ipc/skia/gfx_skia_param_traits.h"
+#include "ui/gfx/ipc/geometry/gfx_param_traits.h"
 
 namespace IPC {
 
-void ParamTraits<content::WebCursor>::Write(base::Pickle* m,
-                                            const param_type& p) {
-  WriteParam(m, p.info().type);
-  if (p.info().type == ui::CursorType::kCustom) {
-    WriteParam(m, p.info().hotspot);
-    WriteParam(m, p.info().image_scale_factor);
-    WriteParam(m, p.info().custom_image);
-  }
-}
-
-bool ParamTraits<content::WebCursor>::Read(const base::Pickle* m,
-                                           base::PickleIterator* iter,
-                                           param_type* r) {
-  content::CursorInfo info;
-  if (!ReadParam(m, iter, &info.type))
-    return false;
-
-  if (info.type == ui::CursorType::kCustom &&
-      (!ReadParam(m, iter, &info.hotspot) ||
-       !ReadParam(m, iter, &info.image_scale_factor) ||
-       !ReadParam(m, iter, &info.custom_image))) {
-    return false;
-  }
-
-  return r->SetInfo(info);
-}
-
-void ParamTraits<content::WebCursor>::Log(const param_type& p, std::string* l) {
-  l->append("<WebCursor>");
-}
-
-void ParamTraits<WebInputEventPointer>::Write(base::Pickle* m,
-                                              const param_type& p) {
-  m->WriteData(reinterpret_cast<const char*>(p), p->size());
-}
-
-bool ParamTraits<WebInputEventPointer>::Read(const base::Pickle* m,
-                                             base::PickleIterator* iter,
-                                             param_type* r) {
-  const char* data;
-  int data_length;
-  if (!iter->ReadData(&data, &data_length)) {
-    NOTREACHED();
-    return false;
-  }
-  if (data_length < static_cast<int>(sizeof(blink::WebInputEvent))) {
-    NOTREACHED();
-    return false;
-  }
-  param_type event = reinterpret_cast<param_type>(data);
-  // Check that the data size matches that of the event.
-  if (data_length != static_cast<int>(event->size())) {
-    NOTREACHED();
-    return false;
-  }
-  const size_t expected_size_for_type =
-      ui::WebInputEventTraits::GetSize(event->GetType());
-  if (data_length != static_cast<int>(expected_size_for_type)) {
-    NOTREACHED();
-    return false;
-  }
-  *r = event;
-  return true;
-}
-
-void ParamTraits<WebInputEventPointer>::Log(const param_type& p,
-                                            std::string* l) {
-  l->append("(");
-  LogParam(p->size(), l);
-  l->append(", ");
-  LogParam(p->GetType(), l);
-  l->append(", ");
-  LogParam(p->TimeStamp(), l);
-  l->append(")");
-}
-
 void ParamTraits<blink::MessagePortChannel>::Write(base::Pickle* m,
                                                    const param_type& p) {
-  ParamTraits<mojo::MessagePipeHandle>::Write(m, p.ReleaseHandle().release());
+  ParamTraits<blink::MessagePortDescriptor>::Write(m, p.ReleaseHandle());
 }
 
 bool ParamTraits<blink::MessagePortChannel>::Read(const base::Pickle* m,
                                                   base::PickleIterator* iter,
                                                   param_type* r) {
-  mojo::MessagePipeHandle handle;
-  if (!ParamTraits<mojo::MessagePipeHandle>::Read(m, iter, &handle))
+  blink::MessagePortDescriptor port;
+  if (!ParamTraits<blink::MessagePortDescriptor>::Read(m, iter, &port))
     return false;
-  *r = blink::MessagePortChannel(mojo::ScopedMessagePipeHandle(handle));
+  *r = blink::MessagePortChannel(std::move(port));
   return true;
 }
 
@@ -133,10 +57,44 @@ void ParamTraits<blink::PolicyValue>::Write(base::Pickle* m,
     case blink::mojom::PolicyValueType::kDecDouble:
       WriteParam(m, p.DoubleValue());
       break;
+    case blink::mojom::PolicyValueType::kEnum:
+      WriteParam(m, p.IntValue());
+      break;
     case blink::mojom::PolicyValueType::kNull:
       break;
   }
 }
+
+void ParamTraits<blink::MessagePortDescriptor>::Write(
+    base::Pickle* m,
+    const param_type& pconst) {
+  // Serializing this object is a move of the object contents, thus we need a
+  // mutable reference to it.
+  param_type& p = const_cast<param_type&>(pconst);
+  ParamTraits<mojo::MessagePipeHandle>::Write(
+      m, p.TakeHandleForSerialization().release());
+  ParamTraits<base::UnguessableToken>::Write(m, p.TakeIdForSerialization());
+  ParamTraits<uint64_t>::Write(m, p.TakeSequenceNumberForSerialization());
+}
+
+bool ParamTraits<blink::MessagePortDescriptor>::Read(const base::Pickle* m,
+                                                     base::PickleIterator* iter,
+                                                     param_type* r) {
+  mojo::MessagePipeHandle port;
+  base::UnguessableToken id;
+  uint64_t sequence_number = 0;
+  if (!ParamTraits<mojo::MessagePipeHandle>::Read(m, iter, &port) ||
+      !ParamTraits<base::UnguessableToken>::Read(m, iter, &id) ||
+      !ParamTraits<uint64_t>::Read(m, iter, &sequence_number)) {
+    return false;
+  }
+  r->InitializeFromSerializedValues(mojo::ScopedMessagePipeHandle(port), id,
+                                    sequence_number);
+  return true;
+}
+
+void ParamTraits<blink::MessagePortDescriptor>::Log(const param_type& p,
+                                                    std::string* l) {}
 
 bool ParamTraits<blink::PolicyValue>::Read(const base::Pickle* m,
                                            base::PickleIterator* iter,
@@ -159,7 +117,14 @@ bool ParamTraits<blink::PolicyValue>::Read(const base::Pickle* m,
       double d;
       if (!ReadParam(m, iter, &d))
         return false;
-      r->SetDoubleValue(d, type);
+      r->SetDoubleValue(d);
+      break;
+    }
+    case blink::mojom::PolicyValueType::kEnum: {
+      int32_t i;
+      if (!ReadParam(m, iter, &i))
+        return false;
+      r->SetIntValue(i);
       break;
     }
     case blink::mojom::PolicyValueType::kNull:
@@ -187,74 +152,6 @@ bool ParamTraits<ui::AXMode>::Read(const base::Pickle* m,
 
 void ParamTraits<ui::AXMode>::Log(const param_type& p, std::string* l) {}
 
-void ParamTraits<scoped_refptr<storage::BlobHandle>>::Write(
-    base::Pickle* m,
-    const param_type& p) {
-  WriteParam(m, p != nullptr);
-  if (p) {
-    auto info = p->Clone().PassInterface();
-    m->WriteUInt32(info.version());
-    MojoMessageHelper::WriteMessagePipeTo(m, info.PassHandle());
-  }
-}
-
-bool ParamTraits<scoped_refptr<storage::BlobHandle>>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* r) {
-  bool is_not_null;
-  if (!ReadParam(m, iter, &is_not_null))
-    return false;
-  if (!is_not_null)
-    return true;
-
-  uint32_t version;
-  if (!ReadParam(m, iter, &version))
-    return false;
-  mojo::ScopedMessagePipeHandle handle;
-  if (!MojoMessageHelper::ReadMessagePipeFrom(m, iter, &handle))
-    return false;
-  DCHECK(handle.is_valid());
-  blink::mojom::BlobPtr blob;
-  blob.Bind(blink::mojom::BlobPtrInfo(std::move(handle), version));
-  *r = base::MakeRefCounted<storage::BlobHandle>(std::move(blob));
-  return true;
-}
-
-void ParamTraits<scoped_refptr<storage::BlobHandle>>::Log(const param_type& p,
-                                                          std::string* l) {
-  l->append("<storage::BlobHandle>");
-}
-
-// static
-void ParamTraits<content::FrameMsg_ViewChanged_Params>::Write(
-    base::Pickle* m,
-    const param_type& p) {
-  DCHECK(p.frame_sink_id.is_valid());
-  WriteParam(m, p.frame_sink_id);
-}
-
-bool ParamTraits<content::FrameMsg_ViewChanged_Params>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* r) {
-  if (!ReadParam(m, iter, &(r->frame_sink_id)))
-    return false;
-  if (!r->frame_sink_id.is_valid()) {
-    NOTREACHED();
-    return false;
-  }
-  return true;
-}
-
-// static
-void ParamTraits<content::FrameMsg_ViewChanged_Params>::Log(const param_type& p,
-                                                            std::string* l) {
-  l->append("(");
-  LogParam(p.frame_sink_id, l);
-  l->append(")");
-}
-
 template <>
 struct ParamTraits<blink::mojom::SerializedBlobPtr> {
   using param_type = blink::mojom::SerializedBlobPtr;
@@ -262,7 +159,7 @@ struct ParamTraits<blink::mojom::SerializedBlobPtr> {
     WriteParam(m, p->uuid);
     WriteParam(m, p->content_type);
     WriteParam(m, p->size);
-    WriteParam(m, p->blob.PassHandle().release());
+    WriteParam(m, p->blob.PassPipe().release());
   }
 
   static bool Read(const base::Pickle* m,
@@ -275,80 +172,36 @@ struct ParamTraits<blink::mojom::SerializedBlobPtr> {
         !ReadParam(m, iter, &(*r)->size) || !ReadParam(m, iter, &handle)) {
       return false;
     }
-    (*r)->blob = blink::mojom::BlobPtrInfo(
+    (*r)->blob = mojo::PendingRemote<blink::mojom::Blob>(
         mojo::ScopedMessagePipeHandle(handle), blink::mojom::Blob::Version_);
     return true;
   }
 };
 
-void ParamTraits<scoped_refptr<base::RefCountedData<
-    blink::TransferableMessage>>>::Write(base::Pickle* m, const param_type& p) {
-  m->WriteData(reinterpret_cast<const char*>(p->data.encoded_message.data()),
-               p->data.encoded_message.size());
-  WriteParam(m, p->data.blobs);
-  WriteParam(m, p->data.stack_trace_id);
-  WriteParam(m, p->data.stack_trace_debugger_id_first);
-  WriteParam(m, p->data.stack_trace_debugger_id_second);
-  WriteParam(m, p->data.ports);
-  WriteParam(m, p->data.stream_channels);
-  WriteParam(m, p->data.has_user_gesture);
-  WriteParam(m, !!p->data.user_activation);
-  WriteParam(m, p->data.transfer_user_activation);
-  WriteParam(m, p->data.allow_autoplay);
-  if (p->data.user_activation) {
-    WriteParam(m, p->data.user_activation->has_been_active);
-    WriteParam(m, p->data.user_activation->was_active);
-  }
-}
-
-bool ParamTraits<
-    scoped_refptr<base::RefCountedData<blink::TransferableMessage>>>::
-    Read(const base::Pickle* m, base::PickleIterator* iter, param_type* r) {
-  *r = new base::RefCountedData<blink::TransferableMessage>();
-
-  const char* data;
-  int length;
-  if (!iter->ReadData(&data, &length))
-    return false;
-  // This just makes encoded_message point into the IPC message buffer. Usually
-  // code receiving a TransferableMessage will synchronously process the message
-  // so this avoids an unnecessary copy. If a receiver needs to hold on to the
-  // message longer, it should make sure to call EnsureDataIsOwned on the
-  // returned message.
-  (*r)->data.encoded_message =
-      base::make_span(reinterpret_cast<const uint8_t*>(data), length);
-  bool has_activation = false;
-  if (!ReadParam(m, iter, &(*r)->data.blobs) ||
-      !ReadParam(m, iter, &(*r)->data.stack_trace_id) ||
-      !ReadParam(m, iter, &(*r)->data.stack_trace_debugger_id_first) ||
-      !ReadParam(m, iter, &(*r)->data.stack_trace_debugger_id_second) ||
-      !ReadParam(m, iter, &(*r)->data.ports) ||
-      !ReadParam(m, iter, &(*r)->data.stream_channels) ||
-      !ReadParam(m, iter, &(*r)->data.has_user_gesture) ||
-      !ReadParam(m, iter, &has_activation) ||
-      !ReadParam(m, iter, &(*r)->data.transfer_user_activation) ||
-      !ReadParam(m, iter, &(*r)->data.allow_autoplay)) {
-    return false;
+template <>
+struct ParamTraits<
+    mojo::PendingRemote<blink::mojom::FileSystemAccessTransferToken>> {
+  using param_type =
+      mojo::PendingRemote<blink::mojom::FileSystemAccessTransferToken>;
+  static void Write(base::Pickle* m, const param_type& p) {
+    // Move the Mojo pipe to serialize the
+    // PendingRemote<FileSystemAccessTransferToken> for a postMessage() target.
+    WriteParam(m, const_cast<param_type&>(p).PassPipe().release());
   }
 
-  if (has_activation) {
-    bool has_been_active;
-    bool was_active;
-    if (!ReadParam(m, iter, &has_been_active) ||
-        !ReadParam(m, iter, &was_active)) {
+  static bool Read(const base::Pickle* m,
+                   base::PickleIterator* iter,
+                   param_type* r) {
+    mojo::MessagePipeHandle handle;
+    if (!ReadParam(m, iter, &handle)) {
       return false;
     }
-    (*r)->data.user_activation =
-        blink::mojom::UserActivationSnapshot::New(has_been_active, was_active);
+    *r = mojo::PendingRemote<blink::mojom::FileSystemAccessTransferToken>(
+        mojo::ScopedMessagePipeHandle(handle),
+        blink::mojom::FileSystemAccessTransferToken::Version_);
+    return true;
   }
-  return true;
-}
-
-void ParamTraits<scoped_refptr<
-    base::RefCountedData<blink::TransferableMessage>>>::Log(const param_type& p,
-                                                            std::string* l) {
-  l->append("<blink::TransferableMessage>");
-}
+};
 
 void ParamTraits<viz::FrameSinkId>::Write(base::Pickle* m,
                                           const param_type& p) {
@@ -419,38 +272,6 @@ void ParamTraits<viz::LocalSurfaceId>::Log(const param_type& p,
   l->append(")");
 }
 
-void ParamTraits<viz::LocalSurfaceIdAllocation>::Write(base::Pickle* m,
-                                                       const param_type& p) {
-  DCHECK(p.IsValid());
-  WriteParam(m, p.local_surface_id());
-  WriteParam(m, p.allocation_time());
-}
-
-bool ParamTraits<viz::LocalSurfaceIdAllocation>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* p) {
-  viz::LocalSurfaceId local_surface_id;
-  if (!ReadParam(m, iter, &local_surface_id))
-    return false;
-
-  base::TimeTicks allocation_time;
-  if (!ReadParam(m, iter, &allocation_time))
-    return false;
-
-  *p = viz::LocalSurfaceIdAllocation(local_surface_id, allocation_time);
-  return p->IsValid();
-}
-
-void ParamTraits<viz::LocalSurfaceIdAllocation>::Log(const param_type& p,
-                                                     std::string* l) {
-  l->append("viz::LocalSurfaceIdAllocation(");
-  LogParam(p.local_surface_id(), l);
-  l->append(", ");
-  LogParam(p.allocation_time(), l);
-  l->append(")");
-}
-
 void ParamTraits<viz::SurfaceId>::Write(base::Pickle* m, const param_type& p) {
   WriteParam(m, p.frame_sink_id());
   WriteParam(m, p.local_surface_id());
@@ -513,59 +334,6 @@ void ParamTraits<viz::SurfaceInfo>::Log(const param_type& p, std::string* l) {
   l->append(", ");
   LogParam(p.size_in_pixels(), l);
   l->append(")");
-}
-
-void ParamTraits<net::SHA256HashValue>::Write(base::Pickle* m,
-                                              const param_type& p) {
-  m->WriteData(reinterpret_cast<const char*>(p.data), sizeof(p.data));
-}
-
-bool ParamTraits<net::SHA256HashValue>::Read(const base::Pickle* m,
-                                             base::PickleIterator* iter,
-                                             param_type* r) {
-  const char* data;
-  int data_length;
-  if (!iter->ReadData(&data, &data_length)) {
-    NOTREACHED();
-    return false;
-  }
-  if (data_length != sizeof(r->data)) {
-    NOTREACHED();
-    return false;
-  }
-  memcpy(r->data, data, sizeof(r->data));
-  return true;
-}
-
-void ParamTraits<net::SHA256HashValue>::Log(const param_type& p,
-                                            std::string* l) {
-  l->append("<SHA256HashValue>");
-}
-
-void ParamTraits<content::RecordTabSwitchTimeRequest>::Write(
-    base::Pickle* m,
-    const param_type& p) {
-  WriteParam(m, p.tab_switch_start_time);
-  WriteParam(m, p.destination_is_loaded);
-  WriteParam(m, p.destination_is_frozen);
-}
-
-bool ParamTraits<content::RecordTabSwitchTimeRequest>::Read(
-    const base::Pickle* m,
-    base::PickleIterator* iter,
-    param_type* r) {
-  if (!ReadParam(m, iter, &r->tab_switch_start_time) ||
-      !ReadParam(m, iter, &r->destination_is_loaded) ||
-      !ReadParam(m, iter, &r->destination_is_frozen)) {
-    return false;
-  }
-
-  return true;
-}
-
-void ParamTraits<content::RecordTabSwitchTimeRequest>::Log(const param_type& p,
-                                                           std::string* l) {
-  l->append("<content::RecordTabSwitchTimeRequest>");
 }
 
 }  // namespace IPC

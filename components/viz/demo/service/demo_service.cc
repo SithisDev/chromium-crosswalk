@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,23 +7,22 @@
 #include <memory>
 #include <utility>
 
-#include "base/message_loop/message_loop.h"
 #include "components/viz/common/frame_sinks/begin_frame_source.h"
-#include "components/viz/service/main/viz_compositor_thread_runner.h"
+#include "components/viz/service/main/viz_compositor_thread_runner_impl.h"
 
 namespace demo {
 
-DemoService::DemoService(viz::mojom::FrameSinkManagerRequest request,
-                         viz::mojom::FrameSinkManagerClientPtr client) {
+DemoService::DemoService(
+    mojo::PendingReceiver<viz::mojom::FrameSinkManager> receiver,
+    mojo::PendingRemote<viz::mojom::FrameSinkManagerClient> client) {
   auto params = viz::mojom::FrameSinkManagerParams::New();
   params->restart_id = viz::BeginFrameSource::kNotRestartableId;
   params->use_activation_deadline = false;
   params->activation_deadline_in_frames = 0u;
-  params->frame_sink_manager = std::move(request);
-  params->frame_sink_manager_client = client.PassInterface();
-  runner_ = std::make_unique<viz::VizCompositorThreadRunner>(
-      base::MessageLoop::TYPE_DEFAULT);
-  runner_->CreateFrameSinkManager(std::move(params));
+  params->frame_sink_manager = std::move(receiver);
+  params->frame_sink_manager_client = std::move(client);
+  runner_ = std::make_unique<viz::VizCompositorThreadRunnerImpl>();
+  runner_->CreateFrameSinkManager(std::move(params), /*gpu_service=*/nullptr);
 }
 
 DemoService::~DemoService() = default;

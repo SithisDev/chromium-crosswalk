@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,6 @@
 namespace ntp_snippets {
 namespace prefs {
 
-// If set to false, remote suggestions are completely disabled. This is set by
-// an enterprise policy.
-extern const char kEnableSnippets[];
-
-// Whether the list of NTP snippets is visible in UI. This is set to false when
-// the user toggles the list off.
-extern const char kArticlesListVisible[];
 
 // The pref name under which remote suggestion categories (including their ID
 // and title) are stored.

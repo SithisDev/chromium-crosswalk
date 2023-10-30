@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2015 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 '''Unit tests for writers.android_policy_writer'''
@@ -45,18 +45,38 @@ class AndroidPolicyWriterUnittest(writer_unittest_common.WriterUnittestCommon):
     # Test an example policy without items.
     policy = {
         'name':
-            '_policy_name',
+        '_policy_name',
         'caption':
-            '_policy_caption',
+        '_policy_caption',
         'desc':
-            '_policy_desc_first.\nadditional line',
+        '_policy_desc_first.\nadditional line',
         'items': [{
             'caption': '_caption1',
             'value': '_value1',
         }, {
             'caption': '_caption2',
             'value': '_value2',
-        }]
+        },
+                  {
+                      'caption': '_caption3',
+                      'value': '_value3',
+                      'supported_on': [{
+                          'platform': 'win'
+                      }, {
+                          'platform': 'win7'
+                      }]
+                  },
+                  {
+                      'caption':
+                      '_caption4',
+                      'value':
+                      '_value4',
+                      'supported_on': [{
+                          'platform': 'android'
+                      }, {
+                          'platform': 'win7'
+                      }]
+                  }]
     }
     writer = android_policy_writer.GetWriter({})
     writer.Init()
@@ -70,10 +90,12 @@ class AndroidPolicyWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '<string-array name="_policy_nameEntries">'
         '<item>_caption1</item>'
         '<item>_caption2</item>'
+        '<item>_caption4</item>'
         '</string-array>'
         '<string-array name="_policy_nameValues">'
         '<item>_value1</item>'
         '<item>_value2</item>'
+        '<item>_value4</item>'
         '</string-array>'
         '</resources>')
 

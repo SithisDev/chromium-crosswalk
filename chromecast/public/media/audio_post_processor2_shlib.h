@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,6 +39,18 @@ class AudioPostProcessor2 {
     int system_output_sample_rate;  // The system (hardware) output sample rate.
     // The number of output frames expected from ProcessFrames().
     int output_frames_per_write;
+  };
+
+  struct Metadata {
+    // The maximum volume multiplier applied to the current buffer, in dBFS.
+    float volume_dbfs;
+
+    // The (max) current target volume multiplier that we are slewing towards.
+    float target_volume_dbfs;
+
+    // The system volume applied to the stream (normalized to 0-1). Equivalent
+    // to DbFSToVolume(volume_dbfs).
+    float system_volume;
   };
 
   struct Status {
@@ -94,15 +106,7 @@ class AudioPostProcessor2 {
   // will take up equal or less space than the input data, ProcessFrames()
   // should overwrite the input data and store a pointer to |data| in |Status|.
   // Otherwise, the Processor should allocate and own its own output buffer.
-  // |system_volume| is the Cast Volume applied to the stream
-  // (normalized to 0-1). It is the same as the cast volume set via alsa.
-  // |volume_dbfs| is the actual attenuation in dBFS (-inf to 0), equivalent to
-  // VolumeMap::VolumeToDbFS(|volume|).
-  // AudioPostProcessor should assume that volume has already been applied.
-  virtual void ProcessFrames(float* data,
-                             int frames,
-                             float system_volume,
-                             float volume_dbfs) = 0;
+  virtual void ProcessFrames(float* data, int frames, Metadata* metadata) = 0;
 
   // Sends a message to the PostProcessor. Implementations are responsible
   // for the format and parsing of messages.

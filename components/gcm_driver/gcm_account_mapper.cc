@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,10 @@
 
 #include "base/bind.h"
 #include "base/guid.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
+#include "components/gcm_driver/features.h"
 #include "components/gcm_driver/gcm_driver_desktop.h"
 #include "google_apis/gcm/engine/gcm_store.h"
 
@@ -48,8 +50,7 @@ GCMAccountMapper::GCMAccountMapper(GCMDriver* gcm_driver)
       clock_(base::DefaultClock::GetInstance()),
       initialized_(false) {}
 
-GCMAccountMapper::~GCMAccountMapper() {
-}
+GCMAccountMapper::~GCMAccountMapper() = default;
 
 void GCMAccountMapper::Initialize(const AccountMappings& account_mappings,
                                   const DispatchMessageCallback& callback) {
@@ -107,6 +108,10 @@ void GCMAccountMapper::SetAccountTokens(
     }
   }
 
+  if (!base::FeatureList::IsEnabled(features::kGCMReportAccountTokenChanges)) {
+    return;
+  }
+
   // Decide what to do with each account (either start mapping, or start
   // removing).
   for (auto mappings_iter = accounts_.begin(); mappings_iter != accounts_.end();
@@ -153,6 +158,8 @@ void GCMAccountMapper::OnMessage(const std::string& app_id,
                                  const IncomingMessage& message) {
   DCHECK_EQ(app_id, kGCMAccountMapperAppId);
   // TODO(fgorski): Report Send to Gaia ID failures using UMA.
+
+  base::UmaHistogramBoolean("GCM.AccountMappingMessageReceived", true);
 
   if (dispatch_message_callback_.is_null()) {
     DVLOG(1) << "dispatch_message_callback_ missing in GCMAccountMapper";
@@ -291,15 +298,14 @@ void GCMAccountMapper::CreateAndSendMessage(
     outgoing_message.time_to_live = kGCMAddMappingMessageTTL;
   }
 
-  gcm_driver_->Send(kGCMAccountMapperAppId,
-                    kGCMAccountMapperSendTo,
+  gcm_driver_->Send(kGCMAccountMapperAppId, kGCMAccountMapperSendTo,
                     outgoing_message,
-                    base::Bind(&GCMAccountMapper::OnSendFinished,
-                               weak_ptr_factory_.GetWeakPtr(),
-                               account_mapping.account_id));
+                    base::BindOnce(&GCMAccountMapper::OnSendFinished,
+                                   weak_ptr_factory_.GetWeakPtr(),
+                                   account_mapping.account_id));
 }
 
-void GCMAccountMapper::OnSendFinished(const std::string& account_id,
+void GCMAccountMapper::OnSendFinished(const CoreAccountId& account_id,
                                       const std::string& message_id,
                                       GCMClient::Result result) {
   // TODO(fgorski): Add another attempt, in case the QUEUE is not full.
@@ -325,10 +331,9 @@ void GCMAccountMapper::GetRegistration() {
   DCHECK(registration_id_.empty());
   std::vector<std::string> sender_ids;
   sender_ids.push_back(kGCMAccountMapperSenderId);
-  gcm_driver_->Register(kGCMAccountMapperAppId,
-                        sender_ids,
-                        base::Bind(&GCMAccountMapper::OnRegisterFinished,
-                                   weak_ptr_factory_.GetWeakPtr()));
+  gcm_driver_->Register(kGCMAccountMapperAppId, sender_ids,
+                        base::BindOnce(&GCMAccountMapper::OnRegisterFinished,
+                                       weak_ptr_factory_.GetWeakPtr()));
 }
 
 void GCMAccountMapper::OnRegisterFinished(const std::string& registration_id,
@@ -347,8 +352,7 @@ void GCMAccountMapper::OnRegisterFinished(const std::string& registration_id,
 bool GCMAccountMapper::CanTriggerUpdate(
     const base::Time& last_update_time) const {
   return last_update_time +
-             base::TimeDelta::FromHours(kGCMUpdateIntervalHours -
-                                        kGCMUpdateEarlyStartHours) <
+             base::Hours(kGCMUpdateIntervalHours - kGCMUpdateEarlyStartHours) <
          clock_->Now();
 }
 
@@ -356,12 +360,12 @@ bool GCMAccountMapper::IsLastStatusChangeOlderThanTTL(
     const AccountMapping& account_mapping) const {
   int ttl_seconds = account_mapping.status == AccountMapping::REMOVING ?
       kGCMRemoveMappingMessageTTL : kGCMAddMappingMessageTTL;
-  return account_mapping.status_change_timestamp +
-      base::TimeDelta::FromSeconds(ttl_seconds) < clock_->Now();
+  return account_mapping.status_change_timestamp + base::Seconds(ttl_seconds) <
+         clock_->Now();
 }
 
 AccountMapping* GCMAccountMapper::FindMappingByAccountId(
-    const std::string& account_id) {
+    const CoreAccountId& account_id) {
   for (auto iter = accounts_.begin(); iter != accounts_.end(); ++iter) {
     if (iter->account_id == account_id)
       return &*iter;

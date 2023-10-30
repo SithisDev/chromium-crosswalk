@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,13 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <tuple>
 #include <vector>
 
+#include "base/check.h"
 #include "base/i18n/break_iterator.h"
-#include "base/logging.h"
 #include "base/metrics/field_trial.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -26,13 +28,15 @@
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/history_url_provider.h"
 #include "components/omnibox/browser/in_memory_url_index.h"
+#include "components/omnibox/browser/keyword_provider.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/url_prefix.h"
 #include "components/prefs/pref_service.h"
 #include "components/url_formatter/url_formatter.h"
-#include "net/base/escape.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "third_party/metrics_proto/omnibox_focus_type.pb.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
+#include "ui/base/page_transition_types.h"
 #include "url/third_party/mozilla/url_parse.h"
 #include "url/url_util.h"
 
@@ -40,21 +44,25 @@ bool HistoryQuickProvider::disabled_ = false;
 
 HistoryQuickProvider::HistoryQuickProvider(AutocompleteProviderClient* client)
     : HistoryProvider(AutocompleteProvider::TYPE_HISTORY_QUICK, client),
-      in_memory_url_index_(client->GetInMemoryURLIndex()) {
-}
+      in_memory_url_index_(client->GetInMemoryURLIndex()) {}
 
 void HistoryQuickProvider::Start(const AutocompleteInput& input,
                                  bool minimal_changes) {
   TRACE_EVENT0("omnibox", "HistoryQuickProvider::Start");
   matches_.clear();
-  if (disabled_ || input.from_omnibox_focus())
+  if (disabled_ ||
+      input.focus_type() != metrics::OmniboxFocusType::INTERACTION_DEFAULT)
     return;
 
   // Don't bother with INVALID.
   if ((input.type() == metrics::OmniboxInputType::EMPTY))
     return;
 
-  autocomplete_input_ = input;
+  // Remove the keyword from input if we're in keyword mode for a starter pack
+  // engine.
+  std::tie(autocomplete_input_, starter_pack_engine_) =
+      KeywordProvider::AdjustInputForStarterPackEngines(
+          input, client()->GetTemplateURLService());
 
   // TODO(pkasting): We should just block here until this loads.  Any time
   // someone unloads the history backend, we'll get inconsistent inline
@@ -72,14 +80,20 @@ size_t HistoryQuickProvider::EstimateMemoryUsage() const {
   return res;
 }
 
-HistoryQuickProvider::~HistoryQuickProvider() {
-}
+HistoryQuickProvider::~HistoryQuickProvider() = default;
 
 void HistoryQuickProvider::DoAutocomplete() {
+  // In keyword mode, it's possible we only provide results from one or two
+  // autocomplete provider(s), so it's sometimes necessary to show more results
+  // than provider_max_matches_.
+  size_t max_matches = InKeywordMode(autocomplete_input_)
+                           ? provider_max_matches_in_keyword_mode_
+                           : provider_max_matches_;
+
   // Get the matching URLs from the DB.
   ScoredHistoryMatches matches = in_memory_url_index_->HistoryItemsForTerms(
       autocomplete_input_.text(), autocomplete_input_.cursor_position(),
-      provider_max_matches_);
+      max_matches);
   if (matches.empty())
     return;
 
@@ -88,9 +102,7 @@ void HistoryQuickProvider::DoAutocomplete() {
   // track of the highest score we can assign to any later results we
   // see.
   int max_match_score = FindMaxMatchScore(matches);
-  for (ScoredHistoryMatches::const_iterator match_iter = matches.begin();
-       match_iter != matches.end(); ++match_iter) {
-    const ScoredHistoryMatch& history_match(*match_iter);
+  for (const auto& history_match : matches) {
     // Set max_match_score to the score we'll assign this result.
     max_match_score = std::min(max_match_score, history_match.raw_score);
     matches_.push_back(QuickMatchToACMatch(history_match, max_match_score));
@@ -133,8 +145,8 @@ int HistoryQuickProvider::FindMaxMatchScore(
       // provider completions compete with the URL-what-you-typed
       // match as normal.
       if (url_db) {
-        const std::string host(base::UTF16ToUTF8(
-            autocomplete_input_.text().substr(
+        const std::string host(
+            base::UTF16ToUTF8(autocomplete_input_.text().substr(
                 autocomplete_input_.parts().host.begin,
                 autocomplete_input_.parts().host.len)));
         // We want to put the URL-what-you-typed match first if either
@@ -194,8 +206,8 @@ int HistoryQuickProvider::FindMaxMatchScore(
   // depends on the likely score for the URL-what-you-typed result.
   int max_match_score = matches.begin()->raw_score;
   if (will_have_url_what_you_typed_match_first) {
-    max_match_score = std::min(max_match_score,
-        url_what_you_typed_match_score - 1);
+    max_match_score =
+        std::min(max_match_score, url_what_you_typed_match_score - 1);
   }
   return max_match_score;
 }
@@ -204,11 +216,12 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
     const ScoredHistoryMatch& history_match,
     int score) {
   const history::URLRow& info = history_match.url_info;
-  AutocompleteMatch match(
-      this, score, !!info.visit_count(),
-      history_match.url_matches.empty() ?
-          AutocompleteMatchType::HISTORY_TITLE :
-          AutocompleteMatchType::HISTORY_URL);
+  bool deletable =
+      !!info.visit_count() && client()->AllowDeletingBrowserHistory();
+  AutocompleteMatch match(this, score, deletable,
+                          history_match.url_matches.empty()
+                              ? AutocompleteMatchType::HISTORY_TITLE
+                              : AutocompleteMatchType::HISTORY_URL);
   match.typed_count = info.typed_count();
   match.destination_url = info.url();
   DCHECK(match.destination_url.is_valid());
@@ -225,17 +238,9 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
       AutocompleteInput::FormattedStringWithEquivalentMeaning(
           info.url(),
           url_formatter::FormatUrl(info.url(), fill_into_edit_format_types,
-                                   net::UnescapeRule::SPACES, nullptr, nullptr,
+                                   base::UnescapeRule::SPACES, nullptr, nullptr,
                                    &inline_autocomplete_offset),
           client()->GetSchemeClassifier(), &inline_autocomplete_offset);
-
-  // Set |inline_autocompletion| and |allowed_to_be_default_match| if possible.
-  if (inline_autocomplete_offset != base::string16::npos) {
-    match.inline_autocompletion =
-        match.fill_into_edit.substr(inline_autocomplete_offset);
-    match.allowed_to_be_default_match = match.inline_autocompletion.empty() ||
-        !PreventInlineAutocomplete(autocomplete_input_);
-  }
 
   // HistoryQuick classification diverges from relevance scoring. Specifically,
   // 1) All occurrences of the input contribute to relevance; e.g. for the input
@@ -255,19 +260,28 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
   // classification though, user input is broken on symbols; e.g. the 1st
   // suggestion will display 'how-to-[yolo] - [yolo].com/#[yolo]'.
 
-  match.contents = url_formatter::FormatUrl(
-      info.url(),
-      AutocompleteMatch::GetFormatTypes(
-          autocomplete_input_.parts().scheme.len > 0 ||
-              history_match.match_in_scheme,
-          history_match.match_in_subdomain),
-      net::UnescapeRule::SPACES, nullptr, nullptr, nullptr);
-  auto contents_terms =
-      FindTermMatches(autocomplete_input_.text(), match.contents);
-  match.contents_class = ClassifyTermMatches(
-      contents_terms, match.contents.size(),
-      ACMatchClassification::MATCH | ACMatchClassification::URL,
-      ACMatchClassification::URL);
+  // If this is a document suggestion, hide its URL for (a) consistency with the
+  // document provider and (b) ease of reading.
+  // TODO(manukh): For doc suggestions, the description will be
+  //  'Doc Title - Google [Docs|Sheets...]'. For additional consistency with
+  //  the document provider, the description could be split to 'Doc Title' and
+  //  'Google [Docs|Sheets...]', moving the latter to contents. But for
+  //  now, do the simpler thing of just clearing the URL.
+  if (!match.IsDocumentSuggestion()) {
+    match.contents = url_formatter::FormatUrl(
+        info.url(),
+        AutocompleteMatch::GetFormatTypes(
+            autocomplete_input_.parts().scheme.len > 0 ||
+                history_match.match_in_scheme,
+            history_match.match_in_subdomain),
+        base::UnescapeRule::SPACES, nullptr, nullptr, nullptr);
+    auto contents_terms =
+        FindTermMatches(autocomplete_input_.text(), match.contents);
+    match.contents_class = ClassifyTermMatches(
+        contents_terms, match.contents.size(),
+        ACMatchClassification::MATCH | ACMatchClassification::URL,
+        ACMatchClassification::URL);
+  }
 
   match.description = info.title();
   auto description_terms =
@@ -275,6 +289,27 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
   match.description_class = ClassifyTermMatches(
       description_terms, match.description.size(), ACMatchClassification::MATCH,
       ACMatchClassification::NONE);
+
+  // Set |inline_autocompletion| and |allowed_to_be_default_match| if possible.
+  if (match.TryRichAutocompletion(match.contents, match.description,
+                                  autocomplete_input_)) {
+    // If rich autocompletion applies, we skip trying the alternatives below.
+  } else if (inline_autocomplete_offset != std::u16string::npos) {
+    match.inline_autocompletion =
+        match.fill_into_edit.substr(inline_autocomplete_offset);
+    match.SetAllowedToBeDefault(autocomplete_input_);
+  }
+
+  // If the input was in a starter pack keyword scope, set the `keyword` and
+  // `transition` appropriately to avoid popping the user out of keyword mode.
+  if (starter_pack_engine_) {
+    match.keyword = starter_pack_engine_->keyword();
+    match.transition = ui::PAGE_TRANSITION_KEYWORD;
+  }
+
+  if (InKeywordMode(autocomplete_input_)) {
+    match.from_keyword = true;
+  }
 
   match.RecordAdditionalInfo("typed count", info.typed_count());
   match.RecordAdditionalInfo("visit count", info.visit_count());

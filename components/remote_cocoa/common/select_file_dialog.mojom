@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,9 @@ struct SelectFileTypeInfo {
 
   // Specifies whether or not there is be a filter added for all files.
   bool include_all_files;
+
+  // Specifies whether the (save) file dialog should keep the extension visible.
+  bool keep_extension_visible;
 };
 
 // The interface to a file selection (Save As, Upload, etc) dialog.

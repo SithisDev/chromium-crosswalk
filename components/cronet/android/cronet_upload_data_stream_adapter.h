@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <jni.h>
 
 #include "base/android/scoped_java_ref.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "components/cronet/cronet_upload_data_stream.h"
@@ -36,12 +35,17 @@ class ByteBufferWithIOBuffer;
 class CronetUploadDataStreamAdapter : public CronetUploadDataStream::Delegate {
  public:
   CronetUploadDataStreamAdapter(JNIEnv* env, jobject jupload_data_stream);
+
+  CronetUploadDataStreamAdapter(const CronetUploadDataStreamAdapter&) = delete;
+  CronetUploadDataStreamAdapter& operator=(
+      const CronetUploadDataStreamAdapter&) = delete;
+
   ~CronetUploadDataStreamAdapter() override;
 
   // CronetUploadDataStream::Delegate implementation.  Called on network thread.
   void InitializeOnNetworkThread(
       base::WeakPtr<CronetUploadDataStream> upload_data_stream) override;
-  void Read(net::IOBuffer* buffer, int buf_len) override;
+  void Read(scoped_refptr<net::IOBuffer> buffer, int buf_len) override;
   void Rewind() override;
   void OnUploadDataStreamDestroyed() override;
 
@@ -55,8 +59,7 @@ class CronetUploadDataStreamAdapter : public CronetUploadDataStream::Delegate {
 
   // Destroys |this|. Can be called from any thread, but needs to be protected
   // by the adapter lock.
-  void Destroy(JNIEnv* env,
-               const base::android::JavaParamRef<jobject>& jobject);
+  void Destroy(JNIEnv* env);
 
  private:
   // Initialized on construction, effectively constant.
@@ -69,8 +72,6 @@ class CronetUploadDataStreamAdapter : public CronetUploadDataStream::Delegate {
 
   // Keeps the net::IOBuffer and Java ByteBuffer alive until the next Read().
   std::unique_ptr<ByteBufferWithIOBuffer> buffer_;
-
-  DISALLOW_COPY_AND_ASSIGN(CronetUploadDataStreamAdapter);
 };
 
 }  // namespace cronet

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,10 @@
 
 #include "base/callback.h"
 #include "base/component_export.h"
+#include "base/memory/raw_ptr.h"
 #include "media/cast/net/cast_transport_config.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/ip_endpoint.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/public/mojom/udp_socket.mojom.h"
@@ -23,26 +25,28 @@ namespace mirroring {
 // will be called if the UDPSocket is failed to be created or connected.
 class COMPONENT_EXPORT(MIRRORING_SERVICE) UdpSocketClient final
     : public media::cast::PacketTransport,
-      public network::mojom::UDPSocketReceiver {
+      public network::mojom::UDPSocketListener {
  public:
   UdpSocketClient(const net::IPEndPoint& remote_endpoint,
                   network::mojom::NetworkContext* context,
                   base::OnceClosure error_callback);
 
+  UdpSocketClient(const UdpSocketClient&) = delete;
+  UdpSocketClient& operator=(const UdpSocketClient&) = delete;
+
   ~UdpSocketClient() override;
 
   // media::cast::PacketTransport implementations.
-  bool SendPacket(media::cast::PacketRef packet,
-                  const base::RepeatingClosure& cb) override;
+  bool SendPacket(media::cast::PacketRef packet, base::OnceClosure cb) override;
   int64_t GetBytesSent() override;
-  void StartReceiving(const media::cast::PacketReceiverCallbackWithStatus&
-                          packet_receiver) override;
+  void StartReceiving(
+      media::cast::PacketReceiverCallbackWithStatus packet_receiver) override;
   void StopReceiving() override;
 
-  // network::mojom::UDPSocketReceiver implementation.
+  // network::mojom::UDPSocketListener implementation.
   void OnReceived(int32_t result,
-                  const base::Optional<net::IPEndPoint>& src_addr,
-                  base::Optional<base::span<const uint8_t>> data) override;
+                  const absl::optional<net::IPEndPoint>& src_addr,
+                  absl::optional<base::span<const uint8_t>> data) override;
 
  private:
   // The callback of network::mojom::UDPSocket::Send(). Further sending is
@@ -53,25 +57,23 @@ class COMPONENT_EXPORT(MIRRORING_SERVICE) UdpSocketClient final
   // allowed to send after the socket is successfully connected to the
   // |remote_endpoint_|.
   void OnSocketConnected(int result,
-                         const base::Optional<net::IPEndPoint>& addr);
+                         const absl::optional<net::IPEndPoint>& addr);
 
   const net::IPEndPoint remote_endpoint_;
-  network::mojom::NetworkContext* const network_context_;
+  const raw_ptr<network::mojom::NetworkContext> network_context_;
   base::OnceClosure error_callback_;
 
-  mojo::Binding<network::mojom::UDPSocketReceiver> binding_;
+  mojo::Receiver<network::mojom::UDPSocketListener> receiver_{this};
 
   // The callback to deliver the received packets to the packet parser. Set
   // when StartReceiving() is called.
   media::cast::PacketReceiverCallbackWithStatus packet_receiver_callback_;
 
-  network::mojom::UDPSocketPtr udp_socket_;
+  mojo::Remote<network::mojom::UDPSocket> udp_socket_;
 
   // Set by SendPacket() when the sending is not allowed. Once set, SendPacket()
   // can only be called again when a previous sending completes successfully.
-  // TODO(xjz): Change the callback to a base::OnceClosure as well as in the
-  // cast::PacketTransport SendPacket().
-  base::RepeatingClosure resume_send_callback_;
+  base::OnceClosure resume_send_callback_;
 
   // Total numbe of bytes written to the data pipe.
   int64_t bytes_sent_;
@@ -85,8 +87,6 @@ class COMPONENT_EXPORT(MIRRORING_SERVICE) UdpSocketClient final
   int num_packets_pending_receive_;
 
   base::WeakPtrFactory<UdpSocketClient> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(UdpSocketClient);
 };
 
 }  // namespace mirroring

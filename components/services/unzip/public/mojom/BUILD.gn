@@ -1,23 +1,15 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//mojo/public/tools/bindings/mojom.gni")
 
 mojom("mojom") {
-  sources = [
-    "unzipper.mojom",
-  ]
+  sources = [ "unzipper.mojom" ]
 
   public_deps = [
-    ":constants",
     "//components/services/filesystem/public/mojom",
     "//mojo/public/mojom/base",
-  ]
-}
-
-mojom("constants") {
-  sources = [
-    "constants.mojom",
+    "//sandbox/policy/mojom",
   ]
 }

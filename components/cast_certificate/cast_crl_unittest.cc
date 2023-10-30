@@ -1,15 +1,21 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/time/time.h"
-#include "components/cast_certificate/cast_cert_validator.h"
-#include "components/cast_certificate/cast_cert_validator_test_helpers.h"
 #include "components/cast_certificate/cast_crl.h"
-#include "components/cast_certificate/proto/test_suite.pb.h"
-#include "net/cert/internal/cert_errors.h"
-#include "net/cert/internal/trust_store_in_memory.h"
+#include "base/files/file_util.h"
+#include "base/logging.h"
+#include "base/time/time.h"
+#include "components/cast_certificate/cast_cert_reader.h"
+#include "components/cast_certificate/cast_cert_test_helpers.h"
+#include "components/cast_certificate/cast_cert_validator.h"
+#include "net/cert/pki/cert_errors.h"
+#include "net/cert/pki/trust_store_in_memory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/openscreen/src/cast/common/certificate/proto/test_suite.pb.h"
+
+using cast::certificate::DeviceCertTest;
+using cast::certificate::DeviceCertTestSuite;
 
 namespace cast_certificate {
 namespace {
@@ -91,17 +97,14 @@ bool TestVerifyRevocation(CastCertError expected_result,
 
 // Runs a single test case.
 bool RunTest(const DeviceCertTest& test_case) {
-  std::unique_ptr<net::TrustStoreInMemory> crl_trust_store;
-  std::unique_ptr<net::TrustStoreInMemory> cast_trust_store;
-  if (test_case.use_test_trust_anchors()) {
-    crl_trust_store = testing::CreateTrustStoreFromFile(
-        "certificates/cast_crl_test_root_ca.pem");
-    cast_trust_store =
-        testing::CreateTrustStoreFromFile("certificates/cast_test_root_ca.pem");
-
-    EXPECT_TRUE(crl_trust_store.get());
-    EXPECT_TRUE(cast_trust_store.get());
-  }
+  std::unique_ptr<net::TrustStoreInMemory> cast_trust_store =
+      test_case.use_test_trust_anchors()
+          ? cast_certificate::testing::LoadTestCert("cast_test_root_ca.pem")
+          : nullptr;
+  std::unique_ptr<net::TrustStoreInMemory> crl_trust_store =
+      test_case.use_test_trust_anchors()
+          ? cast_certificate::testing::LoadTestCert("cast_crl_test_root_ca.pem")
+          : nullptr;
 
   std::vector<std::string> certificate_chain;
   for (auto const& cert : test_case.der_cert_path()) {
@@ -119,14 +122,14 @@ bool RunTest(const DeviceCertTest& test_case) {
 
   std::string crl_bundle = test_case.crl_bundle();
   switch (test_case.expected_result()) {
-    case PATH_VERIFICATION_FAILED:
+    case cast::certificate::PATH_VERIFICATION_FAILED:
       return TestVerifyCertificate(RESULT_FAIL, certificate_chain,
                                    cert_verification_time,
                                    cast_trust_store.get());
-    case CRL_VERIFICATION_FAILED:
+    case cast::certificate::CRL_VERIFICATION_FAILED:
       return TestVerifyCRL(RESULT_FAIL, crl_bundle, crl_verification_time,
                            crl_trust_store.get());
-    case REVOCATION_CHECK_FAILED_WITHOUT_CRL:
+    case cast::certificate::REVOCATION_CHECK_FAILED_WITHOUT_CRL:
       return TestVerifyCertificate(RESULT_SUCCESS, certificate_chain,
                                    cert_verification_time,
                                    cast_trust_store.get()) &&
@@ -136,9 +139,9 @@ bool RunTest(const DeviceCertTest& test_case) {
                  CastCertError::ERR_CRL_INVALID, certificate_chain, crl_bundle,
                  crl_verification_time, cert_verification_time, true,
                  cast_trust_store.get(), crl_trust_store.get());
-    case CRL_EXPIRED_AFTER_INITIAL_VERIFICATION:
+    case cast::certificate::CRL_EXPIRED_AFTER_INITIAL_VERIFICATION:
     // Fall-through intended.
-    case REVOCATION_CHECK_FAILED:
+    case cast::certificate::REVOCATION_CHECK_FAILED:
       return TestVerifyCertificate(RESULT_SUCCESS, certificate_chain,
                                    cert_verification_time,
                                    cast_trust_store.get()) &&
@@ -148,7 +151,7 @@ bool RunTest(const DeviceCertTest& test_case) {
                  CastCertError::ERR_CERTS_REVOKED, certificate_chain,
                  crl_bundle, crl_verification_time, cert_verification_time,
                  false, cast_trust_store.get(), crl_trust_store.get());
-    case SUCCESS:
+    case cast::certificate::SUCCESS:
       return (crl_bundle.empty() ||
               TestVerifyCRL(RESULT_SUCCESS, crl_bundle, crl_verification_time,
                             crl_trust_store.get())) &&
@@ -160,7 +163,7 @@ bool RunTest(const DeviceCertTest& test_case) {
                                   cert_verification_time, !crl_bundle.empty(),
                                   cast_trust_store.get(),
                                   crl_trust_store.get());
-    case UNSPECIFIED:
+    case cast::certificate::UNSPECIFIED:
       return false;
   }
   return false;
@@ -171,8 +174,11 @@ bool RunTest(const DeviceCertTest& test_case) {
 // To see the description of the test, execute the test.
 // These tests are generated by a test generator in google3.
 void RunTestSuite(const std::string& test_suite_file_name) {
-  std::string testsuite_raw =
-      cast_certificate::testing::ReadTestFileToString(test_suite_file_name);
+  std::string testsuite_raw;
+  base::ReadFileToString(
+      testing::GetCastCertificateDirectory().AppendASCII(test_suite_file_name),
+      &testsuite_raw);
+
   DeviceCertTestSuite test_suite;
   EXPECT_TRUE(test_suite.ParseFromString(testsuite_raw));
   uint16_t success = 0;

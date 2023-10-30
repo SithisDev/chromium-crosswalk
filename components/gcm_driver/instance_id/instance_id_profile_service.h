@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "components/keyed_service/core/keyed_service.h"
-
-class PrefService;
 
 namespace gcm {
 class GCMDriver;
@@ -23,19 +20,24 @@ class InstanceIDDriver;
 // Providing Instance ID support, via InstanceIDDriver, to a profile.
 class InstanceIDProfileService : public KeyedService {
  public:
-  // Returns whether InstanceID is enabled for |profile|.
-  static bool IsInstanceIDEnabled(PrefService* prefs);
-
   InstanceIDProfileService(gcm::GCMDriver* driver, bool is_off_the_record);
+
+  InstanceIDProfileService(const InstanceIDProfileService&) = delete;
+  InstanceIDProfileService& operator=(const InstanceIDProfileService&) = delete;
 
   ~InstanceIDProfileService() override;
 
   InstanceIDDriver* driver() const { return driver_.get(); }
 
- private:
-  std::unique_ptr<InstanceIDDriver> driver_;
+  static std::unique_ptr<InstanceIDProfileService> CreateForTests(
+      std::unique_ptr<InstanceIDDriver> instance_id_driver);
 
-  DISALLOW_COPY_AND_ASSIGN(InstanceIDProfileService);
+ private:
+  // Private constructor used for tests only.
+  explicit InstanceIDProfileService(
+      std::unique_ptr<InstanceIDDriver> instance_id_driver);
+
+  std::unique_ptr<InstanceIDDriver> driver_;
 };
 
 }  // namespace instance_id

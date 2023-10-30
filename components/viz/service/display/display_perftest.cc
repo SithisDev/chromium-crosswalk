@@ -1,7 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <limits>
 #include <vector>
 
 #include "base/bind.h"
@@ -10,18 +11,20 @@
 #include "base/timer/lap_timer.h"
 #include "components/viz/common/display/renderer_settings.h"
 #include "components/viz/common/quads/compositor_frame.h"
+#include "components/viz/common/quads/compositor_render_pass.h"
 #include "components/viz/common/quads/draw_quad.h"
-#include "components/viz/common/quads/render_pass.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
+#include "components/viz/service/display/aggregated_frame.h"
 #include "components/viz/service/display/display.h"
 #include "components/viz/service/display/display_scheduler.h"
 #include "components/viz/service/display/output_surface.h"
+#include "components/viz/service/display/overlay_processor_stub.h"
 #include "components/viz/service/display/shared_bitmap_manager.h"
 #include "components/viz/service/display_embedder/server_shared_bitmap_manager.h"
-#include "components/viz/test/fake_output_surface.h"
+#include "components/viz/test/fake_skia_output_surface.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 
 namespace viz {
 namespace {
@@ -32,34 +35,61 @@ static const int kTimeCheckInterval = 10;
 static const int kHeight = 1000;
 static const int kWidth = 1000;
 
+constexpr char kMetricPrefixRemoveOverdrawQuad[] = "RemoveOverdrawQuad.";
+constexpr char kMetricOverlapThroughputRunsPerS[] = "overlap_throughput";
+constexpr char kMetricIsolatedThroughputRunsPerS[] = "isolated_throughput";
+constexpr char kMetricPartialOverlapThroughputRunsPerS[] =
+    "partial_overlap_throughput";
+constexpr char kMetricAdjacentThroughputRunsPerS[] = "adjacent_throughput";
+
+perf_test::PerfResultReporter SetUpRemoveOverdrawQuadReporter(
+    const std::string& story) {
+  perf_test::PerfResultReporter reporter(kMetricPrefixRemoveOverdrawQuad,
+                                         story);
+  reporter.RegisterImportantMetric(kMetricOverlapThroughputRunsPerS, "runs/s");
+  reporter.RegisterImportantMetric(kMetricIsolatedThroughputRunsPerS, "runs/s");
+  reporter.RegisterImportantMetric(kMetricPartialOverlapThroughputRunsPerS,
+                                   "runs/s");
+  reporter.RegisterImportantMetric(kMetricAdjacentThroughputRunsPerS, "runs/s");
+  return reporter;
+}
+
 class RemoveOverdrawQuadPerfTest : public testing::Test {
  public:
   RemoveOverdrawQuadPerfTest()
       : timer_(kWarmupRuns,
-               base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
+               base::Milliseconds(kTimeLimitMillis),
                kTimeCheckInterval),
         task_runner_(base::MakeRefCounted<base::NullTaskRunner>()) {}
 
   std::unique_ptr<Display> CreateDisplay() {
     FrameSinkId frame_sink_id(3, 3);
 
-    auto scheduler = std::make_unique<DisplayScheduler>(&begin_frame_source_,
-                                                        task_runner_.get(), 1);
+    auto scheduler = std::make_unique<DisplayScheduler>(
+        &begin_frame_source_, task_runner_.get(), PendingSwapParams(1));
 
-    std::unique_ptr<FakeOutputSurface> output_surface =
-        FakeOutputSurface::Create3d();
+    std::unique_ptr<FakeSkiaOutputSurface> output_surface =
+        FakeSkiaOutputSurface::Create3d();
 
+    auto overlay_processor = std::make_unique<OverlayProcessorStub>();
+    // Normally display will need to take ownership of a
+    // gpu::GpuTaskschedulerhelper in order to keep it alive to share between
+    // the output surface and the overlay processor. In this case the overlay
+    // processor is a stub and the output surface is test only as well, so there
+    // is no need to pass in a real gpu::GpuTaskSchedulerHelper.
+    // TODO(weiliangc): Figure out a better way to set up test without passing
+    // in nullptr.
     auto display = std::make_unique<Display>(
-        &bitmap_manager_, RendererSettings(), frame_sink_id,
-        std::move(output_surface), std::move(scheduler), task_runner_.get());
+        &bitmap_manager_, RendererSettings(), &debug_settings_, frame_sink_id,
+        nullptr /* gpu::GpuTaskSchedulerHelper */, std::move(output_surface),
+        std::move(overlay_processor), std::move(scheduler), task_runner_.get());
     return display;
   }
 
   // Create an arbitrary SharedQuadState for the given |render_pass|.
-  SharedQuadState* CreateSharedQuadState(RenderPass* render_pass,
+  SharedQuadState* CreateSharedQuadState(AggregatedRenderPass* render_pass,
                                          gfx::Rect rect) {
     gfx::Transform quad_transform = gfx::Transform();
-    bool is_clipped = false;
     bool are_contents_opaque = true;
     float opacity = 1.f;
     int sorting_context_id = 65536;
@@ -67,8 +97,9 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
 
     SharedQuadState* state = render_pass->CreateAndAppendSharedQuadState();
     state->SetAll(quad_transform, rect, rect,
-                  /*rounded_corner_bounds=*/gfx::RRectF(), rect, is_clipped,
-                  are_contents_opaque, opacity, blend_mode, sorting_context_id);
+                  /*mask_filter_info=*/gfx::MaskFilterInfo(),
+                  /*clip_rect=*/absl::nullopt, are_contents_opaque, opacity,
+                  blend_mode, sorting_context_id);
     return state;
   }
 
@@ -77,11 +108,11 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
                    int quad_height,
                    int quad_width) {
     bool needs_blending = false;
-    ResourceId resource_id = 1;
+    ResourceId resource_id(1);
     bool premultiplied_alpha = true;
     gfx::PointF uv_top_left(0, 0);
     gfx::PointF uv_bottom_right(1, 1);
-    SkColor background_color = SK_ColorRED;
+    SkColor4f background_color = SkColors::kRed;
     float vertex_opacity[4] = {1.f, 1.f, 1.f, 1.f};
     bool y_flipped = false;
     bool nearest_neighbor = true;
@@ -113,10 +144,10 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
   //  +--------+
   //  | s1/2/3 |
   //  +--------+
-  void IterateOverlapShareQuadStates(const std::string& test_name,
+  void IterateOverlapShareQuadStates(const std::string& story,
                                      int shared_quad_state_count,
                                      int quad_count) {
-    frame_.render_pass_list.push_back(RenderPass::Create());
+    frame_.render_pass_list.push_back(std::make_unique<AggregatedRenderPass>());
     CreateOverlapShareQuadStates(shared_quad_state_count, quad_count);
     std::unique_ptr<Display> display = CreateDisplay();
 
@@ -126,10 +157,10 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 
-    perf_test::PrintResult(
-        "RemoveOverdrawDraws Iterates overlap ShareQuadStates: ", "", test_name,
-        timer_.LapsPerSecond(), "runs/s", true);
-    frame_ = CompositorFrame();
+    auto reporter = SetUpRemoveOverdrawQuadReporter(story);
+    reporter.AddResult(kMetricOverlapThroughputRunsPerS,
+                       timer_.LapsPerSecond());
+    frame_ = AggregatedFrame{};
   }
 
   void CreateOverlapShareQuadStates(int shared_quad_state_count,
@@ -154,10 +185,10 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
   //     +---+---+
   //         |s3 |
   //         +---+
-  void IterateIsolatedSharedQuadStates(const std::string& test_name,
+  void IterateIsolatedSharedQuadStates(const std::string& story,
                                        int shared_quad_state_count,
                                        int quad_count) {
-    frame_.render_pass_list.push_back(RenderPass::Create());
+    frame_.render_pass_list.push_back(std::make_unique<AggregatedRenderPass>());
     CreateIsolatedSharedQuadStates(shared_quad_state_count, quad_count);
     std::unique_ptr<Display> display = CreateDisplay();
     timer_.Reset();
@@ -166,10 +197,10 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 
-    perf_test::PrintResult(
-        "RemoveOverdrawDraws Iterates isolated SharedQuadStates: ", "",
-        test_name, timer_.LapsPerSecond(), "runs/s", true);
-    frame_ = CompositorFrame();
+    auto reporter = SetUpRemoveOverdrawQuadReporter(story);
+    reporter.AddResult(kMetricIsolatedThroughputRunsPerS,
+                       timer_.LapsPerSecond());
+    frame_ = AggregatedFrame{};
   }
 
   void CreateIsolatedSharedQuadStates(int shared_quad_state_count,
@@ -201,12 +232,12 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
   //    +--|  |    |
   //       +--|    |
   //          +----+
-  void IteratePatriallyOverlapSharedQuadStates(const std::string& test_name,
+  void IteratePartiallyOverlapSharedQuadStates(const std::string& story,
                                                int shared_quad_state_count,
                                                float percentage_overlap,
                                                int quad_count) {
-    frame_.render_pass_list.push_back(RenderPass::Create());
-    CreatePatriallyOverlapSharedQuadStates(shared_quad_state_count,
+    frame_.render_pass_list.push_back(std::make_unique<AggregatedRenderPass>());
+    CreatePartiallyOverlapSharedQuadStates(shared_quad_state_count,
                                            percentage_overlap, quad_count);
     std::unique_ptr<Display> display = CreateDisplay();
     timer_.Reset();
@@ -215,13 +246,13 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 
-    perf_test::PrintResult(
-        "RemoveOverdrawDraws Iterates patrially overlap SharedQuadStates: ", "",
-        test_name, timer_.LapsPerSecond(), "runs/s", true);
-    frame_ = CompositorFrame();
+    auto reporter = SetUpRemoveOverdrawQuadReporter(story);
+    reporter.AddResult(kMetricPartialOverlapThroughputRunsPerS,
+                       timer_.LapsPerSecond());
+    frame_ = AggregatedFrame{};
   }
 
-  void CreatePatriallyOverlapSharedQuadStates(int shared_quad_state_count,
+  void CreatePartiallyOverlapSharedQuadStates(int shared_quad_state_count,
                                               float percentage_overlap,
                                               int quad_count) {
     int shared_quad_state_height =
@@ -249,10 +280,10 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
   //  +----+----+
   //  | s2 | s4 |
   //  +----+----+
-  void IterateAdjacentSharedQuadStates(const std::string& test_name,
+  void IterateAdjacentSharedQuadStates(const std::string& story,
                                        int shared_quad_state_count,
                                        int quad_count) {
-    frame_.render_pass_list.push_back(RenderPass::Create());
+    frame_.render_pass_list.push_back(std::make_unique<AggregatedRenderPass>());
     CreateAdjacentSharedQuadStates(shared_quad_state_count, quad_count);
     std::unique_ptr<Display> display = CreateDisplay();
 
@@ -262,10 +293,10 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 
-    perf_test::PrintResult(
-        "RemoveOverdrawDraws Iterates adjacent SharedQuadStates: ", "",
-        test_name, timer_.LapsPerSecond(), "runs/s", true);
-    frame_ = CompositorFrame();
+    auto reporter = SetUpRemoveOverdrawQuadReporter(story);
+    reporter.AddResult(kMetricAdjacentThroughputRunsPerS,
+                       timer_.LapsPerSecond());
+    frame_ = AggregatedFrame{};
   }
 
   void CreateAdjacentSharedQuadStates(int shared_quad_state_count,
@@ -290,7 +321,8 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
   }
 
  private:
-  CompositorFrame frame_;
+  DebugRendererSettings debug_settings_;
+  AggregatedFrame frame_;
   base::LapTimer timer_;
   StubBeginFrameSource begin_frame_source_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
@@ -298,31 +330,31 @@ class RemoveOverdrawQuadPerfTest : public testing::Test {
 };
 
 TEST_F(RemoveOverdrawQuadPerfTest, IterateOverlapShareQuadStates) {
-  IterateOverlapShareQuadStates("4 sqs with 4 quads in each", 2, 2);
-  IterateOverlapShareQuadStates("4 sqs with 100 quads in each", 2, 10);
-  IterateOverlapShareQuadStates("100 sqs with 4 quads in each", 10, 2);
-  IterateOverlapShareQuadStates("100 sqs with 100 quads in each", 10, 10);
+  IterateOverlapShareQuadStates("4_sqs_with_4_quads", 2, 2);
+  IterateOverlapShareQuadStates("4_sqs_with_100_quads", 2, 10);
+  IterateOverlapShareQuadStates("100_sqs_with_4_quads", 10, 2);
+  IterateOverlapShareQuadStates("100_sqs_with_100_quads", 10, 10);
 }
 
 TEST_F(RemoveOverdrawQuadPerfTest, IterateIsolatedSharedQuadStates) {
-  IterateIsolatedSharedQuadStates("2 sqs with 4 quads", 2, 2);
-  IterateIsolatedSharedQuadStates("4 sqs with 100 quads", 2, 10);
-  IterateIsolatedSharedQuadStates("10 sqs with 4 quads", 10, 2);
-  IterateIsolatedSharedQuadStates("10 sqs with 100 quads", 10, 10);
+  IterateIsolatedSharedQuadStates("2_sqs_with_4_quads", 2, 2);
+  IterateIsolatedSharedQuadStates("2_sqs_with_100_quads", 2, 10);
+  IterateIsolatedSharedQuadStates("10_sqs_with_4_quads", 10, 2);
+  IterateIsolatedSharedQuadStates("10_sqs_with_100_quads", 10, 10);
 }
 
-TEST_F(RemoveOverdrawQuadPerfTest, IteratePatriallyOverlapSharedQuadStates) {
-  IteratePatriallyOverlapSharedQuadStates("2 sqs with 4 quads", 2, 0.5, 2);
-  IteratePatriallyOverlapSharedQuadStates("10 sqs with 100 quads", 2, 0.5, 10);
-  IteratePatriallyOverlapSharedQuadStates("2 sqs with 4 quads", 10, 0.5, 2);
-  IteratePatriallyOverlapSharedQuadStates("10 sqs with 100 quads", 10, 0.5, 10);
+TEST_F(RemoveOverdrawQuadPerfTest, IteratePartiallyOverlapSharedQuadStates) {
+  IteratePartiallyOverlapSharedQuadStates("2_sqs_with_4_quads", 2, 0.5, 2);
+  IteratePartiallyOverlapSharedQuadStates("2_sqs_with_100_quads", 2, 0.5, 10);
+  IteratePartiallyOverlapSharedQuadStates("10_sqs_with_4_quads", 10, 0.5, 2);
+  IteratePartiallyOverlapSharedQuadStates("10_sqs_with_100_quads", 10, 0.5, 10);
 }
 
 TEST_F(RemoveOverdrawQuadPerfTest, IterateAdjacentSharedQuadStates) {
-  IterateAdjacentSharedQuadStates("4 sqs with 4 quads", 2, 2);
-  IterateAdjacentSharedQuadStates("4 sqs with 100 quads", 2, 10);
-  IterateAdjacentSharedQuadStates("100 sqs with 4 quads", 10, 2);
-  IterateAdjacentSharedQuadStates("100 sqs with 100 quads", 10, 10);
+  IterateAdjacentSharedQuadStates("4_sqs_with_4_quads", 2, 2);
+  IterateAdjacentSharedQuadStates("4_sqs_with_100_quads", 2, 10);
+  IterateAdjacentSharedQuadStates("100_sqs_with_4_quads", 10, 2);
+  IterateAdjacentSharedQuadStates("100_sqs_with_100_quads", 10, 10);
 }
 
 }  // namespace

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,33 +8,38 @@
 #include <stdint.h>
 
 #include <queue>
-#include <string>
 
 #include "base/cancelable_callback.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "components/cast_channel/cast_auth_util.h"
 #include "components/cast_channel/cast_channel_enum.h"
-#include "components/cast_channel/cast_socket.h"
 #include "components/cast_channel/cast_transport.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/system/data_pipe.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/log/net_log_source.h"
 #include "services/network/public/mojom/network_context.mojom.h"
+#include "services/network/public/mojom/tcp_socket.mojom.h"
 #include "services/network/public/mojom/tls_socket.mojom.h"
+#include "third_party/openscreen/src/cast/common/channel/proto/cast_channel.pb.h"
 
 namespace net {
 class X509Certificate;
 }
 
 namespace cast_channel {
-class CastMessage;
+
+using ::cast::channel::CastMessage;
+
 class Logger;
 class MojoDataPump;
 struct LastError;
@@ -190,6 +195,9 @@ class CastSocketImpl : public CastSocket {
                  const scoped_refptr<Logger>& logger,
                  const AuthContext& auth_context);
 
+  CastSocketImpl(const CastSocketImpl&) = delete;
+  CastSocketImpl& operator=(const CastSocketImpl&) = delete;
+
   // Ensures that the socket is closed.
   ~CastSocketImpl() override;
 
@@ -228,7 +236,7 @@ class CastSocketImpl : public CastSocket {
     void Start() override;
 
    private:
-    CastSocketImpl* socket_;
+    raw_ptr<CastSocketImpl> socket_;
     ChannelError error_state_;
     LastError last_error_;
   };
@@ -237,6 +245,11 @@ class CastSocketImpl : public CastSocket {
   class CastSocketMessageDelegate : public CastTransport::Delegate {
    public:
     CastSocketMessageDelegate(CastSocketImpl* socket);
+
+    CastSocketMessageDelegate(const CastSocketMessageDelegate&) = delete;
+    CastSocketMessageDelegate& operator=(const CastSocketMessageDelegate&) =
+        delete;
+
     ~CastSocketMessageDelegate() override;
 
     // CastTransport::Delegate implementation.
@@ -245,8 +258,7 @@ class CastSocketImpl : public CastSocket {
     void Start() override;
 
    private:
-    CastSocketImpl* const socket_;
-    DISALLOW_COPY_AND_ASSIGN(CastSocketMessageDelegate);
+    const raw_ptr<CastSocketImpl> socket_;
   };
 
   // Replaces the internally-constructed transport object with one provided
@@ -308,14 +320,14 @@ class CastSocketImpl : public CastSocket {
 
   // Callback from network::mojom::NetworkContext::CreateTCPConnectedSocket.
   void OnConnect(int result,
-                 const base::Optional<net::IPEndPoint>& local_addr,
-                 const base::Optional<net::IPEndPoint>& peer_addr,
+                 const absl::optional<net::IPEndPoint>& local_addr,
+                 const absl::optional<net::IPEndPoint>& peer_addr,
                  mojo::ScopedDataPipeConsumerHandle receive_stream,
                  mojo::ScopedDataPipeProducerHandle send_stream);
   void OnUpgradeToTLS(int result,
                       mojo::ScopedDataPipeConsumerHandle receive_stream,
                       mojo::ScopedDataPipeProducerHandle send_stream,
-                      const base::Optional<net::SSLInfo>& ssl_info);
+                      const absl::optional<net::SSLInfo>& ssl_info);
   /////////////////////////////////////////////////////////////////////////////
 
   // Resets the cancellable callback used for async invocations of
@@ -347,11 +359,11 @@ class CastSocketImpl : public CastSocket {
 
   NetworkContextGetter network_context_getter_;
 
-  // Owned ptr to the underlying TCP socket.
-  network::mojom::TCPConnectedSocketPtr tcp_socket_;
+  // Owned remote to the underlying TCP socket.
+  mojo::Remote<network::mojom::TCPConnectedSocket> tcp_socket_;
 
-  // Owned ptr to the underlying SSL socket.
-  network::mojom::TLSClientSocketPtr socket_;
+  // Owned remote to the underlying SSL socket.
+  mojo::Remote<network::mojom::TLSClientSocket> socket_;
 
   // Helper class to write to the SSL socket.
   std::unique_ptr<MojoDataPump> mojo_data_pump_;
@@ -370,7 +382,7 @@ class CastSocketImpl : public CastSocket {
   std::vector<OnOpenCallback> connect_callbacks_;
 
   // Callback invoked by |connect_timeout_timer_| to cancel the connection.
-  base::CancelableClosure connect_timeout_callback_;
+  base::CancelableOnceClosure connect_timeout_callback_;
 
   // Timer invoked when the connection has timed out.
   std::unique_ptr<base::OneShotTimer> connect_timeout_timer_;
@@ -403,7 +415,7 @@ class CastSocketImpl : public CastSocket {
   // The callback signature is based on net::CompletionCallback, which passes
   // operation result codes as byte counts in the success case, or as
   // net::Error enum values for error cases.
-  base::CancelableCallback<void(int)> connect_loop_callback_;
+  base::CancelableOnceCallback<void(int)> connect_loop_callback_;
 
   // Cast message formatting and parsing layer.
   std::unique_ptr<CastTransport> transport_;
@@ -413,14 +425,12 @@ class CastSocketImpl : public CastSocket {
 
   // Raw pointer to the auth handshake delegate. Used to get detailed error
   // information.
-  AuthTransportDelegate* auth_delegate_;
+  raw_ptr<AuthTransportDelegate> auth_delegate_;
 
   // List of socket observers.
   base::ObserverList<Observer>::Unchecked observers_;
 
   base::WeakPtrFactory<CastSocketImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(CastSocketImpl);
 };
 }  // namespace cast_channel
 

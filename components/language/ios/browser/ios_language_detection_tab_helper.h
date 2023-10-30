@@ -1,14 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_LANUGUAGE_IOS_BROWSER_IOS_LANGUAGE_DETECTION_TAB_HELPER_H_
-#define COMPONENTS_LANUGUAGE_IOS_BROWSER_IOS_LANGUAGE_DETECTION_TAB_HELPER_H_
+#ifndef COMPONENTS_LANGUAGE_IOS_BROWSER_IOS_LANGUAGE_DETECTION_TAB_HELPER_H_
+#define COMPONENTS_LANGUAGE_IOS_BROWSER_IOS_LANGUAGE_DETECTION_TAB_HELPER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
-#include "ios/web/public/web_state/web_state_user_data.h"
+#import "ios/web/public/web_state_user_data.h"
 
 namespace translate {
 struct LanguageDetectionDetails;
@@ -35,6 +34,10 @@ class IOSLanguageDetectionTabHelper
     virtual ~Observer() {}
   };
 
+  IOSLanguageDetectionTabHelper(const IOSLanguageDetectionTabHelper&) = delete;
+  IOSLanguageDetectionTabHelper& operator=(
+      const IOSLanguageDetectionTabHelper&) = delete;
+
   ~IOSLanguageDetectionTabHelper() override;
 
   // Adds or Removes observers.
@@ -60,10 +63,8 @@ class IOSLanguageDetectionTabHelper
   UrlLanguageHistogram* const url_language_histogram_;
 
   WEB_STATE_USER_DATA_KEY_DECL();
-
-  DISALLOW_COPY_AND_ASSIGN(IOSLanguageDetectionTabHelper);
 };
 
 }  // namespace language
 
-#endif  // COMPONENTS_LANUGUAGE_IOS_BROWSER_IOS_LANGUAGE_DETECTION_TAB_HELPER_H_
+#endif  // COMPONENTS_LANGUAGE_IOS_BROWSER_IOS_LANGUAGE_DETECTION_TAB_HELPER_H_

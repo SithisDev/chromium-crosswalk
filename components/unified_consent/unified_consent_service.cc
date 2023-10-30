@@ -1,12 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/unified_consent/unified_consent_service.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/scoped_observer.h"
+#include "base/scoped_observation.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -14,7 +14,6 @@
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/driver/sync_user_settings.h"
 #include "components/sync_preferences/pref_service_syncable.h"
-#include "components/unified_consent/feature.h"
 #include "components/unified_consent/pref_names.h"
 
 namespace unified_consent {
@@ -52,23 +51,6 @@ void UnifiedConsentService::RegisterPrefs(
       static_cast<int>(MigrationState::kNotInitialized));
 }
 
-// static
-void UnifiedConsentService::RollbackIfNeeded(
-    PrefService* user_pref_service,
-    syncer::SyncService* sync_service) {
-  DCHECK(user_pref_service);
-
-  if (user_pref_service->GetInteger(prefs::kUnifiedConsentMigrationState) ==
-      static_cast<int>(MigrationState::kNotInitialized)) {
-    // If there was no migration yet, nothing has to be rolled back.
-    return;
-  }
-
-  // Clear all unified consent prefs.
-  user_pref_service->ClearPref(prefs::kUrlKeyedAnonymizedDataCollectionEnabled);
-  user_pref_service->ClearPref(prefs::kUnifiedConsentMigrationState);
-}
-
 void UnifiedConsentService::SetUrlKeyedAnonymizedDataCollectionEnabled(
     bool enabled) {
   if (GetMigrationState() != MigrationState::kCompleted)
@@ -84,10 +66,14 @@ void UnifiedConsentService::Shutdown() {
   sync_service_->RemoveObserver(this);
 }
 
-void UnifiedConsentService::OnPrimaryAccountCleared(
-    const CoreAccountInfo& account_info) {
-  // By design, clearing the primary account disables URL-keyed data collection.
-  SetUrlKeyedAnonymizedDataCollectionEnabled(false);
+void UnifiedConsentService::OnPrimaryAccountChanged(
+    const signin::PrimaryAccountChangeEvent& event) {
+  if (event.GetEventTypeFor(signin::ConsentLevel::kSync) ==
+      signin::PrimaryAccountChangeEvent::Type::kCleared) {
+    // By design, clearing the primary account disables URL-keyed data
+    // collection.
+    SetUrlKeyedAnonymizedDataCollectionEnabled(false);
+  }
 }
 
 void UnifiedConsentService::OnStateChanged(syncer::SyncService* sync) {
@@ -147,9 +133,8 @@ void UnifiedConsentService::StopObservingServicePrefChanges() {
 
 void UnifiedConsentService::ServicePrefChanged(const std::string& name) {
   DCHECK(sync_service_->IsSetupInProgress());
-  const base::Value* value = pref_service_->Get(name);
-  DCHECK(value);
-  service_pref_changes_[name] = value->Clone();
+  const base::Value& value = pref_service_->GetValue(name);
+  service_pref_changes_[name] = value.Clone();
 }
 
 MigrationState UnifiedConsentService::GetMigrationState() {
@@ -169,7 +154,7 @@ void UnifiedConsentService::SetMigrationState(MigrationState migration_state) {
 void UnifiedConsentService::MigrateProfileToUnifiedConsent() {
   DCHECK_EQ(GetMigrationState(), MigrationState::kNotInitialized);
 
-  if (!identity_manager_->HasPrimaryAccount()) {
+  if (!identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSync)) {
     SetMigrationState(MigrationState::kCompleted);
     return;
   }
@@ -189,7 +174,7 @@ void UnifiedConsentService::UpdateSettingsForMigration() {
       sync_service_->IsSyncFeatureEnabled() &&
       sync_service_->GetUserSettings()->GetSelectedTypes().Has(
           syncer::UserSelectableType::kHistory) &&
-      !sync_service_->GetUserSettings()->IsUsingSecondaryPassphrase();
+      !sync_service_->GetUserSettings()->IsUsingExplicitPassphrase();
   SetUrlKeyedAnonymizedDataCollectionEnabled(url_keyed_metrics_enabled);
 }
 

@@ -1,13 +1,12 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/signin/internal/identity_manager/ubertoken_fetcher_impl.h"
 
-#include <vector>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/time/time.h"
@@ -34,28 +33,24 @@ UbertokenFetcherImpl::UbertokenFetcherImpl(
     ProfileOAuth2TokenService* token_service,
     CompletionCallback ubertoken_callback,
     gaia::GaiaSource source,
-    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    bool is_bound_to_channel_id)
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
     : UbertokenFetcherImpl(account_id,
                            /*access_token=*/"",
                            token_service,
                            std::move(ubertoken_callback),
                            base::BindRepeating(CreateGaiaAuthFetcher,
                                                source,
-                                               url_loader_factory),
-                           is_bound_to_channel_id) {}
+                                               url_loader_factory)) {}
 
 UbertokenFetcherImpl::UbertokenFetcherImpl(
     const CoreAccountId& account_id,
     const std::string& access_token,
     ProfileOAuth2TokenService* token_service,
     CompletionCallback ubertoken_callback,
-    GaiaAuthFetcherFactory factory,
-    bool is_bound_to_channel_id)
+    GaiaAuthFetcherFactory factory)
     : OAuth2AccessTokenManager::Consumer("uber_token_fetcher"),
       token_service_(token_service),
       ubertoken_callback_(std::move(ubertoken_callback)),
-      is_bound_to_channel_id_(is_bound_to_channel_id),
       gaia_auth_fetcher_factory_(factory),
       account_id_(account_id),
       access_token_(access_token),
@@ -94,8 +89,8 @@ void UbertokenFetcherImpl::OnUberAuthTokenFailure(
       UMA_HISTOGRAM_ENUMERATION("Signin.UberTokenRetry", error.state(),
                                 GoogleServiceAuthError::NUM_STATES);
       retry_timer_.Stop();
-      retry_timer_.Start(FROM_HERE, base::TimeDelta::FromSecondsD(backoff),
-                         this, &UbertokenFetcherImpl::ExchangeTokens);
+      retry_timer_.Start(FROM_HERE, base::Seconds(backoff), this,
+                         &UbertokenFetcherImpl::ExchangeTokens);
       return;
     }
   } else {
@@ -146,8 +141,7 @@ void UbertokenFetcherImpl::RequestAccessToken() {
 
 void UbertokenFetcherImpl::ExchangeTokens() {
   gaia_auth_fetcher_ = gaia_auth_fetcher_factory_.Run(this);
-  gaia_auth_fetcher_->StartTokenFetchForUberAuthExchange(
-      access_token_, is_bound_to_channel_id_);
+  gaia_auth_fetcher_->StartTokenFetchForUberAuthExchange(access_token_);
 }
 
 }  // namespace signin

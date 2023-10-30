@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,12 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner_helpers.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/task/sequenced_task_runner_helpers.h"
+#include "base/time/time.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom.h"
@@ -24,18 +27,19 @@ namespace base {
 class TaskRunner;
 }
 
-namespace network {
-class ResourceRequestBody;
-}
-
 namespace storage {
 class BlobStorageContext;
+class FileSystemContext;
+class FileSystemURL;
+namespace mojom {
+class BlobStorageContext;
+}
 }
 
 namespace content {
 class BlobHandle;
 class BrowserContext;
-class ResourceContext;
+class StoragePartition;
 
 // A context class that keeps track of BlobStorageController used by the chrome.
 // There is an instance associated with each BrowserContext. There could be
@@ -54,16 +58,36 @@ class CONTENT_EXPORT ChromeBlobStorageContext
   static ChromeBlobStorageContext* GetFor(
       BrowserContext* browser_context);
 
-  void InitializeOnIOThread(base::FilePath blob_storage_dir,
+  // Must be called on the UI thread.
+  static mojo::PendingRemote<storage::mojom::BlobStorageContext> GetRemoteFor(
+      BrowserContext* browser_context);
+
+  void InitializeOnIOThread(const base::FilePath& profile_dir,
+                            const base::FilePath& blob_storage_dir,
                             scoped_refptr<base::TaskRunner> file_task_runner);
 
   storage::BlobStorageContext* context() const;
 
+  // Bind a BlobStorageContext mojo interface to be used by storage apis.
+  // This interface should not be exposed to renderers.
+  void BindMojoContext(
+      mojo::PendingReceiver<storage::mojom::BlobStorageContext> receiver);
+
   // Returns a NULL scoped_ptr on failure.
   std::unique_ptr<BlobHandle> CreateMemoryBackedBlob(
-      const char* data,
-      size_t length,
+      base::span<const uint8_t> data,
       const std::string& content_type);
+
+  // Creates a FileSystem File blob accessible by the renderer via the blob
+  // remote corresponding to `blob_receiver`.
+  void CreateFileSystemBlob(
+      scoped_refptr<storage::FileSystemContext> file_system_context,
+      mojo::PendingReceiver<blink::mojom::Blob> blob_receiver,
+      const storage::FileSystemURL& url,
+      const std::string& blob_uuid,
+      const std::string& content_type,
+      const uint64_t file_size,
+      const base::Time& file_modification_time);
 
   // Returns a SharedURLLoaderFactory capable of creating URLLoaders for exactly
   // the one URL associated with the passed in |token|. Attempting to load any
@@ -71,8 +95,9 @@ class CONTENT_EXPORT ChromeBlobStorageContext
   // itself is invalid all requests will result in errors.
   // Must be called on the UI thread.
   static scoped_refptr<network::SharedURLLoaderFactory>
-  URLLoaderFactoryForToken(BrowserContext* browser_context,
-                           blink::mojom::BlobURLTokenPtr token);
+  URLLoaderFactoryForToken(
+      StoragePartition* storage_partition,
+      mojo::PendingRemote<blink::mojom::BlobURLToken> token);
 
   // Similar to the above method this also returns a factory capable of loading
   // a single (blob) URL. If the |url| isn't a valid/registered blob URL at the
@@ -84,12 +109,13 @@ class CONTENT_EXPORT ChromeBlobStorageContext
   // holding on to the URL has no such guarantees.
   // Must be called on the UI thread.
   static scoped_refptr<network::SharedURLLoaderFactory> URLLoaderFactoryForUrl(
-      BrowserContext* browser_context,
+      StoragePartition* storage_partition,
       const GURL& url);
 
   // Must be called on the UI thread.
-  static blink::mojom::BlobPtr GetBlobPtr(BrowserContext* browser_context,
-                                          const std::string& uuid);
+  static mojo::PendingRemote<blink::mojom::Blob> GetBlobRemote(
+      BrowserContext* browser_context,
+      const std::string& uuid);
 
  protected:
   virtual ~ChromeBlobStorageContext();
@@ -105,15 +131,6 @@ class CONTENT_EXPORT ChromeBlobStorageContext
 // ChromeBlobStorageContext instance passed in.
 storage::BlobStorageContext* GetBlobStorageContext(
     ChromeBlobStorageContext* blob_storage_context);
-
-using BlobHandles = std::vector<std::unique_ptr<storage::BlobDataHandle>>;
-
-// Attempts to create a vector of BlobDataHandles that ensure any blob data
-// associated with |body| isn't cleaned up until the handles are destroyed.
-// Returns false on failure. This is used for POST and PUT requests.
-bool GetBodyBlobDataHandles(network::ResourceRequestBody* body,
-                            ResourceContext* resource_context,
-                            BlobHandles* blob_handles);
 
 extern const char kBlobStorageContextKeyName[];
 

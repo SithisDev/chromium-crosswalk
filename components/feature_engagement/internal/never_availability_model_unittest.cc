@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 
 #include "base/bind.h"
 #include "base/feature_list.h"
-#include "base/optional.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace feature_engagement {
 
@@ -22,52 +22,68 @@ const base::Feature kAvailabilityTestFeatureBar{
 
 class NeverAvailabilityModelTest : public ::testing::Test {
  public:
-  NeverAvailabilityModelTest() = default;
+  NeverAvailabilityModelTest()
+      : availability_model_(std::make_unique<NeverAvailabilityModel>()) {}
+
+  NeverAvailabilityModelTest(const NeverAvailabilityModelTest&) = delete;
+  NeverAvailabilityModelTest& operator=(const NeverAvailabilityModelTest&) =
+      delete;
 
   void OnInitializedCallback(bool success) { success_ = success; }
 
  protected:
-  NeverAvailabilityModel availability_model_;
-  base::Optional<bool> success_;
+  std::unique_ptr<NeverAvailabilityModel> availability_model_;
+  absl::optional<bool> success_;
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
-
-  DISALLOW_COPY_AND_ASSIGN(NeverAvailabilityModelTest);
+  base::test::SingleThreadTaskEnvironment task_environment_;
 };
 
 }  // namespace
 
 TEST_F(NeverAvailabilityModelTest, ShouldNeverHaveData) {
-  EXPECT_EQ(base::nullopt,
-            availability_model_.GetAvailability(kAvailabilityTestFeatureFoo));
-  EXPECT_EQ(base::nullopt,
-            availability_model_.GetAvailability(kAvailabilityTestFeatureBar));
+  EXPECT_EQ(absl::nullopt,
+            availability_model_->GetAvailability(kAvailabilityTestFeatureFoo));
+  EXPECT_EQ(absl::nullopt,
+            availability_model_->GetAvailability(kAvailabilityTestFeatureBar));
 
-  availability_model_.Initialize(
+  availability_model_->Initialize(
       base::BindOnce(&NeverAvailabilityModelTest::OnInitializedCallback,
                      base::Unretained(this)),
       14u);
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(base::nullopt,
-            availability_model_.GetAvailability(kAvailabilityTestFeatureFoo));
-  EXPECT_EQ(base::nullopt,
-            availability_model_.GetAvailability(kAvailabilityTestFeatureBar));
+  EXPECT_EQ(absl::nullopt,
+            availability_model_->GetAvailability(kAvailabilityTestFeatureFoo));
+  EXPECT_EQ(absl::nullopt,
+            availability_model_->GetAvailability(kAvailabilityTestFeatureBar));
 }
 
 TEST_F(NeverAvailabilityModelTest, ShouldBeReadyAfterInitialization) {
-  EXPECT_FALSE(availability_model_.IsReady());
-  availability_model_.Initialize(
+  EXPECT_FALSE(availability_model_->IsReady());
+  availability_model_->Initialize(
       base::BindOnce(&NeverAvailabilityModelTest::OnInitializedCallback,
                      base::Unretained(this)),
       14u);
-  EXPECT_FALSE(availability_model_.IsReady());
+  EXPECT_FALSE(availability_model_->IsReady());
   EXPECT_FALSE(success_.has_value());
   base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(availability_model_.IsReady());
+  EXPECT_TRUE(availability_model_->IsReady());
   ASSERT_TRUE(success_.has_value());
   EXPECT_TRUE(success_.value());
+}
+
+TEST_F(NeverAvailabilityModelTest, DestroyedBeforeInitialization) {
+  EXPECT_FALSE(availability_model_->IsReady());
+  // Initialize performs asynchronous tasks that are posted to the task queue.
+  // However the class may be torn down before they have a chance to complete.
+  availability_model_->Initialize(
+      base::BindOnce(&NeverAvailabilityModelTest::OnInitializedCallback,
+                     base::Unretained(this)),
+      14u);
+  availability_model_.reset();
+  base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(success_.has_value());
 }
 
 }  // namespace feature_engagement

@@ -1,16 +1,27 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/sync/base/passphrase_enums.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
 
 namespace syncer {
 
 bool IsExplicitPassphrase(PassphraseType type) {
-  return type == PassphraseType::CUSTOM_PASSPHRASE ||
-         type == PassphraseType::FROZEN_IMPLICIT_PASSPHRASE;
+  switch (type) {
+    case PassphraseType::kImplicitPassphrase:
+    case PassphraseType::kKeystorePassphrase:
+    case PassphraseType::kTrustedVaultPassphrase:
+      return false;
+    case PassphraseType::kFrozenImplicitPassphrase:
+    case PassphraseType::kCustomPassphrase:
+      return true;
+  }
+
+  NOTREACHED();
+  return false;
 }
 
 sync_pb::NigoriSpecifics::PassphraseType ProtoPassphraseInt32ToProtoEnum(
@@ -20,39 +31,41 @@ sync_pb::NigoriSpecifics::PassphraseType ProtoPassphraseInt32ToProtoEnum(
              : sync_pb::NigoriSpecifics::UNKNOWN;
 }
 
-base::Optional<PassphraseType> ProtoPassphraseInt32ToEnum(
+absl::optional<PassphraseType> ProtoPassphraseInt32ToEnum(
     ::google::protobuf::int32 type) {
   switch (ProtoPassphraseInt32ToProtoEnum(type)) {
     case sync_pb::NigoriSpecifics::IMPLICIT_PASSPHRASE:
-      return PassphraseType::IMPLICIT_PASSPHRASE;
+      return PassphraseType::kImplicitPassphrase;
     case sync_pb::NigoriSpecifics::KEYSTORE_PASSPHRASE:
-      return PassphraseType::KEYSTORE_PASSPHRASE;
+      return PassphraseType::kKeystorePassphrase;
     case sync_pb::NigoriSpecifics::CUSTOM_PASSPHRASE:
-      return PassphraseType::CUSTOM_PASSPHRASE;
+      return PassphraseType::kCustomPassphrase;
     case sync_pb::NigoriSpecifics::FROZEN_IMPLICIT_PASSPHRASE:
-      return PassphraseType::FROZEN_IMPLICIT_PASSPHRASE;
+      return PassphraseType::kFrozenImplicitPassphrase;
+    case sync_pb::NigoriSpecifics::TRUSTED_VAULT_PASSPHRASE:
+      return PassphraseType::kTrustedVaultPassphrase;
     case sync_pb::NigoriSpecifics::UNKNOWN:
       // This must be an unknown value coming from future versions or a field
       // actually being populated with UNKNOWN (which is a protocol violation).
       break;
   }
 
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 sync_pb::NigoriSpecifics::PassphraseType EnumPassphraseTypeToProto(
     PassphraseType type) {
   switch (type) {
-    case PassphraseType::IMPLICIT_PASSPHRASE:
+    case PassphraseType::kImplicitPassphrase:
       return sync_pb::NigoriSpecifics::IMPLICIT_PASSPHRASE;
-    case PassphraseType::KEYSTORE_PASSPHRASE:
+    case PassphraseType::kKeystorePassphrase:
       return sync_pb::NigoriSpecifics::KEYSTORE_PASSPHRASE;
-    case PassphraseType::CUSTOM_PASSPHRASE:
+    case PassphraseType::kCustomPassphrase:
       return sync_pb::NigoriSpecifics::CUSTOM_PASSPHRASE;
-    case PassphraseType::FROZEN_IMPLICIT_PASSPHRASE:
+    case PassphraseType::kFrozenImplicitPassphrase:
       return sync_pb::NigoriSpecifics::FROZEN_IMPLICIT_PASSPHRASE;
-    case PassphraseType::PASSPHRASE_TYPE_SIZE:
-      break;
+    case PassphraseType::kTrustedVaultPassphrase:
+      return sync_pb::NigoriSpecifics::TRUSTED_VAULT_PASSPHRASE;
   }
 
   NOTREACHED();

@@ -1,13 +1,16 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.components.minidump_uploader;
 
-import android.support.annotation.Nullable;
+import android.util.Pair;
+
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Log;
-import org.chromium.base.VisibleForTesting;
+import org.chromium.components.crash.anr.AnrCollector;
 
 import java.io.File;
 import java.io.FileDescriptor;
@@ -55,6 +58,7 @@ public class CrashFileManager {
     public static final String CRASH_DUMP_DIR = "Crash Reports";
 
     private static final String CRASHPAD_DIR = "Crashpad";
+    private static final String ANR_DIR = "ANRs";
 
     // This should mirror the C++ CrashUploadList::kReporterLogFilename variable.
     @VisibleForTesting
@@ -65,15 +69,26 @@ public class CrashFileManager {
     // define the id to be a sequence of non separator characters {`-`, `,` or `.`}
     private static final Pattern CRASH_LOCAL_ID_PATTERN = Pattern.compile("^[^.]+-([^-,]+?)\\.");
 
-    // Unlike the MINIDUMP_READY_FOR_UPLOAD_PATTERN below, this pattern omits a ".tryN" suffix.
+    // Unlike the MINIDUMP_ALL_READY_FOR_UPLOAD_PATTERN below, this pattern omits a ".tryN" suffix.
     private static final Pattern MINIDUMP_SANS_LOGCAT_PATTERN =
             Pattern.compile("\\.dmp([0-9]*)\\z");
 
-    private static final Pattern MINIDUMP_READY_FOR_UPLOAD_PATTERN =
+    // Minidumps that are ready for uploading including forced uploads.
+    private static final Pattern MINIDUMP_ALL_READY_FOR_UPLOAD_PATTERN =
             Pattern.compile("\\.(dmp|forced)([0-9]*)(\\.try([0-9]+))\\z");
+
+    // Minidumps that are ready for uploading excluding forced uploads.
+    private static final Pattern MINIDUMP_READY_FOR_UPLOAD_PATTERN =
+            Pattern.compile("\\.(dmp)([0-9]*)(\\.try([0-9]+))\\z");
 
     private static final Pattern UPLOADED_MINIDUMP_PATTERN =
             Pattern.compile("\\.up([0-9]*)(\\.try([0-9]+))\\z");
+
+    private static final Pattern MINIDUMP_FORCED_UPLOAD_PATTERN =
+            Pattern.compile("\\.forced([0-9]*)(\\.try([0-9]+))\\z");
+
+    private static final Pattern MINIDUMP_SKIPPED_UPLOAD_PATTERN =
+            Pattern.compile("\\.skipped([0-9]*)(\\.try([0-9]+))\\z");
 
     private static final String NOT_YET_UPLOADED_MINIDUMP_SUFFIX = ".dmp";
 
@@ -196,6 +211,13 @@ public class CrashFileManager {
         assert CrashFileManager.isMinidumpSansLogcat(fileToUpload.getName());
         File renamedFile = new File(fileToUpload.getPath() + READY_FOR_UPLOAD_SUFFIX);
         return fileToUpload.renameTo(renamedFile) ? renamedFile : null;
+    }
+
+    /**
+     * @return True iff the provided File was ready be uploaded for the first time.
+     */
+    public static boolean isReadyUploadForFirstTime(File fileToUpload) {
+        return fileToUpload.getName().contains(READY_FOR_UPLOAD_SUFFIX);
     }
 
     /**
@@ -340,6 +362,21 @@ public class CrashFileManager {
     }
 
     /**
+     * Collects ANRs from Android, then writes them as MIME files in the appropriate directory for
+     * crash to automatically upload.
+     */
+    public void collectAndWriteAnrs() {
+        if (ensureCrashDirExists()) {
+            File anrDir = new File(getCrashDirectory(), ANR_DIR);
+            anrDir.mkdir();
+
+            List<Pair<File, String>> anrFiles = AnrCollector.collectAndWriteAnrs(anrDir);
+            File crashDir = getCrashDirectory();
+            CrashReportMimeWriter.rewriteAnrsAsMIMEs(anrFiles, crashDir);
+        }
+    }
+
+    /**
      * Imports minidumps from Crashpad's database to the Crash Reports directory, converting them to
      * MIME files.
      **/
@@ -408,7 +445,31 @@ public class CrashFileManager {
      * Only returns files that we have tried to upload less than {@param maxTries} number of times.
      */
     public File[] getMinidumpsReadyForUpload(int maxTries) {
-        return getFilesBelowMaxTries(listCrashFiles(MINIDUMP_READY_FOR_UPLOAD_PATTERN), maxTries);
+        return getFilesBelowMaxTries(
+                listCrashFiles(MINIDUMP_ALL_READY_FOR_UPLOAD_PATTERN), maxTries);
+    }
+
+    /**
+     * Returns minidump files that could still be uploaded excluding forced uploads,
+     * sorted by modification time stamp.
+     */
+    public File[] getMinidumpsNotForcedReadyForUpload() {
+        return listCrashFiles(MINIDUMP_READY_FOR_UPLOAD_PATTERN);
+    }
+
+    /**
+     * Returns all minidump files that could still be uploaded, sorted by modification time stamp.
+     */
+    public File[] getMinidumpsSkippedUpload() {
+        return listCrashFiles(MINIDUMP_SKIPPED_UPLOAD_PATTERN);
+    }
+
+    /**
+     * Returns minidump files that are forced to be uploaded by the user, sorted by modification
+     * time stamp.
+     */
+    public File[] getMinidumpsForcedUpload() {
+        return listCrashFiles(MINIDUMP_FORCED_UPLOAD_PATTERN);
     }
 
     /**
@@ -596,7 +657,7 @@ public class CrashFileManager {
      * @param uid The uid of the app to check the minidump limit for.
      */
     private void enforceMinidumpStorageRestrictions(int uid) {
-        File[] allMinidumpFiles = listCrashFiles(MINIDUMP_READY_FOR_UPLOAD_PATTERN);
+        File[] allMinidumpFiles = listCrashFiles(MINIDUMP_ALL_READY_FOR_UPLOAD_PATTERN);
         List<File> minidumpFilesWithCurrentUid = filterMinidumpFilesOnUid(allMinidumpFiles, uid);
 
         // If we have exceeded our cap per uid, delete the oldest minidump of the same uid

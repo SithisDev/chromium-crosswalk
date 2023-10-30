@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,7 @@ ModelTypeSyncBridge::ModelTypeSyncBridge(
   change_processor_->OnModelStarting(this);
 }
 
-ModelTypeSyncBridge::~ModelTypeSyncBridge() {}
+ModelTypeSyncBridge::~ModelTypeSyncBridge() = default;
 
 void ModelTypeSyncBridge::OnSyncStarting(
     const DataTypeActivationRequest& request) {}
@@ -54,8 +54,25 @@ void ModelTypeSyncBridge::ApplyStopSyncChanges(
   }
 }
 
+void ModelTypeSyncBridge::OnCommitAttemptErrors(
+    const syncer::FailedCommitResponseDataList& error_response_list) {
+  // By default the bridge just ignores failed commit items.
+}
+
+ModelTypeSyncBridge::CommitAttemptFailedBehavior
+ModelTypeSyncBridge::OnCommitAttemptFailed(SyncCommitError commit_error) {
+  return CommitAttemptFailedBehavior::kDontRetryOnNextCycle;
+}
+
 size_t ModelTypeSyncBridge::EstimateSyncOverheadMemoryUsage() const {
   return 0U;
+}
+
+sync_pb::EntitySpecifics ModelTypeSyncBridge::TrimRemoteSpecificsForCaching(
+    const sync_pb::EntitySpecifics& entity_specifics) const {
+  // Clears all fields by default to avoid the memory and I/O overhead of an
+  // additional copy of the data.
+  return sync_pb::EntitySpecifics();
 }
 
 ModelTypeChangeProcessor* ModelTypeSyncBridge::change_processor() {

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,15 @@
 #include <keyhi.h>
 #include <stdint.h>
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task_runner.h"
-#include "base/task_runner_util.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/task_runner.h"
+#include "base/task/task_runner_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "components/ownership/owner_key_util.h"
@@ -68,12 +70,11 @@ std::unique_ptr<em::PolicyFetchResponse> AssembleAndSignPolicy(
   return policy_response;
 }
 
-}  // namepace
+}  // namespace
 
 OwnerSettingsService::OwnerSettingsService(
     const scoped_refptr<ownership::OwnerKeyUtil>& owner_key_util)
-    : owner_key_util_(owner_key_util), weak_factory_(this) {
-}
+    : owner_key_util_(owner_key_util) {}
 
 OwnerSettingsService::~OwnerSettingsService() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -98,27 +99,27 @@ bool OwnerSettingsService::IsOwner() {
   return private_key_.get() && private_key_->key();
 }
 
-void OwnerSettingsService::IsOwnerAsync(const IsOwnerCallback& callback) {
+void OwnerSettingsService::IsOwnerAsync(IsOwnerCallback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (private_key_.get()) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(callback, IsOwner()));
+        FROM_HERE, base::BindOnce(std::move(callback), IsOwner()));
   } else {
-    pending_is_owner_callbacks_.push_back(callback);
+    pending_is_owner_callbacks_.push_back(std::move(callback));
   }
 }
 
 bool OwnerSettingsService::AssembleAndSignPolicyAsync(
     base::TaskRunner* task_runner,
     std::unique_ptr<em::PolicyData> policy,
-    const AssembleAndSignPolicyAsyncCallback& callback) {
+    AssembleAndSignPolicyAsyncCallback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!task_runner || !IsOwner())
     return false;
   return base::PostTaskAndReplyWithResult(
       task_runner, FROM_HERE,
-      base::Bind(&AssembleAndSignPolicy, base::Passed(&policy), private_key_),
-      callback);
+      base::BindOnce(&AssembleAndSignPolicy, std::move(policy), private_key_),
+      std::move(callback));
 }
 
 bool OwnerSettingsService::SetBoolean(const std::string& setting, bool value) {
@@ -139,6 +140,13 @@ bool OwnerSettingsService::SetDouble(const std::string& setting, double value) {
   return Set(setting, in_value);
 }
 
+void OwnerSettingsService::RunPendingIsOwnerCallbacksForTesting(bool is_owner) {
+  std::vector<IsOwnerCallback> is_owner_callbacks;
+  is_owner_callbacks.swap(pending_is_owner_callbacks_);
+  for (auto& callback : is_owner_callbacks)
+    std::move(callback).Run(is_owner);
+}
+
 bool OwnerSettingsService::SetString(const std::string& setting,
                                      const std::string& value) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -148,25 +156,29 @@ bool OwnerSettingsService::SetString(const std::string& setting,
 
 void OwnerSettingsService::ReloadKeypair() {
   ReloadKeypairImpl(
-      base::Bind(&OwnerSettingsService::OnKeypairLoaded, as_weak_ptr()));
+      base::BindOnce(&OwnerSettingsService::OnKeypairLoaded, as_weak_ptr()));
 }
 
 void OwnerSettingsService::OnKeypairLoaded(
-    const scoped_refptr<PublicKey>& public_key,
-    const scoped_refptr<PrivateKey>& private_key) {
+    scoped_refptr<PublicKey> public_key,
+    scoped_refptr<PrivateKey> private_key) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  public_key_ = public_key;
-  private_key_ = private_key;
+  // The pointers themself should not be null to indicate that the keys finished
+  // loading (even if unsuccessfully). Absence of the actual data inside can
+  // indicate that the keys are unavailable.
+  public_key_ =
+      public_key ? public_key : base::MakeRefCounted<ownership::PublicKey>();
+  private_key_ = private_key
+                     ? private_key
+                     : base::MakeRefCounted<ownership::PrivateKey>(nullptr);
 
-  const bool is_owner = IsOwner();
   std::vector<IsOwnerCallback> is_owner_callbacks;
   is_owner_callbacks.swap(pending_is_owner_callbacks_);
-  for (std::vector<IsOwnerCallback>::iterator it(is_owner_callbacks.begin());
-       it != is_owner_callbacks.end();
-       ++it) {
-    it->Run(is_owner);
-  }
+
+  const bool is_owner = IsOwner();
+  for (auto& callback : is_owner_callbacks)
+    std::move(callback).Run(is_owner);
 
   OnPostKeypairLoadedActions();
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,4 +56,24 @@ public interface RenderCoordinates {
      * @return Maximum possible horizontal scroll in physical pixels (approx, integer).
      */
     int getMaxHorizontalScrollPixInt();
+
+    /**
+     * @return The Physical on-screen Y offset amount below the browser controls.
+     */
+    int getContentOffsetYPixInt();
+
+    /**
+     * @return Current page scale factor (approx, integer).
+     */
+    int getPageScaleFactorInt();
+
+    /**
+     * @return Current page scale factor.
+     */
+    float getPageScaleFactor();
+
+    /**
+     * @return Minimum page scale factor.
+     */
+    float getMinPageScaleFactor();
 }

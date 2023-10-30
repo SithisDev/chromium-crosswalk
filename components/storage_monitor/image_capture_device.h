@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,9 +61,9 @@ class ImageCaptureDeviceListener {
 @interface ImageCaptureDevice
     : NSObject<ICCameraDeviceDelegate, ICCameraDeviceDownloadDelegate> {
  @private
-  base::scoped_nsobject<ICCameraDevice> camera_;
-  base::WeakPtr<storage_monitor::ImageCaptureDeviceListener> listener_;
-  bool closing_;
+  base::scoped_nsobject<ICCameraDevice> _camera;
+  base::WeakPtr<storage_monitor::ImageCaptureDeviceListener> _listener;
+  bool _closing;
 }
 
 - (instancetype)initWithCameraDevice:(ICCameraDevice*)cameraDevice;

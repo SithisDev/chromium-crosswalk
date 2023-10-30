@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/download/database/download_db.h"
 #include "components/leveldb_proto/public/proto_database.h"
@@ -18,18 +17,26 @@ namespace download_pb {
 class DownloadDBEntry;
 }
 
+namespace leveldb_proto {
+class ProtoDatabaseProvider;
+}  // namespace leveldb_proto
+
 namespace download {
 
 // A protodb Implementation of DownloadDB.
 class DownloadDBImpl : public DownloadDB {
  public:
   DownloadDBImpl(DownloadNamespace download_namespace,
-                 const base::FilePath& database_dir);
+                 const base::FilePath& database_dir,
+                 leveldb_proto::ProtoDatabaseProvider* db_provider);
   DownloadDBImpl(
       DownloadNamespace download_namespace,
-      const base::FilePath& database_dir,
       std::unique_ptr<
           leveldb_proto::ProtoDatabase<download_pb::DownloadDBEntry>> db);
+
+  DownloadDBImpl(const DownloadDBImpl&) = delete;
+  DownloadDBImpl& operator=(const DownloadDBImpl&) = delete;
+
   ~DownloadDBImpl() override;
 
   // DownloadDB implementation.
@@ -51,7 +58,8 @@ class DownloadDBImpl : public DownloadDB {
   std::string GetEntryKey(const std::string& guid) const;
 
   // Called when database is initialized.
-  void OnDatabaseInitialized(DownloadDBCallback callback, bool success);
+  void OnDatabaseInitialized(DownloadDBCallback callback,
+                             leveldb_proto::Enums::InitStatus status);
 
   // Called when database is destroyed.
   void OnDatabaseDestroyed(DownloadDBCallback callback, bool success);
@@ -65,27 +73,22 @@ class DownloadDBImpl : public DownloadDB {
       bool success,
       std::unique_ptr<std::vector<download_pb::DownloadDBEntry>> entries);
 
-  // Directory to store |db_|.
-  base::FilePath database_dir_;
-
   // Proto db for storing all the entries.
   std::unique_ptr<leveldb_proto::ProtoDatabase<download_pb::DownloadDBEntry>>
       db_;
 
   // Whether the object is initialized.
-  bool is_initialized_;
+  bool is_initialized_ = false;
 
   // Namespace of this db.
   DownloadNamespace download_namespace_;
 
   // Number of initialize attempts.
-  int num_initialize_attempts_;
+  int num_initialize_attempts_ = 0;
 
   base::WeakPtrFactory<DownloadDBImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(DownloadDBImpl);
 };
 
 }  // namespace download
 
-#endif  // COMPONENTS_DOWNLOAD_DATABASE_IN_PROGRESS_DOWNLOAD_DB_IMPL_H_
+#endif  // COMPONENTS_DOWNLOAD_DATABASE_DOWNLOAD_DB_IMPL_H_

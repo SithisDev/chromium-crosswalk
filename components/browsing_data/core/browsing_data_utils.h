@@ -1,15 +1,17 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_BROWSING_DATA_CORE_BROWSING_DATA_UTILS_H_
 #define COMPONENTS_BROWSING_DATA_CORE_BROWSING_DATA_UTILS_H_
 
-#include "base/strings/string16.h"
+#include <string>
+
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/browsing_data/core/clear_browsing_data_tab.h"
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
+#include "net/cookies/cookie_constants.h"
 
 namespace browsing_data {
 
@@ -61,7 +63,7 @@ void RecordTimePeriodChange(TimePeriod period);
 // Constructs the text to be displayed by a counter from the given |result|.
 // Currently this can only be used for counters for which the Result is
 // defined in components/browsing_data/core/counters.
-base::string16 GetCounterTextFromResult(
+std::u16string GetCounterTextFromResult(
     const BrowsingDataCounter::Result* result);
 
 // Returns the preference that stores the time period.
@@ -77,6 +79,8 @@ bool GetDeletionPreferenceFromDataType(
 
 BrowsingDataType GetDataTypeFromDeletionPreference(
     const std::string& pref_name);
+
+bool IsHttpsCookieSourceScheme(net::CookieSourceScheme cookie_source_scheme);
 
 }  // namespace browsing_data
 

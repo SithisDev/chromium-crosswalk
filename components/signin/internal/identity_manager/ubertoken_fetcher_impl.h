@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/timer/timer.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
 #include "components/signin/public/identity_manager/ubertoken_fetcher.h"
@@ -55,16 +55,18 @@ class UbertokenFetcherImpl : public UbertokenFetcher,
       ProfileOAuth2TokenService* token_service,
       CompletionCallback ubertoken_callback,
       gaia::GaiaSource source,
-      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      bool is_bound_to_channel_id = true);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
   // Constructs an instance and starts fetching the ubertoken for |account_id|.
   UbertokenFetcherImpl(const CoreAccountId& account_id,
                        const std::string& access_token,
                        ProfileOAuth2TokenService* token_service,
                        CompletionCallback ubertoken_callback,
-                       GaiaAuthFetcherFactory factory,
-                       bool is_bound_to_channel_id = true);
+                       GaiaAuthFetcherFactory factory);
+
+  UbertokenFetcherImpl(const UbertokenFetcherImpl&) = delete;
+  UbertokenFetcherImpl& operator=(const UbertokenFetcherImpl&) = delete;
+
   ~UbertokenFetcherImpl() override;
 
   // Overridden from GaiaAuthConsumer
@@ -85,9 +87,8 @@ class UbertokenFetcherImpl : public UbertokenFetcher,
   // Exchanges an oauth2 access token for an uber-auth token.
   void ExchangeTokens();
 
-  ProfileOAuth2TokenService* token_service_;
+  raw_ptr<ProfileOAuth2TokenService> token_service_;
   CompletionCallback ubertoken_callback_;
-  bool is_bound_to_channel_id_;  // defaults to true
   GaiaAuthFetcherFactory gaia_auth_fetcher_factory_;
   std::unique_ptr<GaiaAuthFetcher> gaia_auth_fetcher_;
   std::unique_ptr<OAuth2AccessTokenManager::Request> access_token_request_;
@@ -96,8 +97,6 @@ class UbertokenFetcherImpl : public UbertokenFetcher,
   int retry_number_;
   base::OneShotTimer retry_timer_;
   bool second_access_token_request_;
-
-  DISALLOW_COPY_AND_ASSIGN(UbertokenFetcherImpl);
 };
 
 }  // namespace signin

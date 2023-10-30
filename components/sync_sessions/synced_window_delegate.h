@@ -1,11 +1,9 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_SYNC_SESSIONS_SYNCED_WINDOW_DELEGATE_H_
 #define COMPONENTS_SYNC_SESSIONS_SYNCED_WINDOW_DELEGATE_H_
-
-#include <set>
 
 #include "components/sessions/core/session_id.h"
 
@@ -33,11 +31,8 @@ class SyncedWindowDelegate {
   // see Browser::active_index
   virtual int GetActiveIndex() const = 0;
 
-  // see Browser::is_app
-  virtual bool IsApp() const = 0;
-
-  // see Browser::is_type_tabbed
-  virtual bool IsTypeTabbed() const = 0;
+  // see Browser::is_type_normal
+  virtual bool IsTypeNormal() const = 0;
 
   // see Browser::is_type_popup
   virtual bool IsTypePopup() const = 0;

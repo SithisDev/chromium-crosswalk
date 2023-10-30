@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 #include <utility>
 
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
+#include "components/autofill_assistant/browser/display_strings_util.h"
 #include "components/autofill_assistant/browser/user_action.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -17,7 +19,7 @@ namespace autofill_assistant {
 
 ShowFormAction::ShowFormAction(ActionDelegate* delegate,
                                const ActionProto& proto)
-    : Action(delegate, proto), weak_ptr_factory_(this) {
+    : Action(delegate, proto) {
   DCHECK(proto_.has_show_form() && proto_.show_form().has_form());
 }
 
@@ -31,24 +33,27 @@ void ShowFormAction::InternalProcessAction(ProcessActionCallback callback) {
   if (!delegate_->SetForm(
           std::make_unique<FormProto>(proto_.show_form().form()),
           base::BindRepeating(&ShowFormAction::OnFormValuesChanged,
-                              weak_ptr_factory_.GetWeakPtr()))) {
+                              weak_ptr_factory_.GetWeakPtr()),
+          base::BindOnce(&ShowFormAction::OnCancelForm,
+                         weak_ptr_factory_.GetWeakPtr()))) {
     // The form contains unsupported or invalid inputs.
-    UpdateProcessedAction(UNSUPPORTED);
-    std::move(callback_).Run(std::move(processed_action_proto_));
+    EndAction(ClientStatus(UNSUPPORTED));
     return;
   }
 }
 
 void ShowFormAction::OnFormValuesChanged(const FormProto::Result* form_result) {
+  action_stopwatch_.StartActiveTime();
   // Copy the current values to the action result.
   *processed_action_proto_->mutable_form_result() = *form_result;
 
   // Show "Continue" chip.
   UserAction user_action =
-      UserAction(proto_.show_form().chip(), proto_.show_form().direct_action());
+      UserAction(proto_.show_form().chip(), /* enabled = */ true,
+                 /* identifier = */ std::string());
   if (user_action.chip().empty()) {
-    user_action.chip().text =
-        l10n_util::GetStringUTF8(IDS_AUTOFILL_ASSISTANT_PAYMENT_INFO_CONFIRM);
+    user_action.chip().text = GetDisplayStringUTF8(
+        ClientSettingsProto::PAYMENT_INFO_CONFIRM, delegate_->GetSettings());
     user_action.chip().type = HIGHLIGHTED_ACTION;
   }
   user_action.SetEnabled(IsFormValid(proto_.show_form().form(), *form_result));
@@ -57,7 +62,13 @@ void ShowFormAction::OnFormValuesChanged(const FormProto::Result* form_result) {
 
   auto user_actions = std::make_unique<std::vector<UserAction>>();
   user_actions->emplace_back(std::move(user_action));
-  delegate_->Prompt(std::move(user_actions));
+  delegate_->Prompt(std::move(user_actions),
+                    /* disable_force_expand_sheet = */ false);
+  action_stopwatch_.StartWaitTime();
+}
+
+void ShowFormAction::OnCancelForm(const ClientStatus& status) {
+  EndAction(status);
 }
 
 bool ShowFormAction::IsFormValid(const FormProto& form,
@@ -141,8 +152,9 @@ bool ShowFormAction::IsCounterValidationRuleSatisfied(
       // max_value].
       auto counters_sum_rule = rule.counters_sum();
       long sum = 0;
-      for (int value : result.values()) {
-        sum += value;
+      for (int i = 0; i < result.values_size(); ++i) {
+        DCHECK_LT(i, input.counters_size());
+        sum += result.values(i) * input.counters(i).size();
       }
       return sum >= counters_sum_rule.min_value() &&
              sum <= counters_sum_rule.max_value();
@@ -175,9 +187,14 @@ bool ShowFormAction::IsSelectionInputValid(
 }
 
 void ShowFormAction::OnButtonClicked() {
-  DCHECK(callback_);
-  delegate_->SetForm(nullptr, base::DoNothing());
-  UpdateProcessedAction(ACTION_APPLIED);
+  EndAction(ClientStatus(ACTION_APPLIED));
+}
+
+void ShowFormAction::EndAction(const ClientStatus& status) {
+  action_stopwatch_.StartActiveTime();
+  delegate_->CleanUpAfterPrompt();
+  delegate_->SetForm(nullptr, base::DoNothing(), base::DoNothing());
+  UpdateProcessedAction(status);
   std::move(callback_).Run(std::move(processed_action_proto_));
 }
 

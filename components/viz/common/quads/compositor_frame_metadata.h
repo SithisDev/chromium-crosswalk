@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,25 +7,31 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
-#include "base/optional.h"
+
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
+#include "components/viz/common/quads/compositor_frame_transition_directive.h"
 #include "components/viz/common/quads/frame_deadline.h"
+#include "components/viz/common/surfaces/region_capture_bounds.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "components/viz/common/surfaces/surface_range.h"
 #include "components/viz/common/viz_common_export.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/delegated_ink_metadata.h"
+#include "ui/gfx/display_color_spaces.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/geometry/vector2d_f.h"
+#include "ui/gfx/overlay_transform.h"
 #include "ui/latency/latency_info.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "components/viz/common/quads/selection.h"
 #include "ui/gfx/selection_bound.h"
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 namespace viz {
 
@@ -67,12 +73,16 @@ class VIZ_COMMON_EXPORT CompositorFrameMetadata {
 
   // Scroll offset and scale of the root layer. This can be used for tasks
   // like positioning windowed plugins.
-  gfx::Vector2dF root_scroll_offset;
+  gfx::PointF root_scroll_offset;
   float page_scale_factor = 0.f;
 
   gfx::SizeF scrollable_viewport_size;
 
+  gfx::ContentColorUsage content_color_usage = gfx::ContentColorUsage::kSRGB;
+
   bool may_contain_video = false;
+
+  bool may_throttle_if_undrawn_frames = true;
 
   // WebView makes quality decisions for rastering resourceless software frames
   // based on information that a scroll or animation is active.
@@ -83,7 +93,7 @@ class VIZ_COMMON_EXPORT CompositorFrameMetadata {
   // This color is usually obtained from the background color of the <body>
   // element. It can be used for filling in gutter areas around the frame when
   // it's too small to fill the box the parent reserved for it.
-  SkColor root_background_color = SK_ColorWHITE;
+  SkColor4f root_background_color = SkColors::kWhite;
 
   std::vector<ui::LatencyInfo> latency_info;
 
@@ -134,37 +144,41 @@ class VIZ_COMMON_EXPORT CompositorFrameMetadata {
   // determine if scrolling/scaling in a particular direction is possible.
   float min_page_scale_factor = 0.f;
 
-  // Used to position the location top bar and page content, whose precise
-  // position is computed by the renderer compositor.
-  float top_controls_height = 0.f;
-  float top_controls_shown_ratio = 0.f;
+  // The visible height of the top-controls. If the value is not set, then the
+  // visible height should be the same as in the latest submitted frame with a
+  // value set.
+  absl::optional<float> top_controls_visible_height;
 
-  // The time at which the LocalSurfaceId used to submit this CompositorFrame
-  // was allocated.
-  base::TimeTicks local_surface_id_allocation_time;
+  absl::optional<base::TimeDelta> preferred_frame_interval;
 
-  base::Optional<base::TimeDelta> preferred_frame_interval;
+  // Display transform hint when the frame is generated. Note this is only
+  // applicable to frames of the root surface.
+  gfx::OverlayTransform display_transform_hint = gfx::OVERLAY_TRANSFORM_NONE;
 
-  // Union of visible rects of MirrorLayers in the frame, used to force damage
-  // on the surface.
-  // TODO(crbug/987725): This is a workaround and should be removed when proper
-  // damage calculation is implemented in SurfaceAggregator.
-  gfx::Rect mirror_rect;
+  // Contains the metadata required for drawing a delegated ink trail onto the
+  // end of a rendered ink stroke. This should only be present when two
+  // conditions are met:
+  //   1. The JS API |updateInkTrailStartPoint| is used - This gathers the
+  //     metadata and puts it onto a compositor frame to be sent to viz.
+  //   2. This frame will not be submitted to the root surface - The browser UI
+  //     does not use this, and the frame must be contained within a
+  //     SurfaceDrawQuad.
+  // The ink trail created with this metadata will only last for a single frame
+  // before it disappears, regardless of whether or not the next frame contains
+  // delegated ink metadata.
+  std::unique_ptr<gfx::DelegatedInkMetadata> delegated_ink_metadata;
 
-#if defined(OS_ANDROID)
-  float max_page_scale_factor = 0.f;
-  gfx::SizeF root_layer_size;
-  bool root_overflow_y_hidden = false;
+  // This represents a list of directives to execute in order to support the
+  // document transitions.
+  std::vector<CompositorFrameTransitionDirective> transition_directives;
 
-  // Used to position Android bottom bar, whose position is computed by the
-  // renderer compositor.
-  float bottom_controls_height = 0.f;
-  float bottom_controls_shown_ratio = 0.f;
+  // A map of region capture crop ids associated with this frame to the
+  // gfx::Rect of the region that they represent.
+  RegionCaptureBounds capture_bounds;
 
-  // Provides selection region updates relative to the current viewport. If the
-  // selection is empty or otherwise unused, the bound types will indicate such.
-  Selection<gfx::SelectionBound> selection;
-#endif  // defined(OS_ANDROID)
+  // Indicates if this frame references shared element resources that need to
+  // be replaced with ResourceIds in the Viz process.
+  bool has_shared_element_resources = false;
 
  private:
   CompositorFrameMetadata(const CompositorFrameMetadata& other);

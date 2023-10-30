@@ -1,15 +1,16 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/child/font_warmup_win.h"
 
+#include <windows.h>
 #include <dwrite.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <windows.h>
 #include <wrl.h>
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -17,7 +18,7 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/sys_byteorder.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/win/windows_version.h"
 
 #include "content/child/dwrite_font_proxy/dwrite_font_proxy_win.h"
@@ -43,7 +44,7 @@ class GDIFontEmulationTest : public testing::Test {
     fake_collection_ = std::make_unique<FakeFontCollection>();
     SetupFonts(fake_collection_.get());
     DWriteFontCollectionProxy::Create(&collection_, factory.Get(),
-                                      fake_collection_->CreatePtr());
+                                      fake_collection_->CreateRemote());
     EXPECT_TRUE(collection_.Get());
 
     content::SetPreSandboxWarmupFontMgrForTesting(
@@ -62,9 +63,9 @@ class GDIFontEmulationTest : public testing::Test {
     EXPECT_TRUE(base::PathService::Get(content::DIR_TEST_DATA, &data_path));
 
     base::FilePath gdi_path = data_path.AppendASCII("font/gdi_test.ttf");
-    fonts->AddFont(L"GDITest")
-        .AddFamilyName(L"en-us", L"GDITest")
-        .AddFamilyName(L"de-de", L"GDIUntersuchung")
+    fonts->AddFont(u"GDITest")
+        .AddFamilyName(u"en-us", u"GDITest")
+        .AddFamilyName(u"de-de", u"GDIUntersuchung")
         .AddFilePath(gdi_path);
   }
 
@@ -74,7 +75,7 @@ class GDIFontEmulationTest : public testing::Test {
   }
 
  protected:
-  base::test::ScopedTaskEnvironment task_environment;
+  base::test::TaskEnvironment task_environment;
   std::unique_ptr<FakeFontCollection> fake_collection_;
   mswr::ComPtr<DWriteFontCollectionProxy> collection_;
 

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "base/time/time.h"
 #include "components/signin/public/identity_manager/access_token_fetcher.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
+#include "components/signin/public/identity_manager/scope_set.h"
 #include "components/sync/base/stop_source.h"
 #include "components/sync/base/sync_prefs.h"
-#include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/engine/sync_credentials.h"
 #include "google_apis/gaia/gaia_constants.h"
 
@@ -23,32 +23,33 @@ namespace {
 
 constexpr char kSyncOAuthConsumerName[] = "sync";
 
-constexpr net::BackoffEntry::Policy kRequestAccessTokenBackoffPolicy = {
-    // Number of initial errors (in sequence) to ignore before applying
-    // exponential back-off rules.
-    0,
+constexpr net::BackoffEntry::Policy
+    kIgnoreFirstErrorRequestAccessTokenBackoffPolicy = {
+        // Number of initial errors (in sequence) to ignore before applying
+        // exponential back-off rules.
+        1,
 
-    // Initial delay for exponential back-off in ms.
-    2000,
+        // Initial delay for exponential back-off in ms.
+        2000,
 
-    // Factor by which the waiting time will be multiplied.
-    2,
+        // Factor by which the waiting time will be multiplied.
+        2,
 
-    // Fuzzing percentage. ex: 10% will spread requests randomly
-    // between 90%-100% of the calculated time.
-    0.2,  // 20%
+        // Fuzzing percentage. ex: 10% will spread requests randomly
+        // between 90%-100% of the calculated time.
+        0.2,  // 20%
 
-    // Maximum amount of time we are willing to delay our request in ms.
-    // TODO(crbug.com/246686): We should retry RequestAccessToken on connection
-    // state change after backoff.
-    1000 * 3600 * 4,  // 4 hours.
+        // Maximum amount of time we are willing to delay our request in ms.
+        // TODO(crbug.com/246686): We should retry RequestAccessToken on
+        // connection state change after backoff.
+        1000 * 3600 * 4,  // 4 hours.
 
-    // Time to keep an entry from being discarded even when it
-    // has no significant state, -1 to never discard.
-    -1,
+        // Time to keep an entry from being discarded even when it
+        // has no significant state, -1 to never discard.
+        -1,
 
-    // Don't use initial delay unless the last request was an error.
-    false,
+        // Don't use initial delay unless the last request was an error.
+        false,
 };
 
 }  // namespace
@@ -60,8 +61,8 @@ SyncAuthManager::SyncAuthManager(
     : identity_manager_(identity_manager),
       account_state_changed_callback_(account_state_changed),
       credentials_changed_callback_(credentials_changed),
-      registered_for_auth_notifications_(false),
-      request_access_token_backoff_(&kRequestAccessTokenBackoffPolicy) {
+      request_access_token_backoff_(
+          &kIgnoreFirstErrorRequestAccessTokenBackoffPolicy) {
   // |identity_manager_| can be null if local Sync is enabled.
 }
 
@@ -81,6 +82,23 @@ void SyncAuthManager::RegisterForAuthNotifications() {
   // Also initialize the sync account here, but *without* notifying the
   // SyncService.
   sync_account_ = DetermineAccountToUse();
+  // If there's already a persistent auth error, also propagate that into our
+  // local state. Note that (as of 2021-01) this shouldn't happen in practice:
+  // Auth errors are not persisted, so it's unlikely that at this point in time
+  // (early during browser startup) an auth error has already been detected.
+  GoogleServiceAuthError token_error =
+      identity_manager_->GetErrorStateOfRefreshTokenForAccount(
+          sync_account_.account_info.account_id);
+  if (token_error.IsPersistentError()) {
+    SetLastAuthError(token_error);
+  }
+}
+
+bool SyncAuthManager::IsActiveAccountInfoFullyLoaded() const {
+  // The result of DetermineAccountToUse() is influenced by refresh tokens being
+  // loaded due to how IdentityManager::ComputeUnconsentedPrimaryAccountInfo()
+  // is implemented, which requires a refresh token.
+  return identity_manager_->AreRefreshTokensLoaded();
 }
 
 SyncAccountInfo SyncAuthManager::GetActiveAccountInfo() const {
@@ -133,7 +151,6 @@ SyncCredentials SyncAuthManager::GetCredentials() const {
   const CoreAccountInfo& account_info = sync_account_.account_info;
 
   SyncCredentials credentials;
-  credentials.account_id = account_info.account_id;
   credentials.email = account_info.email;
   credentials.access_token = access_token_;
 
@@ -231,7 +248,7 @@ void SyncAuthManager::InvalidateAccessToken() {
 
   identity_manager_->RemoveAccessTokenFromCache(
       sync_account_.account_info.account_id,
-      identity::ScopeSet{GaiaConstants::kChromeSyncOAuth2Scope}, access_token_);
+      signin::ScopeSet{GaiaConstants::kChromeSyncOAuth2Scope}, access_token_);
 
   access_token_.clear();
   credentials_changed_callback_.Run();
@@ -265,14 +282,12 @@ void SyncAuthManager::ConnectionClosed() {
   connection_open_ = false;
 }
 
-void SyncAuthManager::OnPrimaryAccountSet(
-    const CoreAccountInfo& primary_account_info) {
-  UpdateSyncAccountIfNecessary();
-}
-
-void SyncAuthManager::OnPrimaryAccountCleared(
-    const CoreAccountInfo& previous_primary_account_info) {
-  UMA_HISTOGRAM_ENUMERATION("Sync.StopSource", SIGN_OUT, STOP_SOURCE_LIMIT);
+void SyncAuthManager::OnPrimaryAccountChanged(
+    const signin::PrimaryAccountChangeEvent& event) {
+  if (event.GetEventTypeFor(signin::ConsentLevel::kSync) ==
+      signin::PrimaryAccountChangeEvent::Type::kCleared) {
+    UMA_HISTOGRAM_ENUMERATION("Sync.StopSource", SIGN_OUT, STOP_SOURCE_LIMIT);
+  }
   UpdateSyncAccountIfNecessary();
 }
 
@@ -356,9 +371,14 @@ void SyncAuthManager::OnRefreshTokenRemovedForAccount(
 
   // If we're still here, then that means Chrome is still signed in to this
   // account. Keep Sync alive but set an auth error.
-  // TODO(crbug.com/906995): Should we stop Sync in this case?
-  DCHECK_EQ(sync_account_.account_info.account_id,
-            identity_manager_->GetPrimaryAccountId());
+  // TODO(crbug.com/1156584): Should we stop Sync in this case?
+  DCHECK_EQ(
+      sync_account_.account_info.account_id,
+      identity_manager_->GetPrimaryAccountId(signin::ConsentLevel::kSignin));
+
+  // Note: It's possible that we're in the middle of a signout, and the "refresh
+  // token removed" event just arrived before the "signout" event. In that case,
+  // OnPrimaryAccountChanged() will get called momentarily and stop sync.
 
   // TODO(crbug.com/839834): REQUEST_CANCELED doesn't seem like the right auth
   // error to use here. Maybe INVALID_GAIA_CREDENTIALS?
@@ -369,10 +389,22 @@ void SyncAuthManager::OnRefreshTokenRemovedForAccount(
   credentials_changed_callback_.Run();
 }
 
-void SyncAuthManager::OnAccountsInCookieUpdated(
-    const signin::AccountsInCookieJarInfo& accounts_in_cookie_jar_info,
-    const GoogleServiceAuthError& error) {
-  UpdateSyncAccountIfNecessary();
+void SyncAuthManager::OnRefreshTokensLoaded() {
+  DCHECK(IsActiveAccountInfoFullyLoaded());
+
+  if (UpdateSyncAccountIfNecessary()) {
+    // |account_state_changed_callback_| has already been called, no need to
+    // consider calling it again.
+    return;
+  }
+
+  if (sync_account_.account_info.account_id.empty()) {
+    // Nothing actually changed, so |account_state_changed_callback_| hasn't
+    // been called yet. However, this is the first time we can reliably tell the
+    // user is signed out, exposed via IsActiveAccountInfoFullyLoaded(), so
+    // let's treat it as account state change.
+    account_state_changed_callback_.Run();
+  }
 }
 
 bool SyncAuthManager::IsRetryingAccessTokenFetchForTest() const {
@@ -385,9 +417,7 @@ void SyncAuthManager::ResetRequestAccessTokenBackoffForTest() {
 
 SyncAccountInfo SyncAuthManager::DetermineAccountToUse() const {
   DCHECK(registered_for_auth_notifications_);
-  return syncer::DetermineAccountToUse(
-      identity_manager_,
-      base::FeatureList::IsEnabled(switches::kSyncSupportSecondaryAccount));
+  return syncer::DetermineAccountToUse(identity_manager_);
 }
 
 bool SyncAuthManager::UpdateSyncAccountIfNecessary() {
@@ -397,12 +427,13 @@ bool SyncAuthManager::UpdateSyncAccountIfNecessary() {
   if (new_account.account_info.account_id ==
       sync_account_.account_info.account_id) {
     // We're already using this account (or there was and is no account to use).
-    // If the |is_primary| bit hasn't changed either, then there's nothing to
-    // do.
-    if (new_account.is_primary == sync_account_.is_primary) {
+    // If the |is_sync_consented| bit hasn't changed either, then there's
+    // nothing to do.
+    if (new_account.is_sync_consented == sync_account_.is_sync_consented) {
       return false;
     }
-    // The |is_primary| bit *has* changed, so update our state and notify.
+    // The |is_sync_consented| bit *has* changed, so update our state and
+    // notify.
     sync_account_ = new_account;
     account_state_changed_callback_.Run();
     return true;
@@ -414,12 +445,14 @@ bool SyncAuthManager::UpdateSyncAccountIfNecessary() {
   // Sign out of the old account (if any).
   if (!sync_account_.account_info.account_id.empty()) {
     sync_account_ = SyncAccountInfo();
+    // Let the client (SyncService) know of the removed account *before*
+    // throwing away the access token, so it can do "unregister" tasks.
+    account_state_changed_callback_.Run();
     // Also clear any pending request or auth errors we might have, since they
     // aren't meaningful anymore.
     partial_token_status_ = SyncTokenStatus();
     ClearAccessTokenAndRequest();
     SetLastAuthError(GoogleServiceAuthError::AuthErrorNone());
-    account_state_changed_callback_.Run();
   }
 
   // Sign in to the new account (if any).
@@ -474,6 +507,16 @@ void SyncAuthManager::AccessTokenFetched(
   ongoing_access_token_fetch_.reset();
   DCHECK(!request_access_token_retry_timer_.IsRunning());
 
+  // Retry without backoff when the request is canceled for the first time. For
+  // more details, see inline comments of
+  // PrimaryAccountAccessTokenFetcher::OnAccessTokenFetchComplete.
+  if (error.state() == GoogleServiceAuthError::REQUEST_CANCELED &&
+      !access_token_retried_) {
+    access_token_retried_ = true;
+    RequestAccessToken();
+    return;
+  }
+
   access_token_ = access_token_info.token;
   partial_token_status_.token_response_time = base::Time::Now();
   partial_token_status_.last_get_token_error = error;
@@ -499,9 +542,15 @@ void SyncAuthManager::AccessTokenFetched(
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
       SetLastAuthError(error);
       break;
-    default:
+    case GoogleServiceAuthError::USER_NOT_SIGNED_UP:
+    case GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE:
+    case GoogleServiceAuthError::SCOPE_LIMITED_UNRECOVERABLE_ERROR:
       DLOG(ERROR) << "Unexpected persistent error: " << error.ToString();
       SetLastAuthError(error);
+      break;
+    case GoogleServiceAuthError::NUM_STATES:
+      NOTREACHED();
+      break;
   }
 
   credentials_changed_callback_.Run();

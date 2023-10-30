@@ -1,50 +1,82 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef COMPONENTS_VIZ_SERVICE_DISPLAY_OVERLAY_STRATEGY_UNDERLAY_CAST_H_
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_OVERLAY_STRATEGY_UNDERLAY_CAST_H_
 
-#include "base/callback.h"
-#include "base/macros.h"
+#include <memory>
+#include <vector>
+
 #include "components/viz/service/display/overlay_strategy_underlay.h"
 #include "components/viz/service/viz_service_export.h"
-#include "ui/gfx/overlay_transform.h"
+
+#include "chromecast/media/service/mojom/video_geometry_setter.mojom.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace viz {
-
-class OverlayCandidateValidator;
-
 // Similar to underlay strategy plus Cast-specific handling of content bounds.
 class VIZ_SERVICE_EXPORT OverlayStrategyUnderlayCast
     : public OverlayStrategyUnderlay {
  public:
   explicit OverlayStrategyUnderlayCast(
-      OverlayCandidateValidator* capability_checker);
+      OverlayProcessorUsingStrategy* capability_checker);
+
+  OverlayStrategyUnderlayCast(const OverlayStrategyUnderlayCast&) = delete;
+  OverlayStrategyUnderlayCast& operator=(const OverlayStrategyUnderlayCast&) =
+      delete;
+
   ~OverlayStrategyUnderlayCast() override;
 
-  bool Attempt(
-      const SkMatrix44& output_color_matrix,
-      const OverlayProcessor::FilterOperationsMap& render_pass_backdrop_filters,
-      DisplayResourceProvider* resource_provider,
-      RenderPassList* render_pass,
-      OverlayCandidateList* candidate_list,
-      std::vector<gfx::Rect>* content_bounds) override;
+  bool Attempt(const SkM44& output_color_matrix,
+               const OverlayProcessorInterface::FilterOperationsMap&
+                   render_pass_backdrop_filters,
+               DisplayResourceProvider* resource_provider,
+               AggregatedRenderPassList* render_pass,
+               SurfaceDamageRectList* surface_damage_rect_list,
+               const PrimaryPlane* primary_plane,
+               OverlayCandidateList* candidate_list,
+               std::vector<gfx::Rect>* content_bounds) override;
 
-  // Callback that's made whenever an overlay quad is processed in the
-  // compositor. Used to allow hardware video plane to be positioned to match
-  // compositor hole.
-  using OverlayCompositedCallback =
-      base::RepeatingCallback<void(const gfx::RectF&, gfx::OverlayTransform)>;
-  static void SetOverlayCompositedCallback(const OverlayCompositedCallback& cb);
+  void ProposePrioritized(const SkM44& output_color_matrix,
+                          const OverlayProcessorInterface::FilterOperationsMap&
+                              render_pass_backdrop_filters,
+                          DisplayResourceProvider* resource_provider,
+                          AggregatedRenderPassList* render_pass_list,
+                          SurfaceDamageRectList* surface_damage_rect_list,
+                          const PrimaryPlane* primary_plane,
+                          std::vector<OverlayProposedCandidate>* candidates,
+                          std::vector<gfx::Rect>* content_bounds) override;
+
+  bool AttemptPrioritized(
+      const SkM44& output_color_matrix,
+      const OverlayProcessorInterface::FilterOperationsMap&
+          render_pass_backdrop_filters,
+      DisplayResourceProvider* resource_provider,
+      AggregatedRenderPassList* render_pass_list,
+      SurfaceDamageRectList* surface_damage_rect_list,
+      const PrimaryPlane* primary_plane,
+      OverlayCandidateList* candidates,
+      std::vector<gfx::Rect>* content_bounds,
+      const OverlayProposedCandidate& proposed_candidate) override;
+
+  void CommitCandidate(const OverlayProposedCandidate& proposed_candidate,
+                       AggregatedRenderPass* render_pass) override;
+
+  // In Chromecast build, OverlayStrategyUnderlayCast needs a valid mojo
+  // interface to VideoGeometrySetter Service (shared by all instances of
+  // OverlaystrategyUnderlayCast). This must be called before compositor starts.
+  // Ideally, it can be called after compositor thread is created.
+  // Must be called on compositor thread.
+  static void ConnectVideoGeometrySetter(
+      mojo::PendingRemote<chromecast::media::mojom::VideoGeometrySetter>
+          video_geometry_setter);
 
   OverlayStrategy GetUMAEnum() const override;
 
  private:
   // Keep track if an overlay is being used on the previous frame.
   bool is_using_overlay_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(OverlayStrategyUnderlayCast);
 };
 
 }  // namespace viz

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,12 @@
 
 #include <jni.h>
 
-#include <map>
 #include <string>
 
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/containers/id_map.h"
-#include "base/macros.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "components/gcm_driver/instance_id/instance_id.h"
@@ -30,28 +28,37 @@ class InstanceIDAndroid : public InstanceID {
   class ScopedBlockOnAsyncTasksForTesting {
    public:
     ScopedBlockOnAsyncTasksForTesting();
+
+    ScopedBlockOnAsyncTasksForTesting(
+        const ScopedBlockOnAsyncTasksForTesting&) = delete;
+    ScopedBlockOnAsyncTasksForTesting& operator=(
+        const ScopedBlockOnAsyncTasksForTesting&) = delete;
+
     ~ScopedBlockOnAsyncTasksForTesting();
 
    private:
     bool previous_value_;
-    DISALLOW_COPY_AND_ASSIGN(ScopedBlockOnAsyncTasksForTesting);
   };
 
   InstanceIDAndroid(const std::string& app_id, gcm::GCMDriver* gcm_driver);
+
+  InstanceIDAndroid(const InstanceIDAndroid&) = delete;
+  InstanceIDAndroid& operator=(const InstanceIDAndroid&) = delete;
+
   ~InstanceIDAndroid() override;
 
   // InstanceID implementation:
-  void GetID(const GetIDCallback& callback) override;
-  void GetCreationTime(const GetCreationTimeCallback& callback) override;
+  void GetID(GetIDCallback callback) override;
+  void GetCreationTime(GetCreationTimeCallback callback) override;
   void GetToken(const std::string& audience,
                 const std::string& scope,
-                const std::map<std::string, std::string>& options,
-                bool is_lazy,
+                base::TimeDelta time_to_live,
+                std::set<Flags> flags,
                 GetTokenCallback callback) override;
   void ValidateToken(const std::string& authorized_entity,
                      const std::string& scope,
                      const std::string& token,
-                     const ValidateTokenCallback& callback) override;
+                     ValidateTokenCallback callback) override;
   void DeleteTokenImpl(const std::string& audience,
                        const std::string& scope,
                        DeleteTokenCallback callback) override;
@@ -90,8 +97,6 @@ class InstanceIDAndroid : public InstanceID {
   base::IDMap<std::unique_ptr<DeleteIDCallback>> delete_id_callbacks_;
 
   base::ThreadChecker thread_checker_;
-
-  DISALLOW_COPY_AND_ASSIGN(InstanceIDAndroid);
 };
 
 }  // namespace instance_id

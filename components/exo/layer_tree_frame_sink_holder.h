@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,15 @@
 
 #include <memory>
 
-#include "base/containers/flat_map.h"
 #include "cc/trees/layer_tree_frame_sink_client.h"
 #include "components/exo/frame_sink_resource_manager.h"
 #include "components/exo/wm_helper.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/resources/release_callback.h"
+
+namespace viz {
+struct FrameTimingDetails;
+}
 
 namespace cc {
 class LayerTreeFrameSink;
@@ -29,6 +32,10 @@ class LayerTreeFrameSinkHolder : public cc::LayerTreeFrameSinkClient,
  public:
   LayerTreeFrameSinkHolder(SurfaceTreeHost* surface_tree_host,
                            std::unique_ptr<cc::LayerTreeFrameSink> frame_sink);
+
+  LayerTreeFrameSinkHolder(const LayerTreeFrameSinkHolder&) = delete;
+  LayerTreeFrameSinkHolder& operator=(const LayerTreeFrameSinkHolder&) = delete;
+
   ~LayerTreeFrameSinkHolder() override;
 
   // Delete frame sink after having reclaimed and called all resource
@@ -48,14 +55,13 @@ class LayerTreeFrameSinkHolder : public cc::LayerTreeFrameSinkClient,
 
   // Overridden from cc::LayerTreeFrameSinkClient:
   void SetBeginFrameSource(viz::BeginFrameSource* source) override {}
-  base::Optional<viz::HitTestRegionList> BuildHitTestData() override;
-  void ReclaimResources(
-      const std::vector<viz::ReturnedResource>& resources) override;
+  absl::optional<viz::HitTestRegionList> BuildHitTestData() override;
+  void ReclaimResources(std::vector<viz::ReturnedResource> resources) override;
   void SetTreeActivationCallback(base::RepeatingClosure callback) override {}
   void DidReceiveCompositorFrameAck() override;
   void DidPresentCompositorFrame(
-      uint32_t presentation_token,
-      const gfx::PresentationFeedback& feedback) override;
+      uint32_t frame_token,
+      const viz::FrameTimingDetails& details) override;
   void DidLoseLayerTreeFrameSink() override;
   void OnDraw(const gfx::Transform& transform,
               const gfx::Rect& viewport,
@@ -79,7 +85,6 @@ class LayerTreeFrameSinkHolder : public cc::LayerTreeFrameSinkClient,
 
   gfx::Size last_frame_size_in_pixels_;
   float last_frame_device_scale_factor_ = 1.0f;
-  base::TimeTicks last_local_surface_id_allocation_time_;
   std::vector<viz::ResourceId> last_frame_resources_;
   viz::FrameTokenGenerator next_frame_token_;
 
@@ -87,8 +92,6 @@ class LayerTreeFrameSinkHolder : public cc::LayerTreeFrameSinkClient,
   bool delete_pending_ = false;
 
   WMHelper::LifetimeManager* lifetime_manager_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(LayerTreeFrameSinkHolder);
 };
 
 }  // namespace exo

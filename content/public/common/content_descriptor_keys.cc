@@ -1,12 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/public/common/content_descriptor_keys.h"
 
 namespace content {
-
-const char kV8NativesDataDescriptor[] = "v8_natives_data";
 
 const char kV8SnapshotDataDescriptor[] = "v8_snapshot_data";
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,8 +28,8 @@ const size_t kMaxAudioFrameSize = 32 * 1024;
 }
 
 AudioPipelineImpl::AudioPipelineImpl(CmaBackend::AudioDecoder* decoder,
-                                     const AvPipelineClient& client)
-    : AvPipelineImpl(decoder, client), audio_decoder_(decoder) {
+                                     AvPipelineClient client)
+    : AvPipelineImpl(decoder, std::move(client)), audio_decoder_(decoder) {
   DCHECK(audio_decoder_);
 }
 

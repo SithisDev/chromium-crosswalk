@@ -1,25 +1,26 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/bluetooth/bluetooth_device_scanning_prompt_controller.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "content/browser/bluetooth/web_bluetooth_service_impl.h"
+#include "content/public/browser/bluetooth_delegate.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/common/content_client.h"
 
 namespace content {
 
 BluetoothDeviceScanningPromptController::
     BluetoothDeviceScanningPromptController(
         WebBluetoothServiceImpl* web_bluetooth_service,
-        RenderFrameHost* render_frame_host)
+        RenderFrameHost& render_frame_host)
     : web_bluetooth_service_(web_bluetooth_service),
-      render_frame_host_(render_frame_host),
-      web_contents_(WebContents::FromRenderFrameHost(render_frame_host_)) {}
+      render_frame_host_(render_frame_host) {}
 
 BluetoothDeviceScanningPromptController::
     ~BluetoothDeviceScanningPromptController() {
@@ -28,14 +29,17 @@ BluetoothDeviceScanningPromptController::
 }
 
 void BluetoothDeviceScanningPromptController::ShowPermissionPrompt() {
-  BluetoothScanningPrompt::EventHandler prompt_event_handler = base::Bind(
-      &BluetoothDeviceScanningPromptController::OnBluetoothScanningPromptEvent,
-      base::Unretained(this));
-  WebContentsDelegate* delegate =
-      WebContents::FromRenderFrameHost(render_frame_host_)->GetDelegate();
-  if (delegate) {
+  BluetoothScanningPrompt::EventHandler prompt_event_handler =
+      base::BindRepeating(&BluetoothDeviceScanningPromptController::
+                              OnBluetoothScanningPromptEvent,
+                          weak_ptr_factory_.GetWeakPtr());
+
+  if (auto* delegate = GetContentClient()->browser()->GetBluetoothDelegate()) {
+    // non-active RFHs can't show UI elements like prompts to the user.
+    if (!render_frame_host_->IsActive())
+      return;
     prompt_ = delegate->ShowBluetoothScanningPrompt(
-        render_frame_host_, std::move(prompt_event_handler));
+        &*render_frame_host_, std::move(prompt_event_handler));
   }
 }
 
@@ -53,7 +57,7 @@ void BluetoothDeviceScanningPromptController::OnBluetoothScanningPromptEvent(
 void BluetoothDeviceScanningPromptController::AddFilteredDevice(
     const std::string& device_id,
     bool should_update_name,
-    const base::string16& device_name) {
+    const std::u16string& device_name) {
   if (prompt_)
     prompt_->AddOrUpdateDevice(device_id, should_update_name, device_name);
 }

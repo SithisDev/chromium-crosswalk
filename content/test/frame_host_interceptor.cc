@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,14 @@
 
 #include <utility>
 
-#include "content/browser/frame_host/render_frame_host_impl.h"
+#include "base/memory/raw_ptr.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/common/frame.mojom-test-utils.h"
-#include "content/common/frame_messages.h"
+#include "content/common/frame.mojom.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom.h"
 
 namespace content {
 
@@ -22,66 +25,70 @@ class FrameHostInterceptor::FrameAgent
   FrameAgent(FrameHostInterceptor* interceptor, RenderFrameHost* rfh)
       : interceptor_(interceptor),
         rfhi_(static_cast<RenderFrameHostImpl*>(rfh)),
-        impl_(binding().SwapImplForTesting(this)) {}
+        impl_(receiver().SwapImplForTesting(this)) {}
+
+  FrameAgent(const FrameAgent&) = delete;
+  FrameAgent& operator=(const FrameAgent&) = delete;
 
   ~FrameAgent() override {
-    auto* old_impl = binding().SwapImplForTesting(impl_);
+    auto* old_impl = receiver().SwapImplForTesting(impl_);
     // TODO(https://crbug.com/729021): Investigate the scenario where
     // |old_impl| can be nullptr if the renderer process is killed.
     DCHECK_EQ(this, old_impl);
   }
 
  protected:
-  mojo::AssociatedBinding<mojom::FrameHost>& binding() {
-    return rfhi_->frame_host_binding_for_testing();
+  mojo::AssociatedReceiver<mojom::FrameHost>& receiver() {
+    return rfhi_->frame_host_receiver_for_testing();
   }
 
   // mojom::FrameHostInterceptorForTesting:
   FrameHost* GetForwardingInterface() override { return impl_; }
 
   void BeginNavigation(
-      const CommonNavigationParams& common_params,
-      mojom::BeginNavigationParamsPtr begin_params,
-      blink::mojom::BlobURLTokenPtr blob_url_token,
-      mojom::NavigationClientAssociatedPtrInfo navigation_client,
-      blink::mojom::NavigationInitiatorPtr navigation_initiator) override {
-    CommonNavigationParams overrideable_common_params = common_params;
+      blink::mojom::CommonNavigationParamsPtr common_params,
+      blink::mojom::BeginNavigationParamsPtr begin_params,
+      mojo::PendingRemote<blink::mojom::BlobURLToken> blob_url_token,
+      mojo::PendingAssociatedRemote<mojom::NavigationClient> navigation_client,
+      mojo::PendingRemote<blink::mojom::PolicyContainerHostKeepAliveHandle>
+          initiator_policy_container_keep_alive_handle,
+      mojo::PendingReceiver<mojom::NavigationRendererCancellationListener>
+          renderer_cancellation_listener) override {
     if (interceptor_->WillDispatchBeginNavigation(
-            rfhi_, &overrideable_common_params, &begin_params, &blob_url_token,
-            &navigation_client, &navigation_initiator)) {
+            rfhi_, &common_params, &begin_params, &blob_url_token,
+            &navigation_client)) {
       GetForwardingInterface()->BeginNavigation(
-          overrideable_common_params, std::move(begin_params),
+          std::move(common_params), std::move(begin_params),
           std::move(blob_url_token), std::move(navigation_client),
-          std::move(navigation_initiator));
+          std::move(initiator_policy_container_keep_alive_handle),
+          std::move(renderer_cancellation_listener));
     }
   }
 
  private:
-  FrameHostInterceptor* interceptor_;
+  raw_ptr<FrameHostInterceptor> interceptor_;
 
-  RenderFrameHostImpl* rfhi_;
-  mojom::FrameHost* impl_;
-
-  DISALLOW_COPY_AND_ASSIGN(FrameAgent);
+  raw_ptr<RenderFrameHostImpl> rfhi_;
+  raw_ptr<mojom::FrameHost> impl_;
 };
 
 FrameHostInterceptor::FrameHostInterceptor(WebContents* web_contents)
     : WebContentsObserver(web_contents) {
-  for (auto* rfh : web_contents->GetAllFrames()) {
-    if (rfh->IsRenderFrameLive())
-      RenderFrameCreated(rfh);
-  }
+  web_contents->ForEachRenderFrameHost(
+      [this](RenderFrameHost* render_frame_host) {
+        if (render_frame_host->IsRenderFrameLive())
+          RenderFrameCreated(render_frame_host);
+      });
 }
 
 FrameHostInterceptor::~FrameHostInterceptor() = default;
 
 bool FrameHostInterceptor::WillDispatchBeginNavigation(
     RenderFrameHost* render_frame_host,
-    CommonNavigationParams* common_params,
-    mojom::BeginNavigationParamsPtr* begin_params,
-    blink::mojom::BlobURLTokenPtr* blob_url_token,
-    mojom::NavigationClientAssociatedPtrInfo* navigation_client,
-    blink::mojom::NavigationInitiatorPtr* navigation_initiator) {
+    blink::mojom::CommonNavigationParamsPtr* common_params,
+    blink::mojom::BeginNavigationParamsPtr* begin_params,
+    mojo::PendingRemote<blink::mojom::BlobURLToken>* blob_url_token,
+    mojo::PendingAssociatedRemote<mojom::NavigationClient>* navigation_client) {
   return true;
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,7 +71,8 @@ void ForwardShareInfoToJavaCallback(
 
 void RenameItemCallback(ScopedJavaGlobalRef<jobject> j_callback,
                         RenameResult result) {
-  base::android::RunIntCallbackAndroid(j_callback, static_cast<int>(result));
+  base::android::RunIntCallbackAndroid(j_callback,
+                                       static_cast<int32_t>(result));
 }
 
 void RunGetAllItemsCallback(const base::android::JavaRef<jobject>& j_callback,
@@ -82,7 +83,7 @@ void RunGetAllItemsCallback(const base::android::JavaRef<jobject>& j_callback,
 }
 
 void RunGetItemByIdCallback(const base::android::JavaRef<jobject>& j_callback,
-                            const base::Optional<OfflineItem>& item) {
+                            const absl::optional<OfflineItem>& item) {
   JNIEnv* env = AttachCurrentThread();
   RunObjectCallbackAndroid(
       j_callback, item.has_value()
@@ -131,9 +132,12 @@ void OfflineContentAggregatorBridge::OpenItem(
     JNIEnv* env,
     const JavaParamRef<jobject>& jobj,
     jint launch_location,
+    jboolean j_open_in_incognito,
     const JavaParamRef<jstring>& j_namespace,
     const JavaParamRef<jstring>& j_id) {
-  provider_->OpenItem(static_cast<LaunchLocation>(launch_location),
+  OpenParams open_params(static_cast<LaunchLocation>(launch_location));
+  open_params.open_in_incognito = j_open_in_incognito;
+  provider_->OpenItem(open_params,
                       JNI_OfflineContentAggregatorBridge_CreateContentId(
                           env, j_namespace, j_id));
 }
@@ -267,7 +271,7 @@ void OfflineContentAggregatorBridge::OnItemRemoved(const ContentId& id) {
 
 void OfflineContentAggregatorBridge::OnItemUpdated(
     const OfflineItem& item,
-    const base::Optional<UpdateDelta>& update_delta) {
+    const absl::optional<UpdateDelta>& update_delta) {
   if (java_ref_.is_null())
     return;
 
@@ -275,6 +279,13 @@ void OfflineContentAggregatorBridge::OnItemUpdated(
   Java_OfflineContentAggregatorBridge_onItemUpdated(
       env, java_ref_, OfflineItemBridge::CreateOfflineItem(env, item),
       OfflineItemBridge::CreateUpdateDelta(env, update_delta));
+}
+
+void OfflineContentAggregatorBridge::OnContentProviderGoingDown() {
+  // TODO(crbug.com/1177397): This event is only needed for desktop Chrome,
+  // so we didn't add an onContentProviderGoingDown() method yet. If Java
+  // observers need to listen for this event in the future, we should add some
+  // plumbing here.
 }
 
 }  // namespace android

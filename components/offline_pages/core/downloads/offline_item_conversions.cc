@@ -1,9 +1,10 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/offline_pages/core/downloads/offline_item_conversions.h"
 
+#include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/offline_items_collection/core/pending_state.h"
 #include "components/offline_pages/core/background/save_page_request.h"
@@ -56,7 +57,7 @@ OfflineItem OfflineItemConversions::CreateOfflineItem(
   item.last_accessed_time = page.last_access_time;
   item.file_path = page.file_path;
   item.mime_type = GetMimeType();
-  item.page_url = page.url;
+  item.url = page.url;
   item.original_url = page.original_url_if_different;
   item.progress.value = 100;
   item.progress.max = 100;
@@ -67,6 +68,7 @@ OfflineItem OfflineItemConversions::CreateOfflineItem(
   item.description = page.snippet;
   item.attribution = page.attribution;
 
+  // TODO(carlosk): Set item.ignore_visuals here to the right thing.
   return item;
 }
 
@@ -80,7 +82,7 @@ OfflineItem OfflineItemConversions::CreateOfflineItem(
   item.total_size_bytes = -1L;
   item.received_bytes = 0;
   item.mime_type = GetMimeType();
-  item.page_url = request.url();
+  item.url = request.url();
   item.original_url = request.original_url();
   switch (request.request_state()) {
     case SavePageRequest::RequestState::AVAILABLE:

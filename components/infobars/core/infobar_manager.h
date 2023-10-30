@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,11 @@
 #include <memory>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/observer_list.h"
 #include "components/infobars/core/infobar_delegate.h"
 
-class ConfirmInfoBarDelegate;
 class GURL;
-class InfoBarUiTest;
+class TestInfoBar;
 
 namespace infobars {
 
@@ -39,6 +37,10 @@ class InfoBarManager {
   };
 
   InfoBarManager();
+
+  InfoBarManager(const InfoBarManager&) = delete;
+  InfoBarManager& operator=(const InfoBarManager&) = delete;
+
   virtual ~InfoBarManager();
 
   // Must be called before destruction.
@@ -101,10 +103,6 @@ class InfoBarManager {
   // Returns the active entry ID.
   virtual int GetActiveEntryID() = 0;
 
-  // Returns a confirm infobar that owns |delegate|.
-  virtual std::unique_ptr<infobars::InfoBar> CreateConfirmInfoBar(
-      std::unique_ptr<ConfirmInfoBarDelegate> delegate) = 0;
-
   // Opens a URL according to the specified |disposition|.
   virtual void OpenURL(const GURL& url, WindowOpenDisposition disposition) = 0;
 
@@ -114,7 +112,7 @@ class InfoBarManager {
   }
 
  private:
-  friend class ::InfoBarUiTest;
+  friend class ::TestInfoBar;
 
   // InfoBars associated with this InfoBarManager.  We own these pointers.
   // However, this is not a vector of unique_ptr, because we don't delete the
@@ -129,8 +127,6 @@ class InfoBarManager {
   bool animations_enabled_ = true;
 
   base::ObserverList<Observer, true>::Unchecked observer_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(InfoBarManager);
 };
 
 }  // namespace infobars

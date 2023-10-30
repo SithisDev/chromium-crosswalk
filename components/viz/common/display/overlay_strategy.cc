@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,11 @@
 
 #include "base/logging.h"
 #include "base/strings/string_split.h"
+#include "components/viz/common/buildflags.h"
 
 namespace viz {
 
-std::vector<OverlayStrategy> ParseOverlayStategies(
+std::vector<OverlayStrategy> ParseOverlayStrategies(
     const std::string& strategies_string) {
   std::vector<OverlayStrategy> strategies;
 
@@ -22,8 +23,10 @@ std::vector<OverlayStrategy> ParseOverlayStategies(
       strategies.push_back(OverlayStrategy::kSingleOnTop);
     } else if (strategy_name == "underlay") {
       strategies.push_back(OverlayStrategy::kUnderlay);
+#if BUILDFLAG(ENABLE_CAST_OVERLAY_STRATEGY)
     } else if (strategy_name == "cast") {
       strategies.push_back(OverlayStrategy::kUnderlayCast);
+#endif
     } else {
       LOG(ERROR) << "Unrecognized overlay strategy " << strategy_name;
     }

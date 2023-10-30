@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 package org.chromium.net;
@@ -102,6 +102,50 @@ public abstract class ExperimentalUrlRequest extends UrlRequest {
          * @return the builder to facilitate chaining.
          */
         public Builder setRequestFinishedListener(RequestFinishedInfo.Listener listener) {
+            return this;
+        }
+
+        /**
+         * Binds the request to the specified network handle. Cronet will send this request only
+         * using the network associated to this handle. If this network disconnects the request will
+         * fail, the exact error will depend on the stage of request processing when the network
+         * disconnects. Network handles can be obtained through {@code Network#getNetworkHandle}.
+         * Only available starting from Android Marshmallow.
+         *
+         * @param networkHandle the network handle to bind the request to. Specify
+         *        {@link ExperimentalCronetEngine#UNBIND_NETWORK_HANDLE} to unbind.
+         * @return the builder to facilitate chaining.
+         */
+        public Builder bindToNetwork(long networkHandle) {
+            return this;
+        }
+
+        /**
+         * Default request idempotency, only enable 0-RTT for safe HTTP methods. Passed to {@link
+         * #setIdempotency}.
+         */
+        public static final int DEFAULT_IDEMPOTENCY = 0;
+
+        /**
+         * Request is idempotent. Passed to {@link #setIdempotency}.
+         */
+        public static final int IDEMPOTENT = 1;
+
+        /**
+         * Request is not idempotent. Passed to {@link #setIdempotency}.
+         */
+        public static final int NOT_IDEMPOTENT = 2;
+
+        /**
+         * Sets idempotency of the request which should be one of the {@link #DEFAULT_IDEMPOTENCY
+         * IDEMPOTENT NOT_IDEMPOTENT} values. The default idempotency indicates that 0-RTT is only
+         * enabled for safe HTTP methods (GET, HEAD, OPTIONS, and TRACE).
+         *
+         * @param idempotency idempotency of the request which should be one of the {@link
+         *         #DEFAULT_IDEMPOTENCY IDEMPOTENT NOT_IDEMPOTENT} values.
+         * @return the builder to facilitate chaining.
+         */
+        public Builder setIdempotency(int idempotency) {
             return this;
         }
 

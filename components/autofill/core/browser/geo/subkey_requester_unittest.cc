@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/null_storage.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/source.h"
@@ -38,6 +38,9 @@ class SubKeyReceiver : public base::RefCountedThreadSafe<SubKeyReceiver> {
  public:
   SubKeyReceiver() : subkeys_size_(kInvalidSize) {}
 
+  SubKeyReceiver(const SubKeyReceiver&) = delete;
+  SubKeyReceiver& operator=(const SubKeyReceiver&) = delete;
+
   void OnSubKeysReceived(const std::vector<std::string>& subkeys_codes,
                          const std::vector<std::string>& subkeys_names) {
     subkeys_size_ = subkeys_codes.size();
@@ -50,8 +53,6 @@ class SubKeyReceiver : public base::RefCountedThreadSafe<SubKeyReceiver> {
   ~SubKeyReceiver() {}
 
   int subkeys_size_;
-
-  DISALLOW_COPY_AND_ASSIGN(SubKeyReceiver);
 };
 
 // A test subclass of the SubKeyRequesterImpl. Used to simulate rules not
@@ -62,6 +63,9 @@ class TestSubKeyRequester : public SubKeyRequester {
                       std::unique_ptr<::i18n::addressinput::Storage> storage)
       : SubKeyRequester(std::move(source), std::move(storage)),
         should_load_rules_(true) {}
+
+  TestSubKeyRequester(const TestSubKeyRequester&) = delete;
+  TestSubKeyRequester& operator=(const TestSubKeyRequester&) = delete;
 
   ~TestSubKeyRequester() override {}
 
@@ -77,13 +81,15 @@ class TestSubKeyRequester : public SubKeyRequester {
 
  private:
   bool should_load_rules_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSubKeyRequester);
 };
 
 }  // namespace
 
 class SubKeyRequesterTest : public testing::Test {
+ public:
+  SubKeyRequesterTest(const SubKeyRequesterTest&) = delete;
+  SubKeyRequesterTest& operator=(const SubKeyRequesterTest&) = delete;
+
  protected:
   SubKeyRequesterTest() {
     base::FilePath file_path;
@@ -102,11 +108,8 @@ class SubKeyRequesterTest : public testing::Test {
 
   ~SubKeyRequesterTest() override {}
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   std::unique_ptr<TestSubKeyRequester> requester_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SubKeyRequesterTest);
 };
 
 // Tests that rules are not loaded by default.
@@ -157,7 +160,7 @@ TEST_F(SubKeyRequesterTest, StartRequest_RulesNotLoaded_WillNotLoad) {
   requester_->StartRegionSubKeysRequest(kLocale, kLanguage, 0, std::move(cb));
 
   // Let the timeout execute.
-  scoped_task_environment_.RunUntilIdle();
+  task_environment_.RunUntilIdle();
 
   // Since the rules are never loaded and the timeout is 0, the delegate should
   // get notified that the subkeys could not be received.

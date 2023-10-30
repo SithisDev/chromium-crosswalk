@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,12 @@
 #include <utility>
 
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/shell/app/resource.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_javascript_dialog_manager.h"
+
+#include <windows.h>
 
 namespace content {
 
@@ -25,10 +28,11 @@ INT_PTR CALLBACK ShellJavaScriptDialog::DialogProc(HWND dialog,
       ShellJavaScriptDialog* owner =
           reinterpret_cast<ShellJavaScriptDialog*>(lparam);
       owner->dialog_win_ = dialog;
-      SetDlgItemText(dialog, IDC_DIALOGTEXT, owner->message_text_.c_str());
+      SetDlgItemText(dialog, IDC_DIALOGTEXT,
+                     base::as_wcstr(owner->message_text_));
       if (owner->dialog_type_ == JAVASCRIPT_DIALOG_TYPE_PROMPT)
         SetDlgItemText(dialog, IDC_PROMPTEDIT,
-                       owner->default_prompt_text_.c_str());
+                       base::as_wcstr(owner->default_prompt_text_));
       break;
     }
     case WM_DESTROY: {
@@ -36,7 +40,7 @@ INT_PTR CALLBACK ShellJavaScriptDialog::DialogProc(HWND dialog,
           GetWindowLongPtr(dialog, DWLP_USER));
       if (owner->dialog_win_) {
         owner->dialog_win_ = 0;
-        std::move(owner->callback_).Run(false, base::string16());
+        std::move(owner->callback_).Run(false, std::u16string());
         owner->manager_->DialogClosed(owner);
       }
       break;
@@ -44,7 +48,7 @@ INT_PTR CALLBACK ShellJavaScriptDialog::DialogProc(HWND dialog,
     case WM_COMMAND: {
       ShellJavaScriptDialog* owner = reinterpret_cast<ShellJavaScriptDialog*>(
           GetWindowLongPtr(dialog, DWLP_USER));
-      base::string16 user_input;
+      std::wstring user_input;
       bool finish = false;
       bool result = false;
       switch (LOWORD(wparam)) {
@@ -65,7 +69,7 @@ INT_PTR CALLBACK ShellJavaScriptDialog::DialogProc(HWND dialog,
       }
       if (finish) {
         owner->dialog_win_ = 0;
-        std::move(owner->callback_).Run(result, user_input);
+        std::move(owner->callback_).Run(result, base::WideToUTF16(user_input));
         DestroyWindow(dialog);
         owner->manager_->DialogClosed(owner);
       }
@@ -81,8 +85,8 @@ ShellJavaScriptDialog::ShellJavaScriptDialog(
     ShellJavaScriptDialogManager* manager,
     gfx::NativeWindow parent_window,
     JavaScriptDialogType dialog_type,
-    const base::string16& message_text,
-    const base::string16& default_prompt_text,
+    const std::u16string& message_text,
+    const std::u16string& default_prompt_text,
     JavaScriptDialogManager::DialogClosedCallback callback)
     : callback_(std::move(callback)),
       manager_(manager),
@@ -103,13 +107,21 @@ ShellJavaScriptDialog::ShellJavaScriptDialog(
   ShowWindow(dialog_win_, SW_SHOWNORMAL);
 }
 
-ShellJavaScriptDialog::~ShellJavaScriptDialog() {
-  Cancel();
-}
+ShellJavaScriptDialog::~ShellJavaScriptDialog() = default;
 
 void ShellJavaScriptDialog::Cancel() {
-  if (dialog_win_)
+  if (dialog_win_) {
+    // DestroyWindow() will delete `this` as the WM_DESTROY event handler
+    // deletes `this` through the `manager_`.
     DestroyWindow(dialog_win_);
+  } else {
+    // If the window failed to be created then we emulate WM_DESTROY, since
+    // tests don't succeed in making dialogs always (e.g.
+    // BackForwardCacheBrowserTest.CanUseCacheWhenPageAlertsInTimeoutLoop).
+    std::move(callback_).Run(false, std::u16string());
+    // DialogClosed() will delete `this`.
+    manager_->DialogClosed(this);
+  }
 }
 
 }  // namespace content

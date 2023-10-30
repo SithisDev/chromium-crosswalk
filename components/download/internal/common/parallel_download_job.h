@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,24 +7,16 @@
 
 #include <memory>
 #include <unordered_map>
-#include <vector>
 
-#include "base/macros.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "components/download/internal/common/download_job_impl.h"
 #include "components/download/internal/common/download_worker.h"
 #include "components/download/public/common/download_create_info.h"
 #include "components/download/public/common/download_export.h"
+#include "components/download/public/common/download_job_factory.h"
 #include "components/download/public/common/parallel_download_configs.h"
-
-namespace net {
-class URLRequestContextGetter;
-}  // namespace net
-
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
+#include "components/download/public/common/url_loader_factory_provider.h"
 
 namespace download {
 
@@ -35,16 +27,17 @@ class COMPONENTS_DOWNLOAD_EXPORT ParallelDownloadJob
     : public DownloadJobImpl,
       public DownloadWorker::Delegate {
  public:
-  // TODO(qinmin): Remove |url_request_context_getter| once network service is
-  // enabled.
   ParallelDownloadJob(
       DownloadItem* download_item,
-      std::unique_ptr<DownloadRequestHandleInterface> request_handle,
+      CancelRequestCallback cancel_request_callback,
       const DownloadCreateInfo& create_info,
-      scoped_refptr<download::DownloadURLLoaderFactoryGetter>
-          url_loader_factory_getter,
-      net::URLRequestContextGetter* url_request_context_getter,
-      service_manager::Connector* connector);
+      URLLoaderFactoryProvider::URLLoaderFactoryProviderPtr
+          url_loader_factory_provider,
+      DownloadJobFactory::WakeLockProviderBinder wake_lock_provider_binder);
+
+  ParallelDownloadJob(const ParallelDownloadJob&) = delete;
+  ParallelDownloadJob& operator=(const ParallelDownloadJob&) = delete;
+
   ~ParallelDownloadJob() override;
 
   // DownloadJobImpl implementation.
@@ -93,9 +86,8 @@ class COMPONENTS_DOWNLOAD_EXPORT ParallelDownloadJob
   void ForkSubRequests(const DownloadItem::ReceivedSlices& slices_to_download);
 
   // Create one range request, virtual for testing. Range request will start
-  // from |offset| to |length|. Range request will be half open, e.g.
-  // "Range:50-" if |length| is 0.
-  virtual void CreateRequest(int64_t offset, int64_t length);
+  // from |offset| and will be half open.
+  virtual void CreateRequest(int64_t offset);
 
   // Information about the initial request when download is started.
   int64_t initial_request_offset_;
@@ -120,21 +112,14 @@ class COMPONENTS_DOWNLOAD_EXPORT ParallelDownloadJob
   // If the download progress is canceled.
   bool is_canceled_;
 
-  // Whether the server accepts range requests.
-  RangeRequestSupportType range_support_;
+  // URLLoaderFactoryProvider to retrieve the URLLoaderFactory and issue
+  // parallel requests.
+  URLLoaderFactoryProvider::URLLoaderFactoryProviderPtr
+      url_loader_factory_provider_;
 
-  // URLLoaderFactory getter to issue network requests with network service
-  scoped_refptr<download::DownloadURLLoaderFactoryGetter>
-      url_loader_factory_getter_;
-
-  // URLRequestContextGetter for issueing network requests when network service
-  // is disabled.
-  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
-
-  // Connector used for establishing the connection to the ServiceManager.
-  service_manager::Connector* connector_;
-
-  DISALLOW_COPY_AND_ASSIGN(ParallelDownloadJob);
+  // Callbac used for binding WakeLockProvider receivers as needed by each
+  // subrequest.
+  const DownloadJobFactory::WakeLockProviderBinder wake_lock_provider_binder_;
 };
 
 }  //  namespace download

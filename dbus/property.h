@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "dbus/dbus_export.h"
 #include "dbus/message.h"
 #include "dbus/object_proxy.h"
@@ -83,9 +83,9 @@
 //
 //       Properties* properties = new Properties(
 //           object_proxy,
-//           base::Bind(&PropertyChanged,
-//                      weak_ptr_factory_.GetWeakPtr(),
-//                      object_path));
+//           base::BindRepeating(&PropertyChanged,
+//                               weak_ptr_factory_.GetWeakPtr(),
+//                               object_path));
 //       properties->ConnectSignals();
 //       properties->GetAll();
 //
@@ -97,7 +97,7 @@
 //
 // This now allows code using the client implementation to access properties
 // in a type-safe manner, and assuming the PropertyChanged callback is
-// propogated up to observers, be notified of changes. A typical access of
+// propagated up to observers, be notified of changes. A typical access of
 // the current value of the name property would be:
 //
 //   ExampleClient::Properties* p = example_client->GetProperties(object_path);
@@ -109,14 +109,14 @@
 // successful. The updated value can be obtained in the callback using the
 // value() method.
 //
-//   p->children.Get(base::Bind(&OnGetChildren));
+//   p->children.Get(base::BindOnce(&OnGetChildren));
 //
 // A new value can be set using the Set() method, the callback indicates
 // success only; it is up to the remote object when (and indeed if) it updates
 // the property value, and whether it emits a signal or a Get() call is
 // required to obtain it.
 //
-//   p->version.Set(20, base::Bind(&OnSetVersion))
+//   p->version.Set(20, base::BindOnce(&OnSetVersion))
 
 namespace dbus {
 
@@ -137,6 +137,10 @@ class PropertySet;
 class CHROME_DBUS_EXPORT PropertyBase {
  public:
   PropertyBase();
+
+  PropertyBase(const PropertyBase&) = delete;
+  PropertyBase& operator=(const PropertyBase&) = delete;
+
   virtual ~PropertyBase();
 
   // Initializes the |property_set| and property |name| so that method
@@ -188,14 +192,12 @@ class CHROME_DBUS_EXPORT PropertyBase {
  private:
   // Pointer to the PropertySet instance that this instance is a member of,
   // no ownership is taken and |property_set_| must outlive this class.
-  PropertySet* property_set_;
+  raw_ptr<PropertySet> property_set_;
 
   bool is_valid_;
 
   // Name of the property.
   std::string name_;
-
-  DISALLOW_COPY_AND_ASSIGN(PropertyBase);
 };
 
 // PropertySet groups a collection of properties for a remote object
@@ -213,7 +215,8 @@ class CHROME_DBUS_EXPORT PropertySet {
   // Callback for changes to cached values of properties, either notified
   // via signal, or as a result of calls to Get() and GetAll(). The |name|
   // argument specifies the name of the property changed.
-  typedef base::Callback<void(const std::string& name)> PropertyChangedCallback;
+  using PropertyChangedCallback =
+      base::RepeatingCallback<void(const std::string& name)>;
 
   // Constructs a property set, where |object_proxy| specifies the proxy for
   // the/ remote object that these properties are for, care should be taken to
@@ -223,6 +226,9 @@ class CHROME_DBUS_EXPORT PropertySet {
   // are changed, this may be a NULL callback.
   PropertySet(ObjectProxy* object_proxy, const std::string& interface,
               const PropertyChangedCallback& property_changed_callback);
+
+  PropertySet(const PropertySet&) = delete;
+  PropertySet& operator=(const PropertySet&) = delete;
 
   // Destructor; we don't hold on to any references or memory that needs
   // explicit clean-up, but clang thinks we might.
@@ -327,7 +333,7 @@ class CHROME_DBUS_EXPORT PropertySet {
 
   // Pointer to object proxy for making method calls, no ownership is taken
   // so this must outlive this class.
-  ObjectProxy* object_proxy_;
+  raw_ptr<ObjectProxy> object_proxy_;
 
   // Interface of property, e.g. "org.chromium.ExampleService", this is
   // distinct from the interface of the method call itself which is the
@@ -346,9 +352,7 @@ class CHROME_DBUS_EXPORT PropertySet {
 
   // Weak pointer factory as D-Bus callbacks may last longer than these
   // objects.
-  base::WeakPtrFactory<PropertySet> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(PropertySet);
+  base::WeakPtrFactory<PropertySet> weak_ptr_factory_{this};
 };
 
 // Property template, this defines the type-specific and type-safe methods

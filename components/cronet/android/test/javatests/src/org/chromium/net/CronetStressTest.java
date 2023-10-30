@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,9 @@ import static org.junit.Assert.assertTrue;
 
 import static org.chromium.net.CronetTestRule.getContext;
 
-import android.support.test.filters.LargeTest;
 import android.support.test.runner.AndroidJUnit4;
+
+import androidx.test.filters.LargeTest;
 
 import org.junit.After;
 import org.junit.Before;

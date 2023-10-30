@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,11 +38,7 @@ public interface RenderWidgetHostView {
             int width, int height, String path, Callback<String> callback);
 
     /**
-     * Insets the bottom of the Visual Viewport by the specified amount.
-     * When called multiple times the new value replaces the old value, so pass {@code 0} to reset
-     * all insetting.
-     * @param bottomAdjustPx The amount to move up the bottom of the Visual Viewport with respect to
-     *        the Layout Viewport, in pixels.
+     * Notifies that the Visual Viewport inset has changed its bottom value.
      */
-    void insetViewportBottom(int bottomAdjustPx);
+    void onViewportInsetBottomChanged();
 }

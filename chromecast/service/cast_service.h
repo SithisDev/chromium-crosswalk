@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,22 +8,18 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
-
-class PrefService;
 
 namespace base {
 class ThreadChecker;
-}
-
-namespace content {
-class BrowserContext;
 }
 
 namespace chromecast {
 
 class CastService {
  public:
+  CastService(const CastService&) = delete;
+  CastService& operator=(const CastService&) = delete;
+
   virtual ~CastService();
 
   // Initializes/finalizes the cast service.
@@ -34,12 +30,8 @@ class CastService {
   void Start();
   void Stop();
 
-  // Notify out-of-process (non-chrome renderers) of accessibility state.
-  virtual void AccessibilityStateChanged(bool enabled);
-
  protected:
-  CastService(content::BrowserContext* browser_context,
-              PrefService* pref_service);
+  CastService();
 
   // Implementation-specific initialization. Initialization of cast service's
   // sub-components, and anything that requires IO operations should go here.
@@ -60,16 +52,9 @@ class CastService {
   // StartInternal() should be finalized here.
   virtual void StopInternal() = 0;
 
-  content::BrowserContext* browser_context() const { return browser_context_; }
-  PrefService* pref_service() const { return pref_service_; }
-
  private:
-  content::BrowserContext* const browser_context_;
-  PrefService* const pref_service_;
   bool stopped_;
   const std::unique_ptr<base::ThreadChecker> thread_checker_;
-
-  DISALLOW_COPY_AND_ASSIGN(CastService);
 };
 
 }  // namespace chromecast

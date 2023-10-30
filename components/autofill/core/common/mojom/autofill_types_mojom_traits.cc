@@ -1,17 +1,166 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/autofill/core/common/mojom/autofill_types_mojom_traits.h"
 
 #include "base/i18n/rtl.h"
+#include "components/autofill/core/common/form_field_data.h"
+#include "components/autofill/core/common/html_field_types.h"
 #include "mojo/public/cpp/base/string16_mojom_traits.h"
 #include "mojo/public/cpp/base/time_mojom_traits.h"
-#include "ui/gfx/geometry/mojo/geometry_struct_traits.h"
+#include "third_party/abseil-cpp/absl/types/variant.h"
+#include "ui/gfx/geometry/mojom/geometry_mojom_traits.h"
 #include "url/mojom/origin_mojom_traits.h"
 #include "url/mojom/url_gurl_mojom_traits.h"
 
 namespace mojo {
+
+// static
+bool StructTraits<autofill::mojom::FrameTokenDataView, autofill::FrameToken>::
+    Read(autofill::mojom::FrameTokenDataView data, autofill::FrameToken* out) {
+  base::UnguessableToken token;
+  if (!data.ReadToken(&token))
+    return false;
+  if (data.is_local())
+    *out = autofill::LocalFrameToken(token);
+  else
+    *out = autofill::RemoteFrameToken(token);
+  return true;
+}
+
+// static
+bool StructTraits<autofill::mojom::FrameTokenWithPredecessorDataView,
+                  autofill::FrameTokenWithPredecessor>::
+    Read(autofill::mojom::FrameTokenWithPredecessorDataView data,
+         autofill::FrameTokenWithPredecessor* out) {
+  if (!data.ReadToken(&out->token))
+    return false;
+  out->predecessor = data.predecessor();
+  return true;
+}
+
+// static
+bool StructTraits<autofill::mojom::FormRendererIdDataView,
+                  autofill::FormRendererId>::
+    Read(autofill::mojom::FormRendererIdDataView data,
+         autofill::FormRendererId* out) {
+  *out = autofill::FormRendererId(data.id());
+  return true;
+}
+
+// static
+bool StructTraits<autofill::mojom::FieldRendererIdDataView,
+                  autofill::FieldRendererId>::
+    Read(autofill::mojom::FieldRendererIdDataView data,
+         autofill::FieldRendererId* out) {
+  *out = autofill::FieldRendererId(data.id());
+  return true;
+}
+
+// static
+bool StructTraits<
+    autofill::mojom::SelectOptionDataView,
+    autofill::SelectOption>::Read(autofill::mojom::SelectOptionDataView data,
+                                  autofill::SelectOption* out) {
+  if (!data.ReadValue(&out->value))
+    return false;
+  if (!data.ReadContent(&out->content))
+    return false;
+  return true;
+}
+
+// static
+autofill::mojom::SectionValueDataView::Tag
+UnionTraits<autofill::mojom::SectionValueDataView,
+            autofill::Section::SectionValue>::
+    GetTag(const autofill::Section::SectionValue& r) {
+  if (absl::holds_alternative<autofill::Section::Default>(r))
+    return autofill::mojom::SectionValueDataView::Tag::kDefaultSection;
+  if (absl::holds_alternative<autofill::Section::Autocomplete>(r)) {
+    return autofill::mojom::SectionValueDataView::Tag::kAutocomplete;
+  }
+  if (absl::holds_alternative<autofill::Section::FieldIdentifier>(r))
+    return autofill::mojom::SectionValueDataView::Tag::kFieldIdentifier;
+
+  NOTREACHED();
+  return autofill::mojom::SectionValueDataView::Tag::kDefaultSection;
+}
+
+// static
+bool UnionTraits<autofill::mojom::SectionValueDataView,
+                 autofill::Section::SectionValue>::
+    Read(autofill::mojom::SectionValueDataView data,
+         autofill::Section::SectionValue* out) {
+  switch (data.tag()) {
+    case autofill::mojom::SectionValueDataView::Tag::kDefaultSection:
+      *out = autofill::Section::Default();
+      break;
+    case autofill::mojom::SectionValueDataView::Tag::kAutocomplete: {
+      autofill::Section::Autocomplete autocomplete;
+      if (!data.ReadAutocomplete(&autocomplete))
+        return false;
+      *out = std::move(autocomplete);
+      break;
+    }
+    case autofill::mojom::SectionValueDataView::Tag::kFieldIdentifier: {
+      autofill::Section::FieldIdentifier field_identifier;
+      if (!data.ReadFieldIdentifier(&field_identifier))
+        return false;
+      *out = std::move(field_identifier);
+      break;
+    }
+  }
+  return true;
+}
+
+// static
+bool StructTraits<autofill::mojom::SectionAutocompleteDataView,
+                  autofill::Section::Autocomplete>::
+    Read(autofill::mojom::SectionAutocompleteDataView data,
+         autofill::Section::Autocomplete* out) {
+  if (!data.ReadSection(&out->section))
+    return false;
+  if (!data.ReadHtmlFieldMode(&out->mode))
+    return false;
+  return true;
+}
+
+// static
+bool StructTraits<autofill::mojom::SectionFieldIdentifierDataView,
+                  autofill::Section::FieldIdentifier>::
+    Read(autofill::mojom::SectionFieldIdentifierDataView data,
+         autofill::Section::FieldIdentifier* out) {
+  if (!data.ReadFieldName(&out->field_name))
+    return false;
+  out->local_frame_id = data.local_frame_id();
+  if (!data.ReadFieldRendererId(&out->field_renderer_id))
+    return false;
+  return true;
+}
+
+// static
+bool StructTraits<autofill::mojom::SectionDataView, autofill::Section>::Read(
+    autofill::mojom::SectionDataView data,
+    autofill::Section* out) {
+  if (!data.ReadValue(&out->value_))
+    return false;
+  return true;
+}
+
+// static
+bool StructTraits<autofill::mojom::AutocompleteParsingResultDataView,
+                  autofill::AutocompleteParsingResult>::
+    Read(autofill::mojom::AutocompleteParsingResultDataView data,
+         autofill::AutocompleteParsingResult* out) {
+  if (!data.ReadSection(&out->section))
+    return false;
+  if (!data.ReadMode(&out->mode))
+    return false;
+  if (!data.ReadFieldType(&out->field_type))
+    return false;
+  return true;
+}
 
 // static
 bool StructTraits<
@@ -33,6 +182,8 @@ bool StructTraits<
     return false;
   if (!data.ReadAutocompleteAttribute(&out->autocomplete_attribute))
     return false;
+  if (!data.ReadParsedAutocomplete(&out->parsed_autocomplete))
+    return false;
 
   if (!data.ReadPlaceholder(&out->placeholder))
     return false;
@@ -50,7 +201,13 @@ bool StructTraits<
     return false;
 
   out->properties_mask = data.properties_mask();
-  out->unique_renderer_id = data.unique_renderer_id();
+
+  if (!data.ReadUniqueRendererId(&out->unique_renderer_id))
+    return false;
+
+  if (!data.ReadHostFormId(&out->host_form_id))
+    return false;
+
   out->form_control_ax_id = data.form_control_ax_id();
   out->max_length = data.max_length();
   out->is_autofilled = data.is_autofilled();
@@ -59,6 +216,7 @@ bool StructTraits<
     return false;
 
   out->is_focusable = data.is_focusable();
+  out->is_visible = data.is_visible();
   out->should_autocomplete = data.should_autocomplete();
 
   if (!data.ReadRole(&out->role))
@@ -69,16 +227,24 @@ bool StructTraits<
 
   out->is_enabled = data.is_enabled();
   out->is_readonly = data.is_readonly();
-  if (!data.ReadTypedValue(&out->typed_value))
+  if (!data.ReadUserInput(&out->user_input))
     return false;
 
-  if (!data.ReadOptionValues(&out->option_values))
-    return false;
-  if (!data.ReadOptionContents(&out->option_contents))
+  if (!data.ReadOptions(&out->options))
     return false;
 
   if (!data.ReadLabelSource(&out->label_source))
     return false;
+
+  if (!data.ReadBounds(&out->bounds))
+    return false;
+
+  if (!data.ReadDatalistValues(&out->datalist_values))
+    return false;
+  if (!data.ReadDatalistLabels(&out->datalist_labels))
+    return false;
+
+  out->force_override = data.force_override();
 
   return true;
 }
@@ -103,16 +269,17 @@ bool StructTraits<autofill::mojom::FormDataDataView, autofill::FormData>::Read(
     return false;
   if (!data.ReadButtonTitles(&out->button_titles))
     return false;
-  if (!data.ReadUrl(&out->url))
-    return false;
   if (!data.ReadAction(&out->action))
     return false;
-  if (!data.ReadMainFrameOrigin(&out->main_frame_origin))
-    return false;
+  out->is_action_empty = data.is_action_empty();
 
   out->is_form_tag = data.is_form_tag();
-  out->is_formless_checkout = data.is_formless_checkout();
-  out->unique_renderer_id = data.unique_renderer_id();
+
+  if (!data.ReadUniqueRendererId(&out->unique_renderer_id))
+    return false;
+
+  if (!data.ReadChildFrames(&out->child_frames))
+    return false;
 
   if (!data.ReadSubmissionEvent(&out->submission_event))
     return false;
@@ -134,7 +301,7 @@ bool StructTraits<autofill::mojom::FormFieldDataPredictionsDataView,
                   autofill::FormFieldDataPredictions>::
     Read(autofill::mojom::FormFieldDataPredictionsDataView data,
          autofill::FormFieldDataPredictions* out) {
-  if (!data.ReadField(&out->field))
+  if (!data.ReadHostFormSignature(&out->host_form_signature))
     return false;
   if (!data.ReadSignature(&out->signature))
     return false;
@@ -168,14 +335,18 @@ bool StructTraits<autofill::mojom::FormDataPredictionsDataView,
 }
 
 // static
-bool StructTraits<autofill::mojom::PasswordAndRealmDataView,
-                  autofill::PasswordAndRealm>::
-    Read(autofill::mojom::PasswordAndRealmDataView data,
-         autofill::PasswordAndRealm* out) {
+bool StructTraits<autofill::mojom::PasswordAndMetadataDataView,
+                  autofill::PasswordAndMetadata>::
+    Read(autofill::mojom::PasswordAndMetadataDataView data,
+         autofill::PasswordAndMetadata* out) {
+  if (!data.ReadUsername(&out->username))
+    return false;
   if (!data.ReadPassword(&out->password))
     return false;
   if (!data.ReadRealm(&out->realm))
     return false;
+
+  out->uses_account_store = data.uses_account_store();
 
   return true;
 }
@@ -185,16 +356,16 @@ bool StructTraits<autofill::mojom::PasswordFormFillDataDataView,
                   autofill::PasswordFormFillData>::
     Read(autofill::mojom::PasswordFormFillDataDataView data,
          autofill::PasswordFormFillData* out) {
-  if (!data.ReadOrigin(&out->origin) || !data.ReadAction(&out->action) ||
+  if (!data.ReadFormRendererId(&out->form_renderer_id) ||
+      !data.ReadUrl(&out->url) || !data.ReadAction(&out->action) ||
       !data.ReadUsernameField(&out->username_field) ||
       !data.ReadPasswordField(&out->password_field) ||
       !data.ReadPreferredRealm(&out->preferred_realm) ||
       !data.ReadAdditionalLogins(&out->additional_logins))
     return false;
 
-  out->form_renderer_id = data.form_renderer_id();
+  out->uses_account_store = data.uses_account_store();
   out->wait_for_username = data.wait_for_username();
-  out->has_renderer_ids = data.has_renderer_ids();
   out->username_may_use_prefilled_placeholder =
       data.username_may_use_prefilled_placeholder();
 
@@ -206,10 +377,9 @@ bool StructTraits<autofill::mojom::PasswordFormGenerationDataDataView,
                   autofill::PasswordFormGenerationData>::
     Read(autofill::mojom::PasswordFormGenerationDataDataView data,
          autofill::PasswordFormGenerationData* out) {
-  out->new_password_renderer_id = data.new_password_renderer_id();
-  out->confirmation_password_renderer_id =
-      data.confirmation_password_renderer_id();
-  return true;
+  return data.ReadNewPasswordRendererId(&out->new_password_renderer_id) &&
+         data.ReadConfirmationPasswordRendererId(
+             &out->confirmation_password_renderer_id);
 }
 
 // static
@@ -221,176 +391,31 @@ bool StructTraits<autofill::mojom::PasswordGenerationUIDataDataView,
     return false;
 
   out->max_length = data.max_length();
-  out->generation_element_id = data.generation_element_id();
+  out->is_generation_element_password_type =
+      data.is_generation_element_password_type();
 
-  if (!data.ReadGenerationElement(&out->generation_element) ||
-      !data.ReadTextDirection(&out->text_direction) ||
-      !data.ReadPasswordForm(&out->password_form))
-    return false;
-
-  return true;
+  return data.ReadGenerationElementId(&out->generation_element_id) &&
+         data.ReadGenerationElement(&out->generation_element) &&
+         data.ReadUserTypedPassword(&out->user_typed_password) &&
+         data.ReadTextDirection(&out->text_direction) &&
+         data.ReadFormData(&out->form_data);
 }
 
-// static
 bool StructTraits<
-    autofill::mojom::PasswordFormDataView,
-    autofill::PasswordForm>::Read(autofill::mojom::PasswordFormDataView data,
-                                  autofill::PasswordForm* out) {
-  if (!data.ReadScheme(&out->scheme) ||
-      !data.ReadSignonRealm(&out->signon_realm) ||
-      !data.ReadOriginWithPath(&out->origin) ||
-      !data.ReadAction(&out->action) ||
-      !data.ReadAffiliatedWebRealm(&out->affiliated_web_realm) ||
-      !data.ReadSubmitElement(&out->submit_element) ||
-      !data.ReadUsernameElement(&out->username_element) ||
-      !data.ReadSubmissionEvent(&out->submission_event))
-    return false;
-
-  out->username_marked_by_site = data.username_marked_by_site();
-
-  if (!data.ReadUsernameValue(&out->username_value) ||
-      !data.ReadAllPossibleUsernames(&out->all_possible_usernames) ||
-      !data.ReadAllPossiblePasswords(&out->all_possible_passwords) ||
-      !data.ReadPasswordElement(&out->password_element) ||
-      !data.ReadPasswordValue(&out->password_value))
-    return false;
-
-  out->form_has_autofilled_value = data.form_has_autofilled_value();
-
-  if (!data.ReadNewPasswordElement(&out->new_password_element) ||
-      !data.ReadNewPasswordValue(&out->new_password_value))
-    return false;
-
-  out->new_password_marked_by_site = data.new_password_marked_by_site();
-
-  if (!data.ReadConfirmationPasswordElement(
-          &out->confirmation_password_element))
-    return false;
-
-  out->preferred = data.preferred();
-
-  if (!data.ReadDateCreated(&out->date_created) ||
-      !data.ReadDateSynced(&out->date_synced))
-    return false;
-
-  out->blacklisted_by_user = data.blacklisted_by_user();
-
-  if (!data.ReadType(&out->type))
-    return false;
-
-  out->times_used = data.times_used();
-
-  if (!data.ReadFormData(&out->form_data) ||
-      !data.ReadGenerationUploadStatus(&out->generation_upload_status) ||
-      !data.ReadDisplayName(&out->display_name) ||
-      !data.ReadIconUrl(&out->icon_url) ||
-      !data.ReadFederationOrigin(&out->federation_origin))
-    return false;
-
-  out->skip_zero_click = data.skip_zero_click();
-
-  out->was_parsed_using_autofill_predictions =
-      data.was_parsed_using_autofill_predictions();
-  out->is_public_suffix_match = data.is_public_suffix_match();
-  out->is_affiliation_based_match = data.is_affiliation_based_match();
-  out->only_for_fallback = data.only_for_fallback();
-  return true;
+    autofill::mojom::ParsingResultDataView,
+    autofill::ParsingResult>::Read(autofill::mojom::ParsingResultDataView data,
+                                   autofill::ParsingResult* out) {
+  return data.ReadUsernameRendererId(&out->username_renderer_id) &&
+         data.ReadPasswordRendererId(&out->password_renderer_id) &&
+         data.ReadNewPasswordRendererId(&out->new_password_renderer_id) &&
+         data.ReadConfirmPasswordRendererId(&out->confirm_password_renderer_id);
 }
 
-// static
-std::vector<autofill::FormFieldData>
-StructTraits<autofill::mojom::PasswordFormFieldPredictionMapDataView,
-             autofill::PasswordFormFieldPredictionMap>::
-    keys(const autofill::PasswordFormFieldPredictionMap& r) {
-  std::vector<autofill::FormFieldData> data;
-  for (const auto& i : r)
-    data.push_back(i.first);
-  return data;
-}
-
-// static
-std::vector<autofill::mojom::PasswordFormFieldPredictionType>
-StructTraits<autofill::mojom::PasswordFormFieldPredictionMapDataView,
-             autofill::PasswordFormFieldPredictionMap>::
-    values(const autofill::PasswordFormFieldPredictionMap& r) {
-  std::vector<autofill::mojom::PasswordFormFieldPredictionType> types;
-  for (const auto& i : r)
-    types.push_back(i.second);
-  return types;
-}
-
-// static
-bool StructTraits<autofill::mojom::PasswordFormFieldPredictionMapDataView,
-                  autofill::PasswordFormFieldPredictionMap>::
-    Read(autofill::mojom::PasswordFormFieldPredictionMapDataView data,
-         autofill::PasswordFormFieldPredictionMap* out) {
-  // Combines keys vector and values vector to the map.
-  std::vector<autofill::FormFieldData> keys;
-  if (!data.ReadKeys(&keys))
-    return false;
-  std::vector<autofill::mojom::PasswordFormFieldPredictionType> values;
-  if (!data.ReadValues(&values))
-    return false;
-  if (keys.size() != values.size())
-    return false;
-  out->clear();
-  for (size_t i = 0; i < keys.size(); ++i)
-    out->insert({keys[i], values[i]});
-
-  return true;
-}
-
-// static
-std::vector<autofill::FormData> StructTraits<
-    autofill::mojom::FormsPredictionsMapDataView,
-    autofill::FormsPredictionsMap>::keys(const autofill::FormsPredictionsMap&
-                                             r) {
-  std::vector<autofill::FormData> data;
-  for (const auto& i : r)
-    data.push_back(i.first);
-  return data;
-}
-
-// static
-std::vector<autofill::PasswordFormFieldPredictionMap> StructTraits<
-    autofill::mojom::FormsPredictionsMapDataView,
-    autofill::FormsPredictionsMap>::values(const autofill::FormsPredictionsMap&
-                                               r) {
-  std::vector<autofill::PasswordFormFieldPredictionMap> maps;
-  for (const auto& i : r)
-    maps.push_back(i.second);
-  return maps;
-}
-
-// static
-bool StructTraits<autofill::mojom::FormsPredictionsMapDataView,
-                  autofill::FormsPredictionsMap>::
-    Read(autofill::mojom::FormsPredictionsMapDataView data,
-         autofill::FormsPredictionsMap* out) {
-  // Combines keys vector and values vector to the map.
-  std::vector<autofill::FormData> keys;
-  if (!data.ReadKeys(&keys))
-    return false;
-  std::vector<autofill::PasswordFormFieldPredictionMap> values;
-  if (!data.ReadValues(&values))
-    return false;
-  if (keys.size() != values.size())
-    return false;
-  out->clear();
-  for (size_t i = 0; i < keys.size(); ++i)
-    out->insert({keys[i], values[i]});
-
-  return true;
-}
-
-// static
-bool StructTraits<autofill::mojom::ValueElementPairDataView,
-                  autofill::ValueElementPair>::
-    Read(autofill::mojom::ValueElementPairDataView data,
-         autofill::ValueElementPair* out) {
-  if (!data.ReadValue(&out->first) || !data.ReadFieldName(&out->second))
-    return false;
-
+bool StructTraits<autofill::mojom::FormElementWasClickedDataView,
+                  autofill::FormElementWasClicked>::
+    Read(autofill::mojom::FormElementWasClickedDataView data,
+         autofill::FormElementWasClicked* out) {
+  *out = autofill::FormElementWasClicked(data.form_element_was_clicked());
   return true;
 }
 

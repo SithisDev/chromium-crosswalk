@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,9 @@
 
 #include <map>
 #include <memory>
+#include <utility>
 
+#include "base/memory/raw_ptr.h"
 #include "components/viz/common/hit_test/hit_test_region_list.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "components/viz/common/surfaces/surface_id.h"
@@ -30,6 +32,10 @@ constexpr FrameSinkId kDisplayFrameSink(kDisplayClientId, 0);
 class TestHostFrameSinkManager : public HostFrameSinkManager {
  public:
   TestHostFrameSinkManager() = default;
+
+  TestHostFrameSinkManager(const TestHostFrameSinkManager&) = delete;
+  TestHostFrameSinkManager& operator=(const TestHostFrameSinkManager&) = delete;
+
   ~TestHostFrameSinkManager() override = default;
 
   void OnAggregatedHitTestRegionListUpdated(
@@ -46,14 +52,17 @@ class TestHostFrameSinkManager : public HostFrameSinkManager {
  private:
   FrameSinkId buffer_frame_sink_id_;
   std::vector<AggregatedHitTestRegion> active_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestHostFrameSinkManager);
 };
 
 class TestFrameSinkManagerImpl : public FrameSinkManagerImpl {
  public:
   explicit TestFrameSinkManagerImpl(SharedBitmapManager* shared_bitmap_manager)
-      : FrameSinkManagerImpl(shared_bitmap_manager) {}
+      : FrameSinkManagerImpl(
+            FrameSinkManagerImpl::InitParams(shared_bitmap_manager)) {}
+
+  TestFrameSinkManagerImpl(const TestFrameSinkManagerImpl&) = delete;
+  TestFrameSinkManagerImpl& operator=(const TestFrameSinkManagerImpl&) = delete;
+
   ~TestFrameSinkManagerImpl() override = default;
 
   void SetLocalClient(TestHostFrameSinkManager* client) {
@@ -71,9 +80,7 @@ class TestFrameSinkManagerImpl : public FrameSinkManagerImpl {
   }
 
  private:
-  TestHostFrameSinkManager* host_client_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(TestFrameSinkManagerImpl);
+  raw_ptr<TestHostFrameSinkManager> host_client_ = nullptr;
 };
 
 }  // namespace
@@ -105,6 +112,10 @@ class TestHitTestAggregator final : public HitTestAggregator {
 class HitTestAggregatorTest : public testing::Test {
  public:
   HitTestAggregatorTest() = default;
+
+  HitTestAggregatorTest(const HitTestAggregatorTest&) = delete;
+  HitTestAggregatorTest& operator=(const HitTestAggregatorTest&) = delete;
+
   ~HitTestAggregatorTest() override = default;
 
   // testing::Test:
@@ -117,7 +128,7 @@ class HitTestAggregatorTest : public testing::Test {
     frame_sink_manager_->SetLocalClient(host_frame_sink_manager_.get());
     support_ = std::make_unique<CompositorFrameSinkSupport>(
         nullptr /* client */, frame_sink_manager_.get(), kDisplayFrameSink,
-        true /* is_root */, false /* needs_sync_points */);
+        true /* is_root */);
     hit_test_aggregator_ = std::make_unique<TestHitTestAggregator>(
         hit_test_manager(), frame_sink_manager(),
         local_surface_id_lookup_delegate(), kDisplayFrameSink);
@@ -170,7 +181,7 @@ class HitTestAggregatorTest : public testing::Test {
     } else {
       auto support = std::make_unique<CompositorFrameSinkSupport>(
           nullptr, frame_sink_manager(), surface_id.frame_sink_id(),
-          false /* is_root */, false /* needs_sync_points */);
+          false /* is_root */);
       support->SubmitCompositorFrame(surface_id.local_surface_id(),
                                      MakeDefaultCompositorFrame(),
                                      std::move(hit_test_region_list));
@@ -225,8 +236,6 @@ class HitTestAggregatorTest : public testing::Test {
       local_surface_id_lookup_delegate_;
   std::unique_ptr<CompositorFrameSinkSupport> support_;
   SurfaceIdAllocatorSet allocator_set_;
-
-  DISALLOW_COPY_AND_ASSIGN(HitTestAggregatorTest);
 };
 
 // TODO(gklassen): Add tests for 3D use cases as suggested by and with
@@ -371,7 +380,7 @@ TEST_F(HitTestAggregatorTest, OneEmbedderTwoChildren) {
 
   auto support2 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c1_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support2->SubmitCompositorFrame(c1_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c1_hit_test_region_list));
@@ -382,7 +391,7 @@ TEST_F(HitTestAggregatorTest, OneEmbedderTwoChildren) {
   local_surface_id_lookup_delegate()->SetSurfaceIdMap(e_surface_id);
   auto support3 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c2_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support3->SubmitCompositorFrame(c2_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c2_hit_test_region_list));
@@ -455,7 +464,7 @@ TEST_F(HitTestAggregatorTest, OccludedChildFrame) {
   // Submit in unexpected order.
   auto support2 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support2->SubmitCompositorFrame(c_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c_hit_test_region_list));
@@ -536,7 +545,7 @@ TEST_F(HitTestAggregatorTest, ForegroundChildFrame) {
 
   auto support2 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support2->SubmitCompositorFrame(c_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c_hit_test_region_list));
@@ -635,21 +644,21 @@ TEST_F(HitTestAggregatorTest, ClippedChildWithTabAndTransparentBackground) {
 
   auto support2 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support2->SubmitCompositorFrame(c_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c_hit_test_region_list));
   local_surface_id_lookup_delegate()->SetSurfaceIdMap(c_surface_id);
   auto support3 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), a_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support3->SubmitCompositorFrame(a_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(a_hit_test_region_list));
   local_surface_id_lookup_delegate()->SetSurfaceIdMap(a_surface_id);
   auto support4 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), b_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support4->SubmitCompositorFrame(b_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(b_hit_test_region_list));
@@ -680,9 +689,8 @@ TEST_F(HitTestAggregatorTest, ClippedChildWithTabAndTransparentBackground) {
   EXPECT_EQ(region.child_count, 2);
 
   gfx::Point point(300, 300);
-  gfx::Transform transform(region.transform());
-  transform.TransformPointReverse(&point);
-  EXPECT_TRUE(point == gfx::Point(100, 200));
+  EXPECT_TRUE(region.transform.TransformPointReverse(&point));
+  EXPECT_EQ(gfx::Point(100, 200), point);
 
   region = host_regions()[2];
   EXPECT_EQ(HitTestRegionFlags::kHitTestChildSurface |
@@ -764,14 +772,14 @@ TEST_F(HitTestAggregatorTest, ThreeChildrenDeep) {
 
   auto support2 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c1_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support2->SubmitCompositorFrame(c1_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c1_hit_test_region_list));
   local_surface_id_lookup_delegate()->SetSurfaceIdMap(c1_surface_id);
   auto support3 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c3_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support3->SubmitCompositorFrame(c3_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c3_hit_test_region_list));
@@ -782,7 +790,7 @@ TEST_F(HitTestAggregatorTest, ThreeChildrenDeep) {
   local_surface_id_lookup_delegate()->SetSurfaceIdMap(e_surface_id);
   auto support4 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c2_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support4->SubmitCompositorFrame(c2_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c2_hit_test_region_list));
@@ -981,7 +989,7 @@ TEST_F(HitTestAggregatorTest, DiscardedSurfaces) {
 
   auto support2 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support2->SubmitCompositorFrame(c_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c_hit_test_region_list));
@@ -1078,21 +1086,21 @@ TEST_F(HitTestAggregatorTest, TransparentOverlayRegions) {
 
   auto support2 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c1_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support2->SubmitCompositorFrame(c1_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c1_hit_test_region_list));
   local_surface_id_lookup_delegate()->SetSurfaceIdMap(c1_surface_id);
   auto support3 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), c2_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support3->SubmitCompositorFrame(c2_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(c2_hit_test_region_list));
   local_surface_id_lookup_delegate()->SetSurfaceIdMap(c2_surface_id);
   auto support4 = std::make_unique<CompositorFrameSinkSupport>(
       nullptr, frame_sink_manager(), d1_surface_id.frame_sink_id(),
-      false /* is_root */, false /* needs_sync_points */);
+      false /* is_root */);
   support4->SubmitCompositorFrame(d1_surface_id.local_surface_id(),
                                   MakeDefaultCompositorFrame(),
                                   std::move(d1_hit_test_region_list));
@@ -1158,14 +1166,14 @@ TEST_F(HitTestAggregatorTest, HitTestDataNotUpdated) {
   // We did not update the hit-test data. Expect the index from Aggregator /
   // Manager to remain unchanged.
   support()->SubmitCompositorFrame(surface_id.local_surface_id(),
-                                   MakeDefaultCompositorFrame(), base::nullopt);
+                                   MakeDefaultCompositorFrame(), absl::nullopt);
   aggregator->Aggregate(surface_id);
   EXPECT_EQ(last_index, aggregator->GetLastSubmitHitTestRegionListIndex());
 
   // We updated hit-test data. Expect the index to have changed.
   support()->SubmitCompositorFrame(surface_id.local_surface_id(),
                                    MakeDefaultCompositorFrame(),
-                                   std::move(hit_test_region_list));
+                                   std::move(hit_test_region_list_copy));
   aggregator->Aggregate(surface_id);
   EXPECT_NE(last_index, aggregator->GetLastSubmitHitTestRegionListIndex());
 }

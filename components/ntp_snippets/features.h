@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,6 +86,7 @@ extern const base::Feature kOptionalImagesEnabledFeature;
 std::vector<const base::Feature*> GetAllFeatures();
 
 // Return a referrer URL for content suggestions.
+// This is deprecated, and only used on iOS.
 std::string GetContentSuggestionsReferrerURL();
 }  // namespace ntp_snippets
 

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,27 +6,26 @@
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_EMBEDDER_SKIA_OUTPUT_DEVICE_GL_H_
 
 #include <memory>
+#include <vector>
 
-#include "base/macros.h"
+#include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "build/build_config.h"
 #include "components/viz/service/display_embedder/skia_output_device.h"
-#include "gpu/config/gpu_preferences.h"
-#include "gpu/ipc/service/image_transport_surface_delegate.h"
-
-class GrContext;
+#include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
 
 namespace gl {
-class GLContext;
+class GLImage;
 class GLSurface;
 }  // namespace gl
 
-namespace gfx {
-class GpuFence;
-}  // namespace gfx
-
 namespace gpu {
+class MailboxManager;
+class SharedContextState;
+class SharedImageRepresentationFactory;
+
 namespace gles2 {
 class FeatureInfo;
 }  // namespace gles2
@@ -34,72 +33,88 @@ class FeatureInfo;
 
 namespace viz {
 
-class SkiaOutputDeviceGL final : public SkiaOutputDevice,
-                                 public gpu::ImageTransportSurfaceDelegate {
+class SkiaOutputDeviceGL final : public SkiaOutputDevice {
  public:
   SkiaOutputDeviceGL(
+      gpu::MailboxManager* mailbox_manager,
+      gpu::SharedImageRepresentationFactory*
+          shared_image_representation_factory,
+      gpu::SharedContextState* context_state,
       scoped_refptr<gl::GLSurface> gl_surface,
       scoped_refptr<gpu::gles2::FeatureInfo> feature_info,
-      const DidSwapBufferCompleteCallback& did_swap_buffer_complete_callback);
+      gpu::MemoryTracker* memory_tracker,
+      DidSwapBufferCompleteCallback did_swap_buffer_complete_callback);
+
+  SkiaOutputDeviceGL(const SkiaOutputDeviceGL&) = delete;
+  SkiaOutputDeviceGL& operator=(const SkiaOutputDeviceGL&) = delete;
+
   ~SkiaOutputDeviceGL() override;
 
-  scoped_refptr<gl::GLSurface> gl_surface();
-  void Initialize(GrContext* gr_context, gl::GLContext* gl_context);
-  bool supports_alpha() {
-    DCHECK(gr_context_);
-    return supports_alpha_;
-  }
-
   // SkiaOutputDevice implementation:
-  void Reshape(const gfx::Size& size,
-               float device_scale_factor,
+  bool Reshape(const SkSurfaceCharacterization& characterization,
                const gfx::ColorSpace& color_space,
-               bool has_alpha,
+               float device_scale_factor,
                gfx::OverlayTransform transform) override;
   void SwapBuffers(BufferPresentedCallback feedback,
-                   std::vector<ui::LatencyInfo> latency_info) override;
+                   OutputSurfaceFrame frame) override;
   void PostSubBuffer(const gfx::Rect& rect,
                      BufferPresentedCallback feedback,
-                     std::vector<ui::LatencyInfo> latency_info) override;
-  void SetDrawRectangle(const gfx::Rect& draw_rectangle) override;
+                     OutputSurfaceFrame frame) override;
+  void CommitOverlayPlanes(BufferPresentedCallback feedback,
+                           OutputSurfaceFrame frame) override;
+  bool SetDrawRectangle(const gfx::Rect& draw_rectangle) override;
+  void SetGpuVSyncEnabled(bool enabled) override;
+  void SetEnableDCLayers(bool enable) override;
+  void ScheduleOverlays(SkiaOutputSurface::OverlayList overlays) override;
   void EnsureBackbuffer() override;
   void DiscardBackbuffer() override;
-  SkSurface* BeginPaint() override;
-  void EndPaint(const GrBackendSemaphore& semaphore) override;
-
-  // gpu::ImageTransportSurfaceDelegate implementation:
-#if defined(OS_WIN)
-  void DidCreateAcceleratedSurfaceChildWindow(
-      gpu::SurfaceHandle parent_window,
-      gpu::SurfaceHandle child_window) override;
-#endif
-  const gpu::gles2::FeatureInfo* GetFeatureInfo() const override;
-  const gpu::GpuPreferences& GetGpuPreferences() const override;
-  void DidSwapBuffersComplete(gpu::SwapBuffersCompleteParams params) override;
-  void BufferPresented(const gfx::PresentationFeedback& feedback) override;
-  GpuVSyncCallback GetGpuVSyncCallback() override;
+  SkSurface* BeginPaint(
+      std::vector<GrBackendSemaphore>* end_semaphores) override;
+  void EndPaint() override;
 
  private:
-  scoped_refptr<gpu::gles2::FeatureInfo> feature_info_;
-  gpu::GpuPreferences gpu_preferences_;
+  class OverlayData;
 
-  scoped_refptr<gl::GLSurface> gl_surface_;
-  GrContext* gr_context_ = nullptr;
-
-  sk_sp<SkSurface> sk_surface_;
-
-  bool supports_alpha_ = false;
-
-  base::WeakPtrFactory<SkiaOutputDeviceGL> weak_ptr_factory_{this};
-
+  // Use instead of calling FinishSwapBuffers() directly. On Windows this cleans
+  // up old entries in |overlays_|.
+  void DoFinishSwapBuffers(const gfx::Size& size,
+                           OutputSurfaceFrame frame,
+                           gfx::SwapCompletionResult result);
   // Used as callback for SwapBuffersAsync and PostSubBufferAsync to finish
   // operation
-  void DoFinishSwapBuffers(const gfx::Size& size,
-                           std::vector<ui::LatencyInfo> latency_info,
-                           gfx::SwapResult result,
-                           std::unique_ptr<gfx::GpuFence>);
+  void DoFinishSwapBuffersAsync(const gfx::Size& size,
+                                OutputSurfaceFrame frame,
+                                gfx::SwapCompletionResult result);
 
-  DISALLOW_COPY_AND_ASSIGN(SkiaOutputDeviceGL);
+  scoped_refptr<gl::GLImage> GetGLImageForMailbox(const gpu::Mailbox& mailbox);
+
+  void CreateSkSurface();
+
+  // Mailboxes of overlays scheduled in the current frame.
+  base::flat_set<gpu::Mailbox> scheduled_overlay_mailboxes_;
+
+  // Holds references to overlay textures so they aren't destroyed while in use.
+  base::flat_map<gpu::Mailbox, OverlayData> overlays_;
+
+  const raw_ptr<gpu::MailboxManager> mailbox_manager_;
+
+  const raw_ptr<gpu::SharedImageRepresentationFactory>
+      shared_image_representation_factory_;
+
+  const raw_ptr<gpu::SharedContextState> context_state_;
+  scoped_refptr<gl::GLSurface> gl_surface_;
+  const bool supports_async_swap_;
+
+  uint64_t backbuffer_estimated_size_ = 0;
+
+  gfx::Size size_;
+  SkColorType color_type_;
+  gfx::ColorSpace color_space_;
+  GrGLFramebufferInfo framebuffer_info_ = {};
+  int sample_count_ = 1;
+  sk_sp<SkSurface> sk_surface_;
+
+  base::WeakPtrFactory<SkiaOutputDeviceGL> weak_ptr_factory_{this};
 };
 
 }  // namespace viz

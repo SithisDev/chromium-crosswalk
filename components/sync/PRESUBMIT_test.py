@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -77,8 +77,6 @@ MOCK_PROTOFILE_CONTENTS = ('\n'
   '    AppSpecifics app = 456;\n'
   '    AppSettingSpecifics app_setting = 789;\n'
   '    ExtensionSettingSpecifics extension_setting = 910;\n'
-  '    ManagedUserSharedSettingSpecifics managed_user_shared_setting'
-                                                                    ' = 915;\n'
   '    //comment\n'
   '  }\n'
   '}\n'
@@ -113,11 +111,13 @@ class ModelTypeInfoChangeTest(unittest.TestCase):
     results = self._testChange('{PROXY_TABS, "", "", "Tabs", -1, 25},')
     self.assertEqual(0, len(results))
 
-  def testValidChangeDeprecatedEntry(self):
-    results = self._testChange('{DEPRECATED_SUPERVISED_USER_SHARED_SETTINGS,'
-    '"MANAGED_USER_SHARED_SETTING", "managed_user_shared_settings",'
-    '"Managed User Shared Settings",'
-    'sync_pb::EntitySpecifics::kManagedUserSharedSettingFieldNumber, 30},')
+  # TODO(crbug.com/1170749): The only remaining deprecated type doesn't satisfy
+  # this test, revisit it.
+  def DISABLED_testValidChangeDeprecatedEntry(self):
+    results = self._testChange('{DEPRECATED_SUPERVISED_USER_ALLOWLISTS,\n'
+      '"MANAGED_USER_WHITELIST",\n'
+      '"managed_user_whitelists", "Managed User Whitelists",\n'
+      'sync_pb::EntitySpecifics::kManagedUserWhitelistFieldNumber, 33},')
     self.assertEqual(0, len(results))
 
   def testInvalidChangeMismatchedNotificationType(self):
@@ -151,24 +151,55 @@ class ModelTypeInfoChangeTest(unittest.TestCase):
     self.assertEqual(6, len(results))
     self.assertTrue('APP_SETTINGS' in results[0].message)
 
-  def testBlacklistedRootTag(self):
+  def testBlocklistedRootTag(self):
     results = self._testChange('{EXTENSION_SETTING, "EXTENSION_SETTING",\n'
       '"_mts_schema_descriptor","Extension Setting",\n'
       'sync_pb::EntitySpecifics::kExtensionSettingFieldNumber, 6},')
     self.assertEqual(2, len(results))
     self.assertTrue('_mts_schema_descriptor' in results[0].message)
-    self.assertTrue("blacklist" in results[0].message)
+    self.assertTrue("blocklist" in results[0].message)
+
+  def testProtoChangeWithoutVisitors(self):
+    files = [
+      MockFile(os.path.abspath('./protocol/entity_specifics.proto'), '')
+    ]
+    results = self._testChangeWithFiles(files)
+    # Changing a .proto file without also updating proto_visitors.h should
+    # result in a warning.
+    self.assertEqual(1, len(results))
+    self.assertTrue("proto_visitors.h" in results[0].message)
+
+  def testProtoChangeWithVisitors(self):
+    files = [
+      MockFile(os.path.abspath('./protocol/entity_specifics.proto'), ''),
+      MockFile(os.path.abspath('./protocol/proto_visitors.h'), '')
+    ]
+    results = self._testChangeWithFiles(files)
+    # Changing .proto files along with proto_visitors.h is good.
+    self.assertEqual(0, len(results))
+
+  def testProtoVisitorsChange(self):
+    files = [
+      MockFile(os.path.abspath('./protocol/proto_visitors.h'), '')
+    ]
+    results = self._testChangeWithFiles(files)
+    # Changing proto_visitors.h without changing any proto files is fine.
+    self.assertEqual(0, len(results))
+
+  def _testChangeWithFiles(self, files):
+    mock_input_api = MockInputApi()
+    mock_input_api.files = files
+    return PRESUBMIT.CheckChangeOnCommit(mock_input_api, MockOutputApi())
 
   def _testChange(self, modeltype_literal):
-    mock_input_api = MockInputApi()
-    mock_input_api.files = [
-      MockFile(os.path.abspath('./protocol/sync.proto'),
+    files = [
+      MockFile(os.path.abspath('./protocol/entity_specifics.proto'),
         MOCK_PROTOFILE_CONTENTS),
+      MockFile(os.path.abspath('./protocol/proto_visitors.h'), ''),
       MockFile(os.path.abspath('./base/model_type.cc'),
         MOCK_MODELTYPE_CONTENTS % (modeltype_literal))
     ]
-
-    return PRESUBMIT.CheckChangeOnCommit(mock_input_api, MockOutputApi())
+    return self._testChangeWithFiles(files)
 
 
 if __name__ == '__main__':

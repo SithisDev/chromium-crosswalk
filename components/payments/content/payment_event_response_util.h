@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,11 @@
 #include "third_party/blink/public/mojom/payments/payment_app.mojom.h"
 
 namespace payments {
+
+// Converts the given 'canmakepayment' event |response_type| into a
+// developer-facing error string. SUCCESS is converted into an empty string.
+base::StringPiece ConvertCanMakePaymentEventResponseTypeToErrorString(
+    mojom::CanMakePaymentEventResponseType response_type);
 
 // Converts the given 'paymentrequest' event |response_type| into a
 // developer-facing error string. PAYMENT_EVENT_SUCCESS is converted into an

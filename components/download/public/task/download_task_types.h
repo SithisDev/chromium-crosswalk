@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,9 @@ enum class DownloadTaskType {
 
   // Task to invoke the download auto-resumption handler.
   DOWNLOAD_AUTO_RESUMPTION_TASK = 2,
+
+  // Task to start user scheduled downloads.
+  DOWNLOAD_LATER_TASK = 3,
 };
 
 }  // namespace download

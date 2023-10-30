@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
@@ -24,14 +24,13 @@
 #include "base/linux_util.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop_current.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/rand_util.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task/post_task.h"
+#include "base/task/current_thread.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -39,27 +38,27 @@
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 #include "third_party/breakpad/breakpad/src/client/linux/handler/exception_handler.h"  // nogncheck
 #include "third_party/breakpad/breakpad/src/client/linux/minidump_writer/linux_dumper.h"  // nogncheck
 #include "third_party/breakpad/breakpad/src/client/linux/minidump_writer/minidump_writer.h"  // nogncheck
-#endif  // ! defined(OS_ANDROID)
+#endif  // ! BUILDFLAG(IS_ANDROID)
 
-#if defined(OS_ANDROID) && !defined(__LP64__)
+#if BUILDFLAG(IS_ANDROID) && !defined(__LP64__)
 #include <sys/syscall.h>
 
 #define SYS_read __NR_read
 #endif
 
-#if defined(OS_ANDROID)
-#include "components/crash/content/app/crashpad.h"
+#if BUILDFLAG(IS_ANDROID)
+#include "components/crash/core/app/crashpad.h"
 #include "third_party/crashpad/crashpad/client/crashpad_client.h"  // nogncheck
 #include "third_party/crashpad/crashpad/util/posix/signals.h"      // nogncheck
 #endif
 
 using content::BrowserThread;
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
 using google_breakpad::ExceptionHandler;
 
@@ -84,9 +83,9 @@ const int kRetryIntervalTranslatingTidInMs = 100;
 void CrashDumpTask(CrashHandlerHostLinux* handler,
                    std::unique_ptr<BreakpadInfo> info) {
   if (handler->IsShuttingDown() && info->upload) {
-    base::DeleteFile(base::FilePath(info->filename), false);
+    base::DeleteFile(base::FilePath(info->filename));
 #if defined(ADDRESS_SANITIZER)
-    base::DeleteFile(base::FilePath(info->log_filename), false);
+    base::DeleteFile(base::FilePath(info->log_filename));
 #endif
     return;
   }
@@ -106,7 +105,7 @@ void CrashDumpTask(CrashHandlerHostLinux* handler,
 
 // Since instances of CrashHandlerHostLinux are leaked, they are only destroyed
 // at the end of the processes lifetime, which is greater in span than the
-// lifetime of the IO message loop. Thus, all calls to base::Bind() use
+// lifetime of the IO message loop. Thus, all calls to base::BindOnce() use
 // non-refcounted pointers.
 
 CrashHandlerHostLinux::CrashHandlerHostLinux(const std::string& process_type,
@@ -114,11 +113,11 @@ CrashHandlerHostLinux::CrashHandlerHostLinux(const std::string& process_type,
                                              bool upload)
     : process_type_(process_type),
       dumps_path_(dumps_path),
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
       upload_(upload),
 #endif
       fd_watch_controller_(FROM_HERE),
-      blocking_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
+      blocking_task_runner_(base::ThreadPool::CreateSequencedTaskRunner(
           {base::MayBlock(), base::TaskPriority::USER_VISIBLE})) {
   int fds[2];
   // We use SOCK_SEQPACKET rather than SOCK_DGRAM to prevent the process from
@@ -136,8 +135,8 @@ CrashHandlerHostLinux::CrashHandlerHostLinux(const std::string& process_type,
   process_socket_ = fds[0];
   browser_socket_ = fds[1];
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&CrashHandlerHostLinux::Init, base::Unretained(this)));
 }
 
@@ -153,7 +152,7 @@ void CrashHandlerHostLinux::StartUploaderThread() {
 }
 
 void CrashHandlerHostLinux::Init() {
-  base::MessageLoopCurrentForIO ml = base::MessageLoopCurrentForIO::Get();
+  base::CurrentIOThread ml = base::CurrentIOThread::Get();
   CHECK(ml->WatchFileDescriptor(browser_socket_, true /* persistent */,
                                 base::MessagePumpForIO::WATCH_READ,
                                 &fd_watch_controller_, this));
@@ -172,7 +171,7 @@ void CrashHandlerHostLinux::OnFileCanReadWithoutBlocking(int fd) {
   // for writing the minidump as well as a file descriptor and a credentials
   // block so that they can't lie about their pid.
   //
-  // The message sender is in components/crash/content/app/breakpad_linux.cc.
+  // The message sender is in components/crash/core/app/breakpad_linux.cc.
 
   struct msghdr msg = {nullptr};
   struct iovec iov[kCrashIovSize];
@@ -262,9 +261,9 @@ void CrashHandlerHostLinux::OnFileCanReadWithoutBlocking(int fd) {
           return;
         }
         DCHECK(!signal_fd.is_valid());
-        int fd = reinterpret_cast<int*>(CMSG_DATA(hdr))[0];
-        DCHECK_GE(fd, 0);  // The kernel should never send a negative fd.
-        signal_fd.reset(fd);
+        int kernel_fd = reinterpret_cast<int*>(CMSG_DATA(hdr))[0];
+        DCHECK_GE(kernel_fd, 0);  // The kernel should never send a negative fd.
+        signal_fd.reset(kernel_fd);
       } else if (hdr->cmsg_type == SCM_CREDENTIALS) {
         DCHECK_EQ(-1, crashing_pid);
         const struct ucred *cred =
@@ -350,7 +349,7 @@ void CrashHandlerHostLinux::FindCrashingThreadAndDump(
                        std::move(asan_report),
 #endif
                        uptime, oom_size, signal_fd, attempt),
-        base::TimeDelta::FromMilliseconds(kRetryIntervalTranslatingTidInMs));
+        base::Milliseconds(kRetryIntervalTranslatingTidInMs));
     return;
   }
 
@@ -391,7 +390,7 @@ void CrashHandlerHostLinux::FindCrashingThreadAndDump(
 
   info->process_start_time = uptime;
   info->oom_size = oom_size;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Nothing gets uploaded in android.
   info->upload = false;
 #else
@@ -502,7 +501,7 @@ bool CrashHandlerHostLinux::IsShuttingDown() const {
 
 }  // namespace breakpad
 
-#else  // !OS_ANDROID
+#else  // !BUILDFLAG(IS_ANDROID)
 
 namespace crashpad {
 
@@ -525,8 +524,8 @@ CrashHandlerHost* CrashHandlerHost::Get() {
 }
 
 int CrashHandlerHost::GetDeathSignalSocket() {
-  static bool initialized = base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
+  static bool initialized = content::GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE,
       base::BindOnce(&CrashHandlerHost::Init, base::Unretained(this)));
   DCHECK(initialized);
 
@@ -558,7 +557,7 @@ CrashHandlerHost::CrashHandlerHost()
 }
 
 void CrashHandlerHost::Init() {
-  base::MessageLoopCurrentForIO ml = base::MessageLoopCurrentForIO::Get();
+  base::CurrentIOThread ml = base::CurrentIOThread::Get();
   CHECK(ml->WatchFileDescriptor(browser_socket_.get(), /* persistent= */ true,
                                 base::MessagePumpForIO::WATCH_READ,
                                 &fd_watch_controller_, this));
@@ -566,7 +565,8 @@ void CrashHandlerHost::Init() {
 }
 
 bool CrashHandlerHost::ReceiveClientMessage(int client_fd,
-                                            base::ScopedFD* handler_fd) {
+                                            base::ScopedFD* handler_fd,
+                                            bool* write_minidump_to_database) {
   int signo;
   unsigned char request_dump;
   iovec iov[2];
@@ -579,7 +579,7 @@ bool CrashHandlerHost::ReceiveClientMessage(int client_fd,
   msg.msg_name = nullptr;
   msg.msg_namelen = 0;
   msg.msg_iov = iov;
-  msg.msg_iovlen = base::size(iov);
+  msg.msg_iovlen = std::size(iov);
 
   char cmsg_buf[CMSG_SPACE(sizeof(int)) + CMSG_SPACE(sizeof(ucred))];
   msg.msg_control = cmsg_buf;
@@ -621,11 +621,8 @@ bool CrashHandlerHost::ReceiveClientMessage(int client_fd,
     NotifyCrashSignalObservers(child_pid, signo);
   }
 
-  if (!request_dump) {
-    return false;
-  }
-
   handler_fd->reset(child_fd.release());
+  *write_minidump_to_database = request_dump;
   return true;
 }
 
@@ -645,12 +642,13 @@ void CrashHandlerHost::OnFileCanReadWithoutBlocking(int fd) {
   DCHECK_EQ(browser_socket_.get(), fd);
 
   base::ScopedFD handler_fd;
-  if (!ReceiveClientMessage(fd, &handler_fd)) {
+  bool write_minidump_to_database = false;
+  if (!ReceiveClientMessage(fd, &handler_fd, &write_minidump_to_database)) {
     return;
   }
 
-  bool result =
-      crash_reporter::internal::StartHandlerForClient(handler_fd.get());
+  bool result = crash_reporter::internal::StartHandlerForClient(
+      handler_fd.get(), write_minidump_to_database);
   DCHECK(result);
 }
 
@@ -660,4 +658,4 @@ void CrashHandlerHost::WillDestroyCurrentMessageLoop() {
 
 }  // namespace crashpad
 
-#endif  // !OS_ANDROID
+#endif  // !BUILDFLAG(IS_ANDROID)

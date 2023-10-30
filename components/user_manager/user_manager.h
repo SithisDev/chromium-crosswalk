@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,6 @@
 #include <string>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
-#include "base/strings/string16.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager_export.h"
 #include "components/user_manager/user_type.h"
@@ -21,6 +19,19 @@ namespace user_manager {
 
 class ScopedUserManager;
 class RemoveUserDelegate;
+
+// A list pref of the the regular users known on this device, arranged in LRU
+// order, stored in local state.
+USER_MANAGER_EXPORT extern const char kRegularUsersPref[];
+
+enum class UserRemovalReason : int32_t {
+  UNKNOWN = 0,
+  LOCAL_USER_INITIATED = 1,
+  REMOTE_ADMIN_INITIATED = 2,
+  LOCAL_USER_INITIATED_ON_REQUIRED_UPDATE = 3,
+  DEVICE_EPHEMERAL_USERS_ENABLED = 4,
+  GAIA_REMOVED = 5
+};
 
 // Interface for UserManagerBase - that provides base implementation for
 // Chrome OS user management. Typical features:
@@ -39,6 +50,11 @@ class USER_MANAGER_EXPORT UserManager {
     // Called when the image of the given user is changed.
     virtual void OnUserImageChanged(const User& user);
 
+    // Called when the user image enterprise state of the given user is changed.
+    virtual void OnUserImageIsEnterpriseManagedChanged(
+        const User& user,
+        bool is_enterprise_managed);
+
     // Called when the profile image download for the given user fails or
     // user has the default profile image or no porfile image at all.
     virtual void OnUserProfileImageUpdateFailed(const User& user);
@@ -52,6 +68,13 @@ class USER_MANAGER_EXPORT UserManager {
     // user sign in are changed.
     virtual void OnUsersSignInConstraintsChanged();
 
+    // Called just before a user of the device will be removed.
+    virtual void OnUserToBeRemoved(const AccountId& account_id);
+
+    // Called just after a user of the device has been removed.
+    virtual void OnUserRemoved(const AccountId& account_id,
+                               UserRemovalReason reason);
+
    protected:
     virtual ~Observer();
   };
@@ -62,7 +85,7 @@ class USER_MANAGER_EXPORT UserManager {
   class UserSessionStateObserver {
    public:
     // Called when active user has changed.
-    virtual void ActiveUserChanged(const User* active_user);
+    virtual void ActiveUserChanged(User* active_user);
 
     // Called when another user got added to the existing session.
     virtual void UserAddedToSession(const User* added_user);
@@ -78,20 +101,22 @@ class USER_MANAGER_EXPORT UserManager {
   // Data retrieved from user account.
   class UserAccountData {
    public:
-    UserAccountData(const base::string16& display_name,
-                    const base::string16& given_name,
+    UserAccountData(const std::u16string& display_name,
+                    const std::u16string& given_name,
                     const std::string& locale);
+
+    UserAccountData(const UserAccountData&) = delete;
+    UserAccountData& operator=(const UserAccountData&) = delete;
+
     ~UserAccountData();
-    const base::string16& display_name() const { return display_name_; }
-    const base::string16& given_name() const { return given_name_; }
+    const std::u16string& display_name() const { return display_name_; }
+    const std::u16string& given_name() const { return given_name_; }
     const std::string& locale() const { return locale_; }
 
    private:
-    const base::string16 display_name_;
-    const base::string16 given_name_;
+    const std::u16string display_name_;
+    const std::u16string given_name_;
     const std::string locale_;
-
-    DISALLOW_COPY_AND_ASSIGN(UserAccountData);
   };
 
   // Initializes UserManager instance to this. Normally should be called right
@@ -153,6 +178,9 @@ class USER_MANAGER_EXPORT UserManager {
   // no owner for the device.
   virtual const AccountId& GetOwnerAccountId() const = 0;
 
+  // Returns account Id of the user that was active in the previous session.
+  virtual const AccountId& GetLastSessionActiveAccountId() const = 0;
+
   // Indicates that a user with the given |account_id| has just logged in. The
   // persistent list is updated accordingly if the user is not ephemeral.
   // |browser_restart| is true when reloading Chrome after crash to distinguish
@@ -174,10 +202,12 @@ class USER_MANAGER_EXPORT UserManager {
   // Invoked by session manager to inform session start.
   virtual void OnSessionStarted() = 0;
 
-  // Removes the user from the device. Note, it will verify that the given user
-  // isn't the owner, so calling this method for the owner will take no effect.
-  // Note, |delegate| can be NULL.
+  // Removes the user from the device while providing a reason for enterprise
+  // reporting. Note, it will verify that the given user isn't the owner, so
+  // calling this method for the owner will take no effect. Note, |delegate|
+  // can be NULL.
   virtual void RemoveUser(const AccountId& account_id,
+                          UserRemovalReason reason,
                           RemoveUserDelegate* delegate) = 0;
 
   // Removes the user from the persistent list only. Also removes the user's
@@ -220,7 +250,7 @@ class USER_MANAGER_EXPORT UserManager {
   // Saves user's displayed name in local state preferences.
   // Ignored If there is no such user.
   virtual void SaveUserDisplayName(const AccountId& account_id,
-                                   const base::string16& display_name) = 0;
+                                   const std::u16string& display_name) = 0;
 
   // Updates data upon User Account download.
   virtual void UpdateUserAccountData(const AccountId& account_id,
@@ -229,7 +259,7 @@ class USER_MANAGER_EXPORT UserManager {
   // Returns the display name for user |account_id| if it is known (was
   // previously set by a |SaveUserDisplayName| call).
   // Otherwise, returns an empty string.
-  virtual base::string16 GetUserDisplayName(
+  virtual std::u16string GetUserDisplayName(
       const AccountId& account_id) const = 0;
 
   // Saves user's displayed (non-canonical) email in local state preferences.
@@ -237,11 +267,8 @@ class USER_MANAGER_EXPORT UserManager {
   virtual void SaveUserDisplayEmail(const AccountId& account_id,
                                     const std::string& display_email) = 0;
 
-  // Returns the display email for user |account_id| if it is known (was
-  // previously set by a |SaveUserDisplayEmail| call).
-  // Otherwise, returns |account_id| itself.
-  virtual std::string GetUserDisplayEmail(
-      const AccountId& account_id) const = 0;
+  // Returns stored user type or USER_TYPE_REGULAR by default.
+  virtual UserType GetUserType(const AccountId& account_id) = 0;
 
   // Saves user's type for |user| into local state preferences.
   virtual void SaveUserType(const User* user) = 0;
@@ -280,14 +307,17 @@ class USER_MANAGER_EXPORT UserManager {
   // Returns true if we're logged in as a Guest.
   virtual bool IsLoggedInAsGuest() const = 0;
 
-  // Returns true if we're logged in as a legacy supervised user.
-  virtual bool IsLoggedInAsSupervisedUser() const = 0;
-
   // Returns true if we're logged in as a kiosk app.
   virtual bool IsLoggedInAsKioskApp() const = 0;
 
-  // Returns true if we're logged in as a ARC kiosk app.
+  // Returns true if we're logged in as an ARC kiosk app.
   virtual bool IsLoggedInAsArcKioskApp() const = 0;
+
+  // Returns true if we're logged in as a Web kiosk app.
+  virtual bool IsLoggedInAsWebKioskApp() const = 0;
+
+  // Returns true if we're logged in as chrome, ARC or Web kiosk app.
+  virtual bool IsLoggedInAsAnyKioskApp() const = 0;
 
   // Returns true if we're logged in as the stub user used for testing on Linux.
   virtual bool IsLoggedInAsStub() const = 0;
@@ -310,14 +340,17 @@ class USER_MANAGER_EXPORT UserManager {
 
   virtual void NotifyLocalStateChanged() = 0;
   virtual void NotifyUserImageChanged(const User& user) = 0;
+  virtual void NotifyUserImageIsEnterpriseManagedChanged(
+      const User& user,
+      bool is_enterprise_managed) = 0;
   virtual void NotifyUserProfileImageUpdateFailed(const User& user) = 0;
   virtual void NotifyUserProfileImageUpdated(
       const User& user,
       const gfx::ImageSkia& profile_image) = 0;
   virtual void NotifyUsersSignInConstraintsChanged() = 0;
-
-  // Returns true if supervised users allowed.
-  virtual bool AreSupervisedUsersAllowed() const = 0;
+  virtual void NotifyUserToBeRemoved(const AccountId& account_id) = 0;
+  virtual void NotifyUserRemoved(const AccountId& account_id,
+                                 UserRemovalReason reason) = 0;
 
   // Returns true if guest user is allowed.
   virtual bool IsGuestSessionAllowed() const = 0;
@@ -328,9 +361,12 @@ class USER_MANAGER_EXPORT UserManager {
   virtual bool IsGaiaUserAllowed(const User& user) const = 0;
 
   // Returns true if |user| is allowed depending on device policies.
-  // Accepted user types: USER_TYPE_REGULAR, USER_TYPE_GUEST,
-  // USER_TYPE_SUPERVISED, USER_TYPE_CHILD.
+  // Accepted user types: USER_TYPE_REGULAR, USER_TYPE_GUEST, USER_TYPE_CHILD.
   virtual bool IsUserAllowed(const User& user) const = 0;
+
+  // Returns true if trusted device policies have successfully been retrieved
+  // and ephemeral users are enabled.
+  virtual bool AreEphemeralUsersEnabled() const = 0;
 
   // Returns "Local State" PrefService instance.
   virtual PrefService* GetLocalState() const = 0;
@@ -357,8 +393,10 @@ class USER_MANAGER_EXPORT UserManager {
   // Returns true if |account_id| is Stub user.
   virtual bool IsStubAccountId(const AccountId& account_id) const = 0;
 
-  // Returns true if |account_id| is supervised.
-  virtual bool IsSupervisedAccountId(const AccountId& account_id) const = 0;
+  // Returns true if |account_id| is deprecated supervised.
+  // TODO(crbug/1155729): Check it is not used anymore and remove it.
+  virtual bool IsDeprecatedSupervisedAccountId(
+      const AccountId& account_id) const = 0;
 
   virtual bool IsDeviceLocalAccountMarkedForRemoval(
       const AccountId& account_id) const = 0;
@@ -371,7 +409,7 @@ class USER_MANAGER_EXPORT UserManager {
   virtual const gfx::ImageSkia& GetResourceImagekiaNamed(int id) const = 0;
 
   // Returns string from resources bundle.
-  virtual base::string16 GetResourceStringUTF16(int string_id) const = 0;
+  virtual std::u16string GetResourceStringUTF16(int string_id) const = 0;
 
   // Schedules CheckAndResolveLocale using given task runner and
   // |on_resolved_callback| as reply callback.
@@ -408,19 +446,6 @@ class USER_MANAGER_EXPORT UserManager {
   // Sets UserManager instance to the given |user_manager|.
   // Returns the previous value of the instance.
   static UserManager* SetForTesting(UserManager* user_manager);
-};
-
-// TODO(xiyuan): Move this along with UserSessionStateObserver
-class USER_MANAGER_EXPORT ScopedUserSessionStateObserver {
- public:
-  explicit ScopedUserSessionStateObserver(
-      UserManager::UserSessionStateObserver* observer);
-  ~ScopedUserSessionStateObserver();
-
- private:
-  UserManager::UserSessionStateObserver* const observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedUserSessionStateObserver);
 };
 
 }  // namespace user_manager

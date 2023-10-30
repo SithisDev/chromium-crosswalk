@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,18 +9,15 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "base/strings/string_piece.h"
+#include "components/autofill/content/renderer/form_autofill_util.h"
 #include "components/autofill/content/renderer/html_based_username_detector.h"
-#include "components/autofill/core/common/password_form.h"
-#include "components/autofill/core/common/password_form_field_prediction_map.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "url/gurl.h"
 
 namespace blink {
 class WebFormElement;
-class WebInputElement;
 class WebLocalFrame;
 }
 
@@ -30,32 +27,7 @@ class RE2;
 
 namespace autofill {
 
-struct PasswordForm;
-
 class FieldDataManager;
-
-enum UsernameDetectionMethod {
-  NO_USERNAME_DETECTED,
-  BASE_HEURISTIC,
-  HTML_BASED_CLASSIFIER,
-  AUTOCOMPLETE_ATTRIBUTE,
-  SERVER_SIDE_PREDICTION,
-  USERNAME_DETECTION_METHOD_COUNT
-};
-
-// The susbset of autocomplete flags related to passwords.
-enum class AutocompleteFlag {
-  NONE,
-  USERNAME,
-  CURRENT_PASSWORD,
-  NEW_PASSWORD,
-  // Represents the whole family of cc-* flags.
-  CREDIT_CARD
-};
-
-// Returns the AutocompleteFlag derived from |element|'s autocomplete attribute.
-AutocompleteFlag AutocompleteFlagForElement(
-    const blink::WebInputElement& element);
 
 // The caller of this function is responsible for deleting the returned object.
 re2::RE2* CreateMatcher(void* instance, const char* pattern);
@@ -66,29 +38,19 @@ bool IsGaiaReauthenticationForm(const blink::WebFormElement& form);
 // Tests whether the given form is a GAIA form with a skip password argument.
 bool IsGaiaWithSkipSavePasswordForm(const blink::WebFormElement& form);
 
-// Create a PasswordForm from DOM form. Webkit doesn't allow storing
-// custom metadata to DOM nodes, so we have to do this every time an event
-// happens with a given form and compare against previously Create'd forms
-// to identify..which sucks.
-// If an element of |form| has an entry in |field_data_manager|, the associated
-// string is used instead of the element's value to create the PasswordForm.
-// |form_predictions| is Autofill server response, if present it's used for
-// overwriting default username element selection.
-// |username_detector_cache| is used by the built-in HTML based username
-// detector to cache results. Can be null.
-std::unique_ptr<PasswordForm> CreatePasswordFormFromWebForm(
-    const blink::WebFormElement& form,
+std::unique_ptr<FormData> CreateFormDataFromWebForm(
+    const blink::WebFormElement& web_form,
     const FieldDataManager* field_data_manager,
-    const FormsPredictionsMap* form_predictions,
-    UsernameDetectorCache* username_detector_cache);
+    UsernameDetectorCache* username_detector_cache,
+    form_util::ButtonTitlesCache* button_titles_cache);
 
-// Same as CreatePasswordFormFromWebForm() but for input elements that are not
-// enclosed in <form> element.
-std::unique_ptr<PasswordForm> CreatePasswordFormFromUnownedInputElements(
+// Same as CreateFormDataFromWebForm() but for input elements that are
+// not enclosed in <form> element.
+std::unique_ptr<FormData> CreateFormDataFromUnownedInputElements(
     const blink::WebLocalFrame& frame,
     const FieldDataManager* field_data_manager,
-    const FormsPredictionsMap* form_predictions,
-    UsernameDetectorCache* username_detector_cache);
+    UsernameDetectorCache* username_detector_cache,
+    form_util::ButtonTitlesCache* button_titles_cache);
 
 // The "Realm" for the sign-on. This is scheme, host, port.
 std::string GetSignOnRealm(const GURL& origin);

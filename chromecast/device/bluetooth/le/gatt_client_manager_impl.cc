@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,21 +7,25 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
+#include "base/time/time.h"
 #include "chromecast/base/bind_to_task_runner.h"
 #include "chromecast/device/bluetooth/bluetooth_util.h"
 #include "chromecast/device/bluetooth/le/remote_characteristic_impl.h"
 #include "chromecast/device/bluetooth/le/remote_descriptor_impl.h"
 #include "chromecast/device/bluetooth/le/remote_device_impl.h"
 #include "chromecast/device/bluetooth/le/remote_service_impl.h"
+#include "chromecast/public/bluetooth/gatt.h"
 
 namespace chromecast {
 namespace bluetooth {
 
 namespace {
+
+const int kMaxDevicesInQueue = 6;
 
 #define RUN_ON_IO_THREAD(method, ...)                                       \
   io_task_runner_->PostTask(                                                \
@@ -50,6 +54,14 @@ constexpr base::TimeDelta GattClientManagerImpl::kConnectTimeout;
 constexpr base::TimeDelta GattClientManagerImpl::kDisconnectTimeout;
 constexpr base::TimeDelta GattClientManagerImpl::kReadRemoteRssiTimeout;
 
+// static
+std::unique_ptr<GattClientManager> GattClientManager::Create(
+    bluetooth_v2_shlib::GattClient* gatt_client,
+    BluetoothManagerPlatform* bluetooth_manager,
+    LeScanManager* le_scan_manager) {
+  return std::make_unique<GattClientManagerImpl>(gatt_client);
+}
+
 GattClientManagerImpl::GattClientManagerImpl(
     bluetooth_v2_shlib::GattClient* gatt_client)
     : gatt_client_(gatt_client),
@@ -65,12 +77,16 @@ GattClientManagerImpl::~GattClientManagerImpl() {}
 void GattClientManagerImpl::Initialize(
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner) {
   io_task_runner_ = std::move(io_task_runner);
+  InitializeOnIoThread();
+}
+
+void GattClientManagerImpl::InitializeOnIoThread() {
+  MAKE_SURE_IO_THREAD(InitializeOnIoThread);
+  gatt_client_->SetDelegate(this);
 }
 
 void GattClientManagerImpl::Finalize() {
-  io_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(&GattClientManagerImpl::FinalizeOnIoThread,
-                                std::move(weak_factory_)));
+  FinalizeOnIoThread();
 }
 
 void GattClientManagerImpl::AddObserver(Observer* o) {
@@ -137,9 +153,10 @@ void GattClientManagerImpl::NotifyBonded(const bluetooth_v2_shlib::Addr& addr) {
 
 void GattClientManagerImpl::EnqueueConnectRequest(
     const bluetooth_v2_shlib::Addr& addr,
-    bool is_connect) {
+    bool is_connect,
+    bluetooth_v2_shlib::Gatt::Client::Transport transport) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
-  pending_connect_requests_.push_back(std::make_pair(addr, is_connect));
+  pending_connect_requests_.emplace_back(addr, is_connect, transport);
 
   // Run the request if this is the only request in the queue. Otherwise, it
   // will be run when all previous requests complete.
@@ -151,6 +168,22 @@ void GattClientManagerImpl::EnqueueConnectRequest(
 void GattClientManagerImpl::EnqueueReadRemoteRssiRequest(
     const bluetooth_v2_shlib::Addr& addr) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
+
+  // Get the last byte because whole address is PII.
+  std::string addr_str = util::AddrLastByteString(addr);
+
+  auto it = addr_to_device_.find(addr);
+  if (it == addr_to_device_.end()) {
+    LOG(ERROR) << "ReadRemoteRssi (" << addr_str << ") failed: no such device";
+    return;
+  }
+
+  if (pending_read_remote_rssi_requests_.size() >= kMaxDevicesInQueue) {
+    LOG(ERROR) << "ReadRemoteRssi (" << addr_str << ") failed: queue is full";
+    it->second->OnReadRemoteRssiComplete(false, 0);
+    return;
+  }
+
   pending_read_remote_rssi_requests_.push_back(addr);
 
   // Run the request if this is the only request in the queue. Otherwise, it
@@ -162,6 +195,10 @@ void GattClientManagerImpl::EnqueueReadRemoteRssiRequest(
 
 bool GattClientManagerImpl::SetGattClientConnectable(bool connectable) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
+
+  if (gatt_client_connectable_ == connectable) {
+    return false;
+  }
 
   if (connectable) {
     if (disconnect_all_pending_) {
@@ -235,14 +272,16 @@ void GattClientManagerImpl::OnConnectChanged(
     it->second->SetConnected(false);
     connected_devices_.erase(addr);
     if (!pending_connect_requests_.empty() &&
-        addr == pending_connect_requests_.front().first) {
+        addr == pending_connect_requests_.front().addr) {
       pending_connect_requests_.pop_front();
       connect_timeout_timer_.Stop();
       disconnect_timeout_timer_.Stop();
       RunQueuedConnectRequest();
     } else {
-      base::Erase(pending_connect_requests_, std::make_pair(addr, true));
-      base::Erase(pending_connect_requests_, std::make_pair(addr, false));
+      base::EraseIf(pending_connect_requests_,
+                    [addr](const PendingRequest& request) {
+                      return request.addr == addr;
+                    });
     }
 
     base::Erase(pending_read_remote_rssi_requests_, addr);
@@ -391,8 +430,8 @@ void GattClientManagerImpl::OnGetServices(
                      it->second->GetServicesSync());
 
   if (pending_connect_requests_.empty() ||
-      addr != pending_connect_requests_.front().first ||
-      !pending_connect_requests_.front().second) {
+      addr != pending_connect_requests_.front().addr ||
+      !pending_connect_requests_.front().is_connect) {
     NOTREACHED() << "Unexpected call to " << __func__;
     return;
   }
@@ -431,11 +470,12 @@ void GattClientManagerImpl::RunQueuedConnectRequest() {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
 
   while (!pending_connect_requests_.empty()) {
-    auto addr = pending_connect_requests_.front().first;
-    bool is_connect = pending_connect_requests_.front().second;
+    const PendingRequest& pending_request = pending_connect_requests_.front();
+    const bluetooth_v2_shlib::Addr& addr = pending_request.addr;
+    const bool is_connect = pending_request.is_connect;
     if (is_connect) {
       if (gatt_client_connectable_) {
-        if (gatt_client_->Connect(addr)) {
+        if (gatt_client_->Connect(addr, pending_request.transport)) {
           connect_timeout_timer_.Start(
               FROM_HERE, kConnectTimeout,
               base::BindOnce(&GattClientManagerImpl::OnConnectTimeout,
@@ -464,6 +504,12 @@ void GattClientManagerImpl::RunQueuedConnectRequest() {
       LOG(ERROR) << "Disconnect failed";
       // Clear pending disconnect request to avoid device be in a bad state.
       gatt_client_->ClearPendingDisconnect(addr);
+
+      auto it = addr_to_device_.find(addr);
+      if (it != addr_to_device_.end()) {
+        it->second->SetConnected(false);
+      }
+
       DisconnectAllComplete(false);
     }
 
@@ -564,11 +610,19 @@ void GattClientManagerImpl::OnReadRemoteRssiTimeout(
   RUN_ON_IO_THREAD(OnReadRemoteRssi, addr, false /* status */, 0 /* rssi */);
 }
 
-// static
-void GattClientManagerImpl::FinalizeOnIoThread(
-    std::unique_ptr<base::WeakPtrFactory<GattClientManagerImpl>> weak_factory) {
-  weak_factory->InvalidateWeakPtrs();
+void GattClientManagerImpl::FinalizeOnIoThread() {
+  MAKE_SURE_IO_THREAD(FinalizeOnIoThread);
+  weak_factory_->InvalidateWeakPtrs();
+  gatt_client_->SetDelegate(nullptr);
 }
+
+GattClientManagerImpl::PendingRequest::PendingRequest(
+    const bluetooth_v2_shlib::Addr& addr,
+    bool is_connect,
+    bluetooth_v2_shlib::Gatt::Client::Transport transport)
+    : addr(addr), is_connect(is_connect), transport(transport) {}
+
+GattClientManagerImpl::PendingRequest::~PendingRequest() = default;
 
 }  // namespace bluetooth
 }  // namespace chromecast

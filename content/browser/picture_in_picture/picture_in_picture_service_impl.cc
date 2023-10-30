@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include <utility>
 
 #include "content/browser/picture_in_picture/picture_in_picture_session.h"
-#include "content/browser/web_contents/web_contents_impl.h"
+#include "content/browser/picture_in_picture/video_picture_in_picture_window_controller_impl.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/public/browser/web_contents_delegate.h"
 
 namespace content {
@@ -16,69 +17,64 @@ namespace content {
 void PictureInPictureServiceImpl::Create(
     RenderFrameHost* render_frame_host,
     mojo::PendingReceiver<blink::mojom::PictureInPictureService> receiver) {
-  DCHECK(render_frame_host);
-  new PictureInPictureServiceImpl(render_frame_host, std::move(receiver));
-}
-
-// static
-void PictureInPictureServiceImpl::CreateFromRequest(
-    RenderFrameHost* render_frame_host,
-    blink::mojom::PictureInPictureServiceRequest request) {
-  // Implicit conversion to
-  // mojo::PendingReceiver<blink::mojom::PictureInPictureService>.
-  Create(render_frame_host, std::move(request));
+  CHECK(render_frame_host);
+  new PictureInPictureServiceImpl(*render_frame_host, std::move(receiver));
 }
 
 // static
 PictureInPictureServiceImpl* PictureInPictureServiceImpl::CreateForTesting(
     RenderFrameHost* render_frame_host,
     mojo::PendingReceiver<blink::mojom::PictureInPictureService> receiver) {
-  return new PictureInPictureServiceImpl(render_frame_host,
+  CHECK(render_frame_host);
+  return new PictureInPictureServiceImpl(*render_frame_host,
                                          std::move(receiver));
 }
 
 void PictureInPictureServiceImpl::StartSession(
     uint32_t player_id,
-    const base::Optional<viz::SurfaceId>& surface_id,
+    mojo::PendingAssociatedRemote<media::mojom::MediaPlayer> player_remote,
+    const viz::SurfaceId& surface_id,
     const gfx::Size& natural_size,
     bool show_play_pause_button,
-    bool show_mute_button,
     mojo::PendingRemote<blink::mojom::PictureInPictureSessionObserver> observer,
+    const gfx::Rect& source_bounds,
     StartSessionCallback callback) {
   gfx::Size window_size;
-
-  WebContentsImpl* web_contents_impl =
-      static_cast<WebContentsImpl*>(web_contents());
-
-  auto result = web_contents_impl->EnterPictureInPicture(surface_id.value(),
-                                                         natural_size);
-
   mojo::PendingRemote<blink::mojom::PictureInPictureSession> session_remote;
 
-  // Picture-in-Picture may not be supported by all embedders, so we should only
-  // create the session if the EnterPictureInPicture request was successful.
+  auto result = GetController().StartSession(
+      this, MediaPlayerId(render_frame_host().GetGlobalId(), player_id),
+      std::move(player_remote), surface_id, natural_size,
+      show_play_pause_button, std::move(observer), source_bounds,
+      &session_remote, &window_size);
+
   if (result == PictureInPictureResult::kSuccess) {
-    active_session_ = std::make_unique<PictureInPictureSession>(
-        this, MediaPlayerId(render_frame_host_, player_id), surface_id,
-        natural_size, show_play_pause_button, show_mute_button,
-        session_remote.InitWithNewPipeAndPassReceiver(), std::move(observer),
-        &window_size);
+    // Frames are to be blocklisted from the back-forward cache because the
+    // picture-in-picture continues to be displayed while the page is in the
+    // cache instead of closing.
+    static_cast<RenderFrameHostImpl&>(render_frame_host())
+        .OnBackForwardCacheDisablingStickyFeatureUsed(
+            blink::scheduler::WebSchedulerTrackedFeature::kPictureInPicture);
   }
 
   std::move(callback).Run(std::move(session_remote), window_size);
 }
 
 PictureInPictureServiceImpl::PictureInPictureServiceImpl(
-    RenderFrameHost* render_frame_host,
+    RenderFrameHost& render_frame_host,
     mojo::PendingReceiver<blink::mojom::PictureInPictureService> receiver)
-    : FrameServiceBase(render_frame_host, std::move(receiver)),
-      render_frame_host_(render_frame_host) {}
+    : DocumentService(render_frame_host, std::move(receiver)) {}
 
 PictureInPictureServiceImpl::~PictureInPictureServiceImpl() {
   // If the service is destroyed because the frame was destroyed, the session
   // may still be active and it has to be shutdown before its dtor runs.
-  if (active_session_)
-    active_session_->Shutdown();
+  GetController().OnServiceDeleted(this);
+}
+
+VideoPictureInPictureWindowControllerImpl&
+PictureInPictureServiceImpl::GetController() {
+  return *VideoPictureInPictureWindowControllerImpl::GetOrCreateForWebContents(
+      WebContents::FromRenderFrameHost(&render_frame_host()));
 }
 
 }  // namespace content

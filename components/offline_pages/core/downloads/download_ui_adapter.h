@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/observer_list.h"
+#include "base/memory/raw_ptr.h"
 #include "base/supports_user_data.h"
 #include "components/offline_items_collection/core/offline_content_aggregator.h"
 #include "components/offline_items_collection/core/offline_content_provider.h"
@@ -22,13 +22,13 @@
 #include "url/gurl.h"
 
 using ContentId = offline_items_collection::ContentId;
-using LaunchLocation = offline_items_collection::LaunchLocation;
+using OpenParams = offline_items_collection::OpenParams;
 using OfflineContentProvider = offline_items_collection::OfflineContentProvider;
 using OfflineContentAggregator =
     offline_items_collection::OfflineContentAggregator;
 using OfflineItem = offline_items_collection::OfflineItem;
-using UpdateDelta = offline_items_collection::UpdateDelta;
 using OfflineItemShareInfo = offline_items_collection::OfflineItemShareInfo;
+using UpdateDelta = offline_items_collection::UpdateDelta;
 
 namespace offline_pages {
 class VisualsDecoder;
@@ -63,12 +63,7 @@ class DownloadUIAdapter : public OfflineContentProvider,
     // Opens an offline item.
     virtual void OpenItem(const OfflineItem& item,
                           int64_t offline_id,
-                          LaunchLocation launch_location) = 0;
-
-    // Suppresses the download complete notification
-    // depending on flags and origin.
-    virtual bool MaybeSuppressNotification(const std::string& origin,
-                                           const ClientId& id) = 0;
+                          const OpenParams& open_params) = 0;
 
     // Share item to other apps.
     virtual void GetShareInfoForItem(const ContentId& id,
@@ -82,6 +77,10 @@ class DownloadUIAdapter : public OfflineContentProvider,
                     RequestCoordinator* coordinator,
                     std::unique_ptr<VisualsDecoder> visuals_decoder,
                     std::unique_ptr<Delegate> delegate);
+
+  DownloadUIAdapter(const DownloadUIAdapter&) = delete;
+  DownloadUIAdapter& operator=(const DownloadUIAdapter&) = delete;
+
   ~DownloadUIAdapter() override;
 
   static DownloadUIAdapter* FromOfflinePageModel(OfflinePageModel* model);
@@ -90,7 +89,7 @@ class DownloadUIAdapter : public OfflineContentProvider,
       OfflinePageModel* model);
 
   // OfflineContentProvider implementation.
-  void OpenItem(LaunchLocation location, const ContentId& id) override;
+  void OpenItem(const OpenParams& open_params, const ContentId& id) override;
   void RemoveItem(const ContentId& id) override;
   void CancelDownload(const ContentId& id) override;
   void PauseDownload(const ContentId& id) override;
@@ -108,8 +107,6 @@ class DownloadUIAdapter : public OfflineContentProvider,
   void RenameItem(const ContentId& id,
                   const std::string& name,
                   RenameCallback callback) override;
-  void AddObserver(OfflineContentProvider::Observer* observer) override;
-  void RemoveObserver(OfflineContentProvider::Observer* observer) override;
 
   // OfflinePageModel::Observer
   void OfflinePageModelLoaded(OfflinePageModel* model) override;
@@ -173,7 +170,7 @@ class DownloadUIAdapter : public OfflineContentProvider,
       OfflineContentProvider::SingleItemCallback callback,
       std::vector<std::unique_ptr<SavePageRequest>> requests);
 
-  void OnPageGetForOpenItem(LaunchLocation location,
+  void OnPageGetForOpenItem(const OpenParams& open_params,
                             const std::vector<OfflinePageItem>& pages);
   void OnPageGetForThumbnailAdded(const OfflinePageItem* page);
 
@@ -182,13 +179,13 @@ class DownloadUIAdapter : public OfflineContentProvider,
   void OpenItemByGuid(const std::string& guid);
 
   // A valid offline content aggregator, supplied at construction.
-  OfflineContentAggregator* aggregator_;
+  raw_ptr<OfflineContentAggregator> aggregator_;
 
   // Always valid, this class is a member of the model.
-  OfflinePageModel* model_;
+  raw_ptr<OfflinePageModel> model_;
 
   // Always valid, a service.
-  RequestCoordinator* request_coordinator_;
+  raw_ptr<RequestCoordinator> request_coordinator_;
 
   // May be null if thumbnails are not required.
   std::unique_ptr<VisualsDecoder> visuals_decoder_;
@@ -196,12 +193,7 @@ class DownloadUIAdapter : public OfflineContentProvider,
   // A delegate, supplied at construction.
   std::unique_ptr<Delegate> delegate_;
 
-  // The observers.
-  base::ObserverList<OfflineContentProvider::Observer>::Unchecked observers_;
-
   base::WeakPtrFactory<DownloadUIAdapter> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(DownloadUIAdapter);
 };
 
 }  // namespace offline_pages

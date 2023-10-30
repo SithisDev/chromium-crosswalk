@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,11 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task/post_task.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/crx_file/crx_verifier.h"
 #include "components/update_client/component_unpacker.h"
@@ -32,15 +30,16 @@ namespace {
 class TestCallback {
  public:
   TestCallback();
-  virtual ~TestCallback() {}
+
+  TestCallback(const TestCallback&) = delete;
+  TestCallback& operator=(const TestCallback&) = delete;
+
+  virtual ~TestCallback() = default;
   void Set(update_client::UnpackerError error, int extra_code);
 
   update_client::UnpackerError error_;
   int extra_code_;
   bool called_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestCallback);
 };
 
 TestCallback::TestCallback()
@@ -78,7 +77,7 @@ class ComponentUnpackerTest : public testing::Test {
  protected:
   void RunThreads();
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   const scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_ =
       base::ThreadTaskRunnerHandle::Get();
   base::RunLoop runloop_;
@@ -109,7 +108,7 @@ TEST_F(ComponentUnpackerTest, UnpackFullCrx) {
           test_file("jebgalgnebhfojomionfpkfelancnnkf.crx"), nullptr,
           config->GetUnzipperFactory()->Create(),
           config->GetPatcherFactory()->Create(),
-          crx_file::VerifierFormat::CRX2_OR_CRX3);
+          crx_file::VerifierFormat::CRX3);
   component_unpacker->Unpack(base::BindOnce(
       &ComponentUnpackerTest::UnpackComplete, base::Unretained(this)));
   RunThreads();
@@ -127,13 +126,10 @@ TEST_F(ComponentUnpackerTest, UnpackFullCrx) {
       base::GetFileSize(unpack_path.AppendASCII("component1.dll"), &file_size));
   EXPECT_EQ(1024, file_size);
   EXPECT_TRUE(
-      base::GetFileSize(unpack_path.AppendASCII("flashtest.pem"), &file_size));
-  EXPECT_EQ(911, file_size);
-  EXPECT_TRUE(
       base::GetFileSize(unpack_path.AppendASCII("manifest.json"), &file_size));
-  EXPECT_EQ(144, file_size);
+  EXPECT_EQ(169, file_size);
 
-  EXPECT_TRUE(base::DeleteFile(unpack_path, true));
+  EXPECT_TRUE(base::DeletePathRecursively(unpack_path));
 }
 
 TEST_F(ComponentUnpackerTest, UnpackFileNotFound) {
@@ -141,7 +137,7 @@ TEST_F(ComponentUnpackerTest, UnpackFileNotFound) {
       base::MakeRefCounted<ComponentUnpacker>(
           std::vector<uint8_t>(std::begin(jebg_hash), std::end(jebg_hash)),
           test_file("file-not-found.crx"), nullptr, nullptr, nullptr,
-          crx_file::VerifierFormat::CRX2_OR_CRX3);
+          crx_file::VerifierFormat::CRX3);
   component_unpacker->Unpack(base::BindOnce(
       &ComponentUnpackerTest::UnpackComplete, base::Unretained(this)));
   RunThreads();
@@ -159,7 +155,7 @@ TEST_F(ComponentUnpackerTest, UnpackFileHashMismatch) {
       base::MakeRefCounted<ComponentUnpacker>(
           std::vector<uint8_t>(std::begin(abag_hash), std::end(abag_hash)),
           test_file("jebgalgnebhfojomionfpkfelancnnkf.crx"), nullptr, nullptr,
-          nullptr, crx_file::VerifierFormat::CRX2_OR_CRX3);
+          nullptr, crx_file::VerifierFormat::CRX3);
   component_unpacker->Unpack(base::BindOnce(
       &ComponentUnpackerTest::UnpackComplete, base::Unretained(this)));
   RunThreads();

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,9 @@
 #include <memory>
 #include <vector>
 
-namespace autofill {
-struct PasswordForm;
-}
-
 namespace password_manager {
+
+struct PasswordForm;
 
 // Interface that allows CredentialsCleanerRunner class to easily manipulate
 // credential clean-ups that request credentials from PasswordStore.
@@ -51,9 +49,8 @@ class CredentialsCleaner {
   // Iterates through |forms| and removes credentials whose signon_realm does
   // not correspond to a HTTP or HTTPS scheme. In particular, this filters out
   // Android and federated credentials. Returns the result.
-  static std::vector<std::unique_ptr<autofill::PasswordForm>>
-  RemoveNonHTTPOrHTTPSForms(
-      std::vector<std::unique_ptr<autofill::PasswordForm>> forms);
+  static std::vector<std::unique_ptr<PasswordForm>> RemoveNonHTTPOrHTTPSForms(
+      std::vector<std::unique_ptr<PasswordForm>> forms);
 };
 
 }  // namespace password_manager

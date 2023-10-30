@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,8 @@ bool g_window_has_focus = false;
 
 class TestRenderWidgetHostView : public RenderWidgetHostViewMac {
  public:
-  TestRenderWidgetHostView(RenderWidgetHost* host, bool is_guest_view_hack)
-      : RenderWidgetHostViewMac(host, is_guest_view_hack) {}
+  TestRenderWidgetHostView(RenderWidgetHost* host)
+      : RenderWidgetHostViewMac(host) {}
   ~TestRenderWidgetHostView() override {}
 
   bool HasFocus() override { return g_window_has_focus; }
@@ -30,9 +30,8 @@ void SetWindowFocusForKeyboardLockBrowserTests(bool is_focused) {
 
 void InstallCreateHooksForKeyboardLockBrowserTests() {
   WebContentsViewMac::InstallCreateHookForTests(
-      [](RenderWidgetHost* host,
-         bool is_guest_view_hack) -> RenderWidgetHostViewMac* {
-        return new TestRenderWidgetHostView(host, is_guest_view_hack);
+      [](RenderWidgetHost* host) -> RenderWidgetHostViewMac* {
+        return new TestRenderWidgetHostView(host);
       });
 }
 

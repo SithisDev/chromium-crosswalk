@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,8 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_MEDIA_MEDIA_STREAM_PROVIDER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_MEDIA_MEDIA_STREAM_PROVIDER_H_
 
-#include <list>
-#include <string>
-
 #include "base/memory/ref_counted.h"
-#include "content/common/content_export.h"
+#include "base/unguessable_token.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 
 namespace content {
@@ -31,30 +28,28 @@ enum MediaStreamProviderError {
   kUnknownError
 };
 
-enum { kInvalidMediaCaptureSessionId = 0xFFFFFFFF };
-
 // Callback class used by MediaStreamProvider.
-class CONTENT_EXPORT MediaStreamProviderListener {
+class MediaStreamProviderListener {
  public:
   // Called by a MediaStreamProvider when a stream has been opened.
   virtual void Opened(blink::mojom::MediaStreamType stream_type,
-                      int capture_session_id) = 0;
+                      const base::UnguessableToken& capture_session_id) = 0;
 
   // Called by a MediaStreamProvider when a stream has been closed.
   virtual void Closed(blink::mojom::MediaStreamType stream_type,
-                      int capture_session_id) = 0;
+                      const base::UnguessableToken& capture_session_id) = 0;
 
   // Called by a MediaStreamProvider when the device has been aborted due to
   // device error.
   virtual void Aborted(blink::mojom::MediaStreamType stream_type,
-                       int capture_session_id) = 0;
+                       const base::UnguessableToken& capture_session_id) = 0;
 
  protected:
   virtual ~MediaStreamProviderListener() {}
 };
 
 // Implemented by a manager class providing captured media.
-class CONTENT_EXPORT MediaStreamProvider
+class MediaStreamProvider
     : public base::RefCountedThreadSafe<MediaStreamProvider> {
  public:
   // Registers a listener.
@@ -67,10 +62,11 @@ class CONTENT_EXPORT MediaStreamProvider
   // possible for other applications to open the device before the device is
   // started. |Opened| is called when the device is opened.
   // kInvalidMediaCaptureSessionId is returned on error.
-  virtual int Open(const blink::MediaStreamDevice& device) = 0;
+  virtual base::UnguessableToken Open(
+      const blink::MediaStreamDevice& device) = 0;
 
   // Closes the specified device and calls |Closed| when done.
-  virtual void Close(int capture_session_id) = 0;
+  virtual void Close(const base::UnguessableToken& capture_session_id) = 0;
 
  protected:
   friend class base::RefCountedThreadSafe<MediaStreamProvider>;

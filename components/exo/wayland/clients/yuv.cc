@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,9 @@
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
+#include "base/logging.h"
+#include "base/message_loop/message_pump_type.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/task/single_thread_task_executor.h"
 #include "components/exo/wayland/clients/client_base.h"
 #include "components/exo/wayland/clients/client_helper.h"
@@ -35,7 +38,7 @@ class YuvClient : public ClientBase {
 };
 
 bool YuvClient::WriteSolidColor(gbm_bo* bo, SkColor color) {
-  for (size_t i = 0; i < gbm_bo_get_plane_count(bo); ++i) {
+  for (size_t i = 0; i < static_cast<size_t>(gbm_bo_get_plane_count(bo)); ++i) {
     base::ScopedFD fd(gbm_bo_get_plane_fd(bo, i));
     uint32_t stride = gbm_bo_get_stride_for_plane(bo, i);
     uint32_t offset = gbm_bo_get_offset(bo, i);
@@ -48,12 +51,15 @@ bool YuvClient::WriteSolidColor(gbm_bo* bo, SkColor color) {
     }
     uint8_t* data = static_cast<uint8_t*>(void_data) + offset;
     uint8_t yuv[] = {
-        (0.257 * SkColorGetR(color)) + (0.504 * SkColorGetG(color)) +
-            (0.098 * SkColorGetB(color)) + 16,
-        -(0.148 * SkColorGetR(color)) - (0.291 * SkColorGetG(color)) +
-            (0.439 * SkColorGetB(color)) + 128,
-        (0.439 * SkColorGetR(color)) - (0.368 * SkColorGetG(color)) -
-            (0.071 * SkColorGetB(color)) + 128};
+        base::ClampRound<uint8_t>((0.257 * SkColorGetR(color)) +
+                                  (0.504 * SkColorGetG(color)) +
+                                  (0.098 * SkColorGetB(color)) + 16),
+        base::ClampRound<uint8_t>(-(0.148 * SkColorGetR(color)) -
+                                  (0.291 * SkColorGetG(color)) +
+                                  (0.439 * SkColorGetB(color)) + 128),
+        base::ClampRound<uint8_t>((0.439 * SkColorGetR(color)) -
+                                  (0.368 * SkColorGetG(color)) -
+                                  (0.071 * SkColorGetB(color)) + 128)};
     if (i == 0) {
       for (int y = 0; y < size_.height(); ++y) {
         for (int x = 0; x < size_.width(); ++x) {
@@ -131,14 +137,19 @@ int main(int argc, char* argv[]) {
   if (!params.FromCommandLine(*command_line))
     return 1;
 
+  if (!params.use_drm) {
+    LOG(ERROR) << "Missing --use-drm parameter which is required for buffer "
+                  "allocation";
+    return 1;
+  }
+
   // TODO(dcastagna): Support other YUV formats.
   params.drm_format = DRM_FORMAT_NV12;
   params.bo_usage =
       GBM_BO_USE_SCANOUT | GBM_BO_USE_LINEAR | GBM_BO_USE_TEXTURING;
 
-  base::SingleThreadTaskExecutor main_task_executor(
-      base::MessagePump::Type::UI);
+  base::SingleThreadTaskExecutor main_task_executor(base::MessagePumpType::UI);
   exo::wayland::clients::YuvClient client;
   client.Run(params);
-  return 1;
+  return 0;
 }

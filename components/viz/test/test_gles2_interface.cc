@@ -1,10 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/viz/test/test_gles2_interface.h"
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -274,27 +275,6 @@ void TestGLES2Interface::PixelStorei(GLenum pname, GLint param) {
   }
 }
 
-GLuint TestGLES2Interface::CreateImageCHROMIUM(ClientBuffer buffer,
-                                               GLsizei width,
-                                               GLsizei height,
-                                               GLenum internalformat) {
-  DCHECK(internalformat == GL_RGB || internalformat == GL_RGBA ||
-         (test_capabilities_.texture_format_bgra8888 &&
-          internalformat == GL_BGRA_EXT));
-  GLuint image_id = NextImageId();
-  images_.insert(image_id);
-  return image_id;
-}
-
-void TestGLES2Interface::DestroyImageCHROMIUM(GLuint image_id) {
-  RetireImageId(image_id);
-  if (!images_.count(image_id)) {
-    ADD_FAILURE() << "destroyImageCHROMIUM called on unknown image "
-                  << image_id;
-  }
-  images_.erase(image_id);
-}
-
 void* TestGLES2Interface::MapBufferCHROMIUM(GLuint target, GLenum access) {
   DCHECK_GT(bound_buffer_.count(target), 0u);
   DCHECK_GT(buffers_.count(bound_buffer_[target]), 0u);
@@ -396,8 +376,10 @@ void TestGLES2Interface::GetQueryObjectuivEXT(GLuint id,
                                               GLenum pname,
                                               GLuint* params) {
   // If the context is lost, behave as if result is available.
-  if (pname == GL_QUERY_RESULT_AVAILABLE_EXT)
+  if (pname == GL_QUERY_RESULT_AVAILABLE_EXT ||
+      pname == GL_QUERY_RESULT_AVAILABLE_NO_FLUSH_CHROMIUM_EXT) {
     *params = 1;
+  }
 }
 
 void TestGLES2Interface::ProduceTextureDirectCHROMIUM(GLuint texture,
@@ -423,7 +405,7 @@ GLuint TestGLES2Interface::CreateAndTexStorage2DSharedImageCHROMIUM(
 void TestGLES2Interface::ResizeCHROMIUM(GLuint width,
                                         GLuint height,
                                         float device_scale,
-                                        GLenum color_space,
+                                        GLcolorSpace color_space,
                                         GLboolean has_alpha) {
   reshape_called_ = true;
   width_ = width;
@@ -522,10 +504,6 @@ void TestGLES2Interface::set_avoid_stencil_buffers(bool avoid_stencil_buffers) {
   test_capabilities_.avoid_stencil_buffers = avoid_stencil_buffers;
 }
 
-void TestGLES2Interface::set_enable_dc_layers(bool support) {
-  test_capabilities_.dc_layers = support;
-}
-
 void TestGLES2Interface::set_support_multisample_compatibility(bool support) {
   test_capabilities_.multisample_compatibility = support;
 }
@@ -544,6 +522,20 @@ void TestGLES2Interface::set_max_texture_size(int size) {
 
 void TestGLES2Interface::set_supports_oop_raster(bool support) {
   test_capabilities_.supports_oop_raster = support;
+}
+
+void TestGLES2Interface::set_supports_shared_image_swap_chain(bool support) {
+  test_capabilities_.shared_image_swap_chain = support;
+}
+
+void TestGLES2Interface::set_supports_gpu_memory_buffer_format(
+    gfx::BufferFormat format,
+    bool support) {
+  if (support) {
+    test_capabilities_.gpu_memory_buffer_formats.Add(format);
+  } else {
+    test_capabilities_.gpu_memory_buffer_formats.Remove(format);
+  }
 }
 
 size_t TestGLES2Interface::NumTextures() const {
@@ -619,10 +611,6 @@ GLuint TestGLES2Interface::NextRenderbufferId() {
 void TestGLES2Interface::RetireRenderbufferId(GLuint id) {
   DCHECK(base::Contains(renderbuffer_set_, id));
   renderbuffer_set_.erase(id);
-}
-
-void TestGLES2Interface::SetMaxSamples(int max_samples) {
-  test_capabilities_.max_samples = max_samples;
 }
 
 size_t TestGLES2Interface::NumFramebuffers() const {

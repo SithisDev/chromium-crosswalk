@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,8 @@
 #include "content/public/common/window_container_type.mojom-shared.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
+#include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
 #include "url/gurl.h"
 
 namespace background_loader {
@@ -36,10 +38,11 @@ class BackgroundLoaderContentsTest : public testing::Test,
   bool download() { return download_; }
   bool can_download_delegate_called() { return delegate_called_; }
 
-  void MediaAccessCallback(const blink::MediaStreamDevices& devices,
-                           blink::mojom::MediaStreamRequestResult result,
-                           std::unique_ptr<content::MediaStreamUI> ui);
-  blink::MediaStreamDevices devices() { return devices_; }
+  void MediaAccessCallback(
+      const blink::mojom::StreamDevicesSet& stream_devices_set,
+      blink::mojom::MediaStreamRequestResult result,
+      std::unique_ptr<content::MediaStreamUI> ui);
+  blink::mojom::StreamDevices& devices() { return devices_; }
   blink::mojom::MediaStreamRequestResult request_result() {
     return request_result_;
   }
@@ -50,8 +53,8 @@ class BackgroundLoaderContentsTest : public testing::Test,
  private:
   std::unique_ptr<BackgroundLoaderContents> contents_;
   bool download_;
-  bool delegate_called_;
-  blink::MediaStreamDevices devices_;
+  bool delegate_called_ = false;
+  blink::mojom::StreamDevices devices_;
   blink::mojom::MediaStreamRequestResult request_result_;
   std::unique_ptr<content::MediaStreamUI> media_stream_ui_;
   base::WaitableEvent waiter_;
@@ -59,7 +62,6 @@ class BackgroundLoaderContentsTest : public testing::Test,
 
 BackgroundLoaderContentsTest::BackgroundLoaderContentsTest()
     : download_(false),
-      delegate_called_(false),
       waiter_(base::WaitableEvent::ResetPolicy::MANUAL,
               base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
@@ -91,17 +93,22 @@ void BackgroundLoaderContentsTest::SetDelegate() {
 }
 
 void BackgroundLoaderContentsTest::MediaAccessCallback(
-    const blink::MediaStreamDevices& devices,
+    const blink::mojom::StreamDevicesSet& stream_devices_set,
     blink::mojom::MediaStreamRequestResult result,
     std::unique_ptr<content::MediaStreamUI> ui) {
-  devices_ = devices;
+  if (result == blink::mojom::MediaStreamRequestResult::OK) {
+    ASSERT_FALSE(stream_devices_set.stream_devices.empty());
+    devices_ = *stream_devices_set.stream_devices[0];
+  } else {
+    ASSERT_TRUE(stream_devices_set.stream_devices.empty());
+  }
   request_result_ = result;
   media_stream_ui_.reset(ui.get());
   waiter_.Signal();
 }
 
 TEST_F(BackgroundLoaderContentsTest, NotVisible) {
-  ASSERT_TRUE(contents()->IsNeverVisible(nullptr));
+  ASSERT_TRUE(contents()->IsNeverComposited(nullptr));
 }
 
 TEST_F(BackgroundLoaderContentsTest, SuppressDialogs) {
@@ -134,14 +141,11 @@ TEST_F(BackgroundLoaderContentsTest, CanDownload_DelegateCalledWhenSet) {
 }
 
 TEST_F(BackgroundLoaderContentsTest, ShouldNotCreateWebContents) {
-  ASSERT_FALSE(contents()->ShouldCreateWebContents(
-      nullptr /* contents */, nullptr /* opener */,
-      nullptr /* source_site_instance */, 0 /* route_id */,
-      0 /* main_frame_route_id */, 0 /* main_frame_widget_route_id */,
+  ASSERT_TRUE(contents()->IsWebContentsCreationOverridden(
+      nullptr /* source_site_instance */,
       content::mojom::WindowContainerType::NORMAL /* window_container_type */,
       GURL() /* opener_url */, "foo" /* frame_name */,
-      GURL::EmptyGURL() /* target_url */, "bar" /* partition_id */,
-      nullptr /* session_storage_namespace */));
+      GURL::EmptyGURL() /* target_url */));
 }
 
 TEST_F(BackgroundLoaderContentsTest, ShouldNotAddNewContents) {
@@ -149,9 +153,10 @@ TEST_F(BackgroundLoaderContentsTest, ShouldNotAddNewContents) {
   contents()->AddNewContents(
       nullptr /* source */,
       std::unique_ptr<content::WebContents>() /* new_contents */,
+      GURL() /* target_url */,
       WindowOpenDisposition::CURRENT_TAB /* disposition */,
-      gfx::Rect() /* initial_rect */, false /* user_gesture */,
-      &blocked /* was_blocked */);
+      blink::mojom::WindowFeatures() /* window_features */,
+      false /* user_gesture */, &blocked /* was_blocked */);
   ASSERT_TRUE(blocked);
 }
 
@@ -165,14 +170,16 @@ TEST_F(BackgroundLoaderContentsTest, DoesNotGiveMediaAccessPermission) {
       std::string() /* requested_video_device_id */,
       blink::mojom::MediaStreamType::GUM_TAB_AUDIO_CAPTURE /* audio_type */,
       blink::mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE /* video_type */,
-      false /* disable_local_echo */);
+      false /* disable_local_echo */,
+      false /* request_pan_tilt_zoom_permission */);
   contents()->RequestMediaAccessPermission(
       nullptr /* contents */, request /* request */,
       base::BindRepeating(&BackgroundLoaderContentsTest::MediaAccessCallback,
                           base::Unretained(this)));
   WaitForSignal();
   // No devices allowed.
-  ASSERT_TRUE(devices().empty());
+  ASSERT_TRUE(!devices().audio_device.has_value() &&
+              !devices().video_device.has_value());
   // Permission has been dismissed rather than denied.
   ASSERT_EQ(blink::mojom::MediaStreamRequestResult::PERMISSION_DISMISSED,
             request_result());
@@ -183,18 +190,6 @@ TEST_F(BackgroundLoaderContentsTest, CheckMediaAccessPermissionFalse) {
   ASSERT_FALSE(contents()->CheckMediaAccessPermission(
       nullptr /* contents */, GURL::EmptyGURL() /* security_origin */,
       blink::mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE /* type */));
-}
-
-TEST_F(BackgroundLoaderContentsTest, AdjustPreviewsState) {
-  content::PreviewsState previews_state;
-
-  // If the state starts out as off or disabled, it should stay that way.
-  previews_state = content::PREVIEWS_OFF;
-  contents()->AdjustPreviewsStateForNavigation(nullptr, &previews_state);
-  EXPECT_EQ(previews_state, content::PREVIEWS_OFF);
-  previews_state = content::PREVIEWS_NO_TRANSFORM;
-  contents()->AdjustPreviewsStateForNavigation(nullptr, &previews_state);
-  EXPECT_EQ(previews_state, content::PREVIEWS_NO_TRANSFORM);
 }
 
 }  // namespace background_loader

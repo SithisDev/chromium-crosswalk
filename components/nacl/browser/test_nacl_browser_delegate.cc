@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@ TestNaClBrowserDelegate::TestNaClBrowserDelegate() {}
 TestNaClBrowserDelegate::~TestNaClBrowserDelegate() {}
 
 void TestNaClBrowserDelegate::ShowMissingArchInfobar(int render_process_id,
-                                                     int render_view_id) {}
+                                                     int render_frame_id) {}
 
 bool TestNaClBrowserDelegate::DialogsAreSuppressed() {
   return false;
@@ -41,24 +41,17 @@ ppapi::host::HostFactory* TestNaClBrowserDelegate::CreatePpapiHostFactory(
   return NULL;
 }
 
-bool TestNaClBrowserDelegate::MapUrlToLocalFilePath(
-    const GURL& url,
-    bool use_blocking_api,
-    const base::FilePath& profile_directory,
-    base::FilePath* file_path) {
-  return false;
+NaClBrowserDelegate::MapUrlToLocalFilePathCallback
+TestNaClBrowserDelegate::GetMapUrlToLocalFilePathCallback(
+    const base::FilePath& profile_directory) {
+  return base::BindRepeating([](const GURL& url, bool use_blocking_api,
+                                base::FilePath* file_path) { return false; });
 }
 
 void TestNaClBrowserDelegate::SetDebugPatterns(
     const std::string& debug_patterns) {}
 
 bool TestNaClBrowserDelegate::URLMatchesDebugPatterns(
-    const GURL& manifest_url) {
-  return false;
-}
-
-bool TestNaClBrowserDelegate::IsNonSfiModeAllowed(
-    const base::FilePath& profile_directory,
     const GURL& manifest_url) {
   return false;
 }

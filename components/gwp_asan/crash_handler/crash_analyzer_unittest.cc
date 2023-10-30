@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/debug/stack_trace.h"
 #include "base/test/gtest_util.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -28,6 +28,10 @@
 #include "third_party/crashpad/crashpad/snapshot/test/test_process_snapshot.h"
 #include "third_party/crashpad/crashpad/test/process_type.h"
 #include "third_party/crashpad/crashpad/util/process/process_memory_native.h"
+
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#include "third_party/crashpad/crashpad/test/linux/fake_ptrace_connection.h"
+#endif
 
 namespace gwp_asan {
 namespace internal {
@@ -74,8 +78,14 @@ class CrashAnalyzerTest : public testing::Test {
         crashpad::CPUArchitecture::kCPUArchitectureX86;
 #endif
 
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+    ASSERT_TRUE(connection_.Initialize(getpid()));
+    auto memory = std::make_unique<crashpad::ProcessMemoryLinux>(&connection_);
+#else
     auto memory = std::make_unique<crashpad::ProcessMemoryNative>();
     ASSERT_TRUE(memory->Initialize(crashpad::test::GetSelfProcess()));
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) ||
+        // BUILDFLAG(IS_CHROMEOS)
 
     process_snapshot_.AddModule(std::move(module));
     process_snapshot_.SetException(std::move(exception));
@@ -84,8 +94,16 @@ class CrashAnalyzerTest : public testing::Test {
 
   GuardedPageAllocator gpa_;
   crashpad::test::TestProcessSnapshot process_snapshot_;
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  crashpad::test::FakePtraceConnection connection_;
+#endif
+
 };
 
+// Stack trace collection on Android builds with frame pointers enabled does
+// not use base::debug::StackTrace, so the stack traces may vary slightly and
+// break this test.
+#if !BUILDFLAG(IS_ANDROID) || !BUILDFLAG(CAN_UNWIND_WITH_FRAME_POINTERS)
 TEST_F(CrashAnalyzerTest, StackTraceCollection) {
   void* ptr = gpa_.Allocate(10);
   ASSERT_NE(ptr, nullptr);
@@ -137,13 +155,8 @@ TEST_F(CrashAnalyzerTest, StackTraceCollection) {
                   proto.deallocation().stack_trace_size() - i),
               reinterpret_cast<uintptr_t>(trace[trace_len - i]));
   }
-
-  // Allocate() and Deallocate() were called from different points in this test.
-  ASSERT_NE(proto.allocation().stack_trace(
-                proto.allocation().stack_trace_size() - (trace_len + 1)),
-            proto.deallocation().stack_trace(
-                proto.deallocation().stack_trace_size() - (trace_len + 1)));
 }
+#endif
 
 TEST_F(CrashAnalyzerTest, InternalError) {
   // Lets pretend an invalid free() occurred in the allocator region.

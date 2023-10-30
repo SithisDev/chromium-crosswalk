@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,13 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 
 namespace policy {
 
 FakeAsyncPolicyLoader::FakeAsyncPolicyLoader(
     const scoped_refptr<base::SequencedTaskRunner>& task_runner)
-    : AsyncPolicyLoader(task_runner) {
-}
+    : AsyncPolicyLoader(task_runner, /*periodic_updates=*/true) {}
 
 std::unique_ptr<PolicyBundle> FakeAsyncPolicyLoader::Load() {
   std::unique_ptr<PolicyBundle> result(new PolicyBundle());

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,15 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
-#include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_clock.h"
+#include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/image_fetcher/core/cache/image_cache.h"
 #include "components/image_fetcher/core/cache/image_data_store_disk.h"
@@ -44,8 +44,6 @@ namespace image_fetcher {
 
 namespace {
 
-const GURL kImageUrl = GURL("http://gstatic.img.com/foo.jpg");
-
 constexpr char kUmaClientName[] = "TestUma";
 constexpr char kImageData[] = "data";
 
@@ -56,6 +54,10 @@ const char kImageFetcherEventHistogramName[] = "ImageFetcher.Events";
 class ReducedModeImageFetcherTest : public testing::Test {
  public:
   ReducedModeImageFetcherTest() {}
+
+  ReducedModeImageFetcherTest(const ReducedModeImageFetcherTest&) = delete;
+  ReducedModeImageFetcherTest& operator=(const ReducedModeImageFetcherTest&) =
+      delete;
 
   ~ReducedModeImageFetcherTest() override {
     reduced_mode_image_fetcher_.reset();
@@ -86,7 +88,8 @@ class ReducedModeImageFetcherTest : public testing::Test {
 
     // Use an initial request to start the cache up.
     image_cache_->SaveImage(kImageUrl.spec(), kImageData,
-                            /* needs_transcoding */ false);
+                            /* needs_transcoding */ false,
+                            /* expiration_interval */ absl::nullopt);
     RunUntilIdle();
     db_->InitStatusCallback(leveldb_proto::Enums::InitStatus::kOK);
     image_cache_->DeleteImage(kImageUrl.spec());
@@ -106,7 +109,7 @@ class ReducedModeImageFetcherTest : public testing::Test {
     RunUntilIdle();
   }
 
-  void RunUntilIdle() { scoped_task_environment_.RunUntilIdle(); }
+  void RunUntilIdle() { task_environment_.RunUntilIdle(); }
 
   void VerifyCacheHit() {
     RunUntilIdle();
@@ -138,6 +141,9 @@ class ReducedModeImageFetcherTest : public testing::Test {
 
   MOCK_METHOD2(OnImageLoaded, void(bool, std::string));
 
+ protected:
+  GURL kImageUrl{"http://gstatic.img.com/foo.jpg"};
+
  private:
   std::unique_ptr<ImageFetcher> image_fetcher_;
   std::unique_ptr<ImageFetcher> cached_image_fetcher_;
@@ -149,26 +155,26 @@ class ReducedModeImageFetcherTest : public testing::Test {
   base::SimpleTestClock clock_;
   TestingPrefServiceSimple test_prefs_;
   base::ScopedTempDir data_dir_;
-  FakeDB<CachedImageMetadataProto>* db_;
+  raw_ptr<FakeDB<CachedImageMetadataProto>> db_;
   std::map<std::string, CachedImageMetadataProto> metadata_store_;
 
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   base::HistogramTester histogram_tester_;
-
-  DISALLOW_COPY_AND_ASSIGN(ReducedModeImageFetcherTest);
 };
 
 TEST_F(ReducedModeImageFetcherTest, FetchNeedsTranscodingImageFromCache) {
   // Save the image that needs transcoding in the database.
   image_cache()->SaveImage(kImageUrl.spec(), kImageData,
-                           /* needs_transcoding */ true);
+                           /* needs_transcoding */ true,
+                           /* expiration_interval */ absl::nullopt);
   VerifyCacheHit();
 }
 
 TEST_F(ReducedModeImageFetcherTest, FetchImageFromCache) {
   // Save the image that doesn't need transcoding in the database.
   image_cache()->SaveImage(kImageUrl.spec(), kImageData,
-                           /* needs_transcoding */ false);
+                           /* needs_transcoding */ false,
+                           /* expiration_interval */ absl::nullopt);
   VerifyCacheHit();
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 
 #include <vector>
 
+#include "base/check.h"
 #include "base/files/file.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "components/nacl/renderer/plugin/plugin.h"
 #include "ppapi/c/pp_errors.h"
 

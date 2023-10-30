@@ -1,48 +1,39 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "components/policy/core/common/cloud/cloud_policy_validator.h"
 
 #include <stddef.h>
+
+#include <memory>
 #include <utility>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner.h"
-#include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "crypto/signature_verifier.h"
 #include "google_apis/gaia/gaia_auth_util.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "base/command_line.h"
+#include "base/system/sys_info.h"
+#include "components/policy/core/common/policy_switches.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace em = enterprise_management;
 
 namespace policy {
 
 namespace {
-
-const char kMetricPolicyKeyVerification[] = "Enterprise.PolicyKeyVerification";
-
-enum MetricPolicyKeyVerification {
-  // Obsolete. Kept to avoid reuse, as this is used in histograms.
-  // UMA metric recorded when the client has no verification key.
-  METRIC_POLICY_KEY_VERIFICATION_KEY_MISSING_DEPRECATED,
-  // Recorded when the policy being verified has no key signature (e.g. policy
-  // fetched before the server supported the verification key).
-  METRIC_POLICY_KEY_VERIFICATION_SIGNATURE_MISSING,
-  // Recorded when the key signature did not match the expected value (in
-  // theory, this should only happen after key rotation or if the policy cached
-  // on disk has been modified).
-  METRIC_POLICY_KEY_VERIFICATION_FAILED,
-  // Recorded when key verification succeeded.
-  METRIC_POLICY_KEY_VERIFICATION_SUCCEEDED,
-  METRIC_POLICY_KEY_VERIFICATION_SIZE  // Must be the last.
-};
 
 const char kMetricPolicyUserVerification[] =
     "Enterprise.PolicyUserVerification";
@@ -240,6 +231,35 @@ void CloudPolicyValidatorBase::ValidateAgainstCurrentPolicy(
   ValidateDeviceId(expected_device_id, device_id_option);
 }
 
+// static
+bool CloudPolicyValidatorBase::VerifySignature(const std::string& data,
+                                               const std::string& key,
+                                               const std::string& signature,
+                                               SignatureType signature_type) {
+  crypto::SignatureVerifier verifier;
+  crypto::SignatureVerifier::SignatureAlgorithm algorithm;
+  switch (signature_type) {
+    case SHA1:
+      algorithm = crypto::SignatureVerifier::RSA_PKCS1_SHA1;
+      break;
+    case SHA256:
+      algorithm = crypto::SignatureVerifier::RSA_PKCS1_SHA256;
+      break;
+    default:
+      NOTREACHED() << "Invalid signature type: " << signature_type;
+      return false;
+  }
+
+  if (!verifier.VerifyInit(algorithm,
+                           base::as_bytes(base::make_span(signature)),
+                           base::as_bytes(base::make_span(key)))) {
+    DLOG(ERROR) << "Invalid verification signature/key format";
+    return false;
+  }
+  verifier.VerifyUpdate(base::as_bytes(base::make_span(data)));
+  return verifier.VerifyFinal();
+}
+
 CloudPolicyValidatorBase::CloudPolicyValidatorBase(
     std::unique_ptr<em::PolicyFetchResponse> policy_response,
     scoped_refptr<base::SequencedTaskRunner> background_task_runner)
@@ -254,44 +274,58 @@ CloudPolicyValidatorBase::CloudPolicyValidatorBase(
       verification_key_(GetPolicyVerificationKey()),
       allow_key_rotation_(false),
       background_task_runner_(background_task_runner) {
-  DCHECK(!verification_key_.empty());
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Empty `verification_key_` is only allowed on Chrome OS test image when
+  // policy key verification is disabled via command line flag.
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kDisablePolicyKeyVerification)) {
+    base::SysInfo::CrashIfChromeOSNonTestImage();
+    // GetPolicyVerificationKey() returns a non-empty string.
+    verification_key_ = absl::nullopt;
+  } else {
+    DCHECK(verification_key_);
+  }
+#else
+  DCHECK(verification_key_);
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 // static
 void CloudPolicyValidatorBase::PostValidationTask(
     std::unique_ptr<CloudPolicyValidatorBase> validator,
-    const base::Closure& completion_callback) {
+    base::OnceClosure completion_callback) {
   const auto task_runner = validator->background_task_runner_;
   task_runner->PostTask(
       FROM_HERE,
       base::BindOnce(&CloudPolicyValidatorBase::PerformValidation,
                      std::move(validator), base::ThreadTaskRunnerHandle::Get(),
-                     completion_callback));
+                     std::move(completion_callback)));
 }
 
 // static
 void CloudPolicyValidatorBase::PerformValidation(
     std::unique_ptr<CloudPolicyValidatorBase> self,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    const base::Closure& completion_callback) {
+    base::OnceClosure completion_callback) {
   // Run the validation activities on this thread.
   self->RunValidation();
 
   // Report completion on |task_runner|.
   task_runner->PostTask(
-      FROM_HERE, base::BindOnce(&CloudPolicyValidatorBase::ReportCompletion,
-                                std::move(self), completion_callback));
+      FROM_HERE,
+      base::BindOnce(&CloudPolicyValidatorBase::ReportCompletion,
+                     std::move(self), std::move(completion_callback)));
 }
 
 // static
 void CloudPolicyValidatorBase::ReportCompletion(
     std::unique_ptr<CloudPolicyValidatorBase> self,
-    const base::Closure& completion_callback) {
-  completion_callback.Run();
+    base::OnceClosure completion_callback) {
+  std::move(completion_callback).Run();
 }
 
 void CloudPolicyValidatorBase::RunValidation() {
-  policy_data_.reset(new em::PolicyData());
+  policy_data_ = std::make_unique<em::PolicyData>();
   RunChecks();
 }
 
@@ -346,7 +380,7 @@ void CloudPolicyValidatorBase::RunChecks() {
       {VALIDATE_VALUES, &CloudPolicyValidatorBase::CheckValues},
   };
 
-  for (size_t i = 0; i < base::size(kCheckFunctions); ++i) {
+  for (size_t i = 0; i < std::size(kCheckFunctions); ++i) {
     if (validation_flags_ & kCheckFunctions[i].flag) {
       status_ = (this->*(kCheckFunctions[i].checkFunction))();
       if (status_ != VALIDATION_OK)
@@ -358,29 +392,27 @@ void CloudPolicyValidatorBase::RunChecks() {
 // Verifies the |new_public_key_verification_signature_deprecated| for the
 // |new_public_key| in the policy blob.
 bool CloudPolicyValidatorBase::CheckNewPublicKeyVerificationSignature() {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Skip verification if the key is empty (disabled via command line).
+  if (!verification_key_) {
+    return true;
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
   if (!policy_->has_new_public_key_verification_signature_deprecated()) {
     // Policy does not contain a verification signature, so log an error.
     LOG(ERROR) << "Policy is missing public_key_verification_signature";
-    UMA_HISTOGRAM_ENUMERATION(kMetricPolicyKeyVerification,
-                              METRIC_POLICY_KEY_VERIFICATION_SIGNATURE_MISSING,
-                              METRIC_POLICY_KEY_VERIFICATION_SIZE);
     return false;
   }
 
   if (!CheckVerificationKeySignature(
-          policy_->new_public_key(), verification_key_,
+          policy_->new_public_key(), verification_key_.value(),
           policy_->new_public_key_verification_signature_deprecated())) {
     LOG(ERROR) << "Signature verification failed";
-    UMA_HISTOGRAM_ENUMERATION(kMetricPolicyKeyVerification,
-                              METRIC_POLICY_KEY_VERIFICATION_FAILED,
-                              METRIC_POLICY_KEY_VERIFICATION_SIZE);
     return false;
   }
   // Signature verification succeeded - return success to the caller.
   DVLOG(1) << "Signature verification succeeded";
-  UMA_HISTOGRAM_ENUMERATION(kMetricPolicyKeyVerification,
-                            METRIC_POLICY_KEY_VERIFICATION_SUCCEEDED,
-                            METRIC_POLICY_KEY_VERIFICATION_SIZE);
   return true;
 }
 
@@ -470,7 +502,14 @@ CloudPolicyValidatorBase::Status CloudPolicyValidatorBase::CheckInitialKey() {
 }
 
 CloudPolicyValidatorBase::Status CloudPolicyValidatorBase::CheckCachedKey() {
-  if (!CheckVerificationKeySignature(cached_key_, verification_key_,
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  // Skip verification if the key is empty (disabled via command line).
+  if (!verification_key_) {
+    return VALIDATION_OK;
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+  if (!CheckVerificationKeySignature(cached_key_, verification_key_.value(),
                                      cached_key_signature_)) {
     LOG(ERROR) << "Cached key signature verification failed";
     return VALIDATION_BAD_KEY_VERIFICATION_SIGNATURE;
@@ -577,7 +616,7 @@ CloudPolicyValidatorBase::Status CloudPolicyValidatorBase::CheckUser() {
     }
 
     if (expected != actual) {
-      LOG(ERROR) << "Invalid user name " << policy_data_->username();
+      LOG(ERROR) << "Invalid user name " << actual << ", expected " << expected;
       UMA_HISTOGRAM_ENUMERATION(kMetricPolicyUserVerification,
                                 MetricPolicyUserVerification::kUsernameFailed);
       return VALIDATION_BAD_USER;
@@ -604,45 +643,16 @@ CloudPolicyValidatorBase::Status CloudPolicyValidatorBase::CheckDomain() {
   }
 
   if (domain_ != policy_domain) {
-    LOG(ERROR) << "Invalid user name " << policy_data_->username();
+    LOG(ERROR) << "Invalid domain name " << policy_domain << " - " << domain_;
     return VALIDATION_BAD_USER;
   }
 
   return VALIDATION_OK;
 }
 
-// static
-bool CloudPolicyValidatorBase::VerifySignature(const std::string& data,
-                                               const std::string& key,
-                                               const std::string& signature,
-                                               SignatureType signature_type) {
-  crypto::SignatureVerifier verifier;
-  crypto::SignatureVerifier::SignatureAlgorithm algorithm;
-  switch (signature_type) {
-    case SHA1:
-      algorithm = crypto::SignatureVerifier::RSA_PKCS1_SHA1;
-      break;
-    case SHA256:
-      algorithm = crypto::SignatureVerifier::RSA_PKCS1_SHA256;
-      break;
-    default:
-      NOTREACHED() << "Invalid signature type: " << signature_type;
-      return false;
-  }
-
-  if (!verifier.VerifyInit(algorithm,
-                           base::as_bytes(base::make_span(signature)),
-                           base::as_bytes(base::make_span(key)))) {
-    DLOG(ERROR) << "Invalid verification signature/key format";
-    return false;
-  }
-  verifier.VerifyUpdate(base::as_bytes(base::make_span(data)));
-  return verifier.VerifyFinal();
-}
-
 template class CloudPolicyValidator<em::CloudPolicySettings>;
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 template class CloudPolicyValidator<em::ExternalPolicyData>;
 #endif
 

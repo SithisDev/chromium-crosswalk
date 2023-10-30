@@ -1,9 +1,12 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_HID_HID_TEST_UTILS_H_
 #define CONTENT_BROWSER_HID_HID_TEST_UTILS_H_
+
+#include <memory>
+#include <vector>
 
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/hid_delegate.h"
@@ -11,6 +14,7 @@
 #include "services/device/public/mojom/hid.mojom-forward.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/mojom/hid/hid.mojom-forward.h"
+#include "url/origin.h"
 
 namespace content {
 
@@ -19,29 +23,59 @@ namespace content {
 class MockHidDelegate : public HidDelegate {
  public:
   MockHidDelegate();
+  MockHidDelegate(MockHidDelegate&) = delete;
+  MockHidDelegate& operator=(MockHidDelegate&) = delete;
   ~MockHidDelegate() override;
 
   // Simulates opening the HID device chooser dialog and selecting an item. The
   // chooser automatically selects the item returned by RunChooserInternal,
-  // which may be mocked. Returns nullptr. Device filters are ignored.
+  // which may be mocked. Returns nullptr. Device filters and exclusion_filters
+  // are ignored.
   std::unique_ptr<HidChooser> RunChooser(
       RenderFrameHost* frame,
       std::vector<blink::mojom::HidDeviceFilterPtr> filters,
+      std::vector<blink::mojom::HidDeviceFilterPtr> exclusion_filters,
       HidChooser::Callback callback) override;
 
-  MOCK_METHOD0(RunChooserInternal, device::mojom::HidDeviceInfoPtr());
+  void AddObserver(BrowserContext* browser_context,
+                   Observer* observer) override;
+  void RemoveObserver(BrowserContext* browser_context,
+                      Observer* observer) override;
+
+  // MockHidDelegate does not register to receive device connection events. Use
+  // these methods to broadcast device connections to all delegate observers.
+  void OnDeviceAdded(const device::mojom::HidDeviceInfo& device);
+  void OnDeviceRemoved(const device::mojom::HidDeviceInfo& device);
+  void OnDeviceChanged(const device::mojom::HidDeviceInfo& device);
+  void OnPermissionRevoked(const url::Origin& origin);
+
+  MOCK_METHOD0(RunChooserInternal,
+               std::vector<device::mojom::HidDeviceInfoPtr>());
   MOCK_METHOD2(CanRequestDevicePermission,
-               bool(content::WebContents* web_contents,
-                    const url::Origin& requesting_origin));
+               bool(BrowserContext* browser_context,
+                    const url::Origin& origin));
   MOCK_METHOD3(HasDevicePermission,
-               bool(content::WebContents* web_contents,
-                    const url::Origin& requesting_origin,
+               bool(BrowserContext* browser_context,
+                    const url::Origin& origin,
+                    const device::mojom::HidDeviceInfo& device));
+  MOCK_METHOD3(RevokeDevicePermission,
+               void(BrowserContext* browser_context,
+                    const url::Origin& origin,
                     const device::mojom::HidDeviceInfo& device));
   MOCK_METHOD1(GetHidManager,
-               device::mojom::HidManager*(content::WebContents* web_contents));
+               device::mojom::HidManager*(BrowserContext* browser_context));
+  MOCK_METHOD2(
+      GetDeviceInfo,
+      const device::mojom::HidDeviceInfo*(BrowserContext* browser_context,
+                                          const std::string& guid));
+  MOCK_METHOD2(IsFidoAllowedForOrigin,
+               bool(BrowserContext* browser_context,
+                    const url::Origin& origin));
+  MOCK_METHOD1(IsServiceWorkerAllowedForOrigin,
+               bool(const url::Origin& origin));
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockHidDelegate);
+  base::ObserverList<Observer> observer_list_;
 };
 
 // Test implementation of ContentBrowserClient for HID tests. The test client
@@ -49,6 +83,8 @@ class MockHidDelegate : public HidDelegate {
 class HidTestContentBrowserClient : public ContentBrowserClient {
  public:
   HidTestContentBrowserClient();
+  HidTestContentBrowserClient(HidTestContentBrowserClient&) = delete;
+  HidTestContentBrowserClient& operator=(HidTestContentBrowserClient&) = delete;
   ~HidTestContentBrowserClient() override;
 
   MockHidDelegate& delegate() { return delegate_; }
@@ -58,8 +94,6 @@ class HidTestContentBrowserClient : public ContentBrowserClient {
 
  private:
   MockHidDelegate delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(HidTestContentBrowserClient);
 };
 
 }  // namespace content

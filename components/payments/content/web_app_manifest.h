@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "content/public/browser/supported_delegations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace payments {
@@ -43,6 +44,9 @@ struct WebAppInstallationInfo {
   // If "prefer_related_applications" is true in web app manifest, this is the
   // list of all "related_applications.id" values where "platform" is "play".
   std::vector<std::string> preferred_app_ids;
+
+  // List of supported delegations for this payment app.
+  content::SupportedDelegations supported_delegations;
 };
 
 }  // namespace payments

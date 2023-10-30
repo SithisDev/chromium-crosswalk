@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,24 +7,24 @@
 
 #include <stdint.h>
 
-#include <string>
-
 #include "base/callback_forward.h"
+#include "base/callback_helpers.h"
 #include "base/files/file.h"
 #include "base/files/file_proxy.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "components/download/quarantine/quarantine.h"
+#include "components/services/quarantine/public/mojom/quarantine.mojom.h"
 #include "content/browser/renderer_host/pepper/browser_ppapi_host_impl.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_platform_file.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_time.h"
 #include "ppapi/host/host_message_context.h"
 #include "ppapi/host/resource_host.h"
 #include "ppapi/shared_impl/file_io_state_manager.h"
-#include "storage/browser/fileapi/file_system_context.h"
+#include "storage/browser/file_system/file_system_context.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -41,11 +41,13 @@ class PepperFileSystemBrowserHost;
 class PepperFileIOHost : public ppapi::host::ResourceHost,
                          public base::SupportsWeakPtr<PepperFileIOHost> {
  public:
-  typedef base::Callback<void(base::File::Error)> NotifyCloseFileCallback;
-
   PepperFileIOHost(BrowserPpapiHostImpl* host,
                    PP_Instance instance,
                    PP_Resource resource);
+
+  PepperFileIOHost(const PepperFileIOHost&) = delete;
+  PepperFileIOHost& operator=(const PepperFileIOHost&) = delete;
+
   ~PepperFileIOHost() override;
 
   // ppapi::host::ResourceHost override.
@@ -92,16 +94,18 @@ class PepperFileIOHost : public ppapi::host::ResourceHost,
                          const base::FilePath& path,
                          base::File::Error error_code);
 
-  void OnLocalFileQuarantined(ppapi::host::ReplyMessageContext reply_context,
-                              const base::FilePath& path,
-                              download::QuarantineFileResult quarantine_result);
+  void OnLocalFileQuarantined(
+      ppapi::host::ReplyMessageContext reply_context,
+      const base::FilePath& path,
+      mojo::Remote<quarantine::mojom::Quarantine> quarantine_remote,
+      quarantine::mojom::QuarantineFileResult quarantine_result);
 
   void SendFileOpenReply(ppapi::host::ReplyMessageContext reply_context,
                          base::File::Error error_code);
 
   void GotUIThreadStuffForInternalFileSystems(
       ppapi::host::ReplyMessageContext reply_context,
-      int platform_file_flags,
+      uint32_t platform_file_flags,
       UIThreadStuff ui_thread_stuff);
   void DidOpenInternalFile(ppapi::host::ReplyMessageContext reply_context,
                            base::File file,
@@ -109,7 +113,7 @@ class PepperFileIOHost : public ppapi::host::ResourceHost,
   void GotResolvedRenderProcessId(
       ppapi::host::ReplyMessageContext reply_context,
       base::FilePath path,
-      int file_flags,
+      uint32_t file_flags,
       base::ProcessId resolved_render_process_id);
 
   void DidOpenQuotaFile(ppapi::host::ReplyMessageContext reply_context,
@@ -127,7 +131,7 @@ class PepperFileIOHost : public ppapi::host::ResourceHost,
       int32_t open_flags,
       ppapi::host::ReplyMessageContext* reply_context) const;
 
-  BrowserPpapiHostImpl* browser_ppapi_host_;
+  raw_ptr<BrowserPpapiHostImpl> browser_ppapi_host_;
 
   int render_process_id_;
   base::ProcessId resolved_render_process_id_;
@@ -142,16 +146,12 @@ class PepperFileIOHost : public ppapi::host::ResourceHost,
   PP_FileSystemType file_system_type_;
   base::WeakPtr<PepperFileSystemBrowserHost> file_system_host_;
 
-  // Valid only for PP_FILESYSTEMTYPE_LOCAL{PERSISTENT,TEMPORARY}.
-  scoped_refptr<storage::FileSystemContext> file_system_context_;
   storage::FileSystemURL file_system_url_;
-  base::OnceClosure on_close_callback_;
+  base::ScopedClosureRunner on_close_callback_;
   int64_t max_written_offset_;
   bool check_quota_;
 
   ppapi::FileIOStateManager state_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(PepperFileIOHost);
 };
 
 }  // namespace content

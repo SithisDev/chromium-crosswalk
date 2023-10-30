@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,22 +18,36 @@ enum class KeepAliveOrigin {
   APP_CONTROLLER,
   BROWSER,
   BROWSER_PROCESS_CHROMEOS,
+  BROWSER_PROCESS_FUCHSIA,
+  BROWSER_PROCESS_LACROS,
   SESSION_RESTORE,
 
   // c/b/background
   BACKGROUND_MODE_MANAGER,
   BACKGROUND_MODE_MANAGER_STARTUP,
+  BACKGROUND_MODE_MANAGER_FORCE_INSTALLED_EXTENSIONS,
 
   // c/b/background_sync
   BACKGROUND_SYNC,
+
+  // c/b/browsing_data
+  BROWSING_DATA_LIFETIME_MANAGER,
 
   // c/b/chromeos
   LOGIN_DISPLAY_HOST_WEBUI,
   PIN_MIGRATION,
 
+  // c/b/devtools
+  REMOTE_DEBUGGING,
+  DEVTOOLS_WINDOW,
+
+  // c/b/extensions
+  NATIVE_MESSAGING_HOST_ERROR_REPORT,
+
   // c/b/notifications
   NOTIFICATION,
   PENDING_NOTIFICATION_CLICK_EVENT,
+  PENDING_NOTIFICATION_CLOSE_EVENT,
 
   // c/b/push_messaging
   IN_FLIGHT_PUSH_MESSAGE,
@@ -45,10 +59,21 @@ enum class KeepAliveOrigin {
   CHROME_VIEWS_DELEGATE,
   PANEL,
   PANEL_VIEW,
-  PROFILE_HELPER,
-  PROFILE_LOADER,
+  PROFILE_MANAGER,
   USER_MANAGER_VIEW,
   CREDENTIAL_PROVIDER_SIGNIN_DIALOG,
+  WEB_APP_INTENT_PICKER,
+
+  // c/b/ui/web_applications
+  WEB_APP_UNINSTALL,
+
+  // c/b/web_applications
+  APP_MANIFEST_UPDATE,
+  APP_START_URL_MIGRATION,
+  APP_GET_INFO,
+
+  // c/b/sessions
+  SESSION_DATA_DELETER,
 };
 
 // Restart: Allow Chrome to restart when all the registered KeepAlives allow

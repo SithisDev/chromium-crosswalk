@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@
 #include "build/build_config.h"
 #include "components/download/public/common/download_file.h"
 #include "components/download/public/common/input_stream.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace download {
@@ -29,16 +28,16 @@ class MockDownloadFile : public DownloadFile {
 
   // DownloadFile functions.
   // Using the legacy workaround for move-only types in mock methods.
-  MOCK_METHOD4(Initialize,
-               void(InitializeCallback initialize_callback,
-                    const CancelRequestCallback& cancel_request_callback,
-                    const DownloadItem::ReceivedSlices& received_slices,
-                    bool is_parallelizable));
+  MOCK_METHOD(void,
+              Initialize,
+              (InitializeCallback initialize_callback,
+               CancelRequestCallback cancel_request_callback,
+               const DownloadItem::ReceivedSlices& received_slices),
+              ());
   void AddInputStream(std::unique_ptr<InputStream> input_stream,
-                      int64_t offset,
-                      int64_t length) override;
-  MOCK_METHOD3(DoAddInputStream,
-               void(InputStream* input_stream, int64_t offset, int64_t length));
+                      int64_t offset) override;
+  MOCK_METHOD2(DoAddInputStream,
+               void(InputStream* input_stream, int64_t offset));
   MOCK_METHOD2(OnResponseCompleted,
                void(int64_t offset, DownloadInterruptReason status));
   MOCK_METHOD2(AppendDataToFile,
@@ -47,14 +46,15 @@ class MockDownloadFile : public DownloadFile {
                DownloadInterruptReason(const base::FilePath& full_path));
   MOCK_METHOD2(RenameAndUniquify,
                void(const base::FilePath& full_path,
-                    const RenameCompletionCallback& callback));
-  MOCK_METHOD6(RenameAndAnnotate,
-               void(const base::FilePath& full_path,
-                    const std::string& client_guid,
-                    const GURL& source_url,
-                    const GURL& referrer_url,
-                    std::unique_ptr<service_manager::Connector> connector,
-                    const RenameCompletionCallback& callback));
+                    RenameCompletionCallback callback));
+  MOCK_METHOD6(
+      RenameAndAnnotate,
+      void(const base::FilePath& full_path,
+           const std::string& client_guid,
+           const GURL& source_url,
+           const GURL& referrer_url,
+           mojo::PendingRemote<quarantine::mojom::Quarantine> remote_quarantine,
+           RenameCompletionCallback callback));
   MOCK_METHOD0(Detach, void());
   MOCK_METHOD0(Cancel, void());
   MOCK_METHOD1(SetPotentialFileLength, void(int64_t length));
@@ -69,17 +69,17 @@ class MockDownloadFile : public DownloadFile {
   MOCK_CONST_METHOD0(DebugString, std::string());
   MOCK_METHOD0(Pause, void());
   MOCK_METHOD0(Resume, void());
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   MOCK_METHOD6(RenameToIntermediateUri,
                void(const GURL& original_url,
                     const GURL& referrer_url,
                     const base::FilePath& file_name,
                     const std::string& mime_type,
                     const base::FilePath& current_path,
-                    const RenameCompletionCallback& callback));
-  MOCK_METHOD1(PublishDownload, void(const RenameCompletionCallback& callback));
+                    RenameCompletionCallback callback));
+  MOCK_METHOD1(PublishDownload, void(RenameCompletionCallback callback));
   MOCK_METHOD0(GetDisplayName, base::FilePath());
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 };
 
 }  // namespace download

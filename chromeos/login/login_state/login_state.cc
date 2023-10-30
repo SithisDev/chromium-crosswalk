@@ -1,13 +1,13 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chromeos/login/login_state/login_state.h"
 
+#include "ash/constants/ash_switches.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/system/sys_info.h"
-#include "chromeos/constants/chromeos_switches.h"
 #include "components/device_event_log/device_event_log.h"
 
 namespace chromeos {
@@ -98,16 +98,11 @@ bool LoginState::IsGuestSessionUser() const {
 }
 
 bool LoginState::IsPublicSessionUser() const {
-  return logged_in_user_type_ == LOGGED_IN_USER_PUBLIC_ACCOUNT ||
-         logged_in_user_type_ == LOGGED_IN_USER_PUBLIC_ACCOUNT_MANAGED;
-}
-
-bool LoginState::ArePublicSessionRestrictionsEnabled() const {
   return logged_in_user_type_ == LOGGED_IN_USER_PUBLIC_ACCOUNT;
 }
 
-bool LoginState::IsKioskApp() const {
-  return logged_in_user_type_ == LOGGED_IN_USER_KIOSK_APP;
+bool LoginState::IsKioskSession() const {
+  return logged_in_user_type_ == LOGGED_IN_USER_KIOSK;
 }
 
 bool LoginState::IsChildUser() const {
@@ -121,13 +116,6 @@ bool LoginState::UserHasNetworkProfile() const {
 }
 
 bool LoginState::IsUserAuthenticated() const {
-  return logged_in_user_type_ == LOGGED_IN_USER_REGULAR ||
-         logged_in_user_type_ == LOGGED_IN_USER_OWNER ||
-         logged_in_user_type_ == LOGGED_IN_USER_SUPERVISED ||
-         logged_in_user_type_ == LOGGED_IN_USER_CHILD;
-}
-
-bool LoginState::IsUserGaiaAuthenticated() const {
   return logged_in_user_type_ == LOGGED_IN_USER_REGULAR ||
          logged_in_user_type_ == LOGGED_IN_USER_OWNER ||
          logged_in_user_type_ == LOGGED_IN_USER_CHILD;

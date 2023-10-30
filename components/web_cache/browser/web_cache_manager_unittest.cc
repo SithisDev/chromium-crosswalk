@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,12 @@
 
 #include <string>
 
+#include "base/time/time.h"
 #include "components/web_cache/browser/web_cache_manager.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
-using base::TimeDelta;
 namespace web_cache {
 
 class WebCacheManagerTest : public testing::Test {
@@ -34,8 +34,9 @@ class WebCacheManagerTest : public testing::Test {
   }
 
   static void SimulateInactivity(WebCacheManager* h, int renderer_id) {
-    stats(h)[renderer_id].access = Time::Now() - TimeDelta::FromMinutes(
-        WebCacheManager::kRendererInactiveThresholdMinutes);
+    stats(h)[renderer_id].access =
+        Time::Now() -
+        base::Minutes(WebCacheManager::kRendererInactiveThresholdMinutes);
     h->FindInactiveRenderers();
   }
 
@@ -93,8 +94,10 @@ class WebCacheManagerTest : public testing::Test {
   WebCacheManager* manager() { return &manager_; }
 
  private:
+  // Create the environment before creating the WebCacheManager, because the
+  // latter depends on the UI thread to have been set up correctly.
+  content::BrowserTaskEnvironment task_environment_;
   WebCacheManager manager_;
-  content::TestBrowserThreadBundle test_browser_thread_bundle_;
 };
 
 // static

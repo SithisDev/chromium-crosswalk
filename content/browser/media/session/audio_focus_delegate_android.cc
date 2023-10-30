@@ -1,10 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/media/session/audio_focus_delegate_android.h"
 
 #include "base/android/jni_android.h"
+#include "base/unguessable_token.h"
 #include "content/browser/media/session/media_session_impl.h"
 #include "content/public/android/content_jni_headers/AudioFocusDelegate_jni.h"
 #include "media/base/media_switches.h"
@@ -34,6 +35,9 @@ void AudioFocusDelegateAndroid::Initialize() {
 AudioFocusDelegate::AudioFocusResult
 AudioFocusDelegateAndroid::RequestAudioFocus(
     media_session::mojom::AudioFocusType audio_focus_type) {
+  if (!base::FeatureList::IsEnabled(media::kRequestSystemAudioFocus))
+    return AudioFocusDelegate::AudioFocusResult::kSuccess;
+
   JNIEnv* env = base::android::AttachCurrentThread();
   DCHECK(env);
   bool success = Java_AudioFocusDelegate_requestAudioFocus(
@@ -50,7 +54,7 @@ void AudioFocusDelegateAndroid::AbandonAudioFocus() {
   Java_AudioFocusDelegate_abandonAudioFocus(env, j_media_session_delegate_);
 }
 
-base::Optional<media_session::mojom::AudioFocusType>
+absl::optional<media_session::mojom::AudioFocusType>
 AudioFocusDelegateAndroid::GetCurrentFocusType() const {
   JNIEnv* env = base::android::AttachCurrentThread();
   DCHECK(env);
@@ -58,6 +62,10 @@ AudioFocusDelegateAndroid::GetCurrentFocusType() const {
                                                   j_media_session_delegate_)
              ? media_session::mojom::AudioFocusType::kGainTransientMayDuck
              : media_session::mojom::AudioFocusType::kGain;
+}
+
+const base::UnguessableToken& AudioFocusDelegateAndroid::request_id() const {
+  return base::UnguessableToken::Null();
 }
 
 void AudioFocusDelegateAndroid::OnSuspend(JNIEnv*,

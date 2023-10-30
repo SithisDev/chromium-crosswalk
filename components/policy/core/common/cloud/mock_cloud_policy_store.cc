@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,12 @@
 
 namespace policy {
 
-MockCloudPolicyStore::MockCloudPolicyStore() {}
+MockCloudPolicyStore::MockCloudPolicyStore() = default;
 
-MockCloudPolicyStore::~MockCloudPolicyStore() {}
+MockCloudPolicyStore::~MockCloudPolicyStore() = default;
 
-MockCloudPolicyStoreObserver::MockCloudPolicyStoreObserver() {}
+MockCloudPolicyStoreObserver::MockCloudPolicyStoreObserver() = default;
 
-MockCloudPolicyStoreObserver::~MockCloudPolicyStoreObserver() {}
+MockCloudPolicyStoreObserver::~MockCloudPolicyStoreObserver() = default;
 
 }  // namespace policy

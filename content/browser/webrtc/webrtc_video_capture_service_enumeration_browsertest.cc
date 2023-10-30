@@ -1,41 +1,35 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/command_line.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/system_connector.h"
+#include "content/public/browser/video_capture_service.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "media/base/media_switches.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "services/video_capture/public/cpp/mock_producer.h"
-#include "services/video_capture/public/mojom/constants.mojom.h"
 #include "services/video_capture/public/mojom/device_factory.mojom.h"
-#include "services/video_capture/public/mojom/device_factory_provider.mojom.h"
 #include "services/video_capture/public/mojom/devices_changed_observer.mojom.h"
 #include "services/video_capture/public/mojom/producer.mojom.h"
+#include "services/video_capture/public/mojom/video_capture_service.mojom.h"
 #include "services/video_capture/public/mojom/video_source_provider.mojom.h"
 #include "services/video_capture/public/mojom/virtual_device.mojom.h"
 
 namespace content {
-
-// The mediadevices.ondevicechange event is currently not supported on Android.
-#if defined(OS_ANDROID)
-#define MAYBE_AddingAndRemovingVirtualDeviceTriggersMediaElementOnDeviceChange \
-  DISABLED_AddingAndRemovingVirtualDeviceTriggersMediaElementOnDeviceChange
-#else
-#define MAYBE_AddingAndRemovingVirtualDeviceTriggersMediaElementOnDeviceChange \
-  AddingAndRemovingVirtualDeviceTriggersMediaElementOnDeviceChange
-#endif
 
 namespace {
 
@@ -67,27 +61,32 @@ class WebRtcVideoCaptureServiceEnumerationBrowserTest
       public testing::WithParamInterface<TestParams>,
       public video_capture::mojom::DevicesChangedObserver {
  public:
-  WebRtcVideoCaptureServiceEnumerationBrowserTest()
-      : devices_changed_observer_binding_(this) {
+  WebRtcVideoCaptureServiceEnumerationBrowserTest() {
     scoped_feature_list_.InitAndEnableFeature(features::kMojoVideoCapture);
   }
+
+  WebRtcVideoCaptureServiceEnumerationBrowserTest(
+      const WebRtcVideoCaptureServiceEnumerationBrowserTest&) = delete;
+  WebRtcVideoCaptureServiceEnumerationBrowserTest& operator=(
+      const WebRtcVideoCaptureServiceEnumerationBrowserTest&) = delete;
 
   ~WebRtcVideoCaptureServiceEnumerationBrowserTest() override {}
 
   void ConnectToService() {
-    connector_->BindInterface(video_capture::mojom::kServiceName, &provider_);
-    video_capture::mojom::DevicesChangedObserverPtr observer;
-    devices_changed_observer_binding_.Bind(mojo::MakeRequest(&observer));
+    mojo::PendingRemote<video_capture::mojom::DevicesChangedObserver> observer;
+    devices_changed_observer_receiver_.Bind(
+        observer.InitWithNewPipeAndPassReceiver());
     switch (GetParam().api_to_use) {
       case ServiceApi::kSingleClient:
-        provider_->ConnectToDeviceFactory(mojo::MakeRequest(&factory_));
+        GetVideoCaptureService().ConnectToDeviceFactory(
+            factory_.BindNewPipeAndPassReceiver());
         factory_->RegisterVirtualDevicesChangedObserver(
             std::move(observer),
             false /*raise_event_if_virtual_devices_already_present*/);
         break;
       case ServiceApi::kMultiClient:
-        provider_->ConnectToVideoSourceProvider(
-            mojo::MakeRequest(&video_source_provider_));
+        GetVideoCaptureService().ConnectToVideoSourceProvider(
+            video_source_provider_.BindNewPipeAndPassReceiver());
         video_source_provider_->RegisterVirtualDevicesChangedObserver(
             std::move(observer),
             false /*raise_event_if_virtual_devices_already_present*/);
@@ -105,20 +104,21 @@ class WebRtcVideoCaptureServiceEnumerationBrowserTest
     closure_to_be_called_on_devices_changed_ = wait_loop.QuitClosure();
     switch (GetParam().device_type) {
       case VirtualDeviceType::kSharedMemory: {
-        video_capture::mojom::SharedMemoryVirtualDevicePtr virtual_device;
-        video_capture::mojom::ProducerPtr producer;
+        mojo::PendingRemote<video_capture::mojom::SharedMemoryVirtualDevice>
+            virtual_device;
+        mojo::PendingRemote<video_capture::mojom::Producer> producer;
         auto mock_producer = std::make_unique<video_capture::MockProducer>(
-            mojo::MakeRequest(&producer));
+            producer.InitWithNewPipeAndPassReceiver());
         switch (GetParam().api_to_use) {
           case ServiceApi::kSingleClient:
             factory_->AddSharedMemoryVirtualDevice(
                 info, std::move(producer), false,
-                mojo::MakeRequest(&virtual_device));
+                virtual_device.InitWithNewPipeAndPassReceiver());
             break;
           case ServiceApi::kMultiClient:
             video_source_provider_->AddSharedMemoryVirtualDevice(
                 info, std::move(producer), false,
-                mojo::MakeRequest(&virtual_device));
+                virtual_device.InitWithNewPipeAndPassReceiver());
             break;
         }
         shared_memory_devices_by_id_.insert(std::make_pair(
@@ -127,15 +127,16 @@ class WebRtcVideoCaptureServiceEnumerationBrowserTest
         break;
       }
       case VirtualDeviceType::kTexture: {
-        video_capture::mojom::TextureVirtualDevicePtr virtual_device;
+        mojo::PendingRemote<video_capture::mojom::TextureVirtualDevice>
+            virtual_device;
         switch (GetParam().api_to_use) {
           case ServiceApi::kSingleClient:
             factory_->AddTextureVirtualDevice(
-                info, mojo::MakeRequest(&virtual_device));
+                info, virtual_device.InitWithNewPipeAndPassReceiver());
             break;
           case ServiceApi::kMultiClient:
             video_source_provider_->AddTextureVirtualDevice(
-                info, mojo::MakeRequest(&virtual_device));
+                info, virtual_device.InitWithNewPipeAndPassReceiver());
             break;
         }
         texture_devices_by_id_.insert(
@@ -164,34 +165,29 @@ class WebRtcVideoCaptureServiceEnumerationBrowserTest
   }
 
   void DisconnectFromService() {
-    factory_ = nullptr;
-    video_source_provider_ = nullptr;
-    provider_ = nullptr;
+    factory_.reset();
+    video_source_provider_.reset();
   }
 
   void EnumerateDevicesInRendererAndVerifyDeviceCount(
       int expected_device_count) {
     const std::string javascript_to_execute = base::StringPrintf(
         kEnumerateVideoCaptureDevicesAndVerify, expected_device_count);
-    std::string result;
-    ASSERT_TRUE(
-        ExecuteScriptAndExtractString(shell(), javascript_to_execute, &result));
-    ASSERT_EQ("OK", result);
+    ASSERT_EQ("OK", EvalJs(shell(), javascript_to_execute,
+                           EXECUTE_SCRIPT_USE_MANUAL_REPLY));
   }
 
   void RegisterForDeviceChangeEventInRenderer() {
-    ASSERT_TRUE(ExecuteScript(shell(), kRegisterForDeviceChangeEvent));
+    ASSERT_TRUE(ExecJs(shell(), kRegisterForDeviceChangeEvent));
   }
 
   void WaitForDeviceChangeEventInRenderer() {
-    std::string result;
-    ASSERT_TRUE(ExecuteScriptAndExtractString(
-        shell(), kWaitForDeviceChangeEvent, &result));
-    ASSERT_EQ("OK", result);
+    ASSERT_EQ("OK", EvalJs(shell(), kWaitForDeviceChangeEvent,
+                           EXECUTE_SCRIPT_USE_MANUAL_REPLY));
   }
 
   void ResetHasReceivedChangedEventFlag() {
-    ASSERT_TRUE(ExecuteScript(shell(), kResetHasReceivedChangedEventFlag));
+    ASSERT_TRUE(ExecJs(shell(), kResetHasReceivedChangedEventFlag));
   }
 
   // Implementation of video_capture::mojom::DevicesChangedObserver:
@@ -205,6 +201,7 @@ class WebRtcVideoCaptureServiceEnumerationBrowserTest
   void SetUpCommandLine(base::CommandLine* command_line) override {
     // Note: We are not planning to actually use any fake device, but we want
     // to avoid enumerating or otherwise calling into real capture devices.
+    command_line->RemoveSwitch(switches::kUseFakeDeviceForMediaStream);
     command_line->AppendSwitchASCII(switches::kUseFakeDeviceForMediaStream,
                                     "device-count=0");
     command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
@@ -216,32 +213,27 @@ class WebRtcVideoCaptureServiceEnumerationBrowserTest
     ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
     embedded_test_server()->StartAcceptingConnections();
 
-    NavigateToURL(shell(),
-                  GURL(embedded_test_server()->GetURL(kVideoCaptureHtmlFile)));
-
-    auto* connector = GetSystemConnector();
-    ASSERT_TRUE(connector);
-    connector_ = connector->Clone();
+    EXPECT_TRUE(NavigateToURL(
+        shell(), GURL(embedded_test_server()->GetURL(kVideoCaptureHtmlFile))));
   }
 
-  std::unique_ptr<service_manager::Connector> connector_;
-  std::map<std::string, video_capture::mojom::TextureVirtualDevicePtr>
+  std::map<std::string,
+           mojo::PendingRemote<video_capture::mojom::TextureVirtualDevice>>
       texture_devices_by_id_;
   std::map<std::string,
-           std::pair<video_capture::mojom::SharedMemoryVirtualDevicePtr,
+           std::pair<mojo::PendingRemote<
+                         video_capture::mojom::SharedMemoryVirtualDevice>,
                      std::unique_ptr<video_capture::MockProducer>>>
       shared_memory_devices_by_id_;
 
  private:
-  mojo::Binding<video_capture::mojom::DevicesChangedObserver>
-      devices_changed_observer_binding_;
+  mojo::Receiver<video_capture::mojom::DevicesChangedObserver>
+      devices_changed_observer_receiver_{this};
   base::test::ScopedFeatureList scoped_feature_list_;
-  video_capture::mojom::DeviceFactoryProviderPtr provider_;
-  video_capture::mojom::DeviceFactoryPtr factory_;
-  video_capture::mojom::VideoSourceProviderPtr video_source_provider_;
+  mojo::Remote<video_capture::mojom::DeviceFactory> factory_;
+  mojo::Remote<video_capture::mojom::VideoSourceProvider>
+      video_source_provider_;
   base::OnceClosure closure_to_be_called_on_devices_changed_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebRtcVideoCaptureServiceEnumerationBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_P(WebRtcVideoCaptureServiceEnumerationBrowserTest,
@@ -275,6 +267,17 @@ IN_PROC_BROWSER_TEST_P(WebRtcVideoCaptureServiceEnumerationBrowserTest,
   DisconnectFromService();
 }
 
+// The mediadevices.ondevicechange event is currently not supported on Android.
+// Flaky on ChromeOS.  https://crbug.com/1126373
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS_ASH) || \
+    BUILDFLAG(IS_CHROMEOS_LACROS)
+#define MAYBE_AddingAndRemovingVirtualDeviceTriggersMediaElementOnDeviceChange \
+  DISABLED_AddingAndRemovingVirtualDeviceTriggersMediaElementOnDeviceChange
+#else
+#define MAYBE_AddingAndRemovingVirtualDeviceTriggersMediaElementOnDeviceChange \
+  AddingAndRemovingVirtualDeviceTriggersMediaElementOnDeviceChange
+#endif
+
 IN_PROC_BROWSER_TEST_P(
     WebRtcVideoCaptureServiceEnumerationBrowserTest,
     MAYBE_AddingAndRemovingVirtualDeviceTriggersMediaElementOnDeviceChange) {
@@ -296,7 +299,7 @@ IN_PROC_BROWSER_TEST_P(
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    ,
+    All,
     WebRtcVideoCaptureServiceEnumerationBrowserTest,
     ::testing::Values(
         TestParams{ServiceApi::kSingleClient, VirtualDeviceType::kSharedMemory},

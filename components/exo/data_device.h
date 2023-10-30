@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,13 @@
 
 #include <cstdint>
 
-#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "components/exo/data_offer_observer.h"
 #include "components/exo/seat_observer.h"
 #include "components/exo/surface.h"
 #include "components/exo/surface_observer.h"
-#include "components/exo/wm_helper.h"
 #include "ui/base/clipboard/clipboard_observer.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-forward.h"
 
 namespace ui {
 class DropTargetEvent;
@@ -23,14 +23,12 @@ namespace exo {
 
 class DataDeviceDelegate;
 class DataOffer;
+class ScopedDataOffer;
 class DataSource;
-class FileHelper;
 class Seat;
+class ScopedSurface;
 
 enum class DndAction { kNone, kCopy, kMove, kAsk };
-
-class ScopedDataOffer;
-class ScopedSurface;
 
 // DataDevice to start drag and drop and copy and paste oprations.
 class DataDevice : public WMHelper::DragDropObserver,
@@ -39,9 +37,11 @@ class DataDevice : public WMHelper::DragDropObserver,
                    public SurfaceObserver,
                    public SeatObserver {
  public:
-  explicit DataDevice(DataDeviceDelegate* delegate,
-                      Seat* seat,
-                      FileHelper* file_helper);
+  DataDevice(DataDeviceDelegate* delegate, Seat* seat);
+
+  DataDevice(const DataDevice&) = delete;
+  DataDevice& operator=(const DataDevice&) = delete;
+
   ~DataDevice() override;
 
   // Starts drag-and-drop operation.
@@ -49,30 +49,30 @@ class DataDevice : public WMHelper::DragDropObserver,
   // be null if the data will be transferred only in the client.  |origin| is
   // the surface which starts the drag and drop operation. |icon| is the
   // nullable image which is rendered at the next to cursor while drag
-  // operation. |serial| is the unique number comes from input events which
-  // triggers the drag and drop operation.
-  void StartDrag(const DataSource* source,
+  // operation.
+  void StartDrag(DataSource* source,
                  Surface* origin,
                  Surface* icon,
-                 uint32_t serial);
+                 ui::mojom::DragEventSource event_source);
 
   // Sets selection data to the clipboard.
-  // |source| represents data comes from the client. |serial| is the unique
-  // number comes from input events which triggers the drag and drop operation.
-  void SetSelection(DataSource* source, uint32_t serial);
+  // |source| represents data comes from the client.
+  void SetSelection(DataSource* source);
 
   // Overridden from WMHelper::DragDropObserver:
   void OnDragEntered(const ui::DropTargetEvent& event) override;
-  int OnDragUpdated(const ui::DropTargetEvent& event) override;
+  aura::client::DragUpdateInfo OnDragUpdated(
+      const ui::DropTargetEvent& event) override;
   void OnDragExited() override;
-  int OnPerformDrop(const ui::DropTargetEvent& event) override;
+  WMHelper::DragDropObserver::DropCallback GetDropCallback() override;
 
-  // Overridden from ui::ClipbaordObserver:
+  // Overridden from ui::ClipboardObserver:
   void OnClipboardDataChanged() override;
 
   // Overridden from SeatObserver:
-  void OnSurfaceFocusing(Surface* surface) override;
-  void OnSurfaceFocused(Surface* surface) override;
+  void OnSurfaceFocused(Surface* surface,
+                        Surface* lost_focus,
+                        bool has_focused_client) override;
 
   // Overridden from DataOfferObserver:
   void OnDataOfferDestroying(DataOffer* data_offer) override;
@@ -80,17 +80,24 @@ class DataDevice : public WMHelper::DragDropObserver,
   // Overridden from SurfaceObserver:
   void OnSurfaceDestroying(Surface* surface) override;
 
+  DataDeviceDelegate* get_delegate() { return delegate_; }
+
  private:
   Surface* GetEffectiveTargetForEvent(const ui::DropTargetEvent& event) const;
   void SetSelectionToCurrentClipboardData();
 
+  void PerformDropOrExitDrag(base::ScopedClosureRunner exit_drag,
+                             ui::mojom::DragOperation& output_drag_op);
+
   DataDeviceDelegate* const delegate_;
   Seat* const seat_;
-  FileHelper* const file_helper_;
   std::unique_ptr<ScopedDataOffer> data_offer_;
   std::unique_ptr<ScopedSurface> focused_surface_;
 
-  DISALLOW_COPY_AND_ASSIGN(DataDevice);
+  base::OnceClosure quit_closure_;
+  bool drop_succeeded_;
+  base::WeakPtrFactory<DataDevice> drop_weak_factory_{this};
+  base::WeakPtrFactory<DataDevice> weak_factory_{this};
 };
 
 }  // namespace exo

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,11 +21,13 @@ class SingleInvalidConfigurationTest : public ::testing::Test {
  public:
   SingleInvalidConfigurationTest() = default;
 
+  SingleInvalidConfigurationTest(const SingleInvalidConfigurationTest&) =
+      delete;
+  SingleInvalidConfigurationTest& operator=(
+      const SingleInvalidConfigurationTest&) = delete;
+
  protected:
   SingleInvalidConfiguration configuration_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SingleInvalidConfigurationTest);
 };
 
 }  // namespace

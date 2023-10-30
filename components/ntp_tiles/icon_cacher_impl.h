@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,19 @@
 
 #include <memory>
 #include <set>
-#include <string>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/cancelable_callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "components/ntp_tiles/icon_cacher.h"
 #include "components/ntp_tiles/popular_sites.h"
+
+namespace data_decoder {
+class DataDecoder;
+}  // namespace data_decoder
 
 namespace favicon {
 class FaviconService;
@@ -45,25 +49,30 @@ class IconCacherImpl : public IconCacher {
   // crbug.com/696563
   IconCacherImpl(favicon::FaviconService* favicon_service,
                  favicon::LargeIconService* large_icon_service,
-                 std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher);
+                 std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher,
+                 std::unique_ptr<data_decoder::DataDecoder> data_decoder);
+
+  IconCacherImpl(const IconCacherImpl&) = delete;
+  IconCacherImpl& operator=(const IconCacherImpl&) = delete;
+
   ~IconCacherImpl() override;
 
   void StartFetchPopularSites(
       PopularSites::Site site,
-      const base::Closure& icon_available,
-      const base::Closure& preliminary_icon_available) override;
+      base::OnceClosure icon_available,
+      base::OnceClosure preliminary_icon_available) override;
 
   // TODO(jkrcal): Rename all instances of "MostLikely" to "ChromeSuggestions".
   void StartFetchMostLikely(const GURL& page_url,
-                            const base::Closure& icon_available) override;
+                            base::OnceClosure icon_available) override;
 
  private:
   using CancelableImageCallback =
-      base::CancelableCallback<void(const gfx::Image&)>;
+      base::CancelableOnceCallback<void(const gfx::Image&)>;
 
   void OnGetFaviconImageForPageURLFinished(
       PopularSites::Site site,
-      const base::Closure& preliminary_icon_available,
+      base::OnceClosure preliminary_icon_available,
       const favicon_base::FaviconImageResult& result);
 
   void OnPopularSitesFaviconDownloaded(
@@ -74,10 +83,10 @@ class IconCacherImpl : public IconCacher {
 
   std::unique_ptr<CancelableImageCallback> MaybeProvideDefaultIcon(
       const PopularSites::Site& site,
-      const base::Closure& preliminary_icon_available);
+      base::OnceClosure preliminary_icon_available);
   void SaveAndNotifyDefaultIconForSite(
       const PopularSites::Site& site,
-      const base::Closure& preliminary_icon_available,
+      base::OnceClosure preliminary_icon_available,
       const gfx::Image& image);
   void SaveIconForSite(const PopularSites::Site& site, const gfx::Image& image);
 
@@ -89,20 +98,18 @@ class IconCacherImpl : public IconCacher {
       const GURL& request_url,
       favicon_base::GoogleFaviconServerRequestStatus status);
 
-  bool StartRequest(const GURL& request_url,
-                    const base::Closure& icon_available);
+  bool StartRequest(const GURL& request_url, base::OnceClosure icon_available);
   void FinishRequestAndNotifyIconAvailable(const GURL& request_url,
                                            bool newly_available);
 
   base::CancelableTaskTracker tracker_;
-  favicon::FaviconService* const favicon_service_;
-  favicon::LargeIconService* const large_icon_service_;
+  const raw_ptr<favicon::FaviconService> favicon_service_;
+  const raw_ptr<favicon::LargeIconService> large_icon_service_;
   std::unique_ptr<image_fetcher::ImageFetcher> const image_fetcher_;
-  std::map<GURL, std::vector<base::Closure>> in_flight_requests_;
+  std::map<GURL, std::vector<base::OnceClosure>> in_flight_requests_;
+  std::unique_ptr<data_decoder::DataDecoder> data_decoder_;
 
   base::WeakPtrFactory<IconCacherImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(IconCacherImpl);
 };
 
 }  // namespace ntp_tiles

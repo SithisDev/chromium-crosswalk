@@ -1,4 +1,4 @@
-// Copyright (c) 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,14 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/optional.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
+#include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/policy/policy_export.h"
 #include "components/policy/proto/cloud_policy.pb.h"
+#include "components/policy/proto/device_management_backend.pb.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/gurl.h"
 
 namespace network {
 class SharedURLLoaderFactory;
@@ -23,7 +25,6 @@ class SharedURLLoaderFactory;
 namespace policy {
 
 class CloudPolicyClient;
-class DMAuth;
 
 // A configuration for sending enterprise_management::DeviceManagementRequest to
 // the DM server.
@@ -39,10 +40,10 @@ class POLICY_EXPORT DMServerJobConfiguration : public JobConfigurationBase {
   DMServerJobConfiguration(
       DeviceManagementService* service,
       JobType type,
-      const std::string& cliend_id,
+      const std::string& client_id,
       bool critical,
-      std::unique_ptr<DMAuth> auth_data,
-      base::Optional<std::string> oauth_token,
+      DMAuth auth_data,
+      absl::optional<std::string> oauth_token,
       scoped_refptr<network::SharedURLLoaderFactory> factory,
       Callback callback);
 
@@ -51,9 +52,12 @@ class POLICY_EXPORT DMServerJobConfiguration : public JobConfigurationBase {
   DMServerJobConfiguration(JobType type,
                            CloudPolicyClient* client,
                            bool critical,
-                           std::unique_ptr<DMAuth> auth_data,
-                           base::Optional<std::string> oauth_token,
+                           DMAuth auth_data,
+                           absl::optional<std::string> oauth_token,
                            Callback callback);
+
+  DMServerJobConfiguration(const DMServerJobConfiguration&) = delete;
+  DMServerJobConfiguration& operator=(const DMServerJobConfiguration&) = delete;
 
   ~DMServerJobConfiguration() override;
 
@@ -62,28 +66,28 @@ class POLICY_EXPORT DMServerJobConfiguration : public JobConfigurationBase {
   }
 
  protected:
-  DeviceManagementStatus MapNetErrorAndResponseCodeToDMStatus(
+  DeviceManagementStatus MapNetErrorAndResponseToDMStatus(
       int net_error,
-      int response_code);
+      int response_code,
+      const std::string& response_body);
 
  private:
   // JobConfiguration interface.
   std::string GetPayload() override;
   std::string GetUmaName() override;
-  void OnBeforeRetry() override {}
+  void OnBeforeRetry(int response_code,
+                     const std::string& response_body) override {}
   void OnURLLoadComplete(DeviceManagementService::Job* job,
                          int net_error,
                          int response_code,
                          const std::string& response_body) override;
 
   // JobConfigurationBase overrides.
-  GURL GetURL(int last_error) override;
+  GURL GetURL(int last_error) const override;
 
   std::string server_url_;
   enterprise_management::DeviceManagementRequest request_;
   Callback callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(DMServerJobConfiguration);
 };
 
 // A configuration for sending registration requests to the DM server.  These
@@ -96,15 +100,19 @@ class POLICY_EXPORT RegistrationJobConfiguration
  public:
   RegistrationJobConfiguration(JobType type,
                                CloudPolicyClient* client,
-                               std::unique_ptr<DMAuth> auth_data,
-                               base::Optional<std::string> oauth_token,
+                               DMAuth auth_data,
+                               absl::optional<std::string> oauth_token,
                                Callback callback);
+  RegistrationJobConfiguration(const RegistrationJobConfiguration&) = delete;
+  RegistrationJobConfiguration& operator=(const RegistrationJobConfiguration&) =
+      delete;
+
+  void SetTimeoutDuration(base::TimeDelta timeout);
 
  private:
   // JobConfiguration interface.
-  void OnBeforeRetry() override;
-
-  DISALLOW_COPY_AND_ASSIGN(RegistrationJobConfiguration);
+  void OnBeforeRetry(int response_code,
+                     const std::string& response_body) override;
 };
 
 }  // namespace policy

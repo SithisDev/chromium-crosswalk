@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,16 @@
 #include <memory>
 #include <string>
 
-#include "base/containers/flat_set.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "content/browser/cache_storage/cache_storage_context_impl.h"
 #include "content/browser/devtools/protocol/devtools_domain_handler.h"
 #include "content/browser/devtools/protocol/storage.h"
-#include "content/browser/indexed_db/indexed_db_context_impl.h"
+#include "content/browser/interest_group/interest_group_manager_impl.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
+
+namespace storage {
+class QuotaOverrideHandle;
+}
 
 namespace content {
 class StoragePartition;
@@ -22,9 +25,15 @@ class StoragePartition;
 namespace protocol {
 
 class StorageHandler : public DevToolsDomainHandler,
-                       public Storage::Backend {
+                       public Storage::Backend,
+                       private content::InterestGroupManagerImpl::
+                           InterestGroupObserverInterface {
  public:
   StorageHandler();
+
+  StorageHandler(const StorageHandler&) = delete;
+  StorageHandler& operator=(const StorageHandler&) = delete;
+
   ~StorageHandler() override;
 
   // content::protocol::DevToolsDomainHandler
@@ -34,45 +43,103 @@ class StorageHandler : public DevToolsDomainHandler,
   Response Disable() override;
 
   // content::protocol::storage::Backend
+  Response GetStorageKeyForFrame(const std::string& frame_id,
+                                 std::string* serialized_storage_key) override;
   void ClearDataForOrigin(
       const std::string& origin,
       const std::string& storage_types,
       std::unique_ptr<ClearDataForOriginCallback> callback) override;
+  void ClearDataForStorageKey(
+      const std::string& storage_key,
+      const std::string& storage_types,
+      std::unique_ptr<ClearDataForStorageKeyCallback> callback) override;
   void GetUsageAndQuota(
       const String& origin,
       std::unique_ptr<GetUsageAndQuotaCallback> callback) override;
+
+  // Storage Quota Override
+  void GetQuotaOverrideHandle();
+  void OverrideQuotaForOrigin(
+      const String& origin,
+      Maybe<double> quota_size,
+      std::unique_ptr<OverrideQuotaForOriginCallback> callback) override;
+
+  // Cookies management
+  void GetCookies(
+      Maybe<std::string> browser_context_id,
+      std::unique_ptr<Storage::Backend::GetCookiesCallback> callback) override;
+
+  void SetCookies(
+      std::unique_ptr<protocol::Array<Network::CookieParam>> cookies,
+      Maybe<std::string> browser_context_id,
+      std::unique_ptr<Storage::Backend::SetCookiesCallback> callback) override;
+
+  void ClearCookies(Maybe<std::string> browser_context_id,
+                    std::unique_ptr<Storage::Backend::ClearCookiesCallback>
+                        callback) override;
 
   // Ignores all double calls to track an origin.
   Response TrackCacheStorageForOrigin(const std::string& origin) override;
   Response UntrackCacheStorageForOrigin(const std::string& origin) override;
   Response TrackIndexedDBForOrigin(const std::string& origin) override;
+  Response TrackIndexedDBForStorageKey(const std::string& storage_key) override;
   Response UntrackIndexedDBForOrigin(const std::string& origin) override;
+  Response UntrackIndexedDBForStorageKey(
+      const std::string& storage_key) override;
+
+  void GetTrustTokens(
+      std::unique_ptr<GetTrustTokensCallback> callback) override;
+  void ClearTrustTokens(
+      const std::string& issuerOrigin,
+      std::unique_ptr<ClearTrustTokensCallback> callback) override;
+
+  void GetInterestGroupDetails(
+      const std::string& owner_origin_string,
+      const std::string& name,
+      std::unique_ptr<GetInterestGroupDetailsCallback> callback) override;
+
+  Response SetInterestGroupTracking(bool enable) override;
 
  private:
   // See definition for lifetime information.
   class CacheStorageObserver;
   class IndexedDBObserver;
+  class InterestGroupObserver;
 
   // Not thread safe.
   CacheStorageObserver* GetCacheStorageObserver();
   IndexedDBObserver* GetIndexedDBObserver();
 
+  // content::InterestGroupManagerImpl::InterestGroupObserverInterface
+  void OnInterestGroupAccessed(
+      const base::Time& accessTime,
+      InterestGroupManagerImpl::InterestGroupObserverInterface::AccessType type,
+      const std::string& owner_origin,
+      const std::string& name) override;
+
   void NotifyCacheStorageListChanged(const std::string& origin);
   void NotifyCacheStorageContentChanged(const std::string& origin,
                                         const std::string& name);
-  void NotifyIndexedDBListChanged(const std::string& origin);
+  void NotifyIndexedDBListChanged(const std::string& origin,
+                                  const std::string& storage_key);
   void NotifyIndexedDBContentChanged(const std::string& origin,
-                                     const base::string16& database_name,
-                                     const base::string16& object_store_name);
+                                     const std::string& storage_key,
+                                     const std::u16string& database_name,
+                                     const std::u16string& object_store_name);
+
+  Response FindStoragePartition(const Maybe<std::string>& browser_context_id,
+                                StoragePartition** storage_partition);
 
   std::unique_ptr<Storage::Frontend> frontend_;
-  StoragePartition* storage_partition_;
+  StoragePartition* storage_partition_{nullptr};
+  RenderFrameHostImpl* frame_host_ = nullptr;
   std::unique_ptr<CacheStorageObserver> cache_storage_observer_;
   std::unique_ptr<IndexedDBObserver> indexed_db_observer_;
 
-  base::WeakPtrFactory<StorageHandler> weak_ptr_factory_{this};
+  // Exposes the API for managing storage quota overrides.
+  std::unique_ptr<storage::QuotaOverrideHandle> quota_override_handle_;
 
-  DISALLOW_COPY_AND_ASSIGN(StorageHandler);
+  base::WeakPtrFactory<StorageHandler> weak_ptr_factory_{this};
 };
 
 }  // namespace protocol

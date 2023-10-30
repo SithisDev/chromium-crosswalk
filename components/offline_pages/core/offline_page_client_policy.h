@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,7 +76,7 @@ struct OfflinePageClientPolicy {
   //   disabled.
   bool requires_specific_user_settings = false;
 
-  // Whether the pages originate from suggestion engines like Zine or the Feed.
+  // Whether the pages originate from suggestion engines like the Feed.
   bool is_suggested = false;
 
   // Whether a background page download is allowed to be converted to a regular

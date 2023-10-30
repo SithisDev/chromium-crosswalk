@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/macros.h"
-#include "base/memory/shared_memory_handle.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 
@@ -18,64 +16,56 @@ namespace chromeos_camera {
 
 MojoMjpegDecodeAccelerator::MojoMjpegDecodeAccelerator(
     scoped_refptr<base::SequencedTaskRunner> io_task_runner,
-    chromeos_camera::mojom::MjpegDecodeAcceleratorPtrInfo jpeg_decoder)
+    mojo::PendingRemote<chromeos_camera::mojom::MjpegDecodeAccelerator>
+        jpeg_decoder)
     : io_task_runner_(std::move(io_task_runner)),
-      jpeg_decoder_info_(std::move(jpeg_decoder)) {}
+      jpeg_decoder_remote_(std::move(jpeg_decoder)) {}
 
 MojoMjpegDecodeAccelerator::~MojoMjpegDecodeAccelerator() {
   DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
 }
 
-bool MojoMjpegDecodeAccelerator::Initialize(
-    MjpegDecodeAccelerator::Client* /*client*/) {
-  NOTIMPLEMENTED();
-  return false;
-}
-
-void MojoMjpegDecodeAccelerator::InitializeAsync(Client* client,
-                                                 InitCB init_cb) {
+void MojoMjpegDecodeAccelerator::InitializeAsync(
+    MjpegDecodeAccelerator::Client* client,
+    MjpegDecodeAccelerator::InitCB init_cb) {
   DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
 
-  jpeg_decoder_.Bind(std::move(jpeg_decoder_info_));
+  jpeg_decoder_.Bind(std::move(jpeg_decoder_remote_));
 
   // base::Unretained is safe because |this| owns |jpeg_decoder_|.
-  jpeg_decoder_.set_connection_error_handler(
-      base::Bind(&MojoMjpegDecodeAccelerator::OnLostConnectionToJpegDecoder,
-                 base::Unretained(this)));
+  jpeg_decoder_.set_disconnect_handler(
+      base::BindOnce(&MojoMjpegDecodeAccelerator::OnLostConnectionToJpegDecoder,
+                     base::Unretained(this)));
   jpeg_decoder_->Initialize(
-      base::Bind(&MojoMjpegDecodeAccelerator::OnInitializeDone,
-                 base::Unretained(this), std::move(init_cb), client));
+      base::BindOnce(&MojoMjpegDecodeAccelerator::OnInitializeDone,
+                     base::Unretained(this), std::move(init_cb), client));
 }
 
 void MojoMjpegDecodeAccelerator::Decode(
     media::BitstreamBuffer bitstream_buffer,
-    scoped_refptr<media::VideoFrame> video_frame) {
+    media::VideoPixelFormat format,
+    const gfx::Size& coded_size,
+    base::UnsafeSharedMemoryRegion output_region) {
   DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(jpeg_decoder_.is_bound());
 
-  DCHECK(
-      base::SharedMemory::IsHandleValid(video_frame->shared_memory_handle()));
+  const size_t output_buffer_size =
+      media::VideoFrame::AllocationSize(format, coded_size);
+  DCHECK_GE(output_region.GetSize(), output_buffer_size);
 
-  base::SharedMemoryHandle output_handle =
-      base::SharedMemory::DuplicateHandle(video_frame->shared_memory_handle());
-  if (!base::SharedMemory::IsHandleValid(output_handle)) {
+  mojo::ScopedSharedBufferHandle output_frame_handle =
+      mojo::WrapUnsafeSharedMemoryRegion(std::move(output_region));
+  if (!output_frame_handle.is_valid()) {
     DLOG(ERROR) << "Failed to duplicate handle of VideoFrame";
     return;
   }
 
-  size_t output_buffer_size = media::VideoFrame::AllocationSize(
-      video_frame->format(), video_frame->coded_size());
-  mojo::ScopedSharedBufferHandle output_frame_handle =
-      mojo::WrapSharedMemoryHandle(
-          output_handle, output_buffer_size,
-          mojo::UnwrappedSharedMemoryHandleProtection::kReadWrite);
-
   // base::Unretained is safe because |this| owns |jpeg_decoder_|.
-  jpeg_decoder_->Decode(std::move(bitstream_buffer), video_frame->coded_size(),
+  jpeg_decoder_->Decode(std::move(bitstream_buffer), coded_size,
                         std::move(output_frame_handle),
                         base::checked_cast<uint32_t>(output_buffer_size),
-                        base::Bind(&MojoMjpegDecodeAccelerator::OnDecodeAck,
-                                   base::Unretained(this)));
+                        base::BindOnce(&MojoMjpegDecodeAccelerator::OnDecodeAck,
+                                       base::Unretained(this)));
 }
 
 bool MojoMjpegDecodeAccelerator::IsSupported() {
@@ -83,7 +73,7 @@ bool MojoMjpegDecodeAccelerator::IsSupported() {
 }
 
 void MojoMjpegDecodeAccelerator::OnInitializeDone(
-    InitCB init_cb,
+    MjpegDecodeAccelerator::InitCB init_cb,
     MjpegDecodeAccelerator::Client* client,
     bool success) {
   DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
@@ -110,7 +100,7 @@ void MojoMjpegDecodeAccelerator::OnDecodeAck(
   // Only NotifyError once.
   // Client::NotifyError() may trigger deletion of |this|, so calling it needs
   // to be the last thing done on this stack!
-  Client* client = nullptr;
+  MjpegDecodeAccelerator::Client* client = nullptr;
   std::swap(client, client_);
   client->NotifyError(bitstream_buffer_id, error);
 }
@@ -118,7 +108,7 @@ void MojoMjpegDecodeAccelerator::OnDecodeAck(
 void MojoMjpegDecodeAccelerator::OnLostConnectionToJpegDecoder() {
   DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
   OnDecodeAck(
-      kInvalidBitstreamBufferId,
+      MjpegDecodeAccelerator::kInvalidTaskId,
       ::chromeos_camera::MjpegDecodeAccelerator::Error::PLATFORM_FAILURE);
 }
 

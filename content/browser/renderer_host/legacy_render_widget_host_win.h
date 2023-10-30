@@ -1,9 +1,11 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_LEGACY_RENDER_WIDGET_HOST_WIN_H_
 #define CONTENT_BROWSER_RENDERER_HOST_LEGACY_RENDER_WIDGET_HOST_WIN_H_
+
+#include "base/memory/raw_ptr.h"
 
 // Must be included before <atlapp.h>.
 #include "base/win/atl.h"   // NOLINT(build/include_order)
@@ -15,10 +17,10 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "ui/accessibility/platform/ax_fragment_root_delegate_win.h"
-#include "ui/compositor/compositor_animation_observer.h"
+#include "ui/base/win/internal_constants.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -30,7 +32,7 @@ class WindowEventTarget;
 
 namespace content {
 
-class DirectManipulationBrowserTest;
+class DirectManipulationBrowserTestBase;
 class DirectManipulationHelper;
 class RenderWidgetHostViewAura;
 
@@ -63,7 +65,7 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
                               ATL::CWinTraits<WS_CHILD>>,
       public ui::AXFragmentRootDelegateWin {
  public:
-  DECLARE_WND_CLASS_EX(L"Chrome_RenderWidgetHostHWND", CS_DBLCLKS, 0)
+  DECLARE_WND_CLASS_EX(ui::kLegacyRenderWidgetHostHwnd, CS_DBLCLKS, 0)
 
   typedef ATL::CWindowImpl<LegacyRenderWidgetHostHWND,
                            ATL::CWindow,
@@ -75,6 +77,10 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
   // in.
   static LegacyRenderWidgetHostHWND* Create(HWND parent);
 
+  LegacyRenderWidgetHostHWND(const LegacyRenderWidgetHostHWND&) = delete;
+  LegacyRenderWidgetHostHWND& operator=(const LegacyRenderWidgetHostHWND&) =
+      delete;
+
   // Destroys the HWND managed by this class.
   void Destroy();
 
@@ -84,6 +90,7 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
     MESSAGE_HANDLER_EX(WM_PAINT, OnPaint)
     MESSAGE_HANDLER_EX(WM_NCPAINT, OnNCPaint)
     MESSAGE_HANDLER_EX(WM_ERASEBKGND, OnEraseBkGnd)
+    MESSAGE_HANDLER_EX(WM_INPUT, OnInput)
     MESSAGE_RANGE_HANDLER(WM_MOUSEFIRST, WM_MOUSELAST, OnMouseRange)
     MESSAGE_HANDLER_EX(WM_MOUSELEAVE, OnMouseLeave)
     MESSAGE_HANDLER_EX(WM_MOUSEACTIVATE, OnMouseActivate)
@@ -101,7 +108,6 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
                           OnMouseRange)
     MESSAGE_HANDLER_EX(WM_NCCALCSIZE, OnNCCalcSize)
     MESSAGE_HANDLER_EX(WM_SIZE, OnSize)
-    MESSAGE_HANDLER_EX(WM_WINDOWPOSCHANGED, OnWindowPosChanged)
     MESSAGE_HANDLER_EX(WM_DESTROY, OnDestroy)
     MESSAGE_HANDLER_EX(DM_POINTERHITTEST, OnPointerHitTest)
   END_MSG_MAP()
@@ -128,30 +134,29 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
     host_ = host;
   }
 
-  // DirectManipulation needs to poll for new events every frame while finger
-  // gesturing on touchpad.
-  void PollForNextEvent();
-
   // Return the root accessible object for either MSAA or UI Automation.
-  gfx::NativeViewAccessible GetOrCreateWindowRootAccessible();
+  gfx::NativeViewAccessible GetOrCreateWindowRootAccessible(
+      bool is_uia_request);
 
  protected:
   void OnFinalMessage(HWND hwnd) override;
 
  private:
   friend class AccessibilityObjectLifetimeWinBrowserTest;
-  friend class DirectManipulationBrowserTest;
+  friend class DirectManipulationBrowserTestBase;
 
-  explicit LegacyRenderWidgetHostHWND(HWND parent);
+  LegacyRenderWidgetHostHWND();
   ~LegacyRenderWidgetHostHWND() override;
 
-  bool Init();
+  // If initialization fails, deletes `this` and returns false.
+  bool InitOrDeleteSelf(HWND parent);
 
   // Returns the target to which the windows input events are forwarded.
   static ui::WindowEventTarget* GetWindowEventTarget(HWND parent);
 
   LRESULT OnEraseBkGnd(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnGetObject(UINT message, WPARAM w_param, LPARAM l_param);
+  LRESULT OnInput(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnKeyboardRange(UINT message, WPARAM w_param, LPARAM l_param,
                           BOOL& handled);
   LRESULT OnMouseLeave(UINT message, WPARAM w_param, LPARAM l_param);
@@ -168,7 +173,6 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
   LRESULT OnSetCursor(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnNCCalcSize(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnSize(UINT message, WPARAM w_param, LPARAM l_param);
-  LRESULT OnWindowPosChanged(UINT message, WPARAM w_param, LPARAM l_param);
   LRESULT OnDestroy(UINT message, WPARAM w_param, LPARAM l_param);
 
   LRESULT OnPointerHitTest(UINT message, WPARAM w_param, LPARAM l_param);
@@ -176,35 +180,35 @@ class CONTENT_EXPORT LegacyRenderWidgetHostHWND
   // Overridden from AXFragmentRootDelegateWin.
   gfx::NativeViewAccessible GetChildOfAXFragmentRoot() override;
   gfx::NativeViewAccessible GetParentOfAXFragmentRoot() override;
+  bool IsAXFragmentRootAControlElement() override;
 
   gfx::NativeViewAccessible GetOrCreateBrowserAccessibilityRoot();
-
-  void CreateAnimationObserver();
-
-  void DestroyAnimationObserver();
 
   Microsoft::WRL::ComPtr<IAccessible> window_accessible_;
 
   // Set to true if we turned on mouse tracking.
   bool mouse_tracking_enabled_;
 
-  RenderWidgetHostViewAura* host_;
+  raw_ptr<RenderWidgetHostViewAura> host_;
 
   // Some assistive software need to track the location of the caret.
   std::unique_ptr<ui::AXSystemCaretWin> ax_system_caret_;
 
-  // Implements IRawElementProviderFragmentRoot when UIA is enabled
+  // Implements IRawElementProviderFragmentRoot when UIA is enabled.
   std::unique_ptr<ui::AXFragmentRootWin> ax_fragment_root_;
+
+  // Set to true when we return a UIA object. Determines whether we need to
+  // call UIA to clean up object references on window destruction.
+  // This is important to avoid triggering a cross-thread COM call which could
+  // cause re-entrancy during teardown. https://crbug.com/1087553
+  bool did_return_uia_object_;
 
   // This class provides functionality to register the legacy window as a
   // Direct Manipulation consumer. This allows us to support smooth scroll
   // in Chrome on Windows 10.
   std::unique_ptr<DirectManipulationHelper> direct_manipulation_helper_;
 
-  std::unique_ptr<ui::CompositorAnimationObserver>
-      compositor_animation_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(LegacyRenderWidgetHostHWND);
+  base::WeakPtrFactory<LegacyRenderWidgetHostHWND> weak_factory_{this};
 };
 
 }  // namespace content

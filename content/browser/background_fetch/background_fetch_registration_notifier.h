@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/background_fetch/background_fetch.mojom.h"
 
 namespace content {
@@ -23,13 +23,20 @@ namespace content {
 class CONTENT_EXPORT BackgroundFetchRegistrationNotifier {
  public:
   BackgroundFetchRegistrationNotifier();
+
+  BackgroundFetchRegistrationNotifier(
+      const BackgroundFetchRegistrationNotifier&) = delete;
+  BackgroundFetchRegistrationNotifier& operator=(
+      const BackgroundFetchRegistrationNotifier&) = delete;
+
   ~BackgroundFetchRegistrationNotifier();
 
   // Registers the |observer| to be notified when fetches for the registration
   // identified by the |unique_id| progress.
   void AddObserver(
       const std::string& unique_id,
-      blink::mojom::BackgroundFetchRegistrationObserverPtr observer);
+      mojo::PendingRemote<blink::mojom::BackgroundFetchRegistrationObserver>
+          observer);
 
   // Notifies any registered observers for the |registration_data| of the
   // progress. This will cause JavaScript events to fire. Completed fetches must
@@ -68,7 +75,7 @@ class CONTENT_EXPORT BackgroundFetchRegistrationNotifier {
 
   // Storage of observers keyed by the |unique_id| of a registration.
   std::multimap<std::string,
-                blink::mojom::BackgroundFetchRegistrationObserverPtr>
+                mojo::Remote<blink::mojom::BackgroundFetchRegistrationObserver>>
       observers_;
 
   // URLs the observers care about, indexed by the unique_id of the observer.
@@ -80,8 +87,6 @@ class CONTENT_EXPORT BackgroundFetchRegistrationNotifier {
   std::map<std::string, std::pair<int, int>> num_requests_and_updates_;
 
   base::WeakPtrFactory<BackgroundFetchRegistrationNotifier> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BackgroundFetchRegistrationNotifier);
 };
 
 }  // namespace content

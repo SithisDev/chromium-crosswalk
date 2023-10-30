@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,9 @@
 
 #include <algorithm>
 
-#include "components/ui_devtools/Protocol.h"
+#include "base/check_op.h"
+#include "base/notreached.h"
+#include "components/ui_devtools/protocol.h"
 #include "components/ui_devtools/ui_element_delegate.h"
 
 namespace ui_devtools {
@@ -26,17 +28,16 @@ UIElement::ClassProperties::ClassProperties(
 
 UIElement::ClassProperties::~ClassProperties() = default;
 
+UIElement::Source::Source(std::string path, int line)
+    : path_(path), line_(line) {}
+
 // static
 void UIElement::ResetNodeId() {
   node_ids = 0;
 }
 
 UIElement::~UIElement() {
-  if (owns_children_) {
-    for (auto* child : children_)
-      delete child;
-  }
-  children_.clear();
+  ClearChildren();
 }
 
 std::string UIElement::GetTypeName() const {
@@ -80,6 +81,8 @@ void UIElement::AddOrderedChild(UIElement* child,
 }
 
 void UIElement::ClearChildren() {
+  for (auto* child : children_)
+    delete child;
   children_.clear();
 }
 
@@ -130,7 +133,29 @@ UIElement::UIElement(const UIElementType type,
 }
 
 bool UIElement::SetPropertiesFromString(const std::string& text) {
-  NOTREACHED();
+  return false;
+}
+
+void UIElement::AddSource(std::string path, int line) {
+  sources_.emplace_back(path, line);
+}
+
+std::vector<UIElement::Source> UIElement::GetSources() {
+  if (sources_.empty())
+    InitSources();
+
+  return sources_;
+}
+
+bool UIElement::FindMatchByElementID(const ui::ElementIdentifier& identifier) {
+  return false;
+}
+
+bool UIElement::DispatchMouseEvent(protocol::DOM::MouseEvent* event) {
+  return false;
+}
+
+bool UIElement::DispatchKeyEvent(protocol::DOM::KeyEvent* event) {
   return false;
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,6 @@
 #include "network_session_configurator_export.h"
 
 namespace features {
-
-// Enabled DNS over HTTPS
-// (https://tools.ietf.org/id/draft-ietf-doh-dns-over-https-12.txt).
-NETWORK_SESSION_CONFIGURATOR_EXPORT extern const base::Feature kDnsOverHttps;
 
 }  // namespace features
 

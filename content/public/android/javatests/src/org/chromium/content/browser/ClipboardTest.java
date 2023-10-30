@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@ package org.chromium.content.browser;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
-import android.support.test.filters.LargeTest;
 import android.text.TextUtils;
+
+import androidx.test.filters.LargeTest;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -17,12 +18,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.webcontents.WebContentsImpl;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.TestThreadUtils;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule.RerunWithUpdatedContainerView;
@@ -47,7 +47,7 @@ public class ClipboardTest {
     private static final String EXPECTED_HTML_NEEDLE = "http://www.example.com/";
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mActivityTestRule.launchContentShellWithUrl(TEST_PAGE_DATA_URL);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
     }
@@ -62,7 +62,7 @@ public class ClipboardTest {
     @Feature({"Clipboard", "TextInput"})
     @RerunWithUpdatedContainerView
     @DisabledTest(message = "https://crbug.com/791021")
-    public void testCopyDocumentFragment() throws Throwable {
+    public void testCopyDocumentFragment() {
         ClipboardManager clipboardManager =
                 TestThreadUtils.runOnUiThreadBlockingNoException(new Callable<ClipboardManager>() {
                     @Override
@@ -83,12 +83,7 @@ public class ClipboardTest {
         copy(webContents);
 
         // Waits until data has been made available on the Android clipboard.
-        CriteriaHelper.pollUiThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return hasPrimaryClip(clipboardManager);
-            }
-        });
+        CriteriaHelper.pollUiThread(() -> hasPrimaryClip(clipboardManager));
 
         // Verify that the data on the clipboard is what we expect it to be. For Android JB MR2
         // and higher we expect HTML content, for other versions the plain-text representation.

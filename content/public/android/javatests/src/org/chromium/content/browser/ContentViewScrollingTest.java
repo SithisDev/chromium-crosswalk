@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,13 @@ package org.chromium.content.browser;
 
 import android.os.SystemClock;
 import android.support.test.InstrumentationRegistry;
-import android.support.test.filters.SmallTest;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
+import androidx.test.filters.SmallTest;
+
+import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
@@ -18,12 +20,12 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
+import org.chromium.base.test.util.Criteria;
+import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content_public.browser.ViewEventSink.InternalAccessDelegate;
-import org.chromium.content_public.browser.test.util.Criteria;
-import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.test.util.WebContentsUtils;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule.RerunWithUpdatedContainerView;
@@ -87,48 +89,49 @@ public class ContentViewScrollingTest {
     private RenderCoordinatesImpl mCoordinates;
 
     private void waitForScroll(final boolean hugLeft, final boolean hugTop) {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                // Scrolling and flinging don't result in exact coordinates.
-                final int minThreshold = 5;
-                final int maxThreshold = 100;
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            // Scrolling and flinging don't result in exact coordinates.
+            final int minThreshold = 5;
+            final int maxThreshold = 100;
+            if (hugLeft) {
+                Criteria.checkThat(
+                        mCoordinates.getScrollXPixInt(), Matchers.lessThan(minThreshold));
+            } else {
+                Criteria.checkThat(
+                        mCoordinates.getScrollXPixInt(), Matchers.greaterThan(maxThreshold));
+            }
 
-                boolean xCorrect = hugLeft ? mCoordinates.getScrollXPixInt() < minThreshold
-                                           : mCoordinates.getScrollXPixInt() > maxThreshold;
-                boolean yCorrect = hugTop ? mCoordinates.getScrollYPixInt() < minThreshold
-                                          : mCoordinates.getScrollYPixInt() > maxThreshold;
-                return xCorrect && yCorrect;
+            if (hugTop) {
+                Criteria.checkThat(
+                        mCoordinates.getScrollYPixInt(), Matchers.lessThan(minThreshold));
+            } else {
+                Criteria.checkThat(
+                        mCoordinates.getScrollYPixInt(), Matchers.greaterThan(maxThreshold));
             }
         });
     }
 
     private void waitForScrollToPosition(final int x, final int y) {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                // Scrolling and flinging don't result in exact coordinates.
-                final int threshold = 5;
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            // Scrolling and flinging don't result in exact coordinates.
+            final int threshold = 5;
 
-                boolean xCorrect = (mCoordinates.getScrollXPixInt() < x + threshold
-                        && mCoordinates.getScrollXPixInt() > x - threshold);
-                boolean yCorrect = (mCoordinates.getScrollYPixInt() < y + threshold
-                        && mCoordinates.getScrollYPixInt() > y - threshold);
-                return xCorrect && yCorrect;
-            }
+            Criteria.checkThat(mCoordinates.getScrollXPixInt(),
+                    Matchers.allOf(
+                            Matchers.lessThan(x + threshold), Matchers.greaterThan(x - threshold)));
+            Criteria.checkThat(mCoordinates.getScrollYPixInt(),
+                    Matchers.allOf(
+                            Matchers.lessThan(y + threshold), Matchers.greaterThan(y - threshold)));
         });
     }
 
     private void waitForViewportInitialization() {
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return mCoordinates.getLastFrameViewportWidthPixInt() != 0;
-            }
+        CriteriaHelper.pollInstrumentationThread(() -> {
+            Criteria.checkThat(mCoordinates.getLastFrameViewportWidthPixInt(), Matchers.not(0));
         });
     }
 
-    private void fling(final int vx, final int vy) throws Throwable {
+    private void fling(final int vx, final int vy) {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
@@ -138,7 +141,7 @@ public class ContentViewScrollingTest {
         });
     }
 
-    private void scrollTo(final int x, final int y) throws Throwable {
+    private void scrollTo(final int x, final int y) {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
@@ -147,7 +150,7 @@ public class ContentViewScrollingTest {
         });
     }
 
-    private void scrollBy(final int dx, final int dy) throws Throwable {
+    private void scrollBy(final int dx, final int dy) {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
@@ -156,8 +159,7 @@ public class ContentViewScrollingTest {
         });
     }
 
-    private void scrollWithJoystick(final float deltaAxisX, final float deltaAxisY)
-            throws Throwable {
+    private void scrollWithJoystick(final float deltaAxisX, final float deltaAxisY) {
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
@@ -173,7 +175,7 @@ public class ContentViewScrollingTest {
     }
 
     @Before
-    public void setUp() throws Exception {
+    public void setUp() {
         mActivityTestRule.launchContentShellWithUrl(LARGE_PAGE);
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
         mCoordinates = mActivityTestRule.getRenderCoordinates();
@@ -187,8 +189,8 @@ public class ContentViewScrollingTest {
     @Test
     @SmallTest
     @Feature({"Main"})
-    @RetryOnFailure
-    public void testFling() throws Throwable {
+    @DisabledTest(message = "Test is flaky. crbug.com/1058233")
+    public void testFling() {
         // Scaling the initial velocity by the device scale factor ensures that
         // it's of sufficient magnitude for all displays densities.
         float deviceScaleFactor = InstrumentationRegistry.getInstrumentation()
@@ -222,8 +224,8 @@ public class ContentViewScrollingTest {
     @Test
     @SmallTest
     @Feature({"Main"})
-    @RetryOnFailure
-    public void testFlingDistance() throws Throwable {
+    @DisabledTest(message = "Test is flaky. crbug.com/1132544")
+    public void testFlingDistance() {
         // Scaling the initial velocity by the device scale factor ensures that
         // it's of sufficient magnitude for all displays densities.
         float deviceScaleFactor = InstrumentationRegistry.getInstrumentation()
@@ -234,7 +236,7 @@ public class ContentViewScrollingTest {
         int velocity = (int) (1000 * deviceScaleFactor);
         // Expected total fling distance calculated by FlingCurve with initial
         // velocity 1000.
-        int expected_dist = (int) (180 * deviceScaleFactor);
+        int expected_dist = (int) (194 * deviceScaleFactor);
 
         // Vertical fling to lower-left.
         fling(0, -velocity);
@@ -257,8 +259,7 @@ public class ContentViewScrollingTest {
     @SmallTest
     @RerunWithUpdatedContainerView
     @Feature({"Main"})
-    @RetryOnFailure
-    public void testScrollTo() throws Throwable {
+    public void testScrollTo() {
         // Vertical scroll to lower-left.
         scrollTo(0, 2500);
         waitForScroll(true, false);
@@ -284,8 +285,7 @@ public class ContentViewScrollingTest {
     @SmallTest
     @RerunWithUpdatedContainerView
     @Feature({"Main"})
-    @RetryOnFailure
-    public void testScrollBy() throws Throwable {
+    public void testScrollBy() {
         scrollTo(0, 0);
         waitForScroll(true, true);
 
@@ -317,7 +317,7 @@ public class ContentViewScrollingTest {
     @Test
     @SmallTest
     @Feature({"Main"})
-    public void testJoystickScroll() throws Throwable {
+    public void testJoystickScroll() {
         scrollTo(0, 0);
         waitForScroll(true, true);
 
@@ -351,8 +351,7 @@ public class ContentViewScrollingTest {
     @SmallTest
     @RerunWithUpdatedContainerView
     @Feature({"Main"})
-    @RetryOnFailure
-    public void testOverScroll() throws Throwable {
+    public void testOverScroll() {
         // Overscroll lower-left.
         scrollTo(-10000, 10000);
         waitForScroll(true, false);
@@ -382,8 +381,7 @@ public class ContentViewScrollingTest {
     @SmallTest
     @RerunWithUpdatedContainerView
     @Feature({"Main"})
-    @RetryOnFailure
-    public void testOnScrollChanged() throws Throwable {
+    public void testOnScrollChanged() {
         final int scrollToX = mCoordinates.getScrollXPixInt() + 2500;
         final int scrollToY = mCoordinates.getScrollYPixInt() + 2500;
         final TestInternalAccessDelegate accessDelegate = new TestInternalAccessDelegate();
@@ -395,11 +393,6 @@ public class ContentViewScrollingTest {
         });
         scrollTo(scrollToX, scrollToY);
         waitForScroll(false, false);
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                return accessDelegate.isScrollChanged();
-            }
-        });
+        CriteriaHelper.pollInstrumentationThread(accessDelegate::isScrollChanged);
     }
 }

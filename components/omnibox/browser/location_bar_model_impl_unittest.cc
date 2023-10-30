@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,22 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
+#include "build/build_config.h"
+#include "components/dom_distiller/core/url_constants.h"
+#include "components/dom_distiller/core/url_utils.h"
 #include "components/omnibox/browser/location_bar_model_delegate.h"
 #include "components/omnibox/browser/test_omnibox_client.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/color_palette.h"
+#include "ui/gfx/favicon_size.h"
+#include "ui/gfx/paint_vector_icon.h"
 #include "url/gurl.h"
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+#include "components/omnibox/browser/vector_icons.h"  // nogncheck
+#include "components/vector_icons/vector_icons.h"     // nogncheck
+#endif
 
 namespace {
 
@@ -29,10 +39,10 @@ class FakeLocationBarModelDelegate : public LocationBarModelDelegate {
   }
 
   // LocationBarModelDelegate:
-  base::string16 FormattedStringWithEquivalentMeaning(
+  std::u16string FormattedStringWithEquivalentMeaning(
       const GURL& url,
-      const base::string16& formatted_url) const override {
-    return formatted_url + base::ASCIIToUTF16("/TestSuffix");
+      const std::u16string& formatted_url) const override {
+    return formatted_url + u"/TestSuffix";
   }
 
   bool GetURL(GURL* url) const override {
@@ -40,7 +50,7 @@ class FakeLocationBarModelDelegate : public LocationBarModelDelegate {
     return true;
   }
 
-  bool ShouldPreventElision() const override { return should_prevent_elision_; }
+  bool ShouldPreventElision() override { return should_prevent_elision_; }
 
   security_state::SecurityLevel GetSecurityLevel() const override {
     return security_level_;
@@ -54,9 +64,9 @@ class FakeLocationBarModelDelegate : public LocationBarModelDelegate {
     return state;
   }
 
-  bool IsInstantNTP() const override { return false; }
+  bool IsNewTabPage() const override { return false; }
 
-  bool IsNewTabPage(const GURL& url) const override { return false; }
+  bool IsNewTabPageURL(const GURL& url) const override { return false; }
 
   bool IsHomePage(const GURL& url) const override { return false; }
 
@@ -88,130 +98,106 @@ class LocationBarModelImplTest : public testing::Test {
   LocationBarModelImpl* model() { return &model_; }
 
  private:
-  base::test::ScopedTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   FakeLocationBarModelDelegate delegate_;
   LocationBarModelImpl model_;
 };
 
-TEST_F(LocationBarModelImplTest,
-       DisplayUrlAppliesFormattedStringWithEquivalentMeaning) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatures({omnibox::kHideSteadyStateUrlScheme,
-                                 omnibox::kHideSteadyStateUrlTrivialSubdomains},
-                                {});
+TEST_F(LocationBarModelImplTest, FormatsReaderModeUrls) {
+  const GURL http_url("http://www.example.com/article.html");
+  // Get the real article's URL shown to the user.
+  delegate()->SetURL(http_url);
+  std::u16string originalDisplayUrl = model()->GetURLForDisplay();
+  std::u16string originalFormattedFullUrl = model()->GetFormattedFullURL();
+  // We expect that they don't start with "http://." We want the reader mode
+  // URL shown to the user to be the same as this original URL.
+#if BUILDFLAG(IS_IOS)
+  EXPECT_EQ(u"example.com/TestSuffix", originalDisplayUrl);
+#else   // #!BUILDFLAG(IS_IOS)
+  EXPECT_EQ(u"example.com/article.html/TestSuffix", originalDisplayUrl);
+#endif  // #defined (OS_IOS)
+  EXPECT_EQ(u"www.example.com/article.html/TestSuffix",
+            originalFormattedFullUrl);
 
-  delegate()->SetURL(GURL("http://www.google.com/"));
+  GURL distilled = dom_distiller::url_utils::GetDistillerViewUrlFromUrl(
+      dom_distiller::kDomDistillerScheme, http_url, "title");
+  // Ensure the test is set up properly by checking the reader mode URL has
+  // the reader mode scheme.
+  EXPECT_EQ(dom_distiller::kDomDistillerScheme, distilled.scheme());
+  delegate()->SetURL(distilled);
 
-  // Verify that both the full formatted URL and the display URL add the test
-  // suffix.
-  EXPECT_EQ(base::ASCIIToUTF16("www.google.com/TestSuffix"),
+  // The user should see the same URL seen for the original article.
+  EXPECT_EQ(originalDisplayUrl, model()->GetURLForDisplay());
+  EXPECT_EQ(originalFormattedFullUrl, model()->GetFormattedFullURL());
+
+  // Similarly, https scheme should also be hidden, except from
+  // GetFormattedFullURL, because kFormatUrlOmitDefaults does not omit https.
+  const GURL https_url("https://www.example.com/article.html");
+  distilled = dom_distiller::url_utils::GetDistillerViewUrlFromUrl(
+      dom_distiller::kDomDistillerScheme, https_url, "title");
+  delegate()->SetURL(distilled);
+  EXPECT_EQ(originalDisplayUrl, model()->GetURLForDisplay());
+  EXPECT_EQ(u"https://www.example.com/article.html/TestSuffix",
             model()->GetFormattedFullURL());
-  EXPECT_EQ(base::ASCIIToUTF16("google.com/TestSuffix"),
+
+  // Invalid dom-distiller:// URLs should be shown, because they do not
+  // correspond to any article.
+  delegate()->SetURL(GURL(("chrome-distiller://abc/?url=invalid")));
+#if BUILDFLAG(IS_IOS)
+  EXPECT_EQ(u"chrome-distiller://abc/TestSuffix", model()->GetURLForDisplay());
+#else
+  EXPECT_EQ(u"chrome-distiller://abc/?url=invalid/TestSuffix",
             model()->GetURLForDisplay());
+#endif
+  EXPECT_EQ(u"chrome-distiller://abc/?url=invalid/TestSuffix",
+            model()->GetFormattedFullURL());
 }
 
-TEST_F(LocationBarModelImplTest, PreventElisionWorks) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatures(
-      {omnibox::kHideSteadyStateUrlScheme,
-       omnibox::kHideSteadyStateUrlTrivialSubdomains, omnibox::kQueryInOmnibox},
-      {});
-
+// TODO(https://crbug.com/1010418): Fix flakes on linux_chromium_asan_rel_ng and
+// re-enable this test.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_PreventElisionWorks DISABLED_PreventElisionWorks
+#else
+#define MAYBE_PreventElisionWorks PreventElisionWorks
+#endif
+TEST_F(LocationBarModelImplTest, MAYBE_PreventElisionWorks) {
   delegate()->SetShouldPreventElision(true);
   delegate()->SetURL(GURL("https://www.google.com/search?q=foo+query+unelide"));
 
-  EXPECT_EQ(base::ASCIIToUTF16(
-                "https://www.google.com/search?q=foo+query+unelide/TestSuffix"),
+  EXPECT_EQ(u"https://www.google.com/search?q=foo+query+unelide/TestSuffix",
             model()->GetURLForDisplay());
 
-  // Verify that query in omnibox is turned off.
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::SECURE);
-  EXPECT_FALSE(model()->GetDisplaySearchTerms(nullptr));
+  // Test that HTTP elisions are prevented.
+  delegate()->SetURL(GURL("http://www.google.com/search?q=foo+query+unelide"));
+  EXPECT_EQ(u"http://www.google.com/search?q=foo+query+unelide/TestSuffix",
+            model()->GetURLForDisplay());
 }
 
-TEST_F(LocationBarModelImplTest, QueryInOmniboxFeatureFlagWorks) {
-  delegate()->SetURL(kValidSearchResultsPage);
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::SECURE);
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+// Tests GetVectorIcon returns the correct security indicator icon.
+TEST_F(LocationBarModelImplTest, GetVectorIcon) {
+  delegate()->SetSecurityLevel(security_state::SecurityLevel::WARNING);
 
-  EXPECT_FALSE(model()->GetDisplaySearchTerms(nullptr));
+  gfx::ImageSkia expected_icon =
+      gfx::CreateVectorIcon(vector_icons::kNotSecureWarningIcon,
+                            gfx::kFaviconSize, gfx::kPlaceholderColor);
 
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(omnibox::kQueryInOmnibox);
+  gfx::ImageSkia icon = gfx::CreateVectorIcon(
+      model()->GetVectorIcon(), gfx::kFaviconSize, gfx::kPlaceholderColor);
 
-  EXPECT_TRUE(model()->GetDisplaySearchTerms(nullptr));
+  EXPECT_EQ(icon.bitmap(), expected_icon.bitmap());
+}
+#endif  // !BUILDFLAG(IS_IOS)
+
+#if BUILDFLAG(IS_IOS)
+
+// Test that blob:http://example.test/foobar is displayed as "example.test" on
+// iOS.
+TEST_F(LocationBarModelImplTest, BlobDisplayURLIOS) {
+  delegate()->SetURL(GURL("blob:http://example.test/foo"));
+  EXPECT_EQ(u"example.test/TestSuffix", model()->GetURLForDisplay());
 }
 
-TEST_F(LocationBarModelImplTest, QueryInOmniboxSecurityLevel) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(omnibox::kQueryInOmnibox);
-
-  delegate()->SetURL(kValidSearchResultsPage);
-
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::SECURE);
-  EXPECT_TRUE(model()->GetDisplaySearchTerms(nullptr));
-
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::EV_SECURE);
-  EXPECT_TRUE(model()->GetDisplaySearchTerms(nullptr));
-
-  // Insecure levels should not be allowed to display search terms.
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::NONE);
-  EXPECT_FALSE(model()->GetDisplaySearchTerms(nullptr));
-
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::DANGEROUS);
-  EXPECT_FALSE(model()->GetDisplaySearchTerms(nullptr));
-
-  // But ignore the level if the connection info has not been initialized.
-  delegate()->SetVisibleSecurityStateConnectionInfoUninitialized();
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::NONE);
-  EXPECT_TRUE(model()->GetDisplaySearchTerms(nullptr));
-}
-
-TEST_F(LocationBarModelImplTest,
-       QueryInOmniboxDefaultSearchProviderWithAndWithoutQuery) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(omnibox::kQueryInOmnibox);
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::SECURE);
-
-  delegate()->SetURL(kValidSearchResultsPage);
-  base::string16 result;
-  EXPECT_TRUE(model()->GetDisplaySearchTerms(&result));
-  EXPECT_EQ(base::ASCIIToUTF16("foo query"), result);
-
-  const GURL kDefaultSearchProviderURLWithNoQuery(
-      "https://www.google.com/maps");
-  result.clear();
-  delegate()->SetURL(kDefaultSearchProviderURLWithNoQuery);
-  EXPECT_FALSE(model()->GetDisplaySearchTerms(&result));
-  EXPECT_EQ(base::string16(), result);
-}
-
-TEST_F(LocationBarModelImplTest, QueryInOmniboxNonDefaultSearchProvider) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(omnibox::kQueryInOmnibox);
-
-  const GURL kNonDefaultSearchProvider(
-      "https://search.yahoo.com/search?ei=UTF-8&fr=crmas&p=foo+query");
-  delegate()->SetURL(kNonDefaultSearchProvider);
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::SECURE);
-
-  base::string16 result;
-  EXPECT_FALSE(model()->GetDisplaySearchTerms(&result));
-  EXPECT_EQ(base::string16(), result);
-}
-
-TEST_F(LocationBarModelImplTest, QueryInOmniboxLookalikeURL) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(omnibox::kQueryInOmnibox);
-
-  delegate()->SetSecurityLevel(security_state::SecurityLevel::SECURE);
-
-  const GURL kLookalikeURLQuery(
-      "https://www.google.com/search?q=lookalike.com");
-  delegate()->SetURL(kLookalikeURLQuery);
-
-  base::string16 result;
-  EXPECT_FALSE(model()->GetDisplaySearchTerms(&result));
-  EXPECT_EQ(base::string16(), result);
-}
+#endif  // BUILDFLAG(IS_IOS)
 
 }  // namespace

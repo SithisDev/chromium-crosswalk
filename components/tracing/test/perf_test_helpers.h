@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include <vector>
 
-#include "base/macros.h"
 #include "base/time/time.h"
 
 namespace tracing {
@@ -19,14 +18,16 @@ namespace tracing {
 // with value name passed to constructor.
 class ScopedStopwatch {
  public:
-  ScopedStopwatch(const std::string& name);
+  ScopedStopwatch(const std::string& metric);
+
+  ScopedStopwatch(const ScopedStopwatch&) = delete;
+  ScopedStopwatch& operator=(const ScopedStopwatch&) = delete;
+
   ~ScopedStopwatch();
 
  private:
   base::TimeTicks begin_;
-  const std::string name_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedStopwatch);
+  const std::string metric_;
 };
 
 // Measure median time of loop iterations.
@@ -40,17 +41,19 @@ class ScopedStopwatch {
 // with value name passed to constructor.
 class IterableStopwatch {
  public:
-  IterableStopwatch(const std::string& name);
+  IterableStopwatch(const std::string& metric);
+
+  IterableStopwatch(const IterableStopwatch&) = delete;
+  IterableStopwatch& operator=(const IterableStopwatch&) = delete;
+
   ~IterableStopwatch();
 
   void NextLap();
 
  private:
   base::TimeTicks begin_;
-  std::vector<int64_t> laps_;
-  const std::string name_;
-
-  DISALLOW_COPY_AND_ASSIGN(IterableStopwatch);
+  std::vector<double> laps_;
+  const std::string metric_;
 };
 
 }  // namespace tracing

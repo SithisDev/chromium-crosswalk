@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,20 +8,40 @@
 #include <list>
 #include <memory>
 #include <set>
-#include <utility>
+#include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
+#include "base/scoped_observation.h"
 #include "base/unguessable_token.h"
+#include "content/browser/browser_interface_broker_impl.h"
+#include "content/browser/buckets/bucket_context.h"
+#include "content/browser/renderer_host/code_cache_host_impl.h"
+#include "content/browser/renderer_host/policy_container_host.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/global_routing_id.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "services/network/public/mojom/url_loader_factory.mojom.h"
-#include "services/service_manager/public/mojom/interface_provider.mojom.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_process_host_observer.h"
+#include "content/public/browser/shared_worker_instance.h"
+#include "media/mojo/mojom/video_decode_perf_history.mojom.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/unique_receiver_set.h"
+#include "net/base/network_isolation_key.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
+#include "services/network/public/cpp/cross_origin_embedder_policy.h"
+#include "services/network/public/mojom/url_loader_factory.mojom-forward.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/mojom/broadcastchannel/broadcast_channel.mojom.h"
 #include "third_party/blink/public/mojom/devtools/devtools_agent.mojom.h"
+#include "third_party/blink/public/mojom/loader/code_cache.mojom.h"
+#include "third_party/blink/public/mojom/loader/fetch_client_settings_object.mojom-forward.h"
+#include "third_party/blink/public/mojom/payments/payment_app.mojom-forward.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_provider.mojom.h"
+#include "third_party/blink/public/mojom/webtransport/web_transport_connector.mojom.h"
 #include "third_party/blink/public/mojom/worker/shared_worker.mojom.h"
 #include "third_party/blink/public/mojom/worker/shared_worker_client.mojom.h"
 #include "third_party/blink/public/mojom/worker/shared_worker_factory.mojom.h"
@@ -32,41 +52,44 @@ class GURL;
 
 namespace blink {
 class MessagePortChannel;
-class URLLoaderFactoryBundleInfo;
-}
+class PendingURLLoaderFactoryBundle;
+class StorageKey;
+}  // namespace blink
 
 namespace content {
 
-class AppCacheNavigationHandle;
-class ServiceWorkerNavigationHandle;
+class ContentBrowserClient;
+class CrossOriginEmbedderPolicyReporter;
+class ServiceWorkerMainResourceHandle;
 class ServiceWorkerObjectHost;
 class SharedWorkerContentSettingsProxyImpl;
-class SharedWorkerInstance;
 class SharedWorkerServiceImpl;
+class SiteInstanceImpl;
 
-// The SharedWorkerHost is the interface that represents the browser side of
-// the browser <-> worker communication channel. This is owned by
-// SharedWorkerServiceImpl and destructed when a worker context or worker's
-// message filter is closed.
-class CONTENT_EXPORT SharedWorkerHost
-    : public blink::mojom::SharedWorkerHost,
-      public service_manager::mojom::InterfaceProvider {
+// SharedWorkerHost is the browser-side host of a single shared worker running
+// in the renderer. This class is owned by the SharedWorkerServiceImpl of the
+// current BrowserContext.
+class CONTENT_EXPORT SharedWorkerHost : public blink::mojom::SharedWorkerHost,
+                                        public RenderProcessHostObserver,
+                                        public BucketContext {
  public:
-  SharedWorkerHost(SharedWorkerServiceImpl* service,
-                   std::unique_ptr<SharedWorkerInstance> instance,
-                   int worker_process_id);
+  SharedWorkerHost(
+      SharedWorkerServiceImpl* service,
+      const SharedWorkerInstance& instance,
+      scoped_refptr<SiteInstanceImpl> site_instance,
+      std::vector<network::mojom::ContentSecurityPolicyPtr>
+          content_security_policies,
+      scoped_refptr<PolicyContainerHost> creator_policy_container_host,
+      network::mojom::ClientSecurityStatePtr creator_client_security_state);
+
+  SharedWorkerHost(const SharedWorkerHost&) = delete;
+  SharedWorkerHost& operator=(const SharedWorkerHost&) = delete;
+
   ~SharedWorkerHost() override;
 
-  // Allows overriding the URLLoaderFactory creation for subresources.
-  // Passing a null callback will restore the default behavior.
-  // This method must be called either on the UI thread or before threads start.
-  // This callback is run on the UI thread.
-  using CreateNetworkFactoryCallback = base::RepeatingCallback<void(
-      network::mojom::URLLoaderFactoryRequest request,
-      int worker_process_id,
-      network::mojom::URLLoaderFactoryPtrInfo original_factory)>;
-  static void SetNetworkFactoryForTesting(
-      const CreateNetworkFactoryCallback& url_loader_factory_callback);
+  // Returns the RenderProcessHost where this shared worker lives.
+  // SharedWorkerHost can't outlive the RenderProcessHost so this can't be null.
+  RenderProcessHost* GetProcessHost();
 
   // Starts the SharedWorker in the renderer process.
   //
@@ -81,106 +104,202 @@ class CONTENT_EXPORT SharedWorkerHost
   // |controller| contains information about the service worker controller. Once
   // a ServiceWorker object about the controller is prepared, it is registered
   // to |controller_service_worker_object_host|.
+  //
+  // |outside_fetch_client_settings_object| is used for loading the shared
+  // worker main script by the browser process, sent to the renderer process,
+  // and then used to load the script.
+  //
+  // |client| is used to determine the IP address space of the worker if the
+  // script is fetched from a URL with a special scheme known only to the
+  // embedder.
   void Start(
-      blink::mojom::SharedWorkerFactoryPtr factory,
+      mojo::PendingRemote<blink::mojom::SharedWorkerFactory> factory,
       blink::mojom::WorkerMainScriptLoadParamsPtr main_script_load_params,
-      std::unique_ptr<blink::URLLoaderFactoryBundleInfo>
+      std::unique_ptr<blink::PendingURLLoaderFactoryBundle>
           subresource_loader_factories,
       blink::mojom::ControllerServiceWorkerInfoPtr controller,
       base::WeakPtr<ServiceWorkerObjectHost>
-          controller_service_worker_object_host);
+          controller_service_worker_object_host,
+      blink::mojom::FetchClientSettingsObjectPtr
+          outside_fetch_client_settings_object,
+      const GURL& final_response_url,
+      ContentBrowserClient* client);
 
   void AllowFileSystem(const GURL& url,
                        base::OnceCallback<void(bool)> callback);
   void AllowIndexedDB(const GURL& url, base::OnceCallback<void(bool)> callback);
   void AllowCacheStorage(const GURL& url,
                          base::OnceCallback<void(bool)> callback);
+  void AllowWebLocks(const GURL& url, base::OnceCallback<void(bool)> callback);
 
-  // Terminates the given worker, i.e. based on a UI action.
-  void TerminateWorker();
+  void CreateWebTransportConnector(
+      mojo::PendingReceiver<blink::mojom::WebTransportConnector> receiver);
+  void BindCacheStorage(
+      mojo::PendingReceiver<blink::mojom::CacheStorage> receiver);
+  void CreateBroadcastChannelProvider(
+      mojo::PendingReceiver<blink::mojom::BroadcastChannelProvider> receiver);
+  void CreateBucketManagerHost(
+      mojo::PendingReceiver<blink::mojom::BucketManagerHost> receiver);
 
-  void AddClient(blink::mojom::SharedWorkerClientPtr client,
-                 int client_process_id,
-                 int frame_id,
-                 const blink::MessagePortChannel& port);
+  // Causes this instance to be deleted, which will terminate the worker. May
+  // be done based on a UI action.
+  void Destruct();
 
-  void BindDevToolsAgent(blink::mojom::DevToolsAgentHostAssociatedPtrInfo host,
-                         blink::mojom::DevToolsAgentAssociatedRequest request);
+  void AddClient(mojo::PendingRemote<blink::mojom::SharedWorkerClient> client,
+                 GlobalRenderFrameHostId client_render_frame_host_id,
+                 const blink::MessagePortChannel& port,
+                 ukm::SourceId client_ukm_source_id);
 
-  void SetAppCacheHandle(
-      std::unique_ptr<AppCacheNavigationHandle> appcache_handle);
   void SetServiceWorkerHandle(
-      std::unique_ptr<ServiceWorkerNavigationHandle> service_worker_handle);
+      std::unique_ptr<ServiceWorkerMainResourceHandle> service_worker_handle);
 
-  SharedWorkerInstance* instance() { return instance_.get(); }
-  int worker_process_id() const { return worker_process_id_; }
-  bool IsAvailable() const;
+  // Removes all clients whose RenderFrameHost has been destroyed before the
+  // shared worker was started.
+  void PruneNonExistentClients();
+
+  // Returns true if this worker is connected to at least one client.
+  bool HasClients() const;
+
+  SiteInstanceImpl* site_instance() { return site_instance_.get(); }
+
+  bool started() const { return started_; }
+
+  const GURL& final_response_url() const { return final_response_url_; }
+
+  const blink::SharedWorkerToken& token() const { return token_; }
+
+  const SharedWorkerInstance& instance() const { return instance_; }
+
+  const network::CrossOriginEmbedderPolicy& cross_origin_embedder_policy()
+      const {
+    return worker_client_security_state_->cross_origin_embedder_policy;
+  }
+
+  const network::mojom::ClientSecurityStatePtr& client_security_state() const {
+    return worker_client_security_state_;
+  }
+
+  const std::vector<network::mojom::ContentSecurityPolicyPtr>&
+  content_security_policies() const {
+    return content_security_policies_;
+  }
+
+  ukm::SourceId ukm_source_id() const { return ukm_source_id_; }
+
+  const base::UnguessableToken& GetDevToolsToken() const;
+
+  // Signals the remote worker to terminate and returns the mojo::Remote
+  // instance so the caller can be notified when the connection is lost. Should
+  // be called right before deleting this instance.
+  mojo::Remote<blink::mojom::SharedWorker> TerminateRemoteWorkerForTesting();
 
   base::WeakPtr<SharedWorkerHost> AsWeakPtr();
+
+  net::NetworkIsolationKey GetNetworkIsolationKey() const;
+
+  net::NetworkAnonymizationKey GetNetworkAnonymizationKey() const;
+
+  const blink::StorageKey& GetStorageKey() const;
+
+  const base::UnguessableToken& GetReportingSource() const {
+    return reporting_source_;
+  }
+
+  void ReportNoBinderForInterface(const std::string& error);
+
+  void CreateCodeCacheHost(
+      mojo::PendingReceiver<blink::mojom::CodeCacheHost> receiver);
+
+  // Creates a network factory params for subresource requests from this worker.
+  network::mojom::URLLoaderFactoryParamsPtr
+  CreateNetworkFactoryParamsForSubresources();
+
+  // BucketContext:
+  blink::StorageKey GetBucketStorageKey() override;
+  blink::mojom::PermissionStatus GetPermissionStatus(
+      blink::PermissionType permission_type) override;
+  void BindCacheStorageForBucket(
+      const storage::BucketInfo& bucket,
+      mojo::PendingReceiver<blink::mojom::CacheStorage> receiver) override;
 
  private:
   friend class SharedWorkerHostTest;
 
-  enum class Phase {
-    kInitial,
-    kStarted,
-    kClosed,
-    kTerminationSent,
-    kTerminationSentAndClosed
-  };
-
   class ScopedDevToolsHandle;
+  class ScopedProcessHostRef;
 
   // Contains information about a client connecting to this shared worker.
   struct ClientInfo {
-    ClientInfo(blink::mojom::SharedWorkerClientPtr client,
+    ClientInfo(mojo::Remote<blink::mojom::SharedWorkerClient> client,
                int connection_request_id,
-               int client_process_id,
-               int frame_id);
+               GlobalRenderFrameHostId render_frame_host_id);
     ~ClientInfo();
-    blink::mojom::SharedWorkerClientPtr client;
+    mojo::Remote<blink::mojom::SharedWorkerClient> client;
     const int connection_request_id;
-    const int client_process_id;
-    const int frame_id;
+    const GlobalRenderFrameHostId render_frame_host_id;
   };
 
   using ClientList = std::list<ClientInfo>;
 
+  // Returns true if the COEP policy of the worker and the creator are
+  // compatible.
+  bool CheckCrossOriginEmbedderPolicy(
+      network::CrossOriginEmbedderPolicy creator_cross_origin_embedder_policy,
+      network::CrossOriginEmbedderPolicy worker_cross_origin_embedder_policy);
+
   // blink::mojom::SharedWorkerHost methods:
   void OnConnected(int connection_request_id) override;
   void OnContextClosed() override;
-  void OnReadyForInspection() override;
-  void OnScriptLoadFailed() override;
+  void OnReadyForInspection(
+      mojo::PendingRemote<blink::mojom::DevToolsAgent>,
+      mojo::PendingReceiver<blink::mojom::DevToolsAgentHost>) override;
+  void OnScriptLoadFailed(const std::string& error_message) override;
   void OnFeatureUsed(blink::mojom::WebFeature feature) override;
 
+  // RenderProcessHostObserver methods:
+  void RenderProcessHostDestroyed(RenderProcessHost* host) override;
+
   // Returns the frame ids of this worker's clients.
-  std::vector<GlobalFrameRoutingId> GetRenderFrameIDsForWorker();
+  std::vector<GlobalRenderFrameHostId> GetRenderFrameIDsForWorker();
 
   void AllowFileSystemResponse(base::OnceCallback<void(bool)> callback,
                                bool allowed);
   void OnClientConnectionLost();
   void OnWorkerConnectionLost();
 
-  // service_manager::mojom::InterfaceProvider:
-  void GetInterface(const std::string& interface_name,
-                    mojo::ScopedMessagePipeHandle interface_pipe) override;
+  // Creates a network factory for subresource requests from this worker. The
+  // network factory is meant to be passed to the renderer.
+  mojo::PendingRemote<network::mojom::URLLoaderFactory>
+  CreateNetworkFactoryForSubresources(bool* bypass_redirect_checks);
 
-  void CreateNetworkFactory(network::mojom::URLLoaderFactoryRequest request);
-
-  void AdvanceTo(Phase phase);
-
-  mojo::Binding<blink::mojom::SharedWorkerHost> binding_;
+  mojo::Receiver<blink::mojom::SharedWorkerHost> receiver_{this};
 
   // |service_| owns |this|.
-  SharedWorkerServiceImpl* service_;
-  std::unique_ptr<SharedWorkerInstance> instance_;
+  const raw_ptr<SharedWorkerServiceImpl> service_;
+
+  // An identifier for this worker that is unique across all workers. This is
+  // generated by this object in the browser process.
+  const blink::SharedWorkerToken token_;
+
+  // This holds information used to match a shared worker connection request to
+  // this shared worker.
+  SharedWorkerInstance instance_;
   ClientList clients_;
 
-  blink::mojom::SharedWorkerRequest worker_request_;
-  blink::mojom::SharedWorkerPtr worker_;
+  std::vector<network::mojom::ContentSecurityPolicyPtr>
+      content_security_policies_;
 
-  const int worker_process_id_;
+  mojo::PendingReceiver<blink::mojom::SharedWorker> worker_receiver_;
+  mojo::Remote<blink::mojom::SharedWorker> worker_;
+
+  // A SiteInstance whose process the shared worker runs in.
+  const scoped_refptr<SiteInstanceImpl> site_instance_;
+
+  // Keep alive the renderer process that will be hosting the shared worker.
+  std::unique_ptr<ScopedProcessHostRef> scoped_process_host_ref_;
+
   int next_connection_request_id_;
+
   std::unique_ptr<ScopedDevToolsHandle> devtools_handle_;
 
   // This is the set of features that this worker has used.
@@ -192,22 +311,44 @@ class CONTENT_EXPORT SharedWorkerHost
   // associated with Mojo interfaces (ServiceWorkerContainer and
   // URLLoaderFactory) that are needed to stay alive while the worker is
   // starting or running.
-  blink::mojom::SharedWorkerFactoryPtr factory_;
+  mojo::Remote<blink::mojom::SharedWorkerFactory> factory_;
 
-  mojo::Binding<service_manager::mojom::InterfaceProvider>
-      interface_provider_binding_;
+  BrowserInterfaceBrokerImpl<SharedWorkerHost, const url::Origin&> broker_{
+      this};
+  mojo::Receiver<blink::mojom::BrowserInterfaceBroker> broker_receiver_{
+      &broker_};
 
-  // The handle owns the precreated AppCacheHost until it's claimed by the
-  // renderer after main script loading finishes.
-  std::unique_ptr<AppCacheNavigationHandle> appcache_handle_;
+  std::unique_ptr<ServiceWorkerMainResourceHandle> service_worker_handle_;
 
-  std::unique_ptr<ServiceWorkerNavigationHandle> service_worker_handle_;
+  // CodeCacheHost processes requests to fetch / write generated code for
+  // JavaScript / WebAssembly resources.
+  CodeCacheHostImpl::ReceiverSet code_cache_host_receivers_;
 
-  Phase phase_ = Phase::kInitial;
+  // Indicates if Start() was invoked on this instance.
+  bool started_ = false;
+
+  GURL final_response_url_;
+
+  const ukm::SourceId ukm_source_id_;
+
+  const base::UnguessableToken reporting_source_;
+
+  scoped_refptr<PolicyContainerHost> creator_policy_container_host_;
+
+  // The client security state of the creator execution context.
+  // Never nullptr. Copied at construction time.
+  // This is copied into `worker_client_security_state_` for workers loaded
+  // from URLs with local schemes, in which case the worker should inherit from
+  // its creator.
+  const network::mojom::ClientSecurityStatePtr creator_client_security_state_;
+
+  // The worker's own client security state, applied to subresource fetches.
+  // This is nullptr until it is computed in `DidStartScriptLoad()`.
+  network::mojom::ClientSecurityStatePtr worker_client_security_state_;
+
+  std::unique_ptr<CrossOriginEmbedderPolicyReporter> coep_reporter_;
 
   base::WeakPtrFactory<SharedWorkerHost> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SharedWorkerHost);
 };
 
 }  // namespace content

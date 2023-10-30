@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,15 @@
 
 #import "content/browser/web_contents/web_contents_view_mac.h"
 
+#include <memory>
 #include <string>
+#include <utility>
 
 #import "base/mac/mac_util.h"
 #import "base/mac/scoped_sending_event.h"
-#include "base/mac/sdk_forward_declarations.h"
-#include "base/message_loop/message_loop_current.h"
 #import "base/message_loop/message_pump_mac.h"
+#include "base/task/current_thread.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "components/remote_cocoa/browser/ns_view_ids.h"
 #include "components/remote_cocoa/common/application.mojom.h"
@@ -20,39 +22,36 @@
 #import "content/app_shim_remote_cocoa/web_contents_view_cocoa.h"
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
-#include "content/browser/frame_host/popup_menu_helper_mac.h"
-#include "content/browser/renderer_host/display_util.h"
+#include "content/browser/renderer_host/popup_menu_helper_mac.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #import "content/browser/web_contents/web_drag_dest_mac.h"
 #include "content/common/web_contents_ns_view_bridge.mojom-shared.h"
-#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_view_delegate.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
+#include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
+#include "ui/display/display_util.h"
 #include "ui/gfx/mac/coordinate_conversion.h"
 
-using blink::WebDragOperation;
-using blink::WebDragOperationsMask;
+using blink::DragOperationsMask;
 using remote_cocoa::mojom::DraggingInfoPtr;
 using remote_cocoa::mojom::SelectionDirection;
 
-// Ensure that the blink::WebDragOperation enum values stay in sync with
+// Ensure that the blink::DragOperationsMask enum values stay in sync with
 // NSDragOperation constants, since the code below static_casts between 'em.
 #define STATIC_ASSERT_ENUM(a, b)                            \
   static_assert(static_cast<int>(a) == static_cast<int>(b), \
                 "enum mismatch: " #a)
-STATIC_ASSERT_ENUM(NSDragOperationNone, blink::kWebDragOperationNone);
-STATIC_ASSERT_ENUM(NSDragOperationCopy, blink::kWebDragOperationCopy);
-STATIC_ASSERT_ENUM(NSDragOperationLink, blink::kWebDragOperationLink);
-STATIC_ASSERT_ENUM(NSDragOperationGeneric, blink::kWebDragOperationGeneric);
-STATIC_ASSERT_ENUM(NSDragOperationPrivate, blink::kWebDragOperationPrivate);
-STATIC_ASSERT_ENUM(NSDragOperationMove, blink::kWebDragOperationMove);
-STATIC_ASSERT_ENUM(NSDragOperationDelete, blink::kWebDragOperationDelete);
-STATIC_ASSERT_ENUM(NSDragOperationEvery, blink::kWebDragOperationEvery);
+STATIC_ASSERT_ENUM(NSDragOperationNone, blink::kDragOperationNone);
+STATIC_ASSERT_ENUM(NSDragOperationCopy, blink::kDragOperationCopy);
+STATIC_ASSERT_ENUM(NSDragOperationLink, blink::kDragOperationLink);
+STATIC_ASSERT_ENUM(NSDragOperationMove, blink::kDragOperationMove);
+STATIC_ASSERT_ENUM(NSDragOperationEvery, blink::kDragOperationEvery);
 
 namespace content {
 namespace {
@@ -78,21 +77,22 @@ void WebContentsViewMac::InstallCreateHookForTests(
   g_create_render_widget_host_view = create_render_widget_host_view;
 }
 
-WebContentsView* CreateWebContentsView(
+std::unique_ptr<WebContentsView> CreateWebContentsView(
     WebContentsImpl* web_contents,
-    WebContentsViewDelegate* delegate,
+    std::unique_ptr<WebContentsViewDelegate> delegate,
     RenderViewHostDelegateView** render_view_host_delegate_view) {
-  WebContentsViewMac* rv = new WebContentsViewMac(web_contents, delegate);
-  *render_view_host_delegate_view = rv;
+  auto rv =
+      std::make_unique<WebContentsViewMac>(web_contents, std::move(delegate));
+  *render_view_host_delegate_view = rv.get();
   return rv;
 }
 
-WebContentsViewMac::WebContentsViewMac(WebContentsImpl* web_contents,
-                                       WebContentsViewDelegate* delegate)
+WebContentsViewMac::WebContentsViewMac(
+    WebContentsImpl* web_contents,
+    std::unique_ptr<WebContentsViewDelegate> delegate)
     : web_contents_(web_contents),
-      delegate_(delegate),
+      delegate_(std::move(delegate)),
       ns_view_id_(remote_cocoa::GetNewNSViewId()),
-      remote_ns_view_host_binding_(this),
       deferred_close_weak_ptr_factory_(this) {}
 
 WebContentsViewMac::~WebContentsViewMac() {
@@ -114,16 +114,20 @@ gfx::NativeView WebContentsViewMac::GetNativeView() const {
 gfx::NativeView WebContentsViewMac::GetContentNativeView() const {
   RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   if (!rwhv)
-    return NULL;
+    return nullptr;
   return rwhv->GetNativeView();
 }
 
 gfx::NativeWindow WebContentsViewMac::GetTopLevelNativeWindow() const {
   NSWindow* window = [GetInProcessNSView() window];
-  return window ? window : delegate_->GetNativeWindow();
+  if (window)
+    return window;
+  if (delegate_)
+    return delegate_->GetNativeWindow();
+  return nullptr;
 }
 
-void WebContentsViewMac::GetContainerBounds(gfx::Rect* out) const {
+gfx::Rect WebContentsViewMac::GetContainerBounds() const {
   NSWindow* window = [GetInProcessNSView() window];
   NSRect bounds = [GetInProcessNSView() bounds];
   if (window)  {
@@ -134,15 +138,20 @@ void WebContentsViewMac::GetContainerBounds(gfx::Rect* out) const {
     bounds = [window convertRectToScreen:bounds];
   }
 
-  *out = gfx::ScreenRectFromNSRect(bounds);
+  return gfx::ScreenRectFromNSRect(bounds);
 }
+
+void WebContentsViewMac::OnCapturerCountChanged() {}
+
+void WebContentsViewMac::FullscreenStateChanged(bool is_fullscreen) {}
 
 void WebContentsViewMac::StartDragging(
     const DropData& drop_data,
-    WebDragOperationsMask allowed_operations,
+    DragOperationsMask allowed_operations,
     const gfx::ImageSkia& image,
-    const gfx::Vector2d& image_offset,
-    const DragEventSourceInfo& event_info,
+    const gfx::Vector2d& cursor_offset,
+    const gfx::Rect& drag_obj_rect,
+    const blink::mojom::DragEventSourceInfo& event_info,
     RenderWidgetHostImpl* source_rwh) {
   // By allowing nested tasks, the code below also allows Close(),
   // which would deallocate |this|.  The same problem can occur while
@@ -153,26 +162,22 @@ void WebContentsViewMac::StartDragging(
 
   // The drag invokes a nested event loop, arrange to continue
   // processing events.
-  base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
-  NSDragOperation mask = static_cast<NSDragOperation>(allowed_operations) &
-                         ~NSDragOperationGeneric;
+  base::CurrentThread::ScopedNestableTaskAllower allow;
+  NSDragOperation mask = static_cast<NSDragOperation>(allowed_operations);
   [drag_dest_ setDragStartTrackersForProcess:source_rwh->GetProcess()->GetID()];
   drag_source_start_rwh_ = source_rwh->GetWeakPtr();
+
+  // TODO(crbug.com/1302094): The param `drag_obj_rect` is unused.
 
   if (remote_ns_view_) {
     // TODO(https://crbug.com/898608): Non-trivial gfx::ImageSkias fail to
     // serialize.
-    remote_ns_view_->StartDrag(drop_data, mask, gfx::ImageSkia(), image_offset);
+    remote_ns_view_->StartDrag(drop_data, mask, gfx::ImageSkia(),
+                               cursor_offset);
   } else {
-    in_process_ns_view_bridge_->StartDrag(drop_data, mask, image, image_offset);
+    in_process_ns_view_bridge_->StartDrag(drop_data, mask, image,
+                                          cursor_offset);
   }
-}
-
-void WebContentsViewMac::SizeContents(const gfx::Size& size) {
-  // TODO(brettw | japhet) This is a hack and should be removed.
-  // See web_contents_view.h.
-  // Note(erikchen): This method has /never/ worked correctly. I've removed the
-  // previous implementation.
 }
 
 void WebContentsViewMac::Focus() {
@@ -182,10 +187,7 @@ void WebContentsViewMac::Focus() {
   // Focus the the fullscreen view, if one exists; otherwise, focus the content
   // native view. This ensures that the view currently attached to a NSWindow is
   // being used to query or set first responder state.
-  RenderWidgetHostView* rwhv =
-      web_contents_->GetFullscreenRenderWidgetHostView();
-  if (!rwhv)
-    rwhv = web_contents_->GetRenderWidgetHostView();
+  RenderWidgetHostView* rwhv = web_contents_->GetRenderWidgetHostView();
   if (!rwhv)
     return;
 
@@ -223,16 +225,6 @@ void WebContentsViewMac::FocusThroughTabTraversal(bool reverse) {
   if (delegate())
     delegate()->ResetStoredFocus();
 
-  if (web_contents_->ShowingInterstitialPage()) {
-    web_contents_->GetInterstitialPage()->FocusThroughTabTraversal(reverse);
-    return;
-  }
-  content::RenderWidgetHostView* fullscreen_view =
-      web_contents_->GetFullscreenRenderWidgetHostView();
-  if (fullscreen_view) {
-    fullscreen_view->Focus();
-    return;
-  }
   web_contents_->GetRenderViewHost()->SetInitialFocus(reverse);
 }
 
@@ -240,8 +232,8 @@ DropData* WebContentsViewMac::GetDropData() const {
   return [drag_dest_ currentDropData];
 }
 
-void WebContentsViewMac::UpdateDragCursor(WebDragOperation operation) {
-  [drag_dest_ setCurrentOperation:operation];
+void WebContentsViewMac::UpdateDragCursor(ui::mojom::DragOperation operation) {
+  [drag_dest_ setCurrentOperation:static_cast<NSDragOperation>(operation)];
 }
 
 void WebContentsViewMac::GotFocus(RenderWidgetHostImpl* render_widget_host) {
@@ -272,9 +264,8 @@ void WebContentsViewMac::TakeFocus(bool reverse) {
     remote_ns_view_->TakeFocus(reverse);
 }
 
-void WebContentsViewMac::ShowContextMenu(
-    RenderFrameHost* render_frame_host,
-    const ContextMenuParams& params) {
+void WebContentsViewMac::ShowContextMenu(RenderFrameHost& render_frame_host,
+                                         const ContextMenuParams& params) {
   if (delegate())
     delegate()->ShowContextMenu(render_frame_host, params);
   else
@@ -283,23 +274,20 @@ void WebContentsViewMac::ShowContextMenu(
 
 void WebContentsViewMac::ShowPopupMenu(
     RenderFrameHost* render_frame_host,
+    mojo::PendingRemote<blink::mojom::PopupMenuClient> popup_client,
     const gfx::Rect& bounds,
     int item_height,
     double item_font_size,
     int selected_item,
-    const std::vector<MenuItem>& items,
+    std::vector<blink::mojom::MenuItemPtr> menu_items,
     bool right_aligned,
     bool allow_multiple_selection) {
-  popup_menu_helper_.reset(new PopupMenuHelper(this, render_frame_host));
+  popup_menu_helper_ = std::make_unique<PopupMenuHelper>(
+      this, render_frame_host, std::move(popup_client));
   popup_menu_helper_->ShowPopupMenu(bounds, item_height, item_font_size,
-                                    selected_item, items, right_aligned,
-                                    allow_multiple_selection);
+                                    selected_item, std::move(menu_items),
+                                    right_aligned, allow_multiple_selection);
   // Note: |this| may be deleted here.
-}
-
-void WebContentsViewMac::HidePopupMenu() {
-  if (popup_menu_helper_)
-    popup_menu_helper_->Hide();
 }
 
 void WebContentsViewMac::OnMenuClosed() {
@@ -315,8 +303,7 @@ gfx::Rect WebContentsViewMac::GetViewBounds() const {
   return gfx::ScreenRectFromNSRect(window_bounds);
 }
 
-void WebContentsViewMac::CreateView(
-    const gfx::Size& initial_size, gfx::NativeView context) {
+void WebContentsViewMac::CreateView(gfx::NativeView context) {
   in_process_ns_view_bridge_ =
       std::make_unique<remote_cocoa::WebContentsNSViewBridge>(ns_view_id_,
                                                               this);
@@ -327,7 +314,7 @@ void WebContentsViewMac::CreateView(
 }
 
 RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
-    RenderWidgetHost* render_widget_host, bool is_guest_view_hack) {
+    RenderWidgetHost* render_widget_host) {
   if (render_widget_host->GetView()) {
     // During testing, the view will already be set up in most cases to the
     // test view, so we don't want to clobber it with a real one. To verify that
@@ -341,9 +328,8 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
 
   RenderWidgetHostViewMac* view =
       g_create_render_widget_host_view
-          ? g_create_render_widget_host_view(render_widget_host,
-                                             is_guest_view_hack)
-          : new RenderWidgetHostViewMac(render_widget_host, is_guest_view_hack);
+          ? g_create_render_widget_host_view(render_widget_host)
+          : new RenderWidgetHostViewMac(render_widget_host);
   if (delegate()) {
     base::scoped_nsobject<NSObject<RenderWidgetHostViewMacDelegate>>
         rw_delegate(delegate()->CreateRenderWidgetHostViewDelegate(
@@ -373,12 +359,6 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
   [GetInProcessNSView() addSubview:view_view
                         positioned:NSWindowBelow
                         relativeTo:nil];
-  // For some reason known only to Cocoa, the autorecalculation of the key view
-  // loop set on the window doesn't set the next key view when the subview is
-  // added. On 10.6 things magically work fine; on 10.5 they fail
-  // <http://crbug.com/61493>. Digging into Cocoa key view loop code yielded
-  // madness; TODO(avi,rohit): look at this again and figure out what's really
-  // going on.
   [GetInProcessNSView() setNextKeyView:view_view];
   return view;
 }
@@ -386,7 +366,17 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
 RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForChildWidget(
     RenderWidgetHost* render_widget_host) {
   RenderWidgetHostViewMac* view =
-      new RenderWidgetHostViewMac(render_widget_host, false);
+      new RenderWidgetHostViewMac(render_widget_host);
+
+  // If the parent RenderWidgetHostViewMac is hosted in another process, ensure
+  // that the popup window will be created created in the same process.
+  // https://crbug.com/1091179
+  if (views_host_) {
+    auto* remote_cocoa_application = views_host_->GetRemoteCocoaApplication();
+    view->MigrateNSViewBridge(remote_cocoa_application,
+                              remote_cocoa::kInvalidNSViewId);
+  }
+
   if (delegate()) {
     base::scoped_nsobject<NSObject<RenderWidgetHostViewMacDelegate>>
         rw_delegate(delegate()->CreateRenderWidgetHostViewDelegate(
@@ -396,16 +386,8 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForChildWidget(
   return view;
 }
 
-void WebContentsViewMac::SetPageTitle(const base::string16& title) {
+void WebContentsViewMac::SetPageTitle(const std::u16string& title) {
   // Meaningless on the Mac; widgets don't have a "title" attribute
-}
-
-
-void WebContentsViewMac::RenderViewCreated(RenderViewHost* host) {
-  // We want updates whenever the intrinsic width of the webpage changes.
-  // Put the RenderView into that mode. The preferred width is used for example
-  // when the "zoom" button in the browser window is clicked.
-  host->EnablePreferredSizeMode();
 }
 
 void WebContentsViewMac::RenderViewReady() {}
@@ -442,7 +424,7 @@ std::list<RenderWidgetHostViewMac*> WebContentsViewMac::GetChildViews() {
   std::list<RenderWidgetHostViewMac*> result;
   for (auto iter = child_views_.begin(); iter != child_views_.end();) {
     if (*iter) {
-      result.push_back(reinterpret_cast<RenderWidgetHostViewMac*>(iter->get()));
+      result.push_back(static_cast<RenderWidgetHostViewMac*>(iter->get()));
       iter++;
     } else {
       iter = child_views_.erase(iter);
@@ -516,7 +498,8 @@ bool WebContentsViewMac::DraggingUpdated(DraggingInfoPtr dragging_info,
 
 bool WebContentsViewMac::PerformDragOperation(DraggingInfoPtr dragging_info,
                                               bool* out_result) {
-  *out_result = [drag_dest_ performDragOperation:dragging_info.get()];
+  *out_result = [drag_dest_ performDragOperation:dragging_info.get()
+                     withWebContentsViewDelegate:delegate_.get()];
   return true;
 }
 
@@ -537,18 +520,19 @@ bool WebContentsViewMac::DragPromisedFileTo(const base::FilePath& file_path,
   }
 
   if (download_url.is_valid() && web_contents_) {
-    scoped_refptr<DragDownloadFile> drag_file_downloader(new DragDownloadFile(
+    auto drag_file_downloader = std::make_unique<DragDownloadFile>(
         *out_file_path, std::move(file), download_url,
         content::Referrer(web_contents_->GetLastCommittedURL(),
                           drop_data.referrer_policy),
-        web_contents_->GetEncoding(), web_contents_));
+        web_contents_->GetEncoding(), web_contents_);
 
+    DragDownloadFile* downloader = drag_file_downloader.get();
     // The finalizer will take care of closing and deletion.
-    drag_file_downloader->Start(
-        new PromiseFileFinalizer(drag_file_downloader.get()));
+    downloader->Start(
+        new PromiseFileFinalizer(std::move(drag_file_downloader)));
   } else {
     // The writer will take care of closing and deletion.
-    base::PostTaskWithTraits(
+    base::ThreadPool::PostTask(
         FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
         base::BindOnce(&PromiseWriterHelper, drop_data, std::move(file)));
   }
@@ -585,7 +569,7 @@ void WebContentsViewMac::EndDrag(uint32_t drag_operation,
   web_contents_->DragSourceEndedAt(
       transformed_point.x(), transformed_point.y(),
       transformed_screen_point.x(), transformed_screen_point.y(),
-      static_cast<blink::WebDragOperation>(drag_operation),
+      static_cast<ui::mojom::DragOperation>(drag_operation),
       drag_source_start_rwh_.get());
 }
 
@@ -630,23 +614,25 @@ void WebContentsViewMac::ViewsHostableAttach(
   // Create an NSView in the target process, if one exists.
   auto* remote_cocoa_application = views_host_->GetRemoteCocoaApplication();
   if (remote_cocoa_application) {
-    remote_cocoa::mojom::WebContentsNSViewHostAssociatedPtr host;
-    remote_ns_view_host_binding_.Bind(mojo::MakeRequest(&host));
-    remote_cocoa::mojom::WebContentsNSViewAssociatedRequest ns_view_request =
-        mojo::MakeRequest(&remote_ns_view_);
+    mojo::PendingAssociatedRemote<remote_cocoa::mojom::WebContentsNSViewHost>
+        host;
+    remote_ns_view_host_receiver_.Bind(
+        host.InitWithNewEndpointAndPassReceiver());
+    mojo::PendingAssociatedReceiver<remote_cocoa::mojom::WebContentsNSView>
+        ns_view_receiver = remote_ns_view_.BindNewEndpointAndPassReceiver();
 
-    // Cast from mojom::WebContentsNSViewHostPtr and
-    // mojom::WebContentsNSViewBridgeRequest to the public interfaces
-    // accepted by the application.
+    // Cast from mojo::PendingAssociatedRemote<mojom::WebContentsNSViewHost> and
+    // mojo::PendingAssociatedReceiver<remote_cocoa::mojom::WebContentsNSView>
+    // to the public interfaces accepted by the application.
     // TODO(ccameron): Remove the need for this cast.
     // https://crbug.com/888290
-    mojo::AssociatedInterfacePtrInfo<remote_cocoa::mojom::StubInterface>
-        stub_host(host.PassInterface().PassHandle(), 0);
-    remote_cocoa::mojom::StubInterfaceAssociatedRequest stub_ns_view_request(
-        ns_view_request.PassHandle());
+    mojo::PendingAssociatedRemote<remote_cocoa::mojom::StubInterface> stub_host(
+        host.PassHandle(), 0);
+    mojo::PendingAssociatedReceiver<remote_cocoa::mojom::StubInterface>
+        stub_ns_view_receiver(ns_view_receiver.PassHandle());
 
     remote_cocoa_application->CreateWebContentsNSView(
-        ns_view_id_, std::move(stub_host), std::move(stub_ns_view_request));
+        ns_view_id_, std::move(stub_host), std::move(stub_ns_view_receiver));
     remote_ns_view_->SetParentNSView(views_host_->GetNSViewId());
 
     // Because this view is being displayed from a remote process, reset the
@@ -674,7 +660,8 @@ void WebContentsViewMac::ViewsHostableDetach() {
   if (remote_ns_view_) {
     remote_ns_view_->SetVisible(false);
     remote_ns_view_->ResetParentNSView();
-    remote_ns_view_host_binding_.Close();
+    remote_ns_view_host_receiver_.reset();
+    remote_ns_view_->Destroy();
     remote_ns_view_.reset();
     // Permit the in-process NSView to call back into |this| again.
     [GetInProcessNSView() setHost:this];
@@ -718,6 +705,11 @@ void WebContentsViewMac::ViewsHostableSetParentAccessible(
   views_host_accessibility_element_ = parent_accessibility_element;
   for (auto* rwhv_mac : GetChildViews())
     rwhv_mac->SetParentAccessibilityElement(views_host_accessibility_element_);
+}
+
+gfx::NativeViewAccessible
+WebContentsViewMac::ViewsHostableGetParentAccessible() {
+  return views_host_accessibility_element_;
 }
 
 gfx::NativeViewAccessible

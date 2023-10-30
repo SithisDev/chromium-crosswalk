@@ -1,7 +1,8 @@
 [document web]
 ++[section]
-++++[image] name='pipe' xml-roles:img
-++++[text] name=' '
-++++[image] name='' xml-roles:img
-++++[text] name=' '
-++++[image] name='  ' xml-roles:img
+++++[image] name='pipe'
+++++[static] name=' '
+++++[static] name=' '
+++++[image] name='  '
+++++[static] name=' '
+++++[image] name='SVG face'

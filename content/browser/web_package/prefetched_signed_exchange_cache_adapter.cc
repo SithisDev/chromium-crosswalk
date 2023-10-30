@@ -1,13 +1,13 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/web_package/prefetched_signed_exchange_cache_adapter.h"
 
-#include "base/task/post_task.h"
-#include "content/browser/loader/navigation_url_loader_impl.h"
 #include "content/browser/loader/prefetch_url_loader.h"
 #include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "storage/browser/blob/blob_builder_from_stream.h"
 #include "storage/browser/blob/blob_data_handle.h"
 
@@ -21,10 +21,9 @@ void AbortAndDeleteBlobBuilder(
     return;
   }
 
-  base::PostTaskWithTraits(
-      FROM_HERE, {BrowserThread::IO},
-      base::BindOnce(&storage::BlobBuilderFromStream::Abort,
-                     std::move(blob_builder)));
+  GetIOThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::BindOnce(&storage::BlobBuilderFromStream::Abort,
+                                std::move(blob_builder)));
 }
 
 }  // namespace
@@ -38,10 +37,7 @@ PrefetchedSignedExchangeCacheAdapter::PrefetchedSignedExchangeCacheAdapter(
     : prefetched_signed_exchange_cache_(
           std::move(prefetched_signed_exchange_cache)),
       blob_context_getter_(std::move(blob_context_getter)),
-      cached_exchange_(
-          std::make_unique<PrefetchedSignedExchangeCache::Entry>()),
       prefetch_url_loader_(prefetch_url_loader) {
-  cached_exchange_->SetOuterUrl(request_url);
 }
 
 PrefetchedSignedExchangeCacheAdapter::~PrefetchedSignedExchangeCacheAdapter() {
@@ -49,35 +45,14 @@ PrefetchedSignedExchangeCacheAdapter::~PrefetchedSignedExchangeCacheAdapter() {
     AbortAndDeleteBlobBuilder(std::move(blob_builder_from_stream_));
 }
 
-void PrefetchedSignedExchangeCacheAdapter::OnReceiveOuterResponse(
-    const network::ResourceResponseHead& response) {
-  cached_exchange_->SetOuterResponse(
-      std::make_unique<network::ResourceResponseHead>(response));
-}
-
-void PrefetchedSignedExchangeCacheAdapter::OnReceiveRedirect(
-    const GURL& new_url,
-    const base::Optional<net::SHA256HashValue> header_integrity,
-    const base::Time& signature_expire_time) {
-  DCHECK(header_integrity);
-  DCHECK(!signature_expire_time.is_null());
-  cached_exchange_->SetHeaderIntegrity(
-      std::make_unique<net::SHA256HashValue>(*header_integrity));
-  cached_exchange_->SetInnerUrl(new_url);
-  cached_exchange_->SetSignatureExpireTime(signature_expire_time);
-}
-
-void PrefetchedSignedExchangeCacheAdapter::OnReceiveInnerResponse(
-    const network::ResourceResponseHead& response) {
-  std::unique_ptr<network::ResourceResponseHead> inner_response =
-      std::make_unique<network::ResourceResponseHead>(response);
-  inner_response->was_fetched_via_cache = true;
-  inner_response->was_in_prefetch_cache = true;
-  cached_exchange_->SetInnerResponse(std::move(inner_response));
+void PrefetchedSignedExchangeCacheAdapter::OnReceiveSignedExchange(
+    std::unique_ptr<PrefetchedSignedExchangeCacheEntry> entry) {
+  cached_exchange_ = std::move(entry);
 }
 
 void PrefetchedSignedExchangeCacheAdapter::OnStartLoadingResponseBody(
     mojo::ScopedDataPipeConsumerHandle body) {
+  DCHECK(cached_exchange_);
   DCHECK(cached_exchange_->inner_response());
   DCHECK(!cached_exchange_->completion_status());
   uint64_t length_hint = 0;
@@ -85,25 +60,23 @@ void PrefetchedSignedExchangeCacheAdapter::OnStartLoadingResponseBody(
     length_hint = cached_exchange_->inner_response()->content_length;
   }
   blob_is_streaming_ = true;
-  if (NavigationURLLoaderImpl::IsNavigationLoaderOnUIEnabled()) {
-    base::PostTaskWithTraitsAndReplyWithResult(
-        FROM_HERE, {BrowserThread::IO},
-        base::BindOnce(
-            &PrefetchedSignedExchangeCacheAdapter::CreateBlobBuilderFromStream,
-            weak_factory_.GetWeakPtr(), std::move(body), length_hint,
-            blob_context_getter_),
-        base::BindOnce(
-            &PrefetchedSignedExchangeCacheAdapter::SetBlobBuilderFromStream,
-            weak_factory_.GetWeakPtr()));
-  } else {
-    blob_builder_from_stream_ =
-        CreateBlobBuilderFromStream(weak_factory_.GetWeakPtr(), std::move(body),
-                                    length_hint, blob_context_getter_);
-  }
+  GetIOThreadTaskRunner({})->PostTaskAndReplyWithResult(
+      FROM_HERE,
+      base::BindOnce(
+          &PrefetchedSignedExchangeCacheAdapter::CreateBlobBuilderFromStream,
+          weak_factory_.GetWeakPtr(), std::move(body), length_hint,
+          blob_context_getter_),
+      base::BindOnce(
+          &PrefetchedSignedExchangeCacheAdapter::SetBlobBuilderFromStream,
+          weak_factory_.GetWeakPtr()));
 }
 
 void PrefetchedSignedExchangeCacheAdapter::OnComplete(
     const network::URLLoaderCompletionStatus& status) {
+  if (!cached_exchange_) {
+    prefetch_url_loader_->SendOnComplete(status);
+    return;
+  }
   cached_exchange_->SetCompletionStatus(
       std::make_unique<network::URLLoaderCompletionStatus>(status));
   MaybeCallOnSignedExchangeStored();
@@ -112,18 +85,16 @@ void PrefetchedSignedExchangeCacheAdapter::OnComplete(
 void PrefetchedSignedExchangeCacheAdapter::StreamingBlobDone(
     storage::BlobBuilderFromStream* builder,
     std::unique_ptr<storage::BlobDataHandle> result) {
+  DCHECK(cached_exchange_);
   blob_is_streaming_ = false;
-  if (NavigationURLLoaderImpl::IsNavigationLoaderOnUIEnabled()) {
-    BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE,
-                              std::move(blob_builder_from_stream_));
-  } else {
-    blob_builder_from_stream_.reset();
-  }
+  GetIOThreadTaskRunner({})->DeleteSoon(FROM_HERE,
+                                        std::move(blob_builder_from_stream_));
   cached_exchange_->SetBlobDataHandle(std::move(result));
   MaybeCallOnSignedExchangeStored();
 }
 
 void PrefetchedSignedExchangeCacheAdapter::MaybeCallOnSignedExchangeStored() {
+  DCHECK(cached_exchange_);
   if (!cached_exchange_->completion_status() || blob_is_streaming_) {
     return;
   }
@@ -131,22 +102,14 @@ void PrefetchedSignedExchangeCacheAdapter::MaybeCallOnSignedExchangeStored() {
   const network::URLLoaderCompletionStatus completion_status =
       *cached_exchange_->completion_status();
 
-  // When SignedExchangePrefetchHandler failed to load the response (eg: invalid
-  // signed exchange format), the inner response is not set. In that case, we
-  // don't send the body to avoid the DCHECK() failure in URLLoaderClientImpl::
-  // OnStartLoadingResponseBody().
-  const bool should_send_body = cached_exchange_->inner_response().get();
-
   if (completion_status.error_code == net::OK &&
       cached_exchange_->blob_data_handle() &&
       cached_exchange_->blob_data_handle()->size()) {
     prefetched_signed_exchange_cache_->Store(std::move(cached_exchange_));
   }
 
-  if (should_send_body) {
-    if (!prefetch_url_loader_->SendEmptyBody())
-      return;
-  }
+  if (!prefetch_url_loader_->SendEmptyBody())
+    return;
   prefetch_url_loader_->SendOnComplete(completion_status);
 }
 
@@ -166,8 +129,9 @@ PrefetchedSignedExchangeCacheAdapter::CreateBlobBuilderFromStream(
               &PrefetchedSignedExchangeCacheAdapter::StreamingBlobDoneOnIO,
               std::move(adapter)));
 
-  blob_builder_from_stream->Start(length_hint, std::move(body),
-                                  nullptr /*  progress_client */);
+  blob_builder_from_stream->Start(
+      length_hint, std::move(body),
+      mojo::NullAssociatedRemote() /*  progress_client */);
   return blob_builder_from_stream;
 }
 
@@ -190,7 +154,7 @@ void PrefetchedSignedExchangeCacheAdapter::StreamingBlobDoneOnIO(
     storage::BlobBuilderFromStream* builder,
     std::unique_ptr<storage::BlobDataHandle> result) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  NavigationURLLoaderImpl::RunOrPostTaskOnLoaderThread(
+  GetUIThreadTaskRunner({})->PostTask(
       FROM_HERE,
       base::BindOnce(&PrefetchedSignedExchangeCacheAdapter::StreamingBlobDone,
                      adapter, builder, std::move(result)));

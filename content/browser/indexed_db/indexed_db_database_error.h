@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,30 +7,30 @@
 
 #include <stdint.h>
 
-#include "base/strings/string16.h"
-#include "base/strings/utf_string_conversions.h"
+#include <string>
+
 #include "content/common/content_export.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-shared.h"
 
 namespace content {
 
 class CONTENT_EXPORT IndexedDBDatabaseError {
-  // TODO(dmurph): Move the WebIDBDatabaseException enum into mojo, and make
-  // the |code| type the mojo enum type.
  public:
   IndexedDBDatabaseError();
-  explicit IndexedDBDatabaseError(int32_t code);
-  IndexedDBDatabaseError(int32_t code, const char* message);
-  IndexedDBDatabaseError(int32_t code, const base::string16& message);
+  explicit IndexedDBDatabaseError(blink::mojom::IDBException code);
+  IndexedDBDatabaseError(blink::mojom::IDBException code, const char* message);
+  IndexedDBDatabaseError(blink::mojom::IDBException code,
+                         const std::u16string& message);
   ~IndexedDBDatabaseError();
 
   IndexedDBDatabaseError& operator=(const IndexedDBDatabaseError& rhs);
 
-  int32_t code() const { return code_; }
-  const base::string16& message() const { return message_; }
+  blink::mojom::IDBException code() const { return code_; }
+  const std::u16string& message() const { return message_; }
 
  private:
-  int32_t code_ = 0;
-  base::string16 message_;
+  blink::mojom::IDBException code_ = blink::mojom::IDBException::kNoError;
+  std::u16string message_;
 };
 
 }  // namespace content

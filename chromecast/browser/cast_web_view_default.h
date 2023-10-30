@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,17 @@
 #include <memory>
 #include <string>
 
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chromecast/browser/cast_content_window.h"
 #include "chromecast/browser/cast_web_contents_impl.h"
 #include "chromecast/browser/cast_web_view.h"
+#include "chromecast/browser/mojom/cast_web_service.mojom.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/public/browser/web_contents_observer.h"
+#include "url/gurl.h"
 
 namespace content {
 class BrowserContext;
@@ -25,38 +27,33 @@ class SiteInstance;
 
 namespace chromecast {
 
-class CastWebContentsManager;
-class CastWindowManager;
+class CastWebService;
+class RendererPrelauncher;
 
 // A simplified interface for loading and displaying WebContents in cast_shell.
 class CastWebViewDefault : public CastWebView,
-                           content::WebContentsObserver,
-                           content::WebContentsDelegate {
+                           private content::WebContentsDelegate {
  public:
-  // |web_contents_manager| and |browser_context| should outlive this object.
-  CastWebViewDefault(const CreateParams& params,
-                     CastWebContentsManager* web_contents_manager,
-                     content::BrowserContext* browser_context,
-                     scoped_refptr<content::SiteInstance> site_instance);
+  // |web_service| and |browser_context| should outlive this object. If
+  // |cast_content_window| is not provided, an instance will be constructed from
+  // |web_service|.
+  CastWebViewDefault(
+      mojom::CastWebViewParamsPtr params,
+      CastWebService* web_service,
+      content::BrowserContext* browser_context,
+      std::unique_ptr<CastContentWindow> cast_content_window = nullptr);
+  CastWebViewDefault(const CastWebViewDefault&) = delete;
+  CastWebViewDefault& operator=(const CastWebViewDefault&) = delete;
   ~CastWebViewDefault() override;
 
   // CastWebView implementation:
-  shell::CastContentWindow* window() const override;
+  CastContentWindow* window() const override;
   content::WebContents* web_contents() const override;
   CastWebContents* cast_web_contents() override;
-  void LoadUrl(GURL url) override;
-  void ClosePage(const base::TimeDelta& shutdown_delay) override;
-  void InitializeWindow(CastWindowManager* window_manager,
-                        CastWindowManager::WindowId z_order,
-                        VisibilityPriority initial_priority) override;
-  void GrantScreenAccess() override;
-  void RevokeScreenAccess() override;
+  base::TimeDelta shutdown_delay() const override;
+  void OwnerDestroyed() override;
 
  private:
-  // WebContentsObserver implementation:
-  void DidStartNavigation(
-      content::NavigationHandle* navigation_handle) override;
-
   // WebContentsDelegate implementation:
   content::WebContents* OpenURLFromTab(
       content::WebContents* source,
@@ -68,32 +65,26 @@ class CastWebViewDefault : public CastWebView,
                                   blink::mojom::MediaStreamType type) override;
   bool DidAddMessageToConsole(content::WebContents* source,
                               blink::mojom::ConsoleMessageLevel log_level,
-                              const base::string16& message,
+                              const std::u16string& message,
                               int32_t line_no,
-                              const base::string16& source_id) override;
+                              const std::u16string& source_id) override;
   void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
       content::MediaResponseCallback callback) override;
-  std::unique_ptr<content::BluetoothChooser> RunBluetoothChooser(
-      content::RenderFrameHost* frame,
-      const content::BluetoothChooser::EventHandler& event_handler) override;
+  bool ShouldAllowRunningInsecureContent(content::WebContents* web_contents,
+                                         bool allowed_per_prefs,
+                                         const url::Origin& origin,
+                                         const GURL& resource_url) override;
 
-  CastWebContentsManager* const web_contents_manager_;
-  content::BrowserContext* const browser_context_;
-  const scoped_refptr<content::SiteInstance> site_instance_;
+  mojom::CastWebViewParamsPtr params_;
+  CastWebService* const web_service_;
 
-  Delegate* const delegate_;
-  const bool allow_media_access_;
-  const std::string log_prefix_;
-
+  std::unique_ptr<RendererPrelauncher> renderer_prelauncher_;
+  scoped_refptr<content::SiteInstance> site_instance_;
   std::unique_ptr<content::WebContents> web_contents_;
   CastWebContentsImpl cast_web_contents_;
-  std::unique_ptr<shell::CastContentWindow> window_;
-  bool resize_window_when_navigation_starts_;
-  base::TimeDelta shutdown_delay_;
-
-  DISALLOW_COPY_AND_ASSIGN(CastWebViewDefault);
+  std::unique_ptr<CastContentWindow> window_;
 };
 
 }  // namespace chromecast
