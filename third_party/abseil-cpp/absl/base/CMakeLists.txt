@@ -14,11 +14,69 @@
 # limitations under the License.
 #
 
+find_library(LIBRT rt)
+
+# Internal-only target, do not depend on directly.
+absl_cc_library(
+  NAME
+    atomic_hook
+  HDRS
+    "internal/atomic_hook.h"
+  DEPS
+    absl::config
+    absl::core_headers
+  COPTS
+    ${ABSL_DEFAULT_COPTS}
+)
+
+# Internal-only target, do not depend on directly.
+absl_cc_library(
+  NAME
+    errno_saver
+  HDRS
+    "internal/errno_saver.h"
+  DEPS
+    absl::config
+  COPTS
+    ${ABSL_DEFAULT_COPTS}
+)
+
+absl_cc_library(
+  NAME
+    log_severity
+  HDRS
+    "log_severity.h"
+  SRCS
+    "log_severity.cc"
+  DEPS
+    absl::core_headers
+  COPTS
+    ${ABSL_DEFAULT_COPTS}
+)
+
+# Internal-only target, do not depend on directly.
+absl_cc_library(
+  NAME
+    raw_logging_internal
+  HDRS
+    "internal/raw_logging.h"
+  SRCS
+    "internal/raw_logging.cc"
+  DEPS
+    absl::atomic_hook
+    absl::config
+    absl::core_headers
+    absl::errno_saver
+    absl::log_severity
+  COPTS
+    ${ABSL_DEFAULT_COPTS}
+)
+
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     spinlock_wait
   HDRS
-    "internal/scheduling_mode.h"
     "internal/spinlock_wait.h"
   SRCS
     "internal/spinlock_akaros.inc"
@@ -29,7 +87,9 @@ absl_cc_library(
   COPTS
     ${ABSL_DEFAULT_COPTS}
   DEPS
+    absl::base_internal
     absl::core_headers
+    absl::errno_saver
 )
 
 absl_cc_library(
@@ -37,6 +97,7 @@ absl_cc_library(
     config
   HDRS
     "config.h"
+    "options.h"
     "policy_checks.h"
   COPTS
     ${ABSL_DEFAULT_COPTS}
@@ -48,12 +109,10 @@ absl_cc_library(
     dynamic_annotations
   HDRS
     "dynamic_annotations.h"
-  SRCS
-    "dynamic_annotations.cc"
   COPTS
     ${ABSL_DEFAULT_COPTS}
-  DEFINES
-    "__CLANG_SUPPORT_DYN_ANNOTATION__"
+  DEPS
+    absl::config
   PUBLIC
 )
 
@@ -67,7 +126,6 @@ absl_cc_library(
     "optimization.h"
     "port.h"
     "thread_annotations.h"
-    "internal/thread_annotations.h"
   COPTS
     ${ABSL_DEFAULT_COPTS}
   DEPS
@@ -75,6 +133,7 @@ absl_cc_library(
   PUBLIC
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     malloc_internal
@@ -87,13 +146,15 @@ absl_cc_library(
     ${ABSL_DEFAULT_COPTS}
   DEPS
     absl::base
+    absl::base_internal
     absl::config
     absl::core_headers
     absl::dynamic_annotations
-    absl::spinlock_wait
+    absl::raw_logging_internal
     Threads::Threads
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     base_internal
@@ -102,8 +163,12 @@ absl_cc_library(
     "internal/identity.h"
     "internal/inline_variable.h"
     "internal/invoke.h"
+    "internal/scheduling_mode.h"
   COPTS
     ${ABSL_DEFAULT_COPTS}
+  DEPS
+    absl::config
+    absl::type_traits
 )
 
 absl_cc_library(
@@ -112,38 +177,41 @@ absl_cc_library(
   HDRS
     "call_once.h"
     "casts.h"
-    "internal/atomic_hook.h"
     "internal/cycleclock.h"
     "internal/low_level_scheduling.h"
     "internal/per_thread_tls.h"
-    "internal/raw_logging.h"
     "internal/spinlock.h"
     "internal/sysinfo.h"
     "internal/thread_identity.h"
     "internal/tsan_mutex_interface.h"
     "internal/unscaledcycleclock.h"
-    "log_severity.h"
   SRCS
     "internal/cycleclock.cc"
-    "internal/raw_logging.cc"
     "internal/spinlock.cc"
     "internal/sysinfo.cc"
     "internal/thread_identity.cc"
     "internal/unscaledcycleclock.cc"
-    "log_severity.cc"
   COPTS
     ${ABSL_DEFAULT_COPTS}
+  LINKOPTS
+    ${ABSL_DEFAULT_LINKOPTS}
+    $<$<BOOL:${LIBRT}>:-lrt>
+    $<$<BOOL:${MINGW}>:"advapi32">
   DEPS
+    absl::atomic_hook
     absl::base_internal
     absl::config
     absl::core_headers
     absl::dynamic_annotations
+    absl::log_severity
+    absl::raw_logging_internal
     absl::spinlock_wait
     absl::type_traits
     Threads::Threads
   PUBLIC
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     throw_delegate
@@ -153,11 +221,12 @@ absl_cc_library(
     "internal/throw_delegate.cc"
   COPTS
     ${ABSL_DEFAULT_COPTS}
-    ${ABSL_EXCEPTIONS_FLAG}
   DEPS
-    absl::base
+    absl::config
+    absl::raw_logging_internal
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     exception_testing
@@ -167,10 +236,11 @@ absl_cc_library(
     ${ABSL_DEFAULT_COPTS}
   DEPS
     absl::config
-    gtest
+    GTest::gtest
   TESTONLY
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     pretty_function
@@ -180,6 +250,7 @@ absl_cc_library(
     ${ABSL_DEFAULT_COPTS}
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     exception_safety_testing
@@ -189,9 +260,6 @@ absl_cc_library(
     "internal/exception_safety_testing.cc"
   COPTS
     ${ABSL_TEST_COPTS}
-    ${ABSL_EXCEPTIONS_FLAG}
-  LINKOPTS
-    ${ABSL_EXCEPTIONS_FLAG_LINKOPTS}
   DEPS
     absl::config
     absl::pretty_function
@@ -199,7 +267,7 @@ absl_cc_library(
     absl::meta
     absl::strings
     absl::utility
-    gtest
+    GTest::gtest
   TESTONLY
 )
 
@@ -210,13 +278,24 @@ absl_cc_test(
     "exception_safety_testing_test.cc"
   COPTS
     ${ABSL_TEST_COPTS}
-    ${ABSL_EXCEPTIONS_FLAG}
-  LINKOPTS
-    ${ABSL_EXCEPTIONS_FLAG_LINKOPTS}
   DEPS
     absl::exception_safety_testing
     absl::memory
-    gtest_main
+    GTest::gtest_main
+)
+
+# Internal-only target, do not depend on directly.
+absl_cc_library(
+  NAME
+    atomic_hook_test_helper
+  SRCS
+    "internal/atomic_hook_test_helper.cc"
+  COPTS
+    ${ABSL_TEST_COPTS}
+  DEPS
+    absl::atomic_hook
+    absl::core_headers
+  TESTONLY
 )
 
 absl_cc_test(
@@ -227,9 +306,11 @@ absl_cc_test(
   COPTS
     ${ABSL_TEST_COPTS}
   DEPS
-    absl::base
+    absl::atomic_hook_test_helper
+    absl::atomic_hook
     absl::core_headers
-    gtest_main
+    GTest::gmock
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -242,7 +323,21 @@ absl_cc_test(
   DEPS
     absl::base
     absl::core_headers
-    gtest_main
+    GTest::gtest_main
+)
+
+absl_cc_test(
+  NAME
+    errno_saver_test
+  SRCS
+    "internal/errno_saver_test.cc"
+  COPTS
+    ${ABSL_TEST_COPTS}
+  DEPS
+    absl::errno_saver
+    absl::strerror
+    GTest::gmock
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -254,8 +349,9 @@ absl_cc_test(
     ${ABSL_TEST_COPTS}
   DEPS
     absl::base
+    absl::config
     absl::throw_delegate
-    gtest_main
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -270,7 +366,7 @@ absl_cc_test(
     ${ABSL_TEST_COPTS}
   DEPS
     absl::base_internal
-    gtest_main
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -284,10 +380,11 @@ absl_cc_test(
     absl::base_internal
     absl::memory
     absl::strings
-    gmock
-    gtest_main
+    GTest::gmock
+    GTest::gtest_main
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     spinlock_test_common
@@ -297,10 +394,11 @@ absl_cc_library(
     ${ABSL_TEST_COPTS}
   DEPS
     absl::base
+    absl::config
+    absl::base_internal
     absl::core_headers
-    absl::spinlock_wait
     absl::synchronization
-    gtest
+    GTest::gtest
   TESTONLY
 )
 
@@ -314,12 +412,14 @@ absl_cc_test(
     ${ABSL_TEST_COPTS}
   DEPS
     absl::base
+    absl::base_internal
+    absl::config
     absl::core_headers
-    absl::spinlock_wait
     absl::synchronization
-    gtest_main
+    GTest::gtest_main
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     endian
@@ -329,6 +429,7 @@ absl_cc_library(
   COPTS
     ${ABSL_DEFAULT_COPTS}
   DEPS
+    absl::base
     absl::config
     absl::core_headers
   PUBLIC
@@ -345,7 +446,7 @@ absl_cc_test(
     absl::base
     absl::config
     absl::endian
-    gtest_main
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -358,7 +459,7 @@ absl_cc_test(
   DEPS
     absl::config
     absl::synchronization
-    gtest_main
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -372,7 +473,7 @@ absl_cc_test(
     absl::base
     absl::core_headers
     absl::synchronization
-    gtest_main
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -383,9 +484,9 @@ absl_cc_test(
   COPTS
     ${ABSL_TEST_COPTS}
   DEPS
-    absl::base
+    absl::raw_logging_internal
     absl::strings
-    gtest_main
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -398,7 +499,7 @@ absl_cc_test(
   DEPS
     absl::base
     absl::synchronization
-    gtest_main
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -410,6 +511,7 @@ absl_cc_test(
     ${ABSL_TEST_COPTS}
   DEPS
     absl::malloc_internal
+    absl::node_hash_map
     Threads::Threads
 )
 
@@ -425,32 +527,10 @@ absl_cc_test(
     absl::core_headers
     absl::synchronization
     Threads::Threads
-    gtest_main
+    GTest::gtest_main
 )
 
-absl_cc_library(
-  NAME
-    bits
-  HDRS
-    "internal/bits.h"
-  COPTS
-    ${ABSL_DEFAULT_COPTS}
-  DEPS
-    absl::core_headers
-)
-
-absl_cc_test(
-  NAME
-    bits_test
-  SRCS
-    "internal/bits_test.cc"
-  COPTS
-    ${ABSL_TEST_COPTS}
-  DEPS
-    absl::bits
-    gtest_main
-)
-
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     scoped_set_env
@@ -461,7 +541,8 @@ absl_cc_library(
   COPTS
     ${ABSL_DEFAULT_COPTS}
   DEPS
-    absl::base
+    absl::config
+    absl::raw_logging_internal
 )
 
 absl_cc_test(
@@ -473,7 +554,7 @@ absl_cc_test(
     ${ABSL_TEST_COPTS}
   DEPS
     absl::scoped_set_env
-    gtest_main
+    GTest::gtest_main
 )
 
 absl_cc_test(
@@ -493,7 +574,107 @@ absl_cc_test(
   SRCS
     "log_severity_test.cc"
   DEPS
-    absl::base
-    gmock
-    gtest_main
+    absl::flags_internal
+    absl::flags_marshalling
+    absl::log_severity
+    absl::strings
+    GTest::gmock
+    GTest::gtest_main
+)
+
+# Internal-only target, do not depend on directly.
+absl_cc_library(
+  NAME
+    strerror
+  SRCS
+    "internal/strerror.cc"
+  HDRS
+    "internal/strerror.h"
+  COPTS
+    ${ABSL_DEFAULT_COPTS}
+  LINKOPTS
+    ${ABSL_DEFAULT_LINKOPTS}
+  DEPS
+    absl::config
+    absl::core_headers
+    absl::errno_saver
+)
+
+absl_cc_test(
+  NAME
+    strerror_test
+  SRCS
+    "internal/strerror_test.cc"
+  COPTS
+    ${ABSL_TEST_COPTS}
+  DEPS
+    absl::strerror
+    absl::strings
+    GTest::gmock
+    GTest::gtest_main
+)
+
+# Internal-only target, do not depend on directly.
+absl_cc_library(
+  NAME
+    fast_type_id
+  HDRS
+    "internal/fast_type_id.h"
+  COPTS
+    ${ABSL_DEFAULT_COPTS}
+  LINKOPTS
+    ${ABSL_DEFAULT_LINKOPTS}
+  DEPS
+    absl::config
+)
+
+absl_cc_test(
+  NAME
+    fast_type_id_test
+  SRCS
+    "internal/fast_type_id_test.cc"
+  COPTS
+    ${ABSL_TEST_COPTS}
+  DEPS
+    absl::fast_type_id
+    GTest::gtest_main
+)
+
+# Internal-only target, do not depend on directly.
+absl_cc_library(
+  NAME
+    prefetch
+  HDRS
+    "internal/prefetch.h"
+  COPTS
+    ${ABSL_DEFAULT_COPTS}
+  LINKOPTS
+    ${ABSL_DEFAULT_LINKOPTS}
+  DEPS
+    absl::config
+)
+
+absl_cc_test(
+  NAME
+    prefetch_test
+  SRCS
+    "internal/prefetch_test.cc"
+  COPTS
+    ${ABSL_TEST_COPTS}
+  DEPS
+    absl::prefetch
+    GTest::gtest_main
+)
+
+absl_cc_test(
+  NAME
+    optimization_test
+  SRCS
+    "optimization_test.cc"
+  COPTS
+    ${ABSL_TEST_COPTS}
+  DEPS
+    absl::core_headers
+    absl::optional
+    GTest::gtest_main
 )

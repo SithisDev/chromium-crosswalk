@@ -23,13 +23,16 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
-licenses(["notice"])  # Apache 2.0
+licenses(["notice"])
 
 cc_library(
     name = "algorithm",
     hdrs = ["algorithm.h"],
     copts = ABSL_DEFAULT_COPTS,
     linkopts = ABSL_DEFAULT_LINKOPTS,
+    deps = [
+        "//absl/base:config",
+    ],
 )
 
 cc_test(
@@ -40,12 +43,14 @@ cc_test(
     linkopts = ABSL_DEFAULT_LINKOPTS,
     deps = [
         ":algorithm",
+        "//absl/base:config",
         "@com_google_googletest//:gtest_main",
     ],
 )
 
-cc_test(
+cc_binary(
     name = "algorithm_benchmark",
+    testonly = 1,
     srcs = ["equal_benchmark.cc"],
     copts = ABSL_TEST_COPTS,
     linkopts = ABSL_DEFAULT_LINKOPTS,

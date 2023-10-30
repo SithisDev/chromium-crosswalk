@@ -131,7 +131,12 @@ static void **NextStackFrame(void **old_sp, const void *uc) {
       const ucontext_t* signal_context =
           reinterpret_cast<const ucontext_t*>(uc);
       void **const sp_before_signal =
-          reinterpret_cast<void**>(signal_context->uc_mcontext.gp_regs[PT_R1]);
+#if defined(__PPC64__)
+          reinterpret_cast<void **>(signal_context->uc_mcontext.gp_regs[PT_R1]);
+#else
+          reinterpret_cast<void **>(
+              signal_context->uc_mcontext.uc_regs->gregs[PT_R1]);
+#endif
       // Check that alleged sp before signal is nonnull and is reasonably
       // aligned.
       if (sp_before_signal != nullptr &&
@@ -162,7 +167,7 @@ ABSL_ATTRIBUTE_NO_SANITIZE_MEMORY   // May read random elements from stack.
 static int UnwindImpl(void** result, int* sizes, int max_depth, int skip_count,
                       const void *ucp, int *min_dropped_frames) {
   void **sp;
-  // Apple OS X uses an old version of gnu as -- both Darwin 7.9.0 (Panther)
+  // Apple macOS uses an old version of gnu as -- both Darwin 7.9.0 (Panther)
   // and Darwin 8.8.1 (Tiger) use as 1.38.  This means we have to use a
   // different asm syntax.  I don't know quite the best way to discriminate
   // systems using the old as from the new one; I've gone with __APPLE__.
@@ -226,21 +231,28 @@ static int UnwindImpl(void** result, int* sizes, int max_depth, int skip_count,
     // Implementation detail: we clamp the max of frames we are willing to
     // count, so as not to spend too much time in the loop below.
     const int kMaxUnwind = 1000;
-    int j = 0;
-    for (; next_sp != nullptr && j < kMaxUnwind; j++) {
+    int num_dropped_frames = 0;
+    for (int j = 0; next_sp != nullptr && j < kMaxUnwind; j++) {
+      if (skip_count > 0) {
+        skip_count--;
+      } else {
+        num_dropped_frames++;
+      }
       next_sp = NextStackFrame<!IS_STACK_FRAMES, IS_WITH_CONTEXT>(next_sp, ucp);
     }
-    *min_dropped_frames = j;
+    *min_dropped_frames = num_dropped_frames;
   }
   return n;
 }
 
 namespace absl {
+ABSL_NAMESPACE_BEGIN
 namespace debugging_internal {
 bool StackTraceWorksForTest() {
   return true;
 }
 }  // namespace debugging_internal
+ABSL_NAMESPACE_END
 }  // namespace absl
 
 #endif  // ABSL_DEBUGGING_INTERNAL_STACKTRACE_POWERPC_INL_H_
