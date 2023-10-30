@@ -4,15 +4,16 @@
 
 (async function() {
   TestRunner.addResult(`Tests that resources with JSON MIME types are previewed with the JSON viewer.\n`);
-  await TestRunner.loadModule('network_test_runner');
+  await TestRunner.loadTestModule('network_test_runner');
+  await TestRunner.loadLegacyModule('source_frame');
   await TestRunner.showPanel('network');
 
   async function testSearches(view, searches) {
     await new Promise(resolve => setTimeout(resolve, 0));
     for (var search of searches) {
-      view._searchInputElement.value = search;
-      view._regexButton.setToggled(false);
-      view._caseSensitiveButton.setToggled(false);
+      view.searchInputElement.value = search;
+      view.regexButton.setToggled(false);
+      view.caseSensitiveButton.setToggled(false);
       view.showSearchField();
       TestRunner.addResult('Should have found and highlighted all: ' + search);
 
@@ -39,11 +40,11 @@
       searchableView = view.children()[0];
     }
     if (isSearchable)
-      compontentView = searchableView._searchProvider;
+      compontentView = searchableView.searchProvider;
 
     if (compontentView instanceof SourceFrame.ResourceSourceFrame) {
       typeName = 'ResourceSourceFrame';
-      compontentView._ensureContentLoaded();
+      compontentView.ensureContentLoaded();
       if (!compontentView.loaded) {
         // try again when content is loaded.
         TestRunner.addSniffer(
@@ -73,20 +74,22 @@
 
 
   function trySearches(request, searches, callback) {
-    TestRunner.addSniffer(Network.RequestPreviewView.prototype, '_doShowPreview', async function() {
-      previewViewHandled(searches, callback, await this._contentViewPromise);
-    });
     var networkPanel = UI.panels.network;
-    networkPanel._showRequest(request);
-    var itemView = networkPanel._networkItemView;
-    itemView._selectTab('preview');
+    TestRunner.addSniffer(Network.RequestPreviewView.prototype, 'doShowPreview', async function() {
+      previewViewHandled(searches, callback, await this.contentViewPromise);
+      networkPanel.hideRequestPanel();
+    });
+    networkPanel.onRequestSelected({data: request});
+    networkPanel.showRequestPanel();
+    var itemView = networkPanel.networkItemView;
+    itemView.selectTab('preview');
   }
 
   function testType(contentType, content, searches, callback) {
     var url = 'data:' + contentType + ',' + encodeURIComponent(content);
     NetworkTestRunner.makeSimpleXHR('GET', url, true, function() {
-      var request = NetworkTestRunner.findRequestsByURLPattern(new RegExp(url.escapeForRegExp()))[0];
-      request._resourceType = Common.resourceTypes.Document;
+      var request = NetworkTestRunner.findRequestsByURLPattern(new RegExp(Platform.StringUtilities.escapeForRegExp(url)))[0];
+      request.setResourceType(Common.resourceTypes.Document);
       trySearches(request, searches, callback);
     });
   }
@@ -99,7 +102,7 @@
       testType('application/json', '[533,3223]', ['533', '322'], next);
     },
     function jsonSpecialMimeTest(next) {
-      testType('application/vnd.document+json', '{foo0foo: 123}', ['foo'], next);
+      testType('application/vnd.document+json', '{"foo0foo": 123}', ['foo'], next);
     },
     function xmlMultipleSearchTest(next) {
       testType('text/xml', '<bar><foo/>test</bar>', ['bar', 'foo', 'bar', 'test'], next);
@@ -114,7 +117,7 @@
       testType('text/xml', '<a><![CDATA[GGG]]><g tee="gee">tee</g></a>', ['GGG', 'tee', 'CDATA'], next);
     },
     function xmlMimeTypeJsonTest(next) {
-      testType('text/xml', '{foo0: \'barr\', \'barr\': \'fooo\'}', ['fooo', 'bar'], next);
+      testType('text/xml', '{"foo0": "barr", "barr": "fooo"}', ['fooo', 'bar'], next);
     }
   ]);
 })();

@@ -4,7 +4,6 @@
   <script src=/resources/testharnessreport.js></script>
   <script src="resources/webxr_util.js"></script>
   <script src="resources/webxr_test_constants.js"></script>
-  <canvas></canvas>
 
   <script>
     const immersivetestName = "end event fires when immersive session ends";
@@ -19,6 +18,11 @@
       function onSessionEnd(event) {
         t.step( () => {
           assert_equals(event.session, session);
+
+          let eventSession = event.session;
+          assert_equals(eventSession, event.session,
+            "XRSessionEvent.session returns the same object.");
+
           session.dispatchEvent(watcherDone);
         });
       }

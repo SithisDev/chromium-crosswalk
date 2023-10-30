@@ -16,11 +16,11 @@
     swFetcher.setLogPrefix("[renderer] ");
     await swFetcher.enable();
     swFetcher.onRequest().continueRequest({});
-    dp1.Runtime.runIfWaitingForDebugger();
+    await dp1.Runtime.runIfWaitingForDebugger();
   });
 
   await dp.ServiceWorker.enable();
-  await session.navigate("resources/service-worker.html");
+  await session.navigate("resources/empty.html");
   session.evaluateAsync(`navigator.serviceWorker.register('service-worker.js')`);
 
   async function waitForServiceWorkerActivation() {
@@ -33,8 +33,9 @@
   }
 
   await waitForServiceWorkerActivation();
-  dp.Page.reload();
-  await dp.Page.onceLifecycleEvent(event => event.params.name === 'load');
+  const onLifecyclePromise = dp.Page.onceLifecycleEvent(event => event.params.name === 'load');
+  await dp.Page.reload();
+  await onLifecyclePromise;
 
   globalFetcher.onceRequest().fulfill({
     responseCode: 200,

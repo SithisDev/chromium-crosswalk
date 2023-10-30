@@ -4,13 +4,13 @@
 
 (async function() {
   TestRunner.addResult(`Tests that inspect() command line api works.\n`);
-  await TestRunner.loadModule('console_test_runner');
+  await TestRunner.loadLegacyModule('console'); await TestRunner.loadTestModule('console_test_runner');
   await TestRunner.loadHTML(`
       <p id="p1">
       </p>
     `);
 
-  TestRunner.addSniffer(SDK.RuntimeModel.prototype, '_inspectRequested', sniffInspect, true);
+  TestRunner.addSniffer(SDK.RuntimeModel.prototype, 'inspectRequested', sniffInspect, true);
 
   function sniffInspect(objectId, hints) {
     TestRunner.addResult('WebInspector.inspect called with: ' + objectId.description);
@@ -28,14 +28,14 @@
   }
 
   TestRunner.runTestSuite([function testRevealElement(next) {
-    TestRunner.addSniffer(Common.Revealer, 'reveal', step2, true);
+    const originalReveal = Common.Revealer.reveal;
+    Common.Revealer.setRevealForTest((node) => {
+      if (!(node instanceof SDK.RemoteObject)) {
+        return Promise.resolve();
+      }
+      return originalReveal(node).then(step3);
+    });
     evalAndDump('inspect($(\'#p1\'))');
-
-    function step2(node, revealPromise) {
-      if (!(node instanceof SDK.RemoteObject))
-        return;
-      revealPromise.then(step3);
-    }
 
     function step3() {
       TestRunner.addResult('Selected node id: \'' + UI.panels.elements.selectedDOMNode().getAttribute('id') + '\'.');

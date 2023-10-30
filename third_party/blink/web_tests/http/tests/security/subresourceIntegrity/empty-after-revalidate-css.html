@@ -7,6 +7,7 @@
 <script>
   var t_css = async_test(
     "SRI with CSS with empty body after revalidation shouldn't crash");
+  window.onload = () => t_css.step_timeout(revalidate_css, 0);
   function revalidate_css() {
     var link = document.createElement('link');
     link.setAttribute('rel', 'stylesheet');
@@ -14,15 +15,14 @@
     link.onload = t_css.unreached_func('Second request should fail');
     link.onerror = t_css.step_func_done();
     link.href =
-      "../../cache/resources/etag-200-empty.php?empty-after-revalidate-css";
+      "../../cache/resources/etag-200-empty.php?type=css&empty-after-revalidate-css";
     document.head.appendChild(link);
   }
 </script>
 <link
-  href="../../cache/resources/etag-200-empty.php?empty-after-revalidate-css"
+  href="../../cache/resources/etag-200-empty.php?type=css&empty-after-revalidate-css"
   rel="stylesheet"
   integrity="sha256-YsI40D9FX0QghiYVdxQyySP2TOmARkLC5uPRO8RL2dE="
-  onload="t_css.step_timeout(revalidate_css, 0)"
   onerror="t_css.unreached_func('First request should pass')()"
 >
 </html>

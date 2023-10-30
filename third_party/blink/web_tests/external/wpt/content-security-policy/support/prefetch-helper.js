@@ -1,10 +1,11 @@
-test(t => {
-  assert_true(document.createElement('link').relList.supports('prefetch'));
-}, "Browser supports prefetch.");
-
-test(t => {
-  assert_true(!!window.PerformanceResourceTiming);
-}, "Browser supports performance APIs.");
+setup(_ => {
+  assert_implements_optional(
+    document.createElement('link').relList.supports('prefetch'),
+    "Browser supports prefetch.");
+  assert_implements_optional(
+    "PerformanceResourceTiming" in window,
+    "Browser supports performance APIs.");
+});
 
 async function waitUntilResourceDownloaded(url) {
   await new Promise((resolve, reject) => {
@@ -21,9 +22,14 @@ async function waitUntilResourceDownloaded(url) {
   });
 }
 
-async function assert_resource_not_downloaded(test, url) {
-  if (performance.getEntriesByName(url).length >= 1) {
-    (test.unreached_func(`'${url}' should not have downloaded.`))();
+function assert_resource_not_downloaded(test, url) {
+  // CSP failures generate resource timing entries, so let's make sure that
+  // download sizes are 0.
+  const entries = performance.getEntriesByName(url, 'resource');
+  for (const entry of entries) {
+    assert_equals(entry.transferSize, 0, 'transferSize');
+    assert_equals(entry.encodedBodySize, 0, 'encodedBodySize');
+    assert_equals(entry.decodedBodySize, 0, 'decodedBodySize');
   }
 }
 

@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests that CPU profiling is able to save/load.\n`);
-  await TestRunner.loadModule('cpu_profiler_test_runner');
+  await TestRunner.loadTestModule('cpu_profiler_test_runner');
   await TestRunner.showPanel('js_profiler');
   await TestRunner.evaluateInPagePromise(`
       function pageFunction() {
@@ -13,23 +13,24 @@
       }
   `);
 
-  MockedFile = function() {
-    this._buffer = '';
-  };
-  MockedFile.prototype = {
-    _appendData: function(data) {
-      this._buffer += data;
-    },
+  class MockedFile {
+    constructor() {
+      this._buffer = '';
+    }
 
-    _data: function() {
+    _appendData(data) {
+      this._buffer += data;
+    }
+
+    _data() {
       return this._buffer;
-    },
+    }
 
     get size() {
       return this._buffer.length;
-    },
+    }
 
-    slice: function(chunkStart, chunkEnd) {
+    slice(chunkStart, chunkEnd) {
       var blob = new Blob([this._buffer], {type: 'text\/text'});
       return blob;
     }

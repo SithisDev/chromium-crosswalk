@@ -3,17 +3,22 @@
 <script src="/resources/testharnessreport.js"></script>
 <script src="resources/webxr_util.js"></script>
 <script src="resources/webxr_test_constants.js"></script>
-<canvas id="webgl-canvas"></canvas>
 
 <script>
 let testName = "Calling end during an input callback stops processing at the right time";
 
 let fakeDeviceInitParams = TRACKED_IMMERSIVE_DEVICE;
 
+let gl = null;
+
 function requestImmersiveSession() {
   return new Promise((resolve, reject) => {
     navigator.xr.test.simulateUserActivation(() => {
       navigator.xr.requestSession('immersive-vr').then((session) => {
+        session.updateRenderState({
+          baseLayer: new XRWebGLLayer(session, gl)
+        });
+
         resolve(session);
       }, (err) => {
         reject(err);
@@ -22,8 +27,8 @@ function requestImmersiveSession() {
   });
 }
 
-let testFunction = function(session, fakeDeviceController, t) {
-
+let testFunction = function(session, fakeDeviceController, t, sessionObjects) {
+  gl = sessionObjects.gl;
   // helper method to send a click and then request a dummy animation frame to
   // ensure that the click propagates.  We're doing everything in these tests
   // from event watchers, we just need to trigger the add/click to make the
@@ -36,7 +41,7 @@ let testFunction = function(session, fakeDeviceController, t) {
       profiles: [],
       selectionClicked: true
     });
-    session.requestAnimationFrame(() => {});
+    requestSkipAnimationFrame(session, () => {});
   }
 
   function sessionEndTest(endEvent, eventOrder) {

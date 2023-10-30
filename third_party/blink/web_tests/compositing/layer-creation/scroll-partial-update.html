@@ -22,14 +22,15 @@
       }
 
       #composited {
-        transform: translateZ(0);
+        will-change: transform;
         width: 20px;
         height: 20px;
       }
 
       #scroller {
         height: 200px;
-        background-color: yellow;
+        /* translucent to prevent compositing */
+        background-color: rgba(255, 255, 0, 0.5);
         overflow-y: scroll;
       }
 

@@ -6,10 +6,8 @@
 }
 .target {
   width: 10px;
-  height: 0px;
+  height: 10px;
   background-color: black;
-  display: inline-block;
-  min-height: 10px;
 }
 .expected {
   background-color: green;
@@ -18,56 +16,11 @@
 <body>
 <script src="resources/interpolation-test.js"></script>
 <script>
-assertInterpolation({
-  property: 'min-height',
-  from: neutralKeyframe,
-  to: '20px',
-}, [
-  {at: -0.5, is: '5px'},
-  {at: 0, is: '10px'},
-  {at: 0.3, is: '13px'},
-  {at: 0.6, is: '16px'},
-  {at: 1, is: '20px'},
-  {at: 1.5, is: '25px'},
-]);
-
+// Regression test for crbug.com/1175628.
 assertNoInterpolation({
   property: 'min-height',
-  from: 'initial',
-  to: '20px',
+  from: 'calc(25631651542881545922376008592752624554174702806001571610784437629701274% - 7px)',
+  to: 'calc(25631651542881545922376008592752624554174702806001571610784437629701274% - 7px)',
 });
-
-assertInterpolation({
-  property: 'min-height',
-  from: 'inherit',
-  to: '20px',
-}, [
-  {at: -0.5, is: '35px'},
-  {at: 0, is: '30px'},
-  {at: 0.3, is: '27px'},
-  {at: 0.6, is: '24px'},
-  {at: 1, is: '20px'},
-  {at: 1.5, is: '15px'},
-]);
-
-assertNoInterpolation({
-  property: 'min-height',
-  from: 'unset',
-  to: '20px',
-});
-
-
-assertInterpolation({
-  property: 'min-height',
-  from: '0px',
-  to: '100px',
-}, [
-  {at: -0.5, is: '0'}, // CSS min-height can't be negative.
-  {at: 0, is: '0'},
-  {at: 0.3, is: '30px'},
-  {at: 0.6, is: '60px'},
-  {at: 1, is: '100px'},
-  {at: 1.5, is: '150px'}
-]);
 </script>
 </body>

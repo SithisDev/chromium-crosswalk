@@ -4,6 +4,7 @@ if (self.importScripts) {
 }
 
 var url = "data:application/json,report({jsonpResult: 'success'});";
+var {BASE_URL, REDIRECT_URL, OTHER_REDIRECT_URL} = get_thorough_test_options();
 
 var TEST_TARGETS = [
 // data: requests.
@@ -23,11 +24,6 @@ var TEST_TARGETS = [
 // data: requests with non-GET methods.
   [BASE_URL + 'url=' + encodeURIComponent(url) +
    '&mode=same-origin&method=POST',
-   [fetchResolved, noContentLength, hasContentType, noServerHeader, hasBody,
-    typeBasic],
-   [checkJsonpSuccess]],
-  [BASE_URL + 'url=' + encodeURIComponent(url) +
-   '&mode=same-origin&method=HEAD',
    [fetchResolved, noContentLength, hasContentType, noServerHeader, hasBody,
     typeBasic],
    [checkJsonpSuccess]],

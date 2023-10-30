@@ -23,6 +23,7 @@ UISourceCode: foo.js
 UISourceCode is content script: false
 Highlighter type: text/javascript
 UISourceCode content: var foo=1;
+//# sourceURL=foo.js
 
 
 Running: testScriptResource

@@ -22,7 +22,7 @@ checkFetchResponse(URL.createObjectURL(blob), "Blob's data", "text/plain",  blob
 function checkKoUrl(url, method, desc) {
   promise_test(function(test) {
     var promise = fetch(url, {"method": method});
-    return promise_rejects(test, new TypeError(), promise);
+    return promise_rejects_js(test, TypeError, promise);
   }, desc);
 }
 
@@ -41,5 +41,8 @@ var invalidRequestMethods = [
 invalidRequestMethods.forEach(function(method) {
   checkKoUrl(URL.createObjectURL(blob2), method, "Fetching [" + method + "] URL.createObjectURL(blob) is KO");
 });
+
+checkKoUrl("blob:not-backed-by-a-blob/", "GET",
+           "Fetching [GET] blob:not-backed-by-a-blob/ is KO");
 
 done();

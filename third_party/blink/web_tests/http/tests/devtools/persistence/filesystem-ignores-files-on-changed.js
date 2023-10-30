@@ -4,10 +4,10 @@
 
 (async function() {
   TestRunner.addResult(`Ensure that if a file that should be ignored is changed on the filesystem it does not propogate events.\n`);
-  await TestRunner.loadModule('bindings_test_runner');
+  await TestRunner.loadTestModule('bindings_test_runner');
 
   TestRunner.addResult('Creating filesystem');
-  var fs = new BindingsTestRunner.TestFileSystem('file:///var/www');
+  var fs = new BindingsTestRunner.TestFileSystem('/var/www');
   await fs.reportCreatedPromise();
 
   Persistence.isolatedFileSystemManager.addEventListener(

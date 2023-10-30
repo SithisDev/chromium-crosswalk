@@ -44,6 +44,7 @@
                 var grey = document.getElementById('grey');
                 var blue = document.getElementById('blue');
                 var green = document.getElementById('green');
+                var actions_promise;
 
                 ['gotpointercapture', 'lostpointercapture', 'pointerdown', 'pointerup', 'click'].forEach(function(eventName) {
                   [grey, blue, green].forEach(function(target) {
@@ -67,7 +68,7 @@
                         if (target == blue && event.type == 'lostpointercapture') {
                           if (phase == PhaseEnum.Phase1WithCapturing) {
                             test_pointerEvent.step(function() {
-                              assert_equals(receivedEvents.join(','), 'pointerdown@green,gotpointercapture@blue,pointerup@blue,click@grey,lostpointercapture@blue', 'An element should only receive click when it is the first common ancestor of pointerdown and pointerup targets');
+                              assert_equals(receivedEvents.join(','), 'pointerdown@green,gotpointercapture@blue,pointerup@blue,click@blue,lostpointercapture@blue', 'An element should only receive click when it is the first common ancestor of pointerdown and pointerup targets');
                             });
                             phase = PhaseEnum.Phase2WithCapturing;
                             receivedEvents = [];
@@ -75,7 +76,10 @@
                             test_pointerEvent.step(function() {
                               assert_equals(receivedEvents.join(','), 'pointerdown@blue,gotpointercapture@blue,pointerup@blue,click@blue,lostpointercapture@blue', 'An element should only receive click when it is the first common ancestor of pointerdown and pointerup targets');
                             });
-                            test_pointerEvent.done();
+                            // Make sure the test finishes after all the input actions are completed.
+                            actions_promise.then( () => {
+                              test_pointerEvent.done();
+                            });
                           }
                         }
                         if (event.type == 'pointerdown' && (target == blue || target == green)) {
@@ -88,9 +92,11 @@
                 });
 
                 // Inject mouse inputs.
-                var green = document.getElementById('green');
-                var blue = document.getElementById('blue');
-                new test_driver.Actions()
+                //
+                // TODO(mustaq@chromium.org): It is no longer testable manually.
+                // Switch it to a promise_test to simplify the code, and remove
+                // the instructions on HTML.
+                var actions_promise = new test_driver.Actions()
                     .pointerMove(0, 0, {origin: green})
                     .pointerDown()
                     .pointerUp()

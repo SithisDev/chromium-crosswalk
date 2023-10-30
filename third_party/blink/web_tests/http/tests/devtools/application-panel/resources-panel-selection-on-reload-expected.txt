@@ -3,8 +3,12 @@ Tests Application Panel response to a main frame navigation.
 Initial state:
 Application
   Manifest
+    Identity
+    Presentation
+    Protocol Handlers
+    Icons
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -16,24 +20,34 @@ Storage
     database-for-test
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
+  Interest Groups
 Cache
   Cache Storage
-  Application Cache
+  Back/forward cache
 Background Services
   Background Fetch
   Background Sync
   Notifications
+  Payment Handler
+  Periodic Background Sync
   Push Messaging
+  Reporting API
 Frames
   top
+    inspected-page.html
 Selection: ["cookies://http://127.0.0.1:8000","category://Cookies"]
 Visible view is a cookie view: true
 Page reloaded.
 After navigation:
 Application
   Manifest
+    Identity
+    Presentation
+    Protocol Handlers
+    Icons
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -44,16 +58,22 @@ Storage
   Web SQL
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
+  Interest Groups
 Cache
   Cache Storage
-  Application Cache
+  Back/forward cache
 Background Services
   Background Fetch
   Background Sync
   Notifications
+  Payment Handler
+  Periodic Background Sync
   Push Messaging
+  Reporting API
 Frames
   top
+    inspected-page.html
 Selection: ["cookies://http://127.0.0.1:8000","category://Cookies"]
 Visible view is a cookie view: true
 

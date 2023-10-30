@@ -17,28 +17,21 @@
     <video controls style="position: absolute; width: 320px;"></video>
   </div>
   <script>
-    if (window.internals)
-        internals.settings.setMockScrollbarsEnabled(true);
-
     var videos = document.getElementsByTagName('video');
+    let call_count = 0;
     for (var i = 0; i < videos.length; ++i) {
-      enableTestMode(videos[i]);
+      let video = videos[i];
+      enableTestMode(video);
+
+      video.requestVideoFrameCallback(() => {
+        if (window.internals)
+          internals.mediaPlayerRemoteRouteAvailabilityChanged(video, true);
+
+        if (++call_count == videos.length && window.testRunner)
+          testRunner.notifyDone();
+      });
     }
-    waitForMultipleEvents("canplaythrough", videos.length, function() {
-        for (var i = 0; i < videos.length; ++i) {
-            videos[i].play();
-            videos[i].addEventListener("playing", function(event) {
-                event.target.pause();
-                event.target.currentTime = 0;
-                if(window.internals)
-                    internals.mediaPlayerRemoteRouteAvailabilityChanged(event.target, true);
-            });
-        }
-        waitForMultipleEvents("seeked", videos.length, function() {
-            if (window.testRunner)
-                testRunner.notifyDone();
-        });
-    });
+
     setSrcByTagName('video', '../content/test.ogv');
   </script>
 </body>

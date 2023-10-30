@@ -2,24 +2,13 @@ Before:
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV id='green-box' class='box green center composited'",
+      "name": "LayoutNGBlockFlow (positioned) DIV id='green-box' class='box green center composited'",
       "bounds": [100, 100],
       "contentsOpaque": true,
       "backgroundColor": "#008000",
@@ -53,37 +42,31 @@ After:
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "Squashing Containment Layer",
-      "drawsContent": false
-    },
-    {
-      "name": "LayoutBlockFlow (positioned) DIV id='green-box' class='box green center composited rotated-3d'",
+      "name": "LayoutNGBlockFlow (positioned) DIV id='green-box' class='box green center composited'",
       "bounds": [100, 100],
       "contentsOpaque": true,
       "backgroundColor": "#008000",
       "transform": 2
     },
     {
-      "name": "Squashing Layer (first squashed layer: LayoutBlockFlow (positioned) DIV class='box top left')",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='box top left'",
       "position": [8, 8],
-      "bounds": [300, 300]
+      "bounds": [100, 300],
+      "contentsOpaque": true,
+      "backgroundColor": "#808080"
+    },
+    {
+      "name": "LayoutNGBlockFlow (positioned) DIV class='box top right'",
+      "position": [208, 8],
+      "bounds": [100, 300],
+      "contentsOpaque": true,
+      "backgroundColor": "#808080"
     }
   ],
   "transforms": [
@@ -94,8 +77,7 @@ After:
         [0, 1, 0, 0],
         [0, 0, 1, 0],
         [108, 108, 0, 1]
-      ],
-      "flattenInheritedTransform": false
+      ]
     },
     {
       "id": 2,
@@ -106,8 +88,7 @@ After:
         [0, 0, 1, 0],
         [0, 0, -1, 1]
       ],
-      "origin": [50, 50],
-      "flattenInheritedTransform": false
+      "origin": [50, 50]
     }
   ]
 }

@@ -4,10 +4,14 @@
     this._dp = dp;
   }
 
+  _trimErrorMessage(error) {
+    return error.replace(/at position \d+/, "<somewhere>");
+  }
+
   async _logMessage(message, expectError, styleSheetId) {
     if (message.error && expectError) {
       this._testRunner.log('Expected protocol error: ' + message.error.message +
-          (message.error.data ? ' (' + message.error.data + ')' : ''));
+          (message.error.data ? ' (' + this._trimErrorMessage(message.error.data) + ')' : ''));
     } else if (message.error && !expectError) {
       this._testRunner.log('ERROR: ' + message.error.message);
     } else if (!message.error && expectError) {
@@ -40,6 +44,24 @@
     await this._logMessage(message, expectError, styleSheetId);
   }
 
+  async setContainerQueryText(styleSheetId, expectError, options) {
+    options.styleSheetId = styleSheetId;
+    var message = await this._dp.CSS.setContainerQueryText(options);
+    await this._logMessage(message, expectError, styleSheetId);
+  }
+
+  async setSupportsText(styleSheetId, expectError, options) {
+    options.styleSheetId = styleSheetId;
+    var message = await this._dp.CSS.setSupportsText(options);
+    await this._logMessage(message, expectError, styleSheetId);
+  }
+
+  async setScopeText(styleSheetId, expectError, options) {
+    options.styleSheetId = styleSheetId;
+    var message = await this._dp.CSS.setScopeText(options);
+    await this._logMessage(message, expectError, styleSheetId);
+  }
+
   async addRule(styleSheetId, expectError, options) {
     options.styleSheetId = styleSheetId;
     var message = await this._dp.CSS.addRule(options);
@@ -68,6 +90,40 @@
       this._indentLog(baseIndent, '@media ' + mediaLine);
       baseIndent += 4;
     }
+
+    const containerQueries = rule.containerQueries || [];
+    const containerQueriesLine = containerQueries.map(cq => {
+      if (cq.name) {
+        return `${cq.name} ${cq.text}`;
+      }
+      return cq.text;
+    }).join(' ');
+    if (containerQueriesLine.length) {
+      this._indentLog(baseIndent, '@container ' + containerQueriesLine);
+      baseIndent += 4;
+    }
+
+    const supports = rule.supports || [];
+    const supportsLine = supports.map(s => s.text).join(' ');
+    if (supportsLine.length) {
+      this._indentLog(baseIndent, '@supports ' + supportsLine);
+      baseIndent += 4;
+    }
+
+    const layers = rule.layers|| [];
+    const layersLine = layers.map(s => s.text).join('.');
+    if (layersLine.length) {
+      this._indentLog(baseIndent, '@layer ' + layersLine);
+      baseIndent += 4;
+    }
+
+    const scopes = rule.scopes || [];
+    const scopesLine = scopes.map(s => s.text).join(' ');
+    if (scopesLine.length) {
+      this._indentLog(baseIndent, '@scope ' + scopesLine);
+      baseIndent += 4;
+    }
+
     var selectorLine = '';
     var selectors = rule.selectorList.selectors;
     for (var i = 0; i < selectors.length; ++i) {
@@ -95,7 +151,11 @@
     var cssProperties = style.cssProperties;
     for (var i = 0; i < cssProperties.length; ++i) {
       var cssProperty = cssProperties[i];
-      var propertyLine = cssProperty.name + ': ' + cssProperty.value + ';';
+      var range = cssProperty.range;
+      var rangeText = range ? '[' + range.startLine + ':' + range.startColumn +
+                                  '-' + range.endLine + ':' + range.endColumn + ']'
+                            : '[undefined-undefined]';
+      var propertyLine = cssProperty.name + ': ' + cssProperty.value + '; @' + rangeText;
       this._indentLog(baseIndent + 4, propertyLine);
     }
   }
@@ -167,5 +227,10 @@
   async requestNodeId(nodeId, selector) {
     var response = await this._dp.DOM.querySelector({nodeId, selector});
     return response.result.nodeId;
+  }
+
+  async requestAllNodeIds(nodeId, selector) {
+    var response = await this._dp.DOM.querySelectorAll({nodeId, selector});
+    return response.result.nodeIds;
   }
 });

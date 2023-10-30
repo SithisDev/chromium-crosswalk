@@ -14,8 +14,10 @@ async function reregisterContent() {
       title: 'same title',
       description: 'same description',
       category: 'article',
-      iconUrl: '/resources/square.png',
-      launchUrl: 'resources/',
+      icons: [{
+        src: '/resources/square.png',
+      }],
+      url: 'resources/',
     });
     await postMessageToWindow('Successfully registered');
   } catch (e) {

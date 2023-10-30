@@ -1,67 +1,24 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutIFrame IFRAME",
-      "position": [8, 8],
-      "bounds": [304, 154]
-    },
-    {
-      "name": "LayoutView #document",
-      "position": [10, 10],
-      "bounds": [300, 150],
-      "drawsContent": false,
-      "backgroundColor": "#EEEEEE"
-    },
-    {
-      "name": "Scrolling Layer",
-      "position": [10, 10],
-      "bounds": [300, 150],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
-      "position": [10, 10],
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [300, 516],
+      "contentsOpaque": true,
       "backgroundColor": "#EEEEEE",
-      "transform": 1
-    },
-    {
-      "name": "LayoutBlockFlow BODY",
-      "bounds": [284, 500],
       "transform": 2
     },
     {
-      "name": "Overflow Controls Host Layer",
-      "position": [10, 10],
-      "bounds": [300, 150],
-      "drawsContent": false
-    },
-    {
-      "name": "Horizontal Scrollbar Layer",
-      "position": [10, 160],
-      "bounds": [300, 0]
-    },
-    {
-      "name": "Vertical Scrollbar Layer",
-      "position": [310, 10],
-      "bounds": [0, 150]
+      "name": "LayoutNGBlockFlow BODY",
+      "bounds": [284, 500],
+      "contentsOpaqueForText": true,
+      "drawsContent": false,
+      "transform": 3
     }
   ],
   "transforms": [
@@ -71,9 +28,8 @@
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [0, -20, 0, 1]
-      ],
-      "flattenInheritedTransform": false
+        [10, 10, 0, 1]
+      ]
     },
     {
       "id": 2,
@@ -82,7 +38,17 @@
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [18, 18, 0, 1]
+        [0, -20, 0, 1]
+      ]
+    },
+    {
+      "id": 3,
+      "parent": 2,
+      "transform": [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [8, 8, 0, 1]
       ]
     }
   ]

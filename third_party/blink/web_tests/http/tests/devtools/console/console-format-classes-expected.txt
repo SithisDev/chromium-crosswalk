@@ -1,13 +1,11 @@
 Tests that console produces instant previews for arrays and objects.
 
 console-format-classes.js:30 Error: custom error with link www.chromium.org
-    at console-format-classes.js:20 
+    at console-format-classes.js:20:9 
   console-message
     source-code
       console-message-anchor
         devtools-link
-      hidden console-message-badge
-        hide-badge-title
       console-message-text
         object-value-error source-code
           devtools-link
@@ -17,8 +15,6 @@ console-format-classes.js:30 (6) [1, empty × 2, 2, (...), empty]
     source-code
       console-message-anchor
         devtools-link
-      hidden console-message-badge
-        hide-badge-title
       console-message-text
         console-view-object-properties-section object-value-array source-code
           tree-outline-disclosure tree-outline-disclosure-hide-overflow
@@ -40,8 +36,6 @@ console-format-classes.js:30 {a: 1}
     source-code
       console-message-anchor
         devtools-link
-      hidden console-message-badge
-        hide-badge-title
       console-message-text
         console-view-object-properties-section object-value-object source-code
           tree-outline-disclosure tree-outline-disclosure-hide-overflow
@@ -54,13 +48,11 @@ console-format-classes.js:30 {a: 1}
               object-value-number
             object-state-note info-note
               children
-console-format-classes.js:30 {str: "", nan: NaN, posInf: Infinity, negInf: -Infinity, negZero: -0} 
+console-format-classes.js:30 {str: '', nan: NaN, posInf: Infinity, negInf: -Infinity, negZero: -0} 
   console-message
     source-code
       console-message-anchor
         devtools-link
-      hidden console-message-badge
-        hide-badge-title
       console-message-text
         console-view-object-properties-section object-value-object source-code
           tree-outline-disclosure tree-outline-disclosure-hide-overflow
@@ -81,13 +73,11 @@ console-format-classes.js:30 {str: "", nan: NaN, posInf: Infinity, negInf: -Infi
               object-value-number
             object-state-note info-note
               children
-console-format-classes.js:30 {null: null, undef: undefined, regexp: /^[regexp]$/g, bool: false} 
+console-format-classes.js:30 {null: null, undef: undefined, re: /^[regexp]$/g, constructedRe: /foo\/bar/, bool: false} 
   console-message
     source-code
       console-message-anchor
         devtools-link
-      hidden console-message-badge
-        hide-badge-title
       console-message-text
         console-view-object-properties-section object-value-object source-code
           tree-outline-disclosure tree-outline-disclosure-hide-overflow
@@ -103,6 +93,8 @@ console-format-classes.js:30 {null: null, undef: undefined, regexp: /^[regexp]$/
               name
               object-value-regexp
               name
+              object-value-regexp
+              name
               object-value-boolean
             object-state-note info-note
               children
@@ -111,8 +103,6 @@ console-format-classes.js:30 Proxy {a: 1}
     source-code
       console-message-anchor
         devtools-link
-      hidden console-message-badge
-        hide-badge-title
       console-message-text
         console-view-object-properties-section object-value-proxy source-code
           tree-outline-disclosure tree-outline-disclosure-hide-overflow
@@ -131,8 +121,6 @@ console-format-classes.js:30 HTMLAllCollection(4) [html, head, base, body]
     source-code
       console-message-anchor
         devtools-link
-      hidden console-message-badge
-        hide-badge-title
       console-message-text
         console-view-object-properties-section object-value-array source-code
           tree-outline-disclosure tree-outline-disclosure-hide-overflow
@@ -158,8 +146,6 @@ console-format-classes.js:34 (7) [Error: custom error with link www.chromium.or
     source-code
       console-message-anchor
         devtools-link
-      hidden console-message-badge
-        hide-badge-title
       console-message-text
         console-view-object-properties-section object-value-array source-code
           tree-outline-disclosure tree-outline-disclosure-hide-overflow

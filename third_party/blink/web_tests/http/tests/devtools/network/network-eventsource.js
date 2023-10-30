@@ -5,7 +5,7 @@
 (async function() {
   TestRunner.addResult(`Tests EventSource resource type and content.\n`);
 
-  await TestRunner.loadModule('network_test_runner');
+  await TestRunner.loadTestModule('network_test_runner');
   await TestRunner.showPanel('network');
 
   await TestRunner.evaluateInPagePromise(`
@@ -47,7 +47,7 @@
     TestRunner.addResult('resource.type: ' + request1.resourceType());
     TestRunner.assertTrue(!request1.failed, 'Resource loading failed.');
 
-    var content = await request1.requestContent();
+    var { content, error, isEncoded } = await request1.requestContent();
     TestRunner.addResult('resource.content after requesting content: ' + content);
     TestRunner.completeTest();
   }

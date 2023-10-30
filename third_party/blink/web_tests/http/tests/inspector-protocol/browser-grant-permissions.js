@@ -9,39 +9,45 @@
 
   // Start listening for geolocation changes.
   await session.evaluateAsync(async () => {
+    window.messages = [];
     window.subscriptionChanges = [];
     const result = await navigator.permissions.query({name: 'geolocation'});
-    window.subscriptionChanges.push(`INITIAL '${name}': ${result.state}`);
+    window.subscriptionChanges.push(`INITIAL 'geolocation': ${result.state}`);
     result.onchange = () => window.subscriptionChanges.push(`CHANGED 'geolocation': ${result.state}`);
   });
 
+  await grant('geolocation');
+  await waitPermission({name: 'geolocation'}, 'granted');
+
+  await grant('audioCapture');
   await Promise.all([
-    grant('geolocation'),
-    waitPermission('geolocation', 'granted')
+    waitPermission({name: 'geolocation'}, 'denied'),
+    waitPermission({name: 'microphone'}, 'granted'),
   ]);
 
+  await grant('geolocation', 'audioCapture', 'videoCapturePanTiltZoom');
   await Promise.all([
-    grant('audioCapture'),
-    waitPermission('geolocation', 'denied'),
-    waitPermission('microphone', 'granted'),
-  ]);
-
-  await Promise.all([
-    grant('geolocation', 'audioCapture'),
-    waitPermission('geolocation', 'granted'),
-    waitPermission('microphone', 'granted'),
+    waitPermission({name: 'geolocation'}, 'granted'),
+    waitPermission({name: 'microphone'}, 'granted'),
+    waitPermission({name: 'camera', panTiltZoom: true}, 'granted'),
+    waitPermission({name: 'camera', panTiltZoom: false}, 'granted'),
+    waitPermission({name: 'camera'}, 'granted'),
   ]);
 
   await grant('eee');
 
-  testRunner.log('- Resetting all permissions'),
+  testRunner.log('- Resetting all permissions');
+  await dp.Browser.resetPermissions();
   await Promise.all([
-    dp.Browser.resetPermissions(),
-    waitPermission('geolocation', 'denied'),
-    waitPermission('microphone', 'denied'),
+    waitPermission({name: 'geolocation'}, 'denied'),
+    waitPermission({name: 'microphone'}, 'denied'),
+    waitPermission({name: 'camera', panTiltZoom: true}, 'denied'),
+    waitPermission({name: 'camera', panTiltZoom: false}, 'denied'),
+    waitPermission({name: 'camera'}, 'denied'),
   ]);
 
   testRunner.log(await session.evaluate(() => window.subscriptionChanges));
+  testRunner.log(await session.evaluate(() => window.messages));
 
   testRunner.completeTest();
 
@@ -56,18 +62,14 @@
       testRunner.log('- Granted: ' + JSON.stringify(permissions));
   }
 
-  async function waitPermission(name, state) {
-    await session.evaluateAsync(async (name, state) => {
-      const result = await navigator.permissions.query({name});
-      if (result.state === state)
-        return;
-      return new Promise(resolve => {
-        result.onchange = () => {
-          if (result.state === state)
-            resolve();
-        }
-      });
-    });
+  async function waitPermission(descriptor, state) {
+    await session.evaluateAsync(async (descriptor, state) => {
+      const result = await navigator.permissions.query(descriptor);
+      if (result.state && result.state === state)
+        window.messages.push(`${JSON.stringify(descriptor)}: ${result.state}`);
+      else
+        window.messages.push(`Failed to set ${permission} to state: ${state}`);
+    }, descriptor, state);
   }
 })
 

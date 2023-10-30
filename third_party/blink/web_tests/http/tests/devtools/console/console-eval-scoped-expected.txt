@@ -2,7 +2,7 @@ Tests that evaluating 'console.log()' in the console will have access to its out
 
 
 Running: testSnippet1
-console-eval-scoped.js:67 with: Object property value
+console-eval-scoped.js:69 with: Object property value
 VM:1 eval in with: Object property value
 
 Running: testSnippet2
@@ -10,7 +10,7 @@ VM:1 eval in function: Function parameter
 
 Running: testConsoleEvalPrimitiveValue
 foo
-"bar"
+'bar'
 
 Running: testConsoleEvalObject
 {
@@ -51,19 +51,6 @@ Running: testConsoleEvalObject
     value : {
         type : "string"
         value : "baz"
-    }
-    writable : true
-}
-{
-    configurable : true
-    enumerable : false
-    isOwn : true
-    name : "__proto__"
-    value : {
-        className : "Object"
-        description : "Object"
-        objectId : <string>
-        type : "object"
     }
     writable : true
 }

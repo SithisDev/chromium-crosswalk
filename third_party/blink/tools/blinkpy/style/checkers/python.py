@@ -19,20 +19,17 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 """Supports checking WebKit style in Python files."""
 
 import os
 import re
 import sys
 
-
 from blinkpy.common.path_finder import PathFinder
 from blinkpy.common.path_finder import get_blink_tools_dir
 from blinkpy.common.path_finder import get_blinkpy_thirdparty_dir
 from blinkpy.common.system.filesystem import FileSystem
 from blinkpy.common.system.executive import Executive
-from blinkpy.third_party import pep8
 
 
 class PythonChecker(object):
@@ -43,29 +40,7 @@ class PythonChecker(object):
         self._handle_style_error = handle_style_error
 
     def check(self, lines_unused=None):
-        self._check_pep8()
         self._check_pylint()
-
-    def _check_pep8(self):
-        # Initialize pep8.options, which is necessary for
-        # Checker.check_all() to execute.
-        pep8.process_options(arglist=[self._file_path])
-
-        pep8_checker = pep8.Checker(self._file_path)
-
-        def _pep8_handle_error(line_number, offset, text, check):
-            # FIXME: Incorporate the character offset into the error output.
-            #        This will require updating the error handler __call__
-            #        signature to include an optional "offset" parameter.
-            pep8_code = text[:4]
-            pep8_message = text[5:]
-
-            category = 'pep8/' + pep8_code
-
-            self._handle_style_error(line_number, category, 5, pep8_message)
-
-        pep8_checker.report_error = _pep8_handle_error
-        pep8_checker.check_all()
 
     def _check_pylint(self):
         output = self.run_pylint(self._file_path)
@@ -85,16 +60,17 @@ class PythonChecker(object):
             finder.path_from_chromium_base('build', 'android'),
             finder.path_from_chromium_base('third_party'),  # for jinja2
             finder.path_from_chromium_base('third_party', 'catapult', 'devil'),
-            finder.path_from_chromium_base('third_party', 'pymock'),
             finder.path_from_chromium_base('tools'),
         ])
         return executive.run_command([
             sys.executable,
-            finder.path_from_depot_tools_base('pylint.py'),
+            finder.path_from_depot_tools_base('pylint-2.7'),
             '--output-format=parseable',
             '--rcfile=' + finder.path_from_blink_tools('blinkpy', 'pylintrc'),
             path,
-        ], env=env, error_handler=executive.ignore_error)
+        ],
+                                     env=env,
+                                     error_handler=executive.ignore_error)
 
     def _parse_pylint_output(self, output):
         # We filter out these messages because they are bugs in pylint that produce false positives.
@@ -123,7 +99,8 @@ class PythonChecker(object):
             category_and_method = match_obj.group(3).split(', ')
             category = 'pylint/' + (category_and_method[0])
             if len(category_and_method) > 1:
-                message = '[%s] %s' % (category_and_method[1], match_obj.group(4))
+                message = '[%s] %s' % (category_and_method[1],
+                                       match_obj.group(4))
             else:
                 message = match_obj.group(4)
             errors.append((line_number, category, message))

@@ -27,16 +27,39 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import json
+from typing import Optional
 
 from blinkpy.common.memoized import memoized
 from blinkpy.web_tests.layout_package import json_results_generator
 
 
 class WebTestResult(object):
-
     def __init__(self, test_name, result_dict):
         self._test_name = test_name
         self._result_dict = result_dict
+
+    def __repr__(self):
+        return "WebTestResult(test_name=%s, result_dict=%s)" % \
+            (repr(self._test_name), repr(self._result_dict))
+
+    def suffixes_for_test_result(self):
+        suffixes = set()
+        artifact_names = self._result_dict.get('artifacts', {}).keys()
+        # Add extensions for mismatches.
+        if 'actual_text' in artifact_names:
+            suffixes.add('txt')
+        if 'actual_image' in artifact_names:
+            suffixes.add('png')
+        if 'actual_audio' in artifact_names:
+            suffixes.add('wav')
+        # Add extensions for missing baselines.
+        if self.is_missing_text():
+            suffixes.add('txt')
+        if self.is_missing_image():
+            suffixes.add('png')
+        if self.is_missing_audio():
+            suffixes.add('wav')
+        return suffixes
 
     def result_dict(self):
         return self._result_dict
@@ -71,45 +94,85 @@ class WebTestResult(object):
     def last_retry_result(self):
         return self.actual_results().split()[-1]
 
-    def has_mismatch_result(self):
-        return self.last_retry_result() in ('TEXT', 'IMAGE', 'IMAGE+TEXT', 'AUDIO')
+    def has_non_reftest_mismatch(self):
+        """Returns true if a test without reference failed due to mismatch.
+
+        This happens when the actual output of a non-reftest does not match the
+        baseline, including an implicit all-PASS testharness baseline (i.e. a
+        previously all-PASS testharness test starts to fail)."""
+        actual_results = self.actual_results().split(' ')
+        artifact_names = self._result_dict.get('artifacts', {}).keys()
+        return ('FAIL' in actual_results and any(
+            artifact_name.startswith('actual')
+            for artifact_name in artifact_names)
+                and 'reference_file_mismatch' not in artifact_names
+                and 'reference_file_match' not in artifact_names)
 
     def is_missing_baseline(self):
-        return self.last_retry_result() == 'MISSING'
+        return (self.is_missing_image() or self.is_missing_text()
+                or self.is_missing_audio())
 
 
 # FIXME: This should be unified with ResultsSummary or other NRWT web tests code
 # in the web_tests package.
 # This doesn't belong in common.net, but we don't have a better place for it yet.
-class WebTestResults(object):
-
+#
+# TODO(crbug.com/1213998): It's strange that this container holds two different
+# shapes of data (results JSON and ResultDB results list) and relies on callers
+# to not call an incompatible method. Hence, there is a lot of code of the form:
+#
+#   if options.resultDB:
+#       do_something_resultdb()
+#   else:
+#       do_something()
+#
+# The `WebTestResults.results_from*` factory methods need to be refactored to
+# normalize the raw data into an ordered dict of `WebTestResult` objects (sorted
+# by test name).
+class WebTestResults:
     @classmethod
-    def results_from_string(cls, string):
+    def results_from_string(cls, string, step_name=None):
         """Creates a WebTestResults object from a test result JSON string.
 
         Args:
             string: JSON string containing web test result.
         """
-
         if not string:
             return None
-
         content_string = json_results_generator.strip_json_wrapper(string)
         json_dict = json.loads(content_string)
         if not json_dict:
             return None
+        return cls(json_dict,
+                   step_name=step_name,
+                   interrupted=json_dict.get('interrupted', False),
+                   builder_name=json_dict.get('builder_name'))
 
-        return cls(json_dict)
+    @classmethod
+    def results_from_resultdb(cls, rv, step_name=None):
+        """Creates a WebTestResults object from a resultDB RPC response data.
 
-    def __init__(self, parsed_json, chromium_revision=None):
+        Args:
+            rv: resultDB RPC response json containing web test result.
+        """
+        if not rv:
+            return None
+        return cls(rv, step_name=step_name)
+
+    def __init__(self,
+                 parsed_json,
+                 chromium_revision: Optional[str] = None,
+                 step_name: Optional[str] = None,
+                 interrupted: bool = False,
+                 builder_name: Optional[str] = None):
         self._results = parsed_json
         self._chromium_revision = chromium_revision
+        self._step_name = step_name
+        self.interrupted = interrupted
+        self.builder_name = builder_name
 
-    def run_was_interrupted(self):
-        return self._results['interrupted']
-
-    def builder_name(self):
-        return self._results['builder_name']
+    def step_name(self):
+        return self._step_name
 
     @memoized
     def chromium_revision(self, git=None):
@@ -157,3 +220,34 @@ class WebTestResults(object):
 
     def didnt_run_as_expected_results(self):
         return self._filter_tests(lambda r: not r.did_run_as_expected())
+
+    # Returns non flaky failing results
+    def failed_unexpected_resultdb(self):
+        results = []
+        prev = None
+        flaky = False
+        for result in self._results:
+            if not prev:
+                prev = result
+            elif result[u'testId'] != prev[u'testId']:
+                if not flaky:
+                    results.append(prev)
+                prev = result
+                flaky = False
+            elif result[u'status'] != prev[u'status']:
+                flaky = True
+        if not flaky:
+            results.append(prev)
+        failed_results = []
+        for result in results:
+            if result[u'status'] == u"FAIL":
+                failed_results.append(result)
+        return failed_results
+
+    def fail_result_exists_resultdb(self, test):
+        for result in self._results:
+            if test in result[u'testId'] and result[u'status'] == u"FAIL":
+                return True
+
+    def test_results_resultdb(self):
+        return self._results

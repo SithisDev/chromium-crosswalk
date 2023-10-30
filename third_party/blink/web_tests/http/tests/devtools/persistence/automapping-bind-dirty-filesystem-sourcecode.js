@@ -4,15 +4,15 @@
 
 (async function() {
   TestRunner.addResult(`Verify that dirty fileSystem uiSourceCodes are bound to network.\n`);
-  await TestRunner.loadModule('bindings_test_runner');
+  await TestRunner.loadTestModule('bindings_test_runner');
   BindingsTestRunner.overrideNetworkModificationTime(
       {'http://127.0.0.1:8000/devtools/persistence/resources/foo.js': null});
 
-  var fs = new BindingsTestRunner.TestFileSystem('file:///var/www');
+  var fs = new BindingsTestRunner.TestFileSystem('/var/www');
   BindingsTestRunner.addFooJSFile(fs);
   fs.reportCreated(function() {});
   var fsUISourceCode = await TestRunner.waitForUISourceCode('foo.js', Workspace.projectTypes.FileSystem);
-  var content = await fsUISourceCode.requestContent();
+  var { content } = await fsUISourceCode.requestContent();
   content = content.replace(/foo/g, 'bar');
   fsUISourceCode.setWorkingCopy(content);
 

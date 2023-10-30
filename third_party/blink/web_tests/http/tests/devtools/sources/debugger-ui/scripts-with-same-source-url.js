@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests that script is replaced with the newer version when the names match.\n`);
-  await TestRunner.loadModule('sources_test_runner');
+  await TestRunner.loadLegacyModule('sources'); await TestRunner.loadTestModule('sources_test_runner');
   await TestRunner.showPanel('sources');
   await TestRunner.evaluateInPagePromise(`
       function injectScript(value)
@@ -29,7 +29,7 @@
     if (event.data.project().type() !== 'network')
       return;
     event.data.requestContent().then(function(it, content) {
-      TestRunner.addResult('Content: ' + content);
+      TestRunner.addResult('Content: ' + content.content);
       if (it)
         TestRunner.completeTest();
     }.bind(null, iteration++));

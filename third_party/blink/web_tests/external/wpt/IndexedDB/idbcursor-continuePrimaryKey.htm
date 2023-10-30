@@ -5,7 +5,7 @@
       href="http://w3c.github.io/IndexedDB/#dom-idbcursor-continueprimarykey">
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
-<script src="support.js"></script>
+<script src="resources/support.js"></script>
 
 <script>
 'use strict';
@@ -120,7 +120,7 @@ indexeddb_test(
           } else {
             calledContinue = true;
             if('exception' in testCase) {
-              assert_throws(
+              assert_throws_dom(
                   testCase.exception, () => { testCase.call(cursor); },
                   testCase.call.toString());
             } else {

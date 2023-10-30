@@ -1,37 +1,27 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
-      "drawsContent": false,
+      "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
+      "name": "Caret",
+      "position": [8, 78],
+      "bounds": [1, 18],
+      "contentsOpaque": true,
+      "invalidations": [
+        [0, 0, 1, 18]
+      ]
     },
     {
-      "name": "Scrolling Contents Layer",
-      "bounds": [800, 600],
-      "contentsOpaque": true,
-      "backgroundColor": "#FFFFFF",
-      "paintInvalidations": [
-        {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [3, 37, 794, 64],
-          "reason": "geometry"
-        },
-        {
-          "object": "Caret",
-          "rect": [8, 78, 1, 18],
-          "reason": "caret"
-        },
-        {
-          "object": "Caret",
-          "rect": [8, 60, 1, 18],
-          "reason": "caret"
-        }
+      "name": "LayoutNGBlockFlow HTML",
+      "position": [6, 40],
+      "bounds": [788, 58],
+      "contentsOpaqueForText": true,
+      "invalidations": [
+        [0, 0, 788, 58]
       ]
     }
   ]

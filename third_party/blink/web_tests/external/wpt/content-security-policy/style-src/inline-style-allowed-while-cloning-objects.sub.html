@@ -12,7 +12,7 @@
 
         var t = async_test("Test that violation report event was fired");
         window.addEventListener("securitypolicyviolation", t.step_func_done(function(e) {
-            assert_equals(e.violatedDirective, "style-src");
+            assert_equals(e.violatedDirective, "style-src-attr");
         }));
         window.onload = function() {
             try {
@@ -111,6 +111,14 @@
             test(function() {
                 assert_equals(ops.id, clonedOps.id)
             });
+            test(function() {
+                let el = document.getElementById("svg");
+                assert_equals(el.getAttribute("style"), "");
+                el.style.background = violetOps.style.background;
+                assert_not_equals(el.style.background, "");
+                let clone = el.cloneNode(true);
+                assert_equals(el.style.background, clone.style.background)
+            }, "non-HTML namespace");
         }
 
     </script>
@@ -131,6 +139,7 @@
     <div id="violetOps">
         Yet another div.
     </div>
+    <svg id="svg" style="background: rgb(238, 130, 238)"></svg>
     <div id="log"></div>
 </body>
 

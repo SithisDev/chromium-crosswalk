@@ -3,6 +3,8 @@ if (self.importScripts) {
   importScripts('/fetch/resources/thorough-util.js');
 }
 
+var {BASE_URL, OTHER_BASE_URL} = get_thorough_test_options();
+
 var TEST_TARGETS = [
   // Auth check
   // Test that default mode is no-cors in serviceworker-proxied tests.
@@ -30,16 +32,14 @@ var TEST_TARGETS = [
   // Test that default mode is no-cors in serviceworker-proxied tests.
   onlyOnServiceWorkerProxiedTest(
     [OTHER_BASE_URL + 'Auth',
-     [fetchResolved, noBody, typeOpaque],
-     [authCheck2]]),
+     [fetchResolved, noBody, typeOpaque], [authCheck2]]),
   onlyOnServiceWorkerProxiedTest(
     [OTHER_BASE_URL + 'Auth&credentials=omit',
      [fetchResolved, noBody, typeOpaque],
      [checkJsonpError]]),
   onlyOnServiceWorkerProxiedTest(
     [OTHER_BASE_URL + 'Auth&credentials=include',
-     [fetchResolved, noBody, typeOpaque],
-     [authCheck2]]),
+     [fetchResolved, noBody, typeOpaque], [authCheck2]]),
   onlyOnServiceWorkerProxiedTest(
     [OTHER_BASE_URL + 'Auth&credentials=same-origin',
      [fetchResolved, noBody, typeOpaque],

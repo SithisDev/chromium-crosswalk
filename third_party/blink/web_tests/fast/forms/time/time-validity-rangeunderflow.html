@@ -2,6 +2,8 @@
 <html>
 <head>
 <script src="../../../resources/js-test.js"></script>
+<script src="../../../resources/testdriver.js"></script>
+<script src="../../../resources/testdriver-vendor.js"></script>
 </head>
 <body>
 <p id="description"></p>
@@ -67,7 +69,7 @@ input.max = '11:00';  // value < min && value > max
 checkUnderflow('13:16', '14:00');
 
 // Disabled
-checkNotUnderflow('23:59', '23:59:30', true);
+checkUnderflow('23:59', '23:59:30', true);
 </script>
 </body>
 </html>

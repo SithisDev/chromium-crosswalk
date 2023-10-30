@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests ViewportDataGrid.\n`);
-  await TestRunner.loadModule('data_grid_test_runner');
+  await TestRunner.loadLegacyModule('data_grid'); await TestRunner.loadTestModule('data_grid_test_runner');
 
   function attach(parent, child, index) {
     var parentName = parent === root ? 'root' : parent.data.id;
@@ -40,7 +40,7 @@
   }
 
   var columns = [{id: 'id'}];
-  var dataGrid = new DataGrid.DataGrid(columns);
+  var dataGrid = new DataGrid.DataGrid({displayName: 'Test', columns});
   var a = new DataGrid.DataGridNode({id: 'a'});
   var aa = new DataGrid.DataGridNode({id: 'aa'});
   var aaa = new DataGrid.DataGridNode({id: 'aaa'});
@@ -111,7 +111,7 @@
   dumpNodes();
 
   var columns = [{id: 'id'}];
-  var dataGrid = new DataGrid.DataGrid(columns);
+  var dataGrid = new DataGrid.DataGrid({displayName: 'Test', columns});
   var a = new DataGrid.DataGridNode({id: 'TextData', secondCol: 'a foo'});
   var b = new DataGrid.DataGridNode({id: 'NullData', secondCol: null});
   var root = dataGrid.rootNode();

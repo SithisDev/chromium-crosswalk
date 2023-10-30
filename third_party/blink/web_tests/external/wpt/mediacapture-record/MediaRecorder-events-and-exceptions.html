@@ -5,29 +5,15 @@
     <link rel="help" href="https://w3c.github.io/mediacapture-record/MediaRecorder.html#mediarecorder">
     <script src="/resources/testharness.js"></script>
     <script src="/resources/testharnessreport.js"></script>
+    <script src="utils/sources.js"></script>
 </head>
 <body>
-<canvas id="canvas" width="320" height="320"></canvas>
 <script>
 
   // This test exercises the MediaRecorder API event sequence:
   //   onStart -> onPause -> onResume -> onDataAvailable -> onStop
   // verifying the |state| and a few exceptions that are supposed to be thrown
   // when doing the wrong thing.
-
-  function createVideoStream() {
-      let canvas = document.getElementById("canvas");
-      canvas.getContext('2d').lineTo(10, 10);
-      return canvas.captureStream();
-  }
-
-  function drawSomethingOnCanvas() {
-      let canvas = document.getElementById("canvas");
-      // Drawing something on the canvas generates a frame in its captured stream.
-      let context = canvas.getContext("2d");
-      context.fillStyle = "red";
-      context.fillRect(0, 0, 10, 10);
-  }
 
   async_test(test => {
 
@@ -36,23 +22,21 @@
     });
 
     recorderOnDataAvailable = test.step_func(event => {
-      // TODO(mcasas): ondataavailable might never be pinged with an empty Blob
-      // data on recorder.stop(), see http://crbug.com/54428
       assert_equals(recorder.state, "inactive");
-      assert_equals(event.data.size, 0, 'We should have gotten an empty Blob');
+      assert_not_equals(event.data.size, 0, 'We should get a Blob with data');
     });
 
     recorderOnStop = test.step_func(function() {
       assert_equals(recorder.state, "inactive");
-      assert_throws("InvalidStateError", function() { recorder.stop() },
-                    "recorder cannot be stop()ped in |inactive| state");
-      assert_throws("InvalidStateError", function() { recorder.pause() },
-                    "recorder cannot be pause()ed in |inactive| state");
-      assert_throws("InvalidStateError", function() { recorder.resume() },
-                    "recorder cannot be resume()d in |inactive| state");
-      assert_throws("InvalidStateError", function() { recorder.requestData() },
-                    "cannot requestData() if recorder is in |inactive| state");
       recorder.onstop = recorderOnUnexpectedEvent;
+      recorder.stop();
+      assert_equals(recorder.state, "inactive", "stop() is idempotent");
+      assert_throws_dom("InvalidStateError", function() { recorder.pause() },
+                        "recorder cannot be pause()ed in |inactive| state");
+      assert_throws_dom("InvalidStateError", function() { recorder.resume() },
+                        "recorder cannot be resume()d in |inactive| state");
+      assert_throws_dom("InvalidStateError", function() { recorder.requestData() },
+                        "cannot requestData() if recorder is in |inactive| state");
       test.done();
     });
 
@@ -77,30 +61,38 @@
       recorder.pause();
     });
 
-    let stream = createVideoStream();
+    const {stream, control} = createVideoStream(test);
     assert_equals(stream.getAudioTracks().length, 0);
     assert_equals(stream.getVideoTracks().length, 1);
     assert_equals(stream.getVideoTracks()[0].readyState, 'live');
 
-    assert_throws("NotSupportedError",
-                  function() {
-                    recorder =
-                        new MediaRecorder(stream, {mimeType : "video/invalid"});
-                  },
-                  "recorder should throw() with unsupported mimeType");
-    let recorder = new MediaRecorder(stream);
+    assert_throws_dom("NotSupportedError",
+                      function() {
+                        new MediaRecorder(
+                          new MediaStream(), {mimeType : "video/invalid"});
+                      },
+                      "recorder should throw() with unsupported mimeType");
+    const recorder = new MediaRecorder(new MediaStream());
     assert_equals(recorder.state, "inactive");
 
-    assert_throws("InvalidStateError", function(){recorder.stop()},
-                  "recorder cannot be stop()ped in |inactive| state");
-    assert_throws("InvalidStateError", function(){recorder.pause()},
-                  "recorder cannot be pause()ed in |inactive| state");
-    assert_throws("InvalidStateError", function(){recorder.resume()},
-                  "recorder cannot be resume()d in |inactive| state");
-    assert_throws("InvalidStateError", function(){recorder.requestData()},
-                  "cannot requestData() if recorder is in |inactive| state");
+    recorder.stop();
+    assert_equals(recorder.state, "inactive", "stop() is idempotent");
+    assert_throws_dom("InvalidStateError", function(){recorder.pause()},
+                      "recorder cannot be pause()ed in |inactive| state");
+    assert_throws_dom("InvalidStateError", function(){recorder.resume()},
+                      "recorder cannot be resume()d in |inactive| state");
+    assert_throws_dom("InvalidStateError", function(){recorder.requestData()},
+                      "cannot requestData() if recorder is in |inactive| state");
 
-    drawSomethingOnCanvas();
+    assert_throws_dom("NotSupportedError",
+                      function() {
+                        recorder.start();
+                      },
+                      "recorder should throw() when starting with inactive stream");
+
+    recorder.stream.addTrack(stream.getTracks()[0]);
+
+    control.addVideoFrame();
 
     recorder.onstop = recorderOnUnexpectedEvent;
     recorder.onpause = recorderOnUnexpectedEvent;

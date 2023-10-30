@@ -1,43 +1,23 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
-      "drawsContent": false,
+      "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
+      "name": "LayoutNGBlockFlow DIV id='box'",
+      "bounds": [100, 100],
+      "contentsOpaque": true,
+      "backgroundColor": "#008000"
     },
     {
-      "name": "Scrolling Contents Layer",
-      "bounds": [800, 600],
+      "name": "LayoutNGBlockFlow (positioned) DIV id='positioned'",
+      "position": [400, 10],
+      "bounds": [50, 50],
       "contentsOpaque": true,
-      "backgroundColor": "#FFFFFF",
-      "paintInvalidations": [
-        {
-          "object": "LayoutBlockFlow DIV id='box'",
-          "rect": [0, 0, 100, 220],
-          "reason": "paint property change"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='box'",
-          "rect": [0, 0, 100, 200],
-          "reason": "paint property change"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='box'",
-          "rect": [400, 10, 50, 200],
-          "reason": "paint property change"
-        },
-        {
-          "object": "LayoutBlockFlow DIV id='box'",
-          "rect": [400, 10, 50, 180],
-          "reason": "paint property change"
-        }
-      ]
+      "backgroundColor": "#0000FF"
     }
   ]
 }

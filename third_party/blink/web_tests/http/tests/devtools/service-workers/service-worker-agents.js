@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests the way service workers don't enable DOM agent and does enable Debugger agent.\n`);
-  await TestRunner.loadModule('application_test_runner');
+  await TestRunner.loadLegacyModule('console'); await TestRunner.loadTestModule('application_test_runner');
     // Note: every test that uses a storage API must manually clean-up state from previous tests.
   await ApplicationTestRunner.resetState();
 
@@ -30,11 +30,11 @@
   ApplicationTestRunner.waitForServiceWorker(step1);
   ApplicationTestRunner.registerServiceWorker(scriptURL, scope);
 
-  function step1(target) {
+  async function step1(target) {
     TestRunner.addResult('Suspending targets.');
-    SDK.targetManager.suspendAllTargets();
+    await SDK.targetManager.suspendAllTargets();
     TestRunner.addResult('Resuming targets.');
-    SDK.targetManager.resumeAllTargets();
+    await SDK.targetManager.resumeAllTargets();
     TestRunner.completeTest();
   }
 

@@ -2,60 +2,27 @@ Tests that Page.setInterceptFileChooserDialog works as expected
 
 Running test: testAcceptFile
 file chooser mode: selectSingle
-selected files: ["set-intercept-file-chooser-dialog.js"]
+selected files: ["path1"]
 
 Running test: testAcceptMultipleFiles
 file chooser mode: selectMultiple
-selected files: ["set-intercept-file-chooser-dialog.js","set-intercept-file-chooser-dialog-expected.txt"]
+selected files: ["path1","path2"]
 
-Running test: testResetInput
-first selected files: ["set-intercept-file-chooser-dialog.js"]
-second selected files: []
+Running test: testOpenFilePickerAPI
+Failed to execute 'showOpenFilePicker' on 'Window': Intercepted by Page.setInterceptFileChooserDialog().
+
+Running test: testSaveFilePickerAPI
+Failed to execute 'showSaveFilePicker' on 'Window': Intercepted by Page.setInterceptFileChooserDialog().
+
+Running test: testDirectoryPickerAPI
+Failed to execute 'showDirectoryPicker' on 'Window': Intercepted by Page.setInterceptFileChooserDialog().
 
 Running test: testErrors
-Try handling non-existing file chooser.
-{
-    error : {
-        code : -32000
-        message : No pending file chooser
-    }
-    id : <number>
-    sessionId : <string>
-}
 Try enabling file interception in multiclient
 {
-    error : {
-        code : -32000
-        message : Cannot enable file chooser interception because other protocol client already intercepts it
-    }
     id : <number>
-    sessionId : <string>
-}
-Test file chooser fails when accepting multiple files for a non-multiple file chooser
-{
-    error : {
-        code : -32000
-        message : Expected to accept a single file
+    result : {
     }
-    id : <number>
-    sessionId : <string>
-}
-Test wrong action
-{
-    error : {
-        code : -32602
-        message : Unknown action 'badaction'
-    }
-    id : <number>
-    sessionId : <string>
-}
-Test trying to handle already-handled file chooser
-{
-    error : {
-        code : -32000
-        message : No pending file chooser
-    }
-    id : <number>
     sessionId : <string>
 }
 

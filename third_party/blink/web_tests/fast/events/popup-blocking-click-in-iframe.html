@@ -1,13 +1,11 @@
 <html>
     <head>
+        <script src="../../resources/gesture-util.js"></script>
         <script>
         if (window.testRunner) {
             testRunner.dumpAsText();
-            testRunner.setCanOpenWindows();
             testRunner.dumpChildFrames();
             testRunner.waitUntilDone();
-            testRunner.setCloseRemainingWindowsWhenComplete()
-            testRunner.setPopupBlockingEnabled(true);
         }
 
         function closeWindow(windowToClose)
@@ -37,10 +35,7 @@
 
         function test()
         {
-            if (window.testRunner) {
-                eventSender.mouseMoveTo(2, 2);
-                eventSender.scheduleAsynchronousClick();
-            }
+            mouseClickOn(2, 2);
         }
 
         function log(msg)

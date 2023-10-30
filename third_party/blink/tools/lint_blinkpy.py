@@ -1,4 +1,4 @@
-#!/usr/bin/env vpython
+#!/usr/bin/env vpython3
 # Copyright (c) 2012 Google Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -30,7 +30,6 @@
 import sys
 
 from blinkpy.style.checkers.python import PythonChecker
-
 
 if len(sys.argv) <= 1:
     sys.stderr.write('Usage: lint_blinkpy.py path [path ...]\n')

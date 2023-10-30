@@ -3,6 +3,8 @@
 <head>
   <script src="../../../resources/testharness.js"></script>
   <script src="../../../resources/testharnessreport.js"></script>
+  <script src="../../../resources/testdriver.js"></script>
+  <script src="../../../resources/testdriver-vendor.js"></script>
   <script src="../../forms/resources/picker-common.js"></script>
 </head>
 <body>
@@ -16,7 +18,7 @@
 <script>
 async_test((t) => {
     accessibilityController.setNotificationListener(t.step_func((axnode, type) => {
-        if (type == 'MenuListItemSelected')
+        if (type == 'MarkDirty' && axnode.role == 'AXRole: AXMenuListOption')
             t.done();
     }));
     var menu = document.getElementById('menu');
@@ -29,7 +31,7 @@ async_test((t) => {
         assert_unreached("Did not receive all accessibility notifications");
         t.done();
     }, 500);
-}, 'Tests if typing an arrow key dispatches a |MenuListItemSelected| a11y event.');
+}, 'Tests if typing an arrow key dispatches an a11y event.');
 
 </script>
 </body>

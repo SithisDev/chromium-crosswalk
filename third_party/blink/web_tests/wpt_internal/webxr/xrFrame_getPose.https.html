@@ -3,7 +3,6 @@
 <script src="/resources/testharnessreport.js"></script>
 <script src="/webxr/resources/webxr_util.js"></script>
 <script src="/webxr/resources/webxr_test_constants.js"></script>
-<canvas />
 
 <script>
 
@@ -37,6 +36,6 @@ let testFunction = function(session, fakeDeviceController, t) {
 };
 
 xr_session_promise_test(
-  testName, testFunction, fakeDeviceInitParams, 'immersive-vr');
+  testName, testFunction, fakeDeviceInitParams, 'immersive-vr', { 'requiredFeatures': ['local-floor'] });
 
 </script>

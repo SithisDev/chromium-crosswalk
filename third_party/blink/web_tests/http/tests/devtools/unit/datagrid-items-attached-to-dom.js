@@ -1,5 +1,5 @@
 (async function() {
-  await TestRunner.loadModule('data_grid');
+  await TestRunner.loadLegacyModule('data_grid');
 
   TestRunner.addResult("This tests viewport datagrid.");
 
@@ -7,7 +7,7 @@
   UI.inspectorView.element.appendChild(div);
 
   var columns = [{id: "id", title: "ID column", width: "250px"}];
-  var dataGrid = new DataGrid.DataGrid(columns);
+  var dataGrid = new DataGrid.DataGrid({displayName: 'Test', columns});
   div.appendChild(dataGrid.element);
   dataGrid.element.style.height = '150px';
 

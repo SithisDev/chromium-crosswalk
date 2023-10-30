@@ -27,7 +27,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from blinkpy.common.checkout.git_mock import MockGit
-from blinkpy.common.net.buildbot_mock import MockBuildBot
+from blinkpy.common.net.results_fetcher_mock import MockTestResultsFetcher
 from blinkpy.common.net.web_mock import MockWeb
 from blinkpy.common.path_finder import PathFinder
 from blinkpy.common.system.system_host_mock import MockSystemHost
@@ -40,26 +40,24 @@ from blinkpy.w3c.wpt_manifest import BASE_MANIFEST_NAME
 
 
 class MockHost(MockSystemHost):
-
     def __init__(self,
                  log_executive=False,
                  web=None,
                  git=None,
                  os_name=None,
                  os_version=None,
+                 machine=None,
                  time_return_val=123):
-        super(MockHost, self).__init__(
-            log_executive=log_executive,
-            os_name=os_name,
-            os_version=os_version,
-            time_return_val=time_return_val)
+        super(MockHost, self).__init__(log_executive=log_executive,
+                                       os_name=os_name,
+                                       os_version=os_version,
+                                       machine=None,
+                                       time_return_val=time_return_val)
 
         add_unit_tests_to_mock_filesystem(self.filesystem)
         self._add_base_manifest_to_mock_filesystem(self.filesystem)
         self.web = web or MockWeb()
         self._git = git
-
-        self.buildbot = MockBuildBot()
 
         # Note: We're using a real PortFactory here. Tests which don't wish to depend
         # on the list of known ports should override this with a MockPortFactory.
@@ -78,9 +76,9 @@ class MockHost(MockSystemHost):
                 'port_name': 'linux-trusty',
                 'specifiers': ['Trusty', 'Debug']
             },
-            'Fake Test Mac10.12': {
-                'port_name': 'mac-mac10.12',
-                'specifiers': ['Mac10.12', 'Release'],
+            'Fake Test Mac11': {
+                'port_name': 'mac-mac11',
+                'specifiers': ['Mac11', 'Release'],
                 'is_try_builder': True,
             },
             'fake_blink_try_linux': {
@@ -94,18 +92,42 @@ class MockHost(MockSystemHost):
                 'is_try_builder': True,
             },
             'android_blink_rel': {
-                'bucket': 'luci.chromium.try',
+                'bucket': 'luci.chromium.android',
                 'port_name': 'android-kitkat',
                 'specifiers': ['KitKat', 'Release'],
                 'is_try_builder': True,
             },
+            # For the try flag unit tests.
+            'linux-rel': {
+                'port_name': 'linux-trusty',
+                'specifiers': ['Trusty', 'Release'],
+                'is_try_builder': True,
+            },
+            'win7-rel': {
+                'port_name': 'win-win7',
+                'specifiers': ['Win7', 'Release'],
+                'is_try_builder': True,
+            },
+            'mac-rel': {
+                'port_name': 'mac-mac12',
+                'specifiers': ['Trusty', 'Release'],
+                'is_try_builder': True,
+            },
         })
+        self.results_fetcher = MockTestResultsFetcher.from_host(self)
 
     def git(self, path=None):
         if path:
-            return MockGit(cwd=path, filesystem=self.filesystem, executive=self.executive, platform=self.platform)
+            return MockGit(
+                cwd=path,
+                filesystem=self.filesystem,
+                executive=self.executive,
+                platform=self.platform)
         if not self._git:
-            self._git = MockGit(filesystem=self.filesystem, executive=self.executive, platform=self.platform)
+            self._git = MockGit(
+                filesystem=self.filesystem,
+                executive=self.executive,
+                platform=self.platform)
         # Various pieces of code (wrongly) call filesystem.chdir(checkout_root).
         # Making the checkout_root exist in the mock filesystem makes that chdir not raise.
         self.filesystem.maybe_make_directory(self._git.checkout_root)
@@ -118,4 +140,4 @@ class MockHost(MockSystemHost):
         filesystem.maybe_make_directory(filesystem.join(external_dir, 'wpt'))
 
         manifest_base_path = filesystem.join(external_dir, BASE_MANIFEST_NAME)
-        filesystem.files[manifest_base_path] = '{"manifest": "base"}'
+        filesystem.files[manifest_base_path] = b'{"manifest": "base"}'

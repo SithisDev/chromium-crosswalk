@@ -5,7 +5,7 @@
 (async function() {
   TestRunner.addResult(
       `Verify that automapping is able to map ambiguous resources based on the selected project folder.\n`);
-  await TestRunner.loadModule('bindings_test_runner');
+  await TestRunner.loadTestModule('bindings_test_runner');
 
   var automappingTest = new BindingsTestRunner.AutomappingTest(new Workspace.Workspace());
 
@@ -20,7 +20,7 @@
     'http://example.com/logo.png': logo2
   });
 
-  var fs = new BindingsTestRunner.TestFileSystem('file:///var/www');
+  var fs = new BindingsTestRunner.TestFileSystem('/var/www');
   BindingsTestRunner.addFiles(fs, {
     'code/proj1/.git/HEAD': {content: 'ref: refs/heads/master', time: new Date('May 12, 2007')},
     'code/proj1/reset.css': reset_css,

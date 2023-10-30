@@ -3,22 +3,27 @@
 # found in the LICENSE file.
 
 import unittest
+from unittest.mock import patch
 
+from blinkpy.common.checkout.git_mock import MockGit
 from blinkpy.common.system.output_capture import OutputCapture
 from blinkpy.tool.blink_tool import BlinkTool
 
 
+# Avoid creating a real `Git` object, since it runs a command in its
+# constructor.
+@patch('blinkpy.tool.blink_tool.BlinkTool.git',
+       lambda self, path=None: MockGit(path))
 class BlinkToolTest(unittest.TestCase):
-
     def test_split_args_basic(self):
         self.assertEqual(
-            BlinkTool._split_command_name_from_args(['--global-option', 'command', '--option', 'arg']),
+            BlinkTool._split_command_name_from_args(
+                ['--global-option', 'command', '--option', 'arg']),
             ('command', ['--global-option', '--option', 'arg']))
 
     def test_split_args_empty(self):
         self.assertEqual(
-            BlinkTool._split_command_name_from_args([]),
-            (None, []))
+            BlinkTool._split_command_name_from_args([]), (None, []))
 
     def test_split_args_with_no_options(self):
         self.assertEqual(

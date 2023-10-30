@@ -26,28 +26,61 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import pickle
 import unittest
 
 from blinkpy.web_tests.models.test_results import TestResult
+from blinkpy.web_tests.port.driver import DriverOutput
+from blinkpy.web_tests.models import test_failures
 
 
 class TestResultsTest(unittest.TestCase):
-
     def test_defaults(self):
         result = TestResult('foo')
         self.assertEqual(result.test_name, 'foo')
         self.assertEqual(result.failures, [])
         self.assertEqual(result.test_run_time, 0)
 
-    def test_loads(self):
-        result = TestResult(test_name='foo',
-                            failures=[],
-                            test_run_time=1.1)
-        s = result.dumps()
-        new_result = TestResult.loads(s)
-        self.assertIsInstance(new_result, TestResult)
+    def test_pickling(self):
+        """Verify `pickle` can serialize and unserialize a test result.
 
-        self.assertEqual(new_result, result)
+        `multiprocessing` uses `pickle` to transport test results between
+        processes over a queue.
+        """
+        result = TestResult(test_name='foo', failures=[], test_run_time=1.1)
+        buf = pickle.dumps(result)
+        unpickled_result = pickle.loads(buf)
 
-        # Also check that != is implemented.
-        self.assertFalse(new_result != result)
+        self.assertIsInstance(unpickled_result, TestResult)
+        self.assertEqual(unpickled_result, result)
+        # Logically the same as the previous assertion, but checks that the `!=`
+        # operator is implemented.
+        self.assertFalse(unpickled_result != result)
+
+    def test_results_has_stderr(self):
+        driver_output = DriverOutput(None, None, None, None, error=b'error')
+        failures = [test_failures.FailureCrash(driver_output, None)]
+        result = TestResult('foo', failures=failures)
+        self.assertTrue(result.has_stderr)
+
+    def test_results_has_repaint_overlay(self):
+        text = '"invalidations": ['.encode('utf8')
+        driver_output = DriverOutput(text, None, None, None)
+        failures = [test_failures.FailureTextMismatch(driver_output, None)]
+        result = TestResult('foo', failures=failures)
+        self.assertTrue(result.has_repaint_overlay)
+
+    def test_results_multiple(self):
+        driver_output = DriverOutput(None, None, None, None)
+        failure_crash = [test_failures.FailureCrash(driver_output, None),
+                    test_failures.TestFailure(driver_output, None)]
+        failure_timeout = [test_failures.FailureTimeout(driver_output, None),
+                    test_failures.TestFailure(driver_output, None)]
+        failure_early_exit = [test_failures.FailureEarlyExit(driver_output, None),
+                    test_failures.TestFailure(driver_output, None)]
+        # Should not raise an exception for CRASH and FAIL.
+        TestResult('foo', failures=failure_crash)
+        # Should not raise an exception for TIMEOUT and FAIL.
+        TestResult('foo', failures=failure_timeout)
+        with self.assertRaises(AssertionError):
+            TestResult('foo', failures=failure_early_exit)

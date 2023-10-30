@@ -10,12 +10,12 @@ ctx.translate(20, 20);
 // Verify backing is reset through transferToImageBitmap()
 ctx.fillStyle = '#0f0';
 var firstImage = aCanvas.transferToImageBitmap();
-// trasnform should be preserved
+// transform should be preserved
 ctx.fillRect(0, 0, 10, 10);
 var secondImage = aCanvas.transferToImageBitmap();
 
 var testCanvas = document.createElement('canvas');
-var testCtx = testCanvas.getContext('2d');
+var testCtx = testCanvas.getContext('2d', {willReadFrequently: true});
 testCtx.drawImage(secondImage, 0, 0);
 // Verify that transform was carried over.
 var imgData = testCtx.getImageData(23, 25, 1, 1).data;

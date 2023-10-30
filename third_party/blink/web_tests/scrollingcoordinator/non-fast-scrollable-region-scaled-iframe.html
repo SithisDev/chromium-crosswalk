@@ -14,7 +14,14 @@
   }
 </style>
 
-<iframe src="data:text/html;charset=utf-8,<html><body style='width:1000px;height:1000px;'>Should be covered by a green overlay.</body></html>"></iframe>
+<script>
+  // Prefer non-composited scrolling because this is a test of non-composited
+  // scrollers.
+  if (window.internals)
+    internals.settings.setPreferCompositingToLCDTextEnabled(false);
+</script>
+
+<iframe src="resources/large-body.html"></iframe>
 <div id="console"></div>
 <div class="spacer"></div>
 
@@ -35,7 +42,9 @@
     runAfterLayoutAndPaint(function(){
       nonFastScrollableRects = internals.nonFastScrollableRects(document);
       shouldBe('nonFastScrollableRects.length', '1');
-      shouldBeEqualToString('rectToString(nonFastScrollableRects[0])', '[110, 110, 120, 120]');
+      // The non-fast region in the space of the scaled layer but prints it in
+      // absolute coordinates so the rect is scaled here.
+      shouldBeEqualToString('rectToString(nonFastScrollableRects[0])', '[220, 220, 240, 240]');
 
       drawNonFastScrollableRegionOverlays();
 

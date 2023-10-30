@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests that console logging dumps proper messages.\n`);
-  await TestRunner.loadModule('console_test_runner');
+  await TestRunner.loadLegacyModule('console'); await TestRunner.loadTestModule('console_test_runner');
   await TestRunner.showPanel('console');
   await TestRunner.loadHTML(`
       <div id="x"></div>
@@ -79,7 +79,7 @@
       var smallTypedArray = new Uint8Array(new ArrayBuffer(400));
       smallTypedArray["foo"] = "bar";
       var bigTypedArray = new Uint8Array(new ArrayBuffer(400 * 1000 * 1000));
-      bigTypedArray["FAIL"] = "FAIL: Object.getOwnPropertyNames() should not have been run";
+      bigTypedArray.PASS = "Non-element properties should be displayed.";
       var namespace = {};
       namespace.longSubNamespace = {};
       namespace.longSubNamespace.x = {};
@@ -133,8 +133,8 @@
         loopOverGlobals(next, total);
     }
 
-    function onRemoteObjectsLoaded() {
-      ConsoleTestRunner.dumpConsoleMessagesIgnoreErrorStackFrames();
+    async function onRemoteObjectsLoaded() {
+      await ConsoleTestRunner.dumpConsoleMessagesIgnoreErrorStackFrames();
       TestRunner.addResult('Expanded all messages');
       ConsoleTestRunner.expandConsoleMessages(
           ConsoleTestRunner.expandConsoleMessagesErrorParameters.bind(this, finish), undefined, function(section) {
@@ -142,8 +142,8 @@
           });
     }
 
-    function finish() {
-      ConsoleTestRunner.dumpConsoleMessagesIgnoreErrorStackFrames();
+    async function finish() {
+      await ConsoleTestRunner.dumpConsoleMessagesIgnoreErrorStackFrames();
       TestRunner.completeTest();
     }
 

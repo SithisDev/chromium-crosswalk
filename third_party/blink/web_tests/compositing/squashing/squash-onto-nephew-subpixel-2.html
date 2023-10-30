@@ -2,7 +2,8 @@
 <head>
 <style>
 .composited {
-transform: translatez(0);
+  /* Not using will-change:transform because it ignores subpixel accumulation. */ 
+  will-change: opacity;
 }
 
 .box {

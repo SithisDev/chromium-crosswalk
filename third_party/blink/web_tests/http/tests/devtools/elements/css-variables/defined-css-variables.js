@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Verify that CSS variables are defined correctly wrt DOM inheritance`);
-  await TestRunner.loadModule('elements_test_runner');
+  await TestRunner.loadLegacyModule('elements'); await TestRunner.loadTestModule('elements_test_runner');
   await TestRunner.showPanel('elements');
   await TestRunner.loadHTML(`
     <style>
@@ -22,6 +22,7 @@
 
       span {
         --span-variable: green;
+        --camelCased: blue;
       }
     </style>
     <body>
@@ -33,7 +34,7 @@
 
 
   const node = await ElementsTestRunner.selectNodeAndWaitForStylesPromise('inspected');
-  const matchedStyles = await TestRunner.cssModel.matchedStylesPromise(node.id);
+  const matchedStyles = await TestRunner.cssModel.getMatchedStyles(node.id);
   TestRunner.addResult('matchedStyles.availableCSSVariables()');
   const styles = matchedStyles.nodeStyles();
   dumpCSSVariables(styles[0]);

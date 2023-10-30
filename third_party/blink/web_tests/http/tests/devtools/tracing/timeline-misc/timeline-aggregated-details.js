@@ -4,20 +4,17 @@
 
 (async function() {
   TestRunner.addResult(`Test timeline aggregated details.\n`);
-  await TestRunner.loadModule('performance_test_runner');
-  await TestRunner.loadModule('network_test_runner');
+  await TestRunner.loadLegacyModule('timeline'); await TestRunner.loadTestModule('performance_test_runner');
+  await TestRunner.loadTestModule('network_test_runner');
   await TestRunner.showPanel('timeline');
 
-  await ProductRegistry.instance();
-  NetworkTestRunner.resetProductRegistry();
-  NetworkTestRunner.addProductRegistryEntry('*.google.com', 'Google');
   TestRunner.addResult('');
 
   var sessionId = '6.23';
   var rawTraceEvents = [
     {
       'args': {'name': 'Renderer'},
-      'cat': '__metadata',
+      'cat': 'metadata',
       'name': 'process_name',
       'ph': 'M',
       'pid': 17851,
@@ -26,7 +23,7 @@
     },
     {
       'args': {'name': 'CrRendererMain'},
-      'cat': '__metadata',
+      'cat': 'metadata',
       'name': 'thread_name',
       'ph': 'M',
       'pid': 17851,
@@ -563,9 +560,8 @@
   ];
 
   var timeline = UI.panels.timeline;
-  timeline._setModel(PerformanceTestRunner.createPerformanceModelWithEvents(rawTraceEvents));
+  timeline.setModel(PerformanceTestRunner.createPerformanceModelWithEvents(rawTraceEvents));
 
-  await ProductRegistry.instance();
   var groupByEnum = Timeline.AggregatedTimelineTreeView.GroupBy;
   for (var grouping of Object.values(groupByEnum)) {
     testEventTree('CallTree', grouping);
@@ -575,12 +571,12 @@
   TestRunner.completeTest();
 
   function getTreeView(type) {
-    if (timeline._tabbedPane) {
-      timeline._tabbedPane.selectTab(type, true);
-      return timeline._flameChart._treeView;
+    if (timeline.tabbedPane) {
+      timeline.tabbedPane.selectTab(type, true);
+      return timeline.flameChart.treeView;
     }
-    timeline._flameChart._detailsView._tabbedPane.selectTab(type, true);
-    return timeline._flameChart._detailsView._tabbedPane.visibleView;
+    timeline.flameChart.detailsView.tabbedPane.selectTab(type, true);
+    return timeline.flameChart.detailsView.tabbedPane.visibleView;
   }
 
   function testEventTree(type, grouping) {
@@ -588,19 +584,19 @@
     var tree = getTreeView(type);
     if (grouping) {
       TestRunner.addResult(type + '  Group by: ' + grouping);
-      tree._groupBySetting.set(grouping);
+      tree.groupBySetting.set(grouping);
     } else {
       TestRunner.addResult(type);
     }
-    var rootNode = tree._dataGrid.rootNode();
+    var rootNode = tree.dataGrid.rootNode();
     for (var node of rootNode.children)
-      printEventTree(1, node._profileNode, node._treeView);
+      printEventTree(1, node.profileNode, node.treeView);
   }
 
   function printEventTree(padding, node, treeView) {
     var name;
     if (node.isGroupNode()) {
-      name = treeView._displayInfoForGroupNode(node).name;
+      name = treeView.displayInfoForGroupNode(node).name;
     } else {
       name = node.event.name === TimelineModel.TimelineModel.RecordType.JSFrame ?
           UI.beautifyFunctionName(node.event.args['data']['functionName']) :

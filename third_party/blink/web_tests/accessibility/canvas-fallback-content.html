@@ -1,4 +1,4 @@
-<!DOCTYPE HTML>
+pc<!DOCTYPE HTML>
 <html>
 <body>
 <script src="../resources/testharness.js"></script>
@@ -39,7 +39,10 @@ myelement {
 <div id="console"></div>
 <script>
   function check(id, expectedRole) {
+      console.log('Checking for ' + expectedRole + ' at #' + id);
       var axElement = accessibilityController.accessibleElementById(id);
+      assert_true(Boolean(axElement));
+      assert_equals(axElement.role, expectedRole, id);
       var element = document.getElementById(id);
       // TODO(crbug.com/930327): focus() triggers a lifecycle update without updating observers.
       // Make sure to get the axElement before calling focus(), to trigger a full update cycle.
@@ -49,7 +52,6 @@ myelement {
   }
 
 test((t) => {
-    var comboBoxRole = (testRunner.platformName == "gtk" || testRunner.platformName == "efl") ? "AXRole: AXComboBox" : "AXRole: AXPopUpButton";
 
     // Check rendered controls.
     check("link1", "AXRole: AXLink");
@@ -58,7 +60,7 @@ test((t) => {
     check("checkbox1", "AXRole: AXCheckBox");
     check("radio1", "AXRole: AXRadioButton");
     check("submit1", "AXRole: AXButton");
-    check("combobox1", comboBoxRole);
+    check("combobox1", "AXRole: AXComboBoxSelect");
     check("focusable1", "AXRole: AXGenericContainer");
     check("aria-button1", "AXRole: AXButton");
     check("aria-link1", "AXRole: AXLink");
@@ -70,17 +72,19 @@ test((t) => {
     check("checkbox2", "AXRole: AXCheckBox");
     check("radio2", "AXRole: AXRadioButton");
     check("submit2", "AXRole: AXButton", t);
-    check("combobox2", comboBoxRole, t);
+    check("combobox2", "AXRole: AXComboBoxSelect", t);
     check("focusable2", "AXRole: AXGenericContainer", t);
     check("aria-button2", "AXRole: AXButton", t);
     check("aria-link2", "AXRole: AXLink", t);
 
     // Check that the role is updated when the element changes.
     document.getElementById('focusable1').setAttribute('role', 'button');
-    check("focusable1", "AXRole: AXButton", t);
-
     document.getElementById('focusable2').setAttribute('role', 'button');
-    check("focusable2", "AXRole: AXButton", t, true);
+    // Role changes do not take effect immediately.
+    requestAnimationFrame(() => {
+      check("focusable1", "AXRole: AXButton", t);
+      check("focusable2", "AXRole: AXButton", t,);
+    });
 }, "This test makes sure that focusable elements in canvas fallback content are accessible.");
 
 

@@ -1,43 +1,61 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutTextControl INPUT id='root'",
-      "position": [5, 5],
-      "bounds": [47, 25],
+      "name": "LayoutNGTextControlSingleLine INPUT id='root'",
+      "position": [-1, -1],
+      "bounds": [50, 23],
+      "contentsOpaqueForText": true,
       "backgroundColor": "#FFFFFF",
-      "paintInvalidations": [
-        {
-          "object": "LayoutTextControl INPUT id='root'",
-          "rect": [0, 0, 47, 25],
-          "reason": "full layer"
-        },
-        {
-          "object": "LayoutTextControl INPUT id='root'",
-          "rect": [0, 0, 41, 19],
-          "reason": "full layer"
-        },
-        {
-          "object": "Caret",
-          "rect": [39, 6, 1, 13],
-          "reason": "caret"
-        }
+      "invalidations": [
+        [0, 0, 50, 23]
+      ],
+      "transform": 1
+    },
+    {
+      "name": "Caret",
+      "position": [38, 0],
+      "bounds": [1, 15],
+      "contentsOpaque": true,
+      "invalidations": [
+        [0, 0, 1, 15]
+      ],
+      "transform": 2
+    },
+    {
+      "name": "LayoutNGTextControlSingleLine INPUT id='root'",
+      "position": [-1, -1],
+      "bounds": [50, 23],
+      "contentsOpaqueForText": true,
+      "invalidations": [
+        [0, 0, 50, 23]
+      ],
+      "transform": 1
+    }
+  ],
+  "transforms": [
+    {
+      "id": 1,
+      "transform": [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [8, 8, 0, 1]
+      ]
+    },
+    {
+      "id": 2,
+      "parent": 1,
+      "transform": [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [4, 3, 0, 1]
       ]
     }
   ]

@@ -4,8 +4,9 @@
 
 (async function() {
   TestRunner.addResult(`Tests that ScriptSearchScope performs search across all sources correctly.\n`);
-  await TestRunner.loadModule('bindings_test_runner');
-  await TestRunner.loadModule('sources_test_runner');
+  await TestRunner.loadTestModule('bindings_test_runner');
+  await TestRunner.loadLegacyModule('sources'); await TestRunner.loadTestModule('sources_test_runner');
+  await TestRunner.loadLegacyModule('search');
   await TestRunner.showPanel('sources');
 
   function fileSystemUISourceCodes() {
@@ -18,7 +19,7 @@
 
   var scope = new Sources.SourcesSearchScope();
   var names = ['search.html', 'search.js', 'search.css'];
-  var fs = new BindingsTestRunner.TestFileSystem('file:///var/www');
+  var fs = new BindingsTestRunner.TestFileSystem('/var/www');
 
   var promises = [];
   for (var name of names)
@@ -41,10 +42,8 @@
   }
 
   function populateFileSystem(name) {
-    var urlPrefix =
-        TestRunner.mainTarget.inspectedURL().substr(0, TestRunner.mainTarget.inspectedURL().lastIndexOf('/') + 1);
     var url = TestRunner.url('resources/' + name);
-    return Runtime.loadResourcePromise(url).then(function(text) {
+    return fetch(url).then(result => result.text()).then(function(text) {
       fs.root.addFile(name, text);
     });
   }
@@ -56,7 +55,7 @@
       var paths = [];
       for (var i = 0; i < names.length; ++i)
         paths.push('/var/www/' + names[i]);
-      Persistence.isolatedFileSystemManager._onSearchCompleted(
+      Persistence.isolatedFileSystemManager.onSearchCompleted(
           {data: {requestId: requestId, fileSystemPath: path, files: paths}});
     }
   };

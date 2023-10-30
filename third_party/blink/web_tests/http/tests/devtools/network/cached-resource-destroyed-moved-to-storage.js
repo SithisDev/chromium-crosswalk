@@ -7,8 +7,8 @@
     `Tests content is moved from cached resource to resource agent's data storage when cached resource is destroyed.\n`
   );
 
-  await TestRunner.loadModule('network_test_runner');
-  await TestRunner.loadModule('console_test_runner');
+  await TestRunner.loadTestModule('network_test_runner');
+  await TestRunner.loadLegacyModule('console'); await TestRunner.loadTestModule('console_test_runner');
   await TestRunner.showPanel('network');
 
   await TestRunner.evaluateInPagePromise(`
@@ -45,7 +45,7 @@
 
   var originalContentLength;
 
-  function step3(content) {
+  function step3({ content, error, isEncoded }) {
     TestRunner.addResult(imageRequest.url());
     TestRunner.addResult('request.type: ' + imageRequest.resourceType());
     TestRunner.addResult('request.content.length after requesting content: ' + content.length);
@@ -65,11 +65,11 @@
   }
 
   function step6() {
-    delete imageRequest._contentData;
+    delete imageRequest.contentData;
     imageRequest.requestContent().then(step7);
   }
 
-  function step7(content) {
+  function step7({ content, error, isEncoded }) {
     TestRunner.addResult('request.content.length after requesting content: ' + content.length);
     TestRunner.assertTrue(
       content.length === originalContentLength,

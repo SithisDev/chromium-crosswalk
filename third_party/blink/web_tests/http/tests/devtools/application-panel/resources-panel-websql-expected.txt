@@ -3,8 +3,12 @@ Tests Application Panel WebSQL support.
 Initial state:
 Application
   Manifest (selected)
+    Identity
+    Presentation
+    Protocol Handlers
+    Icons
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -14,22 +18,34 @@ Storage
   Web SQL
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
+  Interest Groups
 Cache
   Cache Storage
-  Application Cache
+  Back/forward cache
 Background Services
   Background Fetch
   Background Sync
   Notifications
+  Payment Handler
+  Periodic Background Sync
   Push Messaging
+  Reporting API
 Frames
   top
+    Scripts
+      json-value.js
+    inspected-page.html
 Found: true
 Database created state:
 Application
   Manifest
+    Identity
+    Presentation
+    Protocol Handlers
+    Icons
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -40,21 +56,33 @@ Storage
     inspector-test-db (selected)
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
+  Interest Groups
 Cache
   Cache Storage
-  Application Cache
+  Back/forward cache
 Background Services
   Background Fetch
   Background Sync
   Notifications
+  Payment Handler
+  Periodic Background Sync
   Push Messaging
+  Reporting API
 Frames
   top
+    Scripts
+      json-value.js
+    inspected-page.html
 Table added:
 Application
   Manifest
+    Identity
+    Presentation
+    Protocol Handlers
+    Icons
   Service Workers
-  Clear storage
+  Storage
 Storage
   Local Storage
     http://127.0.0.1:8000
@@ -66,14 +94,22 @@ Storage
       table1
   Cookies
     http://127.0.0.1:8000
+  Trust Tokens
+  Interest Groups
 Cache
   Cache Storage
-  Application Cache
+  Back/forward cache
 Background Services
   Background Fetch
   Background Sync
   Notifications
+  Payment Handler
+  Periodic Background Sync
   Push Messaging
+  Reporting API
 Frames
   top
+    Scripts
+      json-value.js
+    inspected-page.html
 

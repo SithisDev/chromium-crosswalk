@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Check that RuntimeCallStats are present in profile.\n`);
-  await TestRunner.loadModule('performance_test_runner');
+  await TestRunner.loadLegacyModule('timeline'); await TestRunner.loadTestModule('performance_test_runner');
   await TestRunner.showPanel('timeline');
   await TestRunner.loadHTML(`
       <div id="foo">
@@ -22,8 +22,8 @@
       }
   `);
 
-  Runtime.experiments.enableForTest('timelineV8RuntimeCallStats');
-  Runtime.experiments.enableForTest('timelineShowAllEvents');
+  Root.Runtime.experiments.enableForTest('timelineV8RuntimeCallStats');
+  Root.Runtime.experiments.enableForTest('timelineShowAllEvents');
   await PerformanceTestRunner.evaluateWithTimeline('performActions()');
 
   var frame = PerformanceTestRunner.mainTrackEvents()

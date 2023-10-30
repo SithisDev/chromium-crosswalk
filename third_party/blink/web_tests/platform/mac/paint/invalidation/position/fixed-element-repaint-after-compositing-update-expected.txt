@@ -1,39 +1,24 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
-      "drawsContent": false,
+      "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "Scrolling Layer",
+      "name": "LayoutNGBlockFlow (positioned) DIV id='fixedOverlapping'",
       "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
-      "bounds": [800, 600],
-      "contentsOpaque": true,
-      "backgroundColor": "#FFFFFF",
-      "paintInvalidations": [
-        {
-          "object": "LayoutBlockFlow (positioned) DIV id='moveMe'",
-          "rect": [150, 150, 100, 100],
-          "reason": "geometry"
-        },
-        {
-          "object": "LayoutBlockFlow (positioned) DIV id='moveMe'",
-          "rect": [8, 102, 100, 100],
-          "reason": "geometry"
-        }
-      ]
-    },
-    {
-      "name": "LayoutBlockFlow (positioned) DIV id='fixedTransformed'",
-      "contentsOpaque": true,
+      "contentsOpaqueForText": true,
       "drawsContent": false,
       "transform": 1
+    },
+    {
+      "name": "LayoutNGBlockFlow (positioned) DIV id='moveMe'",
+      "bounds": [100, 100],
+      "contentsOpaque": true,
+      "backgroundColor": "#008000",
+      "transform": 2
     }
   ],
   "transforms": [
@@ -44,6 +29,15 @@
         [0, 1, 0, 0],
         [0, 0, 1, 0],
         [8, 102, 0, 1]
+      ]
+    },
+    {
+      "id": 2,
+      "transform": [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [150, 150, 0, 1]
       ]
     }
   ]

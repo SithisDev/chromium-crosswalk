@@ -5,6 +5,7 @@ if (self.importScripts) {
 
 // This test assumes TEST_TARGETS are executed in order and sequentially.
 var TEST_TARGETS = [];
+var {BASE_ORIGIN, BASE_URL, OTHER_BASE_URL} = get_thorough_test_options();
 
 // cookieCheckX checks the cookies sent in the request.
 // SetCookie=cookieX indicates to set cookies in the response.
@@ -60,20 +61,20 @@ TEST_TARGETS.push(
   // Try to set cookieC, but
   // cookie is not sent/updated because credentials flag is not set.
   [OTHER_BASE_URL + 'mode=no-cors&credentials=omit&SetCookie=cookieC',
-   [fetchResolved, noBody, typeOpaque],
-   onlyOnServiceWorkerProxiedTest([cookieCheckNone])],
+    [fetchResolved, noBody, typeOpaque],
+    onlyOnServiceWorkerProxiedTest([cookieCheckNone])],
   [OTHER_CHECK_URL + 'otherCheck1', [fetchResolved], [cookieCheck2]],
 
   // Set cookieC with opaque response. Response is opaque, but cookie is set.
   [OTHER_BASE_URL + 'mode=no-cors&credentials=include&SetCookie=cookieC',
-   [fetchResolved, noBody, typeOpaque],
-   onlyOnServiceWorkerProxiedTest([cookieCheck2])],
+    [fetchResolved, noBody, typeOpaque],
+    onlyOnServiceWorkerProxiedTest([cookieCheck2])],
   [OTHER_CHECK_URL + 'otherCheck2', [fetchResolved], [cookieCheckC]],
 
   // Set cookieA with opaque response. Response is opaque and cookie is not set.
   [OTHER_BASE_URL + 'mode=no-cors&credentials=same-origin&SetCookie=cookieA',
-   [fetchResolved, noBody, typeOpaque],
-   onlyOnServiceWorkerProxiedTest([cookieCheckNone])],
+    [fetchResolved, noBody, typeOpaque],
+    onlyOnServiceWorkerProxiedTest([cookieCheckNone])],
   [OTHER_CHECK_URL + 'otherCheck3', [fetchResolved], [cookieCheckC]]
 );
 

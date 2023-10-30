@@ -24,15 +24,15 @@
 
     function zoomPageIn()
     {
-        if (window.eventSender) {
-            eventSender.zoomPageIn();
+        if (window.testRunner) {
+            testRunner.zoomPageIn();
         }
     }
 
     function zoomPageOut()
     {
-        if (window.eventSender) {
-            eventSender.zoomPageOut();
+        if (window.testRunner) {
+            testRunner.zoomPageOut();
         }
     }
 
@@ -59,7 +59,7 @@
     window.addEventListener("click", base, false);
     sendClick();
     window.removeEventListener("click", base, false);
-    
+
     // Just zoomed.
     function justZoomed(e)
     {
@@ -68,7 +68,7 @@
         shouldBe("event.clientX", "83");
         shouldBe("event.clientY", "83");
         shouldBe("event.pageX", "83");
-        shouldBe("event.pageY", "83");
+        shouldBe("event.pageX", "83");
     }
     window.addEventListener("click", justZoomed, false);
     zoomPageIn();

@@ -5,8 +5,8 @@
 (async function() {
   TestRunner.addResult(
       `Tests that when we load two different images from the same url (e.g. counters), their content is different in network panel as well.\n`);
-  await TestRunner.loadModule('network_test_runner');
-  await TestRunner.loadModule('console_test_runner');
+  await TestRunner.loadTestModule('network_test_runner');
+  await TestRunner.loadLegacyModule('console'); await TestRunner.loadTestModule('console_test_runner');
   await TestRunner.showPanel('network');
   await TestRunner.evaluateInPagePromise(`
       function loadImages()
@@ -47,7 +47,7 @@
 
     TestRunner.addResult(request1.url());
     TestRunner.addResult(request2.url());
-    TestRunner.assertTrue(request1Content !== request2Content);
+    TestRunner.assertTrue(request1Content.content !== request2Content.content);
     TestRunner.completeTest();
   }
 })();

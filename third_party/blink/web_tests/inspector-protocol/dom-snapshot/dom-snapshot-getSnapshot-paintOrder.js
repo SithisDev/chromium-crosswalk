@@ -29,11 +29,11 @@
     entries.sort(function(a, b) {
       return a['paintOrder'] - b['paintOrder'];
     }).forEach(function(e) {
-      testRunner.log(e['id']);
+      testRunner.log(e['id'] + ' - ' + e['paintOrder']);
     });
   }
 
-  var response = await dp.DOMSnapshot.getSnapshot({'computedStyleWhitelist': [], 'includePaintOrder': true});
+  const response = await dp.DOMSnapshot.getSnapshot({'computedStyleWhitelist': [], 'includePaintOrder': true});
   if (response.error)
     testRunner.log(response);
   else

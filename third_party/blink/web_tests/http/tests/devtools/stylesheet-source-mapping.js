@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests SourceMap and StyleSheetMapping.\n`);
-  await TestRunner.loadModule('sources_test_runner');
+  await TestRunner.loadLegacyModule('sources'); await TestRunner.loadTestModule('sources_test_runner');
   await TestRunner.evaluateInPagePromise(`
       function addStyleSheet()
       {
@@ -38,8 +38,8 @@
   }
 
   function cssUISourceCodeAdded(uiSourceCode) {
-    styleSheetId = cssModel.styleSheetIdsForURL(styleSheetURL)[0];
-    TestRunner.addSniffer(Bindings.CSSWorkspaceBinding.ModelInfo.prototype, '_updateLocations', locationsUpdated, true);
+    styleSheetId = cssModel.getStyleSheetIdsForURL(styleSheetURL)[0];
+    TestRunner.addSniffer(Bindings.CSSWorkspaceBinding.ModelInfo.prototype, 'updateLocations', locationsUpdated, true);
     TestRunner.addResult('Added CSS uiSourceCode: ' + uiSourceCode.url());
     TestRunner.waitForUISourceCode(sourceURL).then(scssUISourceCodeAdded);
   }
@@ -75,7 +75,7 @@
     testAndDumpLocation(scssUISourceCode, 4, 17, 4, 20);
     scssUISourceCode.requestContent().then(didRequestContent);
 
-    function didRequestContent(content, contentEncoded, mimeType) {
+    function didRequestContent({ content, error, isEncoded }) {
       TestRunner.assertEquals(0, content.indexOf('/* Comment */'));
       contentReceived = true;
       join();

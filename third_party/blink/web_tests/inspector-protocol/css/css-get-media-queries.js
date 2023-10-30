@@ -14,6 +14,12 @@
         }
     }
 }
+
+@media (10px < width < 1000px) {
+  * {
+    color: green;
+  }
+}
 </style>
 `, 'Verify that media queries are reported properly.');
 
@@ -51,7 +57,10 @@
     testRunner.log('mediaRule #' + i);
     testRunner.log('    text: ' + mediaRule.text);
     testRunner.log('    source: ' + mediaRule.source);
-    testRunner.log('    range: ' + JSON.stringify(mediaRule.range));
+    // Stabilize keys order in range.
+    const range = mediaRule.range && Object.keys(mediaRule.range).sort().reduce(
+        (acc, key) => { acc[key] = mediaRule.range[key]; return acc; }, {});
+    testRunner.log('    range: ' + JSON.stringify(range));
     if (mediaRule.styleSheetId && mediaRule.range)
       testRunner.log('    computedText: ' + extractText(mediaRule.styleSheetId, mediaRule.range));
     if (!mediaRule.mediaList) {

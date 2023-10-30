@@ -1,56 +1,55 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV class='overflow fixed'",
-      "position": [8, 13],
-      "bounds": [800, 600]
+      "name": "LayoutNGBlockFlow (positioned) DIV class='overflow fixed'",
+      "bounds": [800, 600],
+      "contentsOpaqueForText": true,
+      "drawsContent": false,
+      "transform": 1
     },
     {
-      "name": "Scrolling Layer",
-      "position": [8, 13],
+      "name": "LayoutNGBlockFlow (positioned) DIV class='overflow fixed'",
       "bounds": [785, 600],
-      "drawsContent": false
+      "drawsContent": false,
+      "transform": 1
     },
     {
-      "name": "Scrolling Contents Layer",
-      "position": [8, 13],
-      "bounds": [785, 1000]
+      "name": "VerticalScrollbar",
+      "position": [785, 0],
+      "bounds": [15, 600],
+      "contentsOpaque": true,
+      "transform": 1
     },
     {
-      "name": "LayoutBlockFlow (positioned) DIV class='yellow fixed'",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='overflow fixed'",
+      "bounds": [100, 1000],
+      "contentsOpaque": true,
+      "backgroundColor": "#0000FF",
+      "transform": 1
+    },
+    {
+      "name": "LayoutNGBlockFlow (positioned) DIV class='yellow fixed'",
       "position": [200, 13],
       "bounds": [100, 100],
       "contentsOpaque": true,
       "backgroundColor": "#FFFF00"
-    },
+    }
+  ],
+  "transforms": [
     {
-      "name": "Overflow Controls Host Layer",
-      "position": [8, 13],
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Vertical Scrollbar Layer",
-      "position": [793, 13],
-      "bounds": [15, 600],
-      "drawsContent": false
+      "id": 1,
+      "transform": [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [8, 13, 0, 1]
+      ]
     }
   ]
 }

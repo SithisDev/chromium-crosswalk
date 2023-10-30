@@ -17,8 +17,13 @@ function assert_function_length(fn, length, description) {
 }
 
 function assert_exported_function(fn, { name, length }, description) {
-  assert_equals(Object.getPrototypeOf(fn), Function.prototype,
-                `${description}: prototype`);
+  if (WebAssembly.Function === undefined) {
+    assert_equals(Object.getPrototypeOf(fn), Function.prototype,
+                  `${description}: prototype`);
+  } else {
+    assert_equals(Object.getPrototypeOf(fn), WebAssembly.Function.prototype,
+                  `${description}: prototype`);
+  }
 
   assert_function_name(fn, name, description);
   assert_function_length(fn, length, description);
@@ -34,6 +39,7 @@ function assert_Instance(instance, expected_exports) {
 
   assert_equals(Object.getPrototypeOf(exports), null, "exports prototype");
   assert_false(Object.isExtensible(exports), "extensible exports");
+  assert_array_equals(Object.keys(exports), Object.keys(expected_exports), "matching export keys");
   for (const [key, expected] of Object.entries(expected_exports)) {
     const property = Object.getOwnPropertyDescriptor(exports, key);
     assert_equals(typeof property, "object", `${key} should be present`);

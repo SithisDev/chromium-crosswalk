@@ -10,7 +10,6 @@ title: test1
 	MediaKeys
 	Nodes
 	Resources
-	ScriptPromises
 	ContextLifecycleStateObservers
 	V8PerContextDatas
 	WorkerGlobalScopes
@@ -19,15 +18,18 @@ title: test1
 	ResourceFetchers
 	AdSubframes
 	DetachedScriptStates
+	ArrayBufferContents
 	LayoutCount
 	RecalcStyleCount
 	LayoutDuration
 	RecalcStyleDuration
+	DevToolsCommandDuration
 	ScriptDuration
 	V8CompileDuration
 	TaskDuration
 	TaskOtherDuration
 	ThreadTime
+	ProcessTime
 	JSHeapUsedSize
 	JSHeapTotalSize
 	FirstMeaningfulPaint
@@ -44,7 +46,6 @@ title: test1
 	MediaKeys
 	Nodes
 	Resources
-	ScriptPromises
 	ContextLifecycleStateObservers
 	V8PerContextDatas
 	WorkerGlobalScopes
@@ -53,15 +54,18 @@ title: test1
 	ResourceFetchers
 	AdSubframes
 	DetachedScriptStates
+	ArrayBufferContents
 	LayoutCount
 	RecalcStyleCount
 	LayoutDuration
 	RecalcStyleDuration
+	DevToolsCommandDuration
 	ScriptDuration
 	V8CompileDuration
 	TaskDuration
 	TaskOtherDuration
 	ThreadTime
+	ProcessTime
 	JSHeapUsedSize
 	JSHeapTotalSize
 	FirstMeaningfulPaint
@@ -78,7 +82,6 @@ title:
 	MediaKeys
 	Nodes
 	Resources
-	ScriptPromises
 	ContextLifecycleStateObservers
 	V8PerContextDatas
 	WorkerGlobalScopes
@@ -87,15 +90,18 @@ title:
 	ResourceFetchers
 	AdSubframes
 	DetachedScriptStates
+	ArrayBufferContents
 	LayoutCount
 	RecalcStyleCount
 	LayoutDuration
 	RecalcStyleDuration
+	DevToolsCommandDuration
 	ScriptDuration
 	V8CompileDuration
 	TaskDuration
 	TaskOtherDuration
 	ThreadTime
+	ProcessTime
 	JSHeapUsedSize
 	JSHeapTotalSize
 	FirstMeaningfulPaint

@@ -38,7 +38,7 @@ PASS unionTypesTest.doubleOrStringSequenceArg([1, "foo", "bar", 2]) is "double: 
 PASS unionTypesTest.doubleOrStringSequenceArg([null, undefined, {}, []]) is "string: null, string: undefined, string: [object Object], string: "
 PASS unionTypesTest.doubleOrStringSequenceArg(null) threw exception TypeError: Failed to execute 'doubleOrStringSequenceArg' on 'UnionTypesTest': The provided value cannot be converted to a sequence..
 PASS unionTypesTest.doubleOrStringSequenceArg(undefined) threw exception TypeError: Failed to execute 'doubleOrStringSequenceArg' on 'UnionTypesTest': The provided value cannot be converted to a sequence..
-PASS unionTypesTest.doubleOrStringSequenceArg({}) threw exception TypeError: Failed to execute 'doubleOrStringSequenceArg' on 'UnionTypesTest': Iterator getter is not callable..
+PASS unionTypesTest.doubleOrStringSequenceArg({}) threw exception TypeError: Failed to execute 'doubleOrStringSequenceArg' on 'UnionTypesTest': The object must have a callable @@iterator property..
 
 
 Tests for method arguments with defaults
@@ -60,12 +60,12 @@ PASS unionTypesTest.nodeListOrElementOrNullArg(undefined) is "null or undefined 
 PASS unionTypesTest.nodeListOrElementOrNullArg(null) is "null or undefined is passed"
 PASS unionTypesTest.nodeListOrElementOrNullArg(nodeList) is "nodelist is passed"
 PASS unionTypesTest.nodeListOrElementOrNullArg(element) is "element is passed"
-PASS unionTypesTest.nodeListOrElementOrNullArg(3.14) threw exception TypeError: Failed to execute 'nodeListOrElementOrNullArg' on 'UnionTypesTest': The provided value is not of type '(NodeList or Element)'.
-PASS unionTypesTest.nodeListOrElementOrNullArg("foo") threw exception TypeError: Failed to execute 'nodeListOrElementOrNullArg' on 'UnionTypesTest': The provided value is not of type '(NodeList or Element)'.
-PASS unionTypesTest.nodeListOrElementOrNullArg({}) threw exception TypeError: Failed to execute 'nodeListOrElementOrNullArg' on 'UnionTypesTest': The provided value is not of type '(NodeList or Element)'.
-PASS unionTypesTest.nodeListOrElementOrNullArg([]) threw exception TypeError: Failed to execute 'nodeListOrElementOrNullArg' on 'UnionTypesTest': The provided value is not of type '(NodeList or Element)'.
-PASS unionTypesTest.nodeListOrElementArg(undefined) threw exception TypeError: Failed to execute 'nodeListOrElementArg' on 'UnionTypesTest': The provided value is not of type '(NodeList or Element)'.
-PASS unionTypesTest.nodeListOrElementArg(null) threw exception TypeError: Failed to execute 'nodeListOrElementArg' on 'UnionTypesTest': The provided value is not of type '(NodeList or Element)'.
+PASS unionTypesTest.nodeListOrElementOrNullArg(3.14) threw exception TypeError: Failed to execute 'nodeListOrElementOrNullArg' on 'UnionTypesTest': The provided value is not of type '(Element or NodeList)'..
+PASS unionTypesTest.nodeListOrElementOrNullArg("foo") threw exception TypeError: Failed to execute 'nodeListOrElementOrNullArg' on 'UnionTypesTest': The provided value is not of type '(Element or NodeList)'..
+PASS unionTypesTest.nodeListOrElementOrNullArg({}) threw exception TypeError: Failed to execute 'nodeListOrElementOrNullArg' on 'UnionTypesTest': The provided value is not of type '(Element or NodeList)'..
+PASS unionTypesTest.nodeListOrElementOrNullArg([]) threw exception TypeError: Failed to execute 'nodeListOrElementOrNullArg' on 'UnionTypesTest': The provided value is not of type '(Element or NodeList)'..
+PASS unionTypesTest.nodeListOrElementArg(undefined) threw exception TypeError: Failed to execute 'nodeListOrElementArg' on 'UnionTypesTest': The provided value is not of type '(Element or NodeList)'..
+PASS unionTypesTest.nodeListOrElementArg(null) threw exception TypeError: Failed to execute 'nodeListOrElementArg' on 'UnionTypesTest': The provided value is not of type '(Element or NodeList)'..
 PASS unionTypesTest.nodeListOrElementArg(nodeList) is "nodelist is passed"
 PASS unionTypesTest.nodeListOrElementArg(element) is "element is passed"
 

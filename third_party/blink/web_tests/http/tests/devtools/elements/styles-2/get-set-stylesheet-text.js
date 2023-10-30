@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests that WebInspector.CSSStyleSheet methods work as expected.\n`);
-  await TestRunner.loadModule('elements_test_runner');
+  await TestRunner.loadLegacyModule('elements'); await TestRunner.loadTestModule('elements_test_runner');
   await TestRunner.showPanel('elements');
   await TestRunner.loadHTML(`
       <style>
@@ -26,7 +26,7 @@
   function findStyleSheet() {
     var styleSheetHeaders = TestRunner.cssModel.styleSheetHeaders();
     for (var i = 0; i < styleSheetHeaders.length; ++i) {
-      styleSheetHeader = styleSheetHeaders[i];
+      const styleSheetHeader = styleSheetHeaders[i];
       if (styleSheetHeader.sourceURL.indexOf('get-set-stylesheet-text.css') >= 0) {
         foundStyleSheetHeader = styleSheetHeader;
         foundStyleSheetHeader.requestContent().then(callback);
@@ -35,7 +35,7 @@
         TestRunner.cssModel.addEventListener(SDK.CSSModel.Events.StyleSheetAdded, styleSheetAdded);
     }
 
-    function callback(content) {
+    function callback({ content, error, isEncoded }) {
       foundStyleSheetText = content;
       TestRunner.runTestSuite([testSetText, testNewElementStyles]);
     }
@@ -62,8 +62,8 @@
 
   function testNewElementStyles() {
     function callback(response) {
-      if (response[Protocol.Error]) {
-        TestRunner.addResult('error: ' + response[Protocol.Error]);
+      if (response.getError()) {
+        TestRunner.addResult('error: ' + response.getError());
         return;
       }
 

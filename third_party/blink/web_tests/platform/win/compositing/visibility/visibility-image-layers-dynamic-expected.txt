@@ -2,40 +2,29 @@ Initial
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [785, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [785, 626],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutBlockFlow DIV class='composited container'",
+      "name": "LayoutNGBlockFlow DIV class='composited container'",
       "bounds": [749, 145],
+      "contentsOpaqueForText": true,
       "drawsContent": false,
       "transform": 1
     },
     {
-      "name": "LayoutBlockFlow DIV class='composited hidden container'",
-      "bounds": [757, 153],
-      "drawsContent": false,
-      "contentsVisible": false,
-      "transform": 2
-    },
-    {
       "name": "LayoutImage IMG class='visible composited box'",
       "bounds": [100, 100],
-      "drawsContent": false,
+      "contentsOpaqueForText": true,
       "transform": 3
+    },
+    {
+      "name": "VerticalScrollbar",
+      "position": [785, 0],
+      "bounds": [15, 600],
+      "contentsOpaque": true
     }
   ],
   "transforms": [
@@ -54,7 +43,7 @@ Initial
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [14, 316, 0, 1]
+        [18, 320, 0, 1]
       ]
     },
     {
@@ -64,7 +53,7 @@ Initial
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [24, 24, 0, 1]
+        [20, 20, 0, 1]
       ]
     }
   ]
@@ -74,46 +63,35 @@ After step 1
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [785, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
-      "bounds": [785, 1766],
+      "name": "Scrolling background of LayoutView #document",
+      "bounds": [785, 1590],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutBlockFlow DIV class='composited container'",
+      "name": "LayoutNGBlockFlow DIV class='composited container'",
       "bounds": [749, 145],
+      "contentsOpaqueForText": true,
       "drawsContent": false,
       "transform": 1
     },
     {
       "name": "LayoutImage IMG class='hidden composited box'",
       "bounds": [100, 100],
-      "drawsContent": false,
+      "contentsOpaqueForText": true,
       "transform": 2
-    },
-    {
-      "name": "LayoutBlockFlow DIV class='composited hidden container'",
-      "bounds": [757, 153],
-      "drawsContent": false,
-      "contentsVisible": false,
-      "transform": 3
     },
     {
       "name": "LayoutImage IMG class='visible composited box'",
       "bounds": [100, 100],
-      "drawsContent": false,
+      "contentsOpaqueForText": true,
       "transform": 4
+    },
+    {
+      "name": "VerticalScrollbar",
+      "position": [785, 0],
+      "bounds": [15, 600],
+      "contentsOpaque": true
     }
   ],
   "transforms": [
@@ -142,7 +120,7 @@ After step 1
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [14, 316, 0, 1]
+        [18, 320, 0, 1]
       ]
     },
     {
@@ -152,7 +130,7 @@ After step 1
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [24, 24, 0, 1]
+        [20, 20, 0, 1]
       ]
     }
   ]
@@ -162,57 +140,48 @@ After step 2
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [785, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
-      "bounds": [785, 3161],
+      "name": "Scrolling background of LayoutView #document",
+      "bounds": [785, 2809],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
     },
     {
-      "name": "LayoutBlockFlow DIV class='composited container'",
+      "name": "LayoutNGBlockFlow DIV class='composited container'",
       "bounds": [749, 145],
+      "contentsOpaqueForText": true,
       "drawsContent": false,
       "transform": 1
     },
     {
       "name": "LayoutImage IMG class='hidden composited box'",
       "bounds": [100, 100],
-      "drawsContent": false,
+      "contentsOpaqueForText": true,
       "transform": 2
     },
     {
-      "name": "LayoutBlockFlow DIV class='composited hidden container'",
+      "name": "LayoutNGBlockFlow DIV class='composited hidden container'",
+      "position": [-4, -4],
       "bounds": [757, 153],
+      "contentsOpaqueForText": true,
       "transform": 3
     },
     {
       "name": "LayoutImage IMG class='composited box'",
       "bounds": [100, 100],
-      "drawsContent": false,
+      "contentsOpaqueForText": true,
       "transform": 4
-    },
-    {
-      "name": "LayoutBlockFlow DIV class='composited hidden container'",
-      "bounds": [757, 153],
-      "drawsContent": false,
-      "contentsVisible": false,
-      "transform": 5
     },
     {
       "name": "LayoutImage IMG class='visible composited box'",
       "bounds": [100, 100],
-      "drawsContent": false,
+      "contentsOpaqueForText": true,
       "transform": 6
+    },
+    {
+      "name": "VerticalScrollbar",
+      "position": [785, 0],
+      "bounds": [15, 600],
+      "contentsOpaque": true
     }
   ],
   "transforms": [
@@ -241,7 +210,7 @@ After step 2
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [14, 161, 0, 1]
+        [18, 165, 0, 1]
       ]
     },
     {
@@ -251,7 +220,7 @@ After step 2
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [24, 24, 0, 1]
+        [20, 20, 0, 1]
       ]
     },
     {
@@ -260,7 +229,7 @@ After step 2
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [14, 316, 0, 1]
+        [18, 320, 0, 1]
       ]
     },
     {
@@ -270,7 +239,7 @@ After step 2
         [1, 0, 0, 0],
         [0, 1, 0, 0],
         [0, 0, 1, 0],
-        [24, 24, 0, 1]
+        [20, 20, 0, 1]
       ]
     }
   ]

@@ -4,8 +4,8 @@
 
 (async function() {
   TestRunner.addResult(`Tests that inspect() command line api works while on breakpoint.\n`);
-  await TestRunner.loadModule('console_test_runner');
-  await TestRunner.loadModule('sources_test_runner');
+  await TestRunner.loadLegacyModule('console'); await TestRunner.loadTestModule('console_test_runner');
+  await TestRunner.loadLegacyModule('sources'); await TestRunner.loadTestModule('sources_test_runner');
   await TestRunner.showPanel('sources');
   await TestRunner.showPanel('elements');
   await TestRunner.loadHTML(`
@@ -19,14 +19,14 @@
       }
   `);
 
-  TestRunner.addSniffer(SDK.RuntimeModel.prototype, '_inspectRequested', inspect);
-  TestRunner.addSniffer(Common.Revealer, 'reveal', oneRevealPromise, true);
-
-  function oneRevealPromise(node, revealPromise) {
-    if (!(node instanceof SDK.RemoteObject))
-      return;
-    revealPromise.then(updateFocusedNode);
-  }
+  TestRunner.addSniffer(SDK.RuntimeModel.prototype, 'inspectRequested', inspect);
+  const originalReveal = Common.Revealer.reveal;
+  Common.Revealer.setRevealForTest((node) => {
+    if (!(node instanceof SDK.RemoteObject)) {
+      return Promise.resolve();
+    }
+    return originalReveal(node).then(updateFocusedNode);
+  });
 
   function updateFocusedNode() {
     TestRunner.addResult('Selected node id: \'' + UI.panels.elements.selectedDOMNode().getAttribute('id') + '\'.');

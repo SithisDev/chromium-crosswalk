@@ -4,7 +4,6 @@
 <script>let additionalChromiumResources = ["resources/xr-internal-device-mocking.js"];</script>
 <script src="/webxr/resources/webxr_util.js"></script>
 <script src="/webxr/resources/webxr_test_constants.js"></script>
-<canvas />
 
 <script>
 // This test manipulates mojo directly to simulate some behavior, and as such is
@@ -26,7 +25,10 @@ let testFunction = function(session, fakeDeviceController, t) {
   });
 }
 
+// Inline that solely relies on the implicit viewer reference space ignores the
+// data provider, so we need to make sure that we get a session that supports
+// the local reference space.
 xr_session_promise_test(
-  testName, testFunction, fakeDeviceInitParams, 'inline');
+  testName, testFunction, fakeDeviceInitParams, 'inline', { requiredFeatures: ["local"] });
 
 </script>

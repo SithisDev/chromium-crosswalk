@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests XHR network resource type and content for synchronous requests. Bug 61205\n`);
-  await TestRunner.loadModule('network_test_runner');
+  await TestRunner.loadTestModule('network_test_runner');
   await TestRunner.showPanel('network');
 
   NetworkTestRunner.recordNetwork();
@@ -18,7 +18,7 @@
     request1.requestContent().then(step3);
   }
 
-  function step3(content) {
+  function step3({ content, error, isEncoded }) {
     TestRunner.addResult('resource.content after requesting content: ' + content);
     TestRunner.completeTest();
   }

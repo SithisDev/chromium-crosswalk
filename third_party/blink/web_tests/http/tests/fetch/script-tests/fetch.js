@@ -2,6 +2,8 @@ if (self.importScripts) {
   importScripts('../resources/fetch-test-helpers.js');
 }
 
+var {BASE_ORIGIN, OTHER_ORIGIN} = get_fetch_test_options();
+
 promise_test(function(t) {
     return fetch('http://')
       .then(
@@ -88,6 +90,25 @@ promise_test(function(t) {
         t.unreached_func('fetching invalid data: URL must fail'),
         function() {});
   }, 'fetch invalid data: URL');
+
+promise_test(function(t) {
+    return fetch('data:,Foobar',
+                 {
+                   method: 'HEAD'
+                 })
+      .then(function(response) {
+          assert_equals(response.status, 200);
+          assert_equals(response.statusText, 'OK');
+          assert_equals(response.headers.get('Content-Type'),
+                        'text/plain;charset=US-ASCII');
+          assert_equals(size(response.headers), 1);
+          assert_equals(response.type, 'basic', 'type must match.');
+          return response.text();
+        })
+      .then(function(text) {
+          assert_equals(text, '');
+        });
+  }, 'fetch data: URL with the HEAD method');
 
 // Only [Exposed=(Window,DedicatedWorker,SharedWorker)].
 if ('createObjectURL' in URL) {

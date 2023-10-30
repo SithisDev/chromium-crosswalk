@@ -4,7 +4,8 @@
 
 (async function() {
   TestRunner.addResult(`Tests the Timeline UI API for network requests.\n`);
-  await TestRunner.loadModule('performance_test_runner');
+  await TestRunner.loadLegacyModule('timeline'); await TestRunner.loadTestModule('performance_test_runner');
+  await TestRunner.loadLegacyModule('components');
   await TestRunner.showPanel('timeline');
   await TestRunner.evaluateInPagePromise(`
       function performActions()
@@ -27,10 +28,9 @@
 
   var model = PerformanceTestRunner.timelineModel();
   var linkifier = new Components.Linkifier();
-  var badgePool = new ProductRegistry.BadgePool();
 
   for (var request of model.networkRequests()) {
-    var element = await Timeline.TimelineUIUtils.buildNetworkRequestDetails(request, model, linkifier, badgePool);
+    var element = await Timeline.TimelineUIUtils.buildNetworkRequestDetails(request, model, linkifier);
     printElement(element);
   }
   TestRunner.completeTest();

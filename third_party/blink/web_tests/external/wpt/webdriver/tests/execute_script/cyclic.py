@@ -1,16 +1,5 @@
 from tests.support.asserts import assert_error, assert_same_element, assert_success
-from tests.support.inline import inline
-
-
-def execute_script(session, script, args=None):
-    if args is None:
-        args = []
-    body = {"script": script, "args": args}
-
-    return session.transport.send(
-        "POST", "/session/{session_id}/execute/sync".format(
-            session_id=session.session_id),
-        body)
+from . import execute_script
 
 
 def test_array(session):
@@ -49,7 +38,7 @@ def test_object_in_array(session):
     assert_error(response, "javascript error")
 
 
-def test_element_in_collection(session):
+def test_element_in_collection(session, inline):
     session.url = inline("<div></div>")
     divs = session.find.css("div")
 
@@ -63,7 +52,7 @@ def test_element_in_collection(session):
         assert_same_element(session, expected, actual)
 
 
-def test_element_in_object(session):
+def test_element_in_object(session, inline):
     session.url = inline("<div></div>")
     div = session.find.css("div", all=False)
 

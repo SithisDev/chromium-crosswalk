@@ -2,25 +2,10 @@ CASE 1, original layer tree
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Squashing Containment Layer",
-      "drawsContent": false
     },
     {
       "name": "LayoutNGBlockFlow (positioned) DIV class='composited box behind'",
@@ -30,9 +15,10 @@ CASE 1, original layer tree
       "transform": 1
     },
     {
-      "name": "Squashing Layer (first squashed layer: LayoutNGBlockFlow (positioned) DIV class='box middle')",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='box middle'",
       "position": [4, 4],
-      "bounds": [276, 276]
+      "bounds": [146, 146],
+      "contentsOpaqueForText": true
     }
   ],
   "transforms": [
@@ -43,8 +29,7 @@ CASE 1, original layer tree
         [0, 1, 0, 0],
         [0, 0, 1, 0],
         [100, 100, 0, 1]
-      ],
-      "flattenInheritedTransform": false
+      ]
     }
   ]
 }
@@ -53,25 +38,10 @@ CASE 2, hovering over the outer div
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Squashing Containment Layer",
-      "drawsContent": false
     },
     {
       "name": "LayoutNGBlockFlow (positioned) DIV class='composited box behind'",
@@ -81,15 +51,12 @@ CASE 2, hovering over the outer div
       "transform": 1
     },
     {
-      "name": "Squashing Layer (first squashed layer: LayoutNGBlockFlow (positioned) DIV class='box middle')",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='box middle'",
       "position": [4, 4],
-      "bounds": [276, 276],
-      "paintInvalidations": [
-        {
-          "object": "NGPhysicalBoxFragment LayoutNGBlockFlow (positioned) DIV class='box middle'",
-          "rect": [0, 0, 132, 132],
-          "reason": "background"
-        }
+      "bounds": [146, 146],
+      "contentsOpaqueForText": true,
+      "invalidations": [
+        [0, 0, 132, 132]
       ]
     }
   ],
@@ -101,8 +68,7 @@ CASE 2, hovering over the outer div
         [0, 1, 0, 0],
         [0, 0, 1, 0],
         [100, 100, 0, 1]
-      ],
-      "flattenInheritedTransform": false
+      ]
     }
   ]
 }
@@ -111,25 +77,10 @@ CASE 3, hovering over the inner div
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Squashing Containment Layer",
-      "drawsContent": false
     },
     {
       "name": "LayoutNGBlockFlow (positioned) DIV class='composited box behind'",
@@ -139,20 +90,12 @@ CASE 3, hovering over the inner div
       "transform": 1
     },
     {
-      "name": "Squashing Layer (first squashed layer: LayoutNGBlockFlow (positioned) DIV class='box middle')",
+      "name": "LayoutNGBlockFlow (positioned) DIV class='box middle'",
       "position": [4, 4],
-      "bounds": [276, 276],
-      "paintInvalidations": [
-        {
-          "object": "NGPhysicalBoxFragment LayoutNGBlockFlow (positioned) DIV class='box middle'",
-          "rect": [0, 0, 132, 132],
-          "reason": "background"
-        },
-        {
-          "object": "LayoutNGBlockFlow (positioned) DIV class='smallbox'",
-          "rect": [26, 28, 71, 72],
-          "reason": "background"
-        }
+      "bounds": [146, 146],
+      "contentsOpaqueForText": true,
+      "invalidations": [
+        [46, 46, 100, 100]
       ]
     }
   ],
@@ -164,8 +107,7 @@ CASE 3, hovering over the inner div
         [0, 1, 0, 0],
         [0, 0, 1, 0],
         [100, 100, 0, 1]
-      ],
-      "flattenInheritedTransform": false
+      ]
     }
   ]
 }

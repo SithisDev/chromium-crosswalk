@@ -36,7 +36,6 @@ from blinkpy.common.pretty_diff import prettify_diff
 from blinkpy.common.system.executive import ScriptError
 from blinkpy.tool.commands.command import Command
 
-
 _log = logging.getLogger(__name__)
 
 
@@ -47,9 +46,15 @@ class PrettyDiff(Command):
 
     def __init__(self):
         options = [
-            optparse.make_option('-g', '--git-commit', action='store', dest='git_commit',
-                                 help=('Operate on a local commit. If a range, the commits are squashed into one. <ref>.... '
-                                       'includes the working copy changes. UPSTREAM can be used for the upstream/tracking branch.'))
+            optparse.make_option(
+                '-g',
+                '--git-commit',
+                action='store',
+                dest='git_commit',
+                help=
+                ('Operate on a local commit. If a range, the commits are squashed into one. <ref>.... '
+                 'includes the working copy changes. UPSTREAM can be used for the upstream/tracking branch.'
+                 ))
         ]
         super(PrettyDiff, self).__init__(options)
         self._tool = None
@@ -82,19 +87,20 @@ class PrettyDiff(Command):
 
     def _diff(self, options):
         changed_files = self._tool.git().changed_files(options.git_commit)
-        return self._tool.git().create_patch(options.git_commit,
-                                             changed_files=changed_files)
+        return self._tool.git().create_patch(
+            options.git_commit, changed_files=changed_files)
 
     @staticmethod
     def _pretty_diff_file(diff):
-        # Diffs can contain multiple text files of different encodings
-        # so we always deal with them as byte arrays, not unicode strings.
-        assert isinstance(diff, str)
+        # |diff|'s type is |bytes| because it can contain multiple text files
+        # of different encodings.
+        assert isinstance(diff, bytes)
         diff_file = tempfile.NamedTemporaryFile(suffix='.html')
-        diff_file.write(prettify_diff(diff))
+        # We deocode |diff| as UTF-8 anyway because we generate a UTF-8 HTML.
+        diff_file.write(prettify_diff(diff.decode(errors='replace')).encode())
         diff_file.flush()
         return diff_file
 
     def _open_pretty_diff(self, file_path):
-        url = 'file://%s' % urllib.quote(file_path)
+        url = 'file://%s' % urllib.parse.quote(file_path)
         self._tool.user.open_url(url)

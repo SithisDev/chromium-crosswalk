@@ -2,6 +2,8 @@
 <html>
 <head>
 <script src="../../../resources/js-test.js"></script>
+<script src="../../../resources/testdriver.js"></script>
+<script src="../../../resources/testdriver-vendor.js"></script>
 </head>
 <body>
 <p id="description"></p>
@@ -48,7 +50,7 @@ shouldBeFalse('stepMismatchFor("12:34", "foo", "12:34")');
 debug('Special step value');
 shouldBeFalse('stepMismatchFor("12:35", "any", "12:34")');
 debug('Disabled');
-shouldBeFalse('stepMismatchFor("12:34:55.001", "1", "12:34:56", true)');
+shouldBeTrue('stepMismatchFor("12:34:55.001", "1", "12:34:56", true)');
 
 debug('');
 </script>

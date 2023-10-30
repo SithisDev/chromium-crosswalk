@@ -1,102 +1,71 @@
+# tags: [ Android Fuchsia Linux Mac Mac10.13 Mac11 Mac12 Win Win10.20h2 Win11 ]
+# tags: [ Release Debug ]
+# results: [ Timeout Crash Pass Failure Slow Skip ]
+
 # This file is used for tests that only need to be suppressed on the Chromium
 # WebKit Leak bots.
 # Further documentation:
-# https://chromium.googlesource.com/chromium/src/+/master/docs/testing/web_test_expectations.md
+# https://chromium.googlesource.com/chromium/src/+/main/docs/testing/web_test_expectations.md
 
 ###########################################################################
 # WARNING: Memory leaks must be fixed asap. Sheriff is expected to revert #
 # culprit CLs instead of suppressing the leaks. If you have any question, #
-# ask hajimehoshi@.                                                       #
+# ask yuzus@.                                                             #
 ###########################################################################
 
-# FIXME: scroll customization leaks memory. See
-# codereview.chromium.org/1236913004/ for context.
-crbug.com/410974 virtual/scroll_customization/fast/scroll-behavior/scroll-customization/scroll-customization-property.html [ Leak ]
-crbug.com/410974 virtual/scroll_customization/fast/scroll-behavior/scroll-customization/touch-scroll-customization.html [ Leak ]
-crbug.com/410974 virtual/scroll_customization/fast/scroll-behavior/scroll-customization/scrollstate-distribute-to-scroll-chain-descendant.html [ Leak ]
-
-# FIXME: rootscroller/set-root-scroller.html on WebKit Linux Trusty
-crbug.com/891575 rootscroller/set-root-scroller.html [ Leak ]
-crbug.com/891575 virtual/android/rootscroller/remove-rootscroller-crash.html [ Leak Pass ]
-crbug.com/891575 virtual/android/rootscroller/set-root-scroller.html [ Leak ]
-crbug.com/891575 virtual/android/fullscreen/video-overlay-scroll.html [ Leak Pass ]
-
-crbug.com/786995 virtual/threaded/http/tests/devtools/tracing/timeline-style/timeline-style-recalc-all-invalidator-types.js [ Leak Pass ]
-crbug.com/859640 http/tests/devtools/tracing/timeline-style/timeline-style-recalc-all-invalidator-types.js  [ Leak Pass ]
-
-# Requests with keepalive specified will be kept alive even when the frame is
-# detached, which means leaks reported by the leak detector are by design.
-# Ignore them.
-crbug.com/755625 external/wpt/beacon/beacon-error.window.html [ Leak ]
-crbug.com/651742 external/wpt/content-security-policy/connect-src/connect-src-beacon-allowed.sub.html [ Leak ]
+crbug.com/786995 virtual/threaded/http/tests/devtools/tracing/timeline-style/timeline-style-recalc-all-invalidator-types.js [ Skip ]
 
 # -----------------------------------------------------------------
 # Flakily leaks
 # -----------------------------------------------------------------
-crbug.com/780386 external/wpt/html/dom/reflection-grouping.html [ Leak Pass ]
-crbug.com/667560 [ Linux ] http/tests/devtools/console/console-search.js [ Leak Pass ]
-crbug.com/835943 [ Linux ] http/tests/appcache/non-html.xhtml [ Leak Pass ]
 
-crbug.com/860117 [ Linux ] editing/pasteboard/drag-drop-iframe-refresh-crash.html [ Pass Leak ]
-crbug.com/976438 [ Linux ] external/wpt/css/selectors/focus-visible-007.html [ Pass Leak ]
-
-# -----------------------------------------------------------------
-# Not revert suspected CL as jam@ request, expected to be fixed soon.
-# -----------------------------------------------------------------
-crbug.com/765721 [ Linux ] http/tests/navigation/navigation-interrupted-by-fragment.html [ Pass Leak ]
-crbug.com/765721 [ Linux ] virtual/stable/http/tests/navigation/navigation-interrupted-by-fragment.html [ Pass Leak ]
-
-crbug.com/809609 [ Linux ] editing/pasteboard/drop-file-svg.html [ Pass Leak ]
-crbug.com/809609 [ Linux ] editing/inserting/insert_div_with_style.html [ Pass Leak ]
-
-# -----------------------------------------------------------------
-# Sheriff 2018-04-23
-# -----------------------------------------------------------------
-crbug.com/836278 [ Linux ] external/wpt/offscreen-canvas/convert-to-blob/offscreencanvas.convert.to.blob.html [ Pass Leak ]
-crbug.com/836278 [ Linux ] virtual/threaded/external/wpt/offscreen-canvas/convert-to-blob/offscreencanvas.convert.to.blob.html [ Pass Leak ]
-
-# Moved from TestExpectations (Sheriff 2018-05-31)
-crbug.com/848354 [ Linux ] plugins/fullscreen-plugins-dont-reload.html [ Pass Leak ]
-
-# Sheriff 2018-07-10
-# Test flaking on Linux Trusty Leak
-crbug.com/862029 [ Linux ] http/tests/devtools/tracing/timeline-misc/timeline-window-filter.js [ Pass Leak ]
-
-# Sheriff 2018-08-15
-crbug.com/874442 [ Linux ] svg/animations/mpath-remove-from-dependents-on-delete-crash.html [ Pass Crash ]
+crbug.com/1181667 [ Linux ] external/wpt/css/selectors/focus-visible-011.html [ Failure Pass ]
 
 # Sheriff 2018-08-17
 crbug.com/847114 [ Linux ] http/tests/devtools/tracing/decode-resize.js [ Pass Failure ]
-crbug.com/847114 [ Linux ] virtual/threaded/http/tests/devtools/tracing/decode-resize.js [ Pass Failure ]
 
-# Sheriff 2018-08-29
-crbug.com/878724 [ Linux ] editing/selection/modify_extend/extend_by_character.html [ Pass Leak ]
-crbug.com/878724 [ Linux ] editing/selection/modify_move/move_right_word_09_ltr_multi_line.html [ Pass Leak ]
-crbug.com/878727 [ Linux ] virtual/threaded/http/tests/devtools/tracing/timeline-misc/timeline-flame-chart-automatically-size-window.js [ Pass Leak ]
+crbug.com/733494 [ Linux ] media/autoplay/document-user-activation.html [ Pass Failure ]
 
-# Sheriff 2018-10-25
-crbug.com/862029 [ Linux ] virtual/threaded/http/tests/devtools/tracing/timeline-misc/timeline-window-filter.js [ Pass Leak ]
+crbug.com/769885 [ Linux ] virtual/android/fullscreen/video-scrolled-iframe.html [ Failure ]
 
-crbug.com/733494 [ Linux ] media/autoplay/document-user-activation.html [ Pass Leak ]
+# This test triggers existing leaky behavior, but this test also catches
+# a prior crash.
+crbug.com/1103082 [ Linux ] fast/forms/select/select-change-layout-object-crash.html [ Failure ]
 
-# Sheriff 2019-01-04
-crbug.com/919117 [ Linux ] virtual/mouseevent_fractional/fast/events/middleClickAutoscroll-drag.html [ Pass Leak ]
+# Sheriff 2021-02-25
+crbug.com/1182675 [ Linux ] dom/attr/id-update-map-crash.html [ Failure Pass ]
 
-# Sheriff 2019-01-07
-crbug.com/919497 [ Linux ] virtual/threaded/http/tests/devtools/tracing/timeline-gpu-tasks.js [ Pass Leak ]
+# Sheriff 2021-03-02
+crbug.com/1183788 [ Linux ] external/wpt/pointerevents/pointerevent_fractional_coordinates.html?touch [ Pass Failure ]
 
-#Sheriff 2019-02-19
-crbug.com/927454 [ Linux ] external/wpt/pointerevents/pointerevent_pointerleave_descendant_over.html [ Pass Leak ]
-crbug.com/927454 [ Linux ] external/wpt/pointerevents/pointerevent_lostpointercapture_is_first.html [ Pass Leak ]
+# Started failing after field trial testing configs were enabled.
+crbug.com/1219915 [ Linux ] editing/selection/context-menu-text-selection.html [ Failure ]
+crbug.com/1219915 [ Linux ] editing/selection/readonly-disabled-hittest.html [ Failure ]
+crbug.com/1219915 [ Linux ] editing/selection/readonly-disabled-text-selection.html [ Failure ]
+crbug.com/1219915 [ Linux ] external/wpt/dom/events/document-level-touchmove-event-listener-passive-by-default.tentative.html [ Failure ]
+crbug.com/1219915 [ Linux ] fast/events/touch/gesture/gesture-tap-reset-selection-range.html [ Failure ]
+crbug.com/1219915 [ Linux ] fast/events/touch/gesture/long-press-drag-drop-touch-editing-combined-in-iframe.html [ Failure ]
+crbug.com/1219915 [ Linux ] fast/events/touch/gesture/long-press-drag-drop-touch-editing-combined.html [ Failure ]
+crbug.com/1219915 [ Linux ] fast/events/touch/gesture/long-press-focuses-frame.html [ Failure ]
+crbug.com/1219915 [ Linux ] fast/events/touch/gesture/long-press-on-draggable-element-in-iframe-triggers-drag.html [ Failure ]
+crbug.com/1219915 [ Linux ] fast/events/touch/gesture/long-press-on-draggable-element-in-nested-iframes-triggers-drag.html [ Failure ]
+crbug.com/1219915 [ Linux ] fast/events/touch/gesture/long-press-selects-word-when-touch-editing-enabled.html [ Failure ]
+crbug.com/1219915 [ Linux ] touchadjustment/focusout-on-touch.html [ Failure ]
+crbug.com/1219915 [ Linux ] touchadjustment/touch-links-longpress.html [ Failure ]
 
-#Sheriff 2019-02-21
-crbug.com/934144 [ Linux ] http/tests/devtools/tracing/timeline-misc/timeline-flame-chart-automatically-size-window.js [ Pass Leak ]
+# Sheriff 2021-11-18
+crbug.com/1271392 [ Linux ] external/wpt/service-workers/service-worker/navigation-headers.https.html [ Failure Pass ]
 
-#Sheriff 2019-04-10
-crbug.com/951453 [ Linux ] external/wpt/html/user-activation/activation-transfer-cross-origin-with-click.sub.tentative.html [ Pass Leak ]
+# Sheriff 2022-08-04
+crbug.com/1350279 [ Linux ] external/wpt/accessibility/crashtests/svg-mouse-listener.html [ Failure Pass ]
+
+# Sheriff 2022-09-09
+crbug.com/1361848 [ Linux ] http/tests/media/autoplay/document-user-activation-navigation-keypress.html [ Failure Pass ]
+crbug.com/1361848 [ Linux ] http/tests/media/autoplay/document-user-activation-navigation-click.html [ Failure Pass ]
+crbug.com/1361848 [ Linux ] http/tests/media/autoplay/document-user-activation-navigation-tap.html [ Failure Pass ]
 
 ###########################################################################
 # WARNING: Memory leaks must be fixed asap. Sheriff is expected to revert #
 # culprit CLs instead of suppressing the leaks. If you have any question, #
-# ask hajimehoshi@.                                                       #
+# ask yuzus@.                                                             #
 ###########################################################################

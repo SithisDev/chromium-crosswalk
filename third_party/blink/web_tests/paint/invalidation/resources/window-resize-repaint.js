@@ -12,15 +12,17 @@ var repaintRects = "";
 if (window.internals)
     internals.runtimeFlags.paintUnderInvalidationCheckingEnabled = true;
 
-function doTest() {
+async function doTest() {
     if (sizeIndex) {
-        repaintRects += internals.layerTreeAsText(document, window.internals.LAYER_TREE_INCLUDES_PAINT_INVALIDATIONS);
+        repaintRects += internals.layerTreeAsText(document, window.internals.LAYER_TREE_INCLUDES_INVALIDATIONS);
         internals.stopTrackingRepaints(document);
     }
     ++sizeIndex;
     if (sizeIndex < testSizes.length) {
         internals.startTrackingRepaints(document);
+        var resizePromise = new Promise(resolve => window.onresize = resolve);
         window.resizeTo(testSizes[sizeIndex].width, testSizes[sizeIndex].height);
+        await resizePromise;
         runAfterLayoutAndPaint(doTest);
     } else if (window.testRunner) {
         testRunner.setCustomTextOutput(repaintRects);
@@ -29,10 +31,11 @@ function doTest() {
 }
 
 if (window.testRunner) {
-    testRunner.useUnfortunateSynchronousResizeMode();
     testRunner.waitUntilDone();
-    onload = function() {
+    onload = async function() {
+        var resizePromise = new Promise(resolve => window.onresize = resolve);
         window.resizeTo(testSizes[0].width, testSizes[0].height);
+        await resizePromise;
         runAfterLayoutAndPaint(doTest);
     };
 }

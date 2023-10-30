@@ -3,15 +3,20 @@
 # found in the LICENSE file.
 
 from blinkpy.common.net.git_cl import CLStatus, GitCL
+from blinkpy.common.net.rpc import BuildbucketClient
 from blinkpy.common.system.executive import ScriptError
 
 # pylint: disable=unused-argument
 
-class MockGitCL(object):
 
-    def __init__(
-            self, host, try_job_results=None, status='closed',
-            issue_number='1234', time_out=False, git_error_output=None):
+class MockGitCL(object):
+    def __init__(self,
+                 host,
+                 try_job_results=None,
+                 status='closed',
+                 issue_number='1234',
+                 time_out=False,
+                 git_error_output=None):
         """Constructs a fake GitCL with canned return values.
 
         Args:
@@ -22,6 +27,7 @@ class MockGitCL(object):
             time_out: Whether to simulate timing out while waiting.
             git_error_output: A dict of git-cl args to exception output.
         """
+        self.bb_client = BuildbucketClient.from_host(host)
         self._builders = host.builders.all_try_builder_names()
         self._status = status
         self._try_job_results = try_job_results
@@ -53,9 +59,8 @@ class MockGitCL(object):
     def wait_for_try_jobs(self, **_):
         if self._time_out:
             return None
-        return CLStatus(
-            self._status,
-            self.filter_latest(self._try_job_results))
+        return CLStatus(self._status,
+                        self.filter_latest(self._try_job_results))
 
     def wait_for_closed_status(self, **_):
         if self._time_out:
@@ -63,7 +68,15 @@ class MockGitCL(object):
         return 'closed'
 
     def latest_try_jobs(self, builder_names=None, **_):
-        return self.filter_latest(self._try_job_results)
+        if builder_names:
+            jobs = {
+                build: status
+                for build, status in self._try_job_results.items()
+                if build.builder_name in builder_names
+            }
+        else:
+            jobs = self._try_job_results
+        return self.filter_latest(jobs)
 
     @staticmethod
     def filter_latest(try_results):

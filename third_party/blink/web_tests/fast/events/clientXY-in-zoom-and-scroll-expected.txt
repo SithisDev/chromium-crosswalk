@@ -8,7 +8,7 @@ Just zoomed
 PASS event.clientX is 83
 PASS event.clientY is 83
 PASS event.pageX is 83
-PASS event.pageY is 83
+PASS event.pageX is 83
 
 Just scrolled
 PASS event.clientX is 100

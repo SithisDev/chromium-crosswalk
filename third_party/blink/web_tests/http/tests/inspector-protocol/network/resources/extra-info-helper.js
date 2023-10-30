@@ -14,6 +14,19 @@
       return {requestExtraInfo, responseExtraInfo};
     }
 
+    async jsNavigateWithExtraInfo(url) {
+      const requestExtraInfoPromise = this._dp.Network.onceRequestWillBeSentExtraInfo();
+      const responseExtraInfoPromise = this._dp.Network.onceResponseReceivedExtraInfo();
+      const response = await this._session.protocol.Runtime.evaluate(
+          {expression: `window.location.href = '${url}'`});
+      if (response.error && response.error.message != 'Inspected target navigated or closed') {
+        throw new Error(response.error.message || response.error);
+      }
+      const requestExtraInfo = await requestExtraInfoPromise;
+      const responseExtraInfo = await responseExtraInfoPromise;
+      return {requestExtraInfo, responseExtraInfo};
+    }
+
     async fetchWithExtraInfo(url) {
       const requestExtraInfoPromise = this._dp.Network.onceRequestWillBeSentExtraInfo();
       const responseExtraInfoPromise = this._dp.Network.onceResponseReceivedExtraInfo();
@@ -21,6 +34,12 @@
       const requestExtraInfo = await requestExtraInfoPromise;
       const responseExtraInfo = await responseExtraInfoPromise;
       return {requestExtraInfo, responseExtraInfo};
+    }
+
+    async jsNavigateIFrameWithExtraInfo(iFrameId, url) {
+      const promises = [this._dp.Network.onceRequestWillBeSent(), this._dp.Network.onceRequestWillBeSentExtraInfo(), this._dp.Network.onceResponseReceivedExtraInfo(), this._dp.Network.onceResponseReceived()];
+      await this._session.evaluate(`document.getElementById('${iFrameId}').src = '${url}'`);
+      return Promise.all(promises);
     }
   };
 

@@ -12,15 +12,15 @@ expect('inherit').parsesAs('inherit');
 expect('none').parsesAs('none').isComputedTo('none');
 expect('10px').parsesAs('10px').isComputedTo('10px');
 expect('10px -2.5px').parsesAs('10px -2.5px').isComputedTo('10px -2.5px');
-expect('10px -2.5px 0').parsesAs('10px -2.5px 0px').isComputedTo('10px -2.5px');
+expect('10px -2.5px 0').parsesAs('10px -2.5px').isComputedTo('10px -2.5px');
 
 expect('42.5%').parsesAs('42.5%').isComputedTo('42.5%');
 expect('42.5% -20.5%').parsesAs('42.5% -20.5%').isComputedTo('42.5% -20.5%');
 expect('42.5% -20.5% 5px').parsesAs('42.5% -20.5% 5px').isComputedTo('42.5% -20.5% 5px');
 
 expect('calc(100%) calc(20px) calc(-1px)').isComputedTo('100% 20px -1px');
-expect('calc(100% + 10px) calc(100% - 10px) calc(100px + 200px)').parsesAs('calc(100% + 10px) calc(100% - 10px) calc(300px)').isComputedTo('calc(100% + 10px) calc(100% + -10px) 300px');
-expect('calc(100% * 0.5 + 2px) calc(100% - 10px / 2) calc(100px - 200px)').parsesAs('calc(50% + 2px) calc(100% - 5px) calc(-100px)').isComputedTo('calc(50% + 2px) calc(100% + -5px) -100px');
+expect('calc(100% + 10px) calc(100% - 10px) calc(100px + 200px)').parsesAs('calc(100% + 10px) calc(100% - 10px) calc(300px)').isComputedTo('calc(100% + 10px) calc(100% - 10px) 300px');
+expect('calc(100% * 0.5 + 2px) calc(100% - 10px / 2) calc(100px - 200px)').parsesAs('calc(50% + 2px) calc(100% - 5px) calc(-100px)').isComputedTo('calc(50% + 2px) calc(100% - 5px) -100px');
 
 expect('2').isInvalid();
 expect('10deg 10px').isInvalid();

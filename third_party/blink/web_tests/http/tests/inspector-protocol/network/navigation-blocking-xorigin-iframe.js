@@ -7,41 +7,53 @@
   await dp.Target.setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true, flatten: true});
 
   let interceptionLog = [];
-  function onRequestIntercepted(dp, e) {
+  async function onRequestIntercepted(dp, e) {
     const response = {interceptionId: e.params.interceptionId};
 
     if (e.params.request.url === 'http://devtools.oopif-b.test:8000/inspector-protocol/resources/test-page.html')
       response.errorReason = 'Aborted';
     interceptionLog.push(e.params.request.url + (response.errorReason ? `: ${response.errorReason}` : ''));
 
-    dp.Network.continueInterceptedRequest(response);
+    await dp.Network.continueInterceptedRequest(response);
   }
 
-  let loadCount = 5;
+  // Main frame load + initial oopif-a load + initial oopif-b load +
+  // oopif-a redirect + oopif-b redirect.
+  const expectedRequests = 5;
+  let loadCount = 0;
   let loadCallback;
   const loadPromise = new Promise(fulfill => loadCallback = fulfill);
 
   const allTargets = [];
-  function initalizeTarget(dp) {
+  async function initalizeTarget(dp) {
     allTargets.push(dp);
-    dp.Network.setRequestInterception({patterns: [{}]});
-    dp.Network.onRequestIntercepted(onRequestIntercepted.bind(this, dp));
-    dp.Network.enable();
-    dp.Page.enable();
+    await Promise.all([
+      dp.Network.setRequestInterception({patterns: [{}]}),
+      dp.Network.onRequestIntercepted(onRequestIntercepted.bind(this, dp)),
+      dp.Network.enable(),
+      dp.Page.enable()
+    ]);
+    dp.Page.onFrameStartedLoading(e => {
+      ++loadCount;
+    });
     dp.Page.onFrameStoppedLoading(e => {
-      if (!--loadCount)
+      // When loading is done, we should have done 5 network requests. But (with
+      // site isolation off) we may finish loading both iframes before the
+      // redirects start, and loadCount would go to zero. So we want to wait for
+      // loadCount to go to zero after we have done the redirects.
+      if (!--loadCount && interceptionLog.length == expectedRequests)
         loadCallback();
     });
-    dp.Runtime.runIfWaitingForDebugger();
+    await dp.Runtime.runIfWaitingForDebugger();
   }
 
-  initalizeTarget(dp);
-  dp.Target.onAttachedToTarget(e => {
+  await initalizeTarget(dp);
+  dp.Target.onAttachedToTarget(async e => {
     const targetProtocol = session.createChild(e.params.sessionId).protocol;
-    initalizeTarget(targetProtocol);
+    await initalizeTarget(targetProtocol);
   });
 
-  dp.Page.navigate({url: 'http://127.0.0.1:8000/inspector-protocol/resources/iframe-navigation.html'});
+  await dp.Page.navigate({url: 'http://127.0.0.1:8000/inspector-protocol/resources/iframe-navigation.html'});
 
   let urls = [];
   function getURLsRecursively(frameTree) {

@@ -5,8 +5,8 @@
 (async function() {
   TestRunner.addResult(
       `Verify that persistence does not overwrite CSS files when CSS model reports error on getStyleSheetText.\n`);
-  await TestRunner.loadModule('bindings_test_runner');
-  await TestRunner.loadModule('sources_test_runner');
+  await TestRunner.loadTestModule('bindings_test_runner');
+  await TestRunner.loadLegacyModule('sources'); await TestRunner.loadTestModule('sources_test_runner');
   await TestRunner.loadHTML(`
       <style>
       body {
@@ -25,8 +25,8 @@
           .then(uiSourceCode => uiSourceCode.requestContent())
           .then(onCSSContent);
 
-      function onCSSContent(content) {
-        fs = new BindingsTestRunner.TestFileSystem('file:///var/www');
+      function onCSSContent({ content, error, isEncoded }) {
+        fs = new BindingsTestRunner.TestFileSystem('/var/www');
         BindingsTestRunner.addFiles(fs, {
           'simple.css': {content: content},
         });
@@ -43,7 +43,7 @@
         fsUISourceCode.requestContent().then(onContent);
       }
 
-      function onContent(content) {
+      function onContent({ content, error, isEncoded }) {
         TestRunner.addResult('Initial content of file:///var/www/simple.css');
         TestRunner.addResult('----\n' + content + '\n----');
         next();
@@ -57,12 +57,12 @@
       var styleSheet =
           TestRunner.cssModel.styleSheetHeaders().find(header => header.contentURL().endsWith('simple.css'));
       // Make CSSModel constantly return errors on all getStyleSheetText requests.
-      TestRunner.override(TestRunner.cssModel._agent, 'getStyleSheetText', throwProtocolError, true);
+      TestRunner.override(TestRunner.cssModel.agent, 'invoke_getStyleSheetText', throwProtocolError, true);
       // Set a new stylesheet text
       TestRunner.cssModel.setStyleSheetText(styleSheet.id, 'body {color: blue}');
       // Expect StylesSourceMapping to sync styleSheet with network UISourceCode.
       // Persistence acts synchronously.
-      TestRunner.addSniffer(Bindings.StyleFile.prototype, '_styleFileSyncedForTest', next);
+      TestRunner.addSniffer(Bindings.StyleFile.prototype, 'styleFileSyncedForTest', next);
 
       function throwProtocolError(styleSheetId) {
         TestRunner.addResult('Protocol Error: FAKE PROTOCOL ERROR');

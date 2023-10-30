@@ -6,7 +6,8 @@
         margin: 5px;
     }
     #test.composite > .container {
-        transform: translateZ(0);
+        /* Not using will-change:transform because it ignores subpixel accumulation. */ 
+        will-change: opacity;
     }
     .container {
         position: absolute;

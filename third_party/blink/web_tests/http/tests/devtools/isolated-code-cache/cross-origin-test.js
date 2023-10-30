@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests V8 code cache for javascript resources\n`);
-  await TestRunner.loadModule('performance_test_runner');
+  await TestRunner.loadLegacyModule('timeline'); await TestRunner.loadTestModule('performance_test_runner');
   await TestRunner.showPanel('timeline');
 
   // Clear browser cache to avoid any existing entries for the fetched
@@ -15,14 +15,18 @@
       'http://127.0.0.1:8000/devtools/resources/test-page-v8-code-cache.html');
 
   await TestRunner.evaluateInPagePromise(`
-      function loadScript() {
+      function waitUntilIdle() {
+        return new Promise(resolve=>window.requestIdleCallback(resolve));
+      }
+      async function loadScript() {
         const url =
             'http://localhost:8000/devtools/resources/v8-cache-script.js';
         const frameId = 'frame_id';
         let iframeWindow = document.getElementById(frameId).contentWindow;
-        return iframeWindow.loadScript(url)
-            .then(() => iframeWindow.loadScript(url))
-            .then(() => iframeWindow.loadScript(url));
+        await iframeWindow.loadScript(url);
+        await iframeWindow.loadScript(url);
+        await waitUntilIdle();
+        await iframeWindow.loadScript(url);
       }
   `);
 
@@ -40,8 +44,9 @@
   // cache on second fetch and consume it in the third fetch. We may have to
   // change this if the heuristics change.
   await PerformanceTestRunner.invokeAsyncWithTimeline('loadScript');
-  PerformanceTestRunner.printTimelineRecordsWithDetails(
-      TimelineModel.TimelineModel.RecordType.CompileScript);
+  await PerformanceTestRunner.printTimelineRecordsWithDetails(
+      TimelineModel.TimelineModel.RecordType.CompileScript,
+      TimelineModel.TimelineModel.RecordType.CacheScript);
 
   // Second navigation
   TestRunner.addResult(
@@ -64,8 +69,9 @@
 
   await TestRunner.addIframe(localhost_scope, {id: frameId});
   await PerformanceTestRunner.invokeAsyncWithTimeline('loadScript');
-  PerformanceTestRunner.printTimelineRecordsWithDetails(
-      TimelineModel.TimelineModel.RecordType.CompileScript);
+  await PerformanceTestRunner.printTimelineRecordsWithDetails(
+      TimelineModel.TimelineModel.RecordType.CompileScript,
+      TimelineModel.TimelineModel.RecordType.CacheScript);
 
   TestRunner.completeTest();
 })();

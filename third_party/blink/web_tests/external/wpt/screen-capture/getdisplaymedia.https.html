@@ -1,8 +1,13 @@
 <!doctype html>
 <meta charset=utf-8>
 <title>getDisplayMedia</title>
+<meta name="timeout" content="long">
+<button id="button">User gesture</button>
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
+<script src="/resources/testdriver.js"></script>
+<script src="/resources/testdriver-vendor.js"></script>
+<video id="display"></video>
 <script>
   'use strict';
 test(() => {
@@ -12,14 +17,53 @@ test(() => {
 const stopTracks = stream => stream.getTracks().forEach(track => track.stop());
 const j = obj => JSON.stringify(obj);
 
+async function getDisplayMedia(constraints) {
+  const p = new Promise(r => button.onclick = r);
+  await test_driver.click(button);
+  await p;
+  return navigator.mediaDevices.getDisplayMedia(constraints);
+}
+
+promise_test(t => {
+  const p = navigator.mediaDevices.getDisplayMedia({video: true});
+  t.add_cleanup(async () => {
+    try { stopTracks(await p) } catch {}
+  });
+  // Race a settled promise to check that the returned promise is already
+  // rejected.
+  return promise_rejects_dom(
+    t, 'InvalidStateError', Promise.race([p, Promise.resolve()]),
+    'getDisplayMedia should have returned an already-rejected promise.');
+}, `getDisplayMedia() must require user activation`);
+
+promise_test( async t => {
+  const v = document.getElementById('display');
+  v.autoplay = true;
+  // work around firefox bug 1586505, orthogonal to what's being tested
+  const frames = () => v.getVideoPlaybackQuality()?.totalVideoFrames || v.mozPaintedFrames;
+  const target_rate = 5;
+  const stream = await getDisplayMedia({video: {width:160, frameRate: target_rate}});
+  t.add_cleanup(() => stopTracks(stream));
+  v.srcObject = stream;
+  const intitial_time = v.currentTime;
+  const initial_frame_count = frames();
+  await new Promise(r => t.step_timeout(r, 10000));
+  const total_elapsed_frames = frames() - initial_frame_count;
+  const total_elapsed_time = v.currentTime - intitial_time;
+  const average_fps = total_elapsed_frames / total_elapsed_time;
+  assert_greater_than_equal(average_fps, target_rate * 0.50);
+  assert_less_than_equal(average_fps, target_rate * 1.75);
+}, "getDisplayMedia() must adhere to frameRate if set");
+
 [
  {video: true},
  {video: true, audio: false},
  {audio: false},
+ {audio: true},
  {},
  undefined
 ].forEach(constraints => promise_test(async t => {
-  const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+  const stream = await getDisplayMedia(constraints);
   t.add_cleanup(() => stopTracks(stream));
   assert_equals(stream.getTracks().length, 1);
   assert_equals(stream.getVideoTracks().length, 1);
@@ -35,22 +79,22 @@ const j = obj => JSON.stringify(obj);
  {video: {height: {exact: 240}}},
  {video: {frameRate: {min: 4}}},
  {video: {frameRate: {exact: 4}}},
- {audio: true},
  {video: false, audio: true},
 ].forEach(constraints => promise_test(async t => {
-  try {
-    stopTracks(await navigator.mediaDevices.getDisplayMedia(constraints));
-  } catch (err) {
-    assert_equals(err.name, 'TypeError', err.message);
-    return;
-  }
-  assert_unreached('getDisplayMedia should have failed');
+  await test_driver.bless('getDisplayMedia()');
+  const p = navigator.mediaDevices.getDisplayMedia(constraints);
+  t.add_cleanup(async () => {
+    try { stopTracks(await p) } catch {}
+  });
+  await promise_rejects_js(
+    t, TypeError, Promise.race([p, Promise.resolve()]),
+    'getDisplayMedia should have returned an already-rejected promise.');
 }, `getDisplayMedia(${j(constraints)}) must fail with TypeError`));
 
 [
  {video: true, audio: true},
 ].forEach(constraints => promise_test(async t => {
-  const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+  const stream = await getDisplayMedia(constraints);
   t.add_cleanup(() => stopTracks(stream));
   assert_greater_than_equal(stream.getTracks().length, 1);
   assert_less_than_equal(stream.getTracks().length, 2);
@@ -59,15 +103,15 @@ const j = obj => JSON.stringify(obj);
 }, `getDisplayMedia(${j(constraints)}) must succeed with video maybe audio`));
 
 [
- {video: {width: {max: 360}}},
- {video: {height: {max: 240}}},
- {video: {width: {max: 360}, height: {max: 240}}},
- {video: {frameRate: {max: 4}}},
- {video: {frameRate: {max: 4}, width: {max: 360}}},
- {video: {frameRate: {max: 4}, height: {max: 240}}},
- {video: {frameRate: {max: 4}, width: {max: 360}, height: {max: 240}}},
+ {width: {max: 360}},
+ {height: {max: 240}},
+ {width: {max: 360}, height: {max: 240}},
+ {frameRate: {max: 4}},
+ {frameRate: {max: 4}, width: {max: 360}},
+ {frameRate: {max: 4}, height: {max: 240}},
+ {frameRate: {max: 4}, width: {max: 360}, height: {max: 240}},
 ].forEach(constraints => promise_test(async t => {
-  const stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+  const stream = await getDisplayMedia({video: constraints});
   t.add_cleanup(() => stopTracks(stream));
   const {width, height, frameRate} = stream.getTracks()[0].getSettings();
   assert_greater_than_equal(width, 1);
@@ -82,7 +126,46 @@ const j = obj => JSON.stringify(obj);
   if (constraints.frameRate) {
     assert_less_than_equal(frameRate, constraints.frameRate.max);
   }
-}, `getDisplayMedia(${j(constraints)}) must be constrained`));
+}, `getDisplayMedia({video: ${j(constraints)}}) must be constrained`));
+
+const someSizes = [
+ {width: 160},
+ {height: 120},
+ {width: 80},
+ {height: 60},
+ {width: 158},
+ {height: 118},
+];
+
+someSizes.forEach(constraints => promise_test(async t => {
+  const stream = await getDisplayMedia({video: constraints});
+  t.add_cleanup(() => stopTracks(stream));
+  const {width, height, frameRate} = stream.getTracks()[0].getSettings();
+  if (constraints.width) {
+    assert_equals(width, constraints.width);
+  } else {
+    assert_equals(height, constraints.height);
+  }
+  assert_greater_than_equal(frameRate, 1);
+}, `getDisplayMedia({video: ${j(constraints)}}) must be downscaled precisely`));
+
+promise_test(async t => {
+  const video = {height: 240};
+  const stream = await getDisplayMedia({video});
+  t.add_cleanup(() => stopTracks(stream));
+  const [track] = stream.getVideoTracks();
+  const {height} = track.getSettings();
+  assert_equals(height, video.height);
+  for (const constraints of someSizes) {
+    await track.applyConstraints(constraints);
+    const {width, height} = track.getSettings();
+    if (constraints.width) {
+      assert_equals(width, constraints.width);
+    } else {
+      assert_equals(height, constraints.height);
+    }
+  }
+}, `applyConstraints(width or height) must downscale precisely`);
 
 [
  {video: {width: {max: 0}}},
@@ -93,7 +176,7 @@ const j = obj => JSON.stringify(obj);
  {video: {frameRate: {max: -1}}},
 ].forEach(constraints => promise_test(async t => {
   try {
-    stopTracks(await navigator.mediaDevices.getDisplayMedia(constraints));
+    stopTracks(await getDisplayMedia(constraints));
   } catch (err) {
     assert_equals(err.name, 'OverconstrainedError', err.message);
     return;
@@ -103,14 +186,36 @@ const j = obj => JSON.stringify(obj);
 
 // Content shell picks a fake desktop device by default.
 promise_test(async t => {
-  const stream = await navigator.mediaDevices.getDisplayMedia({video: true});
+  const stream = await getDisplayMedia({video: true});
+  t.add_cleanup(() => stopTracks(stream));
+  assert_equals(stream.getVideoTracks().length, 1);
+  const track = stream.getVideoTracks()[0];
+  assert_equals(track.kind, "video");
+  assert_equals(track.enabled, true);
+  assert_equals(track.readyState, "live");
+  track.stop();
+  assert_equals(track.readyState, "ended");
+}, 'getDisplayMedia() resolves with stream with video track');
+
+promise_test(async t => {
+  const stream = await getDisplayMedia({video: true});
   t.add_cleanup(() => stopTracks(stream));
   const settings = stream.getVideoTracks()[0].getSettings();
   assert_any(
       assert_equals, settings.displaySurface,
-      ['monitor', 'window', 'application', 'browser']);
+      ['monitor', 'window', 'browser']);
   assert_any(assert_equals, settings.logicalSurface, [true, false]);
   assert_any(assert_equals, settings.cursor, ['never', 'always', 'motion']);
 }, 'getDisplayMedia() with getSettings');
 
+{
+  const properties = ["displaySurface"];
+  properties.forEach((property) => {
+    test(() => {
+      const supportedConstraints =
+        navigator.mediaDevices.getSupportedConstraints();
+      assert_true(supportedConstraints[property]);
+    }, property + " is supported");
+  });
+}
 </script>

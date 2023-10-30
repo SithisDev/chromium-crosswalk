@@ -1,14 +1,16 @@
 <!DOCTYPE html>
-<html> 
+<html>
+<script src="../../resources/testdriver.js"></script>
+<script src="../../resources/testdriver-vendor.js"></script>
     <body>
         <p>
             Test that only a single popup is allowed in response to a single
             user action. The test passes if only one popup is created.
         </p>
-        <button id="button" onclick="popup()">Click Here</button>
+        <button id="button" onclick="openPopup()">Click Here</button>
         <div id="console"></div>
         <script>
-            function popup() {
+            function openPopup() {
                 window.open("about:blank", "window1");
                 window.open("about:blank", "window2");
                 if (window.testRunner) {
@@ -22,9 +24,6 @@
 
             if (window.testRunner) {
                 testRunner.dumpAsText();
-                testRunner.setCanOpenWindows();
-                testRunner.setPopupBlockingEnabled(true);
-                testRunner.setCloseRemainingWindowsWhenComplete(true);
                 testRunner.waitUntilDone();
 
                 gc();
@@ -32,11 +31,7 @@
 
                 var button = document.getElementById("button");
 
-                if (window.eventSender) {
-                    eventSender.mouseMoveTo(button.offsetLeft + button.offsetWidth / 2, button.offsetTop + button.offsetHeight / 2);
-                    eventSender.mouseDown();
-                    eventSender.mouseUp();
-                }
+                test_driver.click(button);
             }
         </script>
     </body>

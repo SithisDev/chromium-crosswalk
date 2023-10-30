@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests the Timeline API instrumentation of style recalc events with invalidations.\n`);
-  await TestRunner.loadModule('performance_test_runner');
+  await TestRunner.loadLegacyModule('timeline'); await TestRunner.loadTestModule('performance_test_runner');
   await TestRunner.showPanel('timeline');
   await TestRunner.loadHTML(`
       <!DOCTYPE HTML>
@@ -47,7 +47,7 @@
       }
   `);
 
-  Runtime.experiments.enableForTest('timelineInvalidationTracking');
+  Root.Runtime.experiments.enableForTest('timelineInvalidationTracking');
 
   TestRunner.runTestSuite([
     async function testLocalFrame(next) {

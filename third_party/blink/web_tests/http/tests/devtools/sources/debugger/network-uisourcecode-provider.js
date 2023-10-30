@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests NetworkUISourceCodeProvider class.\n`);
-  await TestRunner.loadModule('sources_test_runner');
+  await TestRunner.loadLegacyModule('sources'); await TestRunner.loadTestModule('sources_test_runner');
   await TestRunner.showPanel('sources');
   await TestRunner.evaluateInPagePromise(`
       function removeStyleSheet()
@@ -31,7 +31,7 @@
            Workspace.projectTypes.ContentScripts));
     uiSourceCode.requestContent().then(didRequestContent);
 
-    function didRequestContent(content, contentEncoded) {
+    function didRequestContent({ content, error, isEncoded }) {
       TestRunner.addResult('Highlighter type: ' + uiSourceCode.mimeType());
       TestRunner.addResult('UISourceCode content: ' + content);
       callback();

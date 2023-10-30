@@ -1,10 +1,38 @@
-CONSOLE WARNING: line 347: The provided value 'fancy' is not a valid enum value of type ChannelCountMode.
-CONSOLE WARNING: line 353: The provided value 'undefined' is not a valid enum value of type ChannelInterpretation.
-CONSOLE WARNING: line 523: The provided value '9x' is not a valid enum value of type OverSampleType.
-CONSOLE WARNING: line 769: The provided value 'junk' is not a valid enum value of type ChannelCountMode.
-CONSOLE WARNING: line 800: The provided value 'junk' is not a valid enum value of type ChannelCountMode.
+CONSOLE WARNING: The ScriptProcessorNode is deprecated. Use AudioWorkletNode instead. (https://bit.ly/audio-worklet)
+CONSOLE WARNING: The ScriptProcessorNode is deprecated. Use AudioWorkletNode instead. (https://bit.ly/audio-worklet)
+CONSOLE WARNING: The provided value 'fancy' is not a valid enum value of type ChannelCountMode.
+CONSOLE WARNING: The provided value 'undefined' is not a valid enum value of type ChannelInterpretation.
+CONSOLE WARNING: The provided value '9x' is not a valid enum value of type OverSampleType.
+CONSOLE WARNING: The provided value 'junk' is not a valid enum value of type ChannelCountMode.
+CONSOLE WARNING: The ScriptProcessorNode is deprecated. Use AudioWorkletNode instead. (https://bit.ly/audio-worklet)
+CONSOLE WARNING: The provided value 'junk' is not a valid enum value of type ChannelCountMode.
 This is a testharness.js-based test.
 PASS # AUDIT TASK RUNNER STARTED.
+PASS Executing "initialize"
+PASS Executing "createBuffer"
+PASS Executing "createMediaElementSource"
+PASS Executing "createMediaStreamSource"
+PASS Executing "createScriptProcessor"
+PASS Executing "createChannelSplitter"
+PASS Executing "createChannelMerger"
+PASS Executing "createPeriodicWave"
+PASS Executing "createAnalyser"
+PASS Executing "Init test nodes"
+PASS Executing "connections"
+PASS Executing "channel-stuff"
+PASS Executing "audioparam"
+PASS Executing "biquad"
+PASS Executing "offline-audio-context"
+PASS Executing "invalid-offline-audio-context-parameters"
+PASS Executing "invalid-frame-length"
+PASS Executing "waveshaper"
+PASS Executing "audio-buffer-source"
+PASS Executing "oscillator"
+PASS Executing "convolver"
+PASS Executing "panner"
+PASS Executing "script-processor"
+PASS Executing "misc"
+PASS Audit report
 PASS > [initialize] Initialize contexts for testing
 PASS   context = new AudioContext() did not throw an exception.
 PASS   otherContext = new AudioContext() did not throw an exception.
@@ -12,13 +40,13 @@ PASS < [initialize] All assertions passed. (total 2 assertions)
 PASS > [createBuffer] 
 PASS   context.createBuffer(99, 1, context.sampleRate) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The number of channels provided (99) is outside the range [1, 32].".
 PASS   context.createBuffer(0, 1, context.sampleRate) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The number of channels provided (0) is outside the range [1, 32].".
-PASS   context.createBuffer(1, 1, 1) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The sample rate provided (1) is outside the range [3000, 384000].".
-PASS   context.createBuffer(1, 1, 2999) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The sample rate provided (2999) is outside the range [3000, 384000].".
-PASS   context.createBuffer(1, 1, 384001) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The sample rate provided (384001) is outside the range [3000, 384000].".
-PASS   context.createBuffer(1, 1, 1e6) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The sample rate provided (1.00000e+6) is outside the range [3000, 384000].".
+PASS   context.createBuffer(1, 1, 1) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The sample rate provided (1) is outside the range [3000, 768000].".
+PASS   context.createBuffer(1, 1, 2999) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The sample rate provided (2999) is outside the range [3000, 768000].".
+PASS   context.createBuffer(1, 1, 768001) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The sample rate provided (768001) is outside the range [3000, 768000].".
+PASS   context.createBuffer(1, 1, 1e6) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The sample rate provided (1.00000e+6) is outside the range [3000, 768000].".
 PASS   context.createBuffer(1, 1, 3000) did not throw an exception.
 PASS   context.createBuffer(1, 1, 192000) did not throw an exception.
-PASS   context.createBuffer(1, 1, 384000) did not throw an exception.
+PASS   context.createBuffer(1, 1, 768000) did not throw an exception.
 PASS   context.createBuffer(1, 0, context.sampleRate) threw NotSupportedError: "Failed to execute 'createBuffer' on 'BaseAudioContext': The number of frames provided (0) is less than or equal to the minimum bound (0).".
 PASS   context.createBuffer(new ArrayBuffer(100), true) threw TypeError: "Failed to execute 'createBuffer' on 'BaseAudioContext': 3 arguments required, but only 2 present.".
 PASS < [createBuffer] All assertions passed. (total 11 assertions)
@@ -75,10 +103,10 @@ PASS   AnalyserNode.getFloatFrequencyData(null) threw TypeError: "Failed to exec
 PASS   AnalyserNode.getByteFrequencyData(null) threw TypeError: "Failed to execute 'getByteFrequencyData' on 'AnalyserNode': parameter 1 is not of type 'Uint8Array'.".
 PASS   AnalyserNode.getFloatTimeDomainData(null) threw TypeError: "Failed to execute 'getFloatTimeDomainData' on 'AnalyserNode': parameter 1 is not of type 'Float32Array'.".
 PASS   AnalyserNode.getByteTimeDomainData(null) threw TypeError: "Failed to execute 'getByteTimeDomainData' on 'AnalyserNode': parameter 1 is not of type 'Uint8Array'.".
-PASS   AnalyserNode.getFloatFrequencyData(SharedArrayBuffer view) threw TypeError: "Failed to execute 'getFloatFrequencyData' on 'AnalyserNode': The provided ArrayBufferView value must not be shared.".
-PASS   AnalyserNode.getByteFrequencyData(SharedArrayBuffer view) threw TypeError: "Failed to execute 'getByteFrequencyData' on 'AnalyserNode': The provided ArrayBufferView value must not be shared.".
-PASS   AnalyserNode.getFloatTimeDomainData(SharedArrayBuffer view) threw TypeError: "Failed to execute 'getFloatTimeDomainData' on 'AnalyserNode': The provided ArrayBufferView value must not be shared.".
-PASS   AnalyserNode.getByteTimeDomainData(SharedArrayBuffer view) threw TypeError: "Failed to execute 'getByteTimeDomainData' on 'AnalyserNode': The provided ArrayBufferView value must not be shared.".
+PASS   AnalyserNode.getFloatFrequencyData(SharedArrayBuffer view) threw TypeError: "Failed to execute 'getFloatFrequencyData' on 'AnalyserNode': The provided Float32Array value must not be shared.".
+PASS   AnalyserNode.getByteFrequencyData(SharedArrayBuffer view) threw TypeError: "Failed to execute 'getByteFrequencyData' on 'AnalyserNode': The provided Uint8Array value must not be shared.".
+PASS   AnalyserNode.getFloatTimeDomainData(SharedArrayBuffer view) threw TypeError: "Failed to execute 'getFloatTimeDomainData' on 'AnalyserNode': The provided Float32Array value must not be shared.".
+PASS   AnalyserNode.getByteTimeDomainData(SharedArrayBuffer view) threw TypeError: "Failed to execute 'getByteTimeDomainData' on 'AnalyserNode': The provided Uint8Array value must not be shared.".
 PASS   AudioBuffer.getChannelData(2) threw IndexSizeError: "Failed to execute 'getChannelData' on 'AudioBuffer': channel index (2) exceeds number of channels (1)".
 PASS < [createAnalyser] All assertions passed. (total 28 assertions)
 PASS > [Init test nodes] Create test nodes for the following tests
@@ -91,7 +119,7 @@ PASS   node.connect(context.destination, 100, 0) threw IndexSizeError: "Failed t
 PASS   node.connect(context.destination, 0, 100) threw IndexSizeError: "Failed to execute 'connect' on 'AudioNode': input index (100) exceeds number of inputs (1).".
 PASS   node.connect(node2.gain, 100) threw IndexSizeError: "Failed to execute 'connect' on 'AudioNode': output index (100) exceeds number of outputs (1).".
 PASS   node.disconnect(99) threw IndexSizeError: "Failed to execute 'disconnect' on 'AudioNode': The output index provided (99) is outside the range [0, 0].".
-PASS   node.connect(otherContext.destination) threw InvalidAccessError: "Failed to execute 'connect' on 'AudioNode': cannot connect to a destination belonging to a different audio context.".
+PASS   node.connect(otherContext.destination) threw InvalidAccessError: "Failed to execute 'connect' on 'AudioNode': cannot connect to an AudioNode belonging to a different audio context.".
 PASS < [connections] All assertions passed. (total 6 assertions)
 PASS > [channel-stuff] channelCount, channelCountMode, channelInterpretation
 PASS   GainNode.channelCount = 99 threw NotSupportedError: "Failed to set the 'channelCount' property on 'AudioNode': The channel count provided (99) is outside the range [1, 32].".
@@ -115,9 +143,9 @@ PASS   node.getFrequencyResponse(new Float32Array(1), new Float32Array(1), new F
 PASS   node.getFrequencyResponse(null, new Float32Array(1), new Float32Array(1)) threw TypeError: "Failed to execute 'getFrequencyResponse' on 'BiquadFilterNode': parameter 1 is not of type 'Float32Array'.".
 PASS   node.getFrequencyResponse(new Float32Array(1), null, new Float32Array(1)) threw TypeError: "Failed to execute 'getFrequencyResponse' on 'BiquadFilterNode': parameter 2 is not of type 'Float32Array'.".
 PASS   node.getFrequencyResponse(new Float32Array(1), new Float32Array(1), null) threw TypeError: "Failed to execute 'getFrequencyResponse' on 'BiquadFilterNode': parameter 3 is not of type 'Float32Array'.".
-PASS   node.getFrequencyResponse(shared_view, nonshared_view, nonshared_view) threw TypeError: "Failed to execute 'getFrequencyResponse' on 'BiquadFilterNode': The provided ArrayBufferView value must not be shared.".
-PASS   node.getFrequencyResponse(nonshared_view, shared_view, nonshared_view) threw TypeError: "Failed to execute 'getFrequencyResponse' on 'BiquadFilterNode': The provided ArrayBufferView value must not be shared.".
-PASS   node.getFrequencyResponse(nonshared_view, nonshared_view, shared_view) threw TypeError: "Failed to execute 'getFrequencyResponse' on 'BiquadFilterNode': The provided ArrayBufferView value must not be shared.".
+PASS   node.getFrequencyResponse(shared_view, nonshared_view, nonshared_view) threw TypeError: "Failed to execute 'getFrequencyResponse' on 'BiquadFilterNode': The provided Float32Array value must not be shared.".
+PASS   node.getFrequencyResponse(nonshared_view, shared_view, nonshared_view) threw TypeError: "Failed to execute 'getFrequencyResponse' on 'BiquadFilterNode': The provided Float32Array value must not be shared.".
+PASS   node.getFrequencyResponse(nonshared_view, nonshared_view, shared_view) threw TypeError: "Failed to execute 'getFrequencyResponse' on 'BiquadFilterNode': The provided Float32Array value must not be shared.".
 PASS < [biquad] All assertions passed. (total 7 assertions)
 PASS > [offline-audio-context] supports 32 channels
 PASS   new OfflineAudioContext(32, 100, context.sampleRate) did not throw an exception.
@@ -125,18 +153,18 @@ PASS < [offline-audio-context] All assertions passed. (total 1 assertions)
 PASS > [invalid-offline-audio-context-parameters] errors for invalid channel counts
 PASS   new OfflineAudioContext(0, 100, context.sampleRate) threw NotSupportedError: "Failed to construct 'OfflineAudioContext': The number of channels provided (0) is outside the range [1, 32].".
 PASS   new OfflineAudioContext(99, 100, context.sampleRate) threw NotSupportedError: "Failed to construct 'OfflineAudioContext': The number of channels provided (99) is outside the range [1, 32].".
-PASS   new OfflineAudioContext(1, 100, 1) threw NotSupportedError: "Failed to construct 'OfflineAudioContext': The sampleRate provided (1) is outside the range [3000, 384000].".
-PASS   new OfflineAudioContext(1, 100, 1e6) threw NotSupportedError: "Failed to construct 'OfflineAudioContext': The sampleRate provided (1.00000e+6) is outside the range [3000, 384000].".
+PASS   new OfflineAudioContext(1, 100, 1) threw NotSupportedError: "Failed to construct 'OfflineAudioContext': The sampleRate provided (1) is outside the range [3000, 768000].".
+PASS   new OfflineAudioContext(1, 100, 1e6) threw NotSupportedError: "Failed to construct 'OfflineAudioContext': The sampleRate provided (1.00000e+6) is outside the range [3000, 768000].".
 PASS   new OfflineAudioContext(1, 0, 44100) threw NotSupportedError: "Failed to construct 'OfflineAudioContext': The number of frames provided (0) is less than the minimum bound (1).".
 PASS < [invalid-offline-audio-context-parameters] All assertions passed. (total 5 assertions)
 PASS > [invalid-frame-length] 
 PASS   testContext = new OfflineAudioContext(1, -88200000000000, 44100) did not throw an exception.
-PASS   testContext.startRendering() rejected correctly with NotSupportedError: startRendering failed to create AudioBuffer(1, 1448390656, 44100).
+PASS   testContext.startRendering() rejected correctly with NotSupportedError: Failed to execute 'startRendering' on 'OfflineAudioContext': startRendering failed to create AudioBuffer(1, 1448390656, 44100).
 PASS < [invalid-frame-length] All assertions passed. (total 2 assertions)
 PASS > [waveshaper] 
 PASS   node.oversample = "9x" did not throw an exception.
 PASS   node.oversample is equal to none.
-PASS   node.curve = {} threw TypeError: "Failed to set the 'curve' property on 'WaveShaperNode': The provided value is not of type 'Float32Array'.".
+PASS   node.curve = {} threw TypeError: "Failed to set the 'curve' property on 'WaveShaperNode': Failed to convert value to 'Float32Array'.".
 PASS   node.curve = new Float32Array(1) threw InvalidAccessError: "Failed to set the 'curve' property on 'WaveShaperNode': The curve length provided (1) is less than the minimum bound (2).".
 PASS   node.curve is equal to null.
 PASS   node.curve = new Float32Array(2) did not throw an exception.
@@ -208,7 +236,7 @@ PASS < [oscillator] All assertions passed. (total 17 assertions)
 PASS > [convolver] 
 PASS   oc = new OfflineAudioContext(1, 44100, 44100) did not throw an exception.
 PASS   conv = oc.createConvolver() did not throw an exception.
-PASS   conv.buffer = {} threw TypeError: "Failed to set the 'buffer' property on 'ConvolverNode': The provided value is not of type 'AudioBuffer'.".
+PASS   conv.buffer = {} threw TypeError: "Failed to set the 'buffer' property on 'ConvolverNode': Failed to convert value to 'AudioBuffer'.".
 PASS   conv.buffer = oc.createBuffer(1, 100, 22050) threw NotSupportedError: "Failed to set the 'buffer' property on 'ConvolverNode': The buffer sample rate of 22050 does not match the context rate of 44100 Hz.".
 PASS   conv.buffer is equal to null.
 PASS < [convolver] All assertions passed. (total 5 assertions)

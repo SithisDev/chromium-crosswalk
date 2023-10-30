@@ -24,11 +24,8 @@
 
     #test2 .child {
         background-color: green;
-        position: relative;
-        left: 25px;
-        top: 25px;
-        height: 50px;
-        width: 50px;
+        height: 75px;
+        width: 75px;
     }
     #test3 img {
         background-image: url(../svg/resources/animated-svg-fixed-size.svg)
@@ -51,15 +48,25 @@
     }
 
     function finish() {
-        var layerTree = internals.layerTreeAsText(document, internals.LAYER_TREE_INCLUDES_PAINT_INVALIDATIONS);
+        var layerTree = internals.layerTreeAsText(document, internals.LAYER_TREE_INCLUDES_DETAILED_INVALIDATIONS);
         var invalidatedObjects = {};
         for (var layer of JSON.parse(layerTree).layers) {
-            if (layer.paintInvalidations) {
-                for (var invalidation of layer.paintInvalidations)
+            if (layer.invalidations) {
+                for (var invalidation of layer.invalidations) {
+                    // We don't check no-repeat for background obscuration.
+                    if (invalidation.object.includes("id='target2'"))
+                        continue;
+                    // Ok to invalidate the IFC of block-in-inline.
+                    // See |LayoutBox::ForegroundIsKnownToBeOpaqueInRect|.
+                    if (invalidation.object.includes("id='target4'") ||
+                        invalidation.object.includes("id='imgInBlockInInline'"))
+                        continue;
                     invalidatedObjects[invalidation.object] = true;
+                }
             }
         }
-        // Passes if there is no invalidations other than imgForAdvanceImageAnimation.
+        // Passes if there is no invalidations other than imgForAdvanceImageAnimation
+        // (which ensures we are running the image animation).
         if (Object.keys(invalidatedObjects).length != 1 ||
             !Object.keys(invalidatedObjects)[0].includes('imgForAdvanceImageAnimation'))
             output.textContent = 'FAIL: Unexpected paint invalidations: ' + JSON.stringify(invalidatedObjects) + '\n' + layerTree;
@@ -109,7 +116,7 @@
         <a>
             <div></div>
             <div>
-                <img src="../resources/apple.jpg">
+                <img id="imgInBlockInInline" src="../resources/apple.jpg">
             </div>
         </a>
     </div>

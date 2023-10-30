@@ -3,7 +3,7 @@
 <link rel="author" href="mailto:odinho@opera.com" title="Odin Hørthe Omdal">
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
-<script src="support.js"></script>
+<script src="resources/support.js"></script>
 
 <script>
 
@@ -39,10 +39,10 @@
             cursor.continue(undefined);
 
             // Second try
-            assert_throws('InvalidStateError',
+            assert_throws_dom('InvalidStateError',
                 function() { cursor.continue(); }, 'second continue');
 
-            assert_throws('InvalidStateError',
+            assert_throws_dom('InvalidStateError',
                 function() { cursor.continue(3); }, 'third continue');
 
             count++;

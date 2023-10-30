@@ -4,9 +4,9 @@
 
 (async function() {
   TestRunner.addResult(`Tests long script content is correctly shown in source panel after page reload.\n`);
-  await TestRunner.loadModule('network_test_runner');
-  await TestRunner.loadModule('sources_test_runner');
-  await TestRunner.loadModule('console_test_runner');
+  await TestRunner.loadTestModule('network_test_runner');
+  await TestRunner.loadLegacyModule('sources'); await TestRunner.loadTestModule('sources_test_runner');
+  await TestRunner.loadLegacyModule('console'); await TestRunner.loadTestModule('console_test_runner');
   await TestRunner.showPanel('sources');
   await TestRunner.showPanel('network');
   await TestRunner.navigatePromise('resources/long-script-page.html');
@@ -33,7 +33,8 @@
     uiSourceCode.requestContent().then(step6);
   }
 
-  function step6(loadedScript) {
+  function step6({ content, error, isEncoded }) {
+    let loadedScript = content;
     var expected = 'console.log(\'finished\');\n';
     TestRunner.assertTrue(!!loadedScript, 'No script content');
     loadedScript = loadedScript.replace(/\r\n/g, '\n');  // on windows we receive additional symbol \r at line end.

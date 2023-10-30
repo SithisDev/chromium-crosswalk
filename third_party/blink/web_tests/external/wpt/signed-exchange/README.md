@@ -1,5 +1,5 @@
 This directory contains tests for the
-[b2 implementation snapshot](https://tools.ietf.org/html/draft-yasskin-httpbis-origin-signed-exchanges-impl-02) of the
+[b3 implementation snapshot](https://tools.ietf.org/html/draft-yasskin-httpbis-origin-signed-exchanges-impl-03) of the
 [Signed HTTP Exchanges](https://wicg.github.io/webpackage/draft-yasskin-http-origin-signed-responses.html).
 
 `resources` directory contains pregenerated signed exchanges and
@@ -19,4 +19,5 @@ regenerate these files by running `generate-test-sxgs.sh` in the
 To install them, run:
 ```
 go get -u github.com/WICG/webpackage/go/signedexchange/cmd/...
+export PATH=$PATH:$(go env GOPATH)/bin
 ```

@@ -5,12 +5,13 @@
 import base64
 import json
 import logging
-from urllib2 import HTTPError
+from six.moves.urllib.error import HTTPError
 
 from blinkpy.common.net.network_transaction import NetworkTimeout
+from blinkpy.common.path_finder import RELATIVE_WPT_TESTS
 from blinkpy.w3c.chromium_commit import ChromiumCommit
 from blinkpy.w3c.chromium_finder import absolute_chromium_dir
-from blinkpy.w3c.common import CHROMIUM_WPT_DIR, is_file_exportable
+from blinkpy.w3c.common import is_file_exportable
 
 _log = logging.getLogger(__name__)
 URL_BASE = 'https://chromium-review.googlesource.com'
@@ -29,9 +30,10 @@ class GerritAPI(object):
         self.user = user
         self.token = token
 
-    def get(self, path, raw=False):
+    def get(self, path, raw=False, return_none_on_404=False):
         url = URL_BASE + path
-        raw_data = self.host.web.get_binary(url)
+        raw_data = self.host.web.get_binary(
+            url, return_none_on_404=return_none_on_404)
         if raw:
             return raw_data
 
@@ -42,21 +44,37 @@ class GerritAPI(object):
         return json.loads(raw_data[5:])
 
     def post(self, path, data):
+        """Sends a POST request to path with data as the JSON payload.
+
+        The path has to be prefixed with '/a/':
+        https://gerrit-review.googlesource.com/Documentation/rest-api.html#authentication
+        """
+        assert path.startswith('/a/'), \
+            'POST requests need to use authenticated routes.'
         url = URL_BASE + path
         assert self.user and self.token, 'Gerrit user and token required for authenticated routes.'
 
-        b64auth = base64.b64encode('{}:{}'.format(self.user, self.token))
+        b64auth = base64.b64encode('{}:{}'.format(self.user,
+                                                  self.token).encode('utf-8'))
         headers = {
-            'Authorization': 'Basic {}'.format(b64auth),
+            'Authorization': 'Basic {}'.format(b64auth.decode('utf-8')),
             'Content-Type': 'application/json',
         }
-        return self.host.web.request('POST', url, data=json.dumps(data), headers=headers)
+        return self.host.web.request('POST',
+                                     url,
+                                     data=json.dumps(data).encode('utf-8'),
+                                     headers=headers)
 
-    def query_cl(self, change_id):
-        """Quries a commit information from Gerrit."""
-        path = '/changes/chromium%2Fsrc~master~{}?{}'.format(change_id, QUERY_OPTIONS)
+    def query_cl_comments_and_revisions(self, change_id):
+        """Queries a CL with comments and revisions information."""
+        return self.query_cl(change_id, 'o=MESSAGES&o=ALL_REVISIONS')
+
+    def query_cl(self, change_id, query_options=QUERY_OPTIONS):
+        """Queries a commit information from Gerrit."""
+        path = '/changes/chromium%2Fsrc~main~{}?{}'.format(
+            change_id, query_options)
         try:
-            cl_data = self.get(path)
+            cl_data = self.get(path, return_none_on_404=True)
         except NetworkTimeout:
             raise GerritError('Timed out querying CL using Change-Id')
 
@@ -67,7 +85,7 @@ class GerritAPI(object):
         return cl
 
     def query_exportable_open_cls(self, limit=500):
-        path = ('/changes/?q=project:\"chromium/src\"+branch:master+is:open+'
+        path = ('/changes/?q=project:\"chromium/src\"+branch:main+is:open+'
                 '-is:wip&{}&n={}').format(QUERY_OPTIONS, limit)
         # The underlying host.web.get_binary() automatically retries until it
         # times out, at which point NetworkTimeout is raised.
@@ -122,28 +140,37 @@ class GerritCL(object):
 
     @property
     def current_revision_description(self):
-        return self.current_revision['description']
+        # A patchset may have no description.
+        return self.current_revision.get('description', '')
 
     @property
     def status(self):
         return self._data['status']
 
+    @property
+    def messages(self):
+        return self._data['messages']
+
+    @property
+    def revisions(self):
+        return self._data['revisions']
+
     def post_comment(self, message):
         """Posts a comment to the CL."""
         path = '/a/changes/{change_id}/revisions/current/review'.format(
-            change_id=self.change_id,
-        )
+            change_id=self.change_id, )
         try:
             return self.api.post(path, {'message': message})
         except HTTPError as e:
-            raise GerritError('Failed to post a comment to issue {} (code {}).'.format(
-                self.change_id, e.code))
+            raise GerritError(
+                'Failed to post a comment to issue {} (code {}).'.format(
+                    self.change_id, e.code))
 
     def is_exportable(self):
         # TODO(robertma): Consolidate with the related part in chromium_exportable_commits.py.
 
         try:
-            files = self.current_revision['files'].keys()
+            files = list(self.current_revision['files'].keys())
         except KeyError:
             # Empty (deleted) CL is not exportable.
             return False
@@ -160,7 +187,7 @@ class GerritCL(object):
         if 'NOEXPORT=true' in self.current_revision['commit_with_footers']:
             return False
 
-        files_in_wpt = [f for f in files if f.startswith(CHROMIUM_WPT_DIR)]
+        files_in_wpt = [f for f in files if f.startswith(RELATIVE_WPT_TESTS)]
         if not files_in_wpt:
             return False
 

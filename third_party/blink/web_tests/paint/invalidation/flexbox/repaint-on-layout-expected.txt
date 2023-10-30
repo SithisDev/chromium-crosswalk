@@ -1,28 +1,20 @@
 {
   "layers": [
     {
-      "name": "LayoutView #document",
-      "bounds": [800, 600],
-      "drawsContent": false,
-      "backgroundColor": "#FFFFFF"
-    },
-    {
-      "name": "Scrolling Layer",
-      "bounds": [800, 600],
-      "drawsContent": false
-    },
-    {
-      "name": "Scrolling Contents Layer",
+      "name": "Scrolling background of LayoutView #document",
       "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF",
-      "paintInvalidations": [
-        {
-          "object": "LayoutBlockFlow HTML",
-          "rect": [712, 8, 80, 20],
-          "reason": "chunk disappeared"
-        }
+      "invalidations": [
+        [712, 8, 80, 20]
       ]
+    },
+    {
+      "name": "LayoutNGFlexibleBox (positioned) NAV class='nav-bar'",
+      "position": [8, 0],
+      "bounds": [200, 600],
+      "contentsOpaque": true,
+      "backgroundColor": "#008000"
     }
   ]
 }

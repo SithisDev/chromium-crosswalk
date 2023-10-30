@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <title>Makes sure that preloaded resources with a type attribute trigger the onload event</title>
+<meta name="timeout" content="long">
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
 <script src="/preload/resources/preload_helper.js"></script>
@@ -48,7 +49,7 @@
 <link rel=preload href="resources/foo.vtt" as=track type="text/foobar" onload="gibberishLoaded++;">
 <body>
 <script>
-    setup({explicit_done: true});
+    setup({single_test: true});
 
     var iterations = 0;
 

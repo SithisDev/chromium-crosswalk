@@ -4,10 +4,11 @@
 
 (async function() {
   TestRunner.addResult(`Verify that navigator's 'Make a copy' works as expected.\n`);
-  await TestRunner.loadModule('bindings_test_runner');
+  await TestRunner.loadTestModule('bindings_test_runner');
+  await TestRunner.loadLegacyModule('sources');
   await TestRunner.showPanel('sources');
 
-  var fs = new BindingsTestRunner.TestFileSystem('file:///var/www');
+  var fs = new BindingsTestRunner.TestFileSystem('/var/www');
   BindingsTestRunner.addFiles(fs, {
     'script.js': {content: 'testme'},
   });
@@ -16,9 +17,9 @@
 
   var sourcesNavigator = new Sources.NetworkNavigatorView();
   sourcesNavigator.show(UI.inspectorView.element);
-  TestRunner.addResult('BEFORE:\n' + fs.dumpAsText());
-  sourcesNavigator._handleContextMenuCreate(uiSourceCode.project(), '', uiSourceCode);
+  TestRunner.addResult('BEFORE:\n' + 'file://' + fs.dumpAsText());
+  sourcesNavigator.handleContextMenuCreate(uiSourceCode.project(), '', uiSourceCode);
   await TestRunner.waitForUISourceCode('NewFile');
-  TestRunner.addResult('\nAFTER:\n' + fs.dumpAsText());
+  TestRunner.addResult('\nAFTER:\n' + 'file://' + fs.dumpAsText());
   TestRunner.completeTest();
 })();

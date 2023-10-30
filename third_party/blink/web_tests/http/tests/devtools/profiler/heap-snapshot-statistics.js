@@ -3,14 +3,15 @@
 // found in the LICENSE file.
 
 (async function() {
+  'use strict';
   TestRunner.addResult(`Tests Statistics view of detailed heap snapshots.\n`);
-  await TestRunner.loadModule('heap_profiler_test_runner');
+  await TestRunner.loadTestModule('heap_profiler_test_runner');
   await TestRunner.showPanel('heap_profiler');
 
   function createHeapSnapshot() {
     var builder = new HeapProfilerTestRunner.HeapSnapshotBuilder();
     var index = 0;
-    for (type in HeapProfilerTestRunner.HeapNode.Type) {
+    for (let type in HeapProfilerTestRunner.HeapNode.Type) {
       if (!HeapProfilerTestRunner.HeapNode.Type.hasOwnProperty(type))
         continue;
       if (type === HeapProfilerTestRunner.HeapNode.Type.synthetic)
@@ -40,7 +41,7 @@
   }
 
   HeapProfilerTestRunner.runHeapSnapshotTestSuite([function testStatistics(next) {
-    TestRunner.addSniffer(Profiler.HeapSnapshotView.prototype, '_retrieveStatistics', step1);
+    TestRunner.addSniffer(Profiler.HeapSnapshotView.prototype, 'retrieveStatistics', step1);
     HeapProfilerTestRunner.takeAndOpenSnapshot(createHeapSnapshot, () => {});
 
     async function step1(arg, result) {

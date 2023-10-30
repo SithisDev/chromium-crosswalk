@@ -5,7 +5,7 @@
 (async function() {
   TestRunner.addResult(`Tests that console logging dumps proper messages.\n`);
 
-  await TestRunner.loadModule('console_test_runner');
+  await TestRunner.loadLegacyModule('console'); await TestRunner.loadTestModule('console_test_runner');
   await TestRunner.showPanel('console');
 
   await TestRunner.evaluateInPagePromise(`
@@ -38,10 +38,10 @@
 
     // Test big typed array: should be no crash or timeout.
     var bigTypedArray = new Uint8Array(new ArrayBuffer(400 * 1000 * 1000));
-    bigTypedArray["FAIL"] = "FAIL: Object.getOwnPropertyNames() should not have been run";
+    bigTypedArray.PASS = "Non-element properties should be displayed.";
     console.dir(bigTypedArray);
 
-    // document.createEvent("Event") has a special property "isTrusted" flagged "Unforgeable".
+    // document.createEvent("Event") has a special property "isTrusted" flagged "LegacyUnforgeable".
     var event = document.createEvent("Event");
     Object.defineProperty(event, "timeStamp", {value: 0})
     console.dir(event);
@@ -59,8 +59,8 @@
     ConsoleTestRunner.expandConsoleMessages(dumpConsoleMessages, expandTreeElementFilter);
   }
 
-  function dumpConsoleMessages() {
-    ConsoleTestRunner.dumpConsoleMessagesIgnoreErrorStackFrames();
+  async function dumpConsoleMessages() {
+    await ConsoleTestRunner.dumpConsoleMessagesIgnoreErrorStackFrames();
     TestRunner.completeTest();
   }
 })();

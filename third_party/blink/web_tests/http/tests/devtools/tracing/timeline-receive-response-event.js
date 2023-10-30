@@ -4,7 +4,7 @@
 
 (async function() {
   TestRunner.addResult(`Tests the Timeline API instrumentation of a SendRequest, ReceiveResponse etc.\n`);
-  await TestRunner.loadModule('performance_test_runner');
+  await TestRunner.loadLegacyModule('timeline'); await TestRunner.loadTestModule('performance_test_runner');
   await TestRunner.showPanel('timeline');
   await TestRunner.evaluateInPagePromise(`
       function performActions()
@@ -27,9 +27,9 @@
       }
   `);
 
-  UI.viewManager.showView('timeline');
+  await UI.viewManager.showView('timeline');
   const panel = UI.panels.timeline;
-  panel._disableCaptureJSProfileSetting.set(true);
+  panel.disableCaptureJSProfileSetting.set(true);
   await PerformanceTestRunner.invokeAsyncWithTimeline('performActions');
 
   var recordTypes = TimelineModel.TimelineModel.RecordType;
@@ -56,6 +56,6 @@
     if (typesToDump.has(traceEvent.name) && (traceEvent.name !== 'FunctionCall' || traceEvent.args['data']['url']))
       TestRunner.addResult('  '.repeat(level - 1) + traceEvent.name);
   }
-  PerformanceTestRunner.walkTimelineEventTree(dumpEvent);
+  await PerformanceTestRunner.walkTimelineEventTree(dumpEvent);
   TestRunner.completeTest();
 })();

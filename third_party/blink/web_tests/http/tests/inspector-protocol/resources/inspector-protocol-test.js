@@ -3,18 +3,43 @@
 // found in the LICENSE file.
 
 var TestRunner = class {
-  constructor(testBaseURL, targetBaseURL, log, completeTest, fetch) {
+  constructor(testBaseURL, targetBaseURL, log, completeTest, fetch, params) {
     this._dumpInspectorProtocolMessages = false;
     this._testBaseURL = testBaseURL;
     this._targetBaseURL = targetBaseURL;
     this._log = log;
     this._completeTest = completeTest;
     this._fetch = fetch;
+    this._params = params;
     this._browserSession = new TestRunner.Session(this, '');
   }
 
   static get stabilizeNames() {
-    return ['id', 'nodeId', 'objectId', 'scriptId', 'timestamp', 'backendNodeId', 'parentId', 'frameId', 'loaderId', 'baseURL', 'documentURL', 'styleSheetId', 'executionContextId', 'targetId', 'browserContextId', 'sessionId', 'ownerNode'];
+    return [
+      'id',
+      'nodeId',
+      'objectId',
+      'scriptId',
+      'timestamp',
+      'backendNodeId',
+      'parentId',
+      'frameId',
+      'loaderId',
+      'baseURL',
+      'documentURL',
+      'styleSheetId',
+      'executionContextId',
+      'openerId',
+      'targetId',
+      'browserContextId',
+      'sessionId',
+      'receivedBytes',
+      'ownerNode',
+      'guid',
+      'requestId',
+      'openerFrameId',
+      'issueId',
+    ];
   }
 
   startDumpingProtocolMessages() {
@@ -29,6 +54,10 @@ var TestRunner = class {
     if (typeof item === 'object')
       return this._logObject(item, title, stabilizeNames);
     this._log.call(null, item);
+  }
+
+  params(name) {
+    return name ? this._params.get(name) : this._params;
   }
 
   _logObject(object, title, stabilizeNames = TestRunner.stabilizeNames) {
@@ -140,6 +169,26 @@ var TestRunner = class {
     return eval(`${source}\n//# sourceURL=${url}`);
   };
 
+  async loadScriptModule(path) {
+    const source = await this._fetch(this._testBaseURL + path);
+
+    return new Promise((resolve, reject) => {
+      const src = URL.createObjectURL(new Blob([source], { type: 'application/javascript' }));
+      const script = Object.assign(document.createElement('script'), {
+        src,
+        type: 'module',
+        onerror: reject,
+        onload: resolve
+      });
+
+      document.head.appendChild(script);
+    })
+  };
+
+  browserSession() {
+    return this._browserSession;
+  }
+
   browserP() {
     return this._browserSession.protocol;
   }
@@ -154,9 +203,9 @@ var TestRunner = class {
       params.height = options.height;
     if (options.enableBeginFrameControl)
       params.enableBeginFrameControl = true;
-    if (options.createContext) {
-      const browserContextId = (await browserProtocol.Target.createBrowserContext()).result.browserContextId;
-      options.browserContextId = browserContextId;
+    if (options.createContextOptions) {
+      const browserContextId = (await browserProtocol.Target.createBrowserContext(options.createContextOptions)).result.browserContextId;
+      params.browserContextId = browserContextId;
     }
     const targetId = (await browserProtocol.Target.createTarget(params)).result.targetId;
     const page = new TestRunner.Page(this, targetId);
@@ -204,7 +253,7 @@ var TestRunner = class {
     options = options || {};
     options.width = options.width || 800;
     options.height = options.height || 600;
-    options.createContext = true;
+    options.createContextOptions = {};
     options.enableBeginFrameControl = true;
     return this._start(description, options);
   }
@@ -228,10 +277,15 @@ var TestRunner = class {
     }
   }
 
+  _replaceUUID(url) {
+    const uuidRegex = new RegExp('[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
+    return url.replace(uuidRegex, 'UUID');
+  }
+
   logCallFrames(callFrames) {
     for (let frame of callFrames) {
       let functionName = frame.functionName || '(anonymous)';
-      let url = frame.url;
+      let url = this._replaceUUID(frame.url);
       let location = frame.location || frame;
       this.log(`${functionName} at ${url}:${
                                             location.lineNumber
@@ -244,6 +298,10 @@ TestRunner.Page = class {
   constructor(testRunner, targetId) {
     this._testRunner = testRunner;
     this._targetId = targetId;
+  }
+
+  targetId() {
+    return this._targetId;
   }
 
   async createSession() {
@@ -308,11 +366,19 @@ TestRunner.Session = class {
     return session;
   }
 
-  sendCommand(method, params) {
+  async attachChild(targetId) {
+    const {sessionId} = (await this.protocol.Target.attachToTarget({targetId, flatten: true})).result;
+    return this.createChild(sessionId);
+  }
+
+  async sendCommand(method, params) {
     var requestId = ++this._requestId;
     if (this._testRunner._dumpInspectorProtocolMessages)
       this._testRunner.log(`frontend => backend: ${JSON.stringify({method, params, sessionId: this._sessionId})}`);
-    return DevToolsAPI._sendCommand(this._sessionId, method, params);
+    const result = await DevToolsAPI._sendCommand(this._sessionId, method, params);
+    if (this._testRunner._dumpInspectorProtocolMessages)
+      this._testRunner.log(`backend => frontend: ${JSON.stringify(result)}`);
+    return result;
   }
 
   async evaluate(code, ...args) {
@@ -334,7 +400,9 @@ TestRunner.Session = class {
     }
     var response = await this.protocol.Runtime.evaluate({expression: code, returnByValue: true, awaitPromise, userGesture});
     if (response.error) {
-      this._testRunner.log(`Error while evaluating async '${code}': ${response.error}`);
+      const errorMessage = JSON.stringify(response.error);
+      const maybeAsync = awaitPromise ? 'async ' : '';
+      this._testRunner.log(`Error while evaluating ${maybeAsync}'${code}': ${errorMessage}`);
       this._testRunner.completeTest();
     } else {
       return response.result.result.value;
@@ -410,64 +478,6 @@ TestRunner.Session = class {
       };
       this._addEventHandler(eventName, handler);
     });
-  }
-};
-
-class WorkerProtocol {
-  constructor(dp, sessionId) {
-    this._sessionId = sessionId;
-    this._callbacks = new Map();
-    this._dp = dp;
-    this._dp.Target.onReceivedMessageFromTarget(
-        (message) => this._onMessage(message));
-    this.dp = this._setupProtocol();
-  }
-
-  _setupProtocol() {
-    let lastId = 0;
-    return new Proxy({}, {
-      get: (target, agentName, receiver) => new Proxy({}, {
-        get: (target, methodName, receiver) => {
-          const eventPattern = /^(once)?([A-Z][A-Za-z0-9]*)/;
-          var match = eventPattern.exec(methodName);
-          if (!match || match[1] !== 'once') {
-            return args => new Promise(resolve => {
-                     let id = ++lastId;
-                     this._callbacks.set(id, resolve);
-                     this._dp.Target.sendMessageToTarget({
-                       sessionId: this._sessionId,
-                       message: JSON.stringify({
-                         method: `${agentName}.${methodName}`,
-                         params: args || {},
-                         id: id
-                       })
-                     });
-                   });
-          }
-          var eventName = match[2];
-          eventName = eventName.charAt(0).toLowerCase() + eventName.slice(1);
-          return () => new Promise(resolve => {
-                   this._callbacks.set(`${agentName}.${eventName}`, resolve);
-                 });
-        }
-      })
-    });
-  }
-
-  _onMessage(message) {
-    if (message.params.sessionId !== this._sessionId)
-      return;
-    const {id, result, method, params} = JSON.parse(message.params.message);
-    if (id && this._callbacks.has(id)) {
-      let callback = this._callbacks.get(id);
-      this._callbacks.delete(id);
-      callback(result);
-    }
-    if (method && this._callbacks.has(method)) {
-      let callback = this._callbacks.get(method);
-      this._callbacks.delete(method);
-      callback(params);
-    }
   }
 };
 
@@ -562,7 +572,7 @@ DevToolsAPI._fetch = function(url) {
 
 testRunner.dumpAsText();
 testRunner.waitUntilDone();
-testRunner.setCanOpenWindows(true);
+testRunner.setPopupBlockingEnabled(false);
 
 window.addEventListener('load', () => {
   var params = new URLSearchParams(window.location.search);
@@ -574,7 +584,7 @@ window.addEventListener('load', () => {
   var targetBaseURL = targetPageURL.substring(0, targetPageURL.lastIndexOf('/') + 1);
 
   DevToolsAPI._fetch(testScriptURL).then(testScript => {
-    var testRunner = new TestRunner(testBaseURL, targetBaseURL, DevToolsAPI._log, DevToolsAPI._completeTest, DevToolsAPI._fetch);
+    var testRunner = new TestRunner(testBaseURL, targetBaseURL, DevToolsAPI._log, DevToolsAPI._completeTest, DevToolsAPI._fetch, params);
     var testFunction = eval(`${testScript}\n//# sourceURL=${testScriptURL}`);
     if (params.get('debug')) {
       var dispatch = DevToolsAPI.dispatchMessage;

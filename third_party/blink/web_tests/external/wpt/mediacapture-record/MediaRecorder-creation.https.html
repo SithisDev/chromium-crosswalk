@@ -3,8 +3,11 @@
 <head>
   <title>MediaRecorder Creation</title>
   <link rel="help" href="https://w3c.github.io/mediacapture-record/MediaRecorder.html#mediarecorder">
-  <script src="/resources/testharness.js"></script>
+<script src="/resources/testharness.js"></script>
   <script src="/resources/testharnessreport.js"></script>
+  <script src=/resources/testdriver.js></script>
+<script src=/resources/testdriver-vendor.js></script>
+<script src='../mediacapture-streams/permission-helper.js'></script>
 </head>
 <script>
   // This test verifies that MediaRecorder can be created with different Media
@@ -20,13 +23,13 @@
 
         var recorder = new MediaRecorder(stream);
         assert_equals(recorder.state, "inactive");
-        assert_equals(recorder.videoBitsPerSecond, 0);
-        assert_equals(recorder.audioBitsPerSecond, 0);
+        assert_not_equals(recorder.videoBitsPerSecond, 0);
+        assert_not_equals(recorder.audioBitsPerSecond, 0);
         test.done();
       });
 
       const onError = test.unreached_func('Error creating MediaStream.');
-      navigator.mediaDevices.getUserMedia(constraints).then(gotStream, onError);
+      setMediaPermission().then(() => navigator.mediaDevices.getUserMedia(constraints)).then(gotStream, onError);
     }, message);
   }
 

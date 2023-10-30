@@ -3,11 +3,14 @@
 <head>
 <script src="../../../resources/testharness.js"></script>
 <script src="../../../resources/testharnessreport.js"></script>
+<script src="../../../resources/testdriver.js"></script>
+<script src="../../../resources/testdriver-actions.js"></script>
+<script src="../../../resources/testdriver-vendor.js"></script>
 <script src="../resources/common.js"></script>
+<script src="../../../resources/gesture-util.js"></script>
 <script src="../resources/picker-common.js"></script>
-</head>
-<body>
-<select id="menu">
+
+<select>
   <option>option1</option>
   <option>option2</option>
   <option>option3</option>
@@ -38,40 +41,28 @@
   <option>option28</option>
 </select>
 <script>
-internals.settings.setMockScrollbarsEnabled(true);
 internals.settings.setScrollAnimatorEnabled(false);
 
-let test = async_test(function(test) {
-  openPicker(menu, test.step_func(testScrollbarScroll),
-      test.unreached_func('Picker failed to open'));
+promise_test(() => {
+  const menu = document.querySelector('select');
+  return openPicker(menu)
+  .then(() => {
+    // Click on the scrollbar forward button, and then validate
+    // that the scrollbar/scrollable area scrolled.
+    let innerSelectRect = internals.pagePopupWindow.global.picker.selectElement_.getBoundingClientRect();
+    let scrollbarX = innerSelectRect.x + innerSelectRect.width - 5 + internals.pagePopupWindow.screenX;
+    let scrollbarY = innerSelectRect.y + innerSelectRect.height - 10 + internals.pagePopupWindow.screenY;
+    return (new test_driver.Actions())
+      .pointerMove(scrollbarX, scrollbarY)
+      .pointerDown()
+      .pointerUp()
+      .send();
+  })
+  .then(requestAnimationFramePromise())
+  .then(requestAnimationFramePromise())
+  .then(() => {
+    assert_not_equals(internals.pagePopupWindow, null, "The click shouldn't have closed the window");
+    assert_greater_than(internals.pagePopupWindow.global.picker.selectElement_.scrollTop, 0);
+  });
 }, "Scrollbar clicks in a popup must scroll");
-
-function testScrollbarScroll() {
-    let picker = internals.pagePopupWindow.global.picker;
-    let scrollEvents = 0;
-
-    // Click on the scrollbar forward button, and then validate with
-    // a pixel test that the scrollbar/scrollable area scrolled.
-    //
-    // Note: when there is an active popup, eventSender's events are sent with
-    // coordinates relative to the popup itself, so we don't need to take the
-    // outer select element's position into account.
-    let selectElement = internals.pagePopupWindow.global.picker._selectElement;
-    let innerSelectRect = selectElement.getBoundingClientRect();
-    let scrollbarX = innerSelectRect.x + innerSelectRect.width - 5;
-    let scrollbarY = innerSelectRect.y + innerSelectRect.height - 10;
-    eventSender.mouseMoveTo(scrollbarX, scrollbarY);
-    eventSender.mouseDown();
-    eventSender.mouseUp();
-    requestAnimationFrame(test.step_func(function() {
-      requestAnimationFrame(test.step_func(function() {
-          assert_greater_than(selectElement.scrollTop, 0);
-          test.done();
-      }));
-    }));
-}
-
 </script>
-</body>
-</html>
-

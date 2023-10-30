@@ -26,7 +26,6 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 """blink_tool.py is a tool with multiple sub-commands with different purposes.
 
 It has commands for printing expectations, fetching new test baselines, etc.
@@ -51,7 +50,7 @@ from blinkpy.tool.commands.queries import PrintExpectations
 from blinkpy.tool.commands.rebaseline import Rebaseline
 from blinkpy.tool.commands.rebaseline_cl import RebaselineCL
 from blinkpy.tool.commands.rebaseline_test import RebaselineTest
-
+from blinkpy.tool.commands.update_metadata import UpdateMetadata
 
 _log = logging.getLogger(__name__)
 
@@ -62,11 +61,12 @@ class BlinkTool(Host):
 
     global_options = [
         optparse.make_option(
-            '-v', '--verbose', action='store_true', dest='verbose', default=False,
+            '-v',
+            '--verbose',
+            action='store_true',
+            dest='verbose',
+            default=False,
             help='enable all logging'),
-        optparse.make_option(
-            '-d', '--directory', action='append', default=[],
-            help='Directory to look at for changed files'),
     ]
 
     def __init__(self, path):
@@ -84,6 +84,7 @@ class BlinkTool(Host):
             Rebaseline(),
             RebaselineCL(),
             RebaselineTest(),
+            UpdateMetadata(self),
         ]
         self.help_command = HelpCommand(tool=self)
         self.commands.append(self.help_command)
@@ -125,7 +126,10 @@ class BlinkTool(Host):
     def _create_option_parser(self):
         usage = 'Usage: %prog [options] COMMAND [ARGS]'
         name = optparse.OptionParser().get_prog_name()
-        return HelpPrintingOptionParser(epilog_method=self.help_command.help_epilog, prog=name, usage=usage)
+        return HelpPrintingOptionParser(
+            epilog_method=self.help_command.help_epilog,
+            prog=name,
+            usage=usage)
 
     def _add_global_options(self, option_parser):
         global_options = self.global_options or []

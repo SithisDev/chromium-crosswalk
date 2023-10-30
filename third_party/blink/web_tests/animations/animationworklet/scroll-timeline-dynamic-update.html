@@ -21,6 +21,7 @@
 
 .overflow {
   overflow-y: scroll;
+  will-change: transform; /* force compositing */
 }
 
 #contents {
@@ -62,7 +63,7 @@ runInAnimationWorklet(
   );
 
   const scroller = document.getElementById('scroller');
-  const timeline = new ScrollTimeline({ scrollSource: scroller, timeRange: 1000, orientation: 'block' });
+  const timeline = new ScrollTimeline({ scrollSource: scroller, orientation: 'block' });
   const animation = new WorkletAnimation('passthrough_animator', effect, timeline);
   animation.play();
 
@@ -75,7 +76,7 @@ runInAnimationWorklet(
     scroller.scrollTop = 0.5 * maxScroll;
 
     if (window.testRunner) {
-      waitTwoAnimationFrames(_ => {
+      waitForAnimationFrames(3, _ => {
         testRunner.notifyDone();
       });
     }

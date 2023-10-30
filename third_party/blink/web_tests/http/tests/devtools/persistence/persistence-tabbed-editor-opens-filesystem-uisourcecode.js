@@ -3,15 +3,16 @@
 // found in the LICENSE file.
 
 (async function() {
+  'use strict';
   TestRunner.addResult(
       `Verify that for a fileSystem UISourceCode with persistence binding TabbedEditorContainer opens filesystem UISourceCode.\n`);
-  await TestRunner.loadModule('sources_test_runner');
-  await TestRunner.loadModule('bindings_test_runner');
+  await TestRunner.loadLegacyModule('sources'); await TestRunner.loadTestModule('sources_test_runner');
+  await TestRunner.loadTestModule('bindings_test_runner');
   await TestRunner.addScriptTag('resources/foo.js');
   await TestRunner.showPanel('sources');
 
   var testMapping = BindingsTestRunner.initializeTestMapping();
-  var fs = new BindingsTestRunner.TestFileSystem('file:///var/www');
+  var fs = new BindingsTestRunner.TestFileSystem('/var/www');
   var fsEntry = BindingsTestRunner.addFooJSFile(fs);
   fs.reportCreated(function() {});
   testMapping.addBinding('foo.js');
@@ -27,11 +28,11 @@
   }
 
   function dumpEditorTabs(title) {
-    var editorContainer = UI.panels.sources._sourcesView._editorContainer;
-    var openedUISourceCodes = editorContainer._tabIds.keysArray();
-    openedUISourceCodes.sort((a, b) => a.url().compareTo(b.url()));
+    var editorContainer = UI.panels.sources.sourcesView().editorContainer;
+    var openedUISourceCodes = [...editorContainer.tabIds.keys()];
+    openedUISourceCodes.sort((a, b) => a.url > b.url ? 1 : b.url > a.url ? -1 : 0);
     TestRunner.addResult(title);
-    for (code of openedUISourceCodes)
+    for (const code of openedUISourceCodes)
       TestRunner.addResult('    ' + code.url());
   }
 })();
