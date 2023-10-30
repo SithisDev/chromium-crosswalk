@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,8 +80,8 @@ class COMPONENT_EXPORT(URL) SchemeHostPort {
 
   // Creates a (scheme, host, port) tuple. |host| must be a canonicalized
   // A-label (that is, '☃.net' must be provided as 'xn--n3h.net'). |scheme|
-  // must be a standard scheme. |port| must not be 0, unless |scheme| does not
-  // support ports (e.g. 'file'). In that case, |port| must be 0.
+  // must be a standard scheme. |port| must be 0 if |scheme| does not support
+  // ports (e.g. 'file').
   //
   // Copies the data in |scheme| and |host|.
   SchemeHostPort(base::StringPiece scheme,
@@ -111,8 +111,8 @@ class COMPONENT_EXPORT(URL) SchemeHostPort {
   // Copyable and movable.
   SchemeHostPort(const SchemeHostPort&) = default;
   SchemeHostPort& operator=(const SchemeHostPort&) = default;
-  SchemeHostPort(SchemeHostPort&&) = default;
-  SchemeHostPort& operator=(SchemeHostPort&&) = default;
+  SchemeHostPort(SchemeHostPort&&) noexcept = default;
+  SchemeHostPort& operator=(SchemeHostPort&&) noexcept = default;
 
   ~SchemeHostPort();
 
@@ -122,7 +122,7 @@ class COMPONENT_EXPORT(URL) SchemeHostPort {
   const std::string& host() const { return host_; }
   const std::string& scheme() const { return scheme_; }
   uint16_t port() const { return port_; }
-  bool IsInvalid() const;
+  bool IsValid() const;
 
   // Serializes the SchemeHostPort tuple to a canonical form.
   //
@@ -133,7 +133,10 @@ class COMPONENT_EXPORT(URL) SchemeHostPort {
   std::string Serialize() const;
 
   // Efficiently returns what GURL(Serialize()) would return, without needing to
-  // re-parse the URL.
+  // re-parse the URL. Note: this still performs allocations to copy data into
+  // GURL, so please avoid using this method if you only need to work on
+  // schemes, hosts, or ports individually.
+  // For example, see crrev.com/c/3637099/comments/782360d0_e14757be.
   GURL GetURL() const;
 
   // Two SchemeHostPort objects are "equal" iff their schemes, hosts, and ports
@@ -158,7 +161,7 @@ class COMPONENT_EXPORT(URL) SchemeHostPort {
 
   std::string scheme_;
   std::string host_;
-  uint16_t port_;
+  uint16_t port_ = 0;
 };
 
 COMPONENT_EXPORT(URL)

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -101,7 +101,7 @@ bool DoScheme(const CHAR* spec,
               const Component& scheme,
               CanonOutput* output,
               Component* out_scheme) {
-  if (scheme.len <= 0) {
+  if (!scheme.is_nonempty()) {
     // Scheme is unspecified or empty, convert to empty by appending a colon.
     *out_scheme = Component(output->length(), 0);
     output->push_back(':');
@@ -117,12 +117,13 @@ bool DoScheme(const CHAR* spec,
   // FindAndCompareScheme, which could cause some security checks on
   // schemes to be incorrect.
   bool success = true;
-  int end = scheme.end();
-  for (int i = scheme.begin; i < end; i++) {
+  size_t begin = static_cast<size_t>(scheme.begin);
+  size_t end = static_cast<size_t>(scheme.end());
+  for (size_t i = begin; i < end; i++) {
     UCHAR ch = static_cast<UCHAR>(spec[i]);
     char replacement = 0;
     if (ch < 0x80) {
-      if (i == scheme.begin) {
+      if (i == begin) {
         // Need to do a special check for the first letter of the scheme.
         if (IsSchemeFirstChar(static_cast<unsigned char>(ch)))
           replacement = kSchemeCanonical[ch];
@@ -179,8 +180,9 @@ bool DoUserInfo(const CHAR* username_spec,
   out_username->begin = output->length();
   if (username.len > 0) {
     // This will escape characters not valid for the username.
-    AppendStringOfType(&username_spec[username.begin], username.len,
-                       CHAR_USERINFO, output);
+    AppendStringOfType(&username_spec[username.begin],
+                       static_cast<size_t>(username.len), CHAR_USERINFO,
+                       output);
   }
   out_username->len = output->length() - out_username->begin;
 
@@ -189,8 +191,9 @@ bool DoUserInfo(const CHAR* username_spec,
   if (password.len > 0) {
     output->push_back(':');
     out_password->begin = output->length();
-    AppendStringOfType(&password_spec[password.begin], password.len,
-                       CHAR_USERINFO, output);
+    AppendStringOfType(&password_spec[password.begin],
+                       static_cast<size_t>(password.len), CHAR_USERINFO,
+                       output);
     out_password->len = output->length() - out_password->begin;
   } else {
     *out_password = Component();
@@ -223,7 +226,8 @@ bool DoPort(const CHAR* spec,
     // what the error was, and mark the URL as invalid by returning false.
     output->push_back(':');
     out_port->begin = output->length();
-    AppendInvalidNarrowString(spec, port.begin, port.end(), output);
+    AppendInvalidNarrowString(spec, static_cast<size_t>(port.begin),
+                              static_cast<size_t>(port.end()), output);
     out_port->len = output->length() - out_port->begin;
     return false;
   }
@@ -245,10 +249,9 @@ bool DoPort(const CHAR* spec,
 }
 
 // clang-format off
-//   Percent-escape all "C0 controls" (0x00-0x1F)
-//   https://infra.spec.whatwg.org/#c0-control along with the characters ' '
-//   (0x20), '"' (0x22), '<' (0x3C), '>' (0x3E), and '`' (0x60):
-const bool kShouldEscapeCharInRef[0x80] = {
+//   Percent-escape all characters from the fragment percent-encode set
+//   https://url.spec.whatwg.org/#fragment-percent-encode-set
+const bool kShouldEscapeCharInFragment[0x80] = {
 //  Control characters (0x00-0x1F)
     true,  true,  true,  true,  true,  true,  true,  true,
     true,  true,  true,  true,  true,  true,  true,  true,
@@ -276,8 +279,8 @@ const bool kShouldEscapeCharInRef[0x80] = {
     false, false, false, false, false, false, false, false,
 //  p      q      r      s      t      u      v      w
     false, false, false, false, false, false, false, false,
-//  x      y      z      {      |      }      ~
-    false, false, false, false, false, false, false
+//  x      y      z      {      |      }      ~      DELETE
+    false, false, false, false, false, false, false, true
 };
 // clang-format on
 
@@ -286,7 +289,7 @@ void DoCanonicalizeRef(const CHAR* spec,
                        const Component& ref,
                        CanonOutput* output,
                        Component* out_ref) {
-  if (ref.len < 0) {
+  if (!ref.is_valid()) {
     // Common case of no ref.
     *out_ref = Component();
     return;
@@ -298,16 +301,11 @@ void DoCanonicalizeRef(const CHAR* spec,
   out_ref->begin = output->length();
 
   // Now iterate through all the characters, converting to UTF-8 and validating.
-  int end = ref.end();
-  for (int i = ref.begin; i < end; i++) {
-    if (spec[i] == 0) {
-      // IE just strips NULLs, so we do too.
-      continue;
-    }
-
+  size_t end = static_cast<size_t>(ref.end());
+  for (size_t i = static_cast<size_t>(ref.begin); i < end; i++) {
     UCHAR current_char = static_cast<UCHAR>(spec[i]);
     if (current_char < 0x80) {
-      if (kShouldEscapeCharInRef[current_char])
+      if (kShouldEscapeCharInFragment[current_char])
         AppendEscapedChar(static_cast<unsigned char>(spec[i]), output);
       else
         output->push_back(static_cast<char>(spec[i]));
@@ -330,16 +328,16 @@ const char* RemoveURLWhitespace(const char* input,
                                potentially_dangling_markup);
 }
 
-const base::char16* RemoveURLWhitespace(const base::char16* input,
-                                        int input_len,
-                                        CanonOutputT<base::char16>* buffer,
-                                        int* output_len,
-                                        bool* potentially_dangling_markup) {
+const char16_t* RemoveURLWhitespace(const char16_t* input,
+                                    int input_len,
+                                    CanonOutputT<char16_t>* buffer,
+                                    int* output_len,
+                                    bool* potentially_dangling_markup) {
   return DoRemoveURLWhitespace(input, input_len, buffer, output_len,
                                potentially_dangling_markup);
 }
 
-char CanonicalSchemeChar(base::char16 ch) {
+char CanonicalSchemeChar(char16_t ch) {
   if (ch >= 0x80)
     return 0;  // Non-ASCII is not supported by schemes.
   return kSchemeCanonical[ch];
@@ -352,11 +350,11 @@ bool CanonicalizeScheme(const char* spec,
   return DoScheme<char, unsigned char>(spec, scheme, output, out_scheme);
 }
 
-bool CanonicalizeScheme(const base::char16* spec,
+bool CanonicalizeScheme(const char16_t* spec,
                         const Component& scheme,
                         CanonOutput* output,
                         Component* out_scheme) {
-  return DoScheme<base::char16, base::char16>(spec, scheme, output, out_scheme);
+  return DoScheme<char16_t, char16_t>(spec, scheme, output, out_scheme);
 }
 
 bool CanonicalizeUserInfo(const char* username_source,
@@ -371,16 +369,16 @@ bool CanonicalizeUserInfo(const char* username_source,
       output, out_username, out_password);
 }
 
-bool CanonicalizeUserInfo(const base::char16* username_source,
+bool CanonicalizeUserInfo(const char16_t* username_source,
                           const Component& username,
-                          const base::char16* password_source,
+                          const char16_t* password_source,
                           const Component& password,
                           CanonOutput* output,
                           Component* out_username,
                           Component* out_password) {
-  return DoUserInfo<base::char16, base::char16>(
-      username_source, username, password_source, password,
-      output, out_username, out_password);
+  return DoUserInfo<char16_t, char16_t>(username_source, username,
+                                        password_source, password, output,
+                                        out_username, out_password);
 }
 
 bool CanonicalizePort(const char* spec,
@@ -393,13 +391,13 @@ bool CanonicalizePort(const char* spec,
                                      output, out_port);
 }
 
-bool CanonicalizePort(const base::char16* spec,
+bool CanonicalizePort(const char16_t* spec,
                       const Component& port,
                       int default_port_for_scheme,
                       CanonOutput* output,
                       Component* out_port) {
-  return DoPort<base::char16, base::char16>(spec, port, default_port_for_scheme,
-                                            output, out_port);
+  return DoPort<char16_t, char16_t>(spec, port, default_port_for_scheme, output,
+                                    out_port);
 }
 
 void CanonicalizeRef(const char* spec,
@@ -409,11 +407,11 @@ void CanonicalizeRef(const char* spec,
   DoCanonicalizeRef<char, unsigned char>(spec, ref, output, out_ref);
 }
 
-void CanonicalizeRef(const base::char16* spec,
+void CanonicalizeRef(const char16_t* spec,
                      const Component& ref,
                      CanonOutput* output,
                      Component* out_ref) {
-  DoCanonicalizeRef<base::char16, base::char16>(spec, ref, output, out_ref);
+  DoCanonicalizeRef<char16_t, char16_t>(spec, ref, output, out_ref);
 }
 
 }  // namespace url
