@@ -5,8 +5,12 @@
 
 %define ARCH_X86_64 0
 
+%define FORCE_VEX_ENCODING 0
+
 %define PIC 1
 
 %define PREFIX 1
 
 ; %define STACK_ALIGNMENT 4 -- Stack alignment is controlled by Chromium
+
+%define private_prefix dav1d
