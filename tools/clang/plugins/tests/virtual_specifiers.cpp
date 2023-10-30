@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -27,7 +27,7 @@ class CorrectOverride : public Base {
   void F() OVERRIDE {}
 };
 
-class CorrectFinal : public CorrectOverride {
+class CorrectFinal FINAL : public CorrectOverride {
  public:
   ~CorrectFinal() FINAL {}
   void F() FINAL {}
@@ -47,19 +47,19 @@ class VirtualAndOverride : public Base {
   virtual void F() OVERRIDE {}
 };
 
-class VirtualAndFinal : public Base {
+class VirtualAndFinal FINAL : public Base {
  public:
   virtual ~VirtualAndFinal() FINAL {}
   virtual void F() FINAL {}
 };
 
-class VirtualAndOverrideFinal : public Base {
+class VirtualAndOverrideFinal FINAL : public Base {
  public:
   virtual ~VirtualAndOverrideFinal() OVERRIDE FINAL {}
   virtual void F() OVERRIDE FINAL {}
 };
 
-class OverrideAndFinal : public Base {
+class OverrideAndFinal FINAL : public Base {
  public:
   ~OverrideAndFinal() OVERRIDE FINAL {}
   void F() OVERRIDE FINAL {}

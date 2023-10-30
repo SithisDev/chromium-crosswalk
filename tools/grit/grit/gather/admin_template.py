@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -30,12 +30,12 @@ class AdmGatherer(regexp.RegexpGatherer):
 
   # Finds the strings section as the group named 'strings'
   _STRINGS_SECTION = lazy_re.compile(
-      '(?P<first_part>.+^\[strings\])(?P<strings>.+)\Z',
+      r'(?P<first_part>.+^\[strings\])(?P<strings>.+)\Z',
       re.MULTILINE | re.DOTALL)
 
   # Finds the translateable sections from within the [strings] section.
   _TRANSLATEABLES = lazy_re.compile(
-      '^\s*[A-Za-z0-9_]+\s*=\s*"(?P<text>.+)"\s*$',
+      r'^\s*[A-Za-z0-9_]+\s*=\s*"(?P<text>.+)"\s*$',
       re.MULTILINE)
 
   def Escape(self, text):

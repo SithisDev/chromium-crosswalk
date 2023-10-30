@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -78,6 +78,8 @@ def Main(argv):
     'samples to take average from while calculating the moving average'))
   parser.add_argument('--normalize', default=False,
     help='Normalize timeseries to calculate similarity', action='store_true')
+  parser.add_argument('--processes', default='20', help=('Number of '
+    'concurrent workers used by soundwave.'))
   args = parser.parse_args(argv[1:])
 
   temp_dir = tempfile.mkdtemp('telemetry')
@@ -103,6 +105,7 @@ def Main(argv):
     subprocess.call([
       soundwave_path,
       '-d', args.days,
+      '--processes', args.processes,
       'timeseries',
       '-i', startup_timeseries,
       '--output-csv', soundwave_output_path

@@ -1,4 +1,4 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -18,7 +18,12 @@ def SetBrotliCommand(brotli):
 
 def BrotliCompress(data):
   if not __brotli_executable:
-    raise Exception('SetBrotliCommand has not been called yet!')
+    raise Exception('Add "use_brotli = true" to you GN grit(...) target ' +
+                    'if you want to use brotli.')
   compress = subprocess.Popen(__brotli_executable + ['-', '-f'],
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE)
   return compress.communicate(data)[0]
+
+def IsInitialized():
+  global __brotli_executable
+  return __brotli_executable is not None

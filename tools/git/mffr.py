@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,6 +16,8 @@ searches all files (*.*).
 REGEXP uses full Python regexp syntax. REPLACEMENT can use
 back-references.
 """
+
+from __future__ import print_function
 
 import optparse
 import os
@@ -35,8 +37,11 @@ import sys
 # quotes for CreateProcess(), rather than |, <, >, etc. through multiple layers
 # of cmd.
 if sys.platform == 'win32':
-  _git = os.path.normpath(os.path.join(subprocess.check_output(
-      'git bash -c "cd / && pwd -W"', shell=True).strip(), 'bin\\git.exe'))
+  _git = os.path.normpath(
+      os.path.join(
+          subprocess.check_output('git bash -c "cd / && pwd -W"',
+                                  shell=True).decode('utf-8').strip(),
+          'bin\\git.exe'))
 else:
   _git = 'git'
 
@@ -72,13 +77,13 @@ def MultiFileFindReplace(original, replacement, file_globs):
   referees = out.splitlines()
 
   for referee in referees:
-    with open(referee) as f:
+    with open(referee, encoding='utf-8') as f:
       original_contents = f.read()
     contents = re.sub(original, replacement, original_contents)
     if contents == original_contents:
       raise Exception('No change in file %s although matched in grep' %
                       referee)
-    with open(referee, 'wb') as f:
+    with open(referee, mode='w', encoding='utf-8', newline='\n') as f:
       f.write(contents)
 
   return referees
@@ -126,7 +131,7 @@ command line.''')
                     'interpreted correctly, use raw strings.')
   opts, args = parser.parse_args()
   if opts.use_default_glob and opts.user_supplied_globs:
-    print '"-d" and "-g" cannot be used together'
+    print('"-d" and "-g" cannot be used together')
     parser.print_help()
     return 1
 
@@ -139,12 +144,12 @@ command line.''')
     out, err = subprocess.Popen([_git, 'status', '--porcelain'],
                                 stdout=subprocess.PIPE).communicate()
     if out:
-      print 'ERROR: This tool does not print any confirmation prompts,'
-      print 'so you should only run it with a clean staging area and cache'
-      print 'so that reverting a bad find/replace is as easy as running'
-      print '  git checkout -- .'
-      print ''
-      print 'To override this safeguard, pass the -f flag.'
+      print('ERROR: This tool does not print any confirmation prompts,')
+      print('so you should only run it with a clean staging area and cache')
+      print('so that reverting a bad find/replace is as easy as running')
+      print('  git checkout -- .')
+      print('')
+      print('To override this safeguard, pass the -f flag.')
       return 1
 
   global_file_globs = ['*.*']
@@ -168,9 +173,9 @@ command line.''')
     f.close()
 
   for (original, replacement, file_globs) in search_replace_tasks:
-    print 'File globs:  %s' % file_globs
-    print 'Original:    %s' % original
-    print 'Replacement: %s' % replacement
+    print('File globs:  %s' % file_globs)
+    print('Original:    %s' % original)
+    print('Replacement: %s' % replacement)
     MultiFileFindReplace(original, replacement, file_globs)
   return 0
 

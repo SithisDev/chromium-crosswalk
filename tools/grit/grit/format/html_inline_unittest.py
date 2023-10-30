@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -17,6 +17,11 @@ import unittest
 
 from grit import util
 from grit.format import html_inline
+
+
+class FakeGrdNode(object):
+  def EvaluateCondition(self, cond):
+    return eval(cond)
 
 
 class HtmlInlineUnittest(unittest.TestCase):
@@ -102,7 +107,7 @@ class HtmlInlineUnittest(unittest.TestCase):
 
     with self.assertRaises(Exception) as cm:
       html_inline.GetResourceFilenames(tmp_dir.GetPath('index.html'), None)
-    self.failUnlessEqual(cm.exception.message, 'Unmatched </if>')
+    self.failUnlessEqual(str(cm.exception), 'Unmatched </if>')
     tmp_dir.CleanUp()
 
   def testCompressedJavaScript(self):
@@ -538,7 +543,7 @@ class HtmlInlineUnittest(unittest.TestCase):
       'other.js': '// Copyright somebody\nalert(1);',
     }
 
-    expected_inlined = '// // Copyright somebody\nalert(1);'
+    expected_inlined = '// Copyright somebody\nalert(1);'
 
     source_resources = set()
     tmp_dir = util.TempDir(files)
@@ -581,10 +586,6 @@ class HtmlInlineUnittest(unittest.TestCase):
     for filename in files:
       source_resources.add(tmp_dir.GetPath(filename))
 
-    class FakeGrdNode(object):
-      def EvaluateCondition(self, cond):
-        return eval(cond)
-
     result = html_inline.DoInline(tmp_dir.GetPath('if.js'), FakeGrdNode())
     resources = result.inlined_files
 
@@ -594,10 +595,179 @@ class HtmlInlineUnittest(unittest.TestCase):
                          util.FixLineEnd(result.inlined_data, '\n'))
     tmp_dir.CleanUp()
 
+  def testBasicRemovalComments(self):
+    input = '''Line 1
+// <if expr="True">
+Line 3
+// </if> Line 4
+Line 5
+// <if expr="False">
+// Line 7 removed
+// </if>
+Line 9
+'''
+    expected_result_html = '''Line 1
+// 
+Line 3
+//  Line 4
+Line 5
+// <!--grit-removed-lines:2-->
+Line 9
+'''
+    result = html_inline.CheckConditionalElements(FakeGrdNode(), input, '.html')
+    self.assertMultiLineEqual(result, expected_result_html)
+    expected_result_js = '''Line 1
+// 
+Line 3
+//  Line 4
+Line 5
+// /*grit-removed-lines:2*/
+Line 9
+'''
+    result = html_inline.CheckConditionalElements(FakeGrdNode(), input, '.js')
+    self.assertMultiLineEqual(result, expected_result_js)
+    # add_remove_comments_for of None means no comments.
+    expected_result_no_file_extension = '''Line 1
+// 
+Line 3
+//  Line 4
+Line 5
+// 
+Line 9
+'''
+    result = html_inline.CheckConditionalElements(FakeGrdNode(), input, None)
+    self.assertMultiLineEqual(result, expected_result_no_file_extension)
+
+  def testNewlinesInIf(self):
+    input = '''Line 1
+Line 2 <if expr="[
+  'Line 3 removed'
+]"> Line 4
+</if> Line 5
+<if expr="[
+  'Line 7 removed'
+] and False"> Line 8 removed
+Line 9 also removed</if>
+<if 
+expr="True">Line 11</if>'''
+    result = html_inline.CheckConditionalElements(FakeGrdNode(), input)
+    expected_result = '''Line 1
+Line 2  Line 4
+ Line 5
+
+Line 11'''
+    self.assertMultiLineEqual(result, expected_result)
+
+  def testNewlinesInIfWithComments(self):
+    input = '''Line 1
+Line 2 <if expr="[
+  'Line 3 removed'
+]"> Line 4
+</if> Line 5
+<if expr="[
+  'Line 7 removed'
+] and False"> Line 8 removed
+Line 9 also removed</if>
+<if 
+expr="True">Line 11</if>'''
+    result = html_inline.CheckConditionalElements(FakeGrdNode(), input, '.ts')
+    expected_result = '''Line 1
+Line 2 /*grit-removed-lines:2*/ Line 4
+ Line 5
+/*grit-removed-lines:3*/
+/*grit-removed-lines:1*/Line 11'''
+    self.assertMultiLineEqual(result, expected_result)
+
+  def testRemovePartOfLine(self):
+    input = ('Long line<if expr="False">stuff</if>and more<'
+             'if expr="True">stuff</if> and done')
+    expected_result = 'Long lineand morestuff and done'
+    result = html_inline.CheckConditionalElements(FakeGrdNode(), input)
+    self.assertEqual(result, expected_result)
+    result = html_inline.CheckConditionalElements(FakeGrdNode(), input, '.js')
+    self.assertEqual(result, expected_result)
+
+  def testRemovalNested(self):
+    input = '''L1
+L2 <if expr="True">
+  L3 <if expr="True">
+    L4 True inside True kept
+  L5 </if>
+L6 </if>
+L7 <if expr="True">
+  L8 <if expr="False">
+    L9 False inside True removed
+  L10 removed </if>
+L11 </if>
+L12 <if expr="False">
+  L13 removed <if expr="True">
+    L14 True inside False removed
+  L15 removed </if>
+L16 removed </if>
+L17 <if expr="False">
+  L18 removed <if expr="False">
+    L19 False inside False removed
+  L20 removed </if>
+L21 removed </if>
+'''
+    result = html_inline.CheckConditionalElements(FakeGrdNode(), input)
+    expected_result = '''L1
+L2 
+  L3 
+    L4 True inside True kept
+  L5 
+L6 
+L7 
+  L8 
+L11 
+L12 
+L17 
+'''
+    self.assertMultiLineEqual(result, expected_result)
+
+  def testErasureListNestedWithComments(self):
+    input = '''L1
+L2 <if expr="True">
+  L3 <if expr="True">
+    L4 True inside True kept
+  L5 </if>
+L6 </if>
+L7 <if expr="True">
+  L8 <if expr="False">
+    L9 False inside True removed
+  L10 removed </if>
+L11 </if>
+L12 <if expr="False">
+  L13 removed <if expr="True">
+    L14 True inside False removed
+  L15 removed </if>
+L16 removed </if>
+L17 <if expr="False">
+  L18 removed <if expr="False">
+    L19 False inside False removed
+  L20 removed </if>
+L21 removed </if>
+'''
+    result = html_inline.CheckConditionalElements(FakeGrdNode(), input, '.css')
+    expected_result = '''L1
+L2 
+  L3 
+    L4 True inside True kept
+  L5 
+L6 
+L7 
+  L8 /*grit-removed-lines:2*/
+L11 
+L12 /*grit-removed-lines:4*/
+L17 /*grit-removed-lines:4*/
+'''
+    self.assertMultiLineEqual(result, expected_result)
+
   def testImgSrcset(self):
     '''Tests that img srcset="" attributes are converted.'''
 
-    # Note that there is no space before "img10.png"
+    # Note that there is no space before "img10.png" and that
+    # "img11.png" has no descriptor.
     files = {
       'index.html': '''
       <html>
@@ -606,6 +776,9 @@ class HtmlInlineUnittest(unittest.TestCase):
       <img src="chrome://theme/img11.png" srcset="img7.png 1x, '''\
           '''chrome://theme/img13.png 2x">
       <img srcset="img8.png 300w, img9.png 11E-2w,img10.png -1e2w">
+      <img srcset="img11.png">
+      <img srcset="img11.png, img2.png 1x">
+      <img srcset="img2.png 1x, img11.png">
       </html>
       ''',
       'img1.png': '''a1''',
@@ -618,6 +791,7 @@ class HtmlInlineUnittest(unittest.TestCase):
       'img8.png': '''a8''',
       'img9.png': '''a9''',
       'img10.png': '''a10''',
+      'img11.png': '''a11''',
     }
 
     expected_inlined = '''
@@ -630,6 +804,9 @@ class HtmlInlineUnittest(unittest.TestCase):
           '''YTc= 1x,chrome://theme/img13.png 2x">
       <img srcset="data:image/png;base64,YTg= 300w,data:image/png;base64,'''\
           '''YTk= 11E-2w,data:image/png;base64,YTEw -1e2w">
+      <img srcset="data:image/png;base64,YTEx">
+      <img srcset="data:image/png;base64,YTEx,data:image/png;base64,YTI= 1x">
+      <img srcset="data:image/png;base64,YTI= 1x,data:image/png;base64,YTEx">
       </html>
       '''
 
@@ -673,6 +850,63 @@ class HtmlInlineUnittest(unittest.TestCase):
     for filename in files:
       source_resources.add(tmp_dir.GetPath(util.normpath(filename)))
 
+    result = html_inline.DoInline(tmp_dir.GetPath('index.html'), None)
+    resources = result.inlined_files
+    resources.add(tmp_dir.GetPath('index.html'))
+    self.failUnlessEqual(resources, source_resources)
+    self.failUnlessEqual(expected_inlined,
+                         util.FixLineEnd(result.inlined_data, '\n'))
+    tmp_dir.CleanUp()
+
+  def testSourceSrcset(self):
+    '''Tests that source srcset="" attributes are converted.'''
+
+    # Note that there is no space before "img10.png" and that
+    # "img11.png" has no descriptor.
+    files = {
+      'index.html': '''
+      <html>
+      <source src="img1.png" srcset="img2.png 1x, img3.png 2x">
+      <source src="img4.png" srcset=" img5.png   1x , img6.png 2x ">
+      <source src="chrome://theme/img11.png" srcset="img7.png 1x, '''\
+          '''chrome://theme/img13.png 2x">
+      <source srcset="img8.png 300w, img9.png 11E-2w,img10.png -1e2w">
+      <source srcset="img11.png">
+      </html>
+      ''',
+      'img1.png': '''a1''',
+      'img2.png': '''a2''',
+      'img3.png': '''a3''',
+      'img4.png': '''a4''',
+      'img5.png': '''a5''',
+      'img6.png': '''a6''',
+      'img7.png': '''a7''',
+      'img8.png': '''a8''',
+      'img9.png': '''a9''',
+      'img10.png': '''a10''',
+      'img11.png': '''a11''',
+    }
+
+    expected_inlined = '''
+      <html>
+      <source src="data:image/png;base64,YTE=" srcset="data:image/png;'''\
+          '''base64,YTI= 1x,data:image/png;base64,YTM= 2x">
+      <source src="data:image/png;base64,YTQ=" srcset="data:image/png;'''\
+          '''base64,YTU= 1x,data:image/png;base64,YTY= 2x">
+      <source src="chrome://theme/img11.png" srcset="data:image/png;'''\
+          '''base64,YTc= 1x,chrome://theme/img13.png 2x">
+      <source srcset="data:image/png;base64,YTg= 300w,data:image/png;'''\
+          '''base64,YTk= 11E-2w,data:image/png;base64,YTEw -1e2w">
+      <source srcset="data:image/png;base64,YTEx">
+      </html>
+      '''
+
+    source_resources = set()
+    tmp_dir = util.TempDir(files)
+    for filename in files:
+      source_resources.add(tmp_dir.GetPath(filename))
+
+    # Test normal inlining.
     result = html_inline.DoInline(tmp_dir.GetPath('index.html'), None)
     resources = result.inlined_files
     resources.add(tmp_dir.GetPath('index.html'))
@@ -740,10 +974,6 @@ class HtmlInlineUnittest(unittest.TestCase):
     for filename in expected_files:
       source_resources.add(tmp_dir.GetPath(filename))
 
-    class FakeGrdNode(object):
-      def EvaluateCondition(self, cond):
-        return eval(cond)
-
     # Test normal inlining.
     result = html_inline.DoInline(
         tmp_dir.GetPath('index.html'),
@@ -759,6 +989,104 @@ class HtmlInlineUnittest(unittest.TestCase):
     self.failUnlessEqual(expected_inlined, actually_inlined);
     tmp_dir.CleanUp()
 
+  def testPreprocessOnlyEvaluatesIncludeAndIf(self):
+    '''Tests that preprocess_only=true evaluates <include> and <if> only.  '''
+
+    files = {
+      'index.html': '''
+      <html>
+        <head>
+          <link rel="stylesheet" href="not_inlined.css">
+          <script src="also_not_inlined.js">
+        </head>
+        <body>
+          <include src="inline_this.html">
+          <if expr="True">
+            <p>'if' should be evaluated.</p>
+          </if>
+        </body>
+      </html>
+      ''',
+      'not_inlined.css': ''' /* <link> should not be inlined. */ ''',
+      'also_not_inlined.js': ''' // <script> should not be inlined. ''',
+      'inline_this.html': ''' <p>'include' should be inlined.</p> '''
+    }
+
+    expected_inlined = '''
+      <html>
+        <head>
+          <link rel="stylesheet" href="not_inlined.css">
+          <script src="also_not_inlined.js">
+        </head>
+        <body>
+          <p>'include' should be inlined.</p>
+          <p>'if' should be evaluated.</p>
+        </body>
+      </html>
+      '''
+
+    source_resources = set()
+    tmp_dir = util.TempDir(files)
+    source_resources.add(tmp_dir.GetPath('index.html'))
+    source_resources.add(tmp_dir.GetPath('inline_this.html'))
+
+    result = html_inline.DoInline(tmp_dir.GetPath('index.html'), None,
+                                  preprocess_only=True)
+    resources = result.inlined_files
+    resources.add(tmp_dir.GetPath('index.html'))
+    self.failUnlessEqual(resources, source_resources)
+
+    # Ignore whitespace
+    expected_inlined = re.sub(r'\s+', ' ', expected_inlined)
+    actually_inlined = re.sub(r'\s+', ' ',
+                              util.FixLineEnd(result.inlined_data, '\n'))
+    self.failUnlessEqual(expected_inlined, actually_inlined)
+
+    tmp_dir.CleanUp()
+
+  def testPreprocessOnlyAppliesRecursively(self):
+    '''Tests that preprocess_only=true propagates to included files. '''
+
+    files = {
+      'index.html': '''
+      <html>
+        <include src="outer_include.html">
+      </html>
+      ''',
+      'outer_include.html': '''
+      <include src="inner_include.html">
+      <link rel="stylesheet" href="not_inlined.css">
+      ''',
+      'inner_include.html': ''' <p>This should be inlined in index.html</p> ''',
+      'not_inlined.css': ''' /* This should not be inlined. */ '''
+    }
+
+    expected_inlined = '''
+      <html>
+        <p>This should be inlined in index.html</p>
+        <link rel="stylesheet" href="not_inlined.css">
+      </html>
+      '''
+
+    source_resources = set()
+    tmp_dir = util.TempDir(files)
+    source_resources.add(tmp_dir.GetPath('index.html'))
+    source_resources.add(tmp_dir.GetPath('outer_include.html'))
+    source_resources.add(tmp_dir.GetPath('inner_include.html'))
+
+    result = html_inline.DoInline(tmp_dir.GetPath('index.html'), None,
+                                  preprocess_only=True)
+    resources = result.inlined_files
+    resources.add(tmp_dir.GetPath('index.html'))
+    self.failUnlessEqual(resources, source_resources)
+
+    # Ignore whitespace
+    expected_inlined = re.sub(r'\s+', ' ', expected_inlined)
+    actually_inlined = re.sub(r'\s+', ' ',
+                              util.FixLineEnd(result.inlined_data, '\n'))
+    self.failUnlessEqual(expected_inlined, actually_inlined)
+
+    tmp_dir.CleanUp()
 
 if __name__ == '__main__':
   unittest.main()

@@ -1,4 +1,4 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,6 +9,8 @@ all histograms in the Chromium source are properly mapped.  Notably, field
 trials are entirely ignored by this script.
 
 """
+
+from __future__ import print_function
 
 import hashlib
 import logging
@@ -22,6 +24,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'common'))
 import path_util
 
 import extract_histograms
+import histogram_paths
+import merge_xml
 
 
 C_FILENAME = re.compile(r"""
@@ -287,11 +291,25 @@ def readChromiumHistograms():
   return histograms, location_map
 
 
-def readXmlHistograms(histograms_file_location):
-  """Parses all histogram names from histograms.xml.
+def readAllXmlHistograms():
+  """Parses all histogram names defined in |histogram_paths.ALL_XMLS|.
 
   Returns:
-    A set cotaining the parsed histogram names.
+    A set containing the parsed histogram names.
+  """
+  merged = merge_xml.MergeFiles(histogram_paths.ALL_XMLS)
+  histograms, _ = extract_histograms.ExtractHistogramsFromDom(merged)
+  return set(extract_histograms.ExtractNames(histograms))
+
+
+def readXmlHistograms(histograms_file_location):
+  """Parses all histogram names from |histograms_file_location|.
+
+  Args:
+    histograms_file_location: The given histograms.xml file path.
+
+  Returns:
+    A set containing the parsed histogram names.
   """
   logging.info('Reading histograms from %s...' % histograms_file_location)
   histograms = extract_histograms.ExtractHistograms(histograms_file_location)
@@ -315,8 +333,8 @@ def output_csv(unmapped_histograms, location_map):
     parts = location_map[histogram].split(':')
     assert len(parts) == 2
     (filename, line_number) = parts
-    print '%s,%s,%s,%s' % (filename, line_number, histogram,
-                           hashHistogramName(histogram))
+    print('%s,%s,%s,%s' % (filename, line_number, histogram,
+                           hashHistogramName(histogram)))
 
 
 def output_log(unmapped_histograms, location_map, verbose):
@@ -338,8 +356,6 @@ def output_log(unmapped_histograms, location_map, verbose):
 def main():
   # Find default paths.
   default_root = path_util.GetInputFile('/')
-  default_histograms_path = path_util.GetInputFile(
-      'tools/metrics/histograms/histograms.xml')
   default_extra_histograms_path = path_util.GetInputFile(
       'tools/histograms/histograms.xml')
 
@@ -350,12 +366,6 @@ def main():
     help='scan within DIRECTORY for histograms [optional, defaults to "%s"]' %
         default_root,
     metavar='DIRECTORY')
-  parser.add_option(
-    '--histograms-file', dest='histograms_file_location',
-    default=default_histograms_path,
-    help='read histogram definitions from FILE (relative to --root-directory) '
-         '[optional, defaults to "%s"]' % default_histograms_path,
-    metavar='FILE')
   parser.add_option(
     '--extra_histograms-file', dest='extra_histograms_file_location',
     default=default_extra_histograms_path,
@@ -387,7 +397,7 @@ def main():
     logging.error("Could not change to root directory: %s", e)
     sys.exit(1)
   chromium_histograms, location_map = readChromiumHistograms()
-  xml_histograms = readXmlHistograms(options.histograms_file_location)
+  xml_histograms = readAllXmlHistograms()
   unmapped_histograms = chromium_histograms - xml_histograms
 
   if os.path.isfile(options.extra_histograms_file_location):

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,18 @@ void Foo(base::OnceClosure) {}
 void Test() {
   base::OnceClosure cb = base::Bind([] {});
   Foo(base::Bind([] {}));
+  base::OnceClosure cb2 = base::BindRepeating([] {});
+  Foo(base::BindRepeating([] {}));
 
   using namespace base;
 
-  OnceClosure cb2 = Bind([] {});
+  OnceClosure cb3 = Bind([] {});
   Foo(Bind([] {}));
+  OnceClosure cb4 = BindRepeating([] {});
+  Foo(BindRepeating([] {}));
 
-  Closure cb3 = base::Bind([] {});
+  Closure cb5 = base::Bind([] {});
+  Closure cb6 = base::BindRepeating([] {});
+  RepeatingClosure cb7 = base::Bind([] {});
+  RepeatingClosure cb8 = base::BindRepeating([] {});
 }

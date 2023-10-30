@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 # This script takes in a list of test targets to be run on both Linux and
 # Fuchsia devices and then compares their output to each other, extracting the
 # relevant performance data from the output of gtest.
+
+from __future__ import print_function
 
 import argparse
 import logging

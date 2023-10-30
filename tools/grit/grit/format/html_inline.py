@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -39,29 +39,30 @@ DIST_SUBSTR = '%DISTRIBUTION%'
 
 # Matches beginning of an "if" block.
 _BEGIN_IF_BLOCK = lazy_re.compile(
-    '<if [^>]*?expr=("(?P<expr1>[^">]*)"|\'(?P<expr2>[^\'>]*)\')[^>]*?>')
+    r'<if [^>]*?expr=("(?P<expr1>[^">]*)"|\'(?P<expr2>[^\'>]*)\')[^>]*?>')
 
 # Matches ending of an "if" block.
-_END_IF_BLOCK = lazy_re.compile('</if>')
+_END_IF_BLOCK = lazy_re.compile(r'</if>')
 
 # Used by DoInline to replace various links with inline content.
 _STYLESHEET_RE = lazy_re.compile(
-    '<link rel="stylesheet"[^>]+?href="(?P<filename>[^"]*)".*?>(\s*</link>)?',
+    r'<link rel="stylesheet"[^>]+?href="(?P<filename>[^"]*)".*?>(\s*</link>)?',
     re.DOTALL)
 _INCLUDE_RE = lazy_re.compile(
-    '<include[^>]+?src=("(?P<file1>[^">]*)"|\'(?P<file2>[^\'>]*)\').*?>' +
-    '(\s*</include>)?',
+    r'(?P<comment>\/\/ )?<include[^>]+?'
+    r'src=("(?P<file1>[^">]*)"|\'(?P<file2>[^\'>]*)\').*?>(\s*</include>)?',
     re.DOTALL)
 _SRC_RE = lazy_re.compile(
     r'<(?!script)(?:[^>]+?\s)src="(?!\[\[|{{)(?P<filename>[^"\']*)"',
     re.MULTILINE)
-# This re matches '<img srcset="..."'
+# This re matches '<img srcset="..."' or '<source srcset="..."'
 _SRCSET_RE = lazy_re.compile(
-    r'<img\b(?:[^>]*?\s)srcset="(?!\[\[|{{|\$i18n{)(?P<srcset>[^"\']*)"',
+    r'<(img|source)\b(?:[^>]*?\s)srcset="(?!\[\[|{{|\$i18n{)'
+    r'(?P<srcset>[^"\']*)"',
     re.MULTILINE)
 # This re is for splitting srcset value string into "image candidate strings".
 # Notes:
-# - HTML 5.2 states that URL cannot start with comma.
+# - HTML 5.2 states that URL cannot start or end with comma.
 # - the "descriptor" is either "width descriptor" or "pixel density descriptor".
 #   The first one consists of "valid non-negative integer + letter 'x'",
 #   the second one is formed of "positive valid floating-point number +
@@ -69,11 +70,13 @@ _SRCSET_RE = lazy_re.compile(
 #   that form both of them.
 # Matches for example "img2.png 2x" or "img9.png 11E-2w".
 _SRCSET_ENTRY_RE = lazy_re.compile(
-    r'\s*(?P<url>[^,]\S+)\s+(?P<descriptor>[\deE.-]+[wx])\s*',
+    r'\s*(?P<url>[^,\s]\S+[^,\s])'
+    r'(?:\s+(?P<descriptor>[\deE.-]+[wx]))?\s*'
+    r'(?P<separator>,|$)',
     re.MULTILINE)
 _ICON_RE = lazy_re.compile(
     r'<link rel="icon"\s(?:[^>]+?\s)?'
-    'href=(?P<quote>")(?P<filename>[^"\']*)\1',
+    r'href=(?P<quote>")(?P<filename>[^"\']*)\1',
     re.MULTILINE)
 
 
@@ -84,7 +87,7 @@ def GetDistribution():
     string
   """
   distribution = DIST_DEFAULT
-  if DIST_ENV_VAR in os.environ.keys():
+  if DIST_ENV_VAR in os.environ:
     distribution = os.environ[DIST_ENV_VAR]
     if len(distribution) > 1 and distribution[0] == '_':
       distribution = distribution[1:].lower()
@@ -126,7 +129,7 @@ def ConvertFileToDataURL(filename, base_path, distribution, inlined_files,
     raise Exception('%s is of an an unknown type and '
                     'cannot be stored in a data url.' % filename)
   inline_data = base64.standard_b64encode(util.ReadFile(filepath, util.BINARY))
-  return 'data:%s;base64,%s' % (mimetype, inline_data)
+  return 'data:%s;base64,%s' % (mimetype, inline_data.decode('utf-8'))
 
 
 def SrcInlineAsDataURL(
@@ -194,6 +197,7 @@ def SrcsetInlineAsDataURL(
   # Each of them consists of URL and descriptor.
   # _SRCSET_ENTRY_RE splits srcset into a list of URLs, descriptors and
   # commas.
+  # The descriptor part will be None if that optional regex didn't match
   parts = _SRCSET_ENTRY_RE.split(srcset)
 
   if not parts:
@@ -206,37 +210,35 @@ def SrcsetInlineAsDataURL(
   # candidate string: [url, descriptor]
   candidate = [];
 
-  for part in parts:
-    if not part:
-      continue
+  # Each entry should consist of some text before the entry, the url,
+  # the descriptor or None if the entry has no descriptor, a comma separator or
+  # the end of the line, and finally some text after the entry (which is the
+  # same as the text before the next entry).
+  for i in range(0, len(parts) - 1, 4):
+    before, url, descriptor, separator, after = parts[i:i+5]
 
-    if part == ',':
-      # There must be no URL without a descriptor.
-      assert not candidate, "Bad srcset format in '%s'" % srcset_match.group(0)
-      continue
-
-    if candidate:
-      # descriptor found
-      if candidate[0]:
-        # This is not "names_only" mode.
-        candidate.append(part)
-        new_candidates.append(" ".join(candidate))
-
-      candidate = []
-      continue
+    # There must be a comma-separated next entry or this must be the last entry.
+    assert separator == "," or (separator == "" and i == len(parts) - 5), (
+           "Bad srcset format in {}".format(srcset_match.group(0)))
+    # Both before and after the entry must be empty
+    assert before == after == "", (
+           "Bad srcset format in {}".format(srcset_match.group(0)))
 
     if filename_expansion_function:
-      filename = filename_expansion_function(part)
+      filename = filename_expansion_function(url)
     else:
-      filename = part
+      filename = url
 
     data_url = ConvertFileToDataURL(filename, base_path, distribution,
                                     inlined_files, names_only)
 
-    candidate.append(data_url)
+    # This is not "names_only" mode
+    if data_url:
+      candidate = [data_url]
+      if descriptor:
+        candidate.append(descriptor)
 
-  # There must be no URL without a descriptor
-  assert not candidate, "Bad srcset ending in '%s' " % srcset_match.group(0)
+      new_candidates.append(" ".join(candidate))
 
   prefix = srcset_match.string[srcset_match.start():
       srcset_match.start('srcset')]
@@ -252,6 +254,91 @@ class InlinedData:
   def __init__(self, inlined_data, inlined_files):
     self.inlined_data = inlined_data
     self.inlined_files = inlined_files
+
+
+def CheckConditionalElements(grd_node, string, add_remove_comments_for=None):
+  def IsConditionSatisfied(src_match):
+    expr1 = src_match.group('expr1') or ''
+    expr2 = src_match.group('expr2') or ''
+    return grd_node is None or grd_node.EvaluateCondition(expr1 + expr2)
+
+  def CreateReplacementComment(string):
+    """ Creates the comment about removed lines when string is deleted.
+
+    Generate the "grit-removed-lines:#" comment for removing the section
+    represented by 'string'.
+    """
+    if add_remove_comments_for == '.html':
+      comment_start = '<!--'
+      comment_end = '-->'
+    elif (add_remove_comments_for == '.ts' or add_remove_comments_for == '.js'
+          or add_remove_comments_for == '.css'):
+      comment_start = '/*'
+      comment_end = '*/'
+    else:
+      # add_remove_comments_for an unknown file extension
+      assert False, "Unknown file extension " + str(add_remove_comments_for)
+
+    newlines = string.count('\n')
+    if newlines == 0:
+      return ""
+
+    return (comment_start + f"grit-removed-lines:{newlines}" + comment_end)
+
+  """Helper function to conditionally inline inner elements
+
+  If set, add_remove_comments_for must be one of the known file extensions. A
+  comment 'grit-removed-lines:#' will be added wherever a line was removed. The
+  comment style will be determined by the extension.
+  ('<!--grit-removed-lines:3-->' for '.html', '/*grit-removed-lines:3*/' for
+  '.js', and so on)
+  """
+  begin_if = _BEGIN_IF_BLOCK.search(string)
+  if begin_if is None:
+    if _END_IF_BLOCK.search(string) is not None:
+      raise Exception('Unmatched </if>')
+    return string
+
+  condition_satisfied = IsConditionSatisfied(begin_if)
+  leading = string[0:begin_if.start()]
+  content_start = begin_if.end()
+
+  # Find matching "if" block end.
+  count = 1
+  pos = begin_if.end()
+  while True:
+    end_if = _END_IF_BLOCK.search(string, pos)
+    if end_if is None:
+      raise Exception('Unmatched <if>')
+
+    next_if = _BEGIN_IF_BLOCK.search(string, pos)
+    if next_if is None or next_if.start() >= end_if.end():
+      count = count - 1
+      if count == 0:
+        break
+      pos = end_if.end()
+    else:
+      count = count + 1
+      pos = next_if.end()
+
+  trailing = string[end_if.end():]
+  trailing = CheckConditionalElements(grd_node, trailing,
+                                      add_remove_comments_for)
+
+  if condition_satisfied:
+    content = string[content_start:end_if.start()]
+    # if_replacement_comment will be blank unless there's a multiline expr.
+    if_replacement_comment = ('' if add_remove_comments_for is None else
+                              CreateReplacementComment(
+                                  string[begin_if.start():begin_if.end()]))
+    return leading + if_replacement_comment + CheckConditionalElements(
+        grd_node, content, add_remove_comments_for) + trailing
+
+  replacement_comment = ('' if add_remove_comments_for is None else
+                         CreateReplacementComment(
+                             string[begin_if.start():end_if.end()]))
+  return leading + replacement_comment + trailing
+
 
 def DoInline(
     input_filename, grd_node, allow_external_script=False,
@@ -315,50 +402,6 @@ def DoInline(
       filename = filename_expansion_function(filename)
     return os.path.normpath(os.path.join(base_path, filename))
 
-  def IsConditionSatisfied(src_match):
-    expr1 = src_match.group('expr1') or ''
-    expr2 = src_match.group('expr2') or ''
-    return grd_node is None or grd_node.EvaluateCondition(expr1 + expr2)
-
-  def CheckConditionalElements(str):
-    """Helper function to conditionally inline inner elements"""
-    while True:
-      begin_if = _BEGIN_IF_BLOCK.search(str)
-      if begin_if is None:
-        if _END_IF_BLOCK.search(str) is not None:
-          raise Exception('Unmatched </if>')
-        return str
-
-      condition_satisfied = IsConditionSatisfied(begin_if)
-      leading = str[0:begin_if.start()]
-      content_start = begin_if.end()
-
-      # Find matching "if" block end.
-      count = 1
-      pos = begin_if.end()
-      while True:
-        end_if = _END_IF_BLOCK.search(str, pos)
-        if end_if is None:
-          raise Exception('Unmatched <if>')
-
-        next_if = _BEGIN_IF_BLOCK.search(str, pos)
-        if next_if is None or next_if.start() >= end_if.end():
-          count = count - 1
-          if count == 0:
-            break
-          pos = end_if.end()
-        else:
-          count = count + 1
-          pos = next_if.end()
-
-      content = str[content_start:end_if.start()]
-      trailing = str[end_if.end():]
-
-      if condition_satisfied:
-        str = leading + CheckConditionalElements(content) + trailing
-      else:
-        str = leading + trailing
-
   def InlineFileContents(src_match,
                          pattern,
                          inlined_files=inlined_files,
@@ -381,6 +424,7 @@ def DoInline(
     # by DoInline.
     inlined_data_inst=DoInline(filepath, grd_node,
         allow_external_script=allow_external_script,
+        preprocess_only=preprocess_only,
         strip_whitespace=strip_whitespace,
         filename_expansion_function=filename_expansion_function)
 
@@ -432,8 +476,7 @@ def DoInline(
     inlined_files.add(filepath)
 
     # Inline stylesheets included in this css file.
-    text = _INCLUDE_RE.sub(InlineIncludeFiles,
-                           util.ReadFile(filepath, util.BINARY))
+    text = _INCLUDE_RE.sub(InlineIncludeFiles, util.ReadFile(filepath, 'utf-8'))
     # When resolving CSS files we need to pass in the path so that relative URLs
     # can be resolved.
 
@@ -443,17 +486,18 @@ def DoInline(
     """Helper function that returns a string for a regex that matches url('')
        but not url([[ ]]) or url({{ }}). Appends |postfix| to group names.
     """
-    url_re = 'url\((?!\[\[|{{)(?P<q%s>"|\'|)(?P<filename%s>[^"\'()]*)(?P=q%s)\)'
+    url_re = (r'url\((?!\[\[|{{)(?P<q%s>"|\'|)(?P<filename%s>[^"\'()]*)'
+              r'(?P=q%s)\)')
     return url_re % (postfix, postfix, postfix)
 
   def InlineCSSImages(text, filepath=input_filepath):
     """Helper function that inlines external images in CSS backgrounds."""
     # Replace contents of url() for css attributes: content, background,
     # or *-image.
-    property_re = '(content|background|[\w-]*-image):[^;]*'
+    property_re = r'(content|background|[\w-]*-image):[^;]*'
     # Replace group names to prevent duplicates when forming value_re.
-    image_set_value_re = 'image-set\(([ ]*' + GetUrlRegexString('2') + \
-        '[ ]*[0-9.]*x[ ]*(,[ ]*)?)+\)'
+    image_set_value_re = (r'image-set\(([ ]*' + GetUrlRegexString('2') +
+        r'[ ]*[0-9.]*x[ ]*(,[ ]*)?)+\)')
     value_re = '(%s|%s)' % (GetUrlRegexString(), image_set_value_re)
     css_re = property_re + value_re
     return re.sub(css_re, lambda m: InlineCSSUrls(m, filepath), text)
@@ -469,30 +513,31 @@ def DoInline(
     """Helper function that inlines CSS files included via the @import
        directive.
     """
-    return re.sub('@import\s+' + GetUrlRegexString() + ';',
+    return re.sub(r'@import\s+' + GetUrlRegexString() + r';',
                   lambda m: InlineCSSFile(m, '%s', filepath),
                   text)
 
 
-  flat_text = util.ReadFile(input_filename, util.BINARY)
+  flat_text = util.ReadFile(input_filename, 'utf-8')
 
   # Check conditional elements, remove unsatisfied ones from the file. We do
   # this twice. The first pass is so that we don't even bother calling
   # InlineScript, InlineCSSFile and InlineIncludeFiles on text we're eventually
   # going to throw out anyway.
-  flat_text = CheckConditionalElements(flat_text)
+  flat_text = CheckConditionalElements(grd_node, flat_text)
 
   flat_text = _INCLUDE_RE.sub(InlineIncludeFiles, flat_text)
 
   if not preprocess_only:
     if strip_whitespace:
-      flat_text = minifier.Minify(flat_text, input_filename)
+      flat_text = minifier.Minify(flat_text.encode('utf-8'),
+                                  input_filename).decode('utf-8')
 
     if not allow_external_script:
       # We need to inline css and js before we inline images so that image
       # references gets inlined in the css and js
-      flat_text = re.sub('<script (?P<attrs1>.*?)src="(?P<filename>[^"\']*)"' +
-                         '(?P<attrs2>.*?)></script>',
+      flat_text = re.sub(r'<script (?P<attrs1>.*?)src="(?P<filename>[^"\']*)"'
+                         r'(?P<attrs2>.*?)></script>',
                          InlineScript,
                          flat_text)
 
@@ -502,7 +547,7 @@ def DoInline(
 
   # Check conditional elements, second pass. This catches conditionals in any
   # of the text we just inlined.
-  flat_text = CheckConditionalElements(flat_text)
+  flat_text = CheckConditionalElements(grd_node, flat_text)
 
   # Allow custom modifications before inlining images.
   if rewrite_function:
@@ -563,7 +608,7 @@ def InlineToFile(input_filename, output_filename, grd_node):
   """
   inlined_data = InlineToString(input_filename, grd_node)
   with open(output_filename, 'wb') as out_file:
-    out_file.writelines(inlined_data)
+    out_file.write(inlined_data)
 
 
 def GetResourceFilenames(filename,

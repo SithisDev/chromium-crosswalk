@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@ namespace blink {
 
 class A : public GarbageCollected<A> {
 public:
-    virtual void Trace(Visitor*);
+ virtual void Trace(Visitor*) const;
 };
 
 class B : public A {
@@ -20,14 +20,16 @@ class B : public A {
 
 class C : public B {
 public:
-    void Trace(Visitor*);
+ void Trace(Visitor*) const;
+
 private:
     Member<A> m_a;
 };
 
 class D : public C {
 public:
-    void Trace(Visitor*);
+ void Trace(Visitor*) const;
+
 private:
     Member<A> m_a;
 };

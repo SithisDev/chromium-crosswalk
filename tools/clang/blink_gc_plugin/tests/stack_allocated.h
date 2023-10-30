@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,15 +21,16 @@ class StackObject {
     STACK_ALLOCATED();
 
     // Redundant trace() method, warning/error expected.
-    void Trace(Visitor* visitor) { visitor->Trace(m_obj); }
+    void Trace(Visitor* visitor) const { visitor->Trace(m_obj); }
 
-private:
-    Member<HeapObject> m_obj; // Does not need tracing.
+   private:
+    HeapObject* m_obj; // Does not need tracing.
 };
 
 class HeapObject : public GarbageCollected<HeapObject> {
 public:
-    void Trace(Visitor*);
+ void Trace(Visitor*) const;
+
 private:
     StackObject m_part; // Cannot embed a stack allocated object.
 };

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,8 @@ CheckFieldsVisitor::Errors& CheckFieldsVisitor::invalid_fields() {
 
 bool CheckFieldsVisitor::ContainsInvalidFields(RecordInfo* info) {
   stack_allocated_host_ = info->IsStackAllocated();
-  managed_host_ = stack_allocated_host_ ||
-                  info->IsGCAllocated() ||
-                  info->IsNonNewable() ||
-                  info->IsOnlyPlacementNewable();
+  managed_host_ =
+      stack_allocated_host_ || info->IsGCAllocated() || info->IsNewDisallowed();
   for (RecordInfo::Fields::iterator it = info->GetFields().begin();
        it != info->GetFields().end();
        ++it) {
@@ -57,7 +55,7 @@ void CheckFieldsVisitor::AtIterator(Iterator* edge) {
   if (!managed_host_)
     return;
 
-  if (edge->IsUnsafe())
+  if (!stack_allocated_host_ && edge->on_heap())
     invalid_fields_.push_back(std::make_pair(current_, kIteratorToGCManaged));
 }
 
@@ -78,6 +76,17 @@ void CheckFieldsVisitor::AtValue(Value* edge) {
     return;
   }
 
+  // Members/WeakMembers are prohibited if the host is stack allocated, but
+  // heap collections with Members are okay.
+  if (stack_allocated_host_ && Parent() &&
+      (Parent()->IsMember() || Parent()->IsWeakMember())) {
+    if (!GrandParent() || !GrandParent()->IsCollection()) {
+      invalid_fields_.push_back(
+          std::make_pair(current_, kMemberInStackAllocated));
+      return;
+    }
+  }
+
   // If in a stack allocated context, be fairly insistent that T in Member<T>
   // is GC allocated, as stack allocated objects do not have a trace()
   // that separately verifies the validity of Member<T>.
@@ -88,25 +97,23 @@ void CheckFieldsVisitor::AtValue(Value* edge) {
   //
   // (Note: Member<>'s constructor will at run-time verify that the
   // pointer it wraps is indeed heap allocated.)
-  if (stack_allocated_host_ && Parent() && Parent()->IsMember() &&
+  if (stack_allocated_host_ && Parent() &&
+      (Parent()->IsMember() || Parent()->IsWeakMember()) &&
       edge->value()->HasDefinition() && !edge->value()->IsGCAllocated()) {
-    invalid_fields_.push_back(std::make_pair(current_,
-                                             kMemberToGCUnmanaged));
+    invalid_fields_.push_back(std::make_pair(current_, kMemberToGCUnmanaged));
     return;
   }
 
   if (!Parent() || !edge->value()->IsGCAllocated())
     return;
 
-  // Disallow  unique_ptr<T>, RefPtr<T> and T* to stack-allocated types.
-  if (Parent()->IsUniquePtr() ||
-      Parent()->IsRefPtr() ||
-      (stack_allocated_host_ && Parent()->IsRawPtr())) {
+  // Disallow unique_ptr<T>, scoped_refptr<T>, WeakPtr<T>.
+  if (Parent()->IsUniquePtr() || Parent()->IsRefPtr()) {
     invalid_fields_.push_back(std::make_pair(
         current_, InvalidSmartPtr(Parent())));
     return;
   }
-  if (Parent()->IsRawPtr()) {
+  if (Parent()->IsRawPtr() && !stack_allocated_host_) {
     RawPtr* rawPtr = static_cast<RawPtr*>(Parent());
     Error error = rawPtr->HasReferenceType() ?
         kReferencePtrToGCManaged : kRawPtrToGCManaged;
@@ -120,14 +127,9 @@ void CheckFieldsVisitor::AtCollection(Collection* edge) {
 }
 
 CheckFieldsVisitor::Error CheckFieldsVisitor::InvalidSmartPtr(Edge* ptr) {
-  if (ptr->IsRawPtr()) {
-    if (static_cast<RawPtr*>(ptr)->HasReferenceType())
-      return kReferencePtrToGCManaged;
-    else
-      return kRawPtrToGCManaged;
-  }
   if (ptr->IsRefPtr())
-    return kRefPtrToGCManaged;
+    return ptr->Kind() == Edge::kStrong ? kRefPtrToGCManaged
+                                        : kWeakPtrToGCManaged;
   if (ptr->IsUniquePtr())
     return kUniquePtrToGCManaged;
   llvm_unreachable("Unknown smart pointer kind");

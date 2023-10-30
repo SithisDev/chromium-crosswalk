@@ -1,16 +1,19 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import("//build/config/android/rules.gni")
 
 android_resources("customtabs_benchmark_apk_resources") {
-  resource_dirs = [ "res/" ]
-  custom_package = "org.chromium.customtabs.test"
+  sources = [
+    "res/layout/activity_web_view.xml",
+    "res/layout/main.xml",
+    "res/values/strings.xml",
+  ]
 }
 
 android_apk("customtabs_benchmark_apk") {
-  java_files = [
+  sources = [
     "java/src/org/chromium/customtabs/test/MainActivity.java",
     "java/src/org/chromium/customtabs/test/WebViewActivity.java",
   ]
@@ -20,7 +23,7 @@ android_apk("customtabs_benchmark_apk") {
   apk_name = "CustomTabsBenchmark"
   deps = [
     ":customtabs_benchmark_apk_resources",
-    "//third_party/android_deps:android_support_v4_java",
-    "//third_party/custom_tabs_client:custom_tabs_support_java",
+    "//third_party/androidx:androidx_browser_browser_java",
+    "//third_party/androidx:androidx_core_core_java",
   ]
 }

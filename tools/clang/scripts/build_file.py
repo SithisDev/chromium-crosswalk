@@ -1,7 +1,9 @@
 #!/usr/bin/env python
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import print_function
 
 import argparse
 import json
@@ -30,7 +32,7 @@ def ParseArgs():
                       help='optional prefix to prepend, e.g. --prefix=lldb')
   parser.add_argument(
       '--compiler',
-      help='compiler to override the compiler specied in the compile db')
+      help='compiler to override the compiler specified in the compile db')
   parser.add_argument('--suffix',
                       help='optional suffix to append, e.g.' +
                       ' --suffix="-Xclang -ast-dump -fsyntax-only"')
@@ -55,8 +57,8 @@ def BuildIt(record, prefix, compiler, suffix):
       break
     raw_args = raw_args[1:]
   if not raw_args:
-    print 'error: command %s does not appear to invoke clang!' % record[
-        'command']
+    print('error: command %s does not appear to invoke clang!' %
+          record['command'])
     return 2
   args = []
   if prefix:
@@ -66,7 +68,7 @@ def BuildIt(record, prefix, compiler, suffix):
   args.extend(raw_args)
   if suffix:
     args.extend(shlex.split(suffix))
-  print 'Running %s' % ' '.join(args)
+  print('Running %s' % ' '.join(args))
   os.execv(args[0], args)
 
 
@@ -81,7 +83,7 @@ def main():
     if os.path.normpath(os.path.join(args.p, record[
         'file'])) == args.target_file:
       return BuildIt(record, args.prefix, args.compiler, args.suffix)
-  print 'error: could not find %s in compile DB!' % args.target_file
+  print('error: could not find %s in compile DB!' % args.target_file)
   return 1
 
 

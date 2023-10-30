@@ -1,9 +1,11 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """WSGI application to manage a USB gadget.
 """
+
+from __future__ import print_function
 
 import datetime
 import hashlib
@@ -83,7 +85,7 @@ class UpdateHandler(web.RequestHandler):
     if claimed_by is not None:
       args.extend(['--start-claimed', claimed_by])
 
-    print 'Reloading with version {}...'.format(md5sum)
+    print('Reloading with version {}...'.format(md5sum))
 
     global http_server
     if chip.IsConfigured():

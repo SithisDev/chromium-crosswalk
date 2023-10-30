@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -63,11 +63,12 @@ class ClangPluginTest(object):
       cmd = clang_cmd[:]
       try:
         # Some tests need to run with extra flags.
-        cmd.extend(file('%s.flags' % test_name).read().split())
+        cmd.extend(open('%s.flags' % test_name).read().split())
       except IOError:
         pass
       cmd.append(test)
 
+      print("cmd", cmd)
       failure_message = self.RunOneTest(test_name, cmd)
       if failure_message:
         print('failed: %s' % failure_message)
@@ -84,7 +85,9 @@ class ClangPluginTest(object):
 
   def RunOneTest(self, test_name, cmd):
     try:
-      actual = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+      actual = subprocess.check_output(cmd,
+                                       stderr=subprocess.STDOUT,
+                                       universal_newlines=True)
     except subprocess.CalledProcessError as e:
       # Some plugin tests intentionally trigger compile errors, so just ignore
       # an exit code that indicates failure.

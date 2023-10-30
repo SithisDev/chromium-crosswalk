@@ -1,8 +1,10 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """A module for the info implementation of Command."""
+
+from __future__ import print_function
 
 import cr
 
@@ -36,8 +38,8 @@ class InfoCommand(cr.Command):
           val = cr.context.Find(var)
           if val is None:
             val = ''
-          print val
+          print(val)
         else:
-          print var, '=', cr.context.Find(var)
+          print(var, '=', cr.context.Find(var))
     else:
       cr.base.client.PrintInfo()

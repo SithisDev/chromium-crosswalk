@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,7 +14,7 @@ import presubmit_util
 
 def main(argv):
   presubmit_util.DoPresubmitMain(argv, 'ukm.xml', 'ukm.old.xml',
-                                 'pretty_print.py', ukm_model.PrettifyXML)
+                                 ukm_model.PrettifyXML)
 
 
 if '__main__' == __name__:

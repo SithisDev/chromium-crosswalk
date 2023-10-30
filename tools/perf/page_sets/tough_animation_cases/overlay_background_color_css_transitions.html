@@ -53,8 +53,9 @@ body {
     position: absolute;
     width: 600px;
     height: 600px;
-    transform: translateZ(0);
+    will-change: transform;
     transition: background-color 1s linear;
+    border: 1px solid black;
 }
 </style>
 <script src="resources/perf_test_helper.js"></script>

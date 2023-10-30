@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 # The command line above counts the RSS of 1) process 12345, 2) process 23456
 # and 3) all descendant processes of process 23456.
 
+from __future__ import print_function
 
 import collections
 import logging
@@ -134,7 +135,7 @@ def main(argv):
     return 1
 
   # TODO(dmikurube): Classify this total RSS.
-  print len(pageframes) * 4096
+  print(len(pageframes) * 4096)
 
   return 0
 

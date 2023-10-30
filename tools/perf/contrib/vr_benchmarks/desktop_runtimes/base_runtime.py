@@ -1,12 +1,13 @@
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
 import os
 import sys
 
 
-ALL_RUNTIMES = frozenset(['OculusVR', 'OpenVR', 'WindowsMixedReality'])
+ALL_RUNTIMES = frozenset(['OpenXR'])
 SANDBOX_FEATURE = 'XRSandbox'
 
 
@@ -31,6 +32,15 @@ class DesktopRuntimeBase(object):
     else:
       self._finder_options.browser_options.AppendExtraBrowserArgs(
         '--disable-features=%s' % SANDBOX_FEATURE)
+
+    if self._finder_options.mock_runtime_directory:
+      self._mock_runtime_directory = os.path.abspath(
+          self._finder_options.mock_runtime_directory)
+    else:
+      self._mock_runtime_directory = os.path.abspath(
+          os.path.join(self._possible_browser.browser_directory,
+                       'mock_vr_clients'))
+      logging.warning('Using mock directory %s', self._mock_runtime_directory)
 
   def Setup(self):
     """Called once before any stories are run."""
@@ -73,6 +83,6 @@ class DesktopRuntimeBase(object):
         'chrome', 'browser', 'vr', 'test')
     if import_dir not in sys.path:
       sys.path.append(import_dir)
-    # pylint: disable=import-error, wrong-import-position
+    # pylint: disable=import-error,wrong-import-position,import-outside-toplevel
     import run_xr_browser_tests
     run_xr_browser_tests.SetupWindowsACLs(directory)

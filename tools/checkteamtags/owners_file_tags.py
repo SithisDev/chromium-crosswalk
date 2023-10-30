@@ -1,12 +1,17 @@
-# Copyright (c) 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import os
+import posixpath
 import re
 
 from collections import defaultdict
 
+
+def uniform_path_format(native_path):
+  """Alters the path if needed to be separated by forward slashes."""
+  return posixpath.normpath(native_path.replace(os.sep, posixpath.sep))
 
 def parse(filename):
   """Searches the file for lines that start with `# TEAM:` or `# COMPONENT:`.
@@ -76,11 +81,11 @@ def aggregate_components_from_owners(all_owners_data, root):
   dir_to_component = {}
   dir_missing_info_by_depth = defaultdict(list)
   dir_to_team = {}
-  for rel_dirname, owners_data in all_owners_data.iteritems():
-    # We apply relpath to remove any possible `.` and `..` chunks and make
-    # counting separators work correctly as a means of obtaining the file_depth.
-    rel_path = os.path.relpath(rel_dirname, root)
-    file_depth = 0 if rel_path == '.' else rel_path.count(os.path.sep) + 1
+  for rel_dirname, owners_data in all_owners_data.items():
+    # Normalize this relative path to posix-style to make counting separators
+    # work correctly as a means of obtaining the file_depth.
+    rel_path = uniform_path_format(os.path.relpath(rel_dirname, root))
+    file_depth = 0 if rel_path == '.' else rel_path.count(posixpath.sep) + 1
     num_total += 1
     num_total_by_depth[file_depth] += 1
     component = owners_data.get('component')
@@ -102,18 +107,17 @@ def aggregate_components_from_owners(all_owners_data, root):
             component]['depth']:
           topmost_team[component] = {'depth': file_depth, 'team': team}
     else:
-      rel_owners_path = os.path.join(rel_dirname, 'OWNERS')
+      rel_owners_path = uniform_path_format(os.path.join(rel_dirname, 'OWNERS'))
       warnings.append('%s has no COMPONENT tag' % rel_owners_path)
       if not team and not os_tag:
         dir_missing_info_by_depth[file_depth].append(rel_owners_path)
 
   mappings = {
-      'component-to-team': {
-          k: v['team'] for k, v in topmost_team.iteritems()
-      },
-      'teams-per-component': {
-          k: sorted(list(v)) for k, v in teams_per_component.iteritems()
-      },
+      'component-to-team': {k: v['team']
+                            for k, v in topmost_team.items()},
+      'teams-per-component':
+      {k: sorted(list(v))
+       for k, v in teams_per_component.items()},
       'dir-to-component': dir_to_component,
       'dir-to-team': dir_to_team,
   }
@@ -175,18 +179,18 @@ def scrape_owners(root, include_subdirs):
     """ Find the value of tag in the nearest ancestor that defines it."""
     ancestor = os.path.dirname(dirname)
     while ancestor:
-      rel_ancestor = os.path.relpath(ancestor, root)
+      rel_ancestor = uniform_path_format(os.path.relpath(ancestor, root))
       if rel_ancestor in data and data[rel_ancestor].get(tag):
         return data[rel_ancestor][tag]
       if rel_ancestor == '.':
         break
       ancestor = os.path.dirname(ancestor)
-    return
+    return ''
 
   for dirname, _, files in os.walk(root):
     # Proofing against windows casing oddities.
     owners_file_names = [f for f in files if f.upper() == 'OWNERS']
-    rel_dirname = os.path.relpath(dirname, root)
+    rel_dirname = uniform_path_format(os.path.relpath(dirname, root))
     if owners_file_names or include_subdirs:
       if owners_file_names:
         owners_full_path = os.path.join(dirname, owners_file_names[0])

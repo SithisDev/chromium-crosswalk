@@ -1,10 +1,12 @@
-#!/usr/bin/python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Diagnose some common system configuration problems on Linux, and
 suggest fixes."""
+
+from __future__ import print_function
 
 import os
 import subprocess
@@ -99,10 +101,10 @@ def RunChecks():
         sys.stdout.flush()
         error = check()
         if not error:
-            print "ok"
+            print("ok")
         else:
-            print "FAIL"
-            print error
+            print("FAIL")
+            print(error)
 
 
 if __name__ == '__main__':

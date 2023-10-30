@@ -1,7 +1,10 @@
 #!/usr/bin/env python
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import print_function
+from os import path
 
 
 def Run(os_path=None, args=None):
@@ -17,10 +20,11 @@ def Run(os_path=None, args=None):
   finally:
     sys.path = old_sys_path
 
-  return node.RunNode([node_modules.PathToSvgo()] + args)
+  default_args = ['--config=' + path.join(_HERE_PATH, 'svgo.config.js')]
+  return node.RunNode([node_modules.PathToSvgo()] + default_args + args)
 
 
 if __name__ == '__main__':
   import os
   import sys
-  print Run(os_path=os.path, args=sys.argv[1:])
+  print(Run(os_path=os.path, args=sys.argv[1:]))

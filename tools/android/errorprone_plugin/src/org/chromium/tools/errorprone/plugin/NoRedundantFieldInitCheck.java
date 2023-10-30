@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ import javax.lang.model.element.Modifier;
  * Detects when non-final fields are explicitly initialized to default values
  */
 @AutoService(BugChecker.class)
-@BugPattern(name = "NoRedundantFieldInit", category = BugPattern.Category.ANDROID,
+@BugPattern(name = "NoRedundantFieldInit",
         summary = "Do not explicitly initialize a non-final field with a default value",
         severity = BugPattern.SeverityLevel.ERROR, linkType = BugPattern.LinkType.CUSTOM,
         link = "https://issuetracker.google.com/issues/37124982")

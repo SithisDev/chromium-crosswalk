@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,15 +13,16 @@ if __name__ == '__main__':
   sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
 
-import StringIO
 import unittest
+
+from six import StringIO
 
 from grit.gather import txt
 
 
 class TxtUnittest(unittest.TestCase):
   def testGather(self):
-    input = StringIO.StringIO('Hello there\nHow are you?')
+    input = StringIO('Hello there\nHow are you?')
     gatherer = txt.TxtFile(input)
     gatherer.Parse()
     self.failUnless(gatherer.GetText() == input.getvalue())

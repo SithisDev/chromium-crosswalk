@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -6,7 +6,8 @@ import json
 import pickle
 import unittest
 
-import httplib2
+# TODO(crbug.com/996778): Figure out how to get httplib2 hermetically.
+import httplib2  # pylint: disable=import-error
 import mock
 
 from core.services import request

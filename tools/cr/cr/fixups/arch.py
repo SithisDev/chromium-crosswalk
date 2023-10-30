@@ -1,8 +1,10 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """A module for architecture output directory fixups."""
+
+from __future__ import print_function
 
 import cr
 
@@ -23,7 +25,7 @@ class _ArchInitHookHelper(cr.InitHook):
     old_arch = config.OVERRIDES.Find(cr.Arch.SELECTOR)
     new_arch = self._ArchConvert(old_arch)
     if new_arch != old_arch:
-      print '** Fixing architecture from {0} to {1}'.format(old_arch, new_arch)
+      print('** Fixing architecture from {0} to {1}'.format(old_arch, new_arch))
       config.OVERRIDES[cr.Arch.SELECTOR] = new_arch
 
 

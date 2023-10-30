@@ -1,6 +1,8 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+import itertools
 import json
 import os
 import sys
@@ -74,9 +76,8 @@ class PerfBenchmark(benchmark.Benchmark):
 
   def SetExtraBrowserOptions(self, options):
     """To be overridden by perf benchmarks."""
-    pass
 
-  def CustomizeOptions(self, finder_options):
+  def CustomizeOptions(self, finder_options, possible_browser=None):
     # Subclass of PerfBenchmark should override  SetExtraBrowserOptions to add
     # more browser options rather than overriding CustomizeOptions.
     super(PerfBenchmark, self).CustomizeOptions(finder_options)
@@ -95,33 +96,28 @@ class PerfBenchmark(benchmark.Benchmark):
     # binary format that an older build does not expect.
     if (browser_options.browser_type != 'reference' and
         'no-field-trials' not in browser_options.compatibility_mode):
-      variations = self._GetVariationsBrowserArgs(finder_options)
+      variations = self._GetVariationsBrowserArgs(
+          finder_options, browser_options.extra_browser_args, possible_browser)
       browser_options.AppendExtraBrowserArgs(variations)
 
       browser_options.profile_files_to_copy.extend(
           GetAdTaggingProfileFiles(
               self._GetOutDirectoryEstimate(finder_options)))
 
-    # A non-sandboxed, 15-seconds-delayed gpu process is currently running in
+    # A non-sandboxed, 120-seconds-delayed gpu process is currently running in
     # the browser to collect gpu info. A command line switch is added here to
     # skip this gpu process for all perf tests to prevent any interference
     # with the test results.
     browser_options.AppendExtraBrowserArgs(
-        '--disable-gpu-process-for-dx12-vulkan-info-collection')
-
-    # TODO(crbug.com/881469): remove this once Webview supports
-    # VizDisplayCompositor.
-    if (browser_options.browser_type and
-        'android-webview' in browser_options.browser_type):
-      browser_options.AppendExtraBrowserArgs(
-          '--disable-features=VizDisplayCompositor')
-
-    # Switch Chrome to use Perfetto instead of TraceLog as the tracing backend,
-    # needed until the feature gets turned on by default everywhere.
-    if browser_options.browser_type != 'reference':
-      browser_options.AppendExtraBrowserArgs('--enable-perfetto')
+        '--disable-gpu-process-for-dx12-info-collection')
 
     self.SetExtraBrowserOptions(browser_options)
+
+  def GetExtraOutDirectories(self):
+    # Subclasses of PerfBenchmark should override this method instead of
+    # _GetPossibleBuildDirectories to consider more directories in
+    # _GetOutDirectoryEstimate.
+    return []
 
   @staticmethod
   def FixupTargetOS(target_os):
@@ -133,21 +129,35 @@ class PerfBenchmark(benchmark.Benchmark):
       return 'linux'
     if target_os == 'cros':
       return 'chromeos'
+    if target_os == 'lacros':
+      return 'chromeos_lacros'
     return target_os
 
-  def _GetVariationsBrowserArgs(self, finder_options):
-    chrome_root = finder_options.chrome_root
-    if chrome_root is None:
-      chrome_root = path_module.GetChromiumSrcDir()
-
-    variations_dir = os.path.join(chrome_root, 'testing', 'variations')
-    possible_browser = browser_finder.FindBrowser(finder_options)
+  def _GetVariationsBrowserArgs(self,
+                                finder_options,
+                                current_args,
+                                possible_browser=None):
+    if possible_browser is None:
+      possible_browser = browser_finder.FindBrowser(finder_options)
     if not possible_browser:
       return []
 
+    # Because of binary size constraints, Android cannot use the
+    # "--enable-field-trial-config" flag. For Android, we instead generate
+    # browser args from the fieldtrial_testing_config.json config file. For
+    # other OSes, we simply pass the "--enable-field-trial-config" flag. See the
+    # FIELDTRIAL_TESTING_ENABLED buildflag definition in
+    # components/variations/service/BUILD.gn for more details.
+    if not self.IsAndroid(possible_browser):
+      return '--enable-field-trial-config'
+
+    variations_dir = os.path.join(path_module.GetChromiumSrcDir(), 'testing',
+                                  'variations')
+
     return fieldtrial_util.GenerateArgs(
         os.path.join(variations_dir, 'fieldtrial_testing_config.json'),
-        [self.FixupTargetOS(possible_browser.target_os)])
+        self.FixupTargetOS(possible_browser.target_os),
+        current_args)
 
   @staticmethod
   def _GetPossibleBuildDirectories(chrome_src_dir, browser_type):
@@ -172,13 +182,32 @@ class PerfBenchmark(benchmark.Benchmark):
     if finder_options.chromium_output_dir is not None:
       return finder_options.chromium_output_dir
 
-    possible_directories = self._GetPossibleBuildDirectories(
-        finder_options.chrome_root, finder_options.browser_options.browser_type)
+    possible_directories = itertools.chain(
+        self._GetPossibleBuildDirectories(
+          finder_options.chrome_root,
+          finder_options.browser_options.browser_type),
+        self.GetExtraOutDirectories())
+
     return next((p for p in possible_directories if os.path.exists(p)), None)
+
+  @staticmethod
+  def IsAndroid(possible_browser):
+    """Returns whether a possible_browser is on an Android build."""
+    return possible_browser.target_os.startswith('android')
 
   @staticmethod
   def IsSvelte(possible_browser):
     """Returns whether a possible_browser is on a svelte Android build."""
     if possible_browser.target_os == 'android':
       return possible_browser.platform.IsSvelte()
+    return False
+
+  @staticmethod
+  def NeedsSoftwareCompositing():
+    # We have to run with software compositing under xvfb or
+    # chrome remote desktop.
+    if 'CHROME_REMOTE_DESKTOP_SESSION' in os.environ:
+      return True
+    if 'XVFB_DISPLAY' in os.environ:
+      return True
     return False

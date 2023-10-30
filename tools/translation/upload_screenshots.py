@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,12 +16,20 @@ files, so it doesn't know whether an image file corresponds to a message or not.
 It will attempt to upload the image anyways.
 """
 
+from __future__ import print_function
+try:
+  # In Python2, override input with raw_input for compatibility.
+  input = raw_input  # pylint: disable=redefined-builtin
+except NameError:
+  pass
+
 import argparse
 import sys
 import os
 import subprocess
 
 import helper.translation_helper as translation_helper
+import helper.git_helper as git_helper
 
 here = os.path.dirname(os.path.realpath(__file__))
 src_path = os.path.normpath(os.path.join(here, '..', '..'))
@@ -34,6 +42,10 @@ import upload_to_google_storage
 import download_from_google_storage
 
 sys.path.remove(depot_tools_path)
+
+# Translation expectations file for the clank repo.
+INTERNAL_TRANSLATION_EXPECTATIONS_PATH = os.path.join(
+    'clank', 'tools', 'translation_expectations.pyl')
 
 # Translation expectations file for the Chromium repo.
 TRANSLATION_EXPECTATIONS_PATH = os.path.join('tools', 'gritsettings',
@@ -51,7 +63,7 @@ else:
 
 
 def query_yes_no(question, default='no'):
-  """Ask a yes/no question via raw_input() and return their answer.
+  """Ask a yes/no question via input() and return their answer.
 
   "question" is a string that is presented to the user.
   "default" is the presumed answer if the user just hits <Enter>.
@@ -71,41 +83,20 @@ def query_yes_no(question, default='no'):
 
   valid = {'yes': True, 'y': True, 'ye': True, 'no': False, 'n': False}
   while True:
-    print question, prompt
-    choice = raw_input().lower()
+    print(question, prompt)
+    choice = input().lower()
     if default is not None and choice == '':
       return valid[default]
-    elif choice in valid:
+    if choice in valid:
       return valid[choice]
-    else:
-      print "Please respond with 'yes' or 'no' (or 'y' or 'n')."
-
-
-def list_grds_in_repository(repo_path):
-  """Returns a list of all the grd files in the current git repository."""
-  # This works because git does its own glob expansion even though there is no
-  # shell to do it.
-  output = subprocess.check_output(
-      [GIT, 'ls-files', '--', '*.grd'], cwd=repo_path)
-  return output.strip().splitlines()
-
-
-def git_add(files, repo_root):
-  """Adds relative paths given in files to the current CL."""
-  # Upload in batches in order to not exceed command line length limit.
-  BATCH_SIZE = 50
-  added_count = 0
-  while added_count < len(files):
-    batch = files[added_count:added_count+BATCH_SIZE]
-    command = [GIT, 'add'] + batch
-    subprocess.check_call(command, cwd=repo_root)
-    added_count += len(batch)
+    print("Please respond with 'yes' or 'no' (or 'y' or 'n').")
 
 
 def find_screenshots(repo_root, translation_expectations):
   """Returns a list of translation related .png files in the repository."""
   translatable_grds = translation_helper.get_translatable_grds(
-      repo_root, list_grds_in_repository(repo_root), translation_expectations)
+      repo_root, git_helper.list_grds_in_repository(repo_root),
+      translation_expectations)
 
   # Add the paths of grds and any files they include. This includes grdp files
   # and files included via <structure> elements.
@@ -131,10 +122,10 @@ def find_screenshots(repo_root, translation_expectations):
     if not os.path.exists(screenshots_dir):
       continue
     for f in os.listdir(screenshots_dir):
-      if f in ('OWNERS', 'README.md') or f.endswith('.sha1'):
+      if f in ('OWNERS', 'README.md', 'DIR_METADATA') or f.endswith('.sha1'):
         continue
       if not f.endswith('.png'):
-        print 'File with unexpected extension: %s in %s' % (f, screenshots_dir)
+        print('File with unexpected extension: %s in %s' % (f, screenshots_dir))
         continue
       screenshots.append(os.path.join(screenshots_dir, f))
   return screenshots
@@ -148,11 +139,20 @@ def main():
       '--dry-run',
       action='store_true',
       help='Don\'t actually upload the images')
+  parser.add_argument(
+      '-c',
+      '--clank_internal',
+      action='store_true',
+      help='Upload screenshots for strings in the downstream clank directory')
   args = parser.parse_args()
+  if args.clank_internal:
+    screenshots = find_screenshots(
+        os.path.join(src_path, "clank"),
+        os.path.join(src_path, INTERNAL_TRANSLATION_EXPECTATIONS_PATH))
 
-  screenshots = find_screenshots(src_path,
-                                 os.path.join(src_path,
-                                              TRANSLATION_EXPECTATIONS_PATH))
+  else:
+    screenshots = find_screenshots(
+        src_path, os.path.join(src_path, TRANSLATION_EXPECTATIONS_PATH))
   if not screenshots:
     print ("No screenshots found.\n\n"
            "- Screenshots must be located in the correct directory.\n"
@@ -160,16 +160,16 @@ def main():
            "screenshot at path/to/file_grd/IDS_HELLO_WORLD.png.\n"
            "- If you added a new, uncommitted .grd file, `git add` it so that "
            "this script can pick up its screenshot directory.")
-    exit(0)
+    sys.exit(0)
 
-  print 'Found %d updated screenshot(s): ' % len(screenshots)
+  print('Found %d updated screenshot(s): ' % len(screenshots))
   for s in screenshots:
-    print '  %s' % s
-  print
-  if not query_yes_no(
-      'Do you want to upload these to Google Cloud Storage?\n\n'
-      'FILES WILL BE PUBLIC, DO NOT UPLOAD ANYTHING CONFIDENTIAL.'):
-    exit(0)
+    print('  %s' % s)
+  print()
+  if not query_yes_no('Do you want to upload these to Google Cloud Storage?\n\n'
+                      'FILES WILL BE VISIBLE TO A LARGE NUMBER OF PEOPLE. '
+                      'DO NOT UPLOAD ANYTHING CONFIDENTIAL.'):
+    sys.exit(0)
 
   # Creating a standard gsutil object, assuming there are depot_tools
   # and everything related is set up already.
@@ -188,27 +188,27 @@ def main():
         gzip=None) != 0:
       print ('Error uploading screenshots. Try running '
              '`download_from_google_storage --config`.')
-      exit(1)
+      sys.exit(1)
 
-  print
-  print 'Images are uploaded and their signatures are calculated:'
+  print()
+  print('Images are uploaded and their signatures are calculated:')
 
   signatures = ['%s.sha1' % s for s in screenshots]
   for s in signatures:
-    print '  %s' % s
-  print
+    print('  %s' % s)
+  print()
 
   # Always ask if the .sha1 files should be added to the CL, even if they are
   # already part of the CL. If the files are not modified, adding again is a
   # no-op.
   if not query_yes_no('Do you want to add these files to your CL?',
                       default='yes'):
-    exit(0)
+    sys.exit(0)
 
   if not args.dry_run:
-    git_add(signatures, src_path)
+    git_helper.git_add(signatures, src_path)
 
-  print 'DONE.'
+  print('DONE.')
 
 
 if __name__ == '__main__':

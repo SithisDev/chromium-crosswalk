@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,8 @@ private:
 class GC_PLUGIN_IGNORE("http://crbug.com/12345") B;
 class B : public GarbageCollected<B> {
 public:
-    virtual void Trace(Visitor*);
+ virtual void Trace(Visitor*) const;
+
 private:
     Member<HeapObject> m_obj;
 };
@@ -30,7 +31,8 @@ private:
 // Don't require tracing of an ignored base class.
 class C : public B {
 public:
-    void Trace(Visitor*);
+ void Trace(Visitor*) const;
+
 private:
     Member<HeapObject> m_obj;
 };

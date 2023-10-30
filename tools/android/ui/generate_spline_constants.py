@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,6 +10,8 @@ array.
 Run this and paste the output into //chrome/android/java/src/org/chromium/
 chrome/browser/compositor/layouts/phone/stack/StackScroller.java
 """
+
+from __future__ import print_function
 
 import math
 import sys
@@ -65,8 +67,8 @@ def Main():
     spline_position.append(1.0)
     spline_time.append(1.0)
 
-    print WriteJavaArrayDeclaration('SPLINE_POSITION', spline_position)
-    print WriteJavaArrayDeclaration('SPLINE_TIME', spline_time)
+    print(WriteJavaArrayDeclaration('SPLINE_POSITION', spline_position))
+    print(WriteJavaArrayDeclaration('SPLINE_TIME', spline_time))
 
     return 0
 

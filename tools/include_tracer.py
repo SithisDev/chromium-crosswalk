@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright 2011 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 # based on an almost identical script by: jyrki@google.com (Jyrki Alakuijala)
@@ -11,6 +11,8 @@ Since it ignores defines, it gives just a rough estimation of file size.
 Usage:
   tools/include_tracer.py -Iout/Default/gen chrome/browser/ui/browser.h
 """
+
+from __future__ import print_function
 
 import argparse
 import os
@@ -56,7 +58,7 @@ def Walk(include_dirs, seen, filename, parent, indent):
     if os.path.exists(basename + '.proto'):
       filename = basename + '.proto'
     else:
-      print 'could not find ', filename
+      print('could not find ', filename)
 
   # Show and count files only once.
   if filename in seen:
@@ -64,7 +66,7 @@ def Walk(include_dirs, seen, filename, parent, indent):
   seen.add(filename)
 
   # Display the paths.
-  print ' ' * indent + filename
+  print(' ' * indent + filename)
 
   # Skip system includes.
   if filename[0] == '<':
@@ -81,7 +83,7 @@ def Walk(include_dirs, seen, filename, parent, indent):
   if os.path.exists(resolved_filename):
     lines = open(resolved_filename).readlines()
   else:
-    print ' ' * (indent + 2) + "-- not found"
+    print(' ' * (indent + 2) + "-- not found")
     lines = []
   for line in lines:
     line = line.strip()
@@ -107,8 +109,8 @@ def main():
     options.include_dirs = []
 
   bytes = Walk(options.include_dirs, set(), options.source_file, '', 0)
-  print
-  print float(bytes) / (1 << 20), "megabytes of chrome source"
+  print()
+  print(float(bytes) / (1 << 20), "megabytes of chrome source")
 
 
 if __name__ == '__main__':

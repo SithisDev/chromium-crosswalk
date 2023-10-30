@@ -1,5 +1,5 @@
-#!/usr/bin/python
-# Copyright 2016 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -13,6 +13,8 @@
 # and SublimeClang passes the absolute file path to the current file as an
 # additional argument. You should change the -d argument to point to your
 # depot_tools directory.
+
+from __future__ import print_function
 
 import imp
 import optparse
@@ -41,7 +43,8 @@ def main():
   for flag in results['flags']:
     # The sublimeclang plugin expects to parse its input with shlex.
     # Defines and include path names may have spaces or quotes.
-    print pipes.quote(flag)
+    print(pipes.quote(flag))
+
 
 if __name__ == "__main__":
   main()

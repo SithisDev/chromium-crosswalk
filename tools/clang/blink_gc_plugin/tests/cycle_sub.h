@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,16 +14,17 @@ class C;
 // This contains a leaking cycle:
 // C -per-> A -sub-> B -ref-> C
 
-class A : public GarbageCollectedFinalized<A> {
-public:
-    virtual void Trace(Visitor*) {}
+class A : public GarbageCollected<A> {
+ public:
+  virtual void Trace(Visitor*) const {}
 };
 
 class B : public A {
 public:
-    virtual void Trace(Visitor*);
+ virtual void Trace(Visitor*) const;
+
 private:
-    RefPtr<C> m_c;
+    scoped_refptr<C> m_c;
 };
 
 class C : public RefCounted<C> {

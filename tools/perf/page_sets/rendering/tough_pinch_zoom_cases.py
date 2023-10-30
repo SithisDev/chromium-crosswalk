@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.util import wpr_modes
@@ -33,17 +33,16 @@ class ToughPinchZoomPage(rendering_story.RenderingStory):
   def RunPinchGesture(self, action_runner, left_anchor_ratio=0.5,
                       top_anchor_ratio=0.5, scale_factor=None,
                       speed_in_pixels_per_second=800):
-      with action_runner.CreateGestureInteraction('PinchAction',
-                                                  repeatable=True):
-        action_runner.PinchPage(
-            left_anchor_ratio=left_anchor_ratio,
-            top_anchor_ratio=top_anchor_ratio,
-            scale_factor=scale_factor,
-            speed_in_pixels_per_second=speed_in_pixels_per_second)
+    with action_runner.CreateGestureInteraction('PinchAction', repeatable=True):
+      action_runner.PinchPage(
+          left_anchor_ratio=left_anchor_ratio,
+          top_anchor_ratio=top_anchor_ratio,
+          scale_factor=scale_factor,
+          speed_in_pixels_per_second=speed_in_pixels_per_second)
 
   def RunPageInteractions(self, action_runner):
     action_runner.tab.WaitForDocumentReadyStateToBeInteractiveOrBetter()
-    for _ in xrange(0, 3):
+    for _ in range(3):
       current_scale_factor = self.target_scale_factor
       self.RunPinchGesture(action_runner, scale_factor=current_scale_factor)
       while current_scale_factor > 1.0:
@@ -113,7 +112,6 @@ class YoutubePinchZoom2018Page(ToughPinchZoomPage):
   BASE_NAME = 'youtube_pinch'
   YEAR = '2018'
   URL = 'http://www.youtube.com'
-  TAGS = ToughPinchZoomPage.TAGS + [story_tags.REPRESENTATIVE_MAC_DESKTOP]
 
   def RunNavigateSteps(self, action_runner):
     super(YoutubePinchZoom2018Page, self).RunNavigateSteps(action_runner)
@@ -170,7 +168,6 @@ class TwitterPinchZoom2018Page(ToughPinchZoomPage):
   BASE_NAME = 'twitter_pinch'
   YEAR = '2018'
   URL = 'https://twitter.com/katyperry'
-  TAGS = ToughPinchZoomPage.TAGS + [story_tags.REPRESENTATIVE_MAC_DESKTOP]
 
 
   def RunNavigateSteps(self, action_runner):
@@ -229,7 +226,6 @@ class AmazonPinchZoom2018Page(ToughPinchZoomPage):
   BASE_NAME = 'amazon_pinch'
   YEAR = '2018'
   URL = 'http://www.amazon.com'
-  TAGS = ToughPinchZoomPage.TAGS + [story_tags.REPRESENTATIVE_MAC_DESKTOP]
 
 
 class EBayPinchZoom2018Page(ToughPinchZoomPage):

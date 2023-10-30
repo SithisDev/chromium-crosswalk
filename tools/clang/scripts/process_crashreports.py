@@ -1,10 +1,12 @@
 #!/usr/bin/env python
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Looks for crash reports in tools/clang/crashreports and uploads them to GCS.
 """
+
+from __future__ import print_function
 
 import argparse
 import datetime
@@ -62,8 +64,12 @@ def ProcessCrashreport(base, source):
     sys.stdout.write('uploading... ')
     sys.stdout.flush()
     subprocess.check_call([sys.executable, GSUTIL, '-q', 'cp', tmp_name, dest])
-    print 'done'
-    print '    %s' % dest
+    print('done')
+    print('    %s' % dest)
+  except subprocess.CalledProcessError as e:
+    print('upload failed; if it was due to missing permissions, try running')
+    print('download_from_google_storage --config')
+    print('and then try again')
   finally:
     if tmp_name:
       os.remove(tmp_name)
@@ -72,11 +78,11 @@ def ProcessCrashreport(base, source):
 def DeleteCrashFiles():
   for root, dirs, files in os.walk(CRASHREPORTS_DIR, topdown=True):
     for d in dirs:
-      print 'removing dir', d
+      print('removing dir', d)
       shutil.rmtree(os.path.join(root, d))
     for f in files:
       if f != '.gitignore':
-        print 'removing', f
+        print('removing', f)
         os.remove(os.path.join(root, f))
     del dirs[:]  # Abort os.walk() after one level.
 
@@ -114,4 +120,4 @@ if __name__ == '__main__':
   try:
     main()
   except Exception as e:
-    print 'got exception:', e
+    print('got exception:', e)

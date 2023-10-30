@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import shared_page_state
@@ -26,13 +26,13 @@ class TopRealWorldDesktopPage(rendering_story.RenderingStory):
         extra_browser_args=extra_browser_args)
 
   def RunPageInteractions(self, action_runner):
-      action_runner.Wait(1)
-      with action_runner.CreateGestureInteraction('ScrollAction'):
-        action_runner.ScrollPage()
-        if self.story_set.scroll_forever:
-          while True:
-            action_runner.ScrollPage(direction='up')
-            action_runner.ScrollPage(direction='down')
+    action_runner.Wait(1)
+    with action_runner.CreateGestureInteraction('ScrollAction'):
+      action_runner.ScrollPage()
+      if self.story_set.scroll_forever:
+        while True:
+          action_runner.ScrollPage(direction='up')
+          action_runner.ScrollPage(direction='down')
 
 
 class GoogleWebSearch2018Page(TopRealWorldDesktopPage):
@@ -40,8 +40,6 @@ class GoogleWebSearch2018Page(TopRealWorldDesktopPage):
   BASE_NAME = 'google_web_search'
   YEAR = '2018'
   URL = 'https://www.google.com/#hl=en&q=barack+obama'
-  TAGS = TopRealWorldDesktopPage.TAGS + [
-      story_tags.REPRESENTATIVE_WIN_DESKTOP]
 
   def __init__(self,
                page_set,
@@ -75,9 +73,6 @@ class GoogleImageSearch2018Page(TopRealWorldDesktopPage):
         shared_page_state_class=shared_page_state_class,
         name_suffix=name_suffix,
         extra_browser_args=extra_browser_args)
-
-  def RunNavigateSteps(self, action_runner):
-    super(GoogleImageSearch2018Page, self).RunNavigateSteps(action_runner)
 
 
 class GooglePlus2018Page(TopRealWorldDesktopPage):
@@ -153,7 +148,6 @@ class Wordpress2018Page(TopRealWorldDesktopPage):
   YEAR = '2018'
   # pylint: disable=line-too-long
   URL = 'http://en.blog.wordpress.com/2012/09/04/freshly-pressed-editors-picks-for-august-2012/'
-  TAGS = TopRealWorldDesktopPage.TAGS + [story_tags.REPRESENTATIVE_MAC_DESKTOP]
 
   def __init__(self,
                page_set,
@@ -264,7 +258,6 @@ class Pinterest2018Page(TopRealWorldDesktopPage):
   BASE_NAME = 'pinterest'
   YEAR = '2018'
   URL = 'https://www.pinterest.com/search/pins/?q=flowers&rs=typed'
-  TAGS = TopRealWorldDesktopPage.TAGS + [story_tags.REPRESENTATIVE_WIN_DESKTOP]
 
   def __init__(self,
                page_set,
@@ -295,12 +288,22 @@ class AccuWeather2018Page(TopRealWorldDesktopPage):
         name_suffix=name_suffix,
         extra_browser_args=extra_browser_args)
 
+  def RunNavigateSteps(self, action_runner):
+    super(AccuWeather2018Page, self).RunNavigateSteps(action_runner)
+
+    # Close a pop-up dialog before scrolling.
+    action_runner.WaitForElement(selector=".fc-button-consent")
+    action_runner.TapElement(selector=".fc-button-consent")
+
 
 class Twitch2018Page(TopRealWorldDesktopPage):
   """ Why: #1 games according to Alexa  """
   BASE_NAME = 'twitch'
   YEAR = '2018'
   URL = 'https://www.twitch.tv'
+  TAGS = TopRealWorldDesktopPage.TAGS + [
+    story_tags.REPRESENTATIVE_MAC_DESKTOP
+  ]
 
   def __init__(self,
                page_set,
@@ -428,7 +431,6 @@ class YahooNews2018Page(TopRealWorldDesktopPage):
   BASE_NAME = 'yahoo_news'
   YEAR = '2018'
   URL = 'http://news.yahoo.com'
-  TAGS = TopRealWorldDesktopPage.TAGS + [story_tags.REPRESENTATIVE_MOBILE]
 
 
 class CNNNews2018Page(TopRealWorldDesktopPage):
@@ -472,7 +474,6 @@ class YahooSports2018Page(TopRealWorldDesktopPage):
   BASE_NAME = 'yahoo_sports'
   YEAR = '2018'
   URL = 'http://sports.yahoo.com/'
-  TAGS = TopRealWorldDesktopPage.TAGS + [story_tags.REPRESENTATIVE_WIN_DESKTOP]
 
 
 class TechCrunch2018Page(TopRealWorldDesktopPage):

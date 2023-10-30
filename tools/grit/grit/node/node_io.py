@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -41,7 +41,7 @@ class FileNode(base.Node):
     defs = getattr(root, 'defines', {})
     target_platform = getattr(root, 'target_platform', '')
 
-    xtb_file = open(self.ToRealPath(self.GetInputPath()))
+    xtb_file = open(self.ToRealPath(self.GetInputPath()), 'rb')
     try:
       lang = xtb_reader.Parse(xtb_file,
                               self.UberClique().GenerateXtbParserCallback(

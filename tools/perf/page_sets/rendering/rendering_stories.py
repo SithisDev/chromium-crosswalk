@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,12 +16,14 @@ from py_utils import discover
 
 class RenderingStorySet(story.StorySet):
   """Stories related to rendering."""
-  def __init__(self, platform, scroll_forever=False):
+
+  def __init__(self, platform, scroll_forever=False, disable_tracing=False):
     super(RenderingStorySet, self).__init__(
         archive_data_file=('../data/rendering_%s.json' % platform),
         cloud_storage_bucket=story.PARTNER_BUCKET)
 
     assert platform in platforms.ALL_PLATFORMS
+    self._platform = platform
 
     if platform == platforms.MOBILE:
       shared_page_state_class = shared_state.MobileRenderingSharedState
@@ -36,8 +38,9 @@ class RenderingStorySet(story.StorySet):
     self.target_scale_factor = 4.0
 
     for story_class in _IterAllRenderingStoryClasses():
-      if (story_class.ABSTRACT_STORY or
-          platform not in story_class.SUPPORTED_PLATFORMS):
+      if (story_class.ABSTRACT_STORY
+          or platform not in story_class.SUPPORTED_PLATFORMS
+          or story_class.DISABLE_TRACING != disable_tracing):
         continue
 
       required_args = []
@@ -62,8 +65,7 @@ class RenderingStorySet(story.StorySet):
       if (story_class.TAGS and
           story_tags.IMAGE_DECODING in story_class.TAGS and
           story_tags.GPU_RASTERIZATION in story_class.TAGS):
-        required_args += ['--force-gpu-rasterization',
-                          '--enable-gpu-rasterization']
+        required_args += ['--enable-gpu-rasterization']
         # Run RGB decoding with GPU rasterization (to be most comparable to YUV)
         self.AddStory(story_class(
             page_set=self,
@@ -79,6 +81,17 @@ class RenderingStorySet(story.StorySet):
           extra_browser_args=required_args,
           shared_page_state_class=shared_page_state_class,
           name_suffix=name_suffix))
+
+  def GetAbridgedStorySetTagFilter(self):
+    if self._platform == platforms.DESKTOP:
+      if os.name == 'nt':
+        return 'representative_win_desktop'
+      # There is no specific tag for linux, cros, etc,
+      # so just use mac's.
+      return 'representative_mac_desktop'
+    if self._platform == platforms.MOBILE:
+      return 'representative_mobile'
+    raise RuntimeError('Platform {} is not in the list of expected platforms.')
 
 
 class DesktopRenderingStorySet(RenderingStorySet):
@@ -100,5 +113,5 @@ def _IterAllRenderingStoryClasses():
   for _, cls in sorted(discover.DiscoverClasses(
       start_dir=start_dir,
       top_level_dir=os.path.dirname(start_dir),
-      base_class=rendering_story.RenderingStory).iteritems()):
+      base_class=rendering_story.RenderingStory).items()):
     yield cls

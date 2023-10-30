@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,10 +49,6 @@ class BlinkGCPluginConsumer : public clang::ASTConsumer {
   void CheckDispatch(RecordInfo* info);
 
   void CheckFinalization(RecordInfo* info);
-
-  void CheckUnneededFinalization(RecordInfo* info);
-
-  bool HasNonEmptyFinalizer(RecordInfo* info);
 
   // This is the main entry for tracing method definitions.
   void CheckTracingMethod(clang::CXXMethodDecl* method);

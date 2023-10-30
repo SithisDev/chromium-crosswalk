@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,7 +9,7 @@ The lexer uses the PLY library to build a tokenizer which understands
 Web IDL tokens.
 
 Web IDL, and Web IDL regular expressions can be found at:
-   http://heycam.github.io/webidl/
+   http://webidl.spec.whatwg.org/
 PLY can be found at:
    http://www.dabeaz.com/ply/
 """
@@ -53,56 +53,58 @@ class IDLLexer(object):
   # KEYWORD_OR_SYMBOL are matched against keywords dictionary, to determine
   # if the token is actually a keyword.
   keywords = {
-    'any' : 'ANY',
-    'attribute' : 'ATTRIBUTE',
-    'boolean' : 'BOOLEAN',
-    'byte' : 'BYTE',
-    'ByteString' : 'BYTESTRING',
-    'callback' : 'CALLBACK',
-    'const' : 'CONST',
-    'creator' : 'CREATOR',
-    'deleter' : 'DELETER',
-    'dictionary' : 'DICTIONARY',
-    'DOMString' : 'DOMSTRING',
-    'double' : 'DOUBLE',
-    'enum'  : 'ENUM',
-    'false' : 'FALSE',
-    'float' : 'FLOAT',
-    'FrozenArray' : 'FROZENARRAY',
-    'getter': 'GETTER',
-    'includes' : 'INCLUDES',
-    'Infinity' : 'INFINITY',
-    'inherit' : 'INHERIT',
-    'interface' : 'INTERFACE',
-    'iterable': 'ITERABLE',
-    'legacycaller' : 'LEGACYCALLER',
-    'long' : 'LONG',
-    'maplike': 'MAPLIKE',
-    'mixin': 'MIXIN',
-    'namespace' : 'NAMESPACE',
-    'Nan' : 'NAN',
-    'null' : 'NULL',
-    'object' : 'OBJECT',
-    'octet' : 'OCTET',
-    'optional' : 'OPTIONAL',
-    'or' : 'OR',
-    'partial' : 'PARTIAL',
-    'Promise' : 'PROMISE',
-    'readonly' : 'READONLY',
-    'record' : 'RECORD',
-    'required' : 'REQUIRED',
-    'sequence' : 'SEQUENCE',
-    'setlike' : 'SETLIKE',
-    'setter': 'SETTER',
-    'short' : 'SHORT',
-    'static' : 'STATIC',
-    'stringifier' : 'STRINGIFIER',
-    'typedef' : 'TYPEDEF',
-    'true' : 'TRUE',
-    'unsigned' : 'UNSIGNED',
-    'unrestricted' : 'UNRESTRICTED',
-    'USVString' : 'USVSTRING',
-    'void' : 'VOID'
+      'any': 'ANY',
+      'async': 'ASYNC',
+      'attribute': 'ATTRIBUTE',
+      'boolean': 'BOOLEAN',
+      'byte': 'BYTE',
+      'ByteString': 'BYTESTRING',
+      'callback': 'CALLBACK',
+      'const': 'CONST',
+      'constructor': 'CONSTRUCTOR',
+      'deleter': 'DELETER',
+      'dictionary': 'DICTIONARY',
+      'DOMString': 'DOMSTRING',
+      'double': 'DOUBLE',
+      'enum': 'ENUM',
+      'false': 'FALSE',
+      'float': 'FLOAT',
+      'FrozenArray': 'FROZENARRAY',
+      'getter': 'GETTER',
+      'includes': 'INCLUDES',
+      'Infinity': 'INFINITY',
+      'inherit': 'INHERIT',
+      'interface': 'INTERFACE',
+      'iterable': 'ITERABLE',
+      'long': 'LONG',
+      'maplike': 'MAPLIKE',
+      'mixin': 'MIXIN',
+      'namespace': 'NAMESPACE',
+      'NaN': 'NAN',
+      'null': 'NULL',
+      'object': 'OBJECT',
+      'ObservableArray': 'OBSERVABLEARRAY',
+      'octet': 'OCTET',
+      'optional': 'OPTIONAL',
+      'or': 'OR',
+      'partial': 'PARTIAL',
+      'Promise': 'PROMISE',
+      'readonly': 'READONLY',
+      'record': 'RECORD',
+      'required': 'REQUIRED',
+      'sequence': 'SEQUENCE',
+      'setlike': 'SETLIKE',
+      'setter': 'SETTER',
+      'short': 'SHORT',
+      'static': 'STATIC',
+      'stringifier': 'STRINGIFIER',
+      'true': 'TRUE',
+      'typedef': 'TYPEDEF',
+      'undefined': 'UNDEFINED',
+      'unrestricted': 'UNRESTRICTED',
+      'unsigned': 'UNSIGNED',
+      'USVString': 'USVSTRING',
+      'void': 'VOID'
   }
 
   # Token definitions
@@ -250,8 +252,6 @@ class IDLLexer(object):
     return self.tokens
 
   def Lexer(self):
-    if not self._lexobj:
-      self._lexobj = lex.lex(object=self, lextab=None, optimize=0)
     return self._lexobj
 
   def _AddToken(self, token):
@@ -274,7 +274,7 @@ class IDLLexer(object):
       self.tokens.remove(key.upper())
       del self.keywords[key]
 
-  def __init__(self):
+  def __init__(self, optimize=True):
     self.index = [0]
     self._lex_errors = 0
     self.linex = []
@@ -283,7 +283,7 @@ class IDLLexer(object):
     self.tokens = []
     self._AddTokens(IDLLexer.tokens)
     self._AddKeywords(IDLLexer.keywords)
-    self._lexobj = None
+    self._lexobj = lex.lex(object=self, lextab=False, optimize=optimize)
     self.last = None
     self.lines = None
 

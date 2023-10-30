@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,8 @@ class HeapObject : public GarbageCollected<HeapObject> { };
 template<typename T>
 class TemplatedObject : public GarbageCollected<TemplatedObject<T> > {
 public:
-    virtual void Trace(Visitor*);
+ virtual void Trace(Visitor*) const;
+
 private:
     T m_one;
     T m_two;

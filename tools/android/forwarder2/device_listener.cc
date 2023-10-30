@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "tools/android/forwarder2/command.h"
 #include "tools/android/forwarder2/forwarder.h"
@@ -23,7 +23,7 @@ namespace forwarder2 {
 std::unique_ptr<DeviceListener> DeviceListener::Create(
     std::unique_ptr<Socket> host_socket,
     int listener_port,
-    const ErrorCallback& error_callback) {
+    ErrorCallback error_callback) {
   std::unique_ptr<Socket> listener_socket(new Socket());
   std::unique_ptr<DeviceListener> device_listener;
   if (!listener_socket->BindTcp("", listener_port)) {
@@ -36,9 +36,9 @@ std::unique_ptr<DeviceListener> DeviceListener::Create(
   // currently (non-zero) allocated port for this socket.
   listener_port = listener_socket->GetPort();
   SendCommand(command::BIND_SUCCESS, listener_port, host_socket.get());
-  device_listener.reset(new DeviceListener(std::move(listener_socket),
-                                           std::move(host_socket),
-                                           listener_port, error_callback));
+  device_listener.reset(
+      new DeviceListener(std::move(listener_socket), std::move(host_socket),
+                         listener_port, std::move(error_callback)));
   return device_listener;
 }
 
@@ -62,8 +62,8 @@ void DeviceListener::SetAdbDataSocket(std::unique_ptr<Socket> adb_data_socket) {
 DeviceListener::DeviceListener(std::unique_ptr<Socket> listener_socket,
                                std::unique_ptr<Socket> host_socket,
                                int port,
-                               const ErrorCallback& error_callback)
-    : self_deleter_helper_(this, error_callback),
+                               ErrorCallback error_callback)
+    : self_deleter_helper_(this, std::move(error_callback)),
       listener_socket_(std::move(listener_socket)),
       host_socket_(std::move(host_socket)),
       listener_port_(port),
@@ -82,7 +82,7 @@ void DeviceListener::AcceptNextClientSoon() {
 }
 
 void DeviceListener::AcceptClientOnInternalThread() {
-  device_data_socket_.reset(new Socket());
+  device_data_socket_ = std::make_unique<Socket>();
   if (!listener_socket_->Accept(device_data_socket_.get())) {
     if (listener_socket_->DidReceiveEvent()) {
       LOG(INFO) << "Received exit notification, stopped accepting clients.";

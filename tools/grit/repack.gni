@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,9 +16,15 @@ import("//tools/grit/grit_rule.gni")
 #   copy_data_to_bundle [optional]
 #       Whether to define a bundle_data() for the resulting pak.
 #
+#   mark_as_data
+#       Whether to add the resulting pak to |data|.
+#
 #   bundle_output [optional]
 #       Path of the file in the application bundle, defaults to
 #       {{bundle_resources_dir}}/{{source_file_part}}.
+#
+#   compress  [optional]
+#       Gzip the resulting bundle (and append .gz to the output name).
 #
 #   deps  [optional]
 #   public_deps  [optional]
@@ -31,6 +37,8 @@ template("repack") {
   if (_copy_data_to_bundle) {
     _repack_target_name = "${target_name}__repack"
   }
+
+  _compress = defined(invoker.compress) && invoker.compress
 
   action(_repack_target_name) {
     forward_variables_from(invoker,
@@ -48,24 +56,34 @@ template("repack") {
 
     script = "//tools/grit/pak_util.py"
 
-    inputs = invoker.sources
-    foreach(_invoker_source, invoker.sources) {
-      inputs += [ "${_invoker_source}.info" ]
+    inputs = []
+    foreach(source, invoker.sources) {
+      inputs += [
+        source,
+        "${source}.info",
+      ]
     }
     outputs = [
       invoker.output,
       "${invoker.output}.info",
     ]
 
+    if (defined(invoker.mark_as_data) && invoker.mark_as_data) {
+      data = [ invoker.output ]
+    }
+
     args = [ "repack" ]
-    if (defined(invoker.repack_whitelist)) {
-      inputs += [ invoker.repack_whitelist ]
-      _rebased_whitelist = rebase_path(invoker.repack_whitelist)
-      args += [ "--whitelist=$_rebased_whitelist" ]
+    if (defined(invoker.repack_allowlist)) {
+      inputs += [ invoker.repack_allowlist ]
+      _rebased_allowlist = rebase_path(invoker.repack_allowlist)
+      args += [ "--allowlist=$_rebased_allowlist" ]
       args += [ "--suppress-removed-key-output" ]
     }
     args += [ rebase_path(invoker.output, root_build_dir) ]
     args += rebase_path(invoker.sources, root_build_dir)
+    if (_compress) {
+      args += [ "--compress" ]
+    }
   }
 
   if (_copy_data_to_bundle) {
@@ -76,20 +94,12 @@ template("repack") {
                                "visibility",
                              ])
 
-      public_deps = [
-        ":$_repack_target_name",
-      ]
-      sources = [
-        invoker.output,
-      ]
+      public_deps = [ ":$_repack_target_name" ]
+      sources = [ invoker.output ]
       if (defined(invoker.bundle_output)) {
-        outputs = [
-          invoker.bundle_output,
-        ]
+        outputs = [ invoker.bundle_output ]
       } else {
-        outputs = [
-          "{{bundle_resources_dir}}/{{source_file_part}}",
-        ]
+        outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
       }
     }
   }
@@ -120,7 +130,7 @@ template("repack") {
 #   visibility  [optional]
 #   testonly  [optional]
 #   copy_data_to_bundle [optional]
-#   repack_whitelist [optional]
+#   repack_allowlist [optional]
 #       Normal meaning.
 template("repack_locales") {
   if (defined(invoker.output_dir)) {
@@ -151,10 +161,12 @@ template("repack_locales") {
     repack(_current_name) {
       forward_variables_from(invoker,
                              [
-                               "copy_data_to_bundle",
                                "bundle_output",
+                               "compress",
+                               "copy_data_to_bundle",
                                "deps",
-                               "repack_whitelist",
+                               "mark_as_data",
+                               "repack_allowlist",
                                "testonly",
                              ])
       visibility = [ ":${invoker.target_name}" ]
@@ -167,7 +179,6 @@ template("repack_locales") {
         bundle_output =
             "{{bundle_resources_dir}}/${_output_locale}.lproj/locale.pak"
       }
-      set_sources_assignment_filter([])
       sources = []
       foreach(_pattern, invoker.source_patterns) {
         sources += [ "${_pattern}${_input_locale}.pak" ]

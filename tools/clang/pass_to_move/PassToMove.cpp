@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -99,6 +99,9 @@ int main(int argc, const char* argv[]) {
   int result = tool.run(factory.get());
   if (result != 0)
     return result;
+
+  if (replacements.empty())
+    return 0;
 
   // Serialization format is documented in tools/clang/scripts/run_tool.py
   llvm::outs() << "==== BEGIN EDITS ====\n";

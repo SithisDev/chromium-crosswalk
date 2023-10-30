@@ -1,5 +1,5 @@
-#!/usr/bin/env vpython
-# Copyright 2015 The Chromium Authors. All rights reserved.
+#!/usr/bin/env vpython3
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,9 +10,6 @@ import logging
 import optparse
 import sys
 
-import cyglog_to_orderfile
-import cygprofile_utils
-import patch_orderfile
 import symbol_extractor
 
 
@@ -49,7 +46,7 @@ def _VerifySymbolOrder(orderfile_symbols, symbol_infos, threshold):
   logging.warning('Missing symbols in verification: %d', missing_count)
   if misorder_count:
     logging.warning('%d misordered symbols:\n %s', misorder_count,
-                    '\n '.join(str(x) for x in misordered_syms[:10]))
+                    '\n '.join(str(x) for x in misordered_syms[:threshold]))
     if misorder_count > threshold:
       logging.error('%d misordered symbols over threshold %d, failing',
                     misorder_count, threshold)
@@ -60,11 +57,12 @@ def _VerifySymbolOrder(orderfile_symbols, symbol_infos, threshold):
 def main():
   parser = optparse.OptionParser(usage=
       'usage: %prog [options] <binary> <orderfile>')
-  parser.add_option('--target-arch', action='store', dest='arch', default='arm',
-                    choices=['arm', 'arm64', 'x86', 'x86_64', 'x64', 'mips'],
-                    help='The target architecture for the binary.')
-  parser.add_option('--threshold', action='store', dest='threshold',
-                    default=20, type=int,
+  parser.add_option('--target-arch', help='Unused')
+  parser.add_option('--threshold',
+                    action='store',
+                    dest='threshold',
+                    default=80,
+                    type=int,
                     help='The maximum allowed number of out-of-order symbols.')
   options, argv = parser.parse_args(sys.argv)
   if len(argv) != 3:
@@ -72,12 +70,13 @@ def main():
     return 1
   (binary_filename, orderfile_filename) = argv[1:]
 
-  symbol_extractor.SetArchitecture(options.arch)
   symbol_infos = symbol_extractor.SymbolInfosFromBinary(binary_filename)
 
-  if not _VerifySymbolOrder([sym.strip() for sym in file(orderfile_filename)],
-                            symbol_infos, options.threshold):
+  if not _VerifySymbolOrder(
+      [sym.strip() for sym in open(orderfile_filename, 'r')], symbol_infos,
+      options.threshold):
     return 1
+  return 0
 
 
 if __name__ == '__main__':

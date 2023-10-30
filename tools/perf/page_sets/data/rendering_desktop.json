@@ -21,6 +21,21 @@
         "animometer_webgl_attrib_arrays": {
             "DEFAULT": "rendering_desktop_3a59b064d2.wprgo"
         },
+        "animometer_webgl_fast_call": {
+            "DEFAULT": "rendering_desktop_011.wprgo"
+        },
+        "animometer_webgl_indexed": {
+            "DEFAULT": "rendering_desktop_e0cf9b9bd8.wprgo"
+        },
+        "animometer_webgl_indexed_fast_call": {
+            "DEFAULT": "rendering_desktop_e0cf9b9bd8.wprgo"
+        },
+        "animometer_webgl_indexed_multi_draw": {
+            "DEFAULT": "rendering_desktop_e0cf9b9bd8.wprgo"
+        },
+        "animometer_webgl_indexed_multi_draw_base_vertex_base_instance": {
+            "DEFAULT": "rendering_desktop_e0cf9b9bd8.wprgo"
+        },
         "animometer_webgl_multi_draw": {
             "DEFAULT": "rendering_desktop_a8987d91b9.wprgo"
         },
@@ -28,6 +43,9 @@
             "DEFAULT": "rendering_desktop_011.wprgo"
         },
         "aquarium_20k": {
+            "DEFAULT": "rendering_desktop_011.wprgo"
+        },
+        "aquarium_20k_fast_call": {
             "DEFAULT": "rendering_desktop_011.wprgo"
         },
         "blob": {
@@ -105,9 +123,6 @@
         "filter_terrain_svg": {
             "DEFAULT": "rendering_desktop_002.wprgo"
         },
-        "geo_apis": {
-            "DEFAULT": "rendering_desktop_004.wprgo"
-        },
         "gmail_2018": {
             "DEFAULT": "rendering_desktop_000.wprgo"
         },
@@ -162,9 +177,6 @@
         "js_poster_circle": {
             "DEFAULT": "rendering_desktop_009.wprgo"
         },
-        "js_scroll_200_layer_grid": {
-            "DEFAULT": "rendering_desktop_05c1f9e507.wprgo"
-        },
         "js_scroll_text_only": {
             "DEFAULT": "rendering_desktop_a2106b0095.wprgo"
         },
@@ -177,6 +189,12 @@
         "linkedin_pinch_2018": {
             "DEFAULT": "rendering_desktop_f083c0f144.wprgo"
         },
+        "lost_crypt": {
+            "DEFAULT": "rendering_desktop_fb80bbcb6f.wprgo"
+        },
+        "lost_crypt_fast_call": {
+            "DEFAULT": "rendering_desktop_fb80bbcb6f.wprgo"
+        },
         "man_in_blue": {
             "DEFAULT": "rendering_desktop_004.wprgo"
         },
@@ -188,6 +206,12 @@
         },
         "megi_dish": {
             "DEFAULT": "rendering_desktop_004.wprgo"
+        },
+        "microgame_fps": {
+            "DEFAULT": "rendering_desktop_fb80bbcb6f.wprgo"
+        },
+        "microgame_fps_fast_call": {
+            "DEFAULT": "rendering_desktop_fb80bbcb6f.wprgo"
         },
         "microsoft_asteroid_belt": {
             "DEFAULT": "rendering_desktop_004.wprgo"
@@ -227,6 +251,33 @@
         },
         "motion_mark_focus": {
             "DEFAULT": "rendering_desktop_002.wprgo"
+        },
+        "motionmark_ramp_canvas_arcs": {
+            "DEFAULT": "rendering_common_c95200764f.wprgo"
+        },
+        "motionmark_ramp_canvas_lines": {
+            "DEFAULT": "rendering_common_c95200764f.wprgo"
+        },
+        "motionmark_ramp_composite": {
+            "DEFAULT": "rendering_common_c95200764f.wprgo"
+        },
+        "motionmark_ramp_design": {
+            "DEFAULT": "rendering_common_c95200764f.wprgo"
+        },
+        "motionmark_ramp_images": {
+            "DEFAULT": "rendering_common_c95200764f.wprgo"
+        },
+        "motionmark_ramp_leaves": {
+            "DEFAULT": "rendering_common_c95200764f.wprgo"
+        },
+        "motionmark_ramp_multiply": {
+            "DEFAULT": "rendering_common_c95200764f.wprgo"
+        },
+        "motionmark_ramp_paths": {
+            "DEFAULT": "rendering_common_c95200764f.wprgo"
+        },
+        "motionmark_ramp_suits": {
+            "DEFAULT": "rendering_common_c95200764f.wprgo"
         },
         "new_tilings": {
             "DEFAULT": "rendering_desktop_010.wprgo"
@@ -270,11 +321,17 @@
         "repaint_yahoo_homepage_2018": {
             "DEFAULT": "rendering_desktop_fdde4c2d8b.wprgo"
         },
-        "runway": {
-            "DEFAULT": "rendering_desktop_004.wprgo"
+        "runway_2019": {
+            "DEFAULT": "rendering_desktop_00acdd603b.wprgo"
         },
         "san_angeles": {
             "DEFAULT": "rendering_desktop_011.wprgo"
+        },
+        "skelebuddies_wasm_2020": {
+            "DEFAULT": "rendering_desktop_fb80bbcb6f.wprgo"
+        },
+        "skelebuddies_wasm_2020_fast_call": {
+            "DEFAULT": "rendering_desktop_fb80bbcb6f.wprgo"
         },
         "smash_cat": {
             "DEFAULT": "rendering_desktop_004.wprgo"
@@ -284,6 +341,12 @@
         },
         "techcrunch_2018": {
             "DEFAULT": "rendering_desktop_000.wprgo"
+        },
+        "tiny_racing_v3_wasm_2020": {
+            "DEFAULT": "rendering_desktop_fb80bbcb6f.wprgo"
+        },
+        "tiny_racing_v3_wasm_2020_fast_call": {
+            "DEFAULT": "rendering_desktop_fb80bbcb6f.wprgo"
         },
         "twitch_2018": {
             "DEFAULT": "rendering_desktop_000.wprgo"

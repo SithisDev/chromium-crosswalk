@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,8 +11,9 @@ import ast
 import os
 import struct
 import sys
-import types
 from xml.sax import saxutils
+
+import six
 
 from grit import constants
 from grit import clique
@@ -30,8 +31,15 @@ class Node(object):
   _CONTENT_TYPE_CDATA = 1  # Only CDATA, no children.
   _CONTENT_TYPE_MIXED = 2  # CDATA and children, possibly intermingled
 
-  # Default nodes to not whitelist skipped
-  _whitelist_marked_as_skip = False
+  # Types of files to be compressed by default.
+  _COMPRESS_BY_DEFAULT_EXTENSIONS = ('.js', '.html', '.css', '.svg')
+
+  # Types of files to disallow compressing, as it provides no benefit, and can
+  # potentially even make the file larger.
+  _COMPRESS_DISALLOWED_EXTENSIONS = ('.png', '.jpg')
+
+  # Default nodes to not allowlist skipped
+  _allowlist_marked_as_skip = False
 
   # A class-static cache to speed up EvaluateExpression().
   # Keys are expressions (e.g. 'is_ios and lang == "fr"'). Values are tuples
@@ -43,8 +51,8 @@ class Node(object):
   def __init__(self):
     self.children = []        # A list of child elements
     self.mixed_content = []   # A list of u'' and/or child elements (this
-                              # duplicates 'children' but
-                              # is needed to preserve markup-type content).
+    # duplicates 'children' but
+    # is needed to preserve markup-type content).
     self.name = u''           # The name of this element
     self.attrs = {}           # The set of attributes (keys to values)
     self.parent = None        # Our parent unless we are the root element.
@@ -59,7 +67,7 @@ class Node(object):
 
   def __exit__(self, exc_type, exc_value, traceback):
     if exc_type is not None:
-      print(u'Error processing node %s' % unicode(self))
+      print(u'Error processing node %s: %s' % (six.text_type(self), exc_value))
 
   def __iter__(self):
     '''A preorder iteration through the tree that this node is the root of.'''
@@ -76,7 +84,7 @@ class Node(object):
   def ActiveChildren(self):
     '''Returns the children of this node that should be included in the current
     configuration. Overridden by <if>.'''
-    return [node for node in self.children if not node.WhitelistMarkedAsSkip()]
+    return [node for node in self.children if not node.AllowlistMarkedAsSkip()]
 
   def ActiveDescendants(self):
     '''Yields the current node and all descendants that should be included in
@@ -112,7 +120,7 @@ class Node(object):
       name: u'elementname'
       parent: grit.node.base.Node or subclass or None
     '''
-    assert isinstance(name, types.StringTypes)
+    assert isinstance(name, six.string_types)
     assert not parent or isinstance(parent, Node)
     self.name = name
     self.parent = parent
@@ -155,7 +163,7 @@ class Node(object):
     Return:
       None
     '''
-    assert isinstance(content, types.StringTypes)
+    assert isinstance(content, six.string_types)
     if self._ContentType() != self._CONTENT_TYPE_NONE:
       self.mixed_content.append(content)
     elif content.strip() != '':
@@ -172,8 +180,8 @@ class Node(object):
     Return:
       None
     '''
-    assert isinstance(attrib, types.StringTypes)
-    assert isinstance(value, types.StringTypes)
+    assert isinstance(attrib, six.string_types)
+    assert isinstance(value, six.string_types)
     if self._IsValidAttribute(attrib, value):
       self.attrs[attrib] = value
     else:
@@ -184,34 +192,34 @@ class Node(object):
 
     # TODO(joi) Rewrite this, it's extremely ugly!
     if len(self.mixed_content):
-      if isinstance(self.mixed_content[0], types.StringTypes):
+      if isinstance(self.mixed_content[0], six.string_types):
         # Remove leading and trailing chunks of pure whitespace.
         while (len(self.mixed_content) and
-               isinstance(self.mixed_content[0], types.StringTypes) and
+               isinstance(self.mixed_content[0], six.string_types) and
                self.mixed_content[0].strip() == ''):
           self.mixed_content = self.mixed_content[1:]
         # Strip leading and trailing whitespace from mixed content chunks
         # at front and back.
         if (len(self.mixed_content) and
-            isinstance(self.mixed_content[0], types.StringTypes)):
+            isinstance(self.mixed_content[0], six.string_types)):
           self.mixed_content[0] = self.mixed_content[0].lstrip()
         # Remove leading and trailing ''' (used to demarcate whitespace)
         if (len(self.mixed_content) and
-            isinstance(self.mixed_content[0], types.StringTypes)):
+            isinstance(self.mixed_content[0], six.string_types)):
           if self.mixed_content[0].startswith("'''"):
             self.mixed_content[0] = self.mixed_content[0][3:]
     if len(self.mixed_content):
-      if isinstance(self.mixed_content[-1], types.StringTypes):
+      if isinstance(self.mixed_content[-1], six.string_types):
         # Same stuff all over again for the tail end.
         while (len(self.mixed_content) and
-               isinstance(self.mixed_content[-1], types.StringTypes) and
+               isinstance(self.mixed_content[-1], six.string_types) and
                self.mixed_content[-1].strip() == ''):
           self.mixed_content = self.mixed_content[:-1]
         if (len(self.mixed_content) and
-            isinstance(self.mixed_content[-1], types.StringTypes)):
+            isinstance(self.mixed_content[-1], six.string_types)):
           self.mixed_content[-1] = self.mixed_content[-1].rstrip()
         if (len(self.mixed_content) and
-            isinstance(self.mixed_content[-1], types.StringTypes)):
+            isinstance(self.mixed_content[-1], six.string_types)):
           if self.mixed_content[-1].endswith("'''"):
             self.mixed_content[-1] = self.mixed_content[-1][:-3]
 
@@ -225,7 +233,7 @@ class Node(object):
 
       mandatt_option_found = False
       for mandatt in mandatt_list:
-        assert mandatt not in self.DefaultAttributes().keys()
+        assert mandatt not in self.DefaultAttributes()
         if mandatt in self.attrs:
           if not mandatt_option_found:
             mandatt_option_found = True
@@ -240,17 +248,27 @@ class Node(object):
       if not defattr in self.attrs:
         self.attrs[defattr] = self.DefaultAttributes()[defattr]
 
+    # Check that |file| does not point to a TypeScript (.ts) file, as those
+    # files should not be included in the final build.
+    if self.attrs.get('file'):
+      assert not self.attrs.get('file').endswith('.ts'), (
+          'TypeScript files should not be added to Grit: Found \'%s\'' %
+          self.attrs.get('file'))
+
   def GetCdata(self):
     '''Returns all CDATA of this element, concatenated into a single
     string.  Note that this ignores any elements embedded in CDATA.'''
     return ''.join([c for c in self.mixed_content
-                    if isinstance(c, types.StringTypes)])
+                    if isinstance(c, six.string_types)])
 
-  def __unicode__(self):
+  def __str__(self):
     '''Returns this node and all nodes below it as an XML document in a Unicode
     string.'''
     header = u'<?xml version="1.0" encoding="UTF-8"?>\n'
     return header + self.FormatXml()
+
+  # Some Python 2 glue.
+  __unicode__ = __str__
 
   def FormatXml(self, indent = u'', one_line = False):
     '''Returns this node and all nodes below it as an XML
@@ -259,7 +277,7 @@ class Node(object):
     children and CDATA are layed out in a way that preserves internal
     whitespace.
     '''
-    assert isinstance(indent, types.StringTypes)
+    assert isinstance(indent, six.string_types)
 
     content_one_line = (one_line or
                         self._ContentType() == self._CONTENT_TYPE_MIXED)
@@ -276,7 +294,8 @@ class Node(object):
     # Finally build the XML for our node and return it
     if len(inside_content) > 0:
       if one_line:
-        return u'<%s%s>%s</%s>' % (self.name, attribs, inside_content, self.name)
+        return u'<%s%s>%s</%s>' % (self.name, attribs, inside_content,
+                                   self.name)
       elif content_one_line:
         return u'%s<%s%s>\n%s  %s\n%s</%s>' % (
           indent, self.name, attribs,
@@ -293,7 +312,7 @@ class Node(object):
   def ContentsAsXml(self, indent, one_line):
     '''Returns the contents of this node (CDATA and child elements) in XML
     format.  If 'one_line' is true, the content will be laid out on one line.'''
-    assert isinstance(indent, types.StringTypes)
+    assert isinstance(indent, six.string_types)
 
     # Build the contents of the element.
     inside_parts = []
@@ -319,7 +338,7 @@ class Node(object):
 
     # If the last item is a string (not a node) and ends with whitespace,
     # we need to add the ''' delimiter.
-    if (isinstance(last_item, types.StringTypes) and
+    if (isinstance(last_item, six.string_types) and
         last_item.rstrip() != last_item):
       inside_parts[-1] = inside_parts[-1] + u"'''"
 
@@ -420,6 +439,15 @@ class Node(object):
     else:
       return self.attrs['translateable'] == 'true'
 
+  def IsAccessibilityWithNoUI(self):
+    '''Returns true if the node is marked as an accessibility label and the
+    message isn't shown in the UI. Otherwise returns false. This label is
+    used to determine if the text requires screenshots.'''
+    if not 'is_accessibility_with_no_ui' in self.attrs:
+      return False
+    else:
+      return self.attrs['is_accessibility_with_no_ui'] == 'true'
+
   def GetNodeById(self, id):
     '''Returns the node in the subtree parented by this node that has a 'name'
     attribute matching 'id'.  Returns None if no such node is found.
@@ -451,6 +479,16 @@ class Node(object):
   @classmethod
   def EvaluateExpression(cls, expr, defs, target_platform, extra_variables={}):
     '''Worker for EvaluateCondition (below) and conditions in XTB files.'''
+
+    if target_platform == 'chromeos':
+      assert defs.get('chromeos_ash', False) != defs.get(
+          'chromeos_lacros',
+          False), 'The chromeos target must be either ash or lacros'
+    else:
+      assert not defs.get('chromeos_ash', False) and not defs.get(
+          'chromeos_lacros',
+          False), 'Non-chromeos targets cannot be ash or lacros'
+
     if expr in cls.eval_expr_cache:
       code, variables_in_expr = cls.eval_expr_cache[expr]
     else:
@@ -470,7 +508,9 @@ class Node(object):
         value = defs
 
       elif name == 'is_linux':
-        value = target_platform.startswith('linux')
+        value = target_platform == 'linux'
+      elif name == 'is_chromeos':
+        value = target_platform == 'chromeos'
       elif name == 'is_macosx':
         value = target_platform == 'darwin'
       elif name == 'is_win':
@@ -479,11 +519,13 @@ class Node(object):
         value = target_platform == 'android'
       elif name == 'is_ios':
         value = target_platform == 'ios'
+      elif name == 'is_fuchsia':
+        value = target_platform == 'fuchsia'
       elif name == 'is_bsd':
         value = 'bsd' in target_platform
       elif name == 'is_posix':
-        value = (target_platform in ('darwin', 'linux2', 'linux3', 'sunos5',
-                                     'android', 'ios')
+        value = (target_platform in ('linux', 'darwin', 'sunos5', 'android',
+                                     'ios', 'chromeos')
                  or 'bsd' in target_platform)
 
       elif name == 'pp_ifdef':
@@ -500,8 +542,9 @@ class Node(object):
       elif name in extra_variables:
         value = extra_variables[name]
       else:
-        # Undefined variables default to False.
-        value = False
+        # Undefined variables are disallowed. All variables appearing in
+        # <if expr> conditions need to be defined.
+        assert False, 'undefined Grit variable found: ' + name
 
       variable_map[name] = value
 
@@ -519,7 +562,7 @@ class Node(object):
       - 'context' is the current output context
            (the 'context' attribute of the <output> element).
       - 'defs' is a map of C preprocessor-style symbol names to their values.
-      - 'os' is the current platform (likely 'linux2', 'win32' or 'darwin').
+      - 'os' is the current platform (likely 'linux', 'win32' or 'darwin').
       - 'pp_ifdef(symbol)' is a shorthand for "symbol in defs".
       - 'pp_if(symbol)' is a shorthand for "symbol in defs and defs[symbol]".
       - 'is_linux', 'is_macosx', 'is_win', 'is_posix' are true if 'os'
@@ -582,16 +625,16 @@ class Node(object):
     return self.FindBooleanAttribute('fallback_to_english',
                                      default=False, skip_self=True)
 
-  def WhitelistMarkedAsSkip(self):
+  def AllowlistMarkedAsSkip(self):
     '''Returns true if the node is marked to be skipped in the output by a
-    whitelist.
+    allowlist.
     '''
-    return self._whitelist_marked_as_skip
+    return self._allowlist_marked_as_skip
 
-  def SetWhitelistMarkedAsSkip(self, mark_skipped):
-    '''Sets WhitelistMarkedAsSkip.
+  def SetAllowlistMarkedAsSkip(self, mark_skipped):
+    '''Sets AllowlistMarkedAsSkip.
     '''
-    self._whitelist_marked_as_skip = mark_skipped
+    self._allowlist_marked_as_skip = mark_skipped
 
   def ExpandVariables(self):
     '''Whether we need to expand variables on a given node.'''
@@ -610,15 +653,26 @@ class Node(object):
       The data in gzipped or brotli compressed format. If the format is
       unspecified then this returns the data uncompressed.
     '''
-    if self.attrs.get('compress') == 'gzip':
-      # We only use rsyncable compression on Linux.
-      # We exclude ChromeOS since ChromeOS bots are Linux based but do not have
-      # the --rsyncable option built in for gzip. See crbug.com/617950.
-      if sys.platform == 'linux2' and 'chromeos' not in self.GetRoot().defines:
+
+    compress = self.attrs.get('compress')
+    assert not (
+        compress != 'default' and compress != 'false' and
+        self.attrs.get('file').endswith(self._COMPRESS_DISALLOWED_EXTENSIONS)
+    ), 'Disallowed |compress| attribute found for %s' % self.attrs.get('name')
+
+    # Compress JS, HTML, CSS and SVG files by default (gzip), unless |compress|
+    # is explicitly specified.
+    compress_by_default = (compress == 'default'
+                           and self.attrs.get('file').endswith(
+                               self._COMPRESS_BY_DEFAULT_EXTENSIONS))
+
+    if compress == 'gzip' or compress_by_default:
+      # We only use rsyncable compression for platforms built on Linux.
+      if sys.platform == 'linux':
         return grit.format.gzip_string.GzipStringRsyncable(data)
       return grit.format.gzip_string.GzipString(data)
 
-    elif self.attrs.get('compress') in ('true', 'brotli'):
+    if compress == 'brotli':
       # The length of the uncompressed data as 8 bytes little-endian.
       size_bytes = struct.pack("<q", len(data))
       data = brotli_util.BrotliCompress(data)
@@ -627,16 +681,15 @@ class Node(object):
       # The length of the uncompressed data is also appended to the start,
       # truncated to 6 bytes, little-endian. size_bytes is 8 bytes,
       # need to truncate further to 6.
-      formatter = '%ds %dx %ds' % (6, 2, len(size_bytes) - 8)
+      formatter = b'%ds %dx %ds' % (6, 2, len(size_bytes) - 8)
       return (constants.BROTLI_CONST +
              b''.join(struct.unpack(formatter, size_bytes)) +
              data)
 
-    elif self.attrs.get('compress') == 'false':
+    if compress == 'false' or compress == 'default':
       return data
 
-    else:
-      raise Exception('Invalid value for compression')
+    raise Exception('Invalid value for compression')
 
 
 class ContentNode(Node):

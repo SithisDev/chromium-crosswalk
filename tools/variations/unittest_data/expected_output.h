@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include <cstddef>
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "components/variations/proto/study.pb.h"
 
 struct OverrideUIString {
@@ -30,7 +31,8 @@ struct FieldTrialTestingExperiment {
   const size_t platforms_size;
   const Study::FormFactor * form_factors;
   const size_t form_factors_size;
-  const Study::OptionalBool is_low_end_device;
+  const absl::optional<bool> is_low_end_device;
+  const char* const min_os_version;
   const FieldTrialTestingExperimentParams * params;
   const size_t params_size;
   const char* const * enable_features;

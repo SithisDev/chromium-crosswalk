@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,11 @@ import com.google.errorprone.matchers.Matchers;
 import com.sun.source.tree.AnnotationTree;
 
 /**
- * Assert android.support.annotation.Nullable is used instead of javax.annotation.Nullable.
+ * Assert androidx.annotation.Nullable is used instead of javax.annotation.Nullable.
  */
 @AutoService(BugChecker.class)
-@BugPattern(name = "AndroidNullableCheck", category = BugPattern.Category.ANDROID,
-        summary = "Use android.support.annotation.Nullable instead of javax.annotation.Nullable.",
+@BugPattern(name = "AndroidNullableCheck",
+        summary = "Use androidx.annotation.Nullable instead of javax.annotation.Nullable.",
         severity = BugPattern.SeverityLevel.ERROR, linkType = BugPattern.LinkType.CUSTOM,
         link = "http://crbug.com/771683")
 public class AndroidNullableCheck extends BugChecker implements BugChecker.AnnotationTreeMatcher {

@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -63,7 +63,6 @@ from __future__ import print_function
 
 import os
 import re
-import types
 import xml.sax.saxutils
 
 from grit import lazy_re
@@ -78,7 +77,7 @@ _TAGGED_ONLY_DEFAULT = False
 # In tagged-only mode, only messages with this tag will be ouputted.
 _EMIT_TAG = 'android_java'
 
-_NAME_PATTERN = lazy_re.compile('IDS_(?P<name>[A-Z0-9_]+)\Z')
+_NAME_PATTERN = lazy_re.compile(r'IDS_(?P<name>[A-Z0-9_]+)\Z')
 
 # Most strings are output as a <string> element. Note the double quotes
 # around the value to preserve whitespace.
@@ -89,14 +88,15 @@ _PLURALS_TEMPLATE = '<plurals name="%s">\n%s</plurals>\n'
 _PLURALS_ITEM_TEMPLATE = '  <item quantity="%s">%s</item>\n'
 
 # Matches e.g. "{HELLO, plural, HOW ARE YOU DOING}", while capturing
-# "HOW ARE YOU DOING" in <items>.
-_PLURALS_PATTERN = lazy_re.compile(r'\{[A-Z_]+,\s*plural,(?P<items>.*)\}$',
-                                   flags=re.S)
+# "HOW ARE YOU DOING" in <items>. The en-XA pseudolocale adds a set of words
+# beginning with " - one" after the plural block which is also captured.
+_PLURALS_PATTERN = lazy_re.compile(
+    r'\{[A-Z_]+,\s*plural,(?P<items>.*)\}(?P<pseudolong> - one.*)?$', flags=re.S)
 
 # Repeatedly matched against the <items> capture in _PLURALS_PATTERN,
 # to match "<quantity>{<value>}".
 _PLURALS_ITEM_PATTERN = lazy_re.compile(r'(?P<quantity>\S+?)\s*'
-                                        '\{(?P<value>.*?)\}')
+                                        r'\{(?P<value>.*?)\}')
 _PLURALS_QUANTITY_MAP = {
   '=0': 'zero',
   'zero': 'zero',
@@ -174,12 +174,16 @@ def _FormatPluralMessage(message):
   if not plural_match:
     return None
   body_in = plural_match.group('items').strip()
+  # If this is the en-XA pseudolocale get the extra words added.
+  psudolong_extra = plural_match.group('pseudolong')
+  if not psudolong_extra:
+    psudolong_extra = ''
   lines = []
   quantities_so_far = set()
   for item_match in _PLURALS_ITEM_PATTERN.finditer(body_in):
     quantity_in = item_match.group('quantity')
     quantity_out = _PLURALS_QUANTITY_MAP.get(quantity_in)
-    value_in = item_match.group('value')
+    value_in = item_match.group('value') + psudolong_extra
     value_out = '"' + value_in.replace('#', '%d') + '"'
     if quantity_out:
       # only one line per quantity out (https://crbug.com/787488)

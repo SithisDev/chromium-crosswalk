@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -16,6 +16,8 @@ import sys
 if __name__ == '__main__':
   sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
+import six
+
 from grit import util
 from grit.node import include
 from grit.node import message
@@ -24,6 +26,10 @@ from grit.node import structure
 
 PACK_FILE_VERSION = 5
 BINARY, UTF8, UTF16 = range(3)
+
+
+GrdInfoItem = collections.namedtuple('GrdInfoItem',
+                                     ['textual_id', 'id', 'path'])
 
 
 class WrongFileVersion(Exception):
@@ -81,7 +87,7 @@ def Format(root, lang='en', output_dir='.'):
     with node:
       if isinstance(node, (include.IncludeNode, message.MessageNode,
                            structure.StructureNode)):
-        value = node.GetDataPackValue(lang, UTF8)
+        value = node.GetDataPackValue(lang, util.BINARY)
         if value is not None:
           resource_id = id_map[node.GetTextualIds()[0]]
           data[resource_id] = value
@@ -144,7 +150,7 @@ def ReadDataPackFromString(data):
 
 
 def WriteDataPackToString(resources, encoding):
-  """Returns a string with a map of id=>data in the data pack format."""
+  """Returns bytes with a map of id=>data in the data pack format."""
   ret = []
 
   # Compute alias map.
@@ -174,6 +180,8 @@ def WriteDataPackToString(resources, encoding):
     if resource_id in alias_map:
       continue
     data = resources[resource_id]
+    if isinstance(data, six.text_type):
+      data = data.encode('utf-8')
     index_by_id[resource_id] = index
     ret.append(struct.pack('<HI', resource_id, data_offset))
     data_offset += len(data)
@@ -191,7 +199,7 @@ def WriteDataPackToString(resources, encoding):
 
   # Write data.
   ret.extend(deduped_data)
-  return ''.join(ret)
+  return b''.join(ret)
 
 
 def WriteDataPack(resources, output_file, encoding):
@@ -201,18 +209,31 @@ def WriteDataPack(resources, output_file, encoding):
     file.write(content)
 
 
-def RePack(output_file, input_files, whitelist_file=None,
-           suppress_removed_key_output=False):
+def ReadGrdInfo(grd_file):
+  info_dict = {}
+  with open(grd_file + '.info', 'rt') as f:
+    for line in f:
+      item = GrdInfoItem._make(line.strip().split(','))
+      info_dict[int(item.id)] = item
+  return info_dict
+
+
+def RePack(output_file,
+           input_files,
+           allowlist_file=None,
+           suppress_removed_key_output=False,
+           output_info_filepath=None):
   """Write a new data pack file by combining input pack files.
 
   Args:
       output_file: path to the new data pack file.
       input_files: a list of paths to the data pack files to combine.
-      whitelist_file: path to the file that contains the list of resource IDs
+      allowlist_file: path to the file that contains the list of resource IDs
                       that should be kept in the output file or None to include
                       all resources.
       suppress_removed_key_output: allows the caller to suppress the output from
                                    RePackFromDataPackStrings.
+      output_info_file: If not None, specify the output .info filepath.
 
   Raises:
       KeyError: if there are duplicate keys or resource encoding is
@@ -220,29 +241,32 @@ def RePack(output_file, input_files, whitelist_file=None,
   """
   input_data_packs = [ReadDataPack(filename) for filename in input_files]
   input_info_files = [filename + '.info' for filename in input_files]
-  whitelist = None
-  if whitelist_file:
-    lines = util.ReadFile(whitelist_file, util.RAW_TEXT).strip().splitlines()
+  allowlist = None
+  if allowlist_file:
+    lines = util.ReadFile(allowlist_file, 'utf-8').strip().splitlines()
     if not lines:
-      raise Exception('Whitelist file should not be empty')
-    whitelist = set(int(x) for x in lines)
+      raise Exception('Allowlist file should not be empty')
+    allowlist = set(int(x) for x in lines)
   inputs = [(p.resources, p.encoding) for p in input_data_packs]
-  resources, encoding = RePackFromDataPackStrings(
-      inputs, whitelist, suppress_removed_key_output)
+  resources, encoding = RePackFromDataPackStrings(inputs, allowlist,
+                                                  suppress_removed_key_output)
   WriteDataPack(resources, output_file, encoding)
-  with open(output_file + '.info', 'w') as output_info_file:
+  if output_info_filepath is None:
+    output_info_filepath = output_file + '.info'
+  with open(output_info_filepath, 'w') as output_info_file:
     for filename in input_info_files:
       with open(filename, 'r') as info_file:
         output_info_file.writelines(info_file.readlines())
 
 
-def RePackFromDataPackStrings(inputs, whitelist,
+def RePackFromDataPackStrings(inputs,
+                              allowlist,
                               suppress_removed_key_output=False):
   """Combines all inputs into one.
 
   Args:
       inputs: a list of (resources_by_id, encoding) tuples to be combined.
-      whitelist: a list of resource IDs that should be kept in the output string
+      allowlist: a list of resource IDs that should be kept in the output string
                  or None to include all resources.
       suppress_removed_key_output: Do not print removed keys.
 
@@ -259,7 +283,10 @@ def RePackFromDataPackStrings(inputs, whitelist,
     # Make sure we have no dups.
     duplicate_keys = set(input_resources.keys()) & set(resources.keys())
     if duplicate_keys:
-      raise KeyError('Duplicate keys: ' + str(list(duplicate_keys)))
+      raise KeyError(
+          'Duplicate resource IDs: ' + str(list(duplicate_keys)) + '. '
+          'This is likely because the reserved ID ranges defined in ' +
+          'tools/gritsettings/resource_ids.spec have been exhausted.')
 
     # Make sure encoding is consistent.
     if encoding in (None, BINARY):
@@ -268,13 +295,14 @@ def RePackFromDataPackStrings(inputs, whitelist,
       raise KeyError('Inconsistent encodings: ' + str(encoding) +
                      ' vs ' + str(input_encoding))
 
-    if whitelist:
-      whitelisted_resources = dict([(key, input_resources[key])
+    if allowlist:
+      allowlisted_resources = dict([(key, input_resources[key])
                                     for key in input_resources.keys()
-                                    if key in whitelist])
-      resources.update(whitelisted_resources)
-      removed_keys = [key for key in input_resources.keys()
-                      if key not in whitelist]
+                                    if key in allowlist])
+      resources.update(allowlisted_resources)
+      removed_keys = [
+          key for key in input_resources.keys() if key not in allowlist
+      ]
       if not suppress_removed_key_output:
         for key in removed_keys:
           print('RePackFromDataPackStrings Removed Key:', key)

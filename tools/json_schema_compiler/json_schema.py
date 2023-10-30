@@ -1,6 +1,8 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import print_function
 
 import copy
 
@@ -38,8 +40,8 @@ def DeleteNodes(item, delete_key=None, matcher=None):
 
 def Load(filename):
   try:
-    with open(filename, 'r') as handle:
-      schemas = json_parse.Parse(handle.read())
+    with open(filename, 'rb') as handle:
+      schemas = json_parse.Parse(handle.read().decode('utf8'))
     return schemas
   except:
     print('FAILED: Exception encountered while loading "%s"' % filename)
@@ -58,4 +60,3 @@ def CachedLoad(filename):
   # Return a copy of the object so that any changes a caller makes won't affect
   # the next caller.
   return copy.deepcopy(_cache[filename])
-

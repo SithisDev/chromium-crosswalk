@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright 2011 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -20,6 +20,8 @@ Usage:
   --output (or -o):  The path to a file where the output will be written in
                      CSV format: sample_number,response_code,elapsed_time_ms
 """
+
+from __future__ import print_function
 
 import getopt
 import httplib
@@ -100,7 +102,7 @@ def LogResponse(sample_count, response_code, elapsed_time):
   '''
   global g_file_handle
   output_list = (sample_count, response_code, elapsed_time)
-  print 'Request: %d, status: %d, elapsed time: %f ms' % output_list
+  print('Request: %d, status: %d, elapsed time: %f ms' % output_list)
   if g_file_handle is not None:
     g_file_handle.write(('%d,%d,%f' % output_list) + '\n')
     g_file_handle.flush()
@@ -132,16 +134,16 @@ def main():
     elif option == '-o' or option == '--output':
       file_name = value
     else:
-      print 'Bad option: %s' % option
+      print('Bad option: %s' % option)
       return 1
   try:
-    print 'Starting Timed GetHash ----------'
+    print('Starting Timed GetHash ----------')
     SetupOutputFile(file_name)
     RunTimedGetHash(period, samples)
   except KeyboardInterrupt:
     pass
 
-  print 'Timed GetHash complete ----------'
+  print('Timed GetHash complete ----------')
   g_file_handle.close()
 
 

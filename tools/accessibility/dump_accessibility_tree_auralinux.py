@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 Accerciser is slow and buggy. This is a quick way to check that Chrome is
 exposing its interface to ATK from the command line.
 """
+
+from __future__ import print_function
 
 import pyatspi
 
@@ -28,7 +30,7 @@ def Dump(obj, indent):
   bounds = obj.get_extents(pyatspi.DESKTOP_COORDS)
   bounds_str = '(%d, %d) size (%d x %d)' % (
       bounds.x, bounds.y, bounds.width, bounds.height)
-  print '%s%s name="%s" %s' % (indent_str, role, name, bounds_str)
+  print('%s%s name="%s" %s' % (indent_str, role, name, bounds_str))
 
   # Don't recurse into applications other than Chrome
   if role == 'application':

@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,10 +8,12 @@ from __future__ import print_function
 
 import getopt
 import os.path
-import StringIO
 import sys
 from xml.dom import Node
 import xml.dom.minidom
+
+import six
+from six import StringIO
 
 import grit.node.empty
 from grit.node import node_io
@@ -22,23 +24,22 @@ from grit.tool import interface
 from grit import grd_reader
 from grit import lazy_re
 from grit import tclib
-from grit import util
 
 
 # The name of a string in strings.xml
 _STRING_NAME = lazy_re.compile(r'[a-z0-9_]+\Z')
 
 # A string's character limit in strings.xml
-_CHAR_LIMIT = lazy_re.compile(r'\[CHAR-LIMIT=(\d+)\]')
+_CHAR_LIMIT = lazy_re.compile(r'\[CHAR_LIMIT=(\d+)\]')
 
 # Finds String.Format() style format specifiers such as "%-5.2f".
 _FORMAT_SPECIFIER = lazy_re.compile(
-  '%'
-  '([1-9][0-9]*\$|<)?'            # argument_index
-  '([-#+ 0,(]*)'                  # flags
-  '([0-9]+)?'                     # width
-  '(\.[0-9]+)?'                   # precision
-  '([bBhHsScCdoxXeEfgGaAtT%n])')  # conversion
+  r'%'
+  r'([1-9][0-9]*\$|<)?'            # argument_index
+  r'([-#+ 0,(]*)'                  # flags
+  r'([0-9]+)?'                     # width
+  r'(\.[0-9]+)?'                   # precision
+  r'([bBhHsScCdoxXeEfgGaAtT%n])')  # conversion
 
 
 class Android2Grd(interface.Tool):
@@ -175,7 +176,7 @@ OPTIONS may be any of the following:
 
     # Do the hard work -- convert the Android dom to grd file contents.
     grd_dom = self.AndroidDomToGrdDom(android_dom)
-    grd_string = unicode(grd_dom)
+    grd_string = six.text_type(grd_dom)
 
     # Write the grd string to a file in grd_dir.
     grd_filename = self.name + '.grd'
@@ -195,13 +196,13 @@ OPTIONS may be any of the following:
     """
 
     # Start with a basic skeleton for the .grd file.
-    root = grd_reader.Parse(StringIO.StringIO(
+    root = grd_reader.Parse(StringIO(
       '''<?xml version="1.0" encoding="UTF-8"?>
          <grit base_dir="." latest_public_release="0"
              current_release="1" source_lang_id="en">
            <outputs />
            <translations />
-           <release allow_pseudo="false" seq="1">
+           <release seq="1">
              <messages fallback_to_english="true" />
            </release>
          </grit>'''), dir='.')
@@ -388,7 +389,7 @@ OPTIONS may be any of the following:
       char_limit = int(match.group(1))
       msg_content = msg.GetRealContent()
       if len(msg_content) > char_limit:
-        print('Warning: char-limit for %s is %d, but length is %d: %s' %
+        print('Warning: CHAR_LIMIT for %s is %d, but length is %d: %s' %
               (grd_name, char_limit, len(msg_content), msg_content))
     return message.MessageNode.Construct(parent=messages_node,
                                          name=grd_name,

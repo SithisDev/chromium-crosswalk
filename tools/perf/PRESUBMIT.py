@@ -1,4 +1,4 @@
-# Copyright 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,6 +9,8 @@ for more details about the presubmit API built into depot_tools.
 """
 
 import os
+
+USE_PYTHON3 = True
 
 
 def _CommonChecks(input_api, output_api, block_on_failure=False):
@@ -29,9 +31,15 @@ def _CommonChecks(input_api, output_api, block_on_failure=False):
       _CheckPerfJsonConfigs(input_api, output_api, block_on_failure))
   results.extend(_CheckWprShaFiles(input_api, output_api))
   results.extend(_CheckShardMaps(input_api, output_api, block_on_failure))
-  results.extend(input_api.RunTests(input_api.canned_checks.GetPylint(
-      input_api, output_api, extra_paths_list=_GetPathsToPrepend(input_api),
-      pylintrc='pylintrc')))
+  results.extend(_CheckVersionsInSmokeTests(input_api, output_api))
+  results.extend(
+      input_api.RunTests(
+          input_api.canned_checks.GetPylint(
+              input_api,
+              output_api,
+              extra_paths_list=_GetPathsToPrepend(input_api),
+              pylintrc='pylintrc',
+              version='2.7')))
   return results
 
 
@@ -40,6 +48,8 @@ def _GetPathsToPrepend(input_api):
   chromium_src_dir = input_api.os_path.join(perf_dir, '..', '..')
   telemetry_dir = input_api.os_path.join(
       chromium_src_dir, 'third_party', 'catapult', 'telemetry')
+  typ_dir = input_api.os_path.join(
+       chromium_src_dir, 'third_party', 'catapult', 'third_party', 'typ')
   experimental_dir = input_api.os_path.join(
       chromium_src_dir, 'third_party', 'catapult', 'experimental')
   tracing_dir = input_api.os_path.join(
@@ -48,13 +58,16 @@ def _GetPathsToPrepend(input_api):
       chromium_src_dir, 'third_party', 'catapult', 'common', 'py_utils')
   android_pylib_dir = input_api.os_path.join(
       chromium_src_dir, 'build', 'android')
+  testing_dir = input_api.os_path.join(chromium_src_dir, 'testing')
   return [
       telemetry_dir,
+      typ_dir,
       input_api.os_path.join(telemetry_dir, 'third_party', 'mock'),
       experimental_dir,
       tracing_dir,
       py_utils_dir,
       android_pylib_dir,
+      testing_dir,
   ]
 
 
@@ -64,97 +77,92 @@ def _RunArgs(args, input_api):
   out, _ = p.communicate()
   return (out, p.returncode)
 
+def _RunValidationScript(
+    input_api,
+    output_api,
+    script_path,
+    extra_args = None,
+    block_on_failure = None):
+  results = []
+  vpython = 'vpython3.bat' if input_api.is_windows else 'vpython3'
+  perf_dir = input_api.PresubmitLocalPath()
+  script_abs_path = input_api.os_path.join(perf_dir, script_path)
+  extra_args = extra_args if extra_args else []
+  # When running git cl presubmit --all this presubmit may be asked to check
+  # ~500 files, leading to a command line that is over 43,000 characters.
+  # This goes past the Windows 8191 character cmd.exe limit and causes cryptic
+  # failures. To avoid these we break the command up into smaller pieces. The
+  # non-Windows limit is chosen so that the code that splits up commands will
+  # get some exercise on other platforms.
+  # Depending on how long the command is on Windows the error may be:
+  #     The command line is too long.
+  # Or it may be:
+  #     OSError: Execution failed with error: [WinError 206] The filename or
+  #     extension is too long.
+  # I suspect that the latter error comes from CreateProcess hitting its 32768
+  # character limit.
+  files_per_command = 50 if input_api.is_windows else 1000
+  # Handle the case where extra_args is empty.
+  for i in range(0, len(extra_args) if extra_args else 1, files_per_command):
+    args = [vpython, script_abs_path] + extra_args[i:i + files_per_command]
+    out, return_code = _RunArgs(args, input_api)
+    if return_code:
+      error_msg = 'Script ' + script_path + ' failed.'
+      if block_on_failure is None or block_on_failure:
+        results.append(output_api.PresubmitError(error_msg, long_text=out))
+      else:
+        results.append(
+            output_api.PresubmitPromptWarning(error_msg, long_text=out))
+  return results
 
 def _CheckExpectations(input_api, output_api):
-  results = []
-  perf_dir = input_api.PresubmitLocalPath()
-  vpython = 'vpython.bat' if input_api.is_windows else 'vpython'
-  out, return_code = _RunArgs([
-      vpython,
-      input_api.os_path.join(perf_dir, 'validate_story_expectation_data')],
-      input_api)
-  if return_code:
-    results.append(output_api.PresubmitError(
-        'Validating story expectation data failed.', long_text=out))
-  return results
-
+  return _RunValidationScript(
+      input_api,
+      output_api,
+      'validate_story_expectation_data',
+  )
 
 def _CheckPerfDataCurrentness(input_api, output_api, block_on_failure):
-  results = []
-  perf_dir = input_api.PresubmitLocalPath()
-  vpython = 'vpython.bat' if input_api.is_windows else 'vpython'
-  out, return_code = _RunArgs([
-      vpython,
-      input_api.os_path.join(perf_dir, 'generate_perf_data'),
-      '--validate-only'], input_api)
-  if return_code:
-    if block_on_failure:
-      results.append(output_api.PresubmitError(
-          'Validating perf data currentness failed', long_text=out))
-    else:
-      results.append(output_api.PresubmitPromptWarning(
-          'Validating perf data currentness failed', long_text=out))
-  return results
-
+  return _RunValidationScript(
+      input_api,
+      output_api,
+      'generate_perf_data',
+      ['--validate-only'],
+      block_on_failure
+  )
 
 def _CheckPerfJsonConfigs(input_api, output_api, block_on_failure):
-  results = []
-  perf_dir = input_api.PresubmitLocalPath()
-  vpython = 'vpython.bat' if input_api.is_windows else 'vpython'
-  out, return_code = _RunArgs([
-      vpython,
-      input_api.os_path.join(perf_dir, 'validate_perf_json_config')], input_api)
-  if return_code:
-    if block_on_failure:
-      results.append(output_api.PresubmitError(
-          'Validating perf data correctness failed', long_text=out))
-    else:
-      results.append(output_api.PresubmitPromptWarning(
-          'Validating perf data correctness failed', long_text=out))
-  return results
-
+  return _RunValidationScript(
+      input_api,
+      output_api,
+      'validate_perf_json_config',
+      ['--validate-only'],
+      block_on_failure
+  )
 
 def _CheckWprShaFiles(input_api, output_api):
   """Check whether the wpr sha files have matching URLs."""
-  perf_dir = input_api.PresubmitLocalPath()
-
-  results = []
   wpr_archive_shas = []
   for affected_file in input_api.AffectedFiles(include_deletes=False):
     filename = affected_file.AbsoluteLocalPath()
     if not filename.endswith('.sha1'):
       continue
     wpr_archive_shas.append(filename)
-
-  vpython = 'vpython.bat' if input_api.is_windows else 'vpython'
-  out, return_code = _RunArgs([
-      vpython,
-      input_api.os_path.join(perf_dir, 'validate_wpr_archives')] +
-      wpr_archive_shas,
-      input_api)
-  if return_code:
-    results.append(output_api.PresubmitError(
-        'Validating WPR archives failed:', long_text=out))
-  return results
-
+  return _RunValidationScript(
+      input_api,
+      output_api,
+      'validate_wpr_archives',
+      wpr_archive_shas
+  )
 
 def _CheckShardMaps(input_api, output_api, block_on_failure):
-  results = []
-  perf_dir = input_api.PresubmitLocalPath()
-  vpython = 'vpython.bat' if input_api.is_windows else 'vpython'
-  out, return_code = _RunArgs([
-      vpython,
-      input_api.os_path.join(perf_dir, 'generate_perf_sharding'),
-      'validate'], input_api)
-  if return_code:
-    if block_on_failure:
-      results.append(output_api.PresubmitError(
-          'Validating shard maps failed', long_text=out))
-    else:
-      results.append(output_api.PresubmitPromptWarning(
-          'Validating shard maps failed', long_text=out))
-  return results
-
+  return _RunValidationScript(
+      input_api,
+      output_api,
+      'generate_perf_sharding.py',
+      ['validate'],
+      block_on_failure
+  )
 
 def _CheckJson(input_api, output_api):
   """Checks whether JSON files in this change can be parsed."""
@@ -162,12 +170,23 @@ def _CheckJson(input_api, output_api):
     filename = affected_file.AbsoluteLocalPath()
     if os.path.splitext(filename)[1] != '.json':
       continue
+    if (os.path.basename(filename) == 'perf_results.json' and
+        os.path.basename(os.path.dirname(filename)) == 'speedometer2-future'):
+      # Intentionally invalid JSON file.
+      continue
     try:
       input_api.json.load(open(filename))
     except ValueError:
       return [output_api.PresubmitError('Error parsing JSON in %s!' % filename)]
   return []
 
+def _CheckVersionsInSmokeTests(input_api, output_api):
+  return _RunValidationScript(
+      input_api,
+      output_api,
+      input_api.os_path.join(
+          'benchmarks', 'system_health_load_tests_smoke_test.py'),
+  )
 
 def CheckChangeOnUpload(input_api, output_api):
   report = []

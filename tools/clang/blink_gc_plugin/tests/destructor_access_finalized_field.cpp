@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,16 +20,13 @@ HeapObject::~HeapObject()
     m_objs[0];
 }
 
-void HeapObject::Trace(Visitor* visitor)
-{
-    visitor->Trace(m_obj);
-    visitor->Trace(m_objs);
-    visitor->Trace(m_part);
+void HeapObject::Trace(Visitor* visitor) const {
+  visitor->Trace(m_obj);
+  visitor->Trace(m_objs);
+  visitor->Trace(m_part);
 }
 
-void PartOther::Trace(Visitor* visitor)
-{
-    visitor->Trace(m_obj);
+void PartOther::Trace(Visitor* visitor) const {
+  visitor->Trace(m_obj);
 }
-
 }

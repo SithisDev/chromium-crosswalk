@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -86,6 +86,8 @@ should be fixed manually.
 
 """
 
+from __future__ import print_function
+
 import difflib
 import optparse
 import re
@@ -155,7 +157,7 @@ def ProcessFile(filename, should_confirm):
 
   new_lines = SortSources(original_lines)
   if original_lines == new_lines:
-    print '%s: no change' % filename
+    print('%s: no change' % filename)
     return
 
   if should_confirm:

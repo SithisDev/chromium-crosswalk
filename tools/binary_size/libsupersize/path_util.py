@@ -1,25 +1,26 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Functions for dealing with determining --tool-prefix."""
+"""Functions for getting paths to things."""
 
 import abc
-import distutils.spawn
 import logging
 import os
 
 _STATUS_DETECTED = 1
 _STATUS_VERIFIED = 2
 
-SRC_ROOT = os.environ.get('CHECKOUT_SOURCE_ROOT',
-    os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                 os.pardir, os.pardir, os.pardir)))
+# Src root of SuperSize being run. Not to be confused with src root of the input
+# binary being archived.
+_TOOLS_SRC_ROOT = os.environ.get(
+    'CHECKOUT_SOURCE_ROOT',
+    os.path.abspath(
+        os.path.join(os.path.dirname(__file__), os.pardir, os.pardir,
+                     os.pardir)))
 
-_SAMPLE_TOOL_SUFFIX = 'readelf'
 
-
-class _PathFinder(object):
+class _PathFinder:
   def __init__(self, name, value):
     self._status = _STATUS_DETECTED if value is not None else 0
     self._name = name
@@ -51,8 +52,7 @@ class _PathFinder(object):
 
 class OutputDirectoryFinder(_PathFinder):
   def __init__(self, value=None, any_path_within_output_directory=None):
-    super(OutputDirectoryFinder, self).__init__(
-        name='output-directory', value=value)
+    super().__init__(name='output-directory', value=value)
     self._any_path_within_output_directory = any_path_within_output_directory
 
   def Detect(self):
@@ -64,7 +64,7 @@ class OutputDirectoryFinder(_PathFinder):
       parent_dir = os.path.dirname(abs_path)
       if parent_dir == abs_path:
         break
-      abs_path = abs_path = parent_dir
+      abs_path = parent_dir
 
     # See if CWD=output directory.
     if os.path.exists('build.ninja'):
@@ -73,121 +73,133 @@ class OutputDirectoryFinder(_PathFinder):
 
   def Verify(self):
     if not self._value or not os.path.isdir(self._value):
-      raise Exception('Bad --%s. Path not found: %s' %
-                      (self._name, self._value))
+      raise Exception(
+          'Invalid --output-directory. Path not found: {}\n'
+          'Use --no-output-directory to disable features that rely on it.'.
+          format(self._value))
+
+def GetSrcRootFromOutputDirectory(output_directory):
+  """Returns the source root directory from output directory.
+
+  Typical case: '/.../chromium/src/out/Release' -> '/.../chromium/src/'.
+  Heuristic: Look for .gn in the current and successive parent directories.
+
+  Args:
+    output_directory: Starting point of search. This may be relative to CWD.
+
+  Returns:
+    Source root directory.
+  """
+  if output_directory:
+    cur_dir = os.path.abspath(output_directory)
+    while True:
+      gn_path = os.path.join(cur_dir, '.gn')
+      if os.path.isfile(gn_path):
+        return cur_dir
+      cur_dir, prev_dir = os.path.dirname(cur_dir), cur_dir
+      if cur_dir == prev_dir:  # Reached root.
+        break
+  logging.warning('Cannot deduce src root from output directory. Falling back '
+                  'to tools src root.')
+  return _TOOLS_SRC_ROOT
 
 
-class ToolPrefixFinder(_PathFinder):
-  def __init__(self, value=None, output_directory_finder=None,
-               linker_name=None):
-    super(ToolPrefixFinder, self).__init__(
-        name='tool-prefix', value=value)
-    self._output_directory_finder = output_directory_finder
-    self._linker_name = linker_name;
-
-  def IsLld(self):
-    return self._linker_name.startswith('lld') if self._linker_name else True
-
-  def Detect(self):
-    output_directory = self._output_directory_finder.Tentative()
-    if output_directory:
-      ret = None
-      if self.IsLld():
-        ret = os.path.join(SRC_ROOT, 'third_party', 'llvm-build',
-                           'Release+Asserts', 'bin', 'llvm-')
-      else:
-        # Auto-detect from build_vars.txt
-        build_vars = _LoadBuildVars(output_directory)
-        tool_prefix = build_vars.get('android_tool_prefix')
-        if tool_prefix:
-          ret = os.path.normpath(os.path.join(output_directory, tool_prefix))
-          # Maintain a trailing '/' if needed.
-          if tool_prefix.endswith(os.path.sep):
-            ret += os.path.sep
-      if ret:
-        # Check for output directories that have a stale build_vars.txt.
-        if os.path.isfile(ret + _SAMPLE_TOOL_SUFFIX):
-          return ret
-        else:
-          err_lines = ['tool-prefix not found: %s' % ret]
-          if ret.endswith('llvm-'):
-            err_lines.append('Probably need to run: '
-                             'tools/clang/scripts/download_objdump.py')
-          raise Exception('\n'.join(err_lines))
-    from_path = distutils.spawn.find_executable(_SAMPLE_TOOL_SUFFIX)
-    if from_path:
-      return from_path[:-7]
-    return None
-
-  def Verify(self):
-    if os.path.sep not in self._value:
-      full_path = distutils.spawn.find_executable(
-          self._value + _SAMPLE_TOOL_SUFFIX)
-    else:
-      full_path = self._value + _SAMPLE_TOOL_SUFFIX
-    if not full_path or not os.path.isfile(full_path):
-      raise Exception('Bad --%s. Path not found: %s' % (self._name, full_path))
-
-
-def _LoadBuildVars(output_directory):
-  build_vars_path = os.path.join(output_directory, 'build_vars.txt')
-  if os.path.exists(build_vars_path):
-    with open(build_vars_path) as f:
-      return dict(l.rstrip().split('=', 1) for l in f if '=' in l)
-  return dict()
-
-
-def FromSrcRootRelative(path):
-  ret = os.path.relpath(os.path.join(SRC_ROOT, path))
+def FromToolsSrcRoot(*args):
+  ret = os.path.relpath(os.path.join(_TOOLS_SRC_ROOT, *args))
   # Need to maintain a trailing /.
-  if path.endswith(os.path.sep):
+  if args[-1].endswith(os.path.sep):
     ret += os.path.sep
   return ret
 
 
-def ToSrcRootRelative(path):
-  ret = os.path.relpath(path, SRC_ROOT)
-  # Need to maintain a trailing /.
-  if path.endswith(os.path.sep):
-    ret += os.path.sep
-  return ret
+def _LlvmTool(name):
+  default = FromToolsSrcRoot('third_party', 'llvm-build', 'Release+Asserts',
+                             'bin', 'llvm-')
+  actual = os.environ.get('SUPERSIZE_TOOL_PREFIX', default)
+  # abspath since some executions use cwd= argument.
+  return os.path.abspath(actual + name)
 
 
-def GetCppFiltPath(tool_prefix):
-  if tool_prefix[-5:] == 'llvm-':
-    return tool_prefix + 'cxxfilt'
-  return tool_prefix + 'c++filt'
+def CheckLlvmToolsAvailable():
+  test_path = _LlvmTool('objdump')
+  if not os.path.isfile(test_path):
+    raise Exception(
+        ('File not found: {}\nProbably need to run: '
+         'tools/clang/scripts/update.py --package=objdump').format(test_path))
 
 
-def GetNmPath(tool_prefix):
-  return tool_prefix + 'nm'
+def GetCppFiltPath():
+  return _LlvmTool('cxxfilt')
 
 
-def GetApkAnalyzerPath(output_directory):
-  build_vars = _LoadBuildVars(output_directory)
-  sdk_analyzer = os.path.normpath(os.path.join(
-      output_directory, build_vars['android_sdk_root'], 'tools', 'bin',
-      'apkanalyzer'))
-  if os.path.exists(sdk_analyzer):
-    return sdk_analyzer
-  # Older SDKs do not contain the tool, so fall back to the one we know exists.
-  return os.path.join(SRC_ROOT, 'third_party', 'android_sdk', 'public',
-                      'tools', 'bin', 'apkanalyzer')
+def GetDwarfdumpPath():
+  return _LlvmTool('dwarfdump')
 
 
-def GetObjDumpPath(tool_prefix):
-  return tool_prefix + 'objdump'
+def GetNmPath():
+  return _LlvmTool('nm')
 
 
-def GetReadElfPath(tool_prefix):
-  # Work-around for llvm-readobj bug where 'File: ...' info is not printed:
-  # https://bugs.llvm.org/show_bug.cgi?id=35351
-  if tool_prefix[-5:] == 'llvm-':
-    return 'readelf'
-  return tool_prefix + 'readelf'
+def GetReadElfPath():
+  return _LlvmTool('readelf')
 
 
-def GetBcAnalyzerPath(tool_prefix):
-  if tool_prefix[-5:] != 'llvm-':
-    raise ValueError('BC analyzer is only supported in LLVM.')
-  return tool_prefix + 'bcanalyzer'
+def GetBcAnalyzerPath():
+  return _LlvmTool('bcanalyzer')
+
+
+def GetObjDumpPath():
+  return _LlvmTool('objdump')
+
+
+def GetDisassembleObjDumpPath(arch):
+  path = None
+  if arch == 'arm':
+    path = FromToolsSrcRoot('third_party', 'android_ndk', 'toolchains',
+                            'arm-linux-androideabi-4.9', 'prebuilt',
+                            'linux-x86_64', 'bin',
+                            'arm-linux-androideabi-objdump')
+  elif arch == 'arm64':
+    path = FromToolsSrcRoot('third_party', 'android_ndk', 'toolchains',
+                            'aarch64-linux-android-4.9', 'prebuilt',
+                            'linux-x86_64', 'bin',
+                            'aarch64-linux-android-objdump')
+  if path and os.path.exists(path):
+    return path
+
+  logging.warning('Falling back to llvm-objdump for arch %s', arch)
+  return GetObjDumpPath()
+
+
+def GetStripPath():
+  # Chromium's toolchain uses //buildtools/third_party/eu-strip, but first
+  # look for the test-only "fakestrip" for the sake of tests.
+  fake_strip = _LlvmTool('fakestrip')
+  if os.path.exists(fake_strip):
+    return fake_strip
+  return FromToolsSrcRoot('buildtools', 'third_party', 'eu-strip', 'bin',
+                          'eu-strip')
+
+
+def GetApkAnalyzerPath():
+  default_path = FromToolsSrcRoot('third_party', 'android_build_tools',
+                                  'apkanalyzer', 'apkanalyzer')
+  return os.environ.get('SUPERSIZE_APK_ANALYZER', default_path)
+
+
+def GetAapt2Path():
+  default_path = FromToolsSrcRoot('third_party', 'android_build_tools', 'aapt2',
+                                  'aapt2')
+  return os.environ.get('SUPERSIZE_AAPT2', default_path)
+
+
+def GetJavaHome():
+  return FromToolsSrcRoot('third_party', 'jdk', 'current')
+
+
+def GetDefaultJsonConfigPath():
+  return FromToolsSrcRoot('tools', 'binary_size', 'supersize.json')
+
+
+def GetR8Path():
+  return FromToolsSrcRoot('third_party', 'r8', 'lib', 'r8.jar')

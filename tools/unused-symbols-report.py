@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright 2011 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -17,6 +17,8 @@ and run this script on it:
   ./tools/unused-symbols-report.py buildlog > report.html
 """
 
+from __future__ import print_function
+
 import cgi
 import optparse
 import os
@@ -31,7 +33,7 @@ def Demangle(sym):
   if cppfilt_proc is None:
     cppfilt_proc = subprocess.Popen(['c++filt'], stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE)
-  print >>cppfilt_proc.stdin, sym
+  print(sym, file=cppfilt_proc.stdin)
   return cppfilt_proc.stdout.readline().strip()
 
 
@@ -41,10 +43,9 @@ def Unyuck(sym):
                     'std::allocator<char> >', 'std::string')
   sym = sym.replace('std::basic_string<wchar_t, std::char_traits<wchar_t>, '
                     'std::allocator<wchar_t> >', 'std::wstring')
-  sym = sym.replace('std::basic_string<unsigned short, '
-                    'base::string16_internals::'
-                    'string16_char_traits, '
-                    'std::allocator<unsigned short> >', 'string16')
+  sym = sym.replace(
+      'std::basic_string<char16_t, std::char_traits<char16_t>, '
+      'std::allocator<char16_t> >', 'std::u16string')
   sym = re.sub(r', std::allocator<\S+\s+>', '', sym)
   return sym
 
@@ -73,7 +74,7 @@ def Parse(input, skip_paths=None, only_paths=None):
       continue
     match = path_re.match(path)
     if not match:
-      print >>sys.stderr, "Skipping weird path", path
+      print("Skipping weird path", path, file=sys.stderr)
       continue
     target, path = match.groups()
     yield target, path, symbol
@@ -130,23 +131,23 @@ def Output(iter):
     entries = targets.setdefault(target, [])
     entries.append((symbol, path))
 
-  print TEMPLATE_HEADER
-  print "<p>jump to target:"
-  print "<select onchange='document.location.hash = this.value'>"
+  print(TEMPLATE_HEADER)
+  print("<p>jump to target:")
+  print("<select onchange='document.location.hash = this.value'>")
   for target in sorted(targets.keys()):
-    print "<option>%s</option>" % target
-  print "</select></p>"
+    print("<option>%s</option>" % target)
+  print("</select></p>")
 
   for target in sorted(targets.keys()):
-    print "<h2>%s" % target
-    print "<a class=permalink href='#%s' name='%s'>#</a>" % (target, target)
-    print "</h2>"
-    print "<table width=100% cellspacing=0>"
+    print("<h2>%s" % target)
+    print("<a class=permalink href='#%s' name='%s'>#</a>" % (target, target))
+    print("</h2>")
+    print("<table width=100% cellspacing=0>")
     for symbol, path in sorted(targets[target]):
       htmlsymbol = cgi.escape(symbol).replace('::', '::<wbr>')
-      print "<tr><td><div class=symbol>%s</div></td>" % htmlsymbol
-      print "<td valign=top><div class=file>%s</div></td></tr>" % path
-    print "</table>"
+      print("<tr><td><div class=symbol>%s</div></td>" % htmlsymbol)
+      print("<td valign=top><div class=file>%s</div></td></tr>" % path)
+    print("</table>")
 
 
 def main():

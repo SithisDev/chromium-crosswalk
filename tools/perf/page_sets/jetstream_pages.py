@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import json
@@ -6,13 +6,14 @@ import json
 from page_sets import press_story
 from telemetry import story
 from telemetry.util import statistics
-from telemetry.value import list_of_scalar_values
+
 
 class JetstreamStory(press_story.PressStory):
-  URL='http://browserbench.org/JetStream/'
+  URL = 'http://browserbench.org/JetStream/'
+  NAME = 'JetStream'
 
-  def __init__(self, ps):
-    super(JetstreamStory, self).__init__(ps)
+  def __init__(self, page_set):
+    super(JetstreamStory, self).__init__(page_set)
     self.script_to_evaluate_on_commit = """
         var __results = [];
         var __real_log = window.console.log;
@@ -38,10 +39,8 @@ class JetstreamStory(press_story.PressStory):
     result = json.loads(result.partition(': ')[2])
 
     all_score_lists = []
-    for k, v in result.iteritems():
-      self.AddJavascriptMetricValue(list_of_scalar_values.ListOfScalarValues(
-          self, k.replace('.', '_'), 'score', v['result'],
-          important=False))
+    for k, v in result.items():
+      self.AddMeasurement(k.replace('.', '_'), 'score', v['result'])
       # Collect all test scores to compute geometric mean.
       for i, score in enumerate(v['result']):
         if len(all_score_lists) <= i:
@@ -50,9 +49,7 @@ class JetstreamStory(press_story.PressStory):
     all_scores = []
     for score_list in all_score_lists:
       all_scores.append(statistics.GeometricMean(score_list))
-    self.AddJavascriptMetricSummaryValue(
-        list_of_scalar_values.ListOfScalarValues(
-        None, 'Score', 'score', all_scores))
+    self.AddMeasurement('Score', 'score', all_scores)
 
 
 class JetstreamStorySet(story.StorySet):

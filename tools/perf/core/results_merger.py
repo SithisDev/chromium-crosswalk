@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,9 +8,13 @@
 # This file is responsbile for merging JSON test results in both the simplified
 # JSON format and the Chromium JSON test results format version 3.
 
+from __future__ import print_function
+
 import copy
 import json
 import sys
+
+import six
 
 # These fields must appear in the test result output
 REQUIRED = {
@@ -51,7 +55,7 @@ class MergeException(Exception):
   pass
 
 
-def merge_test_results(shard_results_list):
+def merge_test_results(shard_results_list, test_cross_device=False):
   """ Merge list of results.
 
   Args:
@@ -59,6 +63,8 @@ def merge_test_results(shard_results_list):
       same format. Supported format are simplified JSON format & Chromium JSON
       test results format version 3 (see
       https://www.chromium.org/developers/the-json-test-results-format)
+    test_cross_device: If true, some tests are running in multiple shards. This
+      requires some extra handling on merging the values under 'tests'.
 
   Returns:
     a dictionary that represent the merged results. Its format follow the same
@@ -69,9 +75,8 @@ def merge_test_results(shard_results_list):
     return {}
 
   if 'seconds_since_epoch' in shard_results_list[0]:
-    return _merge_json_test_result_format(shard_results_list)
-  else:
-    return _merge_simplified_json_format(shard_results_list)
+    return _merge_json_test_result_format(shard_results_list, test_cross_device)
+  return _merge_simplified_json_format(shard_results_list)
 
 
 def _merge_simplified_json_format(shard_results_list):
@@ -101,7 +106,7 @@ def _merge_simplified_json_format(shard_results_list):
   return merged_results
 
 
-def _merge_json_test_result_format(shard_results_list):
+def _merge_json_test_result_format(shard_results_list, test_cross_device=False):
   # This code is specialized to the Chromium JSON test results format version 3:
   # https://www.chromium.org/developers/the-json-test-results-format
 
@@ -118,7 +123,7 @@ def _merge_json_test_result_format(shard_results_list):
   # To make sure that we don't mutate existing shard_results_list.
   shard_results_list = copy.deepcopy(shard_results_list)
   for result_json in shard_results_list:
-    # TODO(tansell): check whether this deepcopy is actually neccessary.
+    # TODO(tansell): check whether this deepcopy is actually necessary.
     result_json = copy.deepcopy(result_json)
 
     # Check the version first
@@ -140,9 +145,14 @@ def _merge_json_test_result_format(shard_results_list):
     merge = lambda key, merge_func: merge_value(
         result_json, merged_results, key, merge_func)
 
-    # Traverse the result_json's test trie & merged_results's test tries in
-    # DFS order & add the n to merged['tests'].
-    merge('tests', merge_tries)
+    if test_cross_device:
+      # Results from the same test(story) may be found on different
+      # shards(devices). We need to handle the merging on story level.
+      merge('tests', merge_tries_v2)
+    else:
+      # Traverse the result_json's test trie & merged_results's test tries in
+      # DFS order & add the n to merged['tests'].
+      merge('tests', merge_tries)
 
     # If any were interrupted, we are interrupted.
     merge('interrupted', lambda x,y: x|y)
@@ -182,8 +192,8 @@ def _merge_json_test_result_format(shard_results_list):
 
     if result_json:
       raise MergeException(  # pragma: no cover (covered by
-                             # results_merger_unittest).
-          'Unmergable values %s' % result_json.keys())
+          # results_merger_unittest).
+          'Unmergable values %s' % list(result_json.keys()))
 
   return merged_results
 
@@ -206,16 +216,77 @@ def merge_tries(source, dest):
   pending_nodes = [('', dest, source)]
   while pending_nodes:
     prefix, dest_node, curr_node = pending_nodes.pop()
-    for k, v in curr_node.iteritems():
+    for k, v in curr_node.items():
       if k in dest_node:
         if not isinstance(v, dict):
           raise MergeException(
-              "%s:%s: %r not mergable, curr_node: %r\ndest_node: %r" % (
-                  prefix, k, v, curr_node, dest_node))
+              '%s:%s: %r not mergable, curr_node: %r\ndest_node: %r' %
+              (prefix, k, v, curr_node, dest_node))
         pending_nodes.append(("%s:%s" % (prefix, k), dest_node[k], v))
       else:
         dest_node[k] = v
   return dest
+
+
+def merge_tries_v2(source, dest):
+  """ Merges test tries, and adds support for merging results for the same story
+  from different devices, which is not supported on v1.
+
+  This is intended for use as a merge_func parameter to merge_value.
+
+  Args:
+      source: A result json test trie.
+      dest: A json test trie merge destination.
+  """
+  # merge_tries merges source into dest by performing a lock-step depth-first
+  # traversal of dest and source.
+  # pending_nodes contains a list of all sub-tries which have been reached but
+  # need further merging.
+  # Each element consists of a trie prefix, and a sub-trie from each of dest
+  # and source which is reached via that prefix.
+  pending_nodes = [('', dest, source)]
+  while pending_nodes:
+    prefix, dest_node, curr_node = pending_nodes.pop()
+    for k, v in curr_node.items():
+      if k in dest_node:
+        if not isinstance(v, dict):
+          raise MergeException(
+              '%s:%s: %r not mergable, curr_node: %r\ndest_node: %r' %
+              (prefix, k, v, curr_node, dest_node))
+        if 'actual' in v and 'expected' in v:
+          # v is test result of a story name which is already in dest
+          _merging_cross_device_results(v, dest_node[k])
+        else:
+          pending_nodes.append(("%s:%s" % (prefix, k), dest_node[k], v))
+      else:
+        dest_node[k] = v
+  return dest
+
+
+def _merging_cross_device_results(src, dest):
+  # 1. Merge the 'actual' field and update the is_unexpected based on new values
+  dest['actual'] += ' %s' % src['actual']
+  if any(actual != dest['expected'] for actual in dest['actual'].split()):
+    dest['is_unexpected'] = True
+  # 2. append each item under the 'artifacts' and 'times'.
+  if 'artifacts' in src:
+    if 'artifacts' in dest:
+      for artifact, artifact_list in src['artifacts'].items():
+        if artifact in dest['artifacts']:
+          dest['artifacts'][artifact] += artifact_list
+        else:
+          dest['artifacts'][artifact] = artifact_list
+    else:
+      dest['artifacts'] = src['artifacts']
+  if 'times' in src:
+    if 'times' in dest:
+      dest['times'] += src['times']
+    else:
+      dest['time'] = src['time']
+      dest['times'] = src['times']
+  # 3. remove the 'shard' because now the results are from multiple shards.
+  if 'shard' in dest:
+    del dest['shard']
 
 
 def ensure_match(source, dest):
@@ -238,7 +309,7 @@ def sum_dicts(source, dest):
 
   This is intended for use as a merge_func parameter to merge_value.
   """
-  for k, v in source.iteritems():
+  for k, v in source.items():
     dest.setdefault(k, 0)
     dest[k] += v
 
@@ -263,9 +334,13 @@ def merge_value(source, dest, key, merge_func):
   try:
     dest[key] = merge_func(source[key], dest[key])
   except MergeException as e:
-    e.message = "MergeFailure for %s\n%s" % (key, e.message)
-    e.args = tuple([e.message] + list(e.args[1:]))
-    raise
+    # The message attribute does not exist in Python 3, but Python 3's exception
+    # chaining should get us equivalent functionality.
+    if six.PY2:
+      e.message = "MergeFailure for %s\n%s" % (key, e.message)  # pylint: disable=attribute-defined-outside-init
+      e.args = tuple([e.message] + list(e.args[1:]))
+      raise
+    raise MergeException('MergeFailure for %s\n%s' % (key, e))
   del source[key]
 
 
@@ -278,7 +353,7 @@ def main(files):
   for f in files[1:]:
     sys.stderr.write('Merging %s\n' % f)
     result = merge_test_results([result, json.load(open(f))])
-  print json.dumps(result)
+  print(json.dumps(result))
   return 0
 
 

@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -57,7 +57,7 @@ class GooglePlayMusicDesktopStory(_MediaStory):
   """Browse the songs list in music.google.com, then play a song."""
   NAME = 'play:media:google_play_music'
   URL = 'https://music.google.com'
-  TAGS = [story_tags.YEAR_2016]
+  TAGS = [story_tags.HEALTH_CHECK, story_tags.YEAR_2016]
 
   PLAY_SELECTOR = '.x-scope.paper-fab-0'
   STOP_SELECTOR = '.style-scope.sj-play-button'

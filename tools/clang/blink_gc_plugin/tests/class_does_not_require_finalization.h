@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,23 +9,21 @@
 
 namespace blink {
 
-class DoesNeedFinalizer : public GarbageCollectedFinalized<DoesNeedFinalizer> {
-public:
-    ~DoesNeedFinalizer() { ; }
-    void Trace(Visitor*);
+class DoesNeedFinalizer : public GarbageCollected<DoesNeedFinalizer> {
+ public:
+  ~DoesNeedFinalizer() { ; }
+  void Trace(Visitor*) const;
 };
 
-class DoesNotNeedFinalizer
-    : public GarbageCollectedFinalized<DoesNotNeedFinalizer> {
-public:
-    void Trace(Visitor*);
+class DoesNotNeedFinalizer : public GarbageCollected<DoesNotNeedFinalizer> {
+ public:
+  void Trace(Visitor*) const;
 };
 
-class DoesNotNeedFinalizer2
-    : public GarbageCollectedFinalized<DoesNotNeedFinalizer2> {
-public:
-    ~DoesNotNeedFinalizer2();
-    void Trace(Visitor*);
+class DoesNotNeedFinalizer2 : public GarbageCollected<DoesNotNeedFinalizer2> {
+ public:
+  ~DoesNotNeedFinalizer2();
+  void Trace(Visitor*) const;
 };
 
 class HasEmptyDtor {
@@ -35,13 +33,11 @@ public:
 
 // If there are any virtual destructors involved, give up.
 
-class DoesNeedFinalizer2
-    : public GarbageCollectedFinalized<DoesNeedFinalizer2>,
-      public HasEmptyDtor {
-public:
-    void Trace(Visitor*);
+class DoesNeedFinalizer2 : public GarbageCollected<DoesNeedFinalizer2>,
+                           public HasEmptyDtor {
+ public:
+  void Trace(Visitor*) const;
 };
-
 }
 
 #endif

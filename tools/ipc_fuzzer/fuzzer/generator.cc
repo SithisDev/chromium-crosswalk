@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,8 +97,8 @@ void Generator::FuzzString(std::string* value) {
   GenerateStringType<std::string>(value);
 }
 
-void Generator::FuzzString16(base::string16* value) {
-  GenerateStringType<base::string16>(value);
+void Generator::FuzzString16(std::u16string* value) {
+  GenerateStringType<std::u16string>(value);
 }
 
 void Generator::FuzzData(char* data, int length) {

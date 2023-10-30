@@ -1,19 +1,10 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Utility functions for resolving file paths in histograms scripts."""
 
 import os.path
-
-
-def GetHistogramsFile():
-  """Returns the path to histograms.xml.
-
-  Prefer using this function instead of just open("histograms.xml"), so that
-  scripts work properly even if run from outside the histograms directory.
-  """
-  return GetInputFile('tools/metrics/histograms/histograms.xml')
 
 
 def GetInputFile(src_relative_file_path):

@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -33,6 +33,7 @@ _GATHERERS = {
   'chrome_html'         : grit.gather.chrome_html.ChromeHtml,
   'chrome_scaled_image' : grit.gather.chrome_scaled_image.ChromeScaledImage,
   'dialog'              : grit.gather.rc.Dialog,
+  'lottie'              : grit.gather.chrome_html.ChromeHtml,
   'menu'                : grit.gather.rc.Menu,
   'rcdata'              : grit.gather.rc.RCData,
   'tr_html'             : grit.gather.tr_html.TrHtml,
@@ -54,7 +55,7 @@ class StructureNode(base.Node):
   # VALUE must escape all commas: ',' -> ',,'.  Each variable definition
   # should be separated by a comma with no extra whitespace.
   # Example: THING1=foo,THING2=bar
-  variable_pattern = re.compile('([^,=\s]+)=((?:,,|[^,])*)')
+  variable_pattern = re.compile(r'([^,=\s]+)=((?:,,|[^,])*)')
 
   def __init__(self):
     super(StructureNode, self).__init__()
@@ -117,38 +118,33 @@ class StructureNode(base.Node):
     return ['type', 'name', 'file']
 
   def DefaultAttributes(self):
-    return { 'encoding' : 'cp1252',
-             'exclude_from_rc' : 'false',
-             'line_end' : 'unix',
-             'output_encoding' : 'utf-8',
-             'generateid': 'true',
-             'expand_variables' : 'false',
-             'output_filename' : '',
-             'fold_whitespace': 'false',
-             # Run an arbitrary command after translation is complete
-             # so that it doesn't interfere with what's in translation
-             # console.
-             'run_command' : '',
-             # Leave empty to run on all platforms, comma-separated
-             # for one or more specific platforms. Values must match
-             # output of platform.system().
-             'run_command_on_platforms' : '',
-             'allowexternalscript': 'false',
-             # preprocess takes the same code path as flattenhtml, but it
-             # disables any processing/inlining outside of <if> and <include>.
-             'preprocess': 'false',
-             'flattenhtml': 'false',
-             'fallback_to_low_resolution': 'default',
-             # TODO(joi) this is a hack - should output all generated files
-             # as SCons dependencies; however, for now there is a bug I can't
-             # find where GRIT doesn't build the matching fileset, therefore
-             # this hack so that only the files you really need are marked as
-             # dependencies.
-             'sconsdep' : 'false',
-             'variables': '',
-             'compress': 'false',
-             'use_base_dir': 'true',
-             }
+    return {
+        'encoding': 'cp1252',
+        'exclude_from_rc': 'false',
+        'line_end': 'unix',
+        'output_encoding': 'utf-8',
+        'generateid': 'true',
+        'expand_variables': 'false',
+        'output_filename': '',
+        'fold_whitespace': 'false',
+        # Run an arbitrary command after translation is complete
+        # so that it doesn't interfere with what's in translation
+        # console.
+        'run_command': '',
+        # Leave empty to run on all platforms, comma-separated
+        # for one or more specific platforms. Values must match
+        # output of platform.system().
+        'run_command_on_platforms': '',
+        'allowexternalscript': 'false',
+        # preprocess takes the same code path as flattenhtml, but it
+        # disables any processing/inlining outside of <if> and <include>.
+        'preprocess': 'false',
+        'flattenhtml': 'false',
+        'fallback_to_low_resolution': 'default',
+        'variables': '',
+        'compress': 'default',
+        'use_base_dir': 'true',
+    }
 
   def IsExcludedFromRc(self):
     return self.attrs['exclude_from_rc'] == 'true'
@@ -168,10 +164,10 @@ class StructureNode(base.Node):
     with open(flat_filename, 'wb') as outfile:
       if self.ExpandVariables():
         text = self.gatherer.GetText()
-        file_contents = self._Substitute(text).encode('utf-8')
+        file_contents = self._Substitute(text)
       else:
         file_contents = self.gatherer.GetData('', 'utf-8')
-      outfile.write(file_contents)
+      outfile.write(file_contents.encode('utf-8'))
 
     self._last_flat_filename = flat_filename
     return os.path.basename(flat_filename)
@@ -195,13 +191,19 @@ class StructureNode(base.Node):
     return self.gatherer.GetCliques()
 
   def GetDataPackValue(self, lang, encoding):
-    """Returns a str represenation for a data_pack entry."""
+    """Returns a bytes representation for a data_pack entry."""
     if self.ExpandVariables():
       text = self.gatherer.GetText()
       data = util.Encode(self._Substitute(text), encoding)
     else:
       data = self.gatherer.GetData(lang, encoding)
-    return self.CompressDataIfNeeded(data)
+    if encoding != util.BINARY:
+      data = data.encode(encoding)
+    data = self.CompressDataIfNeeded(data)
+    # If the asset is in the Lottie format, indicate it by prepending "LOTTIE".
+    if self.attrs['type'] == 'lottie':
+      data = 'LOTTIE'.encode(self.attrs['output_encoding']) + data
+    return data
 
   def GetHtmlResourceFilenames(self):
     """Returns a set of all filenames inlined by this node."""

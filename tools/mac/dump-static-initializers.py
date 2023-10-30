@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -15,6 +15,8 @@ this script.
 This is meant to be used on a dSYM file. If only an unstripped executable is
 present, use show_mod_init_func.py.
 """
+
+from __future__ import print_function
 
 import optparse
 import re
@@ -52,9 +54,9 @@ def ParseDsymutil(binary):
       else:
         match = dsymutil_re.search(line)
         if match:
-          print current_filename
-          print current_o_filename
-          print
+          print(current_filename)
+          print(current_o_filename)
+          print()
 
 
 def main():

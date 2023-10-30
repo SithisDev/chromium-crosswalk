@@ -1,10 +1,11 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Makes sure that all files contain proper licensing information."""
 
+from __future__ import print_function
 
 import json
 import optparse
@@ -15,23 +16,23 @@ import sys
 
 
 def PrintUsage():
-  print """Usage: python checklicenses.py [--root <root>] [tocheck]
+  print("""Usage: python checklicenses.py [--root <root>] [tocheck]
   --root   Specifies the repository root. This defaults to "../.." relative
            to the script file. This will be correct given the normal location
            of the script in "<root>/tools/checklicenses".
 
-  --ignore-suppressions  Ignores path-specific license whitelist. Useful when
-                         trying to remove a suppression/whitelist entry.
+  --ignore-suppressions  Ignores path-specific license allowlist. Useful when
+                         trying to remove a suppression/allowlist entry.
 
   tocheck  Specifies the directory, relative to root, to check. This defaults
            to "." so it checks everything.
 
 Examples:
   python checklicenses.py
-  python checklicenses.py --root ~/chromium/src third_party"""
+  python checklicenses.py --root ~/chromium/src third_party""")
 
 
-WHITELISTED_LICENSES = [
+ALLOWLISTED_LICENSES = [
     'APSL (v2) BSD (4 clause)',
     'APSL (v2)',
     'Anti-Grain Geometry',
@@ -57,7 +58,6 @@ WHITELISTED_LICENSES = [
     # TODO(phajdan.jr): Make licensecheck not print BSD-like twice.
     'BSD MIT/X11 (BSD like)',
     'BSD-like MIT/X11 (BSD like)',
-
     'BSL (v1.0)',
     'BSL (v1) LGPL (v2.1 or later)',
     'FreeType (BSD like) with patent clause',
@@ -110,34 +110,26 @@ WHITELISTED_LICENSES = [
      'MIT/X11 (BSD like)'),
 ]
 
-
-PATH_SPECIFIC_WHITELISTED_LICENSES = {
+PATH_SPECIFIC_ALLOWLISTED_LICENSES = {
     'base/third_party/icu': [  # http://crbug.com/98087
         'UNKNOWN',
     ],
-
-    'base/third_party/libevent': [  # http://crbug.com/98309
-        'UNKNOWN',
-    ],
-
     'buildtools/third_party/libc++/trunk/test': [
         # http://llvm.org/bugs/show_bug.cgi?id=25980
         'UNKNOWN',
     ],
     # http://llvm.org/bugs/show_bug.cgi?id=25976
-    'buildtools/third_party/libc++/trunk/src/include/atomic_support.h': [
-      'UNKNOWN'
-    ],
-    'buildtools/third_party/libc++/trunk/utils/gen_link_script': [ 'UNKNOWN' ],
-    'buildtools/third_party/libc++/trunk/utils/not': [ 'UNKNOWN' ],
-    'buildtools/third_party/libc++/trunk/utils/sym_check': [ 'UNKNOWN' ],
-    'buildtools/third_party/libc++abi/trunk/test': [ 'UNKNOWN' ],
-
+    'buildtools/third_party/libc++/trunk/src/include/atomic_support.h':
+    ['UNKNOWN'],
+    'buildtools/third_party/libc++/trunk/utils/gen_link_script': ['UNKNOWN'],
+    'buildtools/third_party/libc++/trunk/utils/not': ['UNKNOWN'],
+    'buildtools/third_party/libc++/trunk/utils/sym_check': ['UNKNOWN'],
+    'buildtools/third_party/libc++abi/trunk/test': ['UNKNOWN'],
     'chrome/common/extensions/docs/examples': [  # http://crbug.com/98092
         'UNKNOWN',
     ],
     # This contains files copied from elsewhere from the tree. Since the copied
-    # directories might have suppressions below (like simplejson), whitelist the
+    # directories might have suppressions below (like simplejson), allowlist the
     # whole directory. This is also not shipped code.
     'chrome/common/extensions/docs/server2/third_party': [
         'UNKNOWN',
@@ -177,7 +169,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/angle': [
         'UNKNOWN',
     ],
-
     'third_party/blink': [
         'UNKNOWN',
     ],
@@ -231,7 +222,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'buildtools/clang_format/script': [
         'UNKNOWN',
     ],
-
     'third_party/devscripts': [
         'GPL (v2 or later)',
     ],
@@ -250,15 +240,11 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
 
     # https://bugs.launchpad.net/beautifulsoup/+bug/1481316
     # MIT license.
-    'third_party/catapult/third_party/beautifulsoup': [
-        'UNKNOWN'
-    ],
+    'third_party/catapult/third_party/beautifulsoup': ['UNKNOWN'],
 
     # https://bitbucket.org/ned/coveragepy/issue/313/add-license-file-containing-2-3-or-4
     # Apache (v2.0) license, not shipped
-    'third_party/catapult/third_party/coverage': [
-        'UNKNOWN'
-    ],
+    'third_party/catapult/third_party/coverage': ['UNKNOWN'],
 
     # https://code.google.com/p/graphy/issues/detail?id=6
     # Apache (v2.0)
@@ -361,7 +347,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/catapult/third_party/Paste': [
         'UNKNOWN',
     ],
-
     'third_party/expat/files/lib': [  # http://crbug.com/98121
         'UNKNOWN',
     ],
@@ -376,13 +361,13 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         # https://bugs.freedesktop.org/show_bug.cgi?id=73401
         'UNKNOWN',
     ],
-    'third_party/freetype2': [ # http://crbug.com/177319
+    'third_party/freetype2': [  # http://crbug.com/177319
         'UNKNOWN',
     ],
-    'third_party/freetype-android': [ # http://crbug.com/177319
+    'third_party/freetype-android': [  # http://crbug.com/177319
         'UNKNOWN',
     ],
-    'third_party/grpc': [ # https://github.com/grpc/grpc/issues/6951
+    'third_party/grpc': [  # https://github.com/grpc/grpc/issues/6951
         'UNKNOWN',
     ],
     'third_party/hunspell': [  # http://crbug.com/98134
@@ -414,6 +399,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/lcov/contrib/galaxy/genflat.pl': [
         'GPL (v2 or later)',
     ],
+    'third_party/libevent': [  # http://crbug.com/98309
+        'UNKNOWN',
+    ],
     'third_party/libjpeg_turbo': [  # http://crbug.com/98314
         'UNKNOWN',
     ],
@@ -427,16 +415,10 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
 
-    # The following files have a special license.
-    'third_party/libovr/src': [
-        'UNKNOWN',
-    ],
-
     # The following files lack license headers, but are trivial.
     'third_party/libusb/src/libusb/os/poll_posix.h': [
         'UNKNOWN',
     ],
-
     'third_party/libxml': [
         'UNKNOWN',
     ],
@@ -477,14 +459,10 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/pycoverage': [
         'UNKNOWN',
     ],
-
-    'third_party/pyelftools': [ # http://crbug.com/222831
+    'third_party/pyelftools': [  # http://crbug.com/222831
         'UNKNOWN',
     ],
     'third_party/scons-2.0.1/engine/SCons': [  # http://crbug.com/98462
-        'UNKNOWN',
-    ],
-    'third_party/sfntly/src/java': [  # Apache 2.0, not shipped.
         'UNKNOWN',
     ],
     'third_party/simplejson': [
@@ -506,35 +484,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
 
-    # New BSD license. http://crbug.com/98455
-    'tools/swarming_client/third_party/google': [
-        'UNKNOWN',
-    ],
-
-    # https://github.com/google/google-api-python-client/issues/216
-    # Apache v2.0.
-    'tools/swarming_client/third_party/googleapiclient': [
-        'UNKNOWN',
-    ],
-
-    # http://crbug.com/334668
-    # https://github.com/jcgregorio/httplib2/issues/307
-    # MIT license.
-    'tools/swarming_client/third_party/httplib2': [
-        'UNKNOWN',
-    ],
-
-    # http://crbug.com/471372
-    # BSD
-    'tools/swarming_client/third_party/pyasn1': [
-        'UNKNOWN',
-    ],
-
-    # https://github.com/kennethreitz/requests/issues/1610
-    'tools/swarming_client/third_party/requests': [
-        'UNKNOWN',
-    ],
-
     'third_party/minizip': [
         'UNKNOWN',
     ],
@@ -547,17 +496,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
     'third_party/pdfium/third_party/libtiff/uvcode.h': [
-        'UNKNOWN',
-    ],
-
-    'third_party/talloc': [
-        'GPL (v3 or later)',
-        'UNKNOWN',  # http://crbug.com/98588
-    ],
-    'third_party/tcmalloc': [
-        'UNKNOWN',  # http://crbug.com/98589
-    ],
-    'third_party/tlslite': [
         'UNKNOWN',
     ],
     # MIT license but some files contain no licensing info. e.g. autogen.sh.
@@ -574,7 +512,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/webgl/src': [
         'UNKNOWN',
     ],
-
     'third_party/webrtc': [  # http://crbug.com/98592
         'UNKNOWN',
     ],
@@ -668,9 +605,9 @@ def check_licenses(options, args):
     PrintUsage()
     return 1
 
-  print "Using base directory:", options.base_directory
-  print "Checking:", start_dir
-  print
+  print("Using base directory:", options.base_directory)
+  print("Checking:", start_dir)
+  print()
 
   licensecheck_path = os.path.abspath(os.path.join(options.base_directory,
                                                    'third_party',
@@ -684,20 +621,21 @@ def check_licenses(options, args):
                                   stderr=subprocess.PIPE)
   stdout, stderr = licensecheck.communicate()
   if options.verbose:
-    print '----------- licensecheck stdout -----------'
-    print stdout
-    print '--------- end licensecheck stdout ---------'
+    print('----------- licensecheck stdout -----------')
+    print(stdout)
+    print('--------- end licensecheck stdout ---------')
   if licensecheck.returncode != 0 or stderr:
-    print '----------- licensecheck stderr -----------'
-    print stderr
-    print '--------- end licensecheck stderr ---------'
-    print "\nFAILED\n"
+    print('----------- licensecheck stderr -----------')
+    print(stderr)
+    print('--------- end licensecheck stderr ---------')
+    print("\nFAILED\n")
     return 1
 
   used_suppressions = set()
   errors = []
 
   for line in stdout.splitlines():
+    line = line.decode('utf-8')
     filename, license = line.split(':', 1)
     filename = os.path.relpath(filename.strip(), options.base_directory)
 
@@ -712,14 +650,15 @@ def check_licenses(options, args):
     if 'GENERATED FILE' in license:
       continue
 
-    if license in WHITELISTED_LICENSES:
+    if license in ALLOWLISTED_LICENSES:
       continue
 
     if not options.ignore_suppressions:
       matched_prefixes = [
-          prefix for prefix in PATH_SPECIFIC_WHITELISTED_LICENSES
-          if filename.startswith(prefix) and
-          license in PATH_SPECIFIC_WHITELISTED_LICENSES[prefix]]
+          prefix for prefix in PATH_SPECIFIC_ALLOWLISTED_LICENSES
+          if filename.startswith(prefix)
+          and license in PATH_SPECIFIC_ALLOWLISTED_LICENSES[prefix]
+      ]
       if matched_prefixes:
         used_suppressions.update(set(matched_prefixes))
         continue
@@ -732,15 +671,15 @@ def check_licenses(options, args):
 
   if errors:
     for error in errors:
-      print "'%s' has non-whitelisted license '%s'" % (
-          error['filename'], error['license'])
-    print "\nFAILED\n"
-    print "Please read",
-    print "http://www.chromium.org/developers/adding-3rd-party-libraries"
-    print "for more info how to handle the failure."
-    print
-    print "Please respect OWNERS of checklicenses.py. Changes violating"
-    print "this requirement may be reverted."
+      print("'%s' has non-allowlisted license '%s'" %
+            (error['filename'], error['license']))
+    print("\nFAILED\n")
+    print("Please read", end=' ')
+    print("http://www.chromium.org/developers/adding-3rd-party-libraries")
+    print("for more info how to handle the failure.")
+    print()
+    print("Please respect OWNERS of checklicenses.py. Changes violating")
+    print("this requirement may be reverted.")
 
     # Do not print unused suppressions so that above message is clearly
     # visible and gets proper attention. Too much unrelated output
@@ -748,15 +687,15 @@ def check_licenses(options, args):
 
     return 1
 
-  print "\nSUCCESS\n"
+  print("\nSUCCESS\n")
 
   if not len(args):
     unused_suppressions = set(
-        PATH_SPECIFIC_WHITELISTED_LICENSES.iterkeys()).difference(
+        PATH_SPECIFIC_ALLOWLISTED_LICENSES.iterkeys()).difference(
             used_suppressions)
     if unused_suppressions:
-      print "\nNOTE: unused suppressions detected:\n"
-      print '\n'.join(unused_suppressions)
+      print("\nNOTE: unused suppressions detected:\n")
+      print('\n'.join(unused_suppressions))
 
   return 0
 
@@ -775,7 +714,7 @@ def main():
   option_parser.add_option('--ignore-suppressions',
                            action='store_true',
                            default=False,
-                           help='Ignore path-specific license whitelist.')
+                           help='Ignore path-specific license allowlist.')
   option_parser.add_option('--json', help='Path to JSON output file')
   options, args = option_parser.parse_args()
   return check_licenses(options, args)

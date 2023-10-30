@@ -1,5 +1,5 @@
-#!/usr/bin/env vpython
-# Copyright 2017 The Chromium Authors. All rights reserved.
+#!/usr/bin/env vpython3
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,6 +9,8 @@ import os
 import sys
 
 from core import path_util
+path_util.AddTelemetryToPath()
+
 from core import benchmark_finders
 
 from py_utils import cloud_storage
@@ -34,7 +36,10 @@ def GetAllStorySets():
       'cros_tab_switching.typical_24',
       'multipage_skpicture_printer',
       'leak_detection.cluster_telemetry',
-      'generic_trace_ct']
+      'generic_trace_ct',
+      'ad_tagging.cluster_telemetry',
+      'layout_shift.cluster_telemetry',
+  ]
 
   for benchmark in benchmark_finders.GetAllBenchmarks():
     if benchmark.Name() in benchmarks_to_skip:
@@ -64,7 +69,7 @@ def GetMissingArchivesInCloudStorage(archive_infos, wpr_sha_files):
     bucket = wpr_archive_info._bucket
     story_archives = wpr_archive_info._data['archives']
     for story in story_archives:
-      for _, archive_path in story_archives[story].iteritems():
+      for _, archive_path in story_archives[story].items():
         archive_path = os.path.join(wpr_archive_info._base_dir,
             archive_path)
         hash_path = NormalizedPath(archive_path + '.sha1')

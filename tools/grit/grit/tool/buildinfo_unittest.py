@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,13 +9,14 @@
 from __future__ import print_function
 
 import os
-import StringIO
 import sys
 import unittest
 
 # This is needed to find some of the imports below.
 if __name__ == '__main__':
   sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+
+from six import StringIO
 
 # pylint: disable-msg=C6204
 from grit.tool import buildinfo
@@ -27,7 +28,7 @@ class BuildInfoUnittest(unittest.TestCase):
     # Change CWD to make tests work independently of callers CWD.
     os.chdir(os.path.dirname(__file__))
     os.chdir('..')
-    self.buf = StringIO.StringIO()
+    self.buf = StringIO()
     self.old_stdout = sys.stdout
     sys.stdout = self.buf
 

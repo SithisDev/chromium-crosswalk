@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,15 +13,20 @@ import os
 import sys
 import unittest
 
-from core import path_util
+from chrome_telemetry_build import chromium_config
+
+from core import results_processor
+from core import testing
 
 from telemetry import benchmark as benchmark_module
 from telemetry import decorators
-from telemetry.testing import options_for_unittests
 from telemetry.testing import progress_reporter
+
 from py_utils import discover
+from py_utils import tempfile_ext
 
 from benchmarks import jetstream
+from benchmarks import jetstream2
 from benchmarks import kraken
 from benchmarks import octane
 from benchmarks import rasterize_and_record_micro
@@ -29,15 +34,21 @@ from benchmarks import speedometer
 from benchmarks import v8_browsing
 
 
-MAX_NUM_VALUES = 50000
+# We want to prevent benchmarks from accidentally trying to upload too much
+# data to the chrome perf dashboard. So the smoke tests below cap the max
+# number of values that each story tested would produce when running on the
+# waterfall.
+MAX_VALUES_PER_TEST_CASE = 1000
 
 
-def SmokeTestGenerator(benchmark, num_pages=1):
-  """Generates a benchmark that includes first N pages from pageset.
+def SmokeTestGenerator(benchmark_class, num_pages=1, story_tag_filter=None):
+  """Generates a smoke test for the first N pages from a benchmark.
 
   Args:
-    benchmark: benchmark object to make smoke test.
-    num_pages: use the first N pages to run smoke test.
+    benchmark_class: a benchmark class to smoke test.
+    num_pages: only smoke test the first N pages, since smoke testing
+      everything would take too long to run.
+    story_tag_filter: only smoke test stories matching with tags.
   """
   # NOTE TO SHERIFFS: DO NOT DISABLE THIS TEST.
   #
@@ -45,81 +56,69 @@ def SmokeTestGenerator(benchmark, num_pages=1):
   # failing or flaky benchmark would disable a much wider swath of coverage
   # than is usually intended. Instead, if a particular benchmark is failing,
   # disable it in tools/perf/benchmarks/*.
-  @decorators.Disabled('chromeos')  # crbug.com/351114
   @decorators.Disabled('android')  # crbug.com/641934
-  def BenchmarkSmokeTest(self):
-    class SinglePageBenchmark(benchmark):  # pylint: disable=no-init
-      # Only measure a single page so that this test cycles reasonably quickly.
-      options = benchmark.options.copy()
-      options['pageset_repeat'] = 1
-
-      def CreateStorySet(self, options):
-        # pylint: disable=super-on-old-class
-        story_set = super(SinglePageBenchmark, self).CreateStorySet(options)
-
-        # Only smoke test the first story since smoke testing everything takes
-        # too long.
-        for s in story_set.stories[num_pages:]:
-          story_set.RemoveStory(s)
-        return story_set
-
+  def BenchmarkSmokeTestFunc(self):
     # Some benchmarks are running multiple iterations
     # which is not needed for a smoke test
-    if hasattr(SinglePageBenchmark, 'enable_smoke_test_mode'):
-      SinglePageBenchmark.enable_smoke_test_mode = True
+    if hasattr(benchmark_class, 'enable_smoke_test_mode'):
+      benchmark_class.enable_smoke_test_mode = True
 
-    # Set the benchmark's default arguments.
-    options = options_for_unittests.GetCopy()
-    options.output_formats = ['none']
-    parser = options.CreateParser()
+    with tempfile_ext.NamedTemporaryDirectory() as temp_dir:
+      options = testing.GetRunOptions(
+          output_dir=temp_dir,
+          benchmark_cls=benchmark_class,
+          overrides={
+              'story_shard_end_index': num_pages,
+              'story_tag_filter': story_tag_filter
+          },
+          environment=chromium_config.GetDefaultChromiumConfig())
+      options.pageset_repeat = 1  # For smoke testing only run the page once.
+      options.output_formats = ['histograms']
+      options.max_values_per_test_case = MAX_VALUES_PER_TEST_CASE
+      results_processor.ProcessOptions(options)
 
-    SinglePageBenchmark.AddCommandLineArgs(parser)
-    benchmark_module.AddCommandLineArgs(parser)
-    SinglePageBenchmark.SetArgumentDefaults(parser)
-    options.MergeDefaultValues(parser.get_default_values())
+      return_code = benchmark_class().Run(options)
+      # TODO(crbug.com/1019139): Make 111 be the exit code that means
+      # "no stories were run.".
+      if return_code in (-1, 111):
+        self.skipTest('The benchmark was not run.')
+      self.assertEqual(
+          return_code, 0,
+          msg='Benchmark run failed: %s' % benchmark_class.Name())
+      return_code = results_processor.ProcessResults(options, is_unittest=True)
+      self.assertEqual(
+          return_code, 0,
+          msg='Result processing failed: %s' % benchmark_class.Name())
 
-    # Prevent benchmarks from accidentally trying to upload too much data to the
-    # chromeperf dashboard. The number of values uploaded is equal to (the
-    # average number of values produced by a single story) * (1 + (the number of
-    # stories)). The "1 + " accounts for values summarized across all stories.
-    # We can approximate "the average number of values produced by a single
-    # story" as the number of values produced by the first story.
-    # pageset_repeat doesn't matter because values are summarized across
-    # repetitions before uploading.
-    story_set = benchmark().CreateStorySet(options)
-    SinglePageBenchmark.MAX_NUM_VALUES = MAX_NUM_VALUES / len(story_set.stories)
+  # Set real_test_func as benchmark_class to make typ
+  # write benchmark_class source filepath to trace instead of
+  # path to this file
+  BenchmarkSmokeTestFunc.real_test_func = benchmark_class
 
-    SinglePageBenchmark.ProcessCommandLineArgs(None, options)
-    benchmark_module.ProcessCommandLineArgs(None, options)
-
-    single_page_benchmark = SinglePageBenchmark()
-    with open(path_util.GetExpectationsPath()) as fp:
-      single_page_benchmark.AugmentExpectationsWithParser(fp.read())
-
-    return_code = single_page_benchmark.Run(options)
-    if return_code == -1:
-      self.skipTest('The benchmark was not run.')
-    self.assertEqual(0, return_code, msg='Failed: %s' % benchmark)
-
-  return BenchmarkSmokeTest
+  return BenchmarkSmokeTestFunc
 
 
 # The list of benchmark modules to be excluded from our smoke tests.
-_BLACK_LIST_TEST_MODULES = {
+_BLOCK_LIST_TEST_MODULES = {
     octane,  # Often fails & take long time to timeout on cq bot.
     rasterize_and_record_micro,  # Always fails on cq bot.
     speedometer,  # Takes 101 seconds.
     jetstream,  # Take 206 seconds.
-    kraken,  # Flaky on Android, crbug.com/626174.
+    jetstream2, # Causes CQ shard to timeout, crbug.com/992837
     v8_browsing, # Flaky on Android, crbug.com/628368.
+    kraken, # Crashes on CQ blocking LKGM, b/243415984
 }
 
 # The list of benchmark names to be excluded from our smoke tests.
-_BLACK_LIST_TEST_NAMES = [
-   'memory.long_running_idle_gmail_background_tbmv2',
-   'tab_switching.typical_25',
-   'UNSCHEDULED_oortonline_tbmv2',
-   'webrtc',  # crbug.com/932036
+_BLOCK_LIST_TEST_NAMES = [
+    'memory.long_running_idle_gmail_background_tbmv2',
+    'tab_switching.typical_25',
+    'tracing.tracing_with_background_memory_infra',  # crbug.com/1301865
+    'UNSCHEDULED_oortonline_tbmv2',
+    'webrtc',  # crbug.com/932036
+    'v8.runtime_stats.top_25',  # Fails in Windows, crbug.com/1043048
+    'wasmpspdfkit',  # Fails in Chrome OS, crbug.com/1191938
+    'memory.desktop' if sys.platform == 'darwin' else None,  # crbug.com/1277277
 ]
 
 
@@ -129,6 +128,10 @@ def MergeDecorators(method, method_attribute, benchmark, benchmark_attribute):
       getattr(benchmark, benchmark_attribute, set()))
   if merged_attributes:
     setattr(method, method_attribute, merged_attributes)
+
+
+class BenchmarkSmokeTest(unittest.TestCase):
+  pass
 
 
 def load_tests(loader, standard_tests, pattern):
@@ -144,17 +147,19 @@ def load_tests(loader, standard_tests, pattern):
       benchmarks_dir, top_level_dir, benchmark_module.Benchmark,
       index_by_class_name=False).values()
   for benchmark in all_benchmarks:
-    if sys.modules[benchmark.__module__] in _BLACK_LIST_TEST_MODULES:
+    if sys.modules[benchmark.__module__] in _BLOCK_LIST_TEST_MODULES:
       continue
-    if benchmark.Name() in _BLACK_LIST_TEST_NAMES:
+    if benchmark.Name() in _BLOCK_LIST_TEST_NAMES:
       continue
-
-    class BenchmarkSmokeTest(unittest.TestCase):
-      pass
 
     # tab_switching needs more than one page to test correctly.
     if 'tab_switching' in benchmark.Name():
       method = SmokeTestGenerator(benchmark, num_pages=2)
+    elif 'desktop_ui' in benchmark.Name():
+      # Run tests with a specific smoke_test tag.
+      method = SmokeTestGenerator(benchmark,
+                                  num_pages=None,
+                                  story_tag_filter='smoke_test')
     else:
       method = SmokeTestGenerator(benchmark)
 

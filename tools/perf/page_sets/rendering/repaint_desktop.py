@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import legacy_page_test
@@ -142,4 +142,3 @@ class RepaintYahoo2018Page(RepaintDesktopPage):
   BASE_NAME = 'repaint_yahoo_homepage'
   YEAR = '2018'
   URL = 'http://vmiura.github.io/snapit-pages/snapit_yahoo_homepage.html'
-

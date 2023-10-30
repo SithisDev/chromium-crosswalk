@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,42 +7,39 @@
 #include <string>
 #include <utility>
 
+#include "base/check.h"
 #include "base/json/json_reader.h"
-#include "base/logging.h"
 
 namespace json_schema_compiler {
 namespace test_util {
 
-std::unique_ptr<base::Value> ReadJson(const base::StringPiece& json) {
-  int error_code;
-  std::string error_msg;
-  std::unique_ptr<base::Value> result(
-      base::JSONReader::ReadAndReturnErrorDeprecated(
-          json, base::JSON_ALLOW_TRAILING_COMMAS, &error_code, &error_msg));
+base::Value ReadJson(const base::StringPiece& json) {
+  auto parsed_json = base::JSONReader::ReadAndReturnValueWithError(
+      json, base::JSON_ALLOW_TRAILING_COMMAS);
   // CHECK not ASSERT since passing invalid |json| is a test error.
-  CHECK(result) << error_msg;
-  return result;
+  CHECK(parsed_json.has_value()) << parsed_json.error().message;
+  return std::move(*parsed_json);
 }
 
 std::unique_ptr<base::ListValue> List(std::unique_ptr<base::Value> a) {
   auto list = std::make_unique<base::ListValue>();
-  list->Append(std::move(a));
+  list->GetList().Append(base::Value::FromUniquePtrValue(std::move(a)));
   return list;
 }
 std::unique_ptr<base::ListValue> List(std::unique_ptr<base::Value> a,
                                       std::unique_ptr<base::Value> b) {
   auto list = std::make_unique<base::ListValue>();
-  list->Append(std::move(a));
-  list->Append(std::move(b));
+  list->GetList().Append(base::Value::FromUniquePtrValue(std::move(a)));
+  list->GetList().Append(base::Value::FromUniquePtrValue(std::move(b)));
   return list;
 }
 std::unique_ptr<base::ListValue> List(std::unique_ptr<base::Value> a,
                                       std::unique_ptr<base::Value> b,
                                       std::unique_ptr<base::Value> c) {
   auto list = std::make_unique<base::ListValue>();
-  list->Append(std::move(a));
-  list->Append(std::move(b));
-  list->Append(std::move(c));
+  list->GetList().Append(base::Value::FromUniquePtrValue(std::move(a)));
+  list->GetList().Append(base::Value::FromUniquePtrValue(std::move(b)));
+  list->GetList().Append(base::Value::FromUniquePtrValue(std::move(c)));
   return list;
 }
 
@@ -50,7 +47,7 @@ std::unique_ptr<base::DictionaryValue> Dictionary(
     const std::string& ak,
     std::unique_ptr<base::Value> av) {
   auto dict = std::make_unique<base::DictionaryValue>();
-  dict->SetWithoutPathExpansion(ak, std::move(av));
+  dict->SetKey(ak, base::Value::FromUniquePtrValue(std::move(av)));
   return dict;
 }
 std::unique_ptr<base::DictionaryValue> Dictionary(
@@ -59,8 +56,8 @@ std::unique_ptr<base::DictionaryValue> Dictionary(
     const std::string& bk,
     std::unique_ptr<base::Value> bv) {
   auto dict = std::make_unique<base::DictionaryValue>();
-  dict->SetWithoutPathExpansion(ak, std::move(av));
-  dict->SetWithoutPathExpansion(bk, std::move(bv));
+  dict->SetKey(ak, base::Value::FromUniquePtrValue(std::move(av)));
+  dict->SetKey(bk, base::Value::FromUniquePtrValue(std::move(bv)));
   return dict;
 }
 std::unique_ptr<base::DictionaryValue> Dictionary(
@@ -71,9 +68,9 @@ std::unique_ptr<base::DictionaryValue> Dictionary(
     const std::string& ck,
     std::unique_ptr<base::Value> cv) {
   auto dict = std::make_unique<base::DictionaryValue>();
-  dict->SetWithoutPathExpansion(ak, std::move(av));
-  dict->SetWithoutPathExpansion(bk, std::move(bv));
-  dict->SetWithoutPathExpansion(ck, std::move(cv));
+  dict->SetKey(ak, base::Value::FromUniquePtrValue(std::move(av)));
+  dict->SetKey(bk, base::Value::FromUniquePtrValue(std::move(bv)));
+  dict->SetKey(ck, base::Value::FromUniquePtrValue(std::move(cv)));
   return dict;
 }
 

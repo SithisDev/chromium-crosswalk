@@ -1,5 +1,5 @@
-#!/usr/bin/env vpython
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+#!/usr/bin/env vpython3
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,17 +10,17 @@ sections are placed consecutively in the order specified. This allows us
 to page in less code during start-up.
 
 Example usage:
-  tools/cygprofile/orderfile_generator_backend.py -l 20 -j 1000 --use-goma \
-    --target-arch=arm
+  tools/cygprofile/orderfile_generator_backend.py --use-goma --target-arch=arm
 """
 
+
 import argparse
+import csv
 import hashlib
 import json
 import glob
 import logging
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -29,11 +29,9 @@ import time
 
 import cluster
 import cyglog_to_orderfile
-import cygprofile_utils
 import patch_orderfile
 import process_profiles
 import profile_android_startup
-import symbol_extractor
 
 _SRC_PATH = os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)
 sys.path.append(os.path.join(_SRC_PATH, 'third_party', 'catapult', 'devil'))
@@ -55,16 +53,16 @@ constants.SetBuildType('Release')
 # Architecture specific GN args. Trying to build an orderfile for an
 # architecture not listed here will eventually throw.
 _ARCH_GN_ARGS = {
-    'arm': [ 'target_cpu = "arm"' ],
-    'arm64': [ 'target_cpu = "arm64"',
-               'android_64bit_browser = true'],
+    'arm': ['target_cpu = "arm"'],
+    'arm64': ['target_cpu = "arm64"', 'android_64bit_browser = true'],
+    'x86': ['target_cpu = "x86"'],
 }
 
 class CommandError(Exception):
   """Indicates that a dispatched shell command exited with a non-zero status."""
 
   def __init__(self, value):
-    super(CommandError, self).__init__()
+    super().__init__()
     self.value = value
 
   def __str__(self):
@@ -100,8 +98,7 @@ def _GetFileExtension(file_name):
   file_name_parts = os.path.basename(file_name).split('.')
   if len(file_name_parts) > 1:
     return file_name_parts[-1]
-  else:
-    return None
+  return None
 
 
 def _StashOutputDirectory(buildpath):
@@ -157,7 +154,7 @@ def _UnstashOutputDirectory(buildpath):
   shutil.move(stashpath, buildpath)
 
 
-class StepRecorder(object):
+class StepRecorder:
   """Records steps and timings."""
 
   def __init__(self, buildbot):
@@ -177,7 +174,7 @@ class StepRecorder(object):
     """
     self.EndStep()
     self._previous_step = (name, time.time())
-    print 'Running step: ', name
+    print('Running step: ', name)
 
   def EndStep(self):
     """Records successful completion of the current step.
@@ -186,7 +183,7 @@ class StepRecorder(object):
     """
     if self._previous_step[0]:
       elapsed = time.time() - self._previous_step[1]
-      print 'Step %s took %f seconds' % (self._previous_step[0], elapsed)
+      print('Step %s took %f seconds' % (self._previous_step[0], elapsed))
       self.timings.append((self._previous_step[0], elapsed))
 
     self._previous_step = ('', 0.0)
@@ -200,9 +197,9 @@ class StepRecorder(object):
     Args:
       message: An optional explanation as to why the step failed.
     """
-    print 'STEP FAILED!!'
+    print('STEP FAILED!!')
     if message:
-      print message
+      print(message)
     self._error_recorded = True
     self.EndStep()
 
@@ -228,7 +225,7 @@ class StepRecorder(object):
     Raises:
       CommandError: An error executing the specified command.
     """
-    print 'Executing %s in %s' % (' '.join(cmd), cwd)
+    print('Executing %s in %s' % (' '.join(cmd), cwd))
     process = subprocess.Popen(cmd, stdout=stdout, cwd=cwd, env=os.environ)
     process.wait()
     if raise_on_error and process.returncode != 0:
@@ -237,7 +234,7 @@ class StepRecorder(object):
     return process.returncode
 
 
-class ClankCompiler(object):
+class ClankCompiler:
   """Handles compilation of clank."""
 
   def __init__(self, out_dir, step_recorder, arch, use_goma, goma_dir,
@@ -284,10 +281,11 @@ class ClankCompiler(object):
 
     # Set the "Release Official" flavor, the parts affecting performance.
     args = [
-        'enable_resource_whitelist_generation=false',
+        'enable_resource_allowlist_generation=false',
         'is_chrome_branded=' + str(not self._public).lower(),
         'is_debug=false',
         'is_official_build=true',
+        'symbol_level=1',  # to fit 30 GiB RAM on the bot when LLD is running
         'target_os="android"',
         'use_goma=' + str(self._use_goma).lower(),
         'use_order_profiling=' + str(instrumented).lower(),
@@ -352,7 +350,7 @@ class ClankCompiler(object):
     self.Build(instrumented, use_call_graph, self._libchrome_target)
 
 
-class OrderfileUpdater(object):
+class OrderfileUpdater:
   """Handles uploading and committing a new orderfile in the repository.
 
   Only used for testing or on a bot.
@@ -362,19 +360,15 @@ class OrderfileUpdater(object):
   _CLOUD_STORAGE_BUCKET = None
   _UPLOAD_TO_CLOUD_COMMAND = 'upload_to_google_storage.py'
 
-  def __init__(self, repository_root, step_recorder, branch, netrc):
+  def __init__(self, repository_root, step_recorder):
     """Constructor.
 
     Args:
       repository_root: (str) Root of the target repository.
       step_recorder: (StepRecorder) Step recorder, for logging.
-      branch: (str) Branch to commit to.
-      netrc: (str) Path to the .netrc file to use.
     """
     self._repository_root = repository_root
     self._step_recorder = step_recorder
-    self._branch = branch
-    self._netrc = netrc
 
   def CommitStashedFileHashes(self, files):
     """Commits unpatched and patched orderfiles hashes if changed.
@@ -391,37 +385,9 @@ class OrderfileUpdater(object):
       Exception if the hash file does not match the file.
       NotImplementedError when the commit logic hasn't been overridden.
     """
-    files_to_commit = list(filter(None, files))
+    files_to_commit = [_f for _f in files if _f]
     if files_to_commit:
       self._CommitStashedFiles(files_to_commit)
-
-  def LegacyCommitFileHashes(self,
-                             unpatched_orderfile_filename,
-                             orderfile_filename):
-    """Commits unpatched and patched orderfiles hashes, if provided.
-
-    DEPRECATED. Left in place during transition.
-
-    Files must have been successfilly uploaded to cloud storage first.
-
-    Args:
-      unpatched_orderfile_filename: (str or None) Unpatched orderfile path.
-      orderfile_filename: (str or None) Orderfile path.
-
-    Raises:
-      NotImplementedError when the commit logic hasn't been overridden.
-    """
-    files_to_commit = []
-    commit_message_lines = ['Update Orderfile.']
-    for filename in [unpatched_orderfile_filename, orderfile_filename]:
-      if not filename:
-        continue
-      (relative_path, sha1) = self._GetHashFilePathAndContents(filename)
-      commit_message_lines.append('Profile: %s: %s' % (
-          os.path.basename(relative_path), sha1))
-      files_to_commit.append(relative_path)
-    if files_to_commit:
-      self._CommitFiles(files_to_commit, commit_message_lines)
 
   def UploadToCloudStorage(self, filename, use_debug_location):
     """Uploads a file to cloud storage.
@@ -438,8 +404,8 @@ class OrderfileUpdater(object):
       cmd.extend(['-z', extension])
     cmd.append(filename)
     self._step_recorder.RunCommand(cmd)
-    print 'Download: https://sandbox.google.com/storage/%s/%s' % (
-        bucket, _GenerateHash(filename))
+    print('Download: https://sandbox.google.com/storage/%s/%s' %
+          (bucket, _GenerateHash(filename)))
 
   def _GetHashFilePathAndContents(self, filename):
     """Gets the name and content of the hash file created from uploading the
@@ -458,10 +424,6 @@ class OrderfileUpdater(object):
         abs_hash_filename, self._repository_root)
     with open(abs_hash_filename, 'r') as f:
       return (rel_hash_filename, f.read())
-
-  def _CommitFiles(self, files_to_commit, commit_message_lines):
-    """Commits a list of files, with a given message."""
-    raise NotImplementedError
 
   def _GitStash(self):
     """Git stash the current clank tree.
@@ -489,20 +451,7 @@ class OrderfileUpdater(object):
     raise NotImplementedError
 
 
-class OrderfileNoopUpdater(OrderfileUpdater):
-  def CommitFileHashes(self, unpatched_orderfile_filename, orderfile_filename):
-    # pylint: disable=unused-argument
-    return
-
-  def UploadToCloudStorage(self, filename, use_debug_location):
-    # pylint: disable=unused-argument
-    return
-
-  def _CommitFiles(self, files_to_commit, commit_message_lines):
-    raise NotImplementedError
-
-
-class OrderfileGenerator(object):
+class OrderfileGenerator:
   """A utility for generating a new orderfile for Clank.
 
   Builds an instrumented binary, profiles a run of the application, and
@@ -515,6 +464,8 @@ class OrderfileGenerator(object):
 
   # Previous orderfile_generator debug files would be overwritten.
   _DIRECTORY_FOR_DEBUG_FILES = '/tmp/orderfile_generator_debug_files'
+
+  _CLOUD_STORAGE_BUCKET_FOR_DEBUG = None
 
   def _PrepareOrderfilePaths(self):
     if self._options.public:
@@ -533,7 +484,11 @@ class OrderfileGenerator(object):
 
   def _GetPathToOrderfile(self):
     """Gets the path to the architecture-specific orderfile."""
-    return self._path_to_orderfile % self._options.arch
+    # Build GN files use the ".arm" orderfile irrespective of the actual
+    # architecture. Fake it, otherwise the orderfile we generate here is not
+    # going to be picked up by builds.
+    orderfile_fake_arch = 'arm'
+    return self._path_to_orderfile % orderfile_fake_arch
 
   def _GetUnpatchedOrderfileFilename(self):
     """Gets the path to the architecture-specific unpatched orderfile."""
@@ -563,8 +518,8 @@ class OrderfileGenerator(object):
       self._monochrome = False
       for device in devices:
         device_version = device.build_version_sdk
-        if (device_version >= version_codes.KITKAT
-            and device_version <= version_codes.LOLLIPOP_MR1):
+        if (version_codes.KITKAT <= device_version <=
+            version_codes.LOLLIPOP_MR1):
           return device
 
     assert not self._options.use_legacy_chrome_apk, \
@@ -625,17 +580,11 @@ class OrderfileGenerator(object):
     self._step_recorder = StepRecorder(options.buildbot)
     self._compiler = None
     if orderfile_updater_class is None:
-      if options.public:
-        orderfile_updater_class = OrderfileNoopUpdater
-      else:
-        orderfile_updater_class = OrderfileUpdater
+      orderfile_updater_class = OrderfileUpdater
     assert issubclass(orderfile_updater_class, OrderfileUpdater)
     self._orderfile_updater = orderfile_updater_class(self._clank_dir,
-                                                      self._step_recorder,
-                                                      options.branch,
-                                                      options.netrc)
+                                                      self._step_recorder)
     assert os.path.isdir(constants.DIR_SOURCE_ROOT), 'No src directory found'
-    symbol_extractor.SetArchitecture(options.arch)
 
   @staticmethod
   def _RemoveBlanks(src_file, dest_file):
@@ -761,12 +710,12 @@ class OrderfileGenerator(object):
 
   def _VerifySymbolOrder(self):
     self._step_recorder.BeginStep('Verify Symbol Order')
-    return_code = self._step_recorder.RunCommand(
-        [self._CHECK_ORDERFILE_SCRIPT, self._compiler.lib_chrome_so,
-         self._GetPathToOrderfile(),
-         '--target-arch=' + self._options.arch],
-        constants.DIR_SOURCE_ROOT,
-        raise_on_error=False)
+    return_code = self._step_recorder.RunCommand([
+        self._CHECK_ORDERFILE_SCRIPT, self._compiler.lib_chrome_so,
+        self._GetPathToOrderfile()
+    ],
+                                                 constants.DIR_SOURCE_ROOT,
+                                                 raise_on_error=False)
     if return_code:
       self._step_recorder.FailStep('Orderfile check returned %d.' % return_code)
 
@@ -780,8 +729,8 @@ class OrderfileGenerator(object):
     if not os.path.exists(self._DIRECTORY_FOR_DEBUG_FILES):
       os.makedirs(self._DIRECTORY_FOR_DEBUG_FILES)
     shutil.copy(file_name, self._DIRECTORY_FOR_DEBUG_FILES)
-    print 'File: %s, saved in: %s, sha1sum: %s' % (
-        file_name, self._DIRECTORY_FOR_DEBUG_FILES, file_sha1)
+    print('File: %s, saved in: %s, sha1sum: %s' %
+          (file_name, self._DIRECTORY_FOR_DEBUG_FILES, file_sha1))
 
   def _SaveForDebugging(self, filename):
     """Uploads the file to cloud storage or saves to a temporary location."""
@@ -789,7 +738,7 @@ class OrderfileGenerator(object):
     if not self._options.buildbot:
       self._SaveFileLocally(filename, file_sha1)
     else:
-      print 'Uploading file for debugging: ' + filename
+      print('Uploading file for debugging: ' + filename)
       self._orderfile_updater.UploadToCloudStorage(
           filename, use_debug_location=True)
 
@@ -805,14 +754,14 @@ class OrderfileGenerator(object):
     if not self._options.buildbot:
       self._SaveFileLocally(file_name, file_sha1)
     else:
-      print 'Uploading file for debugging: %s, sha1sum: %s' % (
-          file_name, file_sha1)
+      print('Uploading file for debugging: %s, sha1sum: %s' % (file_name,
+                                                               file_sha1))
       upload_location = '%s/%s' % (
           self._CLOUD_STORAGE_BUCKET_FOR_DEBUG, os.path.basename(file_name))
       self._step_recorder.RunCommand([
           'gsutil.py', 'cp', file_name, 'gs://' + upload_location])
-      print ('Uploaded to: https://sandbox.google.com/storage/' +
-             upload_location)
+      print('Uploaded to: https://sandbox.google.com/storage/' +
+            upload_location)
 
   def _MaybeArchiveOrderfile(self, filename):
     """In buildbot configuration, uploads the generated orderfile to
@@ -853,40 +802,32 @@ class OrderfileGenerator(object):
                                   '--device={}'.format(
                                       self._profiler._device.serial),
                                   '--browser=exact',
-                                  '--output-format=chartjson',
+                                  '--output-format=csv',
                                   '--output-dir={}'.format(out_dir),
                                   '--reset-results',
                                   '--browser-executable={}'.format(apk),
                                   'orderfile.memory_mobile'])
 
-      out_file_path = os.path.join(out_dir, 'results-chart.json')
+      out_file_path = os.path.join(out_dir, 'results.csv')
       if not os.path.exists(out_file_path):
         raise Exception('Results file not found!')
 
+      results = {}
       with open(out_file_path, 'r') as f:
-        json_results = json.load(f)
-
-      if not json_results:
-        raise Exception('Results file is empty')
-
-      if not 'charts' in json_results:
-        raise Exception('charts can not be found in results!')
-
-      charts = json_results['charts']
-      results = dict()
-      for story in charts:
-        if not story.endswith("NativeCodeResidentMemory_avg"):
-          continue
-
-        results[story] = dict()
-        for substory in charts[story]:
-          if substory == 'summary':
+        reader = csv.DictReader(f)
+        for row in reader:
+          if not row['name'].endswith('NativeCodeResidentMemory'):
             continue
-          if not 'values' in charts[story][substory]:
-            raise Exception(
-              'Values can not be found in charts:%s:%s' % (story, substory))
+          # Note: NativeCodeResidentMemory records a single sample from each
+          # story run, so this average (reported as 'avg') is exactly the value
+          # of that one sample. Each story is run multiple times, so this loop
+          # will accumulate into a list all values for all runs of each story.
+          results.setdefault(row['name'], {}).setdefault(
+              row['stories'], []).append(row['avg'])
 
-          results[story][substory] = charts[story][substory]['values']
+      if not results:
+        raise Exception('Could not find relevant results')
+
       return results
 
     except Exception as e:
@@ -956,6 +897,7 @@ class OrderfileGenerator(object):
     Returns:
       benchmark_results: (dict) Results extracted from benchmarks.
     """
+    benchmark_results = {}
     try:
       _UnstashOutputDirectory(out_directory)
       self._compiler = ClankCompiler(out_directory, self._step_recorder,
@@ -975,7 +917,6 @@ class OrderfileGenerator(object):
       self._compiler.CompileChromeApk(instrumented=False,
                                       use_call_graph=False,
                                       force_relink=True)
-      benchmark_results = dict()
       benchmark_results['Speedometer2.0'] = self._PerformanceBenchmark(
           self._compiler.chrome_apk)
       benchmark_results['orderfile.memory_mobile'] = (
@@ -993,9 +934,6 @@ class OrderfileGenerator(object):
 
   def Generate(self):
     """Generates and maybe upload an order."""
-    profile_uploaded = False
-    orderfile_uploaded = False
-
     assert (bool(self._options.profile) ^
             bool(self._options.manual_symbol_offsets))
     if self._options.system_health_orderfile and not self._options.profile:
@@ -1023,16 +961,15 @@ class OrderfileGenerator(object):
                                           self._options.use_call_graph)
         self._GenerateAndProcessProfile()
         self._MaybeArchiveOrderfile(self._GetUnpatchedOrderfileFilename())
-        profile_uploaded = True
       finally:
         _StashOutputDirectory(self._instrumented_out_dir)
     elif self._options.manual_symbol_offsets:
       assert self._options.manual_libname
       assert self._options.manual_objdir
-      with file(self._options.manual_symbol_offsets) as f:
-        symbol_offsets = [int(x) for x in f.xreadlines()]
+      with open(self._options.manual_symbol_offsets) as f:
+        symbol_offsets = [int(x) for x in f]
       processor = process_profiles.SymbolOffsetProcessor(
-          self._compiler.manual_libname)
+          self._options.manual_libname)
       generator = cyglog_to_orderfile.OffsetOrderfileGenerator(
           processor, cyglog_to_orderfile.ObjectFileProcessor(
               self._options.manual_objdir))
@@ -1069,7 +1006,6 @@ class OrderfileGenerator(object):
         self._MaybeArchiveOrderfile(self._GetPathToOrderfile())
       finally:
         _StashOutputDirectory(self._uninstrumented_out_dir)
-      orderfile_uploaded = True
 
     if self._options.benchmark:
       self._output_data['orderfile_benchmark_results'] = self.RunBenchmark(
@@ -1077,17 +1013,8 @@ class OrderfileGenerator(object):
       self._output_data['no_orderfile_benchmark_results'] = self.RunBenchmark(
           self._no_orderfile_out_dir, no_orderfile=True)
 
-    if self._options.new_commit_flow:
+    if self._options.buildbot:
       self._orderfile_updater._GitStash()
-    else:
-      if (self._options.buildbot and self._options.netrc
-          and not self._step_recorder.ErrorRecorded()):
-        unpatched_orderfile_filename = (
-            self._GetUnpatchedOrderfileFilename() if profile_uploaded else None)
-        orderfile_filename = (
-            self._GetPathToOrderfile() if orderfile_uploaded else None)
-        self._orderfile_updater.LegacyCommitFileHashes(
-            unpatched_orderfile_filename, orderfile_filename)
     self._step_recorder.EndStep()
     return not self._step_recorder.ErrorRecorded()
 
@@ -1103,7 +1030,7 @@ class OrderfileGenerator(object):
 
     Returns: true on success.
     """
-    if not (self._options.buildbot and self._options.netrc):
+    if not self._options.buildbot:
       logging.error('Trying to commit when not running on the buildbot')
       return False
     self._orderfile_updater._CommitStashedFiles([
@@ -1127,9 +1054,11 @@ def CreateArgumentParser():
   parser.add_argument(
       '--verify', action='store_true',
       help='If true, the script only verifies the current orderfile')
-  parser.add_argument('--target-arch', action='store', dest='arch',
+  parser.add_argument('--target-arch',
+                      action='store',
+                      dest='arch',
                       default='arm',
-                      choices=['arm', 'arm64'],
+                      choices=list(_ARCH_GN_ARGS.keys()),
                       help='The target architecture for which to build.')
   parser.add_argument('--output-json', action='store', dest='json_file',
                       help='Location to save stats in json format')
@@ -1140,25 +1069,15 @@ def CreateArgumentParser():
   parser.add_argument(
       '--skip-patch', action='store_false', dest='patch', default=True,
       help='Only generate the raw (unpatched) orderfile, don\'t patch it.')
-  parser.add_argument(
-      '--netrc', action='store',
-      help='A custom .netrc file to use for git checkin. Only used on bots.')
-  parser.add_argument(
-      '--branch', action='store', default='master',
-      help='When running on buildbot with a netrc, the branch orderfile '
-      'hashes get checked into.')
-  # Obsolete (Autoninja is now used, and this argument is ignored).
-  parser.add_argument(
-      '-j', '--jobs', help='Obsolete. Number of jobs to use for compilation.')
-  # Obsolete (Autoninja is now used, and this argument is ignored).
-  parser.add_argument('-l', '--max-load', help='Obsolete. Max cpu load.')
   parser.add_argument('--goma-dir', help='GOMA directory.')
   parser.add_argument(
       '--use-goma', action='store_true', help='Enable GOMA.', default=False)
   parser.add_argument('--adb-path', help='Path to the adb binary.')
 
-  parser.add_argument('--public', action='store_true',
-                      help='Required if your checkout is non-internal.',
+  parser.add_argument('--public',
+                      action='store_true',
+                      help='Build non-internal APK and change the orderfile '
+                      'location. Required if your checkout is non-internal.',
                       default=False)
   parser.add_argument('--nosystem-health-orderfile', action='store_false',
                       dest='system_health_orderfile', default=True,
@@ -1168,7 +1087,6 @@ def CreateArgumentParser():
   parser.add_argument(
       '--use-legacy-chrome-apk', action='store_true', default=False,
       help=('Compile and instrument chrome for [L, K] devices.'))
-
   parser.add_argument('--manual-symbol-offsets', default=None, type=str,
                       help=('File of list of ordered symbol offsets generated '
                             'by manual profiling. Must set other --manual* '
@@ -1203,8 +1121,6 @@ def CreateArgumentParser():
   parser.add_argument('--commit-hashes', action='store_true',
                       help=('Commit any orderfile hash files in the current '
                             'checkout; performs no other action'))
-  parser.add_argument('--new-commit-flow', action='store_true',
-                      help='Use the new two-step commit flow.')
   parser.add_argument('--use-call-graph', action='store_true', default=False,
                       help='Use call graph instrumentation.')
   profile_android_startup.AddProfileCollectionArguments(parser)
@@ -1217,9 +1133,6 @@ def CreateOrderfile(options, orderfile_updater_class=None):
   Args:
     options: As returned from optparse.OptionParser.parse_args()
     orderfile_updater_class: (OrderfileUpdater) subclass of OrderfileUpdater.
-                             Use to explicitly set an OrderfileUpdater class,
-                             the defaults are OrderfileUpdater, or
-                             OrderfileNoopUpdater if --public is set.
 
   Returns:
     True iff success.
@@ -1227,13 +1140,19 @@ def CreateOrderfile(options, orderfile_updater_class=None):
   logging.basicConfig(level=logging.INFO)
   devil_chromium.Initialize(adb_path=options.adb_path)
 
+  # Since we generate a ".arm" orderfile irrespective of the architecture (see
+  # comment in _GetPathToOrderfile()), make sure that we don't commit it.
+  if options.arch != 'arm':
+    assert not options.buildbot, (
+        'ARM is the only supported architecture on bots')
+    assert not options.upload_ready_orderfiles, (
+        'ARM is the only supported architecture on bots')
+
   generator = OrderfileGenerator(options, orderfile_updater_class)
   try:
     if options.verify:
       generator._VerifySymbolOrder()
     elif options.commit_hashes:
-      if not options.new_commit_flow:
-        raise Exception('--commit-hashes requries --new-commit-flow')
       return generator.CommitStashedOrderfileHashes()
     elif options.upload_ready_orderfiles:
       return generator.UploadReadyOrderfiles()
@@ -1245,7 +1164,7 @@ def CreateOrderfile(options, orderfile_updater_class=None):
     if options.json_file:
       with open(options.json_file, 'w') as f:
         f.write(json_output)
-    print json_output
+    print(json_output)
   return False
 
 

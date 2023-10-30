@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """ Test server for testing Negotiate Authorization
@@ -23,6 +23,7 @@ Please see //tools/android/kerberos/README.md for detailed instructions.
 # TODO(dgn) Replace with an EmbeddedTestServer based server in the test apk once
 # the java version is ready. See http://crbug.com/488192
 
+from __future__ import print_function
 
 import time
 import BaseHTTPServer

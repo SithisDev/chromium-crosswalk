@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -28,21 +28,21 @@ namespace some_namespace {{
 """)
 
 _EXPECTED_NON_EMPTY_ARRAY_DEFINITION = (
-"""const uint64_t kExpiredHistogramsHashes[] = {
-  0x965ce8e9e12a9c89,  // Test.FirstHistogram
-  0xdb5b2f55ffd139e8,  // Test.SecondHistogram
+    """const uint32_t kExpiredHistogramsHashes[] = {
+  0x0557fa92,  // Back
+  0x290eb683,  // NewTab
+  0x67d2f674,  // Forward
 };
 
-const size_t kNumExpiredHistograms = 2;"""
-)
+const size_t kNumExpiredHistograms = 3;""")
 
 _EXPECTED_EMPTY_ARRAY_DEFINITION = (
-"""const uint64_t kExpiredHistogramsHashes[] = {
-  0x0000000000000000,  // Dummy.Histogram
+    """const uint32_t kExpiredHistogramsHashes[] = {
+  0x00000000,  // Dummy.Histogram
 };
 
-const size_t kNumExpiredHistograms = 1;"""
-)
+const size_t kNumExpiredHistograms = 1;""")
+
 
 class ExpiredHistogramsTest(unittest.TestCase):
 
@@ -93,12 +93,12 @@ class ExpiredHistogramsTest(unittest.TestCase):
             "expires_after": "2000/10/01"
         }
     }
-    base_date = datetime.date(2000, 10, 01)
+    base_date = datetime.date(2000, 10, 1)
     current_milestone = 60
 
     with self.assertRaises(generate_expired_histograms_array.Error) as error:
-        generate_expired_histograms_array._GetExpiredHistograms(histograms,
-            base_date, current_milestone)
+      generate_expired_histograms_array._GetExpiredHistograms(
+          histograms, base_date, current_milestone)
 
     self.assertEqual(
         generate_expired_histograms_array._DATE_FORMAT_ERROR.format(
@@ -110,36 +110,37 @@ class ExpiredHistogramsTest(unittest.TestCase):
     # Does not match the pattern.
     content = "MAJOR_BRANCH__FAKE_DATE=2017-09-09"
     with self.assertRaises(generate_expired_histograms_array.Error):
-        generate_expired_histograms_array._GetBaseDate(content, regex)
+      generate_expired_histograms_array._GetBaseDate(content, regex)
 
     # Has invalid format.
     content = "MAJOR_BRANCH_DATE=2010/01/01"
     with self.assertRaises(generate_expired_histograms_array.Error):
-        generate_expired_histograms_array._GetBaseDate(content, regex)
+      generate_expired_histograms_array._GetBaseDate(content, regex)
 
     # Has invalid format.
     content = "MAJOR_BRANCH_DATE=2010-20-02"
     with self.assertRaises(generate_expired_histograms_array.Error):
-        generate_expired_histograms_array._GetBaseDate(content, regex)
+      generate_expired_histograms_array._GetBaseDate(content, regex)
 
     # Has invalid date.
     content = "MAJOR_BRANCH_DATE=2017-02-29"
     with self.assertRaises(generate_expired_histograms_array.Error):
-        generate_expired_histograms_array._GetBaseDate(content, regex)
+      generate_expired_histograms_array._GetBaseDate(content, regex)
 
     content = "!!FOO!\nMAJOR_BRANCH_DATE=2010-01-01\n!FOO!!"
     base_date = generate_expired_histograms_array._GetBaseDate(content, regex)
-    self.assertEqual(base_date, datetime.date(2010, 01, 01))
+    self.assertEqual(base_date, datetime.date(2010, 1, 1))
 
   def testGenerateHeaderFileContent(self):
     header_filename = "test/test.h"
     namespace = "some_namespace"
 
     histogram_map = generate_expired_histograms_array._GetHashToNameMap(
-        ["Test.FirstHistogram", "Test.SecondHistogram"])
+        ["Back", "NewTab", "Forward"])
     expected_histogram_map = {
-        "0x965ce8e9e12a9c89": "Test.FirstHistogram",
-        "0xdb5b2f55ffd139e8": "Test.SecondHistogram",
+        "0x0557fa92": "Back",
+        "0x290eb683": "NewTab",
+        "0x67d2f674": "Forward",
     }
     self.assertEqual(expected_histogram_map, histogram_map)
 
@@ -153,25 +154,25 @@ class ExpiredHistogramsTest(unittest.TestCase):
     histograms = xml.dom.minidom.parseString("""
 <histogram-configuration>
 <histograms><!-- Must be alphabetical. -->
-  <histogram name="FirstHistogram" expires_after="2010-11-01">
+  <histogram name="FirstHistogram" expires_after="2010-11-01" units="units">
     <owner>me@chromium.org</owner>
     <summary>
       This is a summary.
     </summary>
   </histogram>
-  <histogram name="FourthHistogram" expires_after="M61">
+  <histogram name="FourthHistogram" expires_after="M61" units="units">
     <owner>me@chromium.org</owner>
     <summary>
       This is a summary.
     </summary>
   </histogram>
-  <histogram name="SecondHistogram" expires_after="2010-09-01">
+  <histogram name="SecondHistogram" expires_after="2010-09-01" units="units">
     <owner>me@chromium.org</owner>
   <summary>
     This is a summary.
   </summary>
     </histogram>
-  <histogram name="ThirdHistogram" expires_after="M60">
+  <histogram name="ThirdHistogram" expires_after="M60" units="units">
     <owner>me@chromium.org</owner>
     <summary>
       This is a summary.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Reduces result of 'readelf -wL' to just a list of starting addresses.
@@ -12,6 +12,8 @@ This script assumes that the result of 'readelf -wL' ends with an empty line.
 
 Note: the option '-wL' has the same meaning with '--debug-dump=decodedline'.
 """
+
+from __future__ import print_function
 
 import re
 import sys
@@ -52,16 +54,17 @@ def reduce_decoded_debugline(input_file):
 
 def main():
   if len(sys.argv) != 1:
-    print >> sys.stderr, 'Unsupported arguments'
+    print('Unsupported arguments', file=sys.stderr)
     return 1
 
   starting_list = reduce_decoded_debugline(sys.stdin)
   bits64 = starting_list[-1][0] > 0xffffffff
   for address, filename in starting_list:
     if bits64:
-      print '%016x %s' % (address, filename)
+      print('%016x %s' % (address, filename))
     else:
-      print '%08x %s' % (address, filename)
+      print('%08x %s' % (address, filename))
+  return 0
 
 
 if __name__ == '__main__':

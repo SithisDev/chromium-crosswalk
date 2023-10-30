@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -111,7 +111,7 @@ class DiffStructures(interface.Tool):
     translated = original.Translate(constants.CONSTANT_LANGUAGE, False)
 
     fname = tempfile.mktemp()
-    with util.WrapOutputStream(open(fname, 'w')) as writer:
+    with util.WrapOutputStream(open(fname, 'wb')) as writer:
       writer.write("Original filename: %s\n=============\n\n"
                        % original_filename)
       writer.write(translated)  # write in UTF-8

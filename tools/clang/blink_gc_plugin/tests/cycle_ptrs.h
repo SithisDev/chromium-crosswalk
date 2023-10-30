@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,17 +21,19 @@ class E;
 
 class A : public GarbageCollected<A> {
 public:
-    virtual void Trace(Visitor*);
+ virtual void Trace(Visitor*) const;
+
 private:
     Member<B> m_b;
 };
 
-class B : public GarbageCollectedFinalized<B> {
-public:
-    virtual void Trace(Visitor*);
-private:
-    Member<A> m_a;
-    RefPtr<C> m_c;
+class B : public GarbageCollected<B> {
+ public:
+  virtual void Trace(Visitor*) const;
+
+ private:
+  Member<A> m_a;
+  scoped_refptr<C> m_c;
 };
 
 class C : public RefCounted<C> {

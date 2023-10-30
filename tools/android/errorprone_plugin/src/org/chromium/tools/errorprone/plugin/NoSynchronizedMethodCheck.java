@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@ import javax.lang.model.element.Modifier;
  * Triggers an error for public methods that use "synchronized" in their signature.
  */
 @AutoService(BugChecker.class)
-@BugPattern(name = "NoSynchronizedMethodCheck", category = BugPattern.Category.JDK,
+@BugPattern(name = "NoSynchronizedMethodCheck",
         summary = "Use of synchronized in public method signature disallowed.",
         severity = BugPattern.SeverityLevel.ERROR, linkType = BugPattern.LinkType.CUSTOM,
         link = "https://stackoverflow.com/questions/20906548/why-is-synchronized-block-better-than-synchronized-method")
@@ -35,6 +35,11 @@ public class NoSynchronizedMethodCheck extends BugChecker implements BugChecker.
         }
         // Skip methods that are only public due to VisibleForTesting
         if (ASTHelpers.hasDirectAnnotationWithSimpleName(method, "VisibleForTesting")) {
+            return Description.NO_MATCH;
+        }
+        // A Synchronized @Override methods is unavoidable if the method being overridden is
+        // an Android API method (Example: Exception#fillInStackTrace()).
+        if (ASTHelpers.hasDirectAnnotationWithSimpleName(method, "Override")) {
             return Description.NO_MATCH;
         }
         // Skip non-public classes

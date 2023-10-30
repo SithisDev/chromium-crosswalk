@@ -1,4 +1,4 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,6 +11,9 @@ This allows all the plugins in the system to self register.
 The aim is to make writing plugins as simple as possible, minimizing the
 boilerplate so the actual functionality is clearer.
 """
+
+from __future__ import print_function
+
 from importlib import import_module
 import os
 import sys
@@ -52,7 +55,7 @@ def _TryImport(name):
     return _Import(name)
   except ImportError:
     if cr.context.verbose:
-      print 'Warning: Failed to load module', name
+      print('Warning: Failed to load module', name)
     return None
 
 

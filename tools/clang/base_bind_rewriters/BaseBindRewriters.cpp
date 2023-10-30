@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -131,12 +131,12 @@ class PassedToMoveRewriter : public MatchFinder::MatchCallback,
   Replacements* replacements_;
 };
 
-// Replace base::Bind() to base::BindOnce() where resulting base::Callback is
-// implicitly converted into base::OnceCallback.
+// Replace base::Bind() and base::BindRepeating() to base::BindOnce() where
+// resulting callbacks are implicitly converted into base::OnceCallback.
 // Example:
 //   // Before
-//   base::PostTask(FROM_HERE, base::Bind(&Foo));
-//   base::OnceCallback<void()> cb = base::Bind(&Foo);
+//   base::PostTask(FROM_HERE, base::BindRepeating(&Foo));
+//   base::OnceCallback<void()> cb = base::BindRepeating(&Foo);
 //
 //   // After
 //   base::PostTask(FROM_HERE, base::BindOnce(&Foo));
@@ -154,7 +154,9 @@ class BindOnceRewriter : public MatchFinder::MatchCallback, public Rewriter {
             hasName("::base::RepeatingCallback")))));
 
     auto bind_call =
-        callExpr(callee(namedDecl(hasName("::base::Bind")))).bind("target");
+        callExpr(callee(namedDecl(anyOf(hasName("::base::Bind"),
+                                        hasName("::base::BindRepeating")))))
+            .bind("target");
     auto parameter_construction =
         cxxConstructExpr(is_repeating_callback, argumentCountIs(1),
                          hasArgument(0, ignoringImplicit(bind_call)));
@@ -178,16 +180,16 @@ class BindOnceRewriter : public MatchFinder::MatchCallback, public Rewriter {
   Replacements* replacements_;
 };
 
-// Converts pass-by-const-ref base::Callback's to pass-by-value.
-// Example:
+// Converts pass-by-const-ref base::RepeatingCallback's to
+// pass-by-value. Example:
 //   // Before
-//   using BarCallback = base::Callback<void(void*)>;
-//   void Foo(const base::Callback<void(int)>& cb);
+//   using BarCallback = base::RepeatingCallback<void(void*)>;
+//   void Foo(const base::RepeatingCallback<void(int)>& cb);
 //   void Bar(const BarCallback& cb);
 //
 //   // After
-//   using BarCallback = base::Callback<void(void*)>;
-//   void Foo(base::Callback<void(int)> cb);
+//   using BarCallback = base::RepeatingCallback<void(void*)>;
+//   void Foo(base::RepeatingCallback<void(int)> cb);
 //   void Bar(BarCallback cb);
 class PassByValueRewriter : public MatchFinder::MatchCallback, public Rewriter {
  public:
@@ -229,14 +231,14 @@ class PassByValueRewriter : public MatchFinder::MatchCallback, public Rewriter {
 // Adds std::move() to base::RepeatingCallback<> where it looks relevant.
 // Example:
 //   // Before
-//   void Foo(base::Callback<void(int)> cb1) {
-//     base::Closure cb2 = base::Bind(cb1, 42);
+//   void Foo(base::RepeatingCallback<void(int)> cb1) {
+//     base::RepeatingClosure cb2 = base::BindRepeating(cb1, 42);
 //     PostTask(FROM_HERE, cb2);
 //   }
 //
 //   // After
-//   void Foo(base::Callback<void(int)> cb1) {
-//     base::Closure cb2 = base::Bind(std::move(cb1), 42);
+//   void Foo(base::RepeatingCallback<void(int)> cb1) {
+//     base::RepeatingClosure cb2 = base::BindRepeating(std::move(cb1), 42);
 //     PostTask(FROM_HERE, std::move(cb2));
 //   }
 class AddStdMoveRewriter : public MatchFinder::MatchCallback, public Rewriter {
@@ -274,7 +276,7 @@ class AddStdMoveRewriter : public MatchFinder::MatchCallback, public Rewriter {
     if (!cfg)
       return false;
     if (!parent_map_)
-      parent_map_ = llvm::make_unique<clang::ParentMap>(stmt);
+      parent_map_ = std::make_unique<clang::ParentMap>(stmt);
     else
       parent_map_->addStmt(stmt);
 
@@ -576,66 +578,6 @@ class AddStdMoveRewriter : public MatchFinder::MatchCallback, public Rewriter {
   Replacements* replacements_;
 };
 
-// Remove base::AdaptCallbackForRepeating() where resulting
-// base::RepeatingCallback is implicitly converted into base::OnceCallback.
-// Example:
-//   // Before
-//   base::PostTask(
-//       FROM_HERE,
-//       base::AdaptCallbackForRepeating(base::BindOnce(&Foo)));
-//   base::OnceCallback<void()> cb = base::AdaptCallbackForRepeating(
-//       base::OnceBind(&Foo));
-//
-//   // After
-//   base::PostTask(FROM_HERE, base::BindOnce(&Foo));
-//   base::OnceCallback<void()> cb = base::BindOnce(&Foo);
-class AdaptCallbackForRepeatingRewriter : public MatchFinder::MatchCallback,
-                                          public Rewriter {
- public:
-  explicit AdaptCallbackForRepeatingRewriter(Replacements* replacements)
-      : replacements_(replacements) {}
-
-  StatementMatcher GetMatcher() {
-    auto is_once_callback = hasType(hasCanonicalType(hasDeclaration(
-        classTemplateSpecializationDecl(hasName("::base::OnceCallback")))));
-    auto is_repeating_callback =
-        hasType(hasCanonicalType(hasDeclaration(classTemplateSpecializationDecl(
-            hasName("::base::RepeatingCallback")))));
-
-    auto adapt_callback_call =
-        callExpr(
-            callee(namedDecl(hasName("::base::AdaptCallbackForRepeating"))))
-            .bind("target");
-    auto parameter_construction =
-        cxxConstructExpr(is_repeating_callback, argumentCountIs(1),
-                         hasArgument(0, ignoringImplicit(adapt_callback_call)));
-    auto constructor_conversion = cxxConstructExpr(
-        is_once_callback, argumentCountIs(1),
-        hasArgument(0, ignoringImplicit(parameter_construction)));
-    return implicitCastExpr(is_once_callback,
-                            hasSourceExpression(constructor_conversion));
-  }
-
-  void run(const MatchFinder::MatchResult& result) override {
-    auto* target = result.Nodes.getNodeAs<clang::CallExpr>("target");
-
-    auto left = clang::CharSourceRange::getTokenRange(
-        result.SourceManager->getSpellingLoc(target->getBeginLoc()),
-        result.SourceManager->getSpellingLoc(target->getArg(0)->getExprLoc())
-            .getLocWithOffset(-1));
-
-    // We use " " as replacement to work around https://crbug.com/861886.
-    replacements_->emplace_back(*result.SourceManager, left, " ");
-    auto r_paren = clang::CharSourceRange::getTokenRange(
-        result.SourceManager->getSpellingLoc(target->getRParenLoc()),
-        result.SourceManager->getSpellingLoc(target->getRParenLoc()));
-    replacements_->emplace_back(*result.SourceManager, r_paren, " ");
-  }
-
- private:
-  Replacements* replacements_;
-};
-
 llvm::cl::extrahelp common_help(CommonOptionsParser::HelpMessage);
 llvm::cl::OptionCategory rewriter_category("Rewriter Options");
 
@@ -647,7 +589,6 @@ Available rewriters are:
     bind_to_bind_once
     pass_by_value
     add_std_move
-    remove_unneeded_adapt_callback
 The default is remove_unneeded_passed.
 )"),
     llvm::cl::init("remove_unneeded_passed"),
@@ -667,28 +608,21 @@ int main(int argc, const char* argv[]) {
 
   std::unique_ptr<Rewriter> rewriter;
   if (rewriter_option == "remove_unneeded_passed") {
-    auto passed_to_move =
-        llvm::make_unique<PassedToMoveRewriter>(&replacements);
+    auto passed_to_move = std::make_unique<PassedToMoveRewriter>(&replacements);
     match_finder.addMatcher(passed_to_move->GetMatcher(), passed_to_move.get());
     rewriter = std::move(passed_to_move);
   } else if (rewriter_option == "bind_to_bind_once") {
-    auto bind_once = llvm::make_unique<BindOnceRewriter>(&replacements);
+    auto bind_once = std::make_unique<BindOnceRewriter>(&replacements);
     match_finder.addMatcher(bind_once->GetMatcher(), bind_once.get());
     rewriter = std::move(bind_once);
   } else if (rewriter_option == "pass_by_value") {
-    auto pass_by_value = llvm::make_unique<PassByValueRewriter>(&replacements);
+    auto pass_by_value = std::make_unique<PassByValueRewriter>(&replacements);
     match_finder.addMatcher(pass_by_value->GetMatcher(), pass_by_value.get());
     rewriter = std::move(pass_by_value);
   } else if (rewriter_option == "add_std_move") {
-    auto add_std_move = llvm::make_unique<AddStdMoveRewriter>(&replacements);
+    auto add_std_move = std::make_unique<AddStdMoveRewriter>(&replacements);
     match_finder.addMatcher(add_std_move->GetMatcher(), add_std_move.get());
     rewriter = std::move(add_std_move);
-  } else if (rewriter_option == "remove_unneeded_adapt_callback") {
-    auto remove_unneeded_adapt_callback =
-        llvm::make_unique<AdaptCallbackForRepeatingRewriter>(&replacements);
-    match_finder.addMatcher(remove_unneeded_adapt_callback->GetMatcher(),
-                            remove_unneeded_adapt_callback.get());
-    rewriter = std::move(remove_unneeded_adapt_callback);
   } else {
     abort();
   }
@@ -698,6 +632,9 @@ int main(int argc, const char* argv[]) {
   int result = tool.run(factory.get());
   if (result != 0)
     return result;
+
+  if (replacements.empty())
+    return 0;
 
   // Serialization format is documented in tools/clang/scripts/run_tool.py
   llvm::outs() << "==== BEGIN EDITS ====\n";

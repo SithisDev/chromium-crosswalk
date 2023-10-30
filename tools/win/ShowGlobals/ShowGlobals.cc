@@ -1,10 +1,10 @@
-// Copyright (c) 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This tool scans a PDB file and prints out information about 'interesting'
 // global variables. This includes duplicates and large globals. This is often
-// helpful inunderstanding code bloat or finding inefficient globals.
+// helpful in understanding code bloat or finding inefficient globals.
 //
 // Duplicate global variables often happen when constructs like this are placed
 // in a header file:
@@ -17,16 +17,31 @@
 // linker. This duplication can happen with float/double, structs and classes,
 // and arrays - any non-integral type.
 //
+// With C++ 17 these problems can often be fixed by adding an inline keyword:
+//
+//     const inline double sqrt_two = sqrt(2.0);
+//
+// constexpr would be even better in order to ensure that initializations are
+// not being done at runtime.
+//
+// Note that the linker will coalesce identical constant variables in some
+// cases, leaving multiple symbol entries pointing at a single global. This is
+// the global-variable version of code folding (/OPT:ICF). If the argument
+// --show_folded_constants is passed then these will be displayed. Otherwise
+// they will be silently suppressed as not being interesting because they aren't
+// actually wasting space.
+//
 // Global variables are not necessarily a problem but it is useful to understand
 // them, and monitoring their changes can be instructive.
 
+#include <atlbase.h>
 #include <dia2.h>
 #include <stdio.h>
+#include <wrl/client.h>
 
 #include <algorithm>
+#include <string>
 #include <vector>
-
-#include "base/win/atl.h"
 
 // Helper function for comparing strings - returns a strcmp/wcscmp compatible
 // value.
@@ -36,11 +51,12 @@ int StringCompare(const std::wstring& lhs, const std::wstring& rhs) {
 
 // Use this struct to record data about symbols for sorting and analysis.
 struct SymbolData {
-  SymbolData(ULONGLONG size, DWORD section, const wchar_t* name)
-      : size(size), section(section), name(name) {}
+  SymbolData(ULONGLONG size, DWORD section, DWORD offset, const wchar_t* name)
+      : size(size), section(section), offset(offset), name(name) {}
 
   ULONGLONG size;
   DWORD section;
+  DWORD offset;
   std::wstring name;
 };
 
@@ -69,20 +85,27 @@ bool SizeCompare(const SymbolData& lhs, const SymbolData& rhs) {
 // Use this struct to store data about repeated globals, for later sorting.
 struct RepeatData {
   RepeatData(ULONGLONG repeat_count,
+             int folding_count,
              ULONGLONG bytes_wasted,
              const std::wstring& name)
-      : repeat_count(repeat_count), bytes_wasted(bytes_wasted), name(name) {}
+      : repeat_count(repeat_count),
+        bytes_wasted(bytes_wasted),
+        folding_count(folding_count),
+        name(name) {}
   bool operator<(const RepeatData& rhs) {
     return bytes_wasted < rhs.bytes_wasted;
   }
 
   ULONGLONG repeat_count;
   ULONGLONG bytes_wasted;
+  int folding_count;
   std::wstring name;
 };
 
-bool DumpInterestingGlobals(IDiaSymbol* global, const wchar_t* filename) {
-  wprintf(L"#Dups\tDupSize\t  Size\tSection\tSymbol name\tPDB name\n");
+bool DumpInterestingGlobals(IDiaSymbol* global,
+                            const wchar_t* filename,
+                            bool show_folded_constants) {
+  wprintf(L"#Dups\t#Folded\tDupSize\t  Size\tSection\tSymbol name\tPDB name\n");
 
   // How many bytes must be wasted on repeats before being listed.
   const int kWastageThreshold = 100;
@@ -92,7 +115,7 @@ bool DumpInterestingGlobals(IDiaSymbol* global, const wchar_t* filename) {
   std::vector<SymbolData> symbols;
   std::vector<RepeatData> repeats;
 
-  CComPtr<IDiaEnumSymbols> enum_symbols;
+  Microsoft::WRL::ComPtr<IDiaEnumSymbols> enum_symbols;
   HRESULT result =
       global->findChildren(SymTagData, NULL, nsNone, &enum_symbols);
   if (FAILED(result)) {
@@ -100,12 +123,9 @@ bool DumpInterestingGlobals(IDiaSymbol* global, const wchar_t* filename) {
     return false;
   }
 
-  CComPtr<IDiaSymbol> symbol;
-  // Must call symbol.Release() at end of loop to prepare for reuse of symbol
-  // smart pointer, because DIA2 is not smart-pointer aware.
+  Microsoft::WRL::ComPtr<IDiaSymbol> symbol;
   for (ULONG celt = 0;
-       SUCCEEDED(enum_symbols->Next(1, &symbol, &celt)) && (celt == 1);
-       symbol.Release()) {
+       SUCCEEDED(enum_symbols->Next(1, &symbol, &celt)) && (celt == 1);) {
     DWORD location_type = 0;
     // If we can't get the location type then we assume the variable is not of
     // interest.
@@ -120,7 +140,7 @@ bool DumpInterestingGlobals(IDiaSymbol* global, const wchar_t* filename) {
     // If we call get_length on symbol it works for functions but not for
     // data. For some reason for data we have to call get_type() to get
     // another IDiaSymbol object which we can query for length.
-    CComPtr<IDiaSymbol> type_symbol;
+    Microsoft::WRL::ComPtr<IDiaSymbol> type_symbol;
     if (FAILED(symbol->get_type(&type_symbol))) {
       wprintf(L"Get_type failed.\n");
       continue;
@@ -135,9 +155,12 @@ bool DumpInterestingGlobals(IDiaSymbol* global, const wchar_t* filename) {
     if (symbol->get_addressSection(&section) != S_OK)
       section = static_cast<DWORD>(-2);
 
+    DWORD offset = 0;
+    symbol->get_addressOffset(&offset);
+
     CComBSTR name;
     if (symbol->get_name(&name) == S_OK) {
-      symbols.push_back(SymbolData(size, section, name));
+      symbols.push_back(SymbolData(size, section, offset, name));
     }
   }
 
@@ -148,9 +171,13 @@ bool DumpInterestingGlobals(IDiaSymbol* global, const wchar_t* filename) {
     auto pScan = p;
     // Scan the data looking for symbols that have the same name
     // and size.
+    int folding_count = 0;
     while (pScan != symbols.end() && p->size == pScan->size &&
-           StringCompare(p->name, pScan->name) == 0)
+           StringCompare(p->name, pScan->name) == 0) {
+      if (pScan->offset == p->offset && p->offset != 0)
+        ++folding_count;
       ++pScan;
+    }
 
     // Calculate how many times the symbol name/size appears in this PDB.
     size_t repeat_count = pScan - p;
@@ -158,9 +185,13 @@ bool DumpInterestingGlobals(IDiaSymbol* global, const wchar_t* filename) {
       // Change the count from how many instances of this variable there are to
       // how many *excess* instances there are.
       --repeat_count;
-      ULONGLONG bytes_wasted = repeat_count * p->size;
+      --folding_count;
+      const size_t excess_count =
+          show_folded_constants ? repeat_count : repeat_count - folding_count;
+      const ULONGLONG bytes_wasted = excess_count * p->size;
       if (bytes_wasted > kWastageThreshold) {
-        repeats.push_back(RepeatData(repeat_count, bytes_wasted, p->name));
+        repeats.push_back(
+            RepeatData(repeat_count, folding_count, bytes_wasted, p->name));
       }
     }
 
@@ -172,10 +203,11 @@ bool DumpInterestingGlobals(IDiaSymbol* global, const wchar_t* filename) {
   std::sort(repeats.begin(), repeats.end());
   std::reverse(repeats.begin(), repeats.end());
   for (const auto& repeat : repeats) {
-    // The empty field contain a zero so that Excel/sheets will more easily
+    // The empty fields contain a zero so that Excel/sheets will more easily
     // create the pivot tables that I want.
-    wprintf(L"%llu\t%llu\t%6u\t%u\t%s\t%s\n", repeat.repeat_count,
-            repeat.bytes_wasted, 0, 0, repeat.name.c_str(), filename);
+    wprintf(L"%llu\t%d\t%llu\t%6u\t%u\t%s\t%s\n", repeat.repeat_count,
+            repeat.folding_count, repeat.bytes_wasted, 0, 0,
+            repeat.name.c_str(), filename);
   }
   wprintf(L"\n");
 
@@ -195,9 +227,9 @@ bool DumpInterestingGlobals(IDiaSymbol* global, const wchar_t* filename) {
 }
 
 bool Initialize(const wchar_t* filename,
-                CComPtr<IDiaDataSource>& source,
-                CComPtr<IDiaSession>& session,
-                CComPtr<IDiaSymbol>& global) {
+                Microsoft::WRL::ComPtr<IDiaDataSource>& source,
+                Microsoft::WRL::ComPtr<IDiaSession>& session,
+                Microsoft::WRL::ComPtr<IDiaSymbol>& global) {
   // Initialize DIA2
   HRESULT hr = CoCreateInstance(__uuidof(DiaSource), NULL, CLSCTX_INPROC_SERVER,
                                 __uuidof(IDiaDataSource), (void**)&source);
@@ -230,12 +262,20 @@ bool Initialize(const wchar_t* filename,
 }
 
 int wmain(int argc, wchar_t* argv[]) {
-  if (argc < 2) {
-    wprintf(L"Usage: ShowGlobals file.pdb");
-    return -1;
+  bool show_folded_constants = false;
+
+  const wchar_t* filename = nullptr;
+  for (int i = 0; i < argc; ++i) {
+    if (wcscmp(argv[i], L"--show_folded_constants") == 0)
+      show_folded_constants = true;
+    else
+      filename = argv[i];
   }
 
-  const wchar_t* filename = argv[1];
+  if (!filename) {
+    wprintf(L"Usage: ShowGlobals file.pdb [--show_folded_constants]");
+    return -1;
+  }
 
   HRESULT hr = CoInitialize(NULL);
   if (FAILED(hr)) {
@@ -246,13 +286,13 @@ int wmain(int argc, wchar_t* argv[]) {
   // Extra scope so that we can call CoUninitialize after we destroy our local
   // variables.
   {
-    CComPtr<IDiaDataSource> source;
-    CComPtr<IDiaSession> session;
-    CComPtr<IDiaSymbol> global;
+    Microsoft::WRL::ComPtr<IDiaDataSource> source;
+    Microsoft::WRL::ComPtr<IDiaSession> session;
+    Microsoft::WRL::ComPtr<IDiaSymbol> global;
     if (!(Initialize(filename, source, session, global)))
       return -1;
 
-    DumpInterestingGlobals(global, filename);
+    DumpInterestingGlobals(global.Get(), filename, show_folded_constants);
   }
 
   CoUninitialize();

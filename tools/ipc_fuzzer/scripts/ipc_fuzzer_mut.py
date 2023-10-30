@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Mutational ClusterFuzz fuzzer. A pre-built corpus of ipcdump files has
@@ -74,7 +74,7 @@ class MutationalFuzzer:
 
   def main(self):
     self.set_corpus()
-    for _ in xrange(self.args.no_of_files):
+    for _ in range(self.args.no_of_files):
       self.create_mutated_ipcdump_testcase()
 
     return 0

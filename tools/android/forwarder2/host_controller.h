@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
 #include "tools/android/forwarder2/forwarders_manager.h"
@@ -34,7 +33,8 @@ class HostController {
  public:
   // Callback used for self-deletion when an error happens so that the client
   // can perform some cleanup work before deleting the HostController instance.
-  typedef base::Callback<void(std::unique_ptr<HostController>)> ErrorCallback;
+  using ErrorCallback =
+      base::OnceCallback<void(std::unique_ptr<HostController>)>;
 
   // If |device_port| is zero then a dynamic port is allocated (and retrievable
   // through device_port() below).
@@ -44,7 +44,10 @@ class HostController {
       int host_port,
       int adb_port,
       int exit_notifier_fd,
-      const ErrorCallback& error_callback);
+      ErrorCallback error_callback);
+
+  HostController(const HostController&) = delete;
+  HostController& operator=(const HostController&) = delete;
 
   ~HostController();
 
@@ -60,7 +63,7 @@ class HostController {
                  int device_port,
                  int host_port,
                  int adb_port,
-                 const ErrorCallback& error_callback,
+                 ErrorCallback error_callback,
                  std::unique_ptr<Socket> adb_control_socket,
                  std::unique_ptr<PipeNotifier> delete_controller_notifier);
 
@@ -88,8 +91,6 @@ class HostController {
   const scoped_refptr<base::SingleThreadTaskRunner> deletion_task_runner_;
   base::Thread thread_;
   ForwardersManager forwarders_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(HostController);
 };
 
 }  // namespace forwarder2

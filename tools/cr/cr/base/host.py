@@ -1,8 +1,10 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Module for build host support."""
+
+from __future__ import print_function
 
 import os
 import pipes
@@ -15,11 +17,11 @@ import cr
 _TRAIL_VERBOSITY = 2
 
 def PrintTrail(trail):
-  print 'Command expanded the following variables:'
+  print('Command expanded the following variables:')
   for key, value in trail:
     if value == None:
       value = ''
-    print '   ', key, '=', value
+    print('   ', key, '=', value)
 
 
 class Host(cr.Plugin, cr.Plugin.Type):
@@ -78,10 +80,10 @@ class Host(cr.Plugin, cr.Plugin.Type):
       command = filter(bool, command)
     trail = cr.context.trail
     if not command:
-      print 'Empty command passed to execute'
+      print('Empty command passed to execute')
       exit(1)
     if cr.context.verbose:
-      print ' '.join(command)
+      print(' '.join(command))
       if cr.context.verbose >= _TRAIL_VERBOSITY:
         PrintTrail(trail)
     if ignore_dry_run or not cr.context.dry_run:
@@ -96,7 +98,7 @@ class Host(cr.Plugin, cr.Plugin.Type):
             env={k: str(v) for k, v in cr.context.exported.items()},
             stdout=out)
       except OSError:
-        print 'Failed to exec', command
+        print('Failed to exec', command)
         # Don't log the trail if we already have
         if cr.context.verbose < _TRAIL_VERBOSITY:
           PrintTrail(trail)
@@ -113,8 +115,10 @@ class Host(cr.Plugin, cr.Plugin.Type):
       if return_status:
         return p.returncode
       if p.returncode != 0:
-        print 'Error {0} executing command {1}'.format(p.returncode, command)
+        print('Error {0} executing command {1}'.format(p.returncode, command))
         exit(p.returncode)
+      if output is not None:
+        output = output.decode('utf-8')
       return output or ''
     return ''
 

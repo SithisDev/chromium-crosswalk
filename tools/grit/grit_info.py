@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -36,20 +36,6 @@ def Outputs(filename, defines, ids_file, target_platform=None):
       path, filename = os.path.split(path)
     if output.attrs['lang']:
       lang_folders[output.attrs['lang']] = os.path.dirname(path)
-
-  # Add all generated files, once for each output language.
-  for node in grd:
-    if node.name == 'structure':
-      with node:
-        # TODO(joi) Should remove the "if sconsdep is true" thing as it is a
-        # hack - see grit/node/structure.py
-        if node.HasFileForLanguage() and node.attrs['sconsdep'] == 'true':
-          for lang in lang_folders:
-            path = node.FileForLanguage(lang, lang_folders[lang],
-                                        create_file=False,
-                                        return_if_not_generated=False)
-            if path:
-              target.append(path)
 
   return [t.replace('\\', '/') for t in target]
 
@@ -122,7 +108,7 @@ def DoMain(argv):
   # line flags.
   parser.add_option("-E", action="append", dest="build_env", default=[])
   parser.add_option("-p", action="store", dest="predetermined_ids_file")
-  parser.add_option("-w", action="append", dest="whitelist_files", default=[])
+  parser.add_option("-w", action="append", dest="allowlist_files", default=[])
   parser.add_option("-f", dest="ids_file", default="")
   parser.add_option("-t", dest="target_platform", default=None)
 
@@ -155,8 +141,8 @@ def DoMain(argv):
     if len(args) == 1:
       # Include grd file as second input (works around gyp expecting it).
       inputs.insert(1, args[0])
-    if options.whitelist_files:
-      inputs.extend(options.whitelist_files)
+    if options.allowlist_files:
+      inputs.extend(options.allowlist_files)
     return '\n'.join(inputs)
   elif options.outputs:
     if len(args) != 2:

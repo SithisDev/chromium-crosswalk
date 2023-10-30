@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ import javax.lang.model.element.Modifier;
  * This class detects the synchronized method.
  */
 @AutoService(BugChecker.class)
-@BugPattern(name = "NoSynchronizedThisCheck", category = BugPattern.Category.JDK,
+@BugPattern(name = "NoSynchronizedThisCheck",
         summary = "Do not synchronized on 'this' in public classes",
         severity = BugPattern.SeverityLevel.ERROR, linkType = BugPattern.LinkType.CUSTOM,
         link = "https://stackoverflow.com/questions/442564/avoid-synchronizedthis-in-java")

@@ -1,4 +1,4 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,6 +7,8 @@ definitions read from policy_templates.json.
 
 If the file was pretty-printed, the updated version is pretty-printed too.
 """
+
+from __future__ import print_function
 
 import os
 import re
@@ -21,7 +23,7 @@ from diff_util import PromptUserToAcceptDiff
 import path_util
 
 import histogram_paths
-import histograms_print_style
+import histogram_configuration_model
 
 ENUMS_PATH = histogram_paths.ENUMS_XML
 POLICY_TEMPLATES_PATH = 'components/policy/resources/policy_templates.json'
@@ -51,8 +53,8 @@ def UpdatePoliciesHistogramDefinitions(policy_templates, doc):
   # Find EnterprisePolicies enum.
   for enum_node in doc.getElementsByTagName('enum'):
     if enum_node.attributes['name'].value == POLICIES_ENUM_NAME:
-        policy_enum_node = enum_node
-        break
+      policy_enum_node = enum_node
+      break
   else:
     raise UserError('No policy enum node found')
 
@@ -89,8 +91,8 @@ def UpdateAtomicGroupsHistogramDefinitions(policy_templates, doc):
   # Find EnterprisePolicies enum.
   for enum_node in doc.getElementsByTagName('enum'):
     if enum_node.attributes['name'].value == POLICY_ATOMIC_GROUPS_ENUM_NAME:
-        atomic_group_enum_node = enum_node
-        break
+      atomic_group_enum_node = enum_node
+      break
   else:
     raise UserError('No policy atomic group enum node found')
 
@@ -115,30 +117,29 @@ def UpdateAtomicGroupsHistogramDefinitions(policy_templates, doc):
 
 def main():
   if len(sys.argv) > 1:
-    print >>sys.stderr, 'No arguments expected!'
+    print('No arguments expected!', file=sys.stderr)
     sys.stderr.write(__doc__)
     sys.exit(1)
 
   with open(path_util.GetInputFile(POLICY_TEMPLATES_PATH), 'rb') as f:
-    policy_templates = literal_eval(f.read())
+    policy_templates = literal_eval(f.read().decode('utf-8'))
 
   with open(ENUMS_PATH, 'rb') as f:
     histograms_doc = minidom.parse(f)
     f.seek(0)
-    xml = f.read()
+    xml = f.read().decode('utf-8')
 
   UpdatePoliciesHistogramDefinitions(policy_templates, histograms_doc)
   UpdateAtomicGroupsHistogramDefinitions(policy_templates, histograms_doc)
-  new_xml = histograms_print_style.GetPrintStyle().PrettyPrintXml(
-      histograms_doc)
+  new_xml = histogram_configuration_model.PrettifyTree(histograms_doc)
   if PromptUserToAcceptDiff(xml, new_xml, 'Is the updated version acceptable?'):
     with open(ENUMS_PATH, 'wb') as f:
-      f.write(new_xml)
+      f.write(new_xml.encode('utf-8'))
 
 
 if __name__ == '__main__':
   try:
     main()
   except UserError as e:
-    print >>sys.stderr, e.message
+    print(e.message, file=sys.stderr)
     sys.exit(1)

@@ -1,5 +1,5 @@
-#!/usr/bin/python
-# Copyright 2018 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -47,7 +47,7 @@ def _GetPssInKb(mappings, app_package, verbose):
       else:
         other_pss += mapping.fields['Pss']
       if verbose:
-        print mapping.ToString()
+        print(mapping.ToString())
   return (executable_pss, other_pss)
 
 
@@ -82,8 +82,8 @@ def main():
     total_executable_pss_kb += executable_pss_kb
     total_other_pss_kb += other_pss_kb
 
-  print 'Total executable PSS = %dkB' % total_executable_pss_kb
-  print 'Total other mappings PSS = %dkB' % total_other_pss_kb
+  print('Total executable PSS = %dkB' % total_executable_pss_kb)
+  print('Total other mappings PSS = %dkB' % total_other_pss_kb)
 
 
 if __name__ == '__main__':

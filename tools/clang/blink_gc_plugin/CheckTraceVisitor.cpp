@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,6 +43,11 @@ bool CheckTraceVisitor::VisitCallExpr(CallExpr* call) {
     return true;
   }
 
+  if (ImplicitCastExpr* expr = dyn_cast<ImplicitCastExpr>(callee)) {
+    if (CheckImplicitCastExpr(call, expr))
+      return true;
+  }
+
   // A tracing call will have either a |visitor| or a |m_field| argument.
   // A registerWeakMembers call will have a |this| argument.
   if (call->getNumArgs() != 1)
@@ -70,7 +75,6 @@ bool CheckTraceVisitor::VisitCallExpr(CallExpr* call) {
   if (CXXMemberCallExpr* expr = dyn_cast<CXXMemberCallExpr>(call)) {
     if (CheckTraceFieldMemberCall(expr) || CheckRegisterWeakMembers(expr))
       return true;
-
   }
 
   CheckTraceBaseCall(call);
@@ -151,6 +155,19 @@ void CheckTraceVisitor::CheckCXXDependentScopeMemberExpr(
     }
   }
 
+  // Check for T::Trace(visitor).
+  if (NestedNameSpecifier* qual = expr->getQualifier()) {
+    if (const Type* type = qual->getAsType()) {
+      if (const TemplateTypeParmType* tmpl_parm_type =
+              type->getAs<TemplateTypeParmType>()) {
+        const unsigned param_index = tmpl_parm_type->getIndex();
+        if (param_index >= info_->GetBases().size())
+          return;
+        info_->GetBases()[param_index].second.MarkTraced();
+      }
+    }
+  }
+
   CXXRecordDecl* tmpl = GetDependentTemplatedDecl(expr);
   if (!tmpl)
     return;
@@ -164,7 +181,8 @@ void CheckTraceVisitor::CheckCXXDependentScopeMemberExpr(
     }
   }
 
-  // Check for TraceIfNeeded<T>::trace(visitor, &field)
+  // Check for TraceIfNeeded<T>::trace(visitor, &field) where T cannot be
+  // resolved
   if (call->getNumArgs() == 2 && fn_name == kTraceName &&
       tmpl->getName() == kTraceIfNeededName) {
     FindFieldVisitor finder;
@@ -199,7 +217,7 @@ bool CheckTraceVisitor::CheckTraceBaseCall(CallExpr* call) {
       return false;
 
     callee_record = type->getAsCXXRecordDecl();
-    func_name = trace_decl->getName();
+    func_name = std::string(trace_decl->getName());
   } else if (UnresolvedMemberExpr* callee =
              dyn_cast<UnresolvedMemberExpr>(call->getCallee())) {
     // Callee part may become unresolved if the type of the argument
@@ -369,4 +387,29 @@ void CheckTraceVisitor::MarkAllWeakMembersTraced() {
     if (field.second.edge()->IsWeakMember())
       field.second.MarkTraced();
   }
+}
+
+bool CheckTraceVisitor::CheckImplicitCastExpr(CallExpr* call,
+                                              ImplicitCastExpr* expr) {
+  DeclRefExpr* sub_expr = dyn_cast<DeclRefExpr>(expr->getSubExpr());
+  if (!sub_expr)
+    return false;
+  NestedNameSpecifier* qualifier = sub_expr->getQualifier();
+  if (!qualifier)
+    return false;
+  CXXRecordDecl* class_decl = qualifier->getAsRecordDecl();
+  if (!class_decl)
+    return false;
+  NamedDecl* found_decl = sub_expr->getFoundDecl();
+  std::string fn_name = found_decl->getNameAsString();
+  // Check for TraceIfNeeded<T>::trace(visitor, &field) where T can be resolved
+  if (call->getNumArgs() == 2 && fn_name == kTraceName &&
+      class_decl->getName() == kTraceIfNeededName) {
+    FindFieldVisitor finder;
+    finder.TraverseStmt(call->getArg(1));
+    if (finder.field())
+      FoundField(finder.field());
+    return true;
+  }
+  return false;
 }

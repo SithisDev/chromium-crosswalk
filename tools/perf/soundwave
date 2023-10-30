@@ -1,5 +1,5 @@
-#!/usr/bin/env vpython
-# Copyright 2018 The Chromium Authors. All rights reserved.
+#!/usr/bin/env vpython3
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -22,6 +22,9 @@ DEFAULT_DATABASE_PATH = os.path.abspath(os.path.join(
 
 
 def main():
+  print('*** WARNING: soundwave is deprecated and will be removed soon.\n' +
+        '*** Please see go/chromeperf-bigquery for a replacement.\n')
+
   parser = argparse.ArgumentParser()
   # Default args for all actions.
   parser.add_argument(

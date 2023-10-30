@@ -1,4 +1,4 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 Contains the special mode that returns lists of possible completions for the
 current command line.
 """
+
+from __future__ import print_function
 
 import cr
 
@@ -20,4 +22,4 @@ def Complete():
 
   # TODO(iancottrell): support auto complete of more than just the command
   # try to parse the command line using parser
-  print ' '.join(command.name for command in cr.Command.Plugins())
+  print(' '.join(command.name for command in cr.Command.Plugins()))

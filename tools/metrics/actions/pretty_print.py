@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,7 +13,7 @@ import presubmit_util
 
 def main(argv):
   presubmit_util.DoPresubmitMain(argv, 'actions.xml', 'actions.old.xml',
-                                 'pretty_print.py', extract_actions.UpdateXml)
+                                 extract_actions.UpdateXml)
 
 
 if '__main__' == __name__:

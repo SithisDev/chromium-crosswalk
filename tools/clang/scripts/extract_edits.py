@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Script to extract edits from clang tool output.
@@ -40,6 +40,7 @@ On unix this script can be replaced with running sed as follows:
         | sort | uniq
 """
 
+from __future__ import print_function
 
 import sys
 
@@ -60,7 +61,7 @@ def main():
       continue
     if inside_marker_lines and line not in unique_lines:
       unique_lines.add(line)
-      print line
+      print(line)
   return 0
 
 

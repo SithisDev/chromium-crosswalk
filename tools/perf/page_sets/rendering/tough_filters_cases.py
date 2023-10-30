@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import shared_page_state
@@ -30,6 +30,7 @@ class ToughFiltersCasesPage(rendering_story.RenderingStory):
 class FilterTerrainSVGPage(ToughFiltersCasesPage):
   BASE_NAME = 'filter_terrain_svg'
   URL = 'http://letmespellitoutforyou.com/samples/svg/filter_terrain.svg'
+  TAGS = ToughFiltersCasesPage.TAGS + [story_tags.REPRESENTATIVE_WIN_DESKTOP]
 
 
 class AnalogClockSVGPage(ToughFiltersCasesPage):
@@ -42,8 +43,6 @@ class PirateMarkPage(rendering_story.RenderingStory):
   URL = ('http://web.archive.org/web/20150502135732/'
          'http://ie.microsoft.com/testdrive/Performance/'
          'Pirates/Default.html')
-  TAGS = rendering_story.RenderingStory.TAGS + [
-    story_tags.REPRESENTATIVE_MOBILE]
 
   def __init__(self,
                page_set,

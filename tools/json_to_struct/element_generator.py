@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -111,7 +111,7 @@ def GenerateFieldContent(element_name, field_info, content, lines, indent,
   if content is None:
     content = field_info.get('default', None)
   type = field_info['type']
-  if type == 'int' or type == 'enum':
+  if type in ('int', 'enum', 'class'):
     lines.append('%s%s,' % (indent, content))
   elif type == 'string':
     _GenerateString(content, lines, indent)

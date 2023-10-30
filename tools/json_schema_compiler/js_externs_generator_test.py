@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright 2015 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,7 +13,7 @@ import unittest
 
 # The contents of a fake idl file.
 fake_idl = """
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,6 +65,10 @@ namespace fakeApi {
 
   callback OptionalParamCallback = void(optional Qux qux);
 
+  interface Properties {
+    static DOMString lastError();
+  };
+
   interface Functions {
     // Does something exciting! And what's more, this is a multiline function
     // comment! It goes onto multiple lines!
@@ -78,7 +82,29 @@ namespace fakeApi {
 
     [deprecated="Use a new method."] static DOMString returnString();
 
+    static void instanceOfObjectParam([instanceOf=SomeType] object obj);
+
+    static void instanceOfBarObjectParam([instanceOf=Bar] object barObj);
+
     static void optionalParam(optional OptionalParamCallback callback);
+
+    static void nonFinalOptionalParams(
+        DOMString string,
+        optional double num,
+        object obj,
+        [instanceOf = SomeType] object someType,
+        [instanceOf = SomeType] optional object optionalSomeType,
+        optional boolean bool,
+        optional Baz baz,
+        double num,
+        VoidCallback callback);
+
+    static void multipleOptionalParams(
+        optional DOMString param1,
+        optional DOMString param2,
+        optional object obj,
+        [instanceOf = SomeType] optional object optionalSomeType,
+        optional VoidCallback callback);
   };
 
   interface Events {
@@ -89,7 +115,7 @@ namespace fakeApi {
 """
 
 # The output we expect from our fake idl file.
-fake_idl_expected = """// Copyright %s The Chromium Authors. All rights reserved.
+fake_idl_expected = """// Copyright %s The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,13 +124,11 @@ fake_idl_expected = """// Copyright %s The Chromium Authors. All rights reserved
 // NOTE: The format of types has changed. 'FooType' is now
 //   'chrome.fakeApi.FooType'.
 // Please run the closure compiler before committing changes.
-// See https://chromium.googlesource.com/chromium/src/+/master/docs/closure_compilation.md
+// See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
 /** @fileoverview Externs generated from namespace: fakeApi */
 
-/**
- * @const
- */
+/** @const */
 chrome.fakeApi = {};
 
 /**
@@ -185,16 +209,22 @@ chrome.fakeApi.Qux.prototype.stop = function() {};
 
 
 /**
+ * @type {string}
+ * @see https://developer.chrome.com/extensions/fakeApi#type-lastError
+ */
+chrome.fakeApi.lastError;
+
+/**
  * Does something exciting! And what's more, this is a multiline function
  * comment! It goes onto multiple lines!
  * @param {!chrome.fakeApi.Baz} baz The baz to use.
- * @param {function():void} callback
+ * @param {function(): void} callback
  * @see https://developer.chrome.com/extensions/fakeApi#method-doSomething
  */
 chrome.fakeApi.doSomething = function(baz, callback) {};
 
 /**
- * @param {function(!chrome.fakeApi.Baz, !chrome.fakeApi.Greek):void=} callback
+ * @param {function(!chrome.fakeApi.Baz, !chrome.fakeApi.Greek): void=} callback
  *     The callback which will most assuredly in all cases be called; that is,
  *     of course, iff such a callback was provided and is not at all null.
  * @see https://developer.chrome.com/extensions/fakeApi#method-bazGreek
@@ -209,10 +239,46 @@ chrome.fakeApi.bazGreek = function(callback) {};
 chrome.fakeApi.returnString = function() {};
 
 /**
- * @param {function((!chrome.fakeApi.Qux|undefined)):void=} callback
+ * @param {SomeType} obj
+ * @see https://developer.chrome.com/extensions/fakeApi#method-instanceOfObjectParam
+ */
+chrome.fakeApi.instanceOfObjectParam = function(obj) {};
+
+/**
+ * @param {chrome.fakeApi.Bar} barObj
+ * @see https://developer.chrome.com/extensions/fakeApi#method-instanceOfBarObjectParam
+ */
+chrome.fakeApi.instanceOfBarObjectParam = function(barObj) {};
+
+/**
+ * @param {function((!chrome.fakeApi.Qux|undefined)): void=} callback
  * @see https://developer.chrome.com/extensions/fakeApi#method-optionalParam
  */
 chrome.fakeApi.optionalParam = function(callback) {};
+
+/**
+ * @param {string} string
+ * @param {?number|undefined} num
+ * @param {Object} obj
+ * @param {SomeType} someType
+ * @param {?SomeType|undefined} optionalSomeType
+ * @param {?boolean|undefined} bool
+ * @param {?chrome.fakeApi.Baz|undefined} baz
+ * @param {number} num
+ * @param {function(): void} callback
+ * @see https://developer.chrome.com/extensions/fakeApi#method-nonFinalOptionalParams
+ */
+chrome.fakeApi.nonFinalOptionalParams = function(string, num, obj, someType, optionalSomeType, bool, baz, num, callback) {};
+
+/**
+ * @param {string=} param1
+ * @param {string=} param2
+ * @param {Object=} obj
+ * @param {SomeType=} optionalSomeType
+ * @param {function(): void=} callback
+ * @see https://developer.chrome.com/extensions/fakeApi#method-multipleOptionalParams
+ */
+chrome.fakeApi.multipleOptionalParams = function(param1, param2, obj, optionalSomeType, callback) {};
 
 /**
  * Fired when we realize it's a trap!
@@ -224,7 +290,7 @@ chrome.fakeApi.onTrapDetected;""" % datetime.now().year
 # A subset of fake_idl. The key difference is that the namespace is private,
 # which means that @see links shouldn't be generated.
 fake_private_idl = """
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -248,7 +314,7 @@ namespace fakeApiPrivate {
 };
 """
 
-fake_private_idl_expected = """// Copyright %s The Chromium Authors. All rights reserved.
+fake_private_idl_expected = """// Copyright %s The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -257,13 +323,11 @@ fake_private_idl_expected = """// Copyright %s The Chromium Authors. All rights 
 // NOTE: The format of types has changed. 'FooType' is now
 //   'chrome.fakeApiPrivate.FooType'.
 // Please run the closure compiler before committing changes.
-// See https://chromium.googlesource.com/chromium/src/+/master/docs/closure_compilation.md
+// See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
 /** @fileoverview Externs generated from namespace: fakeApiPrivate */
 
-/**
- * @const
- */
+/** @const */
 chrome.fakeApiPrivate = {};
 
 /**
@@ -289,7 +353,7 @@ chrome.fakeApiPrivate.Bar;
  */
 chrome.fakeApiPrivate.onTrapDetected;""" % datetime.now().year
 
-fake_json = """// Copyright 2014 The Chromium Authors. All rights reserved.
+fake_json = """// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -310,6 +374,12 @@ fake_json = """// Copyright 2014 The Chromium Authors. All rights reserved.
         "additionalProperties": {"type": "string"}
       }
     ],
+    "properties": {
+      "lastError": {
+        "type": "string",
+        "description": "The lastError."
+      }
+    },
     "functions": [ {
       "name": "funcWithInlineObj",
       "type": "function",
@@ -366,11 +436,33 @@ fake_json = """// Copyright 2014 The Chromium Authors. All rights reserved.
           "int": { "type": "number" }
         }
       }
+    },
+    {
+      "name": "funcWithReturnsAsync",
+      "type": "function",
+      "parameters": [
+        {
+          "type": "integer",
+          "name": "someNumber",
+          "description": "A number parameter"
+        }
+      ],
+      "returns_async": {
+        "name": "callback",
+        "optional": true,
+        "parameters": [
+          {
+            "name": "anotherNumber",
+            "type": "integer",
+            "description": "A number that comes back"
+          }
+        ]
+      }
     } ]
   }
 ]"""
 
-fake_json_expected = """// Copyright %s The Chromium Authors. All rights reserved.
+fake_json_expected = """// Copyright %s The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -379,13 +471,11 @@ fake_json_expected = """// Copyright %s The Chromium Authors. All rights reserve
 // NOTE: The format of types has changed. 'FooType' is now
 //   'chrome.fakeJson.FooType'.
 // Please run the closure compiler before committing changes.
-// See https://chromium.googlesource.com/chromium/src/+/master/docs/closure_compilation.md
+// See https://chromium.googlesource.com/chromium/src/+/main/docs/closure_compilation.md
 
 /** @fileoverview Externs generated from namespace: fakeJson */
 
-/**
- * @const
- */
+/** @const */
 chrome.fakeJson = {};
 
 /**
@@ -406,6 +496,13 @@ chrome.fakeJson.CrazyEnum = {
 chrome.fakeJson.CrazyObject;
 
 /**
+ * The lastError.
+ * @type {string}
+ * @see https://developer.chrome.com/extensions/fakeJson#type-lastError
+ */
+chrome.fakeJson.lastError;
+
+/**
  * @param {{
  *   foo: (boolean|undefined),
  *   bar: number,
@@ -417,14 +514,21 @@ chrome.fakeJson.CrazyObject;
  *     description that causes problems!
  * @param {function({
  *   str: string
- * }):void} callback The callback to this heinous method
+ * }): void} callback The callback to this heinous method
  * @return {{
  *   str: string,
  *   int: number
  * }}
  * @see https://developer.chrome.com/extensions/fakeJson#method-funcWithInlineObj
  */
-chrome.fakeJson.funcWithInlineObj = function(inlineObj, callback) {};""" % (
+chrome.fakeJson.funcWithInlineObj = function(inlineObj, callback) {};
+
+/**
+ * @param {number} someNumber A number parameter
+ * @param {function(number): void=} callback
+ * @see https://developer.chrome.com/extensions/fakeJson#method-funcWithReturnsAsync
+ */
+chrome.fakeJson.funcWithReturnsAsync = function(someNumber, callback) {};""" % (
     datetime.now().year)
 
 
@@ -450,7 +554,7 @@ class JsExternGeneratorTest(unittest.TestCase):
     self.assertMultiLineEqual(fake_private_idl_expected,
                               JsExternsGenerator().Generate(namespace).Render())
 
-  def testJsonWithInlineObjects(self):
+  def testJsonWithInlineObjectsAndAsyncReturn(self):
     namespace = self._GetNamespace(fake_json, 'fake_api.json', False)
     self.assertMultiLineEqual(fake_json_expected,
                               JsExternsGenerator().Generate(namespace).Render())

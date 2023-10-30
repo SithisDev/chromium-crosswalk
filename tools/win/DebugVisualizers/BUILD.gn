@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -23,8 +23,8 @@ config("chrome") {
   ldflags = [ "/NATVIS:" + rebase_path("chrome.natvis", root_build_dir) ]
 }
 
-config("webkit") {
-  # webkit.natvis listed as an input in
+config("blink") {
+  # blink.natvis listed as an input in
   # //third_party/blink/renderer/platform/wtf to guarantee relinking on changes.
-  ldflags = [ "/NATVIS:" + rebase_path("webkit.natvis", root_build_dir) ]
+  ldflags = [ "/NATVIS:" + rebase_path("blink.natvis", root_build_dir) ]
 }

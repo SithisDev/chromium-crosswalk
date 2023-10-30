@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,66 +6,64 @@
 
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-using namespace test::api::additional_properties;
+namespace ap = test::api::additional_properties;
 
 TEST(JsonSchemaCompilerAdditionalPropertiesTest,
     AdditionalPropertiesTypePopulate) {
   {
-    std::unique_ptr<base::ListValue> list_value(new base::ListValue());
-    list_value->AppendString("asdf");
-    list_value->AppendInteger(4);
-    std::unique_ptr<base::DictionaryValue> type_value(
-        new base::DictionaryValue());
-    type_value->SetString("string", "value");
-    type_value->SetInteger("other", 9);
-    type_value->Set("another", std::move(list_value));
-    std::unique_ptr<AdditionalPropertiesType> type(
-        new AdditionalPropertiesType());
-    ASSERT_TRUE(AdditionalPropertiesType::Populate(*type_value, type.get()));
-    EXPECT_TRUE(type->additional_properties.Equals(type_value.get()));
+    base::Value list_value(base::Value::Type::LIST);
+    list_value.Append("asdf");
+    list_value.Append(4);
+    base::Value type_value(base::Value::Type::DICTIONARY);
+    type_value.SetStringPath("string", "value");
+    type_value.SetIntPath("other", 9);
+    type_value.SetKey("another", std::move(list_value));
+    auto type = std::make_unique<ap::AdditionalPropertiesType>();
+    ASSERT_TRUE(ap::AdditionalPropertiesType::Populate(type_value, type.get()));
+    EXPECT_EQ(type->additional_properties, type_value);
   }
   {
-    std::unique_ptr<base::DictionaryValue> type_value(
-        new base::DictionaryValue());
-    type_value->SetInteger("string", 3);
-    std::unique_ptr<AdditionalPropertiesType> type(
-        new AdditionalPropertiesType());
-    EXPECT_FALSE(AdditionalPropertiesType::Populate(*type_value, type.get()));
+    base::Value::Dict type_dict;
+    type_dict.Set("string", 3);
+    base::Value type_value(std::move(type_dict));
+    auto type = std::make_unique<ap::AdditionalPropertiesType>();
+    EXPECT_FALSE(
+        ap::AdditionalPropertiesType::Populate(type_value, type.get()));
   }
 }
 
 TEST(JsonSchemaCompilerAdditionalPropertiesTest,
     AdditionalPropertiesParamsCreate) {
-  std::unique_ptr<base::DictionaryValue> param_object_value(
-      new base::DictionaryValue());
-  param_object_value->SetString("str", "a");
-  param_object_value->SetInteger("num", 1);
-  std::unique_ptr<base::ListValue> params_value(new base::ListValue());
-  params_value->Append(param_object_value->CreateDeepCopy());
-  std::unique_ptr<AdditionalProperties::Params> params(
-      AdditionalProperties::Params::Create(*params_value));
+  base::Value::Dict param_object_dict;
+  param_object_dict.Set("str", "a");
+  param_object_dict.Set("num", 1);
+  base::Value param_object_value(std::move(param_object_dict));
+  base::Value::List params_value;
+  params_value.Append(param_object_value.Clone());
+  std::unique_ptr<ap::AdditionalProperties::Params> params(
+      ap::AdditionalProperties::Params::Create(params_value));
   EXPECT_TRUE(params.get());
-  EXPECT_TRUE(params->param_object.additional_properties.Equals(
-      param_object_value.get()));
+  EXPECT_EQ(params->param_object.additional_properties, param_object_value);
 }
 
 TEST(JsonSchemaCompilerAdditionalPropertiesTest,
     ReturnAdditionalPropertiesResultCreate) {
-  ReturnAdditionalProperties::Results::ResultObject result_object;
+  ap::ReturnAdditionalProperties::Results::ResultObject result_object;
   result_object.integer = 5;
   result_object.additional_properties["key"] = "value";
 
-  base::ListValue expected;
+  base::Value::List expected;
   {
-    std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-    dict->SetInteger("integer", 5);
-    dict->SetString("key", "value");
+    base::Value dict(base::Value::Type::DICTIONARY);
+    dict.SetIntKey("integer", 5);
+    dict.SetStringKey("key", "value");
     expected.Append(std::move(dict));
   }
 
   EXPECT_EQ(expected,
-            *ReturnAdditionalProperties::Results::Create(result_object));
+            ap::ReturnAdditionalProperties::Results::Create(result_object));
 }

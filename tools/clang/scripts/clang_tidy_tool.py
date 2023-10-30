@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 r"""Automatically fetch, build, and run clang-tidy from source.
@@ -23,10 +23,13 @@ The same, but checks the changes only.
        out/Release chrome
 """
 
+from __future__ import print_function
+
 import argparse
 import os
 import subprocess
 import sys
+import update
 
 import build_clang_tools_extra
 
@@ -104,8 +107,7 @@ def RunClangTidy(checks, header_filter, auto_fix, clang_src_dir,
   subprocess.check_call(args)
 
 
-def RunClangTidyDiff(checks, header_filter, auto_fix, clang_src_dir,
-                     clang_build_dir, out_dir):
+def RunClangTidyDiff(checks, auto_fix, clang_src_dir, clang_build_dir, out_dir):
   """Invoke the |clang-tidy-diff.py| script over the diff from stdin."""
   clang_tidy_diff_script = os.path.join(
       clang_src_dir, 'clang-tools-extra', 'clang-tidy', 'tool',
@@ -126,9 +128,6 @@ def RunClangTidyDiff(checks, header_filter, auto_fix, clang_src_dir,
   if checks:
     args.append('-checks={}'.format(checks))
 
-  if header_filter:
-    args.append('-header-filter={}'.format(header_filter))
-
   if auto_fix:
     args.append('-fix')
 
@@ -141,7 +140,10 @@ def main():
   parser = argparse.ArgumentParser(
       formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
   parser.add_argument(
-      '--fetch', action='store_true', help='Fetch and build clang sources')
+      '--fetch',
+      nargs='?',
+      const=update.CLANG_REVISION,
+      help='Fetch and build clang sources')
   parser.add_argument(
       '--build',
       action='store_true',
@@ -178,10 +180,10 @@ def main():
     sys.exit('clang-tidy binary doesn\'t exist at ' +
              GetBinaryPath(args.clang_build_dir, 'clang-tidy'))
 
-
   if args.fetch:
     steps.append(('Fetching LLVM sources', lambda:
-                  build_clang_tools_extra.FetchLLVM(args.clang_src_dir)))
+                  build_clang_tools_extra.FetchLLVM(args.clang_src_dir,
+                                                    args.fetch)))
 
   if args.build:
     steps.append(('Building clang-tidy',
@@ -196,11 +198,9 @@ def main():
     ]
   if args.diff:
     steps += [
-        ('Running clang-tidy on diff',
-         lambda: RunClangTidyDiff(args.checks, args.header_filter,
-                                  args.auto_fix, args.clang_src_dir,
-                                  args.clang_build_dir, args.OUT_DIR,
-                                  args.NINJA_TARGET)),
+        ('Running clang-tidy on diff', lambda: RunClangTidyDiff(
+            args.checks, args.auto_fix, args.clang_src_dir, args.
+            clang_build_dir, args.OUT_DIR)),
     ]
   else:
     steps += [
@@ -214,9 +214,9 @@ def main():
   # Run the steps in sequence.
   for i, (msg, step_func) in enumerate(steps):
     # Print progress message
-    print '-- %s %s' % (script_name, '-' * (80 - len(script_name) - 4))
-    print '-- [%d/%d] %s' % (i + 1, len(steps), msg)
-    print 80 * '-'
+    print('-- %s %s' % (script_name, '-' * (80 - len(script_name) - 4)))
+    print('-- [%d/%d] %s' % (i + 1, len(steps), msg))
+    print(80 * '-')
 
     step_func()
 

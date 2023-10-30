@@ -1,10 +1,12 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Creates IPC fuzzer packages suitable for uploading to ClusterFuzz. Stores
 the packages into chrome build directory. See fuzzer_list below for the list of
 fuzzers.
 """
+
+from __future__ import print_function
 
 import argparse
 import distutils.archive_util
@@ -68,7 +70,7 @@ class CFPackageBuilder:
     package_name = fuzzer + '.zip'
     shutil.copy(package_name, self.build_dir)
     final_package_path = os.path.join(self.build_dir, package_name)
-    print 'Built %s.' % final_package_path
+    print('Built %s.' % final_package_path)
 
   def main(self):
     self.parse_arguments()

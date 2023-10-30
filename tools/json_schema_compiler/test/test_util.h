@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 namespace json_schema_compiler {
 namespace test_util {
 
-std::unique_ptr<base::Value> ReadJson(const base::StringPiece& json);
+base::Value ReadJson(const base::StringPiece& json);
 
 template <typename T>
 std::vector<T> Vector(const T& a) {

@@ -1,4 +1,4 @@
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,7 +14,9 @@ CHROMIUM_SRC = os.path.normpath(
     os.path.join(os.path.dirname(__file__),
                  os.pardir, os.pardir, os.pardir))
 CHECKSTYLE_ROOT = os.path.join(CHROMIUM_SRC, 'third_party', 'checkstyle',
-                               'checkstyle-8.0-all.jar')
+                               'checkstyle-all.jar')
+JAVA_PATH = os.path.join(CHROMIUM_SRC, 'third_party', 'jdk', 'current', 'bin',
+                         'java')
 
 
 def FormatCheckstyleOutput(checkstyle_output):
@@ -25,7 +27,7 @@ def FormatCheckstyleOutput(checkstyle_output):
     return checkstyle_output
 
 
-def RunCheckstyle(input_api, output_api, style_file, black_list=None):
+def RunCheckstyle(input_api, output_api, style_file, files_to_skip=None):
   # Android toolchain is only available on Linux.
   if not sys.platform.startswith('linux'):
     return []
@@ -36,28 +38,21 @@ def RunCheckstyle(input_api, output_api, style_file, black_list=None):
     return [output_api.PresubmitError(file_error)]
 
   # Filter out non-Java files and files that were deleted.
-  java_files = [x.AbsoluteLocalPath() for x in input_api.AffectedSourceFiles(
-                lambda f: input_api.FilterSourceFile(f, black_list=black_list))
-                if os.path.splitext(x.LocalPath())[1] == '.java']
+  java_files = [
+      x.AbsoluteLocalPath() for x in input_api.AffectedSourceFiles(
+          lambda f: input_api.FilterSourceFile(f, files_to_skip=files_to_skip))
+      if os.path.splitext(x.LocalPath())[1] == '.java'
+  ]
   if not java_files:
     return []
 
   # Run checkstyle
-  checkstyle_env = os.environ.copy()
-  checkstyle_env['JAVA_CMD'] = 'java'
-  try:
-    check = subprocess.Popen(['java', '-cp',
-                              CHECKSTYLE_ROOT,
-                              'com.puppycrawl.tools.checkstyle.Main', '-c',
-                              style_file, '-f', 'xml'] + java_files,
-                              stdout=subprocess.PIPE, env=checkstyle_env)
-    stdout, _ = check.communicate()
-  except OSError as e:
-    import errno
-    if e.errno == errno.ENOENT:
-      install_error = ('  checkstyle is not installed. Please run '
-                       'build/install-build-deps-android.sh')
-      return [output_api.PresubmitPromptWarning(install_error)]
+  check = subprocess.Popen([JAVA_PATH, '-cp',
+                            CHECKSTYLE_ROOT,
+                            'com.puppycrawl.tools.checkstyle.Main', '-c',
+                            style_file, '-f', 'xml'] + java_files,
+                            stdout=subprocess.PIPE)
+  stdout = check.communicate()[0].decode('utf-8')
 
   result_errors = []
   result_warnings = []

@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright 2013 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Generator for C++ features from json files.
@@ -7,6 +7,8 @@
 Usage example:
   features_compiler.py --destdir gen --root /home/Work/src _permissions.json
 """
+
+from __future__ import print_function
 
 import optparse
 import os
@@ -75,4 +77,4 @@ if __name__ == '__main__':
   result = _GenerateSchema(filenames[0], opts.root, opts.destdir,
                            opts.namespace)
   if not opts.destdir:
-    print result
+    print(result)

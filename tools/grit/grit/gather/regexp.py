@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 '''
 
 from __future__ import print_function
-
-import re
 
 from grit.gather import skeleton_gatherer
 
@@ -60,8 +58,7 @@ class RegexpGatherer(skeleton_gatherer.SkeletonGatherer):
     chunk_start = 0
     for match in regexp.finditer(text_to_parse):
       groups = match.groupdict()
-      keys = groups.keys()
-      keys.sort()
+      keys = sorted(groups.keys())
       self.translatable_chunk_ = False
       for group in keys:
         if group.startswith('id') and groups[group]:

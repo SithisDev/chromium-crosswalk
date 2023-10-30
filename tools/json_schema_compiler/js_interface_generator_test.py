@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright 2015 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,7 +13,7 @@ import unittest
 
 # The contents of a fake idl file.
 fake_idl = """
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,7 +72,7 @@ namespace fakeApi {
 """
 
 # The output we expect from our fake idl file.
-fake_idl_output = ("""// Copyright %s The Chromium Authors. All rights reserved.
+fake_idl_output = ("""// Copyright %s The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,8 +80,6 @@ fake_idl_output = ("""// Copyright %s The Chromium Authors. All rights reserved.
 //   %s.
 
 /** @fileoverview Interface for fakeApi that can be overriden. */
-
-assertNotReached('Interface file for Closure Compiler should not be executed.');
 
 /** @interface */
 function FakeApi() {}
@@ -91,19 +89,19 @@ FakeApi.prototype = {
    * Does something exciting! And what's more, this is a multiline function
    * comment! It goes onto multiple lines!
    * @param {!chrome.fakeApi.Baz} baz The baz to use.
-   * @param {function():void} callback
+   * @param {function(): void} callback
    * @see https://developer.chrome.com/extensions/fakeApi#method-doSomething
    */
-  doSomething: assertNotReached,
+  doSomething: function(baz, callback) {},
 
   /**
-   * @param {function(!chrome.fakeApi.Baz, !chrome.fakeApi.Greek):void=}
+   * @param {function(!chrome.fakeApi.Baz, !chrome.fakeApi.Greek): void=}
    *     callback The callback which will most assuredly in all cases be called;
    *     that is, of course, iff such a callback was provided and is not at all
    *     null.
    * @see https://developer.chrome.com/extensions/fakeApi#method-bazGreek
    */
-  bazGreek: assertNotReached,
+  bazGreek: function(callback) {},
 };
 
 /**
@@ -111,7 +109,8 @@ FakeApi.prototype = {
  * @type {!ChromeEvent}
  * @see https://developer.chrome.com/extensions/fakeApi#event-onTrapDetected
  */
-FakeApi.prototype.onTrapDetected;""" % (datetime.now().year, sys.argv[0]))
+FakeApi.prototype.onTrapDetected;""" % (datetime.now().year,
+                                        sys.argv[0].replace('\\', '/')))
 
 class JsExternGeneratorTest(unittest.TestCase):
   def _GetNamespace(self, fake_content, filename):

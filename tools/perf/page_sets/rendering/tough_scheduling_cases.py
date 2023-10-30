@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import shared_page_state
@@ -66,7 +66,6 @@ class RafScrollingPage(ToughSchedulingPage):
 
   BASE_NAME = 'raf'
   URL = 'file://../tough_scheduling_cases/raf.html'
-  TAGS = ToughSchedulingPage.TAGS + [story_tags.REPRESENTATIVE_MAC_DESKTOP]
 
 
 class RafCanvasScrollingPage(ToughSchedulingPage):
@@ -133,7 +132,6 @@ class SecondBatchJsPage(ToughSchedulingPage):
 class SecondBatchLightJsPage(SecondBatchJsPage):
   BASE_NAME = 'second_batch_js_light'
   URL = 'file://../tough_scheduling_cases/second_batch_js.html?light'
-  TAGS = SecondBatchJsPage.TAGS + [story_tags.REPRESENTATIVE_WIN_DESKTOP]
 
 
 class SecondBatchJsMediumPage(SecondBatchJsPage):

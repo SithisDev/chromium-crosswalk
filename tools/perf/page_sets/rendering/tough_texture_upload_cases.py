@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from telemetry.page import shared_page_state
@@ -36,7 +36,6 @@ class BackgroundColorAnimationWithGradientPage(ToughTextureUploadPage):
   BASE_NAME = 'background_color_animation_with_gradient'
   # pylint: disable=line-too-long
   URL = 'file://../tough_texture_upload_cases/background_color_animation_with_gradient.html'
-  TAGS = ToughTextureUploadPage.TAGS + [story_tags.REPRESENTATIVE_WIN_DESKTOP]
 
 
 class SmallTextureUploadsPage(ToughTextureUploadPage):
@@ -57,3 +56,6 @@ class LargeTextureUploadsPage(ToughTextureUploadPage):
 class ExtraLargeTextureUploadsPage(ToughTextureUploadPage):
   BASE_NAME = 'extra_large_texture_uploads'
   URL = 'file://../tough_texture_upload_cases/extra_large_texture_uploads.html'
+  TAGS = ToughTextureUploadPage.TAGS + [
+    story_tags.REPRESENTATIVE_MOBILE
+  ]

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@ namespace blink {
 
 class A : public GarbageCollected<A> {
  public:
-  void Trace(Visitor*) {
+  void Trace(Visitor*) const {
     // Missing visitor->Trace(str_);
   }
 
@@ -23,15 +23,18 @@ class A : public GarbageCollected<A> {
   TraceWrapperV8Reference<v8::String> str_;
 };
 
-class B : public GarbageCollected<A> {
+class B : public GarbageCollected<B> {
  public:
-  void Trace(Visitor* visitor);
-  void TraceAfterDispatch(Visitor*) {}
+  void Trace(Visitor* visitor) const;
+  void TraceAfterDispatch(Visitor*) const {}
+
+ protected:
+  B() = default;
 };
 
 class C : public B {
  public:
-  void TraceAfterDispatch(Visitor*) {
+  void TraceAfterDispatch(Visitor*) const {
     // Missing visitor->Trace(str_);
   }
 

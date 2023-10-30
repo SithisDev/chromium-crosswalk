@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright 2018 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -34,23 +34,22 @@ def _CompareWithGolden(name=None):
   return real_decorator
 
 
-def _ReadMapFile(map_file):
-  ret = []
-  with open(map_file, 'r') as f:
+def _ReadMapFile(path):
+  with open(path, 'r') as f:
     for line in f:
       # Strip blank lines and comments.
       stripped_line = line.lstrip()
       if not stripped_line or stripped_line.startswith('#'):
         continue
-      ret.append(line)
-  return ret
+      yield line
 
 
 def _RenderSectionSizesAndRawSymbols(section_sizes, raw_symbols):
   ret = []
   ret.append('******** section_sizes ********')
-  for k, v in sorted(section_sizes.iteritems()):
-    ret.append('%-24s %d' % (k, v))
+  for k, (address, size) in sorted(section_sizes.items()):
+    address_text = '@%x' % address
+    ret.append('%-24s %-9s %d' % (k, address_text, size))
   ret.append('')
   ret.append('******** raw_symbols ********')
   for sym in raw_symbols:
@@ -62,55 +61,50 @@ class LinkerMapParserTest(unittest.TestCase):
 
   @_CompareWithGolden()
   def test_Parser(self):
-    map_file = _ReadMapFile(_TEST_MAP_PATH)
-    linker_name = linker_map_parser.DetectLinkerNameFromMapFile(iter(map_file))
-    section_sizes, raw_symbols, _ = (
-        linker_map_parser.MapFileParser().Parse(linker_name, iter(map_file)))
+    lines = _ReadMapFile(_TEST_MAP_PATH)
+    section_sizes, raw_symbols, _ = linker_map_parser.ParseLines(lines)
     return _RenderSectionSizesAndRawSymbols(section_sizes, raw_symbols)
 
   @_CompareWithGolden()
   def test_ParserCfi(self):
-    map_file = _ReadMapFile(_TEST_CFI_MAP_PATH)
-    linker_name = linker_map_parser.DetectLinkerNameFromMapFile(iter(map_file))
-    section_sizes, raw_symbols, _ = (
-        linker_map_parser.MapFileParser().Parse(linker_name, iter(map_file)))
+    lines = _ReadMapFile(_TEST_CFI_MAP_PATH)
+    section_sizes, raw_symbols, _ = linker_map_parser.ParseLines(lines)
     return _RenderSectionSizesAndRawSymbols(section_sizes, raw_symbols)
 
   def test_ParseArmAnnotations(self):
     fun = linker_map_parser.MapFileParserLld.ParseArmAnnotations
 
     # Annotations.
-    self.assertEquals((True, False), fun('$a'))
-    self.assertEquals((True, False), fun('$a.0'))
-    self.assertEquals((True, False), fun('$a.137'))
-    self.assertEquals((True, True), fun('$t'))
-    self.assertEquals((True, True), fun('$t.42'))
-    self.assertEquals((True, None), fun('$d'))
-    self.assertEquals((True, None), fun('$d.7'))
+    self.assertEqual((True, False), fun('$a'))
+    self.assertEqual((True, False), fun('$a.0'))
+    self.assertEqual((True, False), fun('$a.137'))
+    self.assertEqual((True, True), fun('$t'))
+    self.assertEqual((True, True), fun('$t.42'))
+    self.assertEqual((True, None), fun('$d'))
+    self.assertEqual((True, None), fun('$d.7'))
 
     # Annotations that should not appear, but get handled anyway.
-    self.assertEquals((True, False), fun('$a.'))
-    self.assertEquals((True, True), fun('$t.'))
-    self.assertEquals((True, None), fun('$d.'))
-    self.assertEquals((True, None), fun('$$.'))
+    self.assertEqual((True, False), fun('$a.'))
+    self.assertEqual((True, True), fun('$t.'))
+    self.assertEqual((True, None), fun('$d.'))
+    self.assertEqual((True, None), fun('$$.'))
 
     # Non-annotations.
-    self.assertEquals((False, None), fun('$_21::invoke'))
-    self.assertEquals((False, None), fun('$aa'))
-    self.assertEquals((False, None), fun('$tt.'))
-    self.assertEquals((False, None), fun('$'))
-    self.assertEquals((False, None), fun(''))
-    self.assertEquals((False, None), fun('void foo()'))
-    self.assertEquals((False, None), fun('OUTLINED_FUNCTION_'))
-    self.assertEquals((False, None), fun('abc'))
+    self.assertEqual((False, None), fun('$_21::invoke'))
+    self.assertEqual((False, None), fun('$aa'))
+    self.assertEqual((False, None), fun('$tt.'))
+    self.assertEqual((False, None), fun('$'))
+    self.assertEqual((False, None), fun(''))
+    self.assertEqual((False, None), fun('void foo()'))
+    self.assertEqual((False, None), fun('OUTLINED_FUNCTION_'))
+    self.assertEqual((False, None), fun('abc'))
 
   @_CompareWithGolden()
   def test_Tokenize(self):
     ret = []
-    map_file = _ReadMapFile(_TEST_MAP_PATH)
-    linker_name = linker_map_parser.DetectLinkerNameFromMapFile(iter(map_file))
-    parser = linker_map_parser.MapFileParserLld(linker_name)
-    tokenizer = parser.Tokenize(iter(map_file))
+    lines = _ReadMapFile(_TEST_MAP_PATH)
+    parser = linker_map_parser.MapFileParserLld('lld-lto_v1')
+    tokenizer = parser.Tokenize(lines)
     for (_, address, size, level, span, tok) in tokenizer:
       ret.append('%8X %8X (%d) %s %s' % (address, size, level, '-' * 8 if
                                          span is None else '%8X' % span, tok))

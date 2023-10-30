@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -34,7 +34,8 @@ if (target_os == "win" && host_os != "win") {
 # If the current toolchain is the test host toolchain, build the tool.
 if (current_toolchain == imagediff_toolchain) {
   executable("imagediff") {
-    output_name = "image_diff"  # Different than dir name for historical reasons.
+    output_name = "image_diff"  # Different than dir name for historical
+                                # reasons.
     sources = [
       "image_diff.cc",
       "image_diff_png.cc",

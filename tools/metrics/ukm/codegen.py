@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -18,9 +18,9 @@ def sanitize_name(name):
 
 
 def HashName(name):
-  # This must match the hash function in base/metrics/metric_hashes.cc
+  # This must match the hash function in //base/metrics/metrics_hashes.cc.
   # >Q: 8 bytes, big endian.
-  return struct.unpack('>Q', hashlib.md5(name).digest()[:8])[0]
+  return struct.unpack('>Q', hashlib.md5(name.encode()).digest()[:8])[0]
 
 
 class FileInfo(object):

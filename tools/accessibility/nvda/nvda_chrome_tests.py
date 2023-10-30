@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -20,6 +20,8 @@ environment according to the instructions in README.txt, then running the
 test script, then filing bugs for any potential failures. If the environment
 is set up correctly, the actual tests should run automatically and unattended.
 """
+
+from __future__ import print_function
 
 import os
 import pywinauto
@@ -229,4 +231,3 @@ class NvdaChromeTest(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
-

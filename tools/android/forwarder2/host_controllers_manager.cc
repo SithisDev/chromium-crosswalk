@@ -1,10 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "tools/android/forwarder2/host_controllers_manager.h"
 
+#include <memory>
+
 #include "base/bind.h"
+#include "base/logging.h"
 #include "base/process/launch.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -14,7 +17,7 @@
 namespace forwarder2 {
 
 HostControllersManager::HostControllersManager(
-    base::Callback<int()> exit_notifier_fd_callback)
+    base::RepeatingCallback<int()> exit_notifier_fd_callback)
     : controllers_(new HostControllerMap()),
       exit_notifier_fd_callback_(exit_notifier_fd_callback),
       has_failed_(false),
@@ -52,8 +55,8 @@ std::string HostControllersManager::MakeHostControllerMapKey(int adb_port,
 void HostControllersManager::InitOnce() {
   if (thread_.get())
     return;
-  at_exit_manager_.reset(new base::AtExitManager());
-  thread_.reset(new base::Thread("HostControllersManagerThread"));
+  at_exit_manager_ = std::make_unique<base::AtExitManager>();
+  thread_ = std::make_unique<base::Thread>("HostControllersManagerThread");
   thread_->Start();
 }
 
@@ -103,8 +106,8 @@ void HostControllersManager::Map(const std::string& adb_path,
   std::unique_ptr<HostController> host_controller(HostController::Create(
       device_serial, device_port, host_port, adb_port,
       exit_notifier_fd_callback_.Run(),
-      base::Bind(&HostControllersManager::DeleteHostController,
-                 weak_ptr_factory_.GetWeakPtr())));
+      base::BindOnce(&HostControllersManager::DeleteHostController,
+                     weak_ptr_factory_.GetWeakPtr())));
   if (!host_controller.get()) {
     has_failed_ = true;
     SendMessage("ERROR: Connection to device failed.\n", client_socket);

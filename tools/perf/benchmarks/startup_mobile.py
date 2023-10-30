@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -6,10 +6,12 @@ import contextlib
 import logging
 
 from core import perf_benchmark
+from core import platforms
 
 from telemetry.core import android_platform
 from telemetry.core import util as core_util
 from telemetry.internal.browser import browser_finder
+from telemetry.internal.platform import android_device
 from telemetry.timeline import chrome_trace_category_filter
 from telemetry.util import wpr_modes
 from telemetry.web_perf import timeline_based_measurement
@@ -31,16 +33,16 @@ from devil.android.sdk import intent # pylint: disable=import-error
 # 1. Configure for Release Official flavor to get the most representative
 #    results:
 #    shell> gn gen --args='use_goma=true target_os="android" target_cpu="arm" \
-#           is_debug=false is_official_build=true' gn_android/ReleaseOfficial
+#           is_debug=false is_official_build=true' out/AndroidReleaseOfficial
 #
 # 2.1. Build Monochrome:
-#    shell> autoninja -C gn_android/ReleaseOfficial monochrome_apk
+#    shell> autoninja -C out/AndroidReleaseOfficial monochrome_apk
 #
 # 2.2. Build the (pseudo) Maps PWA launcher (it will be auto-installed later):
-#    shell> autoninja -C gn_android/Release/ maps_go_webapk
+#    shell> autoninja -C out/AndroidReleaseOfficial/ maps_go_webapk
 #
 # 3. Invoke Telemetry:
-#    shell> CHROMIUM_OUTPUT_DIR=gn_android/ReleaseOfficial \
+#    shell> CHROMIUM_OUTPUT_DIR=out/AndroidReleaseOfficial \
 #               tools/perf/run_benchmark -v startup.mobile \
 #               --browser=android-chrome \
 #               --output-dir=/tmp/avoid-polluting-chrome-tree \
@@ -59,13 +61,14 @@ from devil.android.sdk import intent # pylint: disable=import-error
 #     unknown.
 #
 # Recording a WPR archive and uploading it:
-# shell> CHROMIUM_OUTPUT_DIR=gn_android/Release tools/perf/record_wpr \
+# shell> CHROMIUM_OUTPUT_DIR=out/AndroidReleaseOfficial tools/perf/record_wpr \
 #            mobile_startup_benchmark --browser=android-chrome \
 #            --also-run-disabled-tests --story-filter=maps_pwa:with_http_cache \
 #            --output-dir=/tmp/maps_pwa_output --upload
 # Note: "startup_mobile_benchmark" instead of "startup.mobile".
 
 _NUMBER_OF_ITERATIONS = 10
+_NUMBER_OF_ITERATIONS_FOR_WEBLAYER = 20
 _MAX_BATTERY_TEMP = 32
 
 class _MobileStartupSharedState(story_module.SharedState):
@@ -89,7 +92,9 @@ class _MobileStartupSharedState(story_module.SharedState):
     self._finder_options.browser_options.AppendExtraBrowserArgs(
         '--skip-webapk-verification')
     self.platform.Initialize()
-    self.platform.SetFullPerformanceModeEnabled(True)
+    self.platform.SetPerformanceMode(finder_options.performance_mode)
+    self._perf_mode_set = (finder_options.performance_mode !=
+                           android_device.KEEP_PERFORMANCE_MODE)
     maps_webapk = core_util.FindLatestApkOnHost(
         finder_options.chrome_root, 'MapsWebApk.apk')
     if not maps_webapk:
@@ -98,6 +103,9 @@ class _MobileStartupSharedState(story_module.SharedState):
     self.platform.InstallApplication(maps_webapk)
     wpr_mode = wpr_modes.WPR_REPLAY
     self._number_of_iterations = _NUMBER_OF_ITERATIONS
+    if 'android-weblayer' in self._possible_browser.GetTypExpectationsTags():
+      # As discussed in crbug.com/1032364, use a higher number to reduce noise.
+      self._number_of_iterations = _NUMBER_OF_ITERATIONS_FOR_WEBLAYER
     if finder_options.use_live_sites:
       wpr_mode = wpr_modes.WPR_OFF
     elif finder_options.browser_options.wpr_mode == wpr_modes.WPR_RECORD:
@@ -117,7 +125,8 @@ class _MobileStartupSharedState(story_module.SharedState):
 
   def TearDownState(self):
     self.platform.network_controller.Close()
-    self.platform.SetFullPerformanceModeEnabled(False)
+    if self._perf_mode_set:
+      self.platform.SetPerformanceMode(android_device.NORMAL_PERFORMANCE_MODE)
 
   def LaunchBrowser(self, url, flush_caches):
     if flush_caches:
@@ -127,7 +136,8 @@ class _MobileStartupSharedState(story_module.SharedState):
     self.platform.StartActivity(
         intent.Intent(package=self._possible_browser.settings.package,
                       activity=self._possible_browser.settings.activity,
-                      action=None, data=url),
+                      data=url,
+                      action='android.intent.action.VIEW'),
         blocking=True)
 
   def LaunchCCT(self, url):
@@ -140,20 +150,21 @@ class _MobileStartupSharedState(story_module.SharedState):
     self.platform.StartActivity(
         intent.Intent(package=self._possible_browser.settings.package,
                       activity=self._possible_browser.settings.activity,
-                      action=None, data=url, extras=cct_extras),
+                      data=url, extras=cct_extras,
+                      action='android.intent.action.VIEW'),
         blocking=True)
 
   def LaunchMapsPwa(self):
     # Launches a bound webapk. The APK should be installed by the shared state
     # constructor. Upon launch, Chrome extracts the icon and the URL from the
     # APK.
-    self.platform.StartActivity(
-        intent.Intent(package='org.chromium.maps_go_webapk',
-                      activity='org.chromium.webapk.shell_apk.MainActivity',
-                      category='android.intent.category.LAUNCHER',
-                      action='android.intent.action.MAIN'),
-        blocking=True)
     self.platform.WaitForBatteryTemperature(_MAX_BATTERY_TEMP)
+    self.platform.StartActivity(intent.Intent(
+        package='org.chromium.maps_go_webapk',
+        activity='org.chromium.webapk.shell_apk.h2o.H2OOpaqueMainActivity',
+        category='android.intent.category.LAUNCHER',
+        action='android.intent.action.MAIN'),
+                                blocking=True)
 
   @contextlib.contextmanager
   def FindBrowser(self):
@@ -199,12 +210,12 @@ class _MobileStartupSharedState(story_module.SharedState):
     return True
 
 
-def _DriveMobileStartupWithIntent(state, flush_caches):
-  for _ in xrange(state.number_of_iterations):
+def _DriveMobileStartupWithIntent(shared_state, flush_caches):
+  for _ in range(shared_state.number_of_iterations):
     # TODO(pasko): Find a way to fail the benchmark when WPR is set up
     # incorrectly and error pages get loaded.
-    state.LaunchBrowser('http://bbc.co.uk', flush_caches)
-    with state.FindBrowser() as browser:
+    shared_state.LaunchBrowser('http://bbc.co.uk', flush_caches)
+    with shared_state.FindBrowser() as browser:
       action_runner = browser.foreground_tab.action_runner
       action_runner.tab.WaitForDocumentReadyStateToBeComplete()
 
@@ -214,8 +225,8 @@ class _MobileStartupWithIntentStory(story_module.Story):
     super(_MobileStartupWithIntentStory, self).__init__(
         _MobileStartupSharedState, name='intent:coldish:bbc')
 
-  def Run(self, state):
-    _DriveMobileStartupWithIntent(state, flush_caches=True)
+  def Run(self, shared_state):
+    _DriveMobileStartupWithIntent(shared_state, flush_caches=True)
 
 
 class _MobileStartupWithIntentStoryWarm(story_module.Story):
@@ -223,8 +234,8 @@ class _MobileStartupWithIntentStoryWarm(story_module.Story):
     super(_MobileStartupWithIntentStoryWarm, self).__init__(
         _MobileStartupSharedState, name='intent:warm:bbc')
 
-  def Run(self, state):
-    _DriveMobileStartupWithIntent(state, flush_caches=False)
+  def Run(self, shared_state):
+    _DriveMobileStartupWithIntent(shared_state, flush_caches=False)
 
 
 class _MobileStartupWithCctIntentStory(story_module.Story):
@@ -232,10 +243,10 @@ class _MobileStartupWithCctIntentStory(story_module.Story):
     super(_MobileStartupWithCctIntentStory, self).__init__(
         _MobileStartupSharedState, name='cct:coldish:bbc')
 
-  def Run(self, state):
-    for _ in xrange(state.number_of_iterations):
-      state.LaunchCCT('http://bbc.co.uk')
-      with state.FindBrowser() as browser:
+  def Run(self, shared_state):
+    for _ in range(shared_state.number_of_iterations):
+      shared_state.LaunchCCT('http://bbc.co.uk')
+      with shared_state.FindBrowser() as browser:
         action_runner = browser.foreground_tab.action_runner
         action_runner.tab.WaitForDocumentReadyStateToBeComplete()
 
@@ -245,11 +256,11 @@ class _MapsPwaStartupStory(story_module.Story):
     super(_MapsPwaStartupStory, self).__init__(
         _MobileStartupSharedState, name='maps_pwa:with_http_cache')
 
-  def Run(self, state):
-    for _ in xrange(state.number_of_iterations):
+  def Run(self, shared_state):
+    for _ in range(shared_state.number_of_iterations):
       # TODO(pasko): Flush HTTP cache for 'maps_pwa:no_http_cache'.
-      state.LaunchMapsPwa()
-      with state.FindBrowser() as browser:
+      shared_state.LaunchMapsPwa()
+      with shared_state.FindBrowser() as browser:
         action_runner = browser.foreground_tab.action_runner
         action_runner.tab.WaitForDocumentReadyStateToBeComplete()
 
@@ -265,12 +276,15 @@ class _MobileStartupStorySet(story_module.StorySet):
     self.AddStory(_MapsPwaStartupStory())
 
 
-@benchmark.Info(emails=['pasko@chromium.org',
-                        'chrome-android-perf-status@chromium.org'],
+@benchmark.Info(emails=['pasko@chromium.org', 'lizeb@chromium.org'],
                 component='Speed>Metrics>SystemHealthRegressions')
 class MobileStartupBenchmark(perf_benchmark.PerfBenchmark):
   """Startup benchmark for Chrome on Android."""
 
+  # TODO(rmhasan): Remove the SUPPORTED_PLATFORMS lists.
+  # SUPPORTED_PLATFORMS is deprecated, please put system specifier tags
+  # from expectations.config in SUPPORTED_PLATFORM_TAGS.
+  SUPPORTED_PLATFORM_TAGS = [platforms.ANDROID_NOT_WEBVIEW]
   SUPPORTED_PLATFORMS = [story_module.expectations.ANDROID_NOT_WEBVIEW]
 
   def CreateCoreTimelineBasedMeasurementOptions(self):
@@ -292,3 +306,10 @@ class MobileStartupBenchmark(perf_benchmark.PerfBenchmark):
   @classmethod
   def Name(cls):
     return 'startup.mobile'
+
+  def SetExtraBrowserOptions(self, options):
+    super(MobileStartupBenchmark, self).SetExtraBrowserOptions(options)
+    # Force online state for the offline indicator so it doesn't show and affect
+    # the benchmarks on bots, which are offline by default.
+    options.AppendExtraBrowserArgs(
+        '--force-online-connection-state-for-indicator')

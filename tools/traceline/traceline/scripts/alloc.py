@@ -1,7 +1,9 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright 2011 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import print_function
 
 import sys
 
@@ -15,8 +17,7 @@ def parseEvents(z):
       delta = e['done'] - e['ms']
       tid = e['thread']
       ms = e['ms']
-      print '%f - %f - %x' % (
-          delta, ms, tid)
+      print('%f - %f - %x' % (delta, ms, tid))
 
 
 def main():

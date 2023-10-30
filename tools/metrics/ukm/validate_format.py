@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2019 The Chromium Authors. All rights reserved.
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Verifies that the UKM XML file is well-formatted."""
@@ -25,13 +25,17 @@ def main():
     validator = UkmXmlValidation(config)
 
     ownerCheckSuccess, ownerCheckErrors = validator.checkEventsHaveOwners()
-    metricCheckSuccess, metricCheckErrors, metricCheckWarnings = \
-      validator.checkMetricTypeIsSpecified()
+    metricCheckSuccess, metricCheckErrors, metricCheckWarnings = (
+      validator.checkMetricTypeIsSpecified())
+    aggregationCheckSuccess, aggregationCheckErrors = (
+      validator.checkLocalMetricIsAggregated())
 
     results = dict();
 
-    if not metricCheckSuccess or not metricCheckSuccess:
-      results['Errors'] = ownerCheckErrors + metricCheckErrors
+    if (not ownerCheckSuccess or not metricCheckSuccess or
+        not aggregationCheckSuccess):
+      results['Errors'] = (ownerCheckErrors + metricCheckErrors +
+                           aggregationCheckErrors)
     if metricCheckWarnings and not IGNORE_METRIC_CHECK_WARNINGS:
       results['Warnings'] = metricCheckWarnings
 

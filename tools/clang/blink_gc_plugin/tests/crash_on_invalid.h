@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,14 +13,13 @@ class Visitor;
 class GamepadCommon {};
 class ScriptWrappable {};
 
-class Gamepad final : public GarbageCollectedFinalized<Gamepad>,
+class Gamepad final : public GarbageCollected<Gamepad>,
                       public GamepadCommon,
                       public ScriptWrappable {
-public:
-    virtual const WrapperTypeInfo *wrapperTypeInfo() const {}
-    void Trace(Visitor *);
+ public:
+  virtual const WrapperTypeInfo* wrapperTypeInfo() const {}
+  void Trace(Visitor*) const;
 };
-
 }
 
 #endif

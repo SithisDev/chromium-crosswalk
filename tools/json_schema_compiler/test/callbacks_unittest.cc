@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,33 +9,29 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-using namespace test::api::callbacks;
-
 TEST(JsonSchemaCompilerCallbacksTest, ReturnsObjectResultCreate) {
-  ReturnsObject::Results::SomeObject some_object;
-  some_object.state = ENUMERATION_FOO;
-  std::unique_ptr<base::ListValue> results =
-      ReturnsObject::Results::Create(some_object);
+  test::api::callbacks::ReturnsObject::Results::SomeObject some_object;
+  some_object.state = test::api::callbacks::ENUMERATION_FOO;
+  base::Value results(
+      test::api::callbacks::ReturnsObject::Results::Create(some_object));
 
-  std::unique_ptr<base::DictionaryValue> expected_dict(
-      new base::DictionaryValue());
-  expected_dict->SetString("state", "foo");
-  base::ListValue expected;
+  base::Value expected_dict(base::Value::Type::DICTIONARY);
+  expected_dict.SetStringPath("state", "foo");
+  base::Value expected(base::Value::Type::LIST);
   expected.Append(std::move(expected_dict));
-  EXPECT_TRUE(results->Equals(&expected));
+  EXPECT_EQ(expected, results);
 }
 
 TEST(JsonSchemaCompilerCallbacksTest, ReturnsMultipleResultCreate) {
-  ReturnsMultiple::Results::SomeObject some_object;
-  some_object.state = ENUMERATION_FOO;
-  std::unique_ptr<base::ListValue> results =
-      ReturnsMultiple::Results::Create(5, some_object);
+  test::api::callbacks::ReturnsMultiple::Results::SomeObject some_object;
+  some_object.state = test::api::callbacks::ENUMERATION_FOO;
+  base::Value results(
+      test::api::callbacks::ReturnsMultiple::Results::Create(5, some_object));
 
-  std::unique_ptr<base::DictionaryValue> expected_dict(
-      new base::DictionaryValue());
-  expected_dict->SetString("state", "foo");
-  base::ListValue expected;
-  expected.AppendInteger(5);
+  base::Value expected_dict(base::Value::Type::DICTIONARY);
+  expected_dict.SetStringPath("state", "foo");
+  base::Value expected(base::Value::Type::LIST);
+  expected.Append(5);
   expected.Append(std::move(expected_dict));
-  EXPECT_TRUE(results->Equals(&expected));
+  EXPECT_EQ(expected, results);
 }

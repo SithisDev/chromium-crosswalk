@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,7 @@ enum : int {
 class HostControllersManager {
  public:
   explicit HostControllersManager(
-      base::Callback<int()> exit_notifier_fd_callback);
+      base::RepeatingCallback<int()> exit_notifier_fd_callback);
   ~HostControllersManager();
   void HandleRequest(const std::string& adb_path,
                      const std::string& device_serial,
@@ -107,7 +107,7 @@ class HostControllersManager {
   std::unique_ptr<base::AtExitManager>
       at_exit_manager_;  // Needed by base::Thread.
   std::unique_ptr<base::Thread> thread_;
-  base::Callback<int()> exit_notifier_fd_callback_;
+  base::RepeatingCallback<int()> exit_notifier_fd_callback_;
   bool has_failed_;
   base::WeakPtrFactory<HostControllersManager> weak_ptr_factory_;
 };

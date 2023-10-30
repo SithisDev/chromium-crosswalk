@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,11 @@
 
 namespace blink {
 
-void TraceImplExternWithUntracedMember::Trace(Visitor* visitor) {
+void TraceImplExternWithUntracedMember::Trace(Visitor* visitor) const {
   // Should get a warning as well.
 }
 
-void TraceImplExternWithUntracedBase::Trace(Visitor* visitor) {
+void TraceImplExternWithUntracedBase::Trace(Visitor* visitor) const {
   // Ditto.
 }
-
 }

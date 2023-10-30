@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 
 If the file was pretty-printed, the updated version is pretty-printed too.
 """
+
+from __future__ import print_function
 
 import logging
 import os
@@ -20,7 +22,7 @@ from diff_util import PromptUserToAcceptDiff
 import path_util
 
 import histogram_paths
-import histograms_print_style
+import histogram_configuration_model
 
 
 ENUMS_PATH = histogram_paths.ENUMS_XML
@@ -60,7 +62,7 @@ def ReadHistogramValues(filename):
       if re.match(ENUM_END_MARKER, line):
         inside_enum = False
       else:
-          # Inside enum: generate new xml entry
+        # Inside enum: generate new xml entry
         m = re.match("^{ \"([\w]+)\", \{([\w]+)", line.strip())
         if m:
           result.append((m.group(1), int(m.group(2))))
@@ -86,8 +88,8 @@ def UpdateHistogramDefinitions(histogram_values, document):
   # Find ExtensionFunctions enum.
   for enum_node in document.getElementsByTagName('enum'):
     if enum_node.attributes['name'].value == ENUM_NAME:
-        extension_functions_enum_node = enum_node
-        break
+      extension_functions_enum_node = enum_node
+      break
   else:
     raise UserError('No policy enum node found')
 
@@ -114,7 +116,7 @@ def Log(message):
 
 def main():
   if len(sys.argv) > 1:
-    print >>sys.stderr, 'No arguments expected!'
+    print('No arguments expected!', file=sys.stderr)
     sys.stderr.write(__doc__)
     sys.exit(1)
 
@@ -131,8 +133,7 @@ def main():
   UpdateHistogramDefinitions(histogram_values, histograms_doc)
 
   Log('Writing out new histograms file.')
-  new_xml = histograms_print_style.GetPrintStyle().PrettyPrintXml(
-      histograms_doc)
+  new_xml = histogram_configuration_model.PrettifyTree(histograms_doc)
   if PromptUserToAcceptDiff(xml, new_xml, 'Is the updated version acceptable?'):
     with open(ENUMS_PATH, 'wb') as f:
       f.write(new_xml)

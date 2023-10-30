@@ -1,11 +1,33 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+import collections
 
 from page_sets import page_cycler_story
 from telemetry.page import cache_temperature as cache_temperature_module
 from telemetry.page import shared_page_state
 from telemetry import story
+
+Tag = collections.namedtuple('Tag', ['name', 'description'])
+
+# pylint: disable=line-too-long
+# Used https://cs.chromium.org/chromium/src/tools/perf/experimental/story_clustering/README.md
+# to find representative stories.
+
+ABRIDGED = Tag('abridged', 'Story should be included in abridged runs')
+ABRIDGED_STORY_NAMES = [
+    "AirBnB_warm",
+    "ru.wikipedia_warm",
+    "Baidu_warm",
+    "AllRecipes_cold",
+    "TheOnion_cold",
+    "Naver_cold",
+    "Aljayyash_cold",
+    "Taobao_warm",
+    "Orange_cold",
+    "Orange_warm",
+]
 
 
 class LoadingDesktopStorySet(story.StorySet):
@@ -75,14 +97,12 @@ class LoadingDesktopStorySet(story.StorySet):
          ('http://pantip.com/', 'Pantip')], cache_temperatures)
     self.AddStories(
         ['typical'],
-        [('http://www.rei.com/', 'REI'),
-         ('http://www.fifa.com/', 'FIFA'),
+        [('http://www.rei.com/', 'REI'), ('http://www.fifa.com/', 'FIFA'),
          ('http://www.economist.com/', 'Economist'),
          ('http://www.theonion.com', 'TheOnion'),
          ('http://arstechnica.com/', 'ArsTechnica'),
          ('http://allrecipes.com/recipe/239896/crunchy-french-onion-chicken',
-             'AllRecipes'),
-         ('http://www.html5rocks.com/en/', 'HTML5Rocks'),
+          'AllRecipes'), ('http://www.html5rocks.com/en/', 'HTML5Rocks'),
          ('http://www.imdb.com/title/tt0910970/', 'IMDB'),
          ('http://www.flickr.com/search/?q=monkeys&f=hp', 'Flickr'),
          ('http://money.cnn.com/', 'money.cnn'),
@@ -91,8 +111,12 @@ class LoadingDesktopStorySet(story.StorySet):
          ('http://colorado.edu', 'Colorado.edu'),
          ('http://www.ticketmaster.com/', 'TicketMaster'),
          ('http://www.theverge.com/', 'TheVerge'),
-         ('http://www.airbnb.com/', 'AirBnB'),
-         ('http://www.ign.com/', 'IGN')], cache_temperatures)
+         ('http://www.airbnb.com/', 'AirBnB'), ('http://www.ign.com/', 'IGN'),
+         ('https://www.google.com/search?q=food', 'Google')],
+        cache_temperatures)
+
+  def GetAbridgedStorySetTagFilter(self):
+    return ABRIDGED.name
 
   def AddStories(self, tags, urls, cache_temperatures):
     for url, name in urls:
@@ -105,6 +129,19 @@ class LoadingDesktopStorySet(story.StorySet):
           tags.append('cache_temperature_warm')
         else:
           raise NotImplementedError
-        self.AddStory(page_cycler_story.PageCyclerStory(url, self,
-            shared_page_state_class=shared_page_state.SharedDesktopPageState,
-            cache_temperature=temp, tags=tags, name=page_name))
+
+        page_tags = tags[:]
+
+        if page_name in ABRIDGED_STORY_NAMES:
+          page_tags.append(ABRIDGED.name)
+
+        self.AddStory(
+            page_cycler_story.PageCyclerStory(
+                url,
+                self,
+                shared_page_state_class=shared_page_state.
+                SharedDesktopPageState,
+                cache_temperature=temp,
+                tags=page_tags,
+                name=page_name,
+                perform_final_navigation=True))

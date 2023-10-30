@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 from __future__ import print_function
 
 import os
-import StringIO
 import sys
 import unittest
 
 if __name__ == '__main__':
   sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+
+from six import StringIO
 
 from grit import util
 from grit.format import android_xml
@@ -53,10 +54,15 @@ a sledge hammer.
             {NUM_MISSISSIPPIS, plural,
             =1{OneMississippi}other{ManyMississippis}}
           </message>
+          <message name="IDS_PLURALS_PSEUDO_LONG" desc="A string using the ICU plurals format after being transformed to en-XA">
+            {MSG_COUNT, plural,
+            =1 {Only one message}
+            other {# messages}} - one two three four
+          </message>
         </messages>
         """)
 
-    buf = StringIO.StringIO()
+    buf = StringIO()
     build.RcBuilder.ProcessNode(root, DummyOutput('android', 'en'), buf)
     output = buf.getvalue()
     expected = r"""
@@ -78,6 +84,10 @@ a sledge hammer."</string>
   <item quantity="one">"OneMississippi"</item>
   <item quantity="other">"ManyMississippis"</item>
 </plurals>
+<plurals name="plurals_pseudo_long">
+  <item quantity="one">"Only one message - one two three four"</item>
+  <item quantity="other">"%d messages - one two three four"</item>
+</plurals>
 </resources>
 """
     self.assertEqual(output.strip(), expected.strip())
@@ -95,7 +105,7 @@ a sledge hammer."</string>
         </messages>
         """)
 
-    buf = StringIO.StringIO()
+    buf = StringIO()
     build.RcBuilder.ProcessNode(root, DummyOutput('android', 'en'), buf)
     output = buf.getvalue()
     expected = r"""

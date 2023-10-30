@@ -1,9 +1,11 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright 2011 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Selects the appropriate scraper for Chrome."""
+
+from __future__ import print_function
 
 
 def GetScraper(version):
@@ -33,4 +35,4 @@ def GetScraper(version):
 
 # if invoked rather than imported, test
 if __name__ == "__main__":
-  print GetScraper("0.1.101.0").version
+  print(GetScraper("0.1.101.0").version)

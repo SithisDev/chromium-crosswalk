@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -21,6 +21,7 @@ class JsonLoader(interface.GathererBase):
     exec('data = ' + self._json_text, globs)
     self._data = globs['data']
 
-  def GetData(self):
+  def GetData(self, lang, encoding):
     '''Returns the parsed JSON data.'''
+    assert encoding == 'utf-8'
     return self._data

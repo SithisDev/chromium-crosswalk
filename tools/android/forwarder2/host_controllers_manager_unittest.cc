@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,10 +23,11 @@ int UnusedGetExitNotifierFD() {
 
 base::FilePath CreateScript(const std::string script_contents) {
   base::FilePath script_file;
-  FILE* script_file_handle = base::CreateAndOpenTemporaryFile(&script_file);
+  base::ScopedFILE script_file_handle =
+      base::CreateAndOpenTemporaryStream(&script_file);
   base::WriteFile(script_file, script_contents.c_str(),
                   script_contents.length());
-  base::CloseFile(script_file_handle);
+  script_file_handle.reset();
   base::SetPosixFilePermissions(script_file,
                                 base::FILE_PERMISSION_READ_BY_USER |
                                     base::FILE_PERMISSION_EXECUTE_BY_USER);
@@ -38,10 +39,10 @@ base::FilePath CreateScript(const std::string script_contents) {
 // Ensure that we don't start the adb binary with superfluous file descriptors
 // from the parent process.
 TEST(HostControllersManagerTest, AdbNoExtraFds) {
-  HostControllersManager manager(base::Bind(&UnusedGetExitNotifierFD));
+  HostControllersManager manager(base::BindRepeating(&UnusedGetExitNotifierFD));
   base::FilePath unrelated_file;
   base::ScopedFILE open_unrelated_file(
-      CreateAndOpenTemporaryFile(&unrelated_file));
+      CreateAndOpenTemporaryStream(&unrelated_file));
   const int unrelated_fd = fileno(open_unrelated_file.get());
   base::FilePath adb_script =
       CreateScript(base::StringPrintf("#! /bin/sh\n"
@@ -57,7 +58,7 @@ TEST(HostControllersManagerTest, AdbNoExtraFds) {
 
 // Ensure that we don't mangle the argument order.
 TEST(HostControllersManagerTest, AdbArgumentSequence) {
-  HostControllersManager manager(base::Bind(&UnusedGetExitNotifierFD));
+  HostControllersManager manager(base::BindRepeating(&UnusedGetExitNotifierFD));
   base::FilePath adb_script =
       CreateScript(base::StringPrintf("#! /bin/sh\n"
                                       "echo -n \"$@\"\n"));

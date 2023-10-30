@@ -1,9 +1,11 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Generic USB gadget functionality.
 """
+
+from __future__ import print_function
 
 import struct
 
@@ -266,8 +268,8 @@ class Gadget(object):
         desc_index = value & 0xff
         desc_lang = index
 
-        print 'GetDescriptor(recipient={}, type={}, index={}, lang={})'.format(
-            recipient, desc_type, desc_index, desc_lang)
+        print('GetDescriptor(recipient={}, type={}, index={}, lang={})'.format(
+            recipient, desc_type, desc_index, desc_lang))
 
         return self.GetDescriptor(recipient, desc_type, desc_index, desc_lang,
                                   length)
@@ -519,7 +521,7 @@ class Gadget(object):
     Returns:
       True on success, None on error to stall the pipe.
     """
-    print 'SetConfiguration({})'.format(index)
+    print('SetConfiguration({})'.format(index))
 
     for endpoint_addrs in self._active_endpoints.values():
       for endpoint_addr in endpoint_addrs:
@@ -559,7 +561,7 @@ class Gadget(object):
     Returns:
       True on success, None on error to stall the pipe.
     """
-    print 'SetInterface({}, {})'.format(interface, alt_setting)
+    print('SetInterface({}, {})'.format(interface, alt_setting))
 
     config_desc = self.GetConfigurationDescriptor()
     interface_desc = None

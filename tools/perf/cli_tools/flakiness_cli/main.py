@@ -1,8 +1,10 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """This tool provides a command line interface for the flakiness dashboard."""
+
+from __future__ import print_function
 
 import argparse
 
@@ -54,4 +56,6 @@ def Main():
 
   df = analysis.pandas.concat(dfs)
   df = df.sort_values('flakiness', ascending=False)
-  print df
+  print(df)
+
+  return None

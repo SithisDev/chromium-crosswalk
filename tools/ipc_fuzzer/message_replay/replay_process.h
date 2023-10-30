@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/single_thread_task_executor.h"
 #include "base/threading/thread.h"
@@ -18,10 +17,6 @@
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_message.h"
 #include "tools/ipc_fuzzer/message_lib/message_file.h"
-
-namespace content {
-class ServiceManagerConnection;
-}
 
 namespace mojo {
 class IncomingInvitation;
@@ -35,6 +30,10 @@ namespace ipc_fuzzer {
 class ReplayProcess : public IPC::Listener {
  public:
   ReplayProcess();
+
+  ReplayProcess(const ReplayProcess&) = delete;
+  ReplayProcess& operator=(const ReplayProcess&) = delete;
+
   ~ReplayProcess() override;
 
   // Set up command line, logging, IO thread. Returns true on success, false
@@ -60,16 +59,12 @@ class ReplayProcess : public IPC::Listener {
 
   std::unique_ptr<mojo::core::ScopedIPCSupport> mojo_ipc_support_;
   std::unique_ptr<mojo::IncomingInvitation> mojo_invitation_;
-  std::unique_ptr<content::ServiceManagerConnection>
-      service_manager_connection_;
   std::unique_ptr<IPC::ChannelProxy> channel_;
   base::SingleThreadTaskExecutor main_task_executor_;
   base::Thread io_thread_;
   base::WaitableEvent shutdown_event_;
   MessageVector messages_;
   size_t message_index_;
-
-  DISALLOW_COPY_AND_ASSIGN(ReplayProcess);
 };
 
 }  // namespace ipc_fuzzer

@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -80,6 +80,6 @@ where in the file.'''
             'file.')
       return 2
     filename = args[0]
-    with util.WrapOutputStream(open(filename, 'w'), 'utf-8') as out:
+    with util.WrapOutputStream(open(filename, 'wb'), 'utf-8') as out:
       out.write(_FILE_CONTENTS)
     print("Wrote file %s" % filename)

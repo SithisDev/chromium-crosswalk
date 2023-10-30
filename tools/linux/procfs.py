@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 # as reasonablly possible. Translation is done when requested. It is to make it
 # always possible to probe the original data.
 
+from __future__ import print_function
 
 import collections
 import logging
@@ -27,7 +28,7 @@ _LOGGER = logging.getLogger('procfs')
 _LOGGER.addHandler(_NullHandler())
 
 
-class ProcStat(object):
+class ProcStat:
   """Reads and stores information in /proc/pid/stat."""
   _PATTERN = re.compile(r'^'
                         '(?P<PID>-?[0-9]+) '
@@ -115,7 +116,7 @@ class ProcStat(object):
     return int(self._rss)
 
 
-class ProcStatm(object):
+class ProcStatm:
   """Reads and stores information in /proc/pid/statm."""
   _PATTERN = re.compile(r'^'
                         '(?P<SIZE>[0-9]+) '
@@ -193,7 +194,7 @@ class ProcStatm(object):
     return int(self._dt)
 
 
-class ProcStatus(object):
+class ProcStatus:
   """Reads and stores information in /proc/pid/status."""
   _PATTERN = re.compile(r'^(?P<NAME>[A-Za-z0-9_]+):\s+(?P<VALUE>.*)')
 
@@ -269,7 +270,7 @@ class ProcStatus(object):
     raise ValueError('VmRSS is not in kB.')
 
 
-class ProcMapsEntry(object):
+class ProcMapsEntry:
   """A class representing one line in /proc/pid/maps."""
 
   def __init__(
@@ -303,7 +304,7 @@ class ProcMapsEntry(object):
     }
 
 
-class ProcMaps(object):
+class ProcMaps:
   """Reads and stores information in /proc/pid/maps."""
 
   MAPS_PATTERN = re.compile(
@@ -371,8 +372,7 @@ class ProcMaps(object):
           int(matched.group(10), 10), # inode
           matched.group(11)           # name
           )
-    else:
-      return None
+    return None
 
   @staticmethod
   def constants(entry):
@@ -394,11 +394,11 @@ class ProcMaps(object):
     self._dictionary[entry.begin] = entry
 
 
-class ProcSmaps(object):
+class ProcSmaps:
   """Reads and stores information in /proc/pid/smaps."""
   _SMAPS_PATTERN = re.compile(r'^(?P<NAME>[A-Za-z0-9_]+):\s+(?P<VALUE>.*)')
 
-  class VMA(object):
+  class VMA:
     def __init__(self):
       self._size = 0
       self._rss = 0
@@ -418,23 +418,26 @@ class ProcSmaps(object):
       if name in dct:
         self.__setattr__(dct[name], value)
 
+    def as_int_without_kb(arg):
+      """Returns `arg` as an int, with its "kB" suffix removed if present."""
+      # The redundant use of `str(arg)` here (when `arg` is already known to be
+      # a string per `isinstance()`) is a workaround for a PyLint bug:
+      # https://github.com/PyCQA/pylint/issues/1162.
+      if isinstance(arg, str) and str(arg).endswith('kB'):
+        return int(str(arg).split()[0])
+      return int(arg)
+
     @property
     def size(self):
-      if self._size.endswith('kB'):
-        return int(self._size.split()[0])
-      return int(self._size)
+      return self.as_int_without_kb(self._size)
 
     @property
     def rss(self):
-      if self._rss.endswith('kB'):
-        return int(self._rss.split()[0])
-      return int(self._rss)
+      return self.as_int_without_kb(self._rss)
 
     @property
     def pss(self):
-      if self._pss.endswith('kB'):
-        return int(self._pss.split()[0])
-      return int(self._pss)
+      return self.as_int_without_kb(self._pss)
 
   def __init__(self, raw, total_dct, maps, vma_internals):
     self._raw = raw
@@ -509,7 +512,7 @@ class ProcSmaps(object):
     return self._vma_internals
 
 
-class ProcPagemap(object):
+class ProcPagemap:
   """Reads and stores partial information in /proc/pid/pagemap.
 
   It picks up virtual addresses to read based on ProcMaps (/proc/pid/maps).
@@ -525,7 +528,7 @@ class ProcPagemap(object):
   _MASK_SOFTDIRTY = 1 << 55
   _MASK_PFN = (1 << 55) - 1
 
-  class VMA(object):
+  class VMA:
     def __init__(self, vsize, present, swapped, pageframes):
       self._vsize = vsize
       self._present = present
@@ -630,7 +633,7 @@ class ProcPagemap(object):
     return self._vma_internals
 
 
-class _ProcessMemory(object):
+class _ProcessMemory:
   """Aggregates process memory information from /proc for manual testing."""
   def __init__(self, pid):
     self._pid = pid
@@ -715,8 +718,8 @@ def main(argv):
   for arg in argv[1:]:
     try:
       pid = int(arg)
-    except ValueError:
-      raise SyntaxError("%s is not an integer." % arg)
+    except ValueError as value_error:
+      raise SyntaxError("%s is not an integer." % arg) from value_error
     else:
       pids.append(pid)
 
@@ -725,20 +728,20 @@ def main(argv):
     procs[pid] = _ProcessMemory(pid)
     procs[pid].read_all()
 
-    print '=== PID: %d ===' % pid
+    print('=== PID: %d ===' % pid)
 
-    print '   stat: %d' % procs[pid].stat.vsize
-    print '  statm: %d' % (procs[pid].statm.size * 4096)
-    print ' status: %d (Peak:%d)' % (procs[pid].status.vm_size * 1024,
-                                     procs[pid].status.vm_peak * 1024)
-    print '  smaps: %d' % (procs[pid].smaps.size * 1024)
-    print 'pagemap: %d' % procs[pid].pagemap.vsize
-    print '   stat: %d' % (procs[pid].stat.rss * 4096)
-    print '  statm: %d' % (procs[pid].statm.resident * 4096)
-    print ' status: %d (Peak:%d)' % (procs[pid].status.vm_rss * 1024,
-                                     procs[pid].status.vm_hwm * 1024)
-    print '  smaps: %d' % (procs[pid].smaps.rss * 1024)
-    print 'pagemap: %d' % procs[pid].pagemap.present
+    print('   stat: %d' % procs[pid].stat.vsize)
+    print('  statm: %d' % (procs[pid].statm.size * 4096))
+    print(' status: %d (Peak:%d)' % (procs[pid].status.vm_size * 1024,
+                                     procs[pid].status.vm_peak * 1024))
+    print('  smaps: %d' % (procs[pid].smaps.size * 1024))
+    print('pagemap: %d' % procs[pid].pagemap.vsize)
+    print('   stat: %d' % (procs[pid].stat.rss * 4096))
+    print('  statm: %d' % (procs[pid].statm.resident * 4096))
+    print(' status: %d (Peak:%d)' % (procs[pid].status.vm_rss * 1024,
+                                     procs[pid].status.vm_hwm * 1024))
+    print('  smaps: %d' % (procs[pid].smaps.rss * 1024))
+    print('pagemap: %d' % procs[pid].pagemap.present)
 
   return 0
 

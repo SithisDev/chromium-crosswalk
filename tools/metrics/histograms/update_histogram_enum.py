@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 If the file was pretty-printed, the updated version is pretty-printed too.
 """
 
+import io
 import logging
 import os
 import re
@@ -19,15 +20,13 @@ import diff_util
 import path_util
 
 import histogram_paths
-import histograms_print_style
+import histogram_configuration_model
 
 
 ENUMS_PATH = histogram_paths.ENUMS_XML
 
 
 class UserError(Exception):
-  def __init__(self, message):
-    Exception.__init__(self, message)
 
   @property
   def message(self):
@@ -61,13 +60,13 @@ def ReadHistogramValues(filename, start_marker, end_marker, strip_k_prefix):
           'k' should be stripped.
 
   Returns:
-      A boolean indicating wheather the histograms.xml file would be changed.
+      A dictionary from enum value to enum label.
 
   Raises:
       DuplicatedValue: An error when two enum labels share the same value.
   """
   # Read the file as a list of lines
-  with open(path_util.GetInputFile(filename)) as f:
+  with io.open(path_util.GetInputFile(filename)) as f:
     content = f.readlines()
 
   START_REGEX = re.compile(start_marker)
@@ -179,7 +178,7 @@ def UpdateHistogramDefinitions(histogram_enum_name, source_enum_values,
              else '')))
 
   # Create item nodes for each of the enum values.
-  for value, label in source_enum_values.iteritems():
+  for value, label in source_enum_values.items():
     new_item_nodes[value] = CreateEnumItemNode(document, value, label)
 
   # Scan existing nodes in |enum_node| for old values and preserve them.
@@ -191,7 +190,7 @@ def UpdateHistogramDefinitions(histogram_enum_name, source_enum_values,
   for child in enum_node.childNodes:
     if child.nodeName == 'int':
       value = int(child.attributes['value'].value)
-      if not source_enum_values.has_key(value):
+      if value not in source_enum_values:
         new_item_nodes[value] = child
     # Preserve existing non-generated comments.
     elif (child.nodeType == minidom.Node.COMMENT_NODE and
@@ -207,7 +206,7 @@ def UpdateHistogramDefinitions(histogram_enum_name, source_enum_values,
     enum_node.appendChild(comment)
 
   # Add in the new enums.
-  for value in sorted(new_item_nodes.iterkeys()):
+  for value in sorted(new_item_nodes.keys()):
     enum_node.appendChild(new_item_nodes[value])
 
 
@@ -218,7 +217,7 @@ def _GetOldAndUpdatedXml(histogram_enum_name, source_enum_values,
   and returns both in XML format.
   """
   Log('Reading existing histograms from "{0}".'.format(ENUMS_PATH))
-  with open(ENUMS_PATH, 'rb') as f:
+  with io.open(ENUMS_PATH, 'r', encoding='utf-8') as f:
     histograms_doc = minidom.parse(f)
     f.seek(0)
     xml = f.read()
@@ -228,36 +227,50 @@ def _GetOldAndUpdatedXml(histogram_enum_name, source_enum_values,
                              source_enum_path, caller_script_name,
                              histograms_doc)
 
-  new_xml = histograms_print_style.GetPrintStyle().PrettyPrintXml(
-      histograms_doc)
+  new_xml = histogram_configuration_model.PrettifyTree(histograms_doc)
   return (xml, new_xml)
 
 
-def CheckPresubmitErrors(histogram_enum_name, update_script_name,
-                         source_enum_path, start_marker,
-                         end_marker, strip_k_prefix = False):
-  """Reads a C++ enum from a .h file and checks for presubmit violations:
-  1. Failure to update histograms.xml to match
-  2. Introduction of duplicate values.
+def CheckPresubmitErrors(histogram_enum_name,
+                         update_script_name,
+                         source_enum_path,
+                         start_marker,
+                         end_marker,
+                         strip_k_prefix=False,
+                         histogram_value_reader=ReadHistogramValues):
+  """Extracts histogram enum values from a source file and checks for
+  violations.
+
+  Enum values are extracted from |source_enum_path| using
+  |histogram_value_reader| function. The following presubmit violations are then
+  checked:
+    1. Failure to update histograms.xml to match
+    2. Introduction of duplicate values
 
   Args:
       histogram_enum_name: The name of the XML <enum> attribute to update.
       update_script_name: The name of an update script to run to update the UMA
           mappings for the enum.
       source_enum_path: A unix-style path, relative to src/, giving
-          the C++ header file from which to read the enum.
+          the source file from which to read the enum.
       start_marker: A regular expression that matches the start of the C++ enum.
       end_marker: A regular expression that matches the end of the C++ enum.
       strip_k_prefix: Set to True if enum values are declared as kFoo and the
           'k' should be stripped.
+      histogram_value_reader: A reader function that takes four arguments
+          (source_path, start_marker, end_marker, strip_k_prefix), and returns a
+          list of strings of the extracted enum names. The default is
+          ReadHistogramValues(), which parses the values out of an enum defined
+          in a C++ source file.
+
 
   Returns:
       A string with presubmit failure description, or None (if no failures).
   """
   Log('Reading histogram enum definition from "{0}".'.format(source_enum_path))
   try:
-    source_enum_values = ReadHistogramValues(
-        source_enum_path, start_marker, end_marker, strip_k_prefix)
+    source_enum_values = histogram_value_reader(source_enum_path, start_marker,
+                                                end_marker, strip_k_prefix)
   except DuplicatedValue as duplicated_values:
     return ('%s enum has been updated and there exist '
             'duplicated values between (%s) and (%s)' %
@@ -265,7 +278,7 @@ def CheckPresubmitErrors(histogram_enum_name, update_script_name,
              duplicated_values.second_label))
 
   (xml, new_xml) = _GetOldAndUpdatedXml(histogram_enum_name, source_enum_values,
-                                        source_enum_path, None)
+                                        source_enum_path, update_script_name)
   if xml != new_xml:
     return ('%s enum has been updated and the UMA mapping needs to be '
             'regenerated. Please run %s in src/tools/metrics/histograms/ to '
@@ -288,14 +301,18 @@ def UpdateHistogramFromDict(histogram_enum_name, source_enum_values,
     Log('Cancelled.')
     return
 
-  with open(ENUMS_PATH, 'wb') as f:
+  with io.open(ENUMS_PATH, 'w', encoding='utf-8') as f:
     f.write(new_xml)
 
   Log('Done.')
 
 
-def UpdateHistogramEnum(histogram_enum_name, source_enum_path,
-                        start_marker, end_marker, strip_k_prefix = False):
+def UpdateHistogramEnum(histogram_enum_name,
+                        source_enum_path,
+                        start_marker,
+                        end_marker,
+                        strip_k_prefix=False,
+                        calling_script=None):
   """Reads a C++ enum from a .h file and updates histograms.xml to match.
 
   Args:
@@ -313,7 +330,7 @@ def UpdateHistogramEnum(histogram_enum_name, source_enum_path,
       start_marker, end_marker, strip_k_prefix)
 
   UpdateHistogramFromDict(histogram_enum_name, source_enum_values,
-      source_enum_path, None)
+                          source_enum_path, calling_script)
 
 
 def UpdateHistogramEnumFromXML(histogram_enum_name, source_enum_path,

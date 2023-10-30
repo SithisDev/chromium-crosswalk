@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -200,10 +200,10 @@ class XmlStyle(object):
       closing_chars = 1
 
     attributes = node.keys()
-    required_attributes = [attribute for attribute in self.required_attributes
-                           if attribute in self.attribute_order[node.tag]]
-    missing_attributes = [attribute for attribute in required_attributes
-                          if attribute not in attributes]
+    missing_attributes = [
+        attribute for attribute in self.required_attributes[node.tag]
+        if attribute not in attributes
+    ]
 
     for attribute in missing_attributes:
       logging.error(

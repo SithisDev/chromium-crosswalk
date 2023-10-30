@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 class FieldPoint;
 
 // This visitor checks that the fields of a class are "well formed".
-// - unique_ptr and RefPtr must not point to a GC derived type.
+// - unique_ptr, scoped_refptr and WeakPtr must not point to a GC derived type.
 // - Part objects must not be a GC derived type.
 // - An on-heap class must never contain GC roots.
 // - Only stack-allocated types may point to stack-allocated types.
@@ -23,6 +23,7 @@ class CheckFieldsVisitor : public RecursiveEdgeVisitor {
   enum Error {
     kRawPtrToGCManaged,
     kRefPtrToGCManaged,
+    kWeakPtrToGCManaged,
     kReferencePtrToGCManaged,
     kUniquePtrToGCManaged,
     kMemberToGCUnmanaged,
@@ -30,6 +31,7 @@ class CheckFieldsVisitor : public RecursiveEdgeVisitor {
     kPtrFromHeapToStack,
     kGCDerivedPartObject,
     kIteratorToGCManaged,
+    kMemberInStackAllocated,
   };
 
   using Errors = std::vector<std::pair<FieldPoint*, Error>>;

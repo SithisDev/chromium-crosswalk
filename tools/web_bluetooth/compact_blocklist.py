@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,6 +13,8 @@ content/public/browser/content_browser_client.h
 Usage:
   compact_blocklist.py <gatt_blocklist.txt>
 """
+
+from __future__ import print_function
 
 import collections
 import string

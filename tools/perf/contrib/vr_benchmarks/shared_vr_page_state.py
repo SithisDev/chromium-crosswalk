@@ -1,4 +1,4 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,15 +11,11 @@ from pylib.utils import shared_preference_utils
 from telemetry.core import android_platform
 from telemetry.core import util
 from telemetry.page import shared_page_state
-from contrib.vr_benchmarks.desktop_runtimes import oculus_runtimes
-from contrib.vr_benchmarks.desktop_runtimes import openvr_runtimes
-from contrib.vr_benchmarks.desktop_runtimes import wmr_runtimes
+from contrib.vr_benchmarks.desktop_runtimes import openxr_runtimes
 
 
 CARDBOARD_PATH = os.path.join('chrome', 'android', 'shared_preference_files',
                               'test', 'vr_cardboard_skipdon_setupcomplete.json')
-WEBXR_CONSENT_DIALOG_DISABLE_FLAG = (
-    '--disable-xr-device-consent-prompt-for-testing')
 
 
 class SharedVrPageStateFactory(shared_page_state.SharedPageState):
@@ -66,8 +62,6 @@ class _SharedVrPageState(shared_page_state.SharedPageState):
     super(_SharedVrPageState, self).__init__(
         test, finder_options, story_set, possible_browser)
     self._story_set = story_set
-    self._finder_options.AppendExtraBrowserArgs(
-        [WEBXR_CONSENT_DIALOG_DISABLE_FLAG])
 
   @property
   def recording_wpr(self):
@@ -106,7 +100,7 @@ class AndroidSharedVrPageState(_SharedVrPageState):
   def _RemoveSystemVrCore(self):
     # Import done here since importing Devil on Windows breaks the Telemetry
     # unittests.
-    from devil.android import forwarder # pylint: disable=import-error
+    from devil.android import forwarder  # pylint: disable=import-error,import-outside-toplevel
     # Close the existing network controller since RemoveSystemPackages could
     # potentially reboot the device, which breaks the existing port forwarding
     # and makes it impossible to cleanly re-establish it if the network
@@ -117,7 +111,7 @@ class AndroidSharedVrPageState(_SharedVrPageState):
     # forwarding necessary for the local server to work. Since port forwarding
     # often refuses to work for a short period after rebooting, try several
     # times.
-    for _ in xrange(5):
+    for _ in range(5):
       try:
         self.platform.network_controller.Open(self.wpr_mode)
         break
@@ -168,8 +162,8 @@ class AndroidSharedVrPageState(_SharedVrPageState):
                      'gvr-android-sdk', 'test-apks', 'vr_keyboard',
                      'vr_keyboard_current.apk'))
 
-  def WillRunStory(self, page):
-    super(AndroidSharedVrPageState, self).WillRunStory(page)
+  def WillRunStory(self, story):
+    super(AndroidSharedVrPageState, self).WillRunStory(story)
     if not self._finder_options.disable_screen_reset:
       self._CycleScreen()
 
@@ -218,18 +212,10 @@ class WindowsSharedVrPageState(_SharedVrPageState):
   # to be installed, i.e. exactly how a real user would use VR. Mock runtimes
   # avoid this, but can't necessarily be implemented.
   DESKTOP_RUNTIMES = {
-    'oculus': {
-      MOCK_RUNTIME: oculus_runtimes.OculusRuntimeMock,
-      REAL_RUNTIME: oculus_runtimes.OculusRuntimeReal,
-    },
-    'openvr': {
-      MOCK_RUNTIME: openvr_runtimes.OpenVRRuntimeMock,
-      REAL_RUNTIME: openvr_runtimes.OpenVRRuntimeReal
-    },
-    'wmr': {
-      MOCK_RUNTIME: wmr_runtimes.WMRRuntimeMock,
-      REAL_RUNTIME: wmr_runtimes.WMRRuntimeReal,
-    },
+      'openxr': {
+          MOCK_RUNTIME: openxr_runtimes.OpenXRRuntimeMock,
+          REAL_RUNTIME: openxr_runtimes.OpenXRRuntimeReal,
+      },
   }
 
   def __init__(self, test, finder_options, story_set, possible_browser):
@@ -244,8 +230,8 @@ class WindowsSharedVrPageState(_SharedVrPageState):
                 self._finder_options, self._possible_browser)
     self._desktop_runtime.Setup()
 
-  def WillRunStory(self, page):
-    super(WindowsSharedVrPageState, self).WillRunStory(page)
+  def WillRunStory(self, story):
+    super(WindowsSharedVrPageState, self).WillRunStory(story)
     self._desktop_runtime.WillRunStory()
 
   def TearDownState(self):

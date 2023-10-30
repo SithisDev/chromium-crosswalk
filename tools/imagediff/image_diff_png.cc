@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "base/logging.h"
+#include <ostream>
+
+#include "base/check.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "third_party/libpng/png.h"
 #include "third_party/zlib/zlib.h"
@@ -87,11 +90,10 @@ class PngDecoderState {
         output_channels(0),
         is_opaque(true),
         output(o),
-        row_converter(NULL),
+        row_converter(nullptr),
         width(0),
         height(0),
-        done(false) {
-  }
+        done(false) {}
 
   ColorFormat output_format;
   int output_channels;
@@ -397,7 +399,7 @@ void ConvertBGRAtoRGB(const unsigned char* bgra, int pixel_width,
 #ifdef PNG_TEXT_SUPPORTED
 
 inline char* strdup(const char* str) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   return _strdup(str);
 #else
   return ::strdup(str);

@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,13 +9,14 @@ collections of cliques (uber-cliques).
 from __future__ import print_function
 
 import re
-import types
+
+import six
 
 from grit import constants
 from grit import exception
 from grit import lazy_re
 from grit import pseudo
-from grit import pseudo_rtl
+from grit import pseudolocales
 from grit import tclib
 
 
@@ -65,7 +66,7 @@ class UberClique(object):
       # can trigger some build environments (Visual Studio, we're
       # looking at you) to consider invocation of grit to have failed,
       # so we make sure never to output that word.
-      extract = re.sub('(?i)error', 'REDACTED', text[0:40])[0:40]
+      extract = re.sub(r'(?i)error', 'REDACTED', text[0:40])[0:40]
       ellipsis = ''
       if len(text) > 40:
         ellipsis = '...'
@@ -80,11 +81,13 @@ class UberClique(object):
       lines.append(
         "WARNING: Fell back to English for the following translations:")
       for (id, langs) in self.fallback_translations_.items():
-        lines.append(ReportTranslation(self.cliques_[id][0], langs.keys()))
+        lines.append(
+            ReportTranslation(self.cliques_[id][0], list(langs.keys())))
     if len(self.missing_translations_):
       lines.append("ERROR: The following translations are MISSING:")
       for (id, langs) in self.missing_translations_.items():
-        lines.append(ReportTranslation(self.cliques_[id][0], langs.keys()))
+        lines.append(
+            ReportTranslation(self.cliques_[id][0], list(langs.keys())))
     return '\n'.join(lines)
 
   def MakeClique(self, message, translateable=True):
@@ -185,7 +188,7 @@ class UberClique(object):
   def AllMessageIds(self):
     '''Returns a list of all defined message IDs.
     '''
-    return self.cliques_.keys()
+    return list(self.cliques_.keys())
 
   def AllCliques(self):
     '''Iterates over all cliques.  Note that this can return multiple cliques
@@ -271,7 +274,7 @@ class CustomType(object):
     '''
     contents = translation.GetContent()
     for ix in range(len(contents)):
-      if (isinstance(contents[ix], types.StringTypes)):
+      if (isinstance(contents[ix], six.string_types)):
         contents[ix] = self.ModifyTextPart(lang, contents[ix])
 
 
@@ -309,7 +312,7 @@ class MessageClique(object):
   CONSTANT_TRANSLATION = tclib.Translation(text='TTTTTT')
 
   # A pattern to match messages that are empty or whitespace only.
-  WHITESPACE_MESSAGE = lazy_re.compile(u'^\s*$')
+  WHITESPACE_MESSAGE = lazy_re.compile(r'^\s*$')
 
   def __init__(self, uber_clique, message, translateable=True,
                custom_type=None):
@@ -392,12 +395,15 @@ class MessageClique(object):
     if lang == constants.CONSTANT_LANGUAGE:
       return self.CONSTANT_TRANSLATION
 
-    for msglang in self.clique.keys():
+    for msglang in self.clique:
       if lang == msglang:
         return self.clique[msglang]
 
-    if lang == constants.FAKE_BIDI:
-      return pseudo_rtl.PseudoRTLMessage(self.GetMessage())
+    if pseudo_if_no_match:
+      if lang == constants.PSEUDOLOCALE_LONG_STRINGS:
+        return pseudolocales.PseudoLongStringMessage(self.GetMessage())
+      elif lang == constants.PSEUDOLOCALE_RTL:
+        return pseudolocales.PseudoRTLMessage(self.GetMessage())
 
     if fallback_to_english:
       self.uber_clique._AddMissingTranslation(lang, self, is_error=False)
@@ -416,7 +422,7 @@ class MessageClique(object):
     translation if requested.
 
     Args:
-      lang_re: re.compile('fr|en')
+      lang_re: re.compile(r'fr|en')
       include_pseudo: True
 
     Return:

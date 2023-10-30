@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2011 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -13,8 +13,10 @@ For more info, see:
   http://dev.chromium.org/developers/testing/no-compile-tests
 """
 
-import StringIO
+from __future__ import print_function
+
 import ast
+import io
 import os
 import re
 import select
@@ -223,8 +225,8 @@ def StartTest(compiler, sourcefile_path, tempfile_dir, cflags, config):
     cmdline.append('-D%s' % name)
   cmdline.extend(['-o', '/dev/null', '-c', '-x', 'c++',
                   sourcefile_path])
-  test_stdout = tempfile.TemporaryFile(dir=tempfile_dir)
-  test_stderr = tempfile.TemporaryFile(dir=tempfile_dir)
+  test_stdout = tempfile.TemporaryFile(dir=tempfile_dir, mode='w+')
+  test_stderr = tempfile.TemporaryFile(dir=tempfile_dir, mode='w+')
 
   process = subprocess.Popen(cmdline, stdout=test_stdout, stderr=test_stderr)
   now = time.time()
@@ -312,10 +314,10 @@ def ExtractTestOutputAndCleanup(test):
   """
   outputs = [None, None]
   for i, stream_name in ((0, "stdout"), (1, "stderr")):
-      stream = test[stream_name]
-      stream.seek(0)
-      outputs[i] = stream.read()
-      stream.close()
+    stream = test[stream_name]
+    stream.seek(0)
+    outputs[i] = stream.read()
+    stream.close()
 
   return outputs
 
@@ -419,9 +421,8 @@ def CompleteAtLeastOneTest(executing_tests):
 
 def main():
   if len(sys.argv) < 6 or sys.argv[5] != '--':
-    print ('Usage: %s <compiler> <parallelism> <sourcefile> <resultfile> '
-           '-- <cflags...>' %
-           sys.argv[0])
+    print('Usage: %s <compiler> <parallelism> <sourcefile> <resultfile> '
+          '-- <cflags...>' % sys.argv[0])
     sys.exit(1)
 
   # Force us into the "C" locale so the compiler doesn't localize its output.
@@ -447,8 +448,8 @@ def main():
   test_configs = ExtractTestConfigs(sourcefile_path, suite_name)
   timings['extract_done'] = time.time()
 
-  resultfile = StringIO.StringIO()
-  resultlog = StringIO.StringIO()
+  resultfile = io.StringIO()
+  resultlog = io.StringIO()
   resultfile.write(RESULT_FILE_HEADER % sourcefile_path)
 
   # Run the no-compile tests, but ensure we do not run more than |parallelism|
@@ -513,9 +514,9 @@ def main():
 
   resultfile.close()
   if return_code != 0:
-    print ("No-compile driver failure with return_code %d. Result log:" %
-           return_code)
-    print resultlog.getvalue()
+    print("No-compile driver failure with return_code %d. Result log:" %
+          return_code)
+    print(resultlog.getvalue())
   sys.exit(return_code)
 
 

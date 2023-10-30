@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 from __future__ import print_function
 
 import re
-import types
+
+import six
 
 from grit.node import base
 
@@ -58,7 +59,7 @@ class MessageNode(base.ContentNode):
 
   # For splitting a list of things that can be separated by commas or
   # whitespace
-  _SPLIT_RE = lazy_re.compile('\s*,\s*|\s+')
+  _SPLIT_RE = lazy_re.compile(r'\s*,\s*|\s+')
 
   def __init__(self):
     super(MessageNode, self).__init__()
@@ -89,10 +90,12 @@ class MessageNode(base.ContentNode):
     return isinstance(child, (PhNode))
 
   def _IsValidAttribute(self, name, value):
-    if name not in ['name', 'offset', 'translateable', 'desc', 'meaning',
-                    'internal_comment', 'shortcut_groups', 'custom_type',
-                    'validation_expr', 'use_name_for_id', 'sub_variable',
-                    'formatter_data']:
+    if name not in [
+        'name', 'offset', 'translateable', 'desc', 'meaning',
+        'internal_comment', 'shortcut_groups', 'custom_type', 'validation_expr',
+        'use_name_for_id', 'sub_variable', 'formatter_data',
+        'is_accessibility_with_no_ui'
+    ]:
       return False
     if (name in ('translateable', 'sub_variable') and
         value not in ['true', 'false']):
@@ -100,7 +103,7 @@ class MessageNode(base.ContentNode):
     return True
 
   def SetReplaceEllipsis(self, value):
-    '''Sets whether to replace ... with \u2026.
+    r'''Sets whether to replace ... with \u2026.
     '''
     self._replace_ellipsis = value
 
@@ -109,16 +112,17 @@ class MessageNode(base.ContentNode):
 
   def DefaultAttributes(self):
     return {
-      'custom_type' : '',
-      'desc' : '',
-      'formatter_data' : '',
-      'internal_comment' : '',
-      'meaning' : '',
-      'shortcut_groups' : '',
-      'sub_variable' : 'false',
-      'translateable' : 'true',
-      'use_name_for_id' : 'false',
-      'validation_expr' : '',
+        'custom_type': '',
+        'desc': '',
+        'formatter_data': '',
+        'internal_comment': '',
+        'is_accessibility_with_no_ui': 'false',
+        'meaning': '',
+        'shortcut_groups': '',
+        'sub_variable': 'false',
+        'translateable': 'true',
+        'use_name_for_id': 'false',
+        'validation_expr': '',
     }
 
   def HandleAttribute(self, attrib, value):
@@ -166,7 +170,7 @@ class MessageNode(base.ContentNode):
     placeholders = []
 
     for item in self.mixed_content:
-      if isinstance(item, types.StringTypes):
+      if isinstance(item, six.string_types):
         # Not a <ph> element: fail if any <ph> formatters are detected.
         if _FORMATTERS.search(item):
           print(_BAD_PLACEHOLDER_MSG % (item, self.source))
@@ -267,6 +271,8 @@ class MessageNode(base.ContentNode):
                                          ).GetRealContent()
     if self._replace_ellipsis:
       msg = _ELLIPSIS_PATTERN.sub(_ELLIPSIS_SYMBOL, msg)
+    # Always remove all byte order marks (\uFEFF) https://crbug.com/1033305
+    msg = msg.replace(u'\uFEFF','')
     return msg.replace('[GRITLANGCODE]', lang)
 
   def NameOrOffset(self):
@@ -303,7 +309,7 @@ class MessageNode(base.ContentNode):
 
     items = message.GetContent()
     for ix, item in enumerate(items):
-      if isinstance(item, types.StringTypes):
+      if isinstance(item, six.string_types):
         # Ensure whitespace at front and back of message is correctly handled.
         if ix == 0:
           item = "'''" + item

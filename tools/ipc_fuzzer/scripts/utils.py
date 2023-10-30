@@ -1,4 +1,4 @@
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Utility functions used by Generational and Mutational ClusterFuzz
@@ -21,7 +21,7 @@ UNCOMMON_PREFIX_CHANCE = 10  # 1 in 10
 COMMON_LAUNCH_PREFIXES = [
     '--renderer-cmd-prefix',
 ]
-UNCOMMON_LAUNCH_PEFIXES = [
+UNCOMMON_LAUNCH_PREFIXES = [
     '--plugin-launcher',
     '--ppapi-plugin-launcher',
     '--utility-cmd-prefix',

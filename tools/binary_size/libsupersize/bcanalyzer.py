@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright 2018 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -20,14 +20,12 @@ This file can also be run stand-alone in order to test out the logic on smaller
 sample sizes.
 """
 
-from __future__ import print_function
-
 import argparse
 import os
 import re
 import subprocess
 
-import concurrent
+import parallel
 import path_util
 
 
@@ -60,7 +58,7 @@ def _IsClosingTag(tag_type):
 def IsBitcodeFile(path):
   try:
     with open(path, 'rb') as f:
-      return f.read(4) == 'BC\xc0\xde'
+      return f.read(4) == b'BC\xc0\xde'
   except IOError:
     return False
 
@@ -91,7 +89,7 @@ def ParseTag(line):
   if len(line) < 2 or line[0] != '<':
     return (None, None, None)
   tag_type, pos = (CLOSING_TAG, 2) if line[1] == '/' else (OPENING_TAG, 1)
-  for i in xrange(pos, len(line)):
+  for i in range(pos, len(line)):
     if not line[i].isalnum() and line[i] != '_':
       if i == pos or not line[i] in ' >/':
         break
@@ -158,7 +156,7 @@ class _BcIntArrayType:
     # Number of bytes per element.
     self.width = width
 
-  def ParseOpItemsAsString(self, line, attrib_pos, add_null_at_end):
+  def ParseOpItemsAsBytes(self, line, attrib_pos, add_null_at_end):
     """Reads op0=# op=# ... values and returns them as a list of bytes.
 
     Interprets each op0=# op1=# ... value as a |self.width|-byte integer, splits
@@ -171,9 +169,9 @@ class _BcIntArrayType:
     """
     items = _ParseOpItems(line, attrib_pos)
     unpacker = _BcIntArrayType._UNPACKER_MAP[self.width]
-    s = ''.join(chr(t) for t in unpacker(items))
+    s = bytes(unpacker(items))
     if add_null_at_end:
-      s += '\x00' * self.width
+      s += b'\x00' * self.width
     # Rather stringent check to ensure exact size match.
     assert len(s) == self.length * self.width
     return s
@@ -225,7 +223,8 @@ class _BcTypeInfo:
       [size, item_type_id] = list(_ParseOpItems(line, attrib_pos))  # op0, op1.
       bits = self.int_types.get(item_type_id)
       if bits is not None:  # |bits| can be None for non-int arrays.
-        self.int_array_types[self.cur_type_id] = _BcIntArrayType(size, bits / 8)
+        self.int_array_types[self.cur_type_id] = _BcIntArrayType(
+            size, bits // 8)
     self.cur_type_id += 1
 
   def GetArrayType(self, idx):
@@ -233,7 +232,7 @@ class _BcTypeInfo:
 
 
 def _ParseBcAnalyzer(lines):
-  """A generator to extract strings from bcanalyzer dump of a BC file."""
+  """A generator to extract bytes() from bcanalyzer dump of a BC file."""
 
   # ...
   # <TYPE_BLOCK_ID NumWords=103 BlockCodeSize=4>
@@ -311,58 +310,62 @@ def _ParseBcAnalyzer(lines):
       if _IsClosingTag(tag_type) and tag == 'CONSTANTS_BLOCK':
         # Skip remaining data, including subsequent <CONSTANTS_BLOCK>s.
         break
-      elif tag == 'SETTYPE':
-        consts_cur_type_id = next(_ParseOpItems(line, attrib_pos))  # op0.
+      if tag == 'SETTYPE':
+        try:
+          consts_cur_type_id = next(_ParseOpItems(line, attrib_pos))  # op0.
+        except StopIteration:
+          return
         consts_cur_type = type_info.GetArrayType(consts_cur_type_id)
       elif consts_cur_type and consts_cur_type.width <= _CHAR_WIDTH_LIMIT:
         if tag in ['CSTRING', 'STRING', 'DATA']:
           # Exclude 32-bit / 4-byte strings since they're rarely used, and are
           # likely confused with 32-bit int arrays.
-          s = consts_cur_type.ParseOpItemsAsString(
-                  line, attrib_pos, tag == 'CSTRING')
+          s = consts_cur_type.ParseOpItemsAsBytes(line, attrib_pos,
+                                                  tag == 'CSTRING')
           yield (consts_cur_type, s)
 
 
 class _BcAnalyzerRunner:
   """Helper to run bcanalyzer and extract output lines. """
-  def __init__(self, tool_prefix, output_directory):
-    self._args = [path_util.GetBcAnalyzerPath(tool_prefix), '--dump',
-                  '--disable-histogram']
+
+  def __init__(self, output_directory):
+    self._args = [
+        path_util.GetBcAnalyzerPath(), '--dump', '--disable-histogram'
+    ]
     self._output_directory = output_directory
 
   def RunOnFile(self, obj_file):
-    output = subprocess.check_output(self._args + [obj_file],
-                                     cwd=self._output_directory)
+    output = subprocess.check_output(
+        self._args + [obj_file], cwd=self._output_directory).decode('ascii')
     return output.splitlines()
 
 
 # This is a target for BulkForkAndCall().
-def RunBcAnalyzerOnIntermediates(target, tool_prefix, output_directory):
+def RunBcAnalyzerOnIntermediates(target, output_directory):
   """Calls bcanalyzer and returns encoded map from path to strings.
 
   Args:
     target: A list of BC file paths.
   """
   assert isinstance(target, list)
-  runner = _BcAnalyzerRunner(tool_prefix, output_directory)
+  runner = _BcAnalyzerRunner(output_directory)
   strings_by_path = {}
   for t in target:
     strings_by_path[t] = [s for _, s in _ParseBcAnalyzer(runner.RunOnFile(t))]
   # Escape strings by repr() so there will be no special characters to interfere
-  # concurrent.EncodeDictOfLists() and decoding.
-  return concurrent.EncodeDictOfLists(strings_by_path, value_transform=repr)
+  # parallel.EncodeDictOfLists() and decoding.
+  return parallel.EncodeDictOfLists(strings_by_path, value_transform=repr)
 
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument('--tool-prefix', required=True)
   parser.add_argument('--output-directory', default='.')
   parser.add_argument('--char-width-limit', type=int)
   parser.add_argument('objects', type=os.path.realpath, nargs='+')
 
   args = parser.parse_args()
   base_path = os.path.normpath(args.output_directory)
-  runner = _BcAnalyzerRunner(args.tool_prefix, args.output_directory)
+  runner = _BcAnalyzerRunner(args.output_directory)
   if args.char_width_limit is not None:
     global _CHAR_WIDTH_LIMIT
     _CHAR_WIDTH_LIMIT = args.char_width_limit

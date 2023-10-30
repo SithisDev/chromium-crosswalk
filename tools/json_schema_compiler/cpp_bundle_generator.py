@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -42,6 +42,7 @@ def _RemoveUnneededFields(schema):
   _RemoveKey(ret, 'nocompile', bool)
   _RemoveKey(ret, 'noinline_doc', bool)
   _RemoveKey(ret, 'jsexterns', object)
+  _RemoveKey(ret, 'manifest_keys', object)
   return ret
 
 def _PrefixSchemaWithNamespace(schema):
@@ -121,9 +122,10 @@ class CppBundleGenerator(object):
     c = code.Code()
     c.Append(cpp_util.CHROMIUM_LICENSE)
     c.Append()
-    c.Append(cpp_util.GENERATED_BUNDLE_FILE_MESSAGE % self._source_file_dir)
+    c.Append(cpp_util.GENERATED_BUNDLE_FILE_MESSAGE %
+             cpp_util.ToPosixPath(self._source_file_dir))
     ifndef_name = cpp_util.GenerateIfndefName(
-        '%s/%s.h' % (self._source_file_dir, file_base))
+        '%s/%s.h' % (cpp_util.ToPosixPath(self._source_file_dir), file_base))
     c.Append()
     c.Append('#ifndef %s' % ifndef_name)
     c.Append('#define %s' % ifndef_name)
@@ -143,13 +145,19 @@ class CppBundleGenerator(object):
     ifdefs = []
     for platform in model_object.platforms:
       if platform == Platforms.CHROMEOS:
-        ifdefs.append('defined(OS_CHROMEOS)')
+        ifdefs.append('BUILDFLAG(IS_CHROMEOS_ASH)')
+      elif platform == Platforms.FUCHSIA:
+        ifdefs.append('BUILDFLAG(IS_FUCHSIA)')
+      elif platform == Platforms.LACROS:
+        # TODO(https://crbug.com/1052397): For readability, this should become
+        # BUILDFLAG(IS_CHROMEOS) && BUILDFLAG(IS_CHROMEOS_LACROS).
+        ifdefs.append('BUILDFLAG(IS_CHROMEOS_LACROS)')
       elif platform == Platforms.LINUX:
-        ifdefs.append('(defined(OS_LINUX) && !defined(OS_CHROMEOS))')
+        ifdefs.append('BUILDFLAG(IS_LINUX)')
       elif platform == Platforms.MAC:
-        ifdefs.append('defined(OS_MACOSX)')
+        ifdefs.append('BUILDFLAG(IS_MAC)')
       elif platform == Platforms.WIN:
-        ifdefs.append('defined(OS_WIN)')
+        ifdefs.append('BUILDFLAG(IS_WIN)')
       else:
         raise ValueError("Unsupported platform ifdef: %s" % platform.name)
     return ' || '.join(ifdefs)
@@ -164,8 +172,8 @@ class CppBundleGenerator(object):
         namespace_name, function.name)
     c.Sblock('{')
     c.Append('&NewExtensionFunction<%s>,' % function_name)
-    c.Append('%s::function_name(),' % function_name)
-    c.Append('%s::histogram_value(),' % function_name)
+    c.Append('%s::static_function_name(),' % function_name)
+    c.Append('%s::static_histogram_value(),' % function_name)
     c.Eblock('},')
 
     if function_ifdefs is not None:
@@ -249,8 +257,11 @@ class _APICCGenerator(object):
     c.Append(cpp_util.CHROMIUM_LICENSE)
     c.Append()
     c.Append('#include "%s"' % (
-        os.path.join(self._bundle._impl_dir,
-                     'generated_api_registration.h')))
+        cpp_util.ToPosixPath(os.path.join(self._bundle._impl_dir,
+                                          'generated_api_registration.h'))))
+    c.Append()
+    c.Append('#include "build/build_config.h"')
+    c.Append('#include "build/chromeos_buildflags.h"')
     c.Append()
     for namespace in self._bundle._model.namespaces.values():
       namespace_name = namespace.unix_name.replace("experimental_", "")
@@ -271,7 +282,7 @@ class _APICCGenerator(object):
       if ifdefs is not None:
         c.Append("#if %s" % ifdefs, indent_level=0)
 
-      c.Append('#include "%s"' % implementation_header)
+      c.Append('#include "%s"' % cpp_util.ToPosixPath(implementation_header))
 
       if ifdefs is not None:
         c.Append("#endif  // %s" % ifdefs, indent_level=0)
@@ -331,8 +342,15 @@ class _SchemasCCGenerator(object):
     c = code.Code()
     c.Append(cpp_util.CHROMIUM_LICENSE)
     c.Append()
-    c.Append('#include "%s"' % (os.path.join(self._bundle._source_file_dir,
-                                             'generated_schemas.h')))
+    c.Append('#include "%s"' % (
+             cpp_util.ToPosixPath(os.path.join(self._bundle._source_file_dir,
+                                               'generated_schemas.h'))))
+    c.Append()
+    c.Append('#include <algorithm>')
+    c.Append('#include <iterator>')
+    c.Append()
+    c.Append('#include "base/containers/fixed_flat_map.h"')
+    c.Append('#include "base/strings/string_piece.h"')
     c.Append()
     c.Append('namespace {')
     for api in self._bundle._api_defs:
@@ -340,17 +358,17 @@ class _SchemasCCGenerator(object):
       json_content = json.dumps(_PrefixSchemaWithNamespace(
                                      _RemoveUnneededFields(api)),
                                 separators=(',', ':'))
-      # Escape all double-quotes and backslashes. For this to output a valid
-      # JSON C string, we need to escape \ and ". Note that some schemas are
+      # This will output a valid JSON C string. Note that some schemas are
       # too large to compile on windows. Split the JSON up into several
       # strings, since apparently that helps.
       max_length = 8192
       segments = [
-          json_content[i:i + max_length].replace('\\', '\\\\').replace(
-              '"', '\\"') for i in range(0, len(json_content), max_length)
+          json_content[i:i + max_length]
+          for i in range(0, len(json_content), max_length)
       ]
-      c.Append('const char %s[] = "%s";' %
-          (_FormatNameAsConstant(namespace.name), '" "'.join(segments)))
+      c.Append(
+          'constexpr char %s[] = R"R(%s)R";' %
+          (_FormatNameAsConstant(namespace.name), ')R" R"R('.join(segments)))
     c.Append('}  // namespace')
     c.Append()
     c.Concat(cpp_util.OpenNamespace(self._bundle._cpp_namespace))
@@ -364,24 +382,18 @@ class _SchemasCCGenerator(object):
     c.Append('// static')
     c.Sblock('base::StringPiece %s::Get(base::StringPiece name) {' %
              self._bundle._GenerateBundleClass('GeneratedSchemas'))
-    c.Append('static const struct {')
-    c.Append('  base::StringPiece name;')
-    c.Append('  base::StringPiece schema;')
-    c.Sblock('} kSchemas[] = {')
+
+    c.Append('static constexpr auto kSchemas = '
+             'base::MakeFixedFlatMap<base::StringPiece, base::StringPiece>({')
+    c.Sblock()
     namespaces = [self._bundle._model.namespaces[api.get('namespace')].name
                   for api in self._bundle._api_defs]
     for namespace in sorted(namespaces):
       schema_constant_name = _FormatNameAsConstant(namespace)
-      c.Append('{{"%s", %d}, {%s, sizeof(%s) - 1}},' %
-               (namespace, len(namespace),
-                schema_constant_name, schema_constant_name))
-    c.Eblock('};')
-    c.Sblock('for (const auto& schema : kSchemas) {')
-    c.Sblock('if (schema.name == name)')
-    c.Append('return schema.schema;')
-    c.Eblock()
-    c.Eblock('}')
-    c.Append('return base::StringPiece();')
+      c.Append('{"%s", %s},' % (namespace, schema_constant_name))
+    c.Eblock('});')
+    c.Append('auto it = kSchemas.find(name);')
+    c.Append('return it != kSchemas.end() ? it->second : base::StringPiece();')
     c.Eblock('}')
     c.Append()
     c.Concat(cpp_util.CloseNamespace(self._bundle._cpp_namespace))
