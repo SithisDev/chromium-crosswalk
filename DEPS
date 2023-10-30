@@ -28,7 +28,6 @@
 #
 # For more on the syntax and semantics of this file, see:
 #   https://bit.ly/chromium-gclient-conditionals
-#
 # which is a bit incomplete but the best documentation we have at the
 # moment.
 
