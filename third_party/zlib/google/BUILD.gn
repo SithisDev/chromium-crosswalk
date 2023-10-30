@@ -7,6 +7,7 @@ import("//build_overrides/build.gni")
 if (build_with_chromium) {
   static_library("zip") {
     sources = [
+      "redact.h",
       "zip.cc",
       "zip.h",
       "zip_internal.cc",
@@ -18,6 +19,7 @@ if (build_with_chromium) {
     ]
     deps = [
       "//base",
+      "//base:i18n",
       "//third_party/zlib:minizip",
     ]
   }
@@ -31,5 +33,16 @@ if (build_with_chromium) {
       "//base",
       "//third_party/zlib",
     ]
+    public_deps = [ ":compression_utils_portable" ]
   }
+}
+
+# This allows other users of Chromium's zlib library, but don't use Chromium's
+# //base, to reuse some boilerplate code.
+static_library("compression_utils_portable") {
+  sources = [
+    "compression_utils_portable.cc",
+    "compression_utils_portable.h",
+  ]
+  public_deps = [ "//third_party/zlib" ]
 }
