@@ -24,8 +24,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_STYLE_ELEMENT_H_
 
 #include <memory>
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/style_element.h"
 #include "third_party/blink/renderer/core/dom/increment_load_event_delay_count.h"
+#include "third_party/blink/renderer/core/html/blocking_attribute.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 
 namespace blink {
@@ -33,7 +35,6 @@ namespace blink {
 class CORE_EXPORT HTMLStyleElement final : public HTMLElement,
                                            private StyleElement {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(HTMLStyleElement);
 
  public:
   HTMLStyleElement(Document&, const CreateElementFlags);
@@ -43,19 +44,22 @@ class CORE_EXPORT HTMLStyleElement final : public HTMLElement,
 
   bool disabled() const;
   void setDisabled(bool);
+  BlockingAttribute& blocking() const { return *blocking_attribute_; }
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   // Always call this asynchronously because this can cause synchronous
   // Document load event and JavaScript execution.
-  void DispatchPendingEvent(std::unique_ptr<IncrementLoadEventDelayCount>);
+  void DispatchPendingEvent(std::unique_ptr<IncrementLoadEventDelayCount>,
+                            bool is_load_event);
 
-  // overload from HTMLElement
+  // override from HTMLElement
   void ParseAttribute(const AttributeModificationParams&) override;
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
   void ChildrenChanged(const ChildrenChange&) override;
+  bool IsPotentiallyRenderBlocking() const override;
 
   void FinishParsingChildren() override;
 
@@ -64,15 +68,16 @@ class CORE_EXPORT HTMLStyleElement final : public HTMLElement,
   }
   void NotifyLoadedSheetAndAllCriticalSubresources(
       LoadedSheetErrorStatus) override;
-  void StartLoadingDynamicSheet() override {
-    StyleElement::StartLoadingDynamicSheet(GetDocument());
+  void SetToPendingState() override {
+    StyleElement::SetToPendingState(GetDocument(), *this);
   }
 
   const AtomicString& media() const override;
   const AtomicString& type() const override;
 
-  bool fired_load_;
-  bool loaded_sheet_;
+  bool IsSameObject(const Node& node) const override { return this == &node; }
+
+  Member<BlockingAttribute> blocking_attribute_;
 };
 
 }  // namespace blink

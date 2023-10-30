@@ -24,22 +24,30 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_MATCHED_PROPERTIES_CACHE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_MATCHED_PROPERTIES_CACHE_H_
 
-#include "base/macros.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/resolver/match_result.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/forward.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
 class ComputedStyle;
 class StyleResolverState;
 
-class CachedMatchedProperties final
-    : public GarbageCollectedFinalized<CachedMatchedProperties> {
+class CORE_EXPORT CachedMatchedProperties final
+    : public GarbageCollected<CachedMatchedProperties> {
  public:
-  HeapVector<MatchedProperties> matched_properties;
+  // Caches data of MatchedProperties. See |MatchedPropertiesCache::Cache| for
+  // semantics.
+  // We use UntracedMember<> here because WeakMember<> would require using a
+  // HeapHashSet which is slower to iterate.
+  Vector<UntracedMember<CSSPropertyValueSet>> matched_properties;
+  Vector<MatchedProperties::Data> matched_properties_types;
+
   scoped_refptr<ComputedStyle> computed_style;
   scoped_refptr<ComputedStyle> parent_computed_style;
 
@@ -47,55 +55,13 @@ class CachedMatchedProperties final
            const ComputedStyle& parent_style,
            const MatchedPropertiesVector&);
   void Clear();
-  void Trace(blink::Visitor* visitor) { visitor->Trace(matched_properties); }
-};
 
-// Specialize the HashTraits for CachedMatchedProperties to check for dead
-// entries in the MatchedPropertiesCache.
-struct CachedMatchedPropertiesHashTraits
-    : HashTraits<Member<CachedMatchedProperties>> {
-  static const WTF::WeakHandlingFlag kWeakHandlingFlag = WTF::kWeakHandling;
+  bool DependenciesEqual(const StyleResolverState&);
 
-  static bool IsAlive(Member<CachedMatchedProperties>& cached_properties) {
-    // Semantics see |CachedMatchedPropertiesHashTraits::TraceInCollection|.
-    if (cached_properties) {
-      for (const auto& matched_properties :
-           cached_properties->matched_properties) {
-        if (!ThreadHeap::IsHeapObjectAlive(matched_properties.properties)) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
+  void Trace(Visitor*) const {}
 
-  template <typename VisitorDispatcher>
-  static bool TraceInCollection(
-      VisitorDispatcher visitor,
-      Member<CachedMatchedProperties>& cached_properties,
-      WTF::WeakHandlingFlag weakness) {
-    // Only honor the cache's weakness semantics if the collection is traced
-    // with |kWeakPointersActWeak|. Otherwise just trace the cachedProperties
-    // strongly, i.e., call trace on it.
-    if (cached_properties && weakness == WTF::kWeakHandling) {
-      // A given cache entry is only kept alive if none of the MatchedProperties
-      // in the CachedMatchedProperties value contain a dead "properties" field.
-      // If there is a dead field the entire cache entry is removed.
-      for (const auto& matched_properties :
-           cached_properties->matched_properties) {
-        if (!ThreadHeap::IsHeapObjectAlive(matched_properties.properties)) {
-          // For now report the cache entry as dead. This might not
-          // be the final result if in a subsequent call for this entry,
-          // the "properties" field has been marked via another path.
-          return true;
-        }
-      }
-    }
-    // At this point none of the entries in the matchedProperties vector
-    // had a dead "properties" field so trace CachedMatchedProperties strongly.
-    visitor->Trace(cached_properties);
-    return false;
-  }
+  bool operator==(const MatchedPropertiesVector& properties);
+  bool operator!=(const MatchedPropertiesVector& properties);
 };
 
 class CORE_EXPORT MatchedPropertiesCache {
@@ -103,15 +69,35 @@ class CORE_EXPORT MatchedPropertiesCache {
 
  public:
   MatchedPropertiesCache();
+  MatchedPropertiesCache(const MatchedPropertiesCache&) = delete;
+  MatchedPropertiesCache& operator=(const MatchedPropertiesCache&) = delete;
   ~MatchedPropertiesCache() { DCHECK(cache_.IsEmpty()); }
 
-  const CachedMatchedProperties* Find(unsigned hash,
-                                      const StyleResolverState&,
-                                      const MatchedPropertiesVector&);
-  void Add(const ComputedStyle&,
-           const ComputedStyle& parent_style,
-           unsigned hash,
-           const MatchedPropertiesVector&);
+  class CORE_EXPORT Key {
+    STACK_ALLOCATED();
+
+   public:
+    explicit Key(const MatchResult&);
+
+    bool IsValid() const {
+      // If hash_ happens to compute to the empty value or the deleted value,
+      // the corresponding MatchResult can't be cached.
+      return hash_ != HashTraits<unsigned>::EmptyValue() &&
+             !HashTraits<unsigned>::IsDeletedValue(hash_);
+    }
+
+   private:
+    friend class MatchedPropertiesCache;
+    friend class MatchedPropertiesCacheTestKey;
+
+    Key(const MatchResult&, unsigned hash);
+
+    const MatchResult& result_;
+    unsigned hash_;
+  };
+
+  const CachedMatchedProperties* Find(const Key&, const StyleResolverState&);
+  void Add(const Key&, const ComputedStyle&, const ComputedStyle& parent_style);
 
   void Clear();
   void ClearViewportDependent();
@@ -119,18 +105,23 @@ class CORE_EXPORT MatchedPropertiesCache {
   static bool IsCacheable(const StyleResolverState&);
   static bool IsStyleCacheable(const ComputedStyle&);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
+  // The cache is mapping a hash to a cached entry where the entry is kept as
+  // long as *all* properties referred to by the entry are alive. This requires
+  // custom weakness which is managed through
+  // |RemoveCachedMatchedPropertiesWithDeadEntries|.
   using Cache = HeapHashMap<unsigned,
                             Member<CachedMatchedProperties>,
                             DefaultHash<unsigned>::Hash,
-                            HashTraits<unsigned>,
-                            CachedMatchedPropertiesHashTraits>;
+                            HashTraits<unsigned>>;
+
+  void RemoveCachedMatchedPropertiesWithDeadEntries(const LivenessBroker&);
+
   Cache cache_;
-  DISALLOW_COPY_AND_ASSIGN(MatchedPropertiesCache);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_MATCHED_PROPERTIES_CACHE_H_

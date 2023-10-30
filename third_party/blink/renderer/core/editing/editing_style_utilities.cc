@@ -26,7 +26,7 @@
 
 #include "third_party/blink/renderer/core/editing/editing_style_utilities.h"
 
-#include "third_party/blink/renderer/core/css/css_color_value.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_computed_style_declaration.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
@@ -38,10 +38,9 @@
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/visible_position.h"
 #include "third_party/blink/renderer/core/editing/visible_selection.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 
 namespace blink {
-
-using namespace cssvalue;
 
 namespace {
 
@@ -101,7 +100,7 @@ EditingStyleUtilities::CreateWrappingStyleForAnnotatedSerialization(
   // Call collapseTextDecorationProperties first or otherwise it'll copy the
   // value over from in-effect to text-decorations.
   wrapping_style->CollapseTextDecorationProperties(
-      context->GetDocument().GetSecureContextMode());
+      context->GetExecutionContext()->GetSecureContextMode());
 
   return wrapping_style;
 }
@@ -192,9 +191,10 @@ EditingStyle* EditingStyleUtilities::CreateStyleAtSelectionStart(
     const EphemeralRange range(selection.ToNormalizedEphemeralRange());
     if (const CSSValue* value =
             BackgroundColorValueInEffect(range.CommonAncestorContainer())) {
-      style->SetProperty(CSSPropertyID::kBackgroundColor, value->CssText(),
-                         /* important */ false,
-                         document.GetSecureContextMode());
+      style->SetProperty(
+          CSSPropertyID::kBackgroundColor, value->CssText(),
+          /* important */ false,
+          document.GetExecutionContext()->GetSecureContextMode());
     }
   }
 
@@ -204,7 +204,7 @@ EditingStyle* EditingStyleUtilities::CreateStyleAtSelectionStart(
 bool EditingStyleUtilities::IsTransparentColorValue(const CSSValue* css_value) {
   if (!css_value)
     return true;
-  if (auto* color_value = DynamicTo<CSSColorValue>(css_value))
+  if (auto* color_value = DynamicTo<cssvalue::CSSColor>(css_value))
     return !color_value->Value().Alpha();
   if (auto* identifier_value = DynamicTo<CSSIdentifierValue>(css_value))
     return identifier_value->GetValueID() == CSSValueID::kTransparent;
@@ -236,6 +236,20 @@ const CSSValue* EditingStyleUtilities::BackgroundColorValueInEffect(
     }
   }
   return nullptr;
+}
+
+void EditingStyleUtilities::StripUAStyleRulesForMarkupSanitization(
+    EditingStyle* style) {
+  if (!style->Style())
+    return;
+
+  // This is a hacky approach to avoid 'font-family: ""' appearing in
+  // sanitized markup.
+  // TODO(editing-dev): Implement a non-hacky fix up for all properties
+  String font_family =
+      style->Style()->GetPropertyValue(CSSPropertyID::kFontFamily);
+  if (font_family == "\"\"")
+    style->Style()->RemoveProperty(CSSPropertyID::kFontFamily);
 }
 
 }  // namespace blink

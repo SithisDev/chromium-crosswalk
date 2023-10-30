@@ -26,6 +26,8 @@
 
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
+#include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/node_lists_node_data.h"
 #include "third_party/blink/renderer/core/html/custom/element_internals.h"
 #include "third_party/blink/renderer/core/html/forms/html_legend_element.h"
@@ -33,15 +35,33 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
 #include "third_party/blink/renderer/core/layout/layout_object_factory.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/core/layout/ng/layout_ng_fieldset.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
 
-using namespace html_names;
+namespace {
+
+bool WillReattachChildLayoutObject(const Node& parent) {
+  for (const Node* child = LayoutTreeBuilderTraversal::FirstChild(parent);
+       child; child = LayoutTreeBuilderTraversal::NextSibling(*child)) {
+    if (child->NeedsReattachLayoutTree())
+      return true;
+    if (child->ChildNeedsReattachLayoutTree() && child->GetComputedStyle() &&
+        child->GetComputedStyle()->Display() == EDisplay::kContents &&
+        WillReattachChildLayoutObject(*child))
+      return true;
+  }
+  return false;
+}
+
+}  // namespace
 
 HTMLFieldSetElement::HTMLFieldSetElement(Document& document)
-    : HTMLFormControlElement(kFieldsetTag, document) {}
+    : HTMLFormControlElement(html_names::kFieldsetTag, document) {
+  // This class has DidRecalcStyle().
+  SetHasCustomStyleCallbacks();
+}
 
 bool HTMLFieldSetElement::MatchesValidityPseudoClasses() const {
   return true;
@@ -74,7 +94,7 @@ HTMLFieldSetElement::InvalidateDescendantDisabledStateAndFindFocusedOne(
   {
     EventDispatchForbiddenScope event_forbidden;
     for (HTMLElement& element : Traversal<HTMLElement>::DescendantsOf(base)) {
-      if (auto* control = ToHTMLFormControlElementOrNull(element))
+      if (auto* control = DynamicTo<HTMLFormControlElement>(element))
         control->AncestorDisabledStateWasChanged();
       else if (element.IsFormAssociatedCustomElement())
         element.EnsureElementInternals().AncestorDisabledStateWasChanged();
@@ -127,8 +147,17 @@ LayoutObject* HTMLFieldSetElement::CreateLayoutObject(
   return LayoutObjectFactory::CreateFieldset(*this, style, legacy);
 }
 
-bool HTMLFieldSetElement::TypeShouldForceLegacyLayout() const {
-  return !RuntimeEnabledFeatures::LayoutNGFieldsetEnabled();
+LayoutBox* HTMLFieldSetElement::GetLayoutBoxForScrolling() const {
+  if (const auto* ng_fieldset = DynamicTo<LayoutNGFieldset>(GetLayoutBox())) {
+    if (auto* content = ng_fieldset->FindAnonymousFieldsetContentBox())
+      return content;
+  }
+  return HTMLFormControlElement::GetLayoutBoxForScrolling();
+}
+
+void HTMLFieldSetElement::DidRecalcStyle(const StyleRecalcChange change) {
+  if (ChildNeedsReattachLayoutTree() && WillReattachChildLayoutObject(*this))
+    SetNeedsReattachLayoutTree();
 }
 
 HTMLLegendElement* HTMLFieldSetElement::Legend() const {
@@ -137,10 +166,6 @@ HTMLLegendElement* HTMLFieldSetElement::Legend() const {
 
 HTMLCollection* HTMLFieldSetElement::elements() {
   return EnsureCachedCollection<HTMLCollection>(kFormControls);
-}
-
-int HTMLFieldSetElement::tabIndex() const {
-  return HTMLElement::tabIndex();
 }
 
 }  // namespace blink

@@ -5,14 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_WORKER_WORKER_SCHEDULER_PROXY_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_WORKER_WORKER_SCHEDULER_PROXY_H_
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_origin_type.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_or_worker_scheduler.h"
@@ -31,17 +29,17 @@ class WorkerScheduler;
 // on the parent thread. It's passed to WorkerScheduler during its
 // construction. Given that DedicatedWorkerThread object outlives worker thread,
 // this class outlives worker thread too.
-class PLATFORM_EXPORT WorkerSchedulerProxy
-    : public FrameOrWorkerScheduler::Observer {
+class PLATFORM_EXPORT WorkerSchedulerProxy {
  public:
   explicit WorkerSchedulerProxy(FrameOrWorkerScheduler* scheduler);
-  ~WorkerSchedulerProxy() override;
+  WorkerSchedulerProxy(const WorkerSchedulerProxy&) = delete;
+  WorkerSchedulerProxy& operator=(const WorkerSchedulerProxy&) = delete;
+  ~WorkerSchedulerProxy();
 
   void OnWorkerSchedulerCreated(
       base::WeakPtr<WorkerScheduler> worker_scheduler);
 
-  void OnLifecycleStateChanged(
-      SchedulingLifecycleState lifecycle_state) override;
+  void OnLifecycleStateChanged(SchedulingLifecycleState lifecycle_state);
 
   // Accessed only during init.
   SchedulingLifecycleState lifecycle_state() const {
@@ -50,7 +48,7 @@ class PLATFORM_EXPORT WorkerSchedulerProxy
   }
 
   // Accessed only during init.
-  base::Optional<FrameOriginType> parent_frame_type() const {
+  absl::optional<FrameOriginType> parent_frame_type() const {
     DCHECK(!initialized_);
     return parent_frame_type_;
   }
@@ -59,16 +57,6 @@ class PLATFORM_EXPORT WorkerSchedulerProxy
   ukm::SourceId ukm_source_id() const {
     DCHECK(!initialized_);
     return ukm_source_id_;
-  }
-
-  // Accessed only during init.
-  std::unique_ptr<service_manager::Connector> TakeConnector() {
-    DCHECK(!initialized_);
-#if DCHECK_IS_ON()
-    DCHECK(!connector_taken_);
-    connector_taken_ = true;
-#endif
-    return std::move(connector_);
   }
 
   // Accessed only during init.
@@ -91,18 +79,11 @@ class PLATFORM_EXPORT WorkerSchedulerProxy
       throttling_observer_handle_;
 
   bool initialized_ = false;
-  base::Optional<FrameOriginType> parent_frame_type_;
+  absl::optional<FrameOriginType> parent_frame_type_;
   FrameStatus initial_frame_status_ = FrameStatus::kNone;
   ukm::SourceId ukm_source_id_ = ukm::kInvalidSourceId;
-  std::unique_ptr<service_manager::Connector> connector_;
-
-#if DCHECK_IS_ON()
-  bool connector_taken_ = false;
-#endif
 
   THREAD_CHECKER(parent_thread_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(WorkerSchedulerProxy);
 };
 
 }  // namespace scheduler

@@ -4,12 +4,12 @@
 
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_time_display_element.h"
 
-#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_elements_helper.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_shared_helper.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace {
 
@@ -25,9 +25,9 @@ namespace blink {
 
 MediaControlTimeDisplayElement::MediaControlTimeDisplayElement(
     MediaControlsImpl& media_controls,
-    blink::WebLocalizedString::Name localized_label)
+    int localized_resource_id)
     : MediaControlDivElement(media_controls),
-      localized_label_(localized_label) {
+      localized_resource_id_(localized_resource_id) {
   SetAriaLabel();
 }
 
@@ -41,9 +41,9 @@ double MediaControlTimeDisplayElement::CurrentValue() const {
   return current_value_;
 }
 
-WebSize MediaControlTimeDisplayElement::GetSizeOrDefault() const {
+gfx::Size MediaControlTimeDisplayElement::GetSizeOrDefault() const {
   return MediaControlElementsHelper::GetSizeOrDefault(
-      *this, WebSize(EstimateElementWidth(), kDefaultTimeDisplayHeight));
+      *this, gfx::Size(EstimateElementWidth(), kDefaultTimeDisplayHeight));
 }
 
 int MediaControlTimeDisplayElement::EstimateElementWidth() const {
@@ -58,7 +58,8 @@ String MediaControlTimeDisplayElement::FormatTime() const {
 }
 
 void MediaControlTimeDisplayElement::SetAriaLabel() {
-  String aria_label = GetLocale().QueryString(localized_label_, FormatTime());
+  String aria_label =
+      GetLocale().QueryString(localized_resource_id_, FormatTime());
   setAttribute(html_names::kAriaLabelAttr, AtomicString(aria_label));
 }
 

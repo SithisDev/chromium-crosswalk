@@ -45,10 +45,6 @@ WebSecurityOrigin WebSecurityOrigin::Create(const WebURL& url) {
   return WebSecurityOrigin(SecurityOrigin::Create(url));
 }
 
-WebSecurityOrigin WebSecurityOrigin::CreateUniqueOpaque() {
-  return WebSecurityOrigin(SecurityOrigin::CreateUniqueOpaque());
-}
-
 void WebSecurityOrigin::Reset() {
   private_ = nullptr;
 }
@@ -72,11 +68,6 @@ uint16_t WebSecurityOrigin::Port() const {
   return private_->Port();
 }
 
-uint16_t WebSecurityOrigin::EffectivePort() const {
-  DCHECK(private_);
-  return private_->EffectivePort();
-}
-
 bool WebSecurityOrigin::IsOpaque() const {
   DCHECK(private_);
   return private_->IsOpaque();
@@ -93,6 +84,11 @@ bool WebSecurityOrigin::CanRequest(const WebURL& url) const {
   return private_->CanRequest(url);
 }
 
+bool WebSecurityOrigin::CanDisplay(const WebURL& url) const {
+  DCHECK(private_);
+  return private_->CanDisplay(url);
+}
+
 bool WebSecurityOrigin::IsPotentiallyTrustworthy() const {
   DCHECK(private_);
   return private_->IsPotentiallyTrustworthy();
@@ -106,6 +102,12 @@ WebString WebSecurityOrigin::ToString() const {
 bool WebSecurityOrigin::CanAccessPasswordManager() const {
   DCHECK(private_);
   return private_->CanAccessPasswordManager();
+}
+
+bool WebSecurityOrigin::IsSameOriginWith(const WebSecurityOrigin& other) const {
+  DCHECK(private_);
+  DCHECK(other.private_);
+  return private_->IsSameOriginWith(other.private_.Get());
 }
 
 WebSecurityOrigin::WebSecurityOrigin(scoped_refptr<const SecurityOrigin> origin)

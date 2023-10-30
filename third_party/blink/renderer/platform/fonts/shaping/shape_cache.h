@@ -34,16 +34,11 @@
 #include "third_party/blink/renderer/platform/text/text_run.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/hash_table_deleted_value_type.h"
 
 namespace blink {
 
-struct ShapeCacheEntry {
-  DISALLOW_NEW();
-  ShapeCacheEntry() { shape_result_ = nullptr; }
-  scoped_refptr<const ShapeResult> shape_result_;
-};
+using ShapeCacheEntry = scoped_refptr<const ShapeResult>;
 
 class ShapeCache {
   USING_FAST_MALLOC(ShapeCache);
@@ -113,12 +108,14 @@ class ShapeCache {
     // TODO(cavalcantii): Investigate tradeoffs of reserving space
     // in short_string_map.
   }
+  ShapeCache(const ShapeCache&) = delete;
+  ShapeCache& operator=(const ShapeCache&) = delete;
 
   ShapeCacheEntry* Add(const TextRun& run, ShapeCacheEntry entry) {
     if (run.length() > SmallStringKey::Capacity())
       return nullptr;
 
-    return AddSlowCase(run, entry);
+    return AddSlowCase(run, std::move(entry));
   }
 
   void ClearIfVersionChanged(unsigned version) {
@@ -140,10 +137,10 @@ class ShapeCache {
   size_t ByteSize() const {
     size_t self_byte_size = 0;
     for (auto cache_entry : single_char_map_) {
-      self_byte_size += cache_entry.value.shape_result_->ByteSize();
+      self_byte_size += cache_entry.value->ByteSize();
     }
     for (auto cache_entry : short_string_map_) {
-      self_byte_size += cache_entry.value.shape_result_->ByteSize();
+      self_byte_size += cache_entry.value->ByteSize();
     }
     return self_byte_size;
   }
@@ -160,7 +157,8 @@ class ShapeCache {
       // as such use bit 31 (zero-based) to indicate direction.
       if (run.Direction() == TextDirection::kRtl)
         key |= (1u << 31);
-      SingleCharMap::AddResult add_result = single_char_map_.insert(key, entry);
+      SingleCharMap::AddResult add_result =
+          single_char_map_.insert(key, std::move(entry));
       is_new_entry = add_result.is_new_entry;
       value = &add_result.stored_value->value;
     } else {
@@ -170,9 +168,8 @@ class ShapeCache {
       } else {
         small_string_key = SmallStringKey(run.Span16(), run.Direction());
       }
-
       SmallStringMap::AddResult add_result =
-          short_string_map_.insert(small_string_key, entry);
+          short_string_map_.insert(small_string_key, std::move(entry));
       is_new_entry = add_result.is_new_entry;
       value = &add_result.stored_value->value;
     }
@@ -202,6 +199,7 @@ class ShapeCache {
   struct SmallStringKeyHashTraits : WTF::SimpleClassHashTraits<SmallStringKey> {
     STATIC_ONLY(SmallStringKeyHashTraits);
     static const bool kHasIsEmptyValueFunction = true;
+    static const bool kEmptyValueIsZero = false;
     static bool IsEmptyValue(const SmallStringKey& key) {
       return key.IsHashTableEmptyValue();
     }
@@ -234,8 +232,6 @@ class ShapeCache {
   SmallStringMap short_string_map_;
   unsigned version_ = 0;
   base::WeakPtrFactory<ShapeCache> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ShapeCache);
 };
 
 inline bool operator==(const ShapeCache::SmallStringKey& a,

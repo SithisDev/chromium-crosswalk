@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_SKEW_Y_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_SKEW_Y_H_
 
-#include "base/macros.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/cssom/css_numeric_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_transform_component.h"
 
@@ -31,6 +31,8 @@ class CORE_EXPORT CSSSkewY final : public CSSTransformComponent {
   static CSSSkewY* FromCSSValue(const CSSFunctionValue&);
 
   CSSSkewY(CSSNumericValue* ay);
+  CSSSkewY(const CSSSkewY&) = delete;
+  CSSSkewY& operator=(const CSSSkewY&) = delete;
 
   // Getters and setters for the ay attributes defined in the IDL.
   CSSNumericValue* ay() { return ay_.Get(); }
@@ -47,16 +49,15 @@ class CORE_EXPORT CSSSkewY final : public CSSTransformComponent {
   TransformComponentType GetType() const override { return kSkewYType; }
   const CSSFunctionValue* ToCSSValue() const override;
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(ay_);
     CSSTransformComponent::Trace(visitor);
   }
 
  private:
   Member<CSSNumericValue> ay_;
-  DISALLOW_COPY_AND_ASSIGN(CSSSkewY);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CSS_SKEW_Y_H_

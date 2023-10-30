@@ -28,6 +28,8 @@
 
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 
+#include "base/containers/adapters.h"
+#include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -43,8 +45,9 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/frame_tree.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace blink {
 
@@ -53,17 +56,17 @@ namespace blink {
 // std::numeric_limits<double>::lowest() because, if subtracted, it becomes
 // NaN which will make all following arithmetic NaN too (an unusable number).
 constexpr double kMinDistance = std::numeric_limits<int>::lowest();
+constexpr double kPriorityClassA = kMinDistance;
+constexpr double kPriorityClassB = kMinDistance / 2;
 
 constexpr int kFudgeFactor = 2;
-
-static void DeflateIfOverlapped(PhysicalRect&, PhysicalRect&);
 
 FocusCandidate::FocusCandidate(Node* node, SpatialNavigationDirection direction)
     : visible_node(nullptr), focusable_node(nullptr), is_offscreen(true) {
   DCHECK(node);
   DCHECK(node->IsElementNode());
 
-  if (auto* area = ToHTMLAreaElementOrNull(*node)) {
+  if (auto* area = DynamicTo<HTMLAreaElement>(*node)) {
     HTMLImageElement* image = area->ImageElement();
     if (!image || !image->GetLayoutObject())
       return;
@@ -76,6 +79,10 @@ FocusCandidate::FocusCandidate(Node* node, SpatialNavigationDirection direction)
 
     visible_node = node;
     rect_in_root_frame = NodeRectInRootFrame(node);
+
+    // Remove any overlap with line boxes *above* the search origin.
+    rect_in_root_frame =
+        ShrinkInlineBoxToLineBox(*node->GetLayoutObject(), rect_in_root_frame);
   }
 
   focusable_node = node;
@@ -137,28 +144,47 @@ static bool IsRectInDirection(SpatialNavigationDirection direction,
   }
 }
 
-FloatRect RectInViewport(const Node& node) {
+int LineBoxes(const LayoutObject& layout_object) {
+  if (!layout_object.IsInline() || layout_object.IsAtomicInlineLevel())
+    return 1;
+
+  // If it has empty quads, it's most likely not a line broken ("fragmented")
+  // text. <a><div></div></a> has for example one empty rect.
+  Vector<gfx::QuadF> quads;
+  layout_object.AbsoluteQuads(quads);
+  for (const gfx::QuadF& quad : quads) {
+    if (quad.BoundingBox().IsEmpty())
+      return 1;
+  }
+
+  return quads.size();
+}
+
+bool IsFragmentedInline(const LayoutObject& layout_object) {
+  return LineBoxes(layout_object) > 1;
+}
+
+gfx::RectF RectInViewport(const Node& node) {
   LocalFrameView* frame_view = node.GetDocument().View();
   if (!frame_view)
-    return FloatRect();
+    return gfx::RectF();
 
   DCHECK(!frame_view->NeedsLayout());
 
   LayoutObject* object = node.GetLayoutObject();
   if (!object)
-    return FloatRect();
+    return gfx::RectF();
 
   PhysicalRect rect_in_root_frame = NodeRectInRootFrame(&node);
 
   // Convert to the visual viewport which will account for pinch zoom.
   VisualViewport& visual_viewport =
       object->GetDocument().GetPage()->GetVisualViewport();
-  FloatRect rect_in_viewport =
-      visual_viewport.RootFrameToViewport(FloatRect(rect_in_root_frame));
+  gfx::RectF rect_in_viewport =
+      visual_viewport.RootFrameToViewport(gfx::RectF(rect_in_root_frame));
 
   // RootFrameToViewport doesn't clip so manually apply the viewport clip here.
-  FloatRect viewport_rect =
-      FloatRect(FloatPoint(), FloatSize(visual_viewport.Size()));
+  gfx::RectF viewport_rect(gfx::SizeF(visual_viewport.Size()));
   rect_in_viewport.Intersect(viewport_rect);
 
   return rect_in_viewport;
@@ -191,7 +217,7 @@ ScrollableArea* ScrollableAreaFor(const Node* node) {
   if (!object || !object->IsBox())
     return nullptr;
 
-  return ToLayoutBox(object)->GetScrollableArea();
+  return To<LayoutBox>(object)->GetScrollableArea();
 }
 
 bool IsUnobscured(const FocusCandidate& candidate) {
@@ -223,14 +249,14 @@ bool IsUnobscured(const FocusCandidate& candidate) {
                         HitTestRequest::kAllowChildFrameContent);
 
   const HitTestResult::NodeSet& nodes = result.ListBasedTestResult();
-  for (auto hit_node = nodes.rbegin(); hit_node != nodes.rend(); ++hit_node) {
-    if (candidate.visible_node->ContainsIncludingHostElements(**hit_node))
+  for (const auto& hit_node : base::Reversed(nodes)) {
+    if (candidate.visible_node->ContainsIncludingHostElements(*hit_node))
       return true;
 
     if (FrameOwnerElement(candidate) &&
         FrameOwnerElement(candidate)
             ->contentDocument()
-            ->ContainsIncludingHostElements(**hit_node))
+            ->ContainsIncludingHostElements(*hit_node))
       return true;
   }
 
@@ -254,8 +280,8 @@ bool ScrollInDirection(Node* container, SpatialNavigationDirection direction) {
 
   int dx = 0;
   int dy = 0;
-  int pixels_per_line_step = ScrollableArea::PixelsPerLineStep(
-      container->GetDocument().GetFrame()->View()->GetChromeClient());
+  int pixels_per_line_step =
+      ScrollableArea::PixelsPerLineStep(container->GetDocument().GetFrame());
   switch (direction) {
     case SpatialNavigationDirection::kLeft:
       dx = -pixels_per_line_step;
@@ -263,7 +289,10 @@ bool ScrollInDirection(Node* container, SpatialNavigationDirection direction) {
     case SpatialNavigationDirection::kRight:
       // TODO(bokan, https://crbug.com/952326): Fix this DCHECK.
       //  DCHECK_GT(container->GetLayoutBox()->ScrollWidth(),
-      //            container->GetLayoutBox()->ScrollLeft() +
+      //            container->GetLayoutBoxForScrolling()
+      //                    ->GetScrollableArea()
+      //                    ->ScrollPosition()
+      //                    .X() +
       //                container->GetLayoutBox()->ClientWidth());
       dx = pixels_per_line_step;
       break;
@@ -273,7 +302,10 @@ bool ScrollInDirection(Node* container, SpatialNavigationDirection direction) {
     case SpatialNavigationDirection::kDown:
       // TODO(bokan, https://crbug.com/952326): Fix this DCHECK.
       //  DCHECK_GT(container->GetLayoutBox()->ScrollHeight(),
-      //            container->GetLayoutBox()->ScrollTop() +
+      //            container->GetLayoutBoxForScrolling()
+      //                    ->GetScrollableArea()
+      //                    ->ScrollPosition()
+      //                    .Y() +
       //                container->GetLayoutBox()->ClientHeight());
       dy = pixels_per_line_step;
       break;
@@ -292,24 +324,8 @@ bool ScrollInDirection(Node* container, SpatialNavigationDirection direction) {
   if (!scroller)
     return false;
 
-  scroller->ScrollBy(ScrollOffset(dx, dy), kUserScroll);
+  scroller->ScrollBy(ScrollOffset(dx, dy), mojom::blink::ScrollType::kUser);
   return true;
-}
-
-static void DeflateIfOverlapped(PhysicalRect& a, PhysicalRect& b) {
-  if (!a.Intersects(b) || a.Contains(b) || b.Contains(a))
-    return;
-
-  LayoutUnit deflate_factor = LayoutUnit(-kFudgeFactor);
-
-  // Avoid negative width or height values.
-  if ((a.Width() + 2 * deflate_factor > 0) &&
-      (a.Height() + 2 * deflate_factor > 0))
-    a.Inflate(deflate_factor);
-
-  if ((b.Width() + 2 * deflate_factor > 0) &&
-      (b.Height() + 2 * deflate_factor > 0))
-    b.Inflate(deflate_factor);
 }
 
 bool IsScrollableNode(const Node* node) {
@@ -319,11 +335,9 @@ bool IsScrollableNode(const Node* node) {
   if (node->IsDocumentNode())
     return true;
 
-  LayoutObject* layout_object = node->GetLayoutObject();
-  if (!layout_object || !layout_object->IsBox())
-    return false;
-
-  return ToLayoutBox(layout_object)->CanBeScrolledAndHasScrollableArea();
+  if (auto* box = DynamicTo<LayoutBox>(node->GetLayoutObject()))
+    return box->CanBeScrolledAndHasScrollableArea();
+  return false;
 }
 
 Node* ScrollableAreaOrDocumentOf(Node* node) {
@@ -358,26 +372,36 @@ bool CanScrollInDirection(const Node* container,
   if (!IsScrollableNode(container))
     return false;
 
+  const Element* container_element = DynamicTo<Element>(container);
+  if (!container_element)
+    return false;
+  LayoutBox* box = container_element->GetLayoutBoxForScrolling();
+  if (!box)
+    return false;
+  auto* scrollable_area = box->GetScrollableArea();
+  if (!scrollable_area)
+    return false;
+
   DCHECK(container->GetLayoutObject());
   switch (direction) {
     case SpatialNavigationDirection::kLeft:
       return (container->GetLayoutObject()->Style()->OverflowX() !=
                   EOverflow::kHidden &&
-              container->GetLayoutBox()->ScrollLeft() > 0);
+              scrollable_area->ScrollPosition().x() > 0);
     case SpatialNavigationDirection::kUp:
       return (container->GetLayoutObject()->Style()->OverflowY() !=
                   EOverflow::kHidden &&
-              container->GetLayoutBox()->ScrollTop() > 0);
+              scrollable_area->ScrollPosition().y() > 0);
     case SpatialNavigationDirection::kRight:
       return (container->GetLayoutObject()->Style()->OverflowX() !=
                   EOverflow::kHidden &&
-              container->GetLayoutBox()->ScrollLeft() +
+              LayoutUnit(scrollable_area->ScrollPosition().x()) +
                       container->GetLayoutBox()->ClientWidth() <
                   container->GetLayoutBox()->ScrollWidth());
     case SpatialNavigationDirection::kDown:
       return (container->GetLayoutObject()->Style()->OverflowY() !=
                   EOverflow::kHidden &&
-              container->GetLayoutBox()->ScrollTop() +
+              LayoutUnit(scrollable_area->ScrollPosition().y()) +
                       container->GetLayoutBox()->ClientHeight() <
                   container->GetLayoutBox()->ScrollHeight());
     default:
@@ -393,16 +417,16 @@ bool CanScrollInDirection(const LocalFrame* frame,
   LayoutView* layoutView = frame->ContentLayoutObject();
   if (!layoutView)
     return false;
-  ScrollbarMode vertical_mode;
-  ScrollbarMode horizontal_mode;
+  mojom::blink::ScrollbarMode vertical_mode;
+  mojom::blink::ScrollbarMode horizontal_mode;
   layoutView->CalculateScrollbarModes(horizontal_mode, vertical_mode);
   if ((direction == SpatialNavigationDirection::kLeft ||
        direction == SpatialNavigationDirection::kRight) &&
-      kScrollbarAlwaysOff == horizontal_mode)
+      mojom::blink::ScrollbarMode::kAlwaysOff == horizontal_mode)
     return false;
   if ((direction == SpatialNavigationDirection::kUp ||
        direction == SpatialNavigationDirection::kDown) &&
-      kScrollbarAlwaysOff == vertical_mode)
+      mojom::blink::ScrollbarMode::kAlwaysOff == vertical_mode)
     return false;
   ScrollableArea* scrollable_area = frame->View()->GetScrollableArea();
   LayoutSize size(scrollable_area->ContentsSize());
@@ -575,11 +599,29 @@ double Alignment(SpatialNavigationDirection direction,
   }
 }
 
+bool BothOnTopmostPaintLayerInStackingContext(
+    const FocusCandidate& current_interest,
+    const FocusCandidate& candidate) {
+  if (!current_interest.visible_node)
+    return false;
+
+  const LayoutObject* origin = current_interest.visible_node->GetLayoutObject();
+  const PaintLayer* focused_layer = origin->PaintingLayer();
+  if (!focused_layer || focused_layer->IsRootLayer())
+    return false;
+
+  const LayoutObject* next = candidate.visible_node->GetLayoutObject();
+  const PaintLayer* candidate_layer = next->PaintingLayer();
+  if (focused_layer != candidate_layer)
+    return false;
+
+  return !candidate_layer->HasVisibleSelfPaintingDescendant();
+}
+
 double ComputeDistanceDataForNode(SpatialNavigationDirection direction,
                                   const FocusCandidate& current_interest,
                                   const FocusCandidate& candidate) {
   double distance = 0.0;
-  double overlap = 0.0;
   PhysicalRect node_rect = candidate.rect_in_root_frame;
   PhysicalRect current_rect = current_interest.rect_in_root_frame;
   if (node_rect.Contains(current_rect)) {
@@ -590,9 +632,10 @@ double ComputeDistanceDataForNode(SpatialNavigationDirection direction,
   }
 
   if (current_rect.Contains(node_rect)) {
-    // We give priority to "insiders", candidates that are completely inside the
-    // current focus rect, by giving them a negative, < 0, distance number.
-    distance = kMinDistance;
+    // We give highest priority to "insiders", candidates that are completely
+    // inside the current focus rect, by giving them a negative, < 0, distance
+    // number.
+    distance = kPriorityClassA;
 
     // For insiders we cannot meassure the distance from the outer box. Instead,
     // we meassure distance _from_ the focused container's rect's "opposite
@@ -605,11 +648,11 @@ double ComputeDistanceDataForNode(SpatialNavigationDirection direction,
     // "outsider".
   } else if (!IsRectInDirection(direction, current_rect, node_rect)) {
     return kMaxDistance;
-  } else {
-    DeflateIfOverlapped(current_rect, node_rect);
-    PhysicalRect intersection_rect = Intersection(current_rect, node_rect);
-    overlap =
-        (intersection_rect.Width() * intersection_rect.Height()).ToDouble();
+  } else if (BothOnTopmostPaintLayerInStackingContext(current_interest,
+                                                      candidate)) {
+    // Prioritize "popup candidates" over other candidates by giving them a
+    // negative, < 0, distance number.
+    distance = kPriorityClassB;
   }
 
   LayoutPoint exit_point;
@@ -659,10 +702,11 @@ double ComputeDistanceDataForNode(SpatialNavigationDirection direction,
       return kMaxDistance;
   }
 
-  // Distance calculation is based on https://drafts.csswg.org/css-nav-1/.
-  return distance + navigation_axis_distance -
-         Alignment(direction, current_rect, node_rect) +
-         weighted_orthogonal_axis_distance - sqrt(overlap);
+  // We try to formalize this distance calculation at
+  // https://drafts.csswg.org/css-nav-1/.
+  distance += weighted_orthogonal_axis_distance.ToDouble() +
+              navigation_axis_distance.ToDouble();
+  return distance - Alignment(direction, current_rect, node_rect);
 }
 
 // Returns a thin rectangle that represents one of |box|'s edges.
@@ -713,13 +757,143 @@ PhysicalRect StartEdgeForAreaElement(const HTMLAreaElement& area,
 }
 
 HTMLFrameOwnerElement* FrameOwnerElement(const FocusCandidate& candidate) {
-  return DynamicTo<HTMLFrameOwnerElement>(candidate.visible_node.Get());
+  return DynamicTo<HTMLFrameOwnerElement>(candidate.visible_node);
 }
 
 // The visual viewport's rect (given in the root frame's coordinate space).
 PhysicalRect RootViewport(const LocalFrame* current_frame) {
   return PhysicalRect::EnclosingRect(
       current_frame->GetPage()->GetVisualViewport().VisibleRect());
+}
+
+// Ignores fragments that are completely offscreen.
+// Returns the first one that is not offscreen, in the given iterator range.
+template <class Iterator>
+PhysicalRect FirstVisibleFragment(const PhysicalRect& visibility,
+                                  Iterator fragment,
+                                  Iterator end) {
+  while (fragment != end) {
+    PhysicalRect physical_fragment =
+        PhysicalRect::EnclosingRect(fragment->BoundingBox());
+    physical_fragment.Intersect(visibility);
+    if (!physical_fragment.IsEmpty())
+      return physical_fragment;
+    ++fragment;
+  }
+  return visibility;
+}
+
+LayoutUnit GetLogicalHeight(const PhysicalRect& rect,
+                            const LayoutObject& layout_object) {
+  if (layout_object.IsHorizontalWritingMode())
+    return rect.Height();
+  else
+    return rect.Width();
+}
+
+void SetLogicalHeight(PhysicalRect& rect,
+                      const LayoutObject& layout_object,
+                      LayoutUnit height) {
+  if (layout_object.IsHorizontalWritingMode())
+    rect.SetHeight(height);
+  else
+    rect.SetWidth(height);
+}
+
+LayoutUnit TallestInlineAtomicChild(const LayoutObject& layout_object) {
+  LayoutUnit max_child_size(0);
+
+  if (!layout_object.IsLayoutInline())
+    return max_child_size;
+
+  for (LayoutObject* child = layout_object.SlowFirstChild(); child;
+       child = child->NextSibling()) {
+    if (child->IsOutOfFlowPositioned())
+      continue;
+
+    if (child->IsAtomicInlineLevel()) {
+      max_child_size =
+          std::max(To<LayoutBox>(child)->LogicalHeight(), max_child_size);
+    }
+  }
+
+  return max_child_size;
+}
+
+//   "Although margins, borders, and padding of non-replaced elements do not
+//    enter into the line box calculation, they are still rendered around
+//    inline boxes. This means that if the height specified by line-height is
+//    less than the content height of contained boxes, backgrounds and colors
+//    of padding and borders may "bleed" into adjoining line boxes". [1]
+// [1] https://drafts.csswg.org/css2/#leading
+// [2] https://drafts.csswg.org/css2/#line-box
+// [3] https://drafts.csswg.org/css2/#atomic-inline-level-boxes
+//
+// If an inline box is "bleeding", ShrinkInlineBoxToLineBox shrinks its
+// rect to the size of of its "line box" [2]. We need to do so because
+// "bleeding" can make links intersect vertically. We need to avoid that
+// overlap because it could make links on the same line (to the left or right)
+// unreachable as SpatNav's distance formula favors intersecting rects (on the
+// line below or above).
+PhysicalRect ShrinkInlineBoxToLineBox(const LayoutObject& layout_object,
+                                      PhysicalRect node_rect,
+                                      int line_boxes) {
+  if (!layout_object.IsInline() || layout_object.IsLayoutReplaced() ||
+      layout_object.IsButtonIncludingNG())
+    return node_rect;
+
+  // If actual line-height is bigger than the inline box, we shouldn't change
+  // anything. This is, for example, needed to not break
+  // snav-stay-in-overflow-div.html where the link's inline box doesn't fill
+  // the entire line box vertically.
+  LayoutUnit line_height = layout_object.StyleRef().ComputedLineHeightAsFixed();
+  LayoutUnit current_height = GetLogicalHeight(node_rect, layout_object);
+  if (line_height >= current_height)
+    return node_rect;
+
+  // Handle focusables like <a><img><a> (a LayoutInline that carries atomic
+  // inline boxes [3]). Despite a small line-height on the <a>, <a>'s line box
+  // will still fit the <img>.
+  line_height = std::max(TallestInlineAtomicChild(layout_object), line_height);
+  if (line_height >= current_height)
+    return node_rect;
+
+  // Cap the box at its line height to avoid overlapping inline links.
+  // Links can overlap vertically when CSS line-height < font-size, see
+  // snav-line-height_less_font-size.html.
+  line_boxes = line_boxes == -1 ? LineBoxes(layout_object) : line_boxes;
+  line_height = line_height * line_boxes;
+  if (line_height >= current_height)
+    return node_rect;
+  SetLogicalHeight(node_rect, layout_object, line_height);
+  return node_rect;
+}
+
+// TODO(crbug.com/1131419): Add tests and support for other writing-modes.
+PhysicalRect SearchOriginFragment(const PhysicalRect& visible_part,
+                                  const LayoutObject& fragmented,
+                                  const SpatialNavigationDirection direction) {
+  // For accuracy, use the first visible fragment (not the fragmented element's
+  // entire bounding rect which is a union of all fragments) as search origin.
+  Vector<gfx::QuadF> fragments;
+  fragmented.AbsoluteQuads(
+      fragments, kTraverseDocumentBoundaries | kApplyRemoteMainFrameTransform);
+  switch (direction) {
+    case SpatialNavigationDirection::kLeft:
+    case SpatialNavigationDirection::kDown:
+      // Search from the topmost fragment.
+      return FirstVisibleFragment(visible_part, fragments.begin(),
+                                  fragments.end());
+    case SpatialNavigationDirection::kRight:
+    case SpatialNavigationDirection::kUp:
+      // Search from the bottommost fragment.
+      return FirstVisibleFragment(visible_part, fragments.rbegin(),
+                                  fragments.rend());
+    case SpatialNavigationDirection::kNone:
+      break;
+      // Nothing to do.
+  }
+  return visible_part;
 }
 
 // Spatnav uses this rectangle to measure distances to focus candidates.
@@ -739,7 +913,7 @@ PhysicalRect SearchOrigin(const PhysicalRect& viewport_rect_of_root_frame,
     return OppositeEdge(direction, viewport_rect_of_root_frame);
   }
 
-  auto* area_element = ToHTMLAreaElementOrNull(focus_node);
+  auto* area_element = DynamicTo<HTMLAreaElement>(focus_node);
   if (area_element)
     focus_node = area_element->ImageElement();
 
@@ -748,7 +922,21 @@ PhysicalRect SearchOrigin(const PhysicalRect& viewport_rect_of_root_frame,
       return StartEdgeForAreaElement(*area_element, direction);
 
     PhysicalRect box_in_root_frame = NodeRectInRootFrame(focus_node);
-    return Intersection(box_in_root_frame, viewport_rect_of_root_frame);
+    PhysicalRect visible_part =
+        Intersection(box_in_root_frame, viewport_rect_of_root_frame);
+
+    const LayoutObject* const layout_object = focus_node->GetLayoutObject();
+    if (IsFragmentedInline(*layout_object)) {
+      visible_part =
+          SearchOriginFragment(visible_part, *layout_object, direction);
+    }
+
+    // Remove any overlap with line boxes *below* the search origin.
+    // The search origin is always only one line (because if |focus_node| is
+    // line broken, SearchOriginFragment picks the first or last line's box).
+    visible_part = ShrinkInlineBoxToLineBox(*layout_object, visible_part, 1);
+
+    return visible_part;
   }
 
   Node* container = ScrollableAreaOrDocumentOf(focus_node);
@@ -759,10 +947,8 @@ PhysicalRect SearchOrigin(const PhysicalRect& viewport_rect_of_root_frame,
       return OppositeEdge(direction, Intersection(box_in_root_frame,
                                                   viewport_rect_of_root_frame));
     }
-
     container = ScrollableAreaOrDocumentOf(container);
   }
-
   return OppositeEdge(direction, viewport_rect_of_root_frame);
 }
 

@@ -9,7 +9,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -60,7 +60,7 @@ TEST_P(QueueWithSizesBadSizeTest, BadSizeThrowsException) {
   EXPECT_TRUE(queue->IsEmpty());
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          QueueWithSizesBadSizeTest,
                          Values(-1,
                                 std::numeric_limits<double>::quiet_NaN(),

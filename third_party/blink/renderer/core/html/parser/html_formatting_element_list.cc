@@ -39,8 +39,6 @@ static const size_t kNoahsArkCapacity = 3;
 
 HTMLFormattingElementList::HTMLFormattingElementList() = default;
 
-HTMLFormattingElementList::~HTMLFormattingElementList() = default;
-
 Element* HTMLFormattingElementList::ClosestElementInScopeWithName(
     const AtomicString& target_name) {
   for (wtf_size_t i = 1; i <= entries_.size(); ++i) {
@@ -127,7 +125,8 @@ void HTMLFormattingElementList::TryToEnsureNoahsArkConditionQuickly(
   // quickly ensuring the condition.
   HeapVector<Member<HTMLStackItem>, 10> candidates;
 
-  wtf_size_t new_item_attribute_count = new_item->Attributes().size();
+  wtf_size_t new_item_attribute_count =
+      static_cast<wtf_size_t>(new_item->Attributes().size());
 
   for (wtf_size_t i = entries_.size(); i;) {
     --i;

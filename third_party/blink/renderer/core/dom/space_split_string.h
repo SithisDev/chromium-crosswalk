@@ -74,12 +74,8 @@ class CORE_EXPORT SpaceSplitString {
 
     ~Data();
 
-    bool Contains(const AtomicString& string) {
-      for (const auto& item : vector_) {
-        if (item == string)
-          return true;
-      }
-      return false;
+    bool Contains(const AtomicString& string) const {
+      return vector_.Contains(string);
     }
 
     bool ContainsAll(Data&);
@@ -105,7 +101,10 @@ class CORE_EXPORT SpaceSplitString {
     AtomicString key_string_;
     Vector<AtomicString, 4> vector_;
   };
-  typedef HashMap<AtomicString, Data*> DataMap;
+
+  // We can use a non-ref-counted StringImpl* as the key because the associated
+  // Data object will keep it alive via the key_string_ member.
+  typedef HashMap<StringImpl*, Data*> DataMap;
 
   static DataMap& SharedDataMap();
 
@@ -116,6 +115,8 @@ class CORE_EXPORT SpaceSplitString {
 
   scoped_refptr<Data> data_;
 };
+
+CORE_EXPORT std::ostream& operator<<(std::ostream&, const SpaceSplitString&);
 
 }  // namespace blink
 

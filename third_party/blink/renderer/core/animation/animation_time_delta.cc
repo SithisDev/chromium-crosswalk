@@ -3,10 +3,11 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/animation/animation_time_delta.h"
+#include "third_party/blink/renderer/core/core_export.h"
 
 namespace blink {
 
-#if !defined(BLINK_ANIMATION_USE_TIME_DELTA)
+#if !BUILDFLAG(BLINK_ANIMATION_USE_TIME_DELTA)
 // Comparison operators on AnimationTimeDelta.
 bool CORE_EXPORT operator==(const AnimationTimeDelta& lhs,
                             const AnimationTimeDelta& rhs) {
@@ -19,6 +20,10 @@ bool CORE_EXPORT operator!=(const AnimationTimeDelta& lhs,
 bool CORE_EXPORT operator>(const AnimationTimeDelta& lhs,
                            const AnimationTimeDelta& rhs) {
   return lhs.InSecondsF() > rhs.InSecondsF();
+}
+bool CORE_EXPORT operator<(const AnimationTimeDelta& lhs,
+                           const AnimationTimeDelta& rhs) {
+  return !(lhs >= rhs);
 }
 bool CORE_EXPORT operator>=(const AnimationTimeDelta& lhs,
                             const AnimationTimeDelta& rhs) {

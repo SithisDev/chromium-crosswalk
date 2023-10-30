@@ -24,14 +24,21 @@
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
-#include "third_party/skia/include/effects/SkTileImageFilter.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 
 namespace blink {
 
 FETile::FETile(Filter* filter) : FilterEffect(filter) {}
 
-FloatRect FETile::MapInputs(const FloatRect& rect) const {
+gfx::RectF FETile::MapInputs(const gfx::RectF& rect) const {
   return AbsoluteBounds();
+}
+
+gfx::RectF FETile::GetSourceRect() const {
+  const FilterEffect* input = InputEffect(0);
+  if (input->GetFilterEffectType() == kFilterEffectTypeSourceInput)
+    return GetFilter()->FilterRegion();
+  return input->FilterPrimitiveSubregion();
 }
 
 sk_sp<PaintFilter> FETile::CreateImageFilter() {
@@ -39,14 +46,13 @@ sk_sp<PaintFilter> FETile::CreateImageFilter() {
       InputEffect(0), OperatingInterpolationSpace()));
   if (!input)
     return nullptr;
-
-  FloatRect src_rect;
-  if (InputEffect(0)->GetFilterEffectType() == kFilterEffectTypeSourceInput)
-    src_rect = GetFilter()->FilterRegion();
-  else
-    src_rect = InputEffect(0)->FilterPrimitiveSubregion();
-  FloatRect dst_rect = FilterPrimitiveSubregion();
-  return sk_make_sp<TilePaintFilter>(src_rect, dst_rect, std::move(input));
+  gfx::RectF src_rect =
+      GetFilter()->MapLocalRectToAbsoluteRect(GetSourceRect());
+  gfx::RectF dst_rect =
+      GetFilter()->MapLocalRectToAbsoluteRect(FilterPrimitiveSubregion());
+  return sk_make_sp<TilePaintFilter>(gfx::RectFToSkRect(src_rect),
+                                     gfx::RectFToSkRect(dst_rect),
+                                     std::move(input));
 }
 
 WTF::TextStream& FETile::ExternalRepresentation(WTF::TextStream& ts,

@@ -13,7 +13,8 @@
 namespace base {
 namespace sequence_manager {
 
-struct PLATFORM_EXPORT TaskQueueWithVoters {
+struct PLATFORM_EXPORT TaskQueueWithVoters
+    : public RefCountedThreadSafe<TaskQueueWithVoters> {
   explicit TaskQueueWithVoters(scoped_refptr<TestTaskQueue> task_queue)
       : queue(std::move(task_queue)) {}
 
@@ -24,4 +25,4 @@ struct PLATFORM_EXPORT TaskQueueWithVoters {
 }  // namespace sequence_manager
 }  // namespace base
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_TEST_FUZZER_TASK_QUEUE_WITH_VOTERS_H_

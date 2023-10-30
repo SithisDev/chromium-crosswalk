@@ -27,28 +27,23 @@
 
 namespace blink {
 
-class HTMLTextAreaElement;
-
 class LayoutTextControlMultiLine final : public LayoutTextControl {
  public:
-  LayoutTextControlMultiLine(HTMLTextAreaElement*);
+  explicit LayoutTextControlMultiLine(Element*);
   ~LayoutTextControlMultiLine() override;
 
  private:
   bool IsOfType(LayoutObjectType type) const override {
-    return type == kLayoutObjectTextArea || LayoutTextControl::IsOfType(type);
+    NOT_DESTROYED();
+    return type == kLayoutObjectTextControlMultiLine ||
+           LayoutTextControl::IsOfType(type);
   }
 
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const PhysicalOffset& accumulated_offset,
-                   HitTestAction) override;
+                   HitTestPhase) override;
 
-  float GetAvgCharWidth(const AtomicString& family) const override;
-  LayoutUnit PreferredContentLogicalWidth(float char_width) const override;
-  LayoutUnit ComputeControlLogicalHeight(
-      LayoutUnit line_height,
-      LayoutUnit non_content_height) const override;
   // We override the two baseline functions because we want our baseline to be
   // the bottom of our margin box.
   LayoutUnit BaselinePosition(
@@ -57,6 +52,7 @@ class LayoutTextControlMultiLine final : public LayoutTextControl {
       LineDirectionMode,
       LinePositionMode = kPositionOnContainingLine) const override;
   LayoutUnit InlineBlockBaseline(LineDirectionMode) const override {
+    NOT_DESTROYED();
     return LayoutUnit(-1);
   }
 
@@ -64,8 +60,6 @@ class LayoutTextControlMultiLine final : public LayoutTextControl {
                                            SubtreeLayoutScope&) override;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutTextControlMultiLine, IsTextArea());
-
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_LAYOUT_TEXT_CONTROL_MULTI_LINE_H_

@@ -33,7 +33,7 @@
 
 #include "third_party/blink/renderer/modules/filesystem/dom_file_system_sync.h"
 #include "third_party/blink/renderer/modules/filesystem/entry_base.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -62,7 +62,7 @@ class EntrySync : public EntryBase {
   void remove(ExceptionState&) const;
   EntrySync* getParent() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   EntrySync(DOMFileSystemBase*, const String& full_path);

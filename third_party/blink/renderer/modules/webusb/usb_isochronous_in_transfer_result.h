@@ -9,7 +9,7 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_data_view.h"
 #include "third_party/blink/renderer/modules/webusb/usb_isochronous_in_transfer_packet.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -28,8 +28,9 @@ class USBIsochronousInTransferResult final : public ScriptWrappable {
 
   static USBIsochronousInTransferResult* Create(
       const HeapVector<Member<USBIsochronousInTransferPacket>>& packets,
-      DOMDataView* data) {
-    return MakeGarbageCollected<USBIsochronousInTransferResult>(data, packets);
+      NotShared<DOMDataView> data) {
+    return MakeGarbageCollected<USBIsochronousInTransferResult>(data.Get(),
+                                                                packets);
   }
 
   static USBIsochronousInTransferResult* Create(
@@ -50,7 +51,7 @@ class USBIsochronousInTransferResult final : public ScriptWrappable {
     return packets_;
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(data_);
     visitor->Trace(packets_);
     ScriptWrappable::Trace(visitor);

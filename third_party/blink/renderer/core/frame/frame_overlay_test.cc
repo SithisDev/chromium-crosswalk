@@ -8,15 +8,18 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/web/web_device_emulation_params.h"
+#include "third_party/blink/public/common/widget/device_emulation_params.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
+#include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
+#include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller_test.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
@@ -36,14 +39,14 @@ class SolidColorOverlay : public FrameOverlay::Delegate {
 
   void PaintFrameOverlay(const FrameOverlay& frame_overlay,
                          GraphicsContext& graphics_context,
-                         const IntSize& size) const override {
+                         const gfx::Size& size) const override {
     if (DrawingRecorder::UseCachedDrawingIfPossible(
             graphics_context, frame_overlay, DisplayItem::kFrameOverlay))
       return;
-    FloatRect rect(0, 0, size.Width(), size.Height());
+    gfx::RectF rect(0, 0, size.width(), size.height());
     DrawingRecorder recorder(graphics_context, frame_overlay,
-                             DisplayItem::kFrameOverlay);
-    graphics_context.FillRect(rect, color_);
+                             DisplayItem::kFrameOverlay, gfx::Rect(size));
+    graphics_context.FillRect(rect, color_, AutoDarkMode::Disabled());
   }
 
  private:
@@ -57,18 +60,19 @@ class FrameOverlayTest : public testing::Test, public PaintTestConfigurations {
 
   FrameOverlayTest() {
     helper_.Initialize(nullptr, nullptr, nullptr);
-    GetWebView()->MainFrameWidget()->Resize(
-        WebSize(kViewportWidth, kViewportHeight));
-    GetWebView()->MainFrameWidget()->UpdateAllLifecyclePhases(
-        WebWidget::LifecycleUpdateReason::kTest);
+    GetWebView()->MainFrameViewWidget()->Resize(
+        gfx::Size(kViewportWidth, kViewportHeight));
+    GetWebView()->MainFrameViewWidget()->UpdateAllLifecyclePhases(
+        DocumentUpdateReason::kTest);
   }
 
   WebViewImpl* GetWebView() const { return helper_.GetWebView(); }
 
-  std::unique_ptr<FrameOverlay> CreateSolidYellowOverlay() {
-    return std::make_unique<FrameOverlay>(
+  FrameOverlay* CreateSolidYellowOverlay() {
+    return MakeGarbageCollected<FrameOverlay>(
         GetWebView()->MainFrameImpl()->GetFrame(),
-        std::make_unique<SolidColorOverlay>(SK_ColorYELLOW));
+        std::make_unique<SolidColorOverlay>(
+            Color::FromSkColor(SK_ColorYELLOW)));
   }
 
   template <typename OverlayType>
@@ -86,41 +90,34 @@ class MockFrameOverlayCanvas : public SkCanvas {
 INSTANTIATE_PAINT_TEST_SUITE_P(FrameOverlayTest);
 
 TEST_P(FrameOverlayTest, AcceleratedCompositing) {
-  std::unique_ptr<FrameOverlay> frame_overlay = CreateSolidYellowOverlay();
+  FrameOverlay* frame_overlay = CreateSolidYellowOverlay();
   frame_overlay->UpdatePrePaint();
   EXPECT_EQ(PropertyTreeState::Root(),
             frame_overlay->DefaultPropertyTreeState());
 
   // Ideally, we would get results from the compositor that showed that this
   // page overlay actually winds up getting drawn on top of the rest.
-  // For now, we just check that the GraphicsLayer will draw the right thing.
+  // For now, we just check that we drew the right thing.
   MockFrameOverlayCanvas canvas;
   EXPECT_CALL(canvas,
               onDrawRect(SkRect::MakeWH(kViewportWidth, kViewportHeight),
                          Property(&SkPaint::getColor, SK_ColorYELLOW)));
 
-  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
-    PaintRecordBuilder builder;
-    frame_overlay->Paint(builder.Context());
-    builder.EndRecording()->Playback(&canvas);
-  } else {
-    auto* graphics_layer = frame_overlay->GetGraphicsLayer();
-    EXPECT_FALSE(graphics_layer->GetHitTestable());
-    EXPECT_EQ(PropertyTreeState::Root(),
-              graphics_layer->GetPropertyTreeState());
-    graphics_layer->Paint();
-    graphics_layer->CapturePaintRecord()->Playback(&canvas);
-  }
+  auto* builder = MakeGarbageCollected<PaintRecordBuilder>();
+  frame_overlay->Paint(builder->Context());
+  builder->EndRecording()->Playback(&canvas);
+  frame_overlay->Destroy();
 }
 
 TEST_P(FrameOverlayTest, DeviceEmulationScale) {
-  WebDeviceEmulationParams params;
+  DeviceEmulationParams params;
   params.scale = 1.5;
+  params.view_size = gfx::Size(800, 600);
   GetWebView()->EnableDeviceEmulation(params);
-  GetWebView()->MainFrameWidget()->UpdateAllLifecyclePhases(
-      WebWidget::LifecycleUpdateReason::kTest);
+  GetWebView()->MainFrameViewWidget()->UpdateAllLifecyclePhases(
+      DocumentUpdateReason::kTest);
 
-  std::unique_ptr<FrameOverlay> frame_overlay = CreateSolidYellowOverlay();
+  FrameOverlay* frame_overlay = CreateSolidYellowOverlay();
   frame_overlay->UpdatePrePaint();
   auto* transform = GetWebView()
                         ->MainFrameImpl()
@@ -138,37 +135,23 @@ TEST_P(FrameOverlayTest, DeviceEmulationScale) {
                               &state](PaintController& paint_controller) {
     EXPECT_THAT(
         paint_controller.GetDisplayItemList(),
-        ElementsAre(IsSameId(frame_overlay.get(), DisplayItem::kFrameOverlay)));
+        ElementsAre(IsSameId(frame_overlay->Id(), DisplayItem::kFrameOverlay)));
+    EXPECT_EQ(gfx::Rect(0, 0, 800, 600),
+              paint_controller.GetDisplayItemList()[0].VisualRect());
     EXPECT_THAT(
         paint_controller.PaintChunks(),
         ElementsAre(IsPaintChunk(
-            0, 1, PaintChunk::Id(*frame_overlay, DisplayItem::kFrameOverlay),
-            state)));
+            0, 1,
+            PaintChunk::Id(frame_overlay->Id(), DisplayItem::kFrameOverlay),
+            state, nullptr, gfx::Rect(0, 0, 800, 600))));
   };
 
-  if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
-    auto paint_controller =
-        std::make_unique<PaintController>(PaintController::kTransient);
-    GraphicsContext context(*paint_controller);
-    frame_overlay->Paint(context);
-    paint_controller->CommitNewDisplayItems();
-    check_paint_results(*paint_controller);
-  } else {
-    auto* graphics_layer = frame_overlay->GetGraphicsLayer();
-    EXPECT_FALSE(graphics_layer->GetHitTestable());
-    EXPECT_EQ(state, graphics_layer->GetPropertyTreeState());
-    graphics_layer->Paint();
-    check_paint_results(graphics_layer->GetPaintController());
-  }
-}
-
-TEST_P(FrameOverlayTest, VisualRect) {
-  std::unique_ptr<FrameOverlay> frame_overlay = CreateSolidYellowOverlay();
-  frame_overlay->UpdatePrePaint();
-  GetWebView()->MainFrameWidget()->UpdateAllLifecyclePhases(
-      WebWidget::LifecycleUpdateReason::kTest);
-  EXPECT_EQ(IntRect(0, 0, kViewportWidth, kViewportHeight),
-            frame_overlay->VisualRect());
+  PaintController paint_controller(PaintController::kTransient);
+  GraphicsContext context(paint_controller);
+  frame_overlay->Paint(context);
+  paint_controller.CommitNewDisplayItems();
+  check_paint_results(paint_controller);
+  frame_overlay->Destroy();
 }
 
 }  // namespace

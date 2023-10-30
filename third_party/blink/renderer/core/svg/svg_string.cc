@@ -19,31 +19,26 @@
 
 #include "third_party/blink/renderer/core/svg/svg_string.h"
 
-#include "third_party/blink/renderer/core/svg/svg_animate_element.h"
+#include "base/notreached.h"
 
 namespace blink {
 
-void SVGString::Add(SVGPropertyBase*, SVGElement*) {
+void SVGString::Add(const SVGPropertyBase*, const SVGElement*) {
   NOTREACHED();
 }
 
-void SVGString::CalculateAnimatedValue(SVGAnimationElement* animation_element,
+void SVGString::CalculateAnimatedValue(const SMILAnimationEffectParameters&,
                                        float percentage,
                                        unsigned repeat_count,
-                                       SVGPropertyBase* from,
-                                       SVGPropertyBase* to,
-                                       SVGPropertyBase*,
-                                       SVGElement*) {
-  DCHECK(animation_element);
-
-  String from_string = ToSVGString(from)->value_;
-  String to_string = ToSVGString(to)->value_;
-
-  animation_element->AnimateDiscreteType<String>(percentage, from_string,
-                                                 to_string, value_);
+                                       const SVGPropertyBase* from,
+                                       const SVGPropertyBase* to,
+                                       const SVGPropertyBase*,
+                                       const SVGElement*) {
+  NOTREACHED();
 }
 
-float SVGString::CalculateDistance(SVGPropertyBase*, SVGElement*) {
+float SVGString::CalculateDistance(const SVGPropertyBase*,
+                                   const SVGElement*) const {
   // No paced animations for strings.
   return -1;
 }

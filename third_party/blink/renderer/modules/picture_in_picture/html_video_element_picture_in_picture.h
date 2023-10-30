@@ -23,11 +23,14 @@ class HTMLVideoElementPictureInPicture {
                                                HTMLVideoElement&,
                                                ExceptionState&);
 
-  static bool FastHasAttribute(const QualifiedName&, const HTMLVideoElement&);
+  static bool FastHasAttribute(const HTMLVideoElement&, const QualifiedName&);
 
-  static void SetBooleanAttribute(const QualifiedName&,
-                                  HTMLVideoElement&,
+  static void SetBooleanAttribute(HTMLVideoElement&,
+                                  const QualifiedName&,
                                   bool);
+
+  static void CheckIfPictureInPictureIsAllowed(HTMLVideoElement&,
+                                               ExceptionState&);
 
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(enterpictureinpicture,
                                          kEnterpictureinpicture)

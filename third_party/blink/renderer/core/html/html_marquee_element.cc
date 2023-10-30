@@ -25,11 +25,12 @@
 #include <cstdlib>
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_html_marquee_element.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_keyframe_effect_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_optional_effect_timing.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_cssnumericvalue_string_unrestricteddouble.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect_model.h"
-#include "third_party/blink/renderer/core/animation/keyframe_effect_options.h"
-#include "third_party/blink/renderer/core/animation/optional_effect_timing.h"
 #include "third_party/blink/renderer/core/animation/string_keyframe.h"
 #include "third_party/blink/renderer/core/animation/timing_input.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
@@ -40,13 +41,14 @@
 #include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/html/html_style_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
@@ -71,31 +73,31 @@ void HTMLMarqueeElement::DidAddUserAgentShadowRoot(ShadowRoot& shadow_root) {
   auto* mover = MakeGarbageCollected<HTMLDivElement>(GetDocument());
   shadow_root.AppendChild(mover);
 
-  mover->AppendChild(
-      HTMLSlotElement::CreateUserAgentDefaultSlot(GetDocument()));
+  mover->AppendChild(MakeGarbageCollected<HTMLSlotElement>(GetDocument()));
   mover_ = mover;
 }
 
 class HTMLMarqueeElement::RequestAnimationFrameCallback final
-    : public FrameRequestCallbackCollection::FrameCallback {
+    : public FrameCallback {
  public:
   explicit RequestAnimationFrameCallback(HTMLMarqueeElement* marquee)
       : marquee_(marquee) {}
+  RequestAnimationFrameCallback(const RequestAnimationFrameCallback&) = delete;
+  RequestAnimationFrameCallback& operator=(
+      const RequestAnimationFrameCallback&) = delete;
 
   void Invoke(double) override {
     marquee_->continue_callback_request_id_ = 0;
     marquee_->ContinueAnimation();
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(marquee_);
-    FrameRequestCallbackCollection::FrameCallback::Trace(visitor);
+    FrameCallback::Trace(visitor);
   }
 
  private:
   Member<HTMLMarqueeElement> marquee_;
-
-  DISALLOW_COPY_AND_ASSIGN(RequestAnimationFrameCallback);
 };
 
 class HTMLMarqueeElement::AnimationFinished final : public NativeEventListener {
@@ -107,7 +109,7 @@ class HTMLMarqueeElement::AnimationFinished final : public NativeEventListener {
     marquee_->start();
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(marquee_);
     NativeEventListener::Trace(visitor);
   }
@@ -243,21 +245,21 @@ StringKeyframeEffectModel* HTMLMarqueeElement::CreateEffectModel(
   MutableCSSPropertyValueSet::SetResult set_result;
 
   SecureContextMode secure_context_mode =
-      mover_->GetDocument().GetSecureContextMode();
+      mover_->GetExecutionContext()->GetSecureContextMode();
 
   StringKeyframeVector keyframes;
   auto* keyframe1 = MakeGarbageCollected<StringKeyframe>();
   set_result = keyframe1->SetCSSPropertyValue(
       CSSPropertyID::kTransform, parameters.transform_begin,
       secure_context_mode, style_sheet_contents);
-  DCHECK(set_result.did_parse);
+  DCHECK_NE(MutableCSSPropertyValueSet::kParseError, set_result);
   keyframes.push_back(keyframe1);
 
   auto* keyframe2 = MakeGarbageCollected<StringKeyframe>();
   set_result = keyframe2->SetCSSPropertyValue(
       CSSPropertyID::kTransform, parameters.transform_end, secure_context_mode,
       style_sheet_contents);
-  DCHECK(set_result.did_parse);
+  DCHECK(set_result != MutableCSSPropertyValueSet::kParseError);
   keyframes.push_back(keyframe2);
 
   return MakeGarbageCollected<StringKeyframeEffectModel>(
@@ -269,7 +271,7 @@ void HTMLMarqueeElement::ContinueAnimation() {
   if (!ShouldContinue())
     return;
 
-  if (player_ && player_->playState() == "paused") {
+  if (player_ && player_->PlayStateString() == "paused") {
     player_->play();
     return;
   }
@@ -292,7 +294,8 @@ void HTMLMarqueeElement::ContinueAnimation() {
   OptionalEffectTiming* effect_timing = OptionalEffectTiming::Create();
   effect_timing->setFill("forwards");
   effect_timing->setDuration(
-      UnrestrictedDoubleOrString::FromUnrestrictedDouble(duration));
+      MakeGarbageCollected<V8UnionCSSNumericValueOrStringOrUnrestrictedDouble>(
+          duration));
   TimingInput::Update(timing, effect_timing, nullptr, ASSERT_NO_EXCEPTION);
 
   auto* keyframe_effect =
@@ -353,10 +356,11 @@ HTMLMarqueeElement::Metrics HTMLMarqueeElement::GetMetrics() {
   }
 
   if (IsHorizontal()) {
-    mover_->style()->setProperty(&GetDocument(), "width", "-webkit-max-content",
-                                 "important", ASSERT_NO_EXCEPTION);
+    mover_->style()->setProperty(GetExecutionContext(), "width",
+                                 "-webkit-max-content", "important",
+                                 ASSERT_NO_EXCEPTION);
   } else {
-    mover_->style()->setProperty(&GetDocument(), "height",
+    mover_->style()->setProperty(GetExecutionContext(), "height",
                                  "-webkit-max-content", "important",
                                  ASSERT_NO_EXCEPTION);
   }
@@ -484,7 +488,7 @@ AtomicString HTMLMarqueeElement::CreateTransform(double value) const {
          String::NumberToStringECMAScript(value) + "px)";
 }
 
-void HTMLMarqueeElement::Trace(Visitor* visitor) {
+void HTMLMarqueeElement::Trace(Visitor* visitor) const {
   visitor->Trace(mover_);
   visitor->Trace(player_);
   HTMLElement::Trace(visitor);

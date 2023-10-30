@@ -31,6 +31,10 @@
 #include "third_party/blink/renderer/modules/webmidi/midi_access.h"
 
 #include <memory>
+#include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
+#include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
+#include "third_party/blink/public/common/privacy_budget/identifiable_token_builder.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/loader/document_load_timing.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
@@ -41,6 +45,8 @@
 #include "third_party/blink/renderer/modules/webmidi/midi_output.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_output_map.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_port.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
 
 namespace blink {
 
@@ -59,33 +65,45 @@ PortState ToDeviceState(PortState state) {
 }  // namespace
 
 MIDIAccess::MIDIAccess(
-    std::unique_ptr<MIDIAccessor> accessor,
+    MIDIDispatcher* dispatcher,
     bool sysex_enabled,
     const Vector<MIDIAccessInitializer::PortDescriptor>& ports,
     ExecutionContext* execution_context)
-    : ContextLifecycleObserver(execution_context),
-      accessor_(std::move(accessor)),
+    : ExecutionContextLifecycleObserver(execution_context),
+      dispatcher_(dispatcher),
       sysex_enabled_(sysex_enabled),
       has_pending_activity_(false) {
-  accessor_->SetClient(this);
+  dispatcher_->SetClient(this);
   for (const auto& port : ports) {
-    if (port.type == MIDIPort::kTypeInput) {
-      inputs_.push_back(MIDIInput::Create(this, port.id, port.manufacturer,
-                                          port.name, port.version,
-                                          ToDeviceState(port.state)));
+    if (port.type == MIDIPortType::kInput) {
+      inputs_.push_back(MakeGarbageCollected<MIDIInput>(
+          this, port.id, port.manufacturer, port.name, port.version,
+          ToDeviceState(port.state)));
     } else {
-      outputs_.push_back(MIDIOutput::Create(
+      outputs_.push_back(MakeGarbageCollected<MIDIOutput>(
           this, outputs_.size(), port.id, port.manufacturer, port.name,
           port.version, ToDeviceState(port.state)));
     }
   }
+  constexpr IdentifiableSurface surface = IdentifiableSurface::FromTypeAndToken(
+      IdentifiableSurface::Type::kWebFeature,
+      WebFeature::kRequestMIDIAccess_ObscuredByFootprinting);
+  if (IdentifiabilityStudySettings::Get()->ShouldSampleSurface(surface)) {
+    IdentifiableTokenBuilder builder;
+    for (const auto& port : ports) {
+      builder.AddToken(IdentifiabilityBenignStringToken(port.id));
+      builder.AddToken(IdentifiabilityBenignStringToken(port.name));
+      builder.AddToken(IdentifiabilityBenignStringToken(port.manufacturer));
+      builder.AddToken(IdentifiabilityBenignStringToken(port.version));
+      builder.AddToken(port.type);
+    }
+    IdentifiabilityMetricBuilder(execution_context->UkmSourceID())
+        .Add(surface, builder.GetToken())
+        .Record(execution_context->UkmRecorder());
+  }
 }
 
 MIDIAccess::~MIDIAccess() = default;
-
-void MIDIAccess::Dispose() {
-  accessor_.reset();
-}
 
 EventListener* MIDIAccess::onstatechange() {
   return GetAttributeEventListener(event_type_names::kStatechange);
@@ -139,8 +157,8 @@ void MIDIAccess::DidAddInputPort(const String& id,
                                  const String& version,
                                  PortState state) {
   DCHECK(IsMainThread());
-  MIDIInput* port = MIDIInput::Create(this, id, manufacturer, name, version,
-                                      ToDeviceState(state));
+  auto* port = MakeGarbageCollected<MIDIInput>(this, id, manufacturer, name,
+                                               version, ToDeviceState(state));
   inputs_.push_back(port);
   DispatchEvent(*MIDIConnectionEvent::Create(port));
 }
@@ -152,8 +170,8 @@ void MIDIAccess::DidAddOutputPort(const String& id,
                                   PortState state) {
   DCHECK(IsMainThread());
   unsigned port_index = outputs_.size();
-  MIDIOutput* port = MIDIOutput::Create(this, port_index, id, manufacturer,
-                                        name, version, ToDeviceState(state));
+  auto* port = MakeGarbageCollected<MIDIOutput>(
+      this, port_index, id, manufacturer, name, version, ToDeviceState(state));
   outputs_.push_back(port);
   DispatchEvent(*MIDIConnectionEvent::Create(port));
 }
@@ -198,18 +216,15 @@ void MIDIAccess::SendMIDIData(unsigned port_index,
       port_index >= outputs_.size())
     return;
 
-  accessor_->SendMIDIData(port_index, data, length, time_stamp);
+  dispatcher_->SendMIDIData(port_index, data, length, time_stamp);
 }
 
-void MIDIAccess::ContextDestroyed(ExecutionContext*) {
-  accessor_.reset();
-}
-
-void MIDIAccess::Trace(blink::Visitor* visitor) {
+void MIDIAccess::Trace(Visitor* visitor) const {
+  visitor->Trace(dispatcher_);
   visitor->Trace(inputs_);
   visitor->Trace(outputs_);
   EventTargetWithInlineData::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
 }  // namespace blink

@@ -5,25 +5,27 @@
 #include "third_party/blink/renderer/core/page/touch_adjustment.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/web_screen_info.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
+#include "ui/display/screen_info.h"
 
 namespace blink {
 
 namespace {
 
-class MockChromeClient : public RenderingTestChromeClient {
+class FakeChromeClient : public RenderingTestChromeClient {
  public:
-  MockChromeClient() = default;
+  FakeChromeClient() = default;
 
   void SetDeviceScaleFactor(float device_scale_factor) {
     screen_info_.device_scale_factor = device_scale_factor;
   }
 
-  WebScreenInfo GetScreenInfo() const override { return screen_info_; }
+  const display::ScreenInfo& GetScreenInfo(LocalFrame&) const override {
+    return screen_info_;
+  }
 
  private:
-  WebScreenInfo screen_info_;
+  display::ScreenInfo screen_info_;
 };
 
 }  // namespace
@@ -32,11 +34,11 @@ class TouchAdjustmentTest : public RenderingTest {
  protected:
   TouchAdjustmentTest()
       : RenderingTest(MakeGarbageCollected<SingleChildLocalFrameClient>()),
-        chrome_client_(MakeGarbageCollected<MockChromeClient>()) {}
+        chrome_client_(MakeGarbageCollected<FakeChromeClient>()) {}
 
   LocalFrame& GetFrame() const { return *GetDocument().GetFrame(); }
 
-  MockChromeClient& GetChromeClient() const override { return *chrome_client_; }
+  FakeChromeClient& GetChromeClient() const override { return *chrome_client_; }
 
   void SetZoomAndScale(float device_scale_factor,
                        float browser_zoom_factor,
@@ -53,7 +55,7 @@ class TouchAdjustmentTest : public RenderingTest {
   const LayoutSize min_touch_area_dip_unscaled = LayoutSize(20, 20);
 
  private:
-  Persistent<MockChromeClient> chrome_client_;
+  Persistent<FakeChromeClient> chrome_client_;
 
   float device_scale_factor_;
   float page_scale_factor_;
@@ -94,13 +96,6 @@ TEST_F(TouchAdjustmentTest, AdjustmentRangeUpperboundScale) {
   SetZoomAndScale(0.5 /* dsf */, 1 /* browser_zoom */, 1 /* page_scale */);
   result = GetHitTestRectForAdjustment(GetFrame(), touch_area);
   EXPECT_EQ(result, max_touch_area_dip_unscaled * 0.5f);
-
-  // When DeviceScaleFactorDeprecated() is not 1, zoom-for-dsf is disabled,
-  // touch_area should be in dip.
-  SetZoomAndScale(2 /* dsf */, 1 /* browser_zoom */, 1 /* page_scale */);
-  GetPage().SetDeviceScaleFactorDeprecated(0.5);
-  result = GetHitTestRectForAdjustment(GetFrame(), touch_area);
-  EXPECT_EQ(result, max_touch_area_dip_unscaled);
 }
 
 TEST_F(TouchAdjustmentTest, AdjustmentRangeLowerboundScale) {

@@ -32,7 +32,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_FILESYSTEM_FILE_ENTRY_SYNC_H_
 
 #include "third_party/blink/renderer/modules/filesystem/entry_sync.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -52,14 +53,13 @@ class FileEntrySync final : public EntrySync {
   File* file(ExceptionState&);
   FileWriterSync* createWriter(ExceptionState&);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 };
 
-DEFINE_TYPE_CASTS(FileEntrySync,
-                  EntrySync,
-                  entry,
-                  entry->isFile(),
-                  entry.isFile());
+template <>
+struct DowncastTraits<FileEntrySync> {
+  static bool AllowFrom(const EntrySync& entry) { return entry.isFile(); }
+};
 
 }  // namespace blink
 

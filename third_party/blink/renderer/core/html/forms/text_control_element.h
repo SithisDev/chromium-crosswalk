@@ -27,7 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_TEXT_CONTROL_ELEMENT_H_
 
 #include "base/gtest_prod_util.h"
-#include "third_party/blink/public/platform/web_focus_type.h"
+#include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element_with_state.h"
@@ -36,6 +36,7 @@
 namespace blink {
 
 class ExceptionState;
+class V8SelectionMode;
 
 enum TextFieldSelectionDirection {
   kSelectionHasNoDirection,
@@ -45,10 +46,12 @@ enum TextFieldSelectionDirection {
 enum class TextFieldEventBehavior {
   kDispatchNoEvent,
   kDispatchChangeEvent,
+  kDispatchInputEvent,
   kDispatchInputAndChangeEvent
 };
 
 enum class TextControlSetValueSelection {
+  kSetSelectionToStart,
   kSetSelectionToEnd,
   kClamp,
   kDoNotSet,
@@ -65,7 +68,9 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
 
   void ForwardEvent(Event&);
 
-  void SetFocused(bool, WebFocusType) override;
+  void SetFocused(bool, mojom::blink::FocusType) override;
+
+  bool IsRichlyEditableForAccessibility() const override { return false; }
 
   // The derived class should return true if placeholder processing is needed.
   virtual bool IsPlaceholderVisible() const = 0;
@@ -76,7 +81,6 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
   void UpdatePlaceholderVisibility();
 
   VisiblePosition VisiblePositionForIndex(int) const;
-  int IndexForVisiblePosition(const VisiblePosition&) const;
   unsigned selectionStart() const;
   unsigned selectionEnd() const;
   const AtomicString& selectionDirection() const;
@@ -88,7 +92,7 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
   virtual void setRangeText(const String& replacement,
                             unsigned start,
                             unsigned end,
-                            const String& selection_mode,
+                            const V8SelectionMode& selection_mode,
                             ExceptionState&);
   // Web-exposed setSelectionRange() function. This schedule to dispatch
   // 'select' event.
@@ -121,12 +125,13 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
   void CheckIfValueWasReverted(const String&);
   void ClearValueBeforeFirstUserEdit();
 
-  virtual String value() const = 0;
-  virtual void setValue(
+  virtual String Value() const = 0;
+  virtual void SetValue(
       const String&,
       TextFieldEventBehavior = TextFieldEventBehavior::kDispatchNoEvent,
       TextControlSetValueSelection =
-          TextControlSetValueSelection::kSetSelectionToEnd) = 0;
+          TextControlSetValueSelection::kSetSelectionToEnd,
+      WebAutofillState = WebAutofillState::kNotFilled) = 0;
 
   TextControlInnerEditorElement* InnerEditorElement() const {
     return inner_editor_;
@@ -144,13 +149,15 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
   String DirectionForFormData() const;
 
   // Set the value trimmed to the max length of the field and dispatch the input
-  // and change events.
-  void SetAutofillValue(const String& value);
+  // and change events. If |value| is empty, the autofill state is always
+  // set to WebAutofillState::kNotFilled.
+  void SetAutofillValue(const String& value,
+                        WebAutofillState = WebAutofillState::kAutofilled);
 
   virtual void SetSuggestedValue(const String& value);
   const String& SuggestedValue() const;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   ETextOverflow ValueForTextOverflow() const;
 
@@ -186,10 +193,10 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
   static unsigned IndexForPosition(HTMLElement* inner_editor, const Position&);
 
   void DispatchFocusEvent(Element* old_focused_element,
-                          WebFocusType,
+                          mojom::blink::FocusType,
                           InputDeviceCapabilities* source_capabilities) final;
   void DispatchBlurEvent(Element* new_focused_element,
-                         WebFocusType,
+                         mojom::blink::FocusType,
                          InputDeviceCapabilities* source_capabilities) final;
   void ScheduleSelectEvent();
   void DisabledOrReadonlyAttributeChanged(const QualifiedName&);
@@ -202,7 +209,8 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
   bool IsEmptySuggestedValue() const { return SuggestedValue().IsEmpty(); }
   // Called in dispatchFocusEvent(), after placeholder process, before calling
   // parent's dispatchFocusEvent().
-  virtual void HandleFocusEvent(Element* /* oldFocusedNode */, WebFocusType) {}
+  virtual void HandleFocusEvent(Element* /* oldFocusedNode */,
+                                mojom::blink::FocusType) {}
   // Called in dispatchBlurEvent(), after placeholder process, before calling
   // parent's dispatchBlurEvent().
   virtual void HandleBlurEvent() {}
@@ -231,6 +239,8 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
   String value_before_set_suggested_value_;
 
   FRIEND_TEST_ALL_PREFIXES(TextControlElementTest, IndexForPosition);
+  FRIEND_TEST_ALL_PREFIXES(HTMLTextAreaElementTest, ValueWithHardLineBreaks);
+  FRIEND_TEST_ALL_PREFIXES(HTMLTextAreaElementTest, ValueWithHardLineBreaksRtl);
 };
 
 inline bool IsTextControl(const Node& node) {
@@ -241,17 +251,16 @@ inline bool IsTextControl(const Node* node) {
   return node && IsTextControl(*node);
 }
 
-// We can't use DEFINE_TYPE_CASTS for TextControl because macro
-// names and the destination type name are not matched.
-// e.g. ToTextControl() returns TextControlElement.
+// ToTextControl() is stricter than To<TextControlElement>(). ToTextControl()
+// does not accept HTMLInputElement with non-text types.
 #define DEFINE_TEXT_CONTROL_CASTS(Type, ArgType)                              \
   inline Type* ToTextControl(ArgType* node) {                                 \
-    SECURITY_DCHECK(!node || IsTextControl(*node));                           \
-    return static_cast<Type*>(node);                                          \
+    DCHECK(!node || IsTextControl(*node));                                    \
+    return To<TextControlElement>(node);                                      \
   }                                                                           \
   inline Type& ToTextControl(ArgType& node) {                                 \
-    SECURITY_DCHECK(IsTextControl(node));                                     \
-    return static_cast<Type&>(node);                                          \
+    DCHECK(IsTextControl(node));                                              \
+    return To<TextControlElement>(node);                                      \
   }                                                                           \
   inline Type* ToTextControlOrNull(ArgType* node) {                           \
     return node && IsTextControl(*node) ? static_cast<Type*>(node) : nullptr; \
@@ -267,10 +276,18 @@ DEFINE_TEXT_CONTROL_CASTS(const TextControlElement, const Node);
 
 #undef DEFINE_TEXT_CONTROL_CASTS
 
+template <>
+struct DowncastTraits<TextControlElement> {
+  static bool AllowFrom(const Node& node) {
+    return node.HasTagName(html_names::kInputTag) ||
+           node.HasTagName(html_names::kTextareaTag);
+  }
+};
+
 TextControlElement* EnclosingTextControl(const Position&);
 TextControlElement* EnclosingTextControl(const PositionInFlatTree&);
-TextControlElement* EnclosingTextControl(const Node*);
+CORE_EXPORT TextControlElement* EnclosingTextControl(const Node*);
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_TEXT_CONTROL_ELEMENT_H_

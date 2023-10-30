@@ -26,13 +26,16 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TRANSFORMS_TRANSFORM_OPERATIONS_H_
 
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/platform/geometry/layout_size.h"
 #include "third_party/blink/renderer/platform/transforms/transform_operation.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "ui/gfx/geometry/size_f.h"
+
+namespace gfx {
+class BoxF;
+}
 
 namespace blink {
-class FloatBox;
 
 class PLATFORM_EXPORT EmptyTransformOperations final {
   DISALLOW_NEW();
@@ -42,7 +45,7 @@ class PLATFORM_EXPORT TransformOperations {
   DISALLOW_NEW();
 
  public:
-  explicit TransformOperations(bool make_identity = false);
+  TransformOperations() = default;
   TransformOperations(const EmptyTransformOperations&) {}
 
   bool operator==(const TransformOperations& o) const;
@@ -50,7 +53,7 @@ class PLATFORM_EXPORT TransformOperations {
 
   // Constructs a transformation matrix from the operations. The parameter
   // |border_box_size| is used when computing styles that are size-dependent.
-  void Apply(const FloatSize& border_box_size, TransformationMatrix& t) const {
+  void Apply(const gfx::SizeF& border_box_size, TransformationMatrix& t) const {
     for (auto& operation : operations_)
       operation->Apply(t, border_box_size);
   }
@@ -59,7 +62,7 @@ class PLATFORM_EXPORT TransformOperations {
   // |start|. This process facilitates mixing pairwise operations for a common
   // prefix and matrix interpolation for the remainder.  The parameter
   // |border_box_size| is used when computing styles that are size-dependent.
-  void ApplyRemaining(const FloatSize& border_box_size,
+  void ApplyRemaining(const gfx::SizeF& border_box_size,
                       wtf_size_t start,
                       TransformationMatrix& t) const;
 
@@ -72,6 +75,17 @@ class PLATFORM_EXPORT TransformOperations {
     return false;
   }
 
+  // Return true if any of the operation types are non-perspective 3D operation
+  // types (even if the values describe affine transforms).
+  bool HasNonPerspective3DOperation() const {
+    for (auto& operation : operations_) {
+      if (operation->Is3DOperation() &&
+          operation->GetType() != TransformOperation::kPerspective)
+        return true;
+    }
+    return false;
+  }
+
   bool PreservesAxisAlignment() const {
     for (auto& operation : operations_) {
       if (!operation->PreservesAxisAlignment())
@@ -80,8 +94,15 @@ class PLATFORM_EXPORT TransformOperations {
     return true;
   }
 
-  // Returns true if any operation has a non-trivial component in the Z
-  // axis.
+  bool IsIdentityOrTranslation() const {
+    for (auto& operation : operations_) {
+      if (!operation->IsIdentityOrTranslation())
+        return false;
+    }
+    return true;
+  }
+
+  // Returns true if any operation has a non-trivial component in the Z axis.
   bool HasNonTrivial3DComponent() const {
     for (auto& operation : operations_) {
       if (operation->HasNonTrivial3DComponent())
@@ -90,13 +111,17 @@ class PLATFORM_EXPORT TransformOperations {
     return false;
   }
 
-  bool DependsOnBoxSize() const {
+  // Returns true if any operation is perspective.
+  bool HasPerspective() const {
     for (auto& operation : operations_) {
-      if (operation->DependsOnBoxSize())
+      if (operation->GetType() == TransformOperation::kPerspective)
         return true;
     }
     return false;
   }
+
+  TransformOperation::BoxSizeDependency BoxSizeDependencies(
+      wtf_size_t start = 0) const;
 
   wtf_size_t MatchingPrefixLength(const TransformOperations&) const;
 
@@ -114,17 +139,12 @@ class PLATFORM_EXPORT TransformOperations {
     return index < operations_.size() ? operations_.at(index).get() : nullptr;
   }
 
-  bool BlendedBoundsForBox(const FloatBox&,
+  bool BlendedBoundsForBox(const gfx::BoxF&,
                            const TransformOperations& from,
                            const double& min_progress,
                            const double& max_progress,
-                           FloatBox* bounds) const;
+                           gfx::BoxF* bounds) const;
 
-  TransformOperations BlendPrefixByMatchingOperations(
-      const TransformOperations& from,
-      wtf_size_t matching_prefix_length,
-      double progress,
-      bool* success) const;
   scoped_refptr<TransformOperation> BlendRemainingByUsingMatrixInterpolation(
       const TransformOperations& from,
       wtf_size_t matching_prefix_length,
@@ -134,6 +154,10 @@ class PLATFORM_EXPORT TransformOperations {
                             double progress) const;
   TransformOperations Add(const TransformOperations& addend) const;
   TransformOperations Zoom(double factor) const;
+
+  // Perform accumulation of |to| onto |this|, as specified in
+  // https://drafts.csswg.org/css-transforms-2/#combining-transform-lists
+  TransformOperations Accumulate(const TransformOperations& to) const;
 
  private:
   Vector<scoped_refptr<TransformOperation>> operations_;

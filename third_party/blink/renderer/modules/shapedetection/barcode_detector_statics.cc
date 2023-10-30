@@ -4,11 +4,16 @@
 
 #include "third_party/blink/renderer/modules/shapedetection/barcode_detector_statics.h"
 
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
+#include "third_party/blink/public/common/privacy_budget/identifiable_token_builder.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/modules/shapedetection/detected_barcode.h"
+#include "third_party/blink/renderer/modules/shapedetection/barcode_detector.h"
+#include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
 
 namespace blink {
 
@@ -29,15 +34,16 @@ BarcodeDetectorStatics* BarcodeDetectorStatics::From(
 }
 
 BarcodeDetectorStatics::BarcodeDetectorStatics(ExecutionContext& document)
-    : Supplement<ExecutionContext>(document) {}
+    : Supplement<ExecutionContext>(document), service_(&document) {}
 
 BarcodeDetectorStatics::~BarcodeDetectorStatics() = default;
 
 void BarcodeDetectorStatics::CreateBarcodeDetection(
-    shape_detection::mojom::blink::BarcodeDetectionRequest request,
+    mojo::PendingReceiver<shape_detection::mojom::blink::BarcodeDetection>
+        receiver,
     shape_detection::mojom::blink::BarcodeDetectorOptionsPtr options) {
   EnsureServiceConnection();
-  service_->CreateBarcodeDetection(std::move(request), std::move(options));
+  service_->CreateBarcodeDetection(std::move(receiver), std::move(options));
 }
 
 ScriptPromise BarcodeDetectorStatics::EnumerateSupportedFormats(
@@ -52,22 +58,23 @@ ScriptPromise BarcodeDetectorStatics::EnumerateSupportedFormats(
   return promise;
 }
 
-void BarcodeDetectorStatics::Trace(Visitor* visitor) {
+void BarcodeDetectorStatics::Trace(Visitor* visitor) const {
   Supplement<ExecutionContext>::Trace(visitor);
+  visitor->Trace(service_);
   visitor->Trace(get_supported_format_requests_);
 }
 
 void BarcodeDetectorStatics::EnsureServiceConnection() {
-  if (service_)
+  if (service_.is_bound())
     return;
 
   ExecutionContext* context = GetSupplementable();
 
   // See https://bit.ly/2S0zRAS for task types.
   auto task_runner = context->GetTaskRunner(TaskType::kMiscPlatformAPI);
-  auto request = mojo::MakeRequest(&service_, task_runner);
-  context->GetInterfaceProvider()->GetInterface(std::move(request));
-  service_.set_connection_error_handler(WTF::Bind(
+  context->GetBrowserInterfaceBroker().GetInterface(
+      service_.BindNewPipeAndPassReceiver(task_runner));
+  service_.set_disconnect_handler(WTF::Bind(
       &BarcodeDetectorStatics::OnConnectionError, WrapWeakPersistent(this)));
 }
 
@@ -80,7 +87,19 @@ void BarcodeDetectorStatics::OnEnumerateSupportedFormats(
   Vector<WTF::String> results;
   results.ReserveInitialCapacity(results.size());
   for (const auto& format : formats)
-    results.push_back(DetectedBarcode::BarcodeFormatToString(format));
+    results.push_back(BarcodeDetector::BarcodeFormatToString(format));
+  if (IdentifiabilityStudySettings::Get()->ShouldSampleWebFeature(
+          WebFeature::kBarcodeDetector_GetSupportedFormats)) {
+    IdentifiableTokenBuilder builder;
+    for (const auto& format_string : results)
+      builder.AddToken(IdentifiabilityBenignStringToken(format_string));
+
+    ExecutionContext* context = GetSupplementable();
+    IdentifiabilityMetricBuilder(context->UkmSourceID())
+        .AddWebFeature(WebFeature::kBarcodeDetector_GetSupportedFormats,
+                       builder.GetToken())
+        .Record(context->UkmRecorder());
+  }
   resolver->Resolve(results);
 }
 

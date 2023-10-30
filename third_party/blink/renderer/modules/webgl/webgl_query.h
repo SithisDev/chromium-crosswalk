@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_WEBGL_QUERY_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_WEBGL_QUERY_H_
 
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_shared_platform_3d_object.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 
@@ -25,8 +25,6 @@ class WebGLQuery : public WebGLSharedPlatform3DObject {
  public:
   explicit WebGLQuery(WebGL2RenderingContextBase*);
   ~WebGLQuery() override;
-
-  static WebGLQuery* Create(WebGL2RenderingContextBase*);
 
   void SetTarget(GLenum);
   bool HasTarget() const { return target_ != 0; }

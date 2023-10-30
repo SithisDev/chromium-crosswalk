@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NGPageLayoutAlgorithm_h
-#define NGPageLayoutAlgorithm_h
+#ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_PAGE_LAYOUT_ALGORITHM_H_
+#define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_PAGE_LAYOUT_ALGORITHM_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_algorithm.h"
 
 #include "third_party/blink/renderer/core/layout/ng/ng_box_fragment_builder.h"
@@ -23,19 +24,15 @@ class CORE_EXPORT NGPageLayoutAlgorithm
  public:
   NGPageLayoutAlgorithm(const NGLayoutAlgorithmParams& params);
 
-  scoped_refptr<const NGLayoutResult> Layout() override;
+  const NGLayoutResult* Layout() override;
 
-  base::Optional<MinMaxSize> ComputeMinMaxSize(
-      const MinMaxSizeInput&) const override;
+  MinMaxSizesResult ComputeMinMaxSizes(const MinMaxSizesFloatInput&) override;
 
  private:
   NGConstraintSpace CreateConstraintSpaceForPages(
       const LogicalSize& size) const;
-
-  NGBoxStrut border_padding_;
-  NGBoxStrut border_scrollbar_padding_;
 };
 
 }  // namespace blink
 
-#endif  // NGPageLayoutAlgorithm_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_PAGE_LAYOUT_ALGORITHM_H_

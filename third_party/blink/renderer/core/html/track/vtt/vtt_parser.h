@@ -38,7 +38,7 @@
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_cue.h"
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_tokenizer.h"
 #include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -53,12 +53,12 @@ class VTTParserClient : public GarbageCollectedMixin {
   virtual void NewCuesParsed() = 0;
   virtual void FileFailedToParse() = 0;
 
-  void Trace(Visitor* visitor) override {}
+  void Trace(Visitor* visitor) const override {}
 };
 
 // Implementation of the WebVTT parser algorithm.
 // https://w3c.github.io/webvtt/#webvtt-parser-algorithm
-class VTTParser final : public GarbageCollectedFinalized<VTTParser> {
+class VTTParser final : public GarbageCollected<VTTParser> {
  public:
   enum ParseState {
     kInitial,
@@ -67,7 +67,8 @@ class VTTParser final : public GarbageCollectedFinalized<VTTParser> {
     kTimingsAndSettings,
     kCueText,
     kRegion,
-    kBadCue
+    kBadCue,
+    kStyle
   };
 
   VTTParser(VTTParserClient*, Document&);
@@ -95,11 +96,12 @@ class VTTParser final : public GarbageCollectedFinalized<VTTParser> {
   // Useful functions for parsing percentage settings.
   static bool ParsePercentageValue(VTTScanner& value_scanner,
                                    double& percentage);
-  static bool ParsePercentageValuePair(VTTScanner&, char, DoublePoint&);
+  static bool ParsePercentageValuePair(VTTScanner&, char, gfx::PointF&);
 
   // Create the DocumentFragment representation of the WebVTT cue text.
   static DocumentFragment* CreateDocumentFragmentFromCueText(Document&,
-                                                             const String&);
+                                                             const String&,
+                                                             TextTrack*);
 
   // Input data to the parser to parse.
   void ParseBytes(const char* data, size_t length);
@@ -108,7 +110,10 @@ class VTTParser final : public GarbageCollectedFinalized<VTTParser> {
   // Transfers ownership of last parsed cues to caller.
   void GetNewCues(HeapVector<Member<TextTrackCue>>&);
 
-  void Trace(Visitor*);
+  // Transfers ownership of last parsed style sheets to caller.
+  void GetNewStyleSheets(HeapVector<Member<CSSStyleSheet>>&);
+
+  void Trace(Visitor*) const;
 
  private:
   Member<Document> document_;
@@ -125,9 +130,9 @@ class VTTParser final : public GarbageCollectedFinalized<VTTParser> {
   ParseState CollectRegionSettings(const String&);
   ParseState CollectWebVTTBlock(const String&);
   ParseState CheckAndRecoverCue(const String& line);
+  ParseState CollectStyleSheet(const String& line);
   bool CheckAndCreateRegion(const String& line);
   bool CheckAndStoreRegion(const String& line);
-
   void CreateNewCue();
   void ResetCueValues();
 
@@ -143,12 +148,15 @@ class VTTParser final : public GarbageCollectedFinalized<VTTParser> {
   String current_settings_;
   Member<VTTRegion> current_region_;
   Member<VTTParserClient> client_;
-
+  HeapVector<Member<CSSStyleSheet>> style_sheets_;
   HeapVector<Member<TextTrackCue>> cue_list_;
+
+  // Used for histogram metric logging only.
+  bool contains_style_block_;
 
   VTTRegionMap region_map_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_TRACK_VTT_VTT_PARSER_H_

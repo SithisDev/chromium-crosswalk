@@ -9,8 +9,8 @@
 #include "third_party/blink/renderer/core/xml/xpath_expression_node.h"  // EvaluationContext
 #include "third_party/blink/renderer/core/xml/xpath_predicate.h"  // Number, StringExpression
 #include "third_party/blink/renderer/core/xml/xpath_value.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"  // HeapVector, Member, etc.
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"  // HeapVector, Member, etc.
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 #include <cmath>
@@ -25,13 +25,15 @@ class XPathContext {
 
  public:
   XPathContext()
-      : document_(MakeGarbageCollected<Document>()), context_(*document_) {}
+      : document_(Document::CreateForTest()),
+        context_(*document_, had_type_conversion_error_) {}
 
   xpath::EvaluationContext& Context() { return context_; }
   Document& GetDocument() { return *document_; }
 
  private:
-  const Member<Document> document_;
+  Document* const document_;
+  bool had_type_conversion_error_ = false;
   xpath::EvaluationContext context_;
 };
 

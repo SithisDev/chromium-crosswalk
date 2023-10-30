@@ -5,17 +5,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_STRING_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_STRING_VALUE_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
-class CSSStringValue : public CSSValue {
+class CORE_EXPORT CSSStringValue : public CSSValue {
  public:
   CSSStringValue(const String&);
 
-  String Value() const { return string_; }
+  const String& Value() const { return string_; }
 
   String CustomCSSText() const;
 
@@ -23,7 +24,7 @@ class CSSStringValue : public CSSValue {
     return string_ == other.string_;
   }
 
-  void TraceAfterDispatch(blink::Visitor*);
+  void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   String string_;

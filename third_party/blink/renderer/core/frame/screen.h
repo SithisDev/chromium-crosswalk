@@ -30,23 +30,31 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_SCREEN_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/core/dom/events/event_target.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+
+namespace display {
+struct ScreenInfo;
+}
 
 namespace blink {
 
-class LocalFrame;
+class LocalDOMWindow;
 
-class CORE_EXPORT Screen final : public ScriptWrappable,
-                                 public DOMWindowClient,
-                                 public Supplementable<Screen> {
+class CORE_EXPORT Screen : public EventTargetWithInlineData,
+                           public ExecutionContextClient,
+                           public Supplementable<Screen> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(Screen);
 
  public:
-  explicit Screen(LocalFrame*);
+  explicit Screen(LocalDOMWindow*, int64_t display_id);
+
+  static bool AreWebExposedScreenPropertiesEqual(
+      const display::ScreenInfo& prev,
+      const display::ScreenInfo& current);
 
   int height() const;
   int width() const;
@@ -57,7 +65,27 @@ class CORE_EXPORT Screen final : public ScriptWrappable,
   int availHeight() const;
   int availWidth() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
+
+  // EventTargetWithInlineData:
+  const WTF::AtomicString& InterfaceName() const override;
+  ExecutionContext* GetExecutionContext() const override;
+
+  // Whether the device’s visual output extends over multiple screens.
+  // https://w3c.github.io/window-placement/
+  bool isExtended() const;
+  // Fired when the window’s screen or that screen's attributes change.
+  // https://w3c.github.io/window-placement/
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(change, kChange)
+
+  // Not web-exposed; for internal usage only.
+  static constexpr int64_t kInvalidDisplayId = -1;
+  int64_t DisplayId() const { return display_id_; }
+  void UpdateDisplayId(int64_t display_id) { display_id_ = display_id; }
+
+ protected:
+  const display::ScreenInfo& GetScreenInfo() const;
+  int64_t display_id_;
 };
 
 }  // namespace blink

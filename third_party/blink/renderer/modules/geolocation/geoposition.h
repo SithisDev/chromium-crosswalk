@@ -26,12 +26,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_GEOLOCATION_GEOPOSITION_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_GEOLOCATION_GEOPOSITION_H_
 
-#include "third_party/blink/renderer/core/dom/dom_time_stamp.h"
+#include "third_party/blink/renderer/core/timing/epoch_time_stamp.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
-#include "third_party/blink/renderer/modules/geolocation/coordinates.h"
+#include "third_party/blink/renderer/modules/geolocation/geolocation_coordinates.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -39,22 +38,22 @@ class Geoposition final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  Geoposition(Coordinates* coordinates, DOMTimeStamp timestamp)
+  Geoposition(GeolocationCoordinates* coordinates, EpochTimeStamp timestamp)
       : coordinates_(coordinates), timestamp_(timestamp) {
     DCHECK(coordinates_);
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(coordinates_);
     ScriptWrappable::Trace(visitor);
   }
 
-  DOMTimeStamp timestamp() const { return timestamp_; }
-  Coordinates* coords() const { return coordinates_; }
+  EpochTimeStamp timestamp() const { return timestamp_; }
+  GeolocationCoordinates* coords() const { return coordinates_; }
 
  private:
-  Member<Coordinates> coordinates_;
-  DOMTimeStamp timestamp_;
+  Member<GeolocationCoordinates> coordinates_;
+  EpochTimeStamp timestamp_;
 };
 
 }  // namespace blink

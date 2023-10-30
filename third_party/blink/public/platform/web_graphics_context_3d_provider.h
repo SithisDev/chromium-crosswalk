@@ -35,7 +35,7 @@
 #include "base/callback_forward.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 
-class GrContext;
+class GrDirectContext;
 
 namespace cc {
 class ImageDecodeCache;
@@ -49,21 +49,27 @@ class VideoFrame;
 
 namespace gpu {
 struct Capabilities;
+class GLHelper;
 struct GpuFeatureInfo;
+class InterfaceBase;
 class SharedImageInterface;
 
 namespace gles2 {
 class GLES2Interface;
 }
 
+namespace raster {
+class RasterInterface;
+}
+
 namespace webgpu {
 class WebGPUInterface;
 }
-}
+}  // namespace gpu
 
 namespace viz {
-class GLHelper;
-}
+class RasterContextProvider;
+}  // namespace viz
 
 namespace blink {
 enum AntialiasingMode {
@@ -71,12 +77,11 @@ enum AntialiasingMode {
   kAntialiasingModeNone,
   kAntialiasingModeMSAAImplicitResolve,
   kAntialiasingModeMSAAExplicitResolve,
-  kAntialiasingModeScreenSpaceAntialiasing,
 };
 
 struct WebglPreferences {
   AntialiasingMode anti_aliasing_mode = kAntialiasingModeUnspecified;
-  uint32_t msaa_sample_count = 8;
+  uint32_t msaa_sample_count = 4;
   uint32_t eqaa_storage_sample_count = 4;
   // WebGL-specific numeric limits.
   uint32_t max_active_webgl_contexts = 0;
@@ -87,16 +92,19 @@ class WebGraphicsContext3DProvider {
  public:
   virtual ~WebGraphicsContext3DProvider() = default;
 
+  virtual gpu::InterfaceBase* InterfaceBase() = 0;
   virtual gpu::gles2::GLES2Interface* ContextGL() = 0;
+  virtual gpu::raster::RasterInterface* RasterInterface() = 0;
   virtual gpu::webgpu::WebGPUInterface* WebGPUInterface() = 0;
+  virtual bool IsContextLost() = 0;  // Has the GPU driver lost this context?
   virtual bool BindToCurrentThread() = 0;
-  virtual GrContext* GetGrContext() = 0;
+  virtual GrDirectContext* GetGrContext() = 0;
   virtual const gpu::Capabilities& GetCapabilities() const = 0;
   virtual const gpu::GpuFeatureInfo& GetGpuFeatureInfo() const = 0;
   virtual const WebglPreferences& GetWebglPreferences() const = 0;
-  // Creates a viz::GLHelper after first call and returns that instance. This
+  // Creates a gpu::GLHelper after first call and returns that instance. This
   // method cannot return null.
-  virtual viz::GLHelper* GetGLHelper() = 0;
+  virtual gpu::GLHelper* GetGLHelper() = 0;
 
   virtual void SetLostContextCallback(base::RepeatingClosure) = 0;
   virtual void SetErrorMessageCallback(
@@ -107,8 +115,9 @@ class WebGraphicsContext3DProvider {
   virtual void CopyVideoFrame(media::PaintCanvasVideoRenderer* video_render,
                               media::VideoFrame* video_frame,
                               cc::PaintCanvas* canvas) = 0;
+  virtual viz::RasterContextProvider* RasterContextProvider() const = 0;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_GRAPHICS_CONTEXT_3D_PROVIDER_H_

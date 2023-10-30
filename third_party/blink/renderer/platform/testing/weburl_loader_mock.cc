@@ -6,33 +6,23 @@
 
 #include <utility>
 
+#include "net/cookies/site_for_cookies.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
 #include "third_party/blink/public/platform/url_conversion.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_url_error.h"
 #include "third_party/blink/public/platform/web_url_loader_client.h"
+#include "third_party/blink/public/platform/web_url_request_extra_data.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_task_runner.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/testing/weburl_loader_mock_factory_impl.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 
 namespace blink {
 
-namespace {
-
-void AssertFallbackLoaderAvailability(const WebURL& url,
-                                      const WebURLLoader* default_loader) {
-  DCHECK(KURL(url).ProtocolIsData())
-      << "shouldn't be falling back: " << url.GetString().Utf8();
-  DCHECK(default_loader) << "default_loader wasn't set: "
-                         << url.GetString().Utf8();
-}
-
-}  // namespace
-
-WebURLLoaderMock::WebURLLoaderMock(WebURLLoaderMockFactoryImpl* factory,
-                                   std::unique_ptr<WebURLLoader> default_loader)
-    : factory_(factory), default_loader_(std::move(default_loader)) {}
+WebURLLoaderMock::WebURLLoaderMock(WebURLLoaderMockFactoryImpl* factory)
+    : factory_(factory) {}
 
 WebURLLoaderMock::~WebURLLoaderMock() {
   Cancel();
@@ -42,8 +32,7 @@ void WebURLLoaderMock::ServeAsynchronousRequest(
     WebURLLoaderTestDelegate* delegate,
     const WebURLResponse& response,
     const WebData& data,
-    const base::Optional<WebURLError>& error) {
-  DCHECK(!using_default_loader_);
+    const absl::optional<WebURLError>& error) {
   if (!client_)
     return;
 
@@ -71,7 +60,8 @@ void WebURLLoaderMock::ServeAsynchronousRequest(
   data.ForEachSegment([this, &delegate, &self](const char* segment,
                                                size_t segment_size,
                                                size_t segment_offset) {
-    delegate->DidReceiveData(client_, segment, segment_size);
+    delegate->DidReceiveData(client_, segment,
+                             base::checked_cast<int>(segment_size));
     // DidReceiveData() may clear the |self| weak ptr.  We stop iterating
     // when that happens.
     return self;
@@ -85,7 +75,7 @@ void WebURLLoaderMock::ServeAsynchronousRequest(
 }
 
 WebURL WebURLLoaderMock::ServeRedirect(
-    const WebURLRequest& request,
+    const WebString& method,
     const WebURLResponse& redirect_response) {
   KURL redirect_url(redirect_response.HttpHeaderField("Location"));
 
@@ -93,10 +83,10 @@ WebURL WebURLLoaderMock::ServeRedirect(
 
   bool report_raw_headers = false;
   bool follow = client_->WillFollowRedirect(
-      redirect_url, redirect_url,
-      WebSecurityOrigin::Create(WebURL(redirect_url)), WebString(),
-      network::mojom::ReferrerPolicy::kDefault, request.HttpMethod(),
-      redirect_response, report_raw_headers);
+      redirect_url, net::SiteForCookies::FromUrl(GURL(redirect_url)),
+      WebString(), network::mojom::ReferrerPolicy::kDefault, method,
+      redirect_response, report_raw_headers, nullptr /* removed_headers */,
+      false /* insecure_scheme_was_upgraded */);
   // |this| might be deleted in willFollowRedirect().
   if (!self)
     return redirect_url;
@@ -108,57 +98,47 @@ WebURL WebURLLoaderMock::ServeRedirect(
 }
 
 void WebURLLoaderMock::LoadSynchronously(
-    const WebURLRequest& request,
+    std::unique_ptr<network::ResourceRequest> request,
+    scoped_refptr<WebURLRequestExtraData> url_request_extra_data,
+    bool pass_response_pipe_to_client,
+    bool no_mime_sniffing,
+    base::TimeDelta timeout_interval,
     WebURLLoaderClient* client,
     WebURLResponse& response,
-    base::Optional<WebURLError>& error,
+    absl::optional<WebURLError>& error,
     WebData& data,
     int64_t& encoded_data_length,
     int64_t& encoded_body_length,
-    blink::WebBlobInfo& downloaded_blob) {
-  if (factory_->IsMockedURL(request.Url())) {
-    factory_->LoadSynchronously(request, &response, &error, &data,
-                                &encoded_data_length);
-    return;
-  }
-  AssertFallbackLoaderAvailability(request.Url(), default_loader_.get());
-  using_default_loader_ = true;
-  default_loader_->LoadSynchronously(request, client, response, error, data,
-                                     encoded_data_length, encoded_body_length,
-                                     downloaded_blob);
+    blink::WebBlobInfo& downloaded_blob,
+    std::unique_ptr<blink::ResourceLoadInfoNotifierWrapper>
+        resource_load_info_notifier_wrapper) {
+  DCHECK(factory_->IsMockedURL(WebURL(KURL(request->url)))) << request->url;
+  factory_->LoadSynchronously(std::move(request), &response, &error, &data,
+                              &encoded_data_length);
 }
 
-void WebURLLoaderMock::LoadAsynchronously(const WebURLRequest& request,
-                                          WebURLLoaderClient* client) {
+void WebURLLoaderMock::LoadAsynchronously(
+    std::unique_ptr<network::ResourceRequest> request,
+    scoped_refptr<WebURLRequestExtraData> url_request_extra_data,
+    bool no_mime_sniffing,
+    std::unique_ptr<blink::ResourceLoadInfoNotifierWrapper>
+        resource_load_info_notifier_wrapper,
+    WebURLLoaderClient* client) {
   DCHECK(client);
-  if (factory_->IsMockedURL(request.Url())) {
-    client_ = client;
-    factory_->LoadAsynchronouly(request, this);
-    return;
-  }
-  AssertFallbackLoaderAvailability(request.Url(), default_loader_.get());
-  using_default_loader_ = true;
-  default_loader_->LoadAsynchronously(request, client);
+  DCHECK(factory_->IsMockedURL(WebURL(KURL(request->url)))) << request->url;
+  client_ = client;
+  factory_->LoadAsynchronouly(std::move(request), this);
 }
 
 void WebURLLoaderMock::Cancel() {
-  if (using_default_loader_ && default_loader_) {
-    default_loader_.reset();
-    return;
-  }
   client_ = nullptr;
   factory_->CancelLoad(this);
 }
 
-void WebURLLoaderMock::SetDefersLoading(bool deferred) {
-  is_deferred_ = deferred;
-  if (using_default_loader_) {
-    default_loader_->SetDefersLoading(deferred);
-    return;
-  }
-
+void WebURLLoaderMock::Freeze(WebLoaderFreezeMode mode) {
+  is_deferred_ = (mode != WebLoaderFreezeMode::kNone);
   // Ignores setDefersLoading(false) safely.
-  if (!deferred)
+  if (!is_deferred_)
     return;
 
   // setDefersLoading(true) is not implemented.
@@ -168,7 +148,8 @@ void WebURLLoaderMock::SetDefersLoading(bool deferred) {
 void WebURLLoaderMock::DidChangePriority(WebURLRequest::Priority new_priority,
                                          int intra_priority_value) {}
 
-scoped_refptr<base::SingleThreadTaskRunner> WebURLLoaderMock::GetTaskRunner() {
+scoped_refptr<base::SingleThreadTaskRunner>
+WebURLLoaderMock::GetTaskRunnerForBodyLoader() {
   return base::MakeRefCounted<scheduler::FakeTaskRunner>();
 }
 

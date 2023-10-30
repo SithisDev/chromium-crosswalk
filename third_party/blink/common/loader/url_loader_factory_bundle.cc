@@ -6,7 +6,9 @@
 
 #include <utility>
 
-#include "base/logging.h"
+#include "base/no_destructor.h"
+#include "base/notreached.h"
+#include "services/network/public/cpp/not_implemented_url_loader_factory.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "url/gurl.h"
@@ -26,39 +28,43 @@ void BindPendingRemoteMapToRemoteMap(
         it.second;
     if ((*target)[key].is_bound())
       (*target)[key].reset();
-    if (pending_factory)  // factory_info.is_valid().
+    if (pending_factory)  // pending_factory.is_valid().
       (*target)[key].Bind(std::move(pending_factory));
   }
 }
 
 }  // namespace
 
-URLLoaderFactoryBundleInfo::URLLoaderFactoryBundleInfo() = default;
+PendingURLLoaderFactoryBundle::PendingURLLoaderFactoryBundle() = default;
 
-URLLoaderFactoryBundleInfo::URLLoaderFactoryBundleInfo(
+PendingURLLoaderFactoryBundle::PendingURLLoaderFactoryBundle(
     mojo::PendingRemote<network::mojom::URLLoaderFactory>
         pending_default_factory,
     SchemeMap pending_scheme_specific_factories,
-    OriginMap pending_initiator_specific_factories,
+    OriginMap pending_isolated_world_factories,
     bool bypass_redirect_checks)
     : pending_default_factory_(std::move(pending_default_factory)),
       pending_scheme_specific_factories_(
           std::move(pending_scheme_specific_factories)),
-      pending_initiator_specific_factories_(
-          std::move(pending_initiator_specific_factories)),
+      pending_isolated_world_factories_(
+          std::move(pending_isolated_world_factories)),
       bypass_redirect_checks_(bypass_redirect_checks) {}
 
-URLLoaderFactoryBundleInfo::~URLLoaderFactoryBundleInfo() = default;
+PendingURLLoaderFactoryBundle::~PendingURLLoaderFactoryBundle() = default;
+
+bool PendingURLLoaderFactoryBundle::
+    IsTrackedChildPendingURLLoaderFactoryBundle() const {
+  return false;
+}
 
 scoped_refptr<network::SharedURLLoaderFactory>
-URLLoaderFactoryBundleInfo::CreateFactory() {
-  auto other = std::make_unique<URLLoaderFactoryBundleInfo>();
+PendingURLLoaderFactoryBundle::CreateFactory() {
+  auto other = std::make_unique<PendingURLLoaderFactoryBundle>();
   other->pending_default_factory_ = std::move(pending_default_factory_);
-  other->pending_appcache_factory_ = std::move(pending_appcache_factory_);
   other->pending_scheme_specific_factories_ =
       std::move(pending_scheme_specific_factories_);
-  other->pending_initiator_specific_factories_ =
-      std::move(pending_initiator_specific_factories_);
+  other->pending_isolated_world_factories_ =
+      std::move(pending_isolated_world_factories_);
   other->bypass_redirect_checks_ = bypass_redirect_checks_;
 
   return base::MakeRefCounted<URLLoaderFactoryBundle>(std::move(other));
@@ -69,8 +75,8 @@ URLLoaderFactoryBundleInfo::CreateFactory() {
 URLLoaderFactoryBundle::URLLoaderFactoryBundle() = default;
 
 URLLoaderFactoryBundle::URLLoaderFactoryBundle(
-    std::unique_ptr<URLLoaderFactoryBundleInfo> info) {
-  Update(std::move(info));
+    std::unique_ptr<PendingURLLoaderFactoryBundle> pending_factory) {
+  Update(std::move(pending_factory));
 }
 
 URLLoaderFactoryBundle::~URLLoaderFactoryBundle() = default;
@@ -81,40 +87,51 @@ network::mojom::URLLoaderFactory* URLLoaderFactoryBundle::GetFactory(
   if (it != scheme_specific_factories_.end())
     return it->second.get();
 
-  if (request.request_initiator.has_value()) {
+  if (request.isolated_world_origin.has_value()) {
     auto it2 =
-        initiator_specific_factories_.find(request.request_initiator.value());
-    if (it2 != initiator_specific_factories_.end())
+        isolated_world_factories_.find(request.isolated_world_origin.value());
+    if (it2 != isolated_world_factories_.end())
       return it2->second.get();
   }
 
-  // AppCache factory must be used if it's given.
-  if (appcache_factory_)
-    return appcache_factory_.get();
+  if (!default_factory_.is_bound()) {
+    // Hitting the NOTREACHED below means that a subresource load has
+    // unexpectedly happened in a speculative frame (or in a test frame created
+    // via RenderViewTest).  This most likely indicates a bug somewhere else.
+    NOTREACHED();
+
+    // TODO(https://crbug.com/1300973): Once known issues are fixed, remove the
+    // NotImplementedURLLoaderFactory (i.e. trust the NOTREACHED above, replace
+    // it with an equivalent DCHECK, and accept crashing if a nullptr is
+    // returned from this method).
+    static const base::NoDestructor<
+        mojo::Remote<network::mojom::URLLoaderFactory>>
+        s_fallback_factory(network::NotImplementedURLLoaderFactory::Create());
+    return s_fallback_factory->get();
+  }
 
   return default_factory_.get();
 }
 
 void URLLoaderFactoryBundle::CreateLoaderAndStart(
-    network::mojom::URLLoaderRequest loader,
-    int32_t routing_id,
+    mojo::PendingReceiver<network::mojom::URLLoader> loader,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& request,
-    network::mojom::URLLoaderClientPtr client,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation) {
   network::mojom::URLLoaderFactory* factory_ptr = GetFactory(request);
-  factory_ptr->CreateLoaderAndStart(std::move(loader), routing_id, request_id,
-                                    options, request, std::move(client),
+  factory_ptr->CreateLoaderAndStart(std::move(loader), request_id, options,
+                                    request, std::move(client),
                                     traffic_annotation);
 }
 
 void URLLoaderFactoryBundle::Clone(
-    network::mojom::URLLoaderFactoryRequest request) {
+    mojo::PendingReceiver<network::mojom::URLLoaderFactory> receiver) {
   NOTREACHED();
 }
 
-std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+std::unique_ptr<network::PendingSharedURLLoaderFactory>
 URLLoaderFactoryBundle::Clone() {
   mojo::PendingRemote<network::mojom::URLLoaderFactory> pending_default_factory;
   if (default_factory_) {
@@ -122,16 +139,12 @@ URLLoaderFactoryBundle::Clone() {
         pending_default_factory.InitWithNewPipeAndPassReceiver());
   }
 
-  auto pending_factories = std::make_unique<blink::URLLoaderFactoryBundleInfo>(
-      std::move(pending_default_factory),
-      CloneRemoteMapToPendingRemoteMap(scheme_specific_factories_),
-      CloneRemoteMapToPendingRemoteMap(initiator_specific_factories_),
-      bypass_redirect_checks_);
-
-  if (appcache_factory_) {
-    appcache_factory_->Clone(pending_factories->pending_appcache_factory()
-                                 .InitWithNewPipeAndPassReceiver());
-  }
+  auto pending_factories =
+      std::make_unique<blink::PendingURLLoaderFactoryBundle>(
+          std::move(pending_default_factory),
+          CloneRemoteMapToPendingRemoteMap(scheme_specific_factories_),
+          CloneRemoteMapToPendingRemoteMap(isolated_world_factories_),
+          bypass_redirect_checks_);
 
   return pending_factories;
 }
@@ -141,21 +154,18 @@ bool URLLoaderFactoryBundle::BypassRedirectChecks() const {
 }
 
 void URLLoaderFactoryBundle::Update(
-    std::unique_ptr<URLLoaderFactoryBundleInfo> pending_factories) {
+    std::unique_ptr<PendingURLLoaderFactoryBundle> pending_factories) {
   if (pending_factories->pending_default_factory()) {
+    default_factory_.reset();
     default_factory_.Bind(
         std::move(pending_factories->pending_default_factory()));
-  }
-  if (pending_factories->pending_appcache_factory()) {
-    appcache_factory_.Bind(
-        std::move(pending_factories->pending_appcache_factory()));
   }
   BindPendingRemoteMapToRemoteMap(
       &scheme_specific_factories_,
       std::move(pending_factories->pending_scheme_specific_factories()));
   BindPendingRemoteMapToRemoteMap(
-      &initiator_specific_factories_,
-      std::move(pending_factories->pending_initiator_specific_factories()));
+      &isolated_world_factories_,
+      std::move(pending_factories->pending_isolated_world_factories()));
   bypass_redirect_checks_ = pending_factories->bypass_redirect_checks();
 }
 

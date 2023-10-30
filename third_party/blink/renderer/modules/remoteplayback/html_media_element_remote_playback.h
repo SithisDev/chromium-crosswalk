@@ -7,7 +7,6 @@
 
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
@@ -23,9 +22,9 @@ class MODULES_EXPORT HTMLMediaElementRemotePlayback final {
   STATIC_ONLY(HTMLMediaElementRemotePlayback);
 
  public:
-  static bool FastHasAttribute(const QualifiedName&, const HTMLMediaElement&);
-  static void SetBooleanAttribute(const QualifiedName&,
-                                  HTMLMediaElement&,
+  static bool FastHasAttribute(const HTMLMediaElement&, const QualifiedName&);
+  static void SetBooleanAttribute(HTMLMediaElement&,
+                                  const QualifiedName&,
                                   bool);
 
   static HTMLMediaElementRemotePlayback& From(HTMLMediaElement&);

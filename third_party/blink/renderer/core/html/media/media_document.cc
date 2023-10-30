@@ -25,13 +25,10 @@
 
 #include "third_party/blink/renderer/core/html/media/media_document.h"
 
-#include "base/macros.h"
-#include "third_party/blink/renderer/bindings/core/v8/add_event_listener_options_or_boolean.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/raw_data_document_parser.h"
-#include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
@@ -47,13 +44,11 @@
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
 
 namespace blink {
-
-using namespace html_names;
 
 class MediaDocumentParser : public RawDataDocumentParser {
  public:
@@ -87,18 +82,20 @@ void MediaDocumentParser::CreateDocumentStructure() {
     return;  // runScriptsAtDocumentElementAvailable can detach the frame.
 
   auto* head = MakeGarbageCollected<HTMLHeadElement>(*GetDocument());
-  auto* meta = MakeGarbageCollected<HTMLMetaElement>(*GetDocument());
-  meta->setAttribute(kNameAttr, "viewport");
-  meta->setAttribute(kContentAttr, "width=device-width");
+  auto* meta = MakeGarbageCollected<HTMLMetaElement>(*GetDocument(),
+                                                     CreateElementFlags());
+  meta->setAttribute(html_names::kNameAttr, "viewport");
+  meta->setAttribute(html_names::kContentAttr, "width=device-width");
   head->AppendChild(meta);
 
   auto* media = MakeGarbageCollected<HTMLVideoElement>(*GetDocument());
-  media->setAttribute(kControlsAttr, "");
-  media->setAttribute(kAutoplayAttr, "");
-  media->setAttribute(kNameAttr, "media");
+  media->setAttribute(html_names::kControlsAttr, "");
+  media->setAttribute(html_names::kAutoplayAttr, "");
+  media->setAttribute(html_names::kNameAttr, "media");
 
   auto* source = MakeGarbageCollected<HTMLSourceElement>(*GetDocument());
-  source->setAttribute(kSrcAttr, AtomicString(GetDocument()->Url()));
+  source->setAttribute(html_names::kSrcAttr,
+                       AtomicString(GetDocument()->Url()));
 
   if (DocumentLoader* loader = GetDocument()->Loader())
     source->setType(loader->MimeType());
@@ -123,11 +120,11 @@ void MediaDocumentParser::Finish() {
 
 MediaDocument::MediaDocument(const DocumentInit& initializer)
     : HTMLDocument(initializer, kMediaDocumentClass) {
-  SetCompatibilityMode(kQuirksMode);
+  SetCompatibilityMode(kNoQuirksMode);
   LockCompatibilityMode();
 
   // Set the autoplay policy to kNoUserGestureRequired.
-  if (GetSettings() && IsInMainFrame()) {
+  if (GetSettings() && IsInOutermostMainFrame()) {
     GetSettings()->SetAutoplayPolicy(
         AutoplayPolicy::Type::kNoUserGestureRequired);
   }
@@ -142,15 +139,15 @@ void MediaDocument::DefaultEventHandler(Event& event) {
   if (!target_node)
     return;
 
-  if (event.type() == event_type_names::kKeydown && event.IsKeyboardEvent()) {
+  auto* keyboard_event = DynamicTo<KeyboardEvent>(event);
+  if (event.type() == event_type_names::kKeydown && keyboard_event) {
     HTMLVideoElement* video =
         Traversal<HTMLVideoElement>::FirstWithin(*target_node);
     if (!video)
       return;
 
-    auto& keyboard_event = ToKeyboardEvent(event);
-    if (keyboard_event.key() == " " ||
-        keyboard_event.keyCode() == VKEY_MEDIA_PLAY_PAUSE) {
+    if (keyboard_event->key() == " " ||
+        keyboard_event->keyCode() == VKEY_MEDIA_PLAY_PAUSE) {
       // space or media key (play/pause)
       video->TogglePlayState();
       event.SetDefaultHandled();

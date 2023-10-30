@@ -5,21 +5,27 @@
 #include "third_party/blink/renderer/core/loader/modulescript/module_tree_linker.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/public/platform/web_url_request.h"
+#include "third_party/blink/renderer/bindings/core/v8/boxed_v8_module.h"
 #include "third_party/blink/renderer/bindings/core/v8/module_record.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/loader/modulescript/module_script_creation_params.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_tree_linker_registry.h"
 #include "third_party/blink/renderer/core/script/js_module_script.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
-#include "third_party/blink/renderer/core/testing/dummy_modulator.h"
+#include "third_party/blink/renderer/core/testing/module_test_base.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_request.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -33,7 +39,7 @@ class TestModuleTreeClient final : public ModuleTreeClient {
  public:
   TestModuleTreeClient() = default;
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(module_script_);
     ModuleTreeClient::Trace(visitor);
   }
@@ -51,202 +57,84 @@ class TestModuleTreeClient final : public ModuleTreeClient {
   Member<ModuleScript> module_script_;
 };
 
-}  // namespace
-
-class ModuleTreeLinkerTestModulator final : public DummyModulator {
+class SimModuleRequest : public SimRequestBase {
  public:
-  ModuleTreeLinkerTestModulator(ScriptState* script_state)
-      : script_state_(script_state) {}
-  ~ModuleTreeLinkerTestModulator() override = default;
+  explicit SimModuleRequest(KURL url)
+      : SimRequestBase(std::move(url),
+                       "text/javascript",
+                       /* start_immediately=*/false) {}
 
-  void Trace(blink::Visitor*) override;
-
-  enum class ResolveResult { kFailure, kSuccess };
-
-  // Resolve last |Modulator::FetchSingle()| call.
-  ModuleScript* ResolveSingleModuleScriptFetch(
-      const KURL& url,
-      const Vector<String>& dependency_module_specifiers,
-      bool parse_error = false) {
-    ScriptState::Scope scope(script_state_);
-
+  void CompleteWithImports(const Vector<String>& specifiers) {
     StringBuilder source_text;
-    Vector<ModuleRequest> dependency_module_requests;
-    dependency_module_requests.ReserveInitialCapacity(
-        dependency_module_specifiers.size());
-    for (const auto& specifier : dependency_module_specifiers) {
-      dependency_module_requests.emplace_back(specifier,
-                                              TextPosition::MinimumPosition());
+    for (const auto& specifier : specifiers) {
       source_text.Append("import '");
       source_text.Append(specifier);
       source_text.Append("';\n");
     }
     source_text.Append("export default 'grapes';");
 
-    ModuleRecord module_record = ModuleRecord::Compile(
-        script_state_->GetIsolate(), source_text.ToString(), url, url,
-        ScriptFetchOptions(), TextPosition::MinimumPosition(),
-        ASSERT_NO_EXCEPTION);
-    auto* module_script =
-        JSModuleScript::CreateForTest(this, module_record, url);
-    auto result_request = dependency_module_requests_map_.insert(
-        module_record, dependency_module_requests);
-    EXPECT_TRUE(result_request.is_new_entry);
-    auto result_map = module_map_.insert(url, module_script);
-    EXPECT_TRUE(result_map.is_new_entry);
-
-    if (parse_error) {
-      v8::Local<v8::Value> error = V8ThrowException::CreateError(
-          script_state_->GetIsolate(), "Parse failure.");
-      module_script->SetParseErrorAndClearRecord(
-          ScriptValue(script_state_, error));
-    }
-
-    EXPECT_TRUE(pending_clients_.Contains(url));
-    pending_clients_.Take(url)->NotifyModuleLoadFinished(module_script);
-
-    return module_script;
+    Complete(source_text.ToString());
   }
-
-  void ResolveDependentTreeFetch(const KURL& url, ResolveResult result) {
-    ResolveSingleModuleScriptFetch(url, Vector<String>(),
-                                   result == ResolveResult::kFailure);
-  }
-
-  void SetInstantiateShouldFail(bool b) { instantiate_should_fail_ = b; }
-
-  bool HasInstantiated(ModuleScript* module_script) const {
-    return instantiated_records_.Contains(module_script->Record());
-  }
-
- private:
-  // Implements Modulator:
-
-  ScriptState* GetScriptState() override { return script_state_; }
-
-  KURL ResolveModuleSpecifier(const String& module_request,
-                              const KURL& base_url,
-                              String* failure_reason) final {
-    return KURL(base_url, module_request);
-  }
-  void ClearIsAcquiringImportMaps() final {}
-
-  void FetchSingle(const ModuleScriptFetchRequest& request,
-                   ResourceFetcher*,
-                   ModuleGraphLevel,
-                   ModuleScriptCustomFetchType,
-                   SingleModuleClient* client) override {
-    EXPECT_FALSE(pending_clients_.Contains(request.Url()));
-    pending_clients_.Set(request.Url(), client);
-  }
-
-  ModuleScript* GetFetchedModuleScript(const KURL& url) override {
-    const auto& it = module_map_.find(url);
-    if (it == module_map_.end())
-      return nullptr;
-
-    return it->value;
-  }
-
-  ScriptValue InstantiateModule(ModuleRecord record) override {
-    if (instantiate_should_fail_) {
-      ScriptState::Scope scope(script_state_);
-      v8::Local<v8::Value> error = V8ThrowException::CreateError(
-          script_state_->GetIsolate(), "Instantiation failure.");
-      return ScriptValue(script_state_, error);
-    }
-    instantiated_records_.insert(record);
-    return ScriptValue();
-  }
-
-  Vector<ModuleRequest> ModuleRequestsFromModuleRecord(
-      ModuleRecord module_record) override {
-    if (module_record.IsNull())
-      return Vector<ModuleRequest>();
-
-    const auto& it = dependency_module_requests_map_.find(module_record);
-    if (it == dependency_module_requests_map_.end())
-      return Vector<ModuleRequest>();
-
-    return it->value;
-  }
-
-  Member<ScriptState> script_state_;
-  HeapHashMap<KURL, Member<SingleModuleClient>> pending_clients_;
-  HashMap<ModuleRecord, Vector<ModuleRequest>> dependency_module_requests_map_;
-  HeapHashMap<KURL, Member<ModuleScript>> module_map_;
-  HashSet<ModuleRecord> instantiated_records_;
-  bool instantiate_should_fail_ = false;
 };
 
-void ModuleTreeLinkerTestModulator::Trace(blink::Visitor* visitor) {
-  visitor->Trace(script_state_);
-  visitor->Trace(pending_clients_);
-  visitor->Trace(module_map_);
-  DummyModulator::Trace(visitor);
-}
+}  // namespace
 
-class ModuleTreeLinkerTest : public PageTestBase {
-  DISALLOW_COPY_AND_ASSIGN(ModuleTreeLinkerTest);
-
+class ModuleTreeLinkerTest : public SimTest {
  public:
-  ModuleTreeLinkerTest() = default;
-  void SetUp() override;
+  Modulator* GetModulator() {
+    return Modulator::From(ToScriptStateForMainWorld(MainFrame().GetFrame()));
+  }
 
-  ModuleTreeLinkerTestModulator* GetModulator() { return modulator_.Get(); }
-
- protected:
-  Persistent<ModuleTreeLinkerTestModulator> modulator_;
+  bool HasInstantiated(ModuleScript* module_script) {
+    if (!module_script)
+      return false;
+    ScriptState::Scope script_scope(GetModulator()->GetScriptState());
+    return (module_script->V8Module()->GetStatus() ==
+            v8::Module::kInstantiated);
+  }
 };
-
-void ModuleTreeLinkerTest::SetUp() {
-  PageTestBase::SetUp(IntSize(500, 500));
-  ScriptState* script_state = ToScriptStateForMainWorld(&GetFrame());
-  modulator_ =
-      MakeGarbageCollected<ModuleTreeLinkerTestModulator>(script_state);
-}
 
 TEST_F(ModuleTreeLinkerTest, FetchTreeNoDeps) {
-  auto* registry = MakeGarbageCollected<ModuleTreeLinkerRegistry>();
-
-  KURL url("http://example.com/root.js");
+  SimModuleRequest sim_module(KURL("http://example.com/root.js"));
   TestModuleTreeClient* client = MakeGarbageCollected<TestModuleTreeClient>();
-  ModuleTreeLinker::Fetch(url, GetDocument().Fetcher(),
-                          mojom::RequestContextType::SCRIPT,
-                          ScriptFetchOptions(), GetModulator(),
-                          ModuleScriptCustomFetchType::kNone, registry, client);
+  GetModulator()->FetchTree(
+      sim_module.GetURL(), ModuleType::kJavaScript, GetDocument().Fetcher(),
+      mojom::blink::RequestContextType::SCRIPT,
+      network::mojom::RequestDestination::kScript, ScriptFetchOptions(),
+      ModuleScriptCustomFetchType::kNone, client);
 
   EXPECT_FALSE(client->WasNotifyFinished())
       << "ModuleTreeLinker should always finish asynchronously.";
   EXPECT_FALSE(client->GetModuleScript());
 
-  GetModulator()->ResolveSingleModuleScriptFetch(url, {});
+  sim_module.Complete(R"(export default 'grapes';)");
+  test::RunPendingTasks();
+
   EXPECT_TRUE(client->WasNotifyFinished());
-  ASSERT_TRUE(client->GetModuleScript());
-  EXPECT_TRUE(GetModulator()->HasInstantiated(client->GetModuleScript()));
+
+  ModuleScript* module_script = client->GetModuleScript();
+  ASSERT_TRUE(module_script);
+  EXPECT_TRUE(HasInstantiated(module_script));
 }
 
 TEST_F(ModuleTreeLinkerTest, FetchTreeInstantiationFailure) {
-  GetModulator()->SetInstantiateShouldFail(true);
+  SimModuleRequest sim_module(KURL("http://example.com/root.js"));
 
-  ModuleTreeLinkerRegistry* registry =
-      MakeGarbageCollected<ModuleTreeLinkerRegistry>();
-
-  KURL url("http://example.com/root.js");
   TestModuleTreeClient* client = MakeGarbageCollected<TestModuleTreeClient>();
-  ModuleTreeLinker::Fetch(url, GetDocument().Fetcher(),
-                          mojom::RequestContextType::SCRIPT,
-                          ScriptFetchOptions(), GetModulator(),
-                          ModuleScriptCustomFetchType::kNone, registry, client);
+  GetModulator()->FetchTree(
+      sim_module.GetURL(), ModuleType::kJavaScript, GetDocument().Fetcher(),
+      mojom::blink::RequestContextType::SCRIPT,
+      network::mojom::RequestDestination::kScript, ScriptFetchOptions(),
+      ModuleScriptCustomFetchType::kNone, client);
 
   EXPECT_FALSE(client->WasNotifyFinished())
       << "ModuleTreeLinker should always finish asynchronously.";
   EXPECT_FALSE(client->GetModuleScript());
 
-  GetModulator()->ResolveSingleModuleScriptFetch(url, {});
-
-  // Modulator::InstantiateModule() fails here, as
-  // we SetInstantiateShouldFail(true) earlier.
+  sim_module.Complete(R"(
+    import _self_should_fail from 'http://example.com/root.js';
+  )");
+  test::RunPendingTasks();
 
   EXPECT_TRUE(client->WasNotifyFinished());
   ASSERT_TRUE(client->GetModuleScript());
@@ -256,53 +144,49 @@ TEST_F(ModuleTreeLinkerTest, FetchTreeInstantiationFailure) {
 }
 
 TEST_F(ModuleTreeLinkerTest, FetchTreeWithSingleDependency) {
-  ModuleTreeLinkerRegistry* registry =
-      MakeGarbageCollected<ModuleTreeLinkerRegistry>();
+  SimModuleRequest sim_module(KURL("http://example.com/root.js"));
+  SimModuleRequest sim_module_dep(KURL("http://example.com/dep1.js"));
 
-  KURL url("http://example.com/root.js");
   TestModuleTreeClient* client = MakeGarbageCollected<TestModuleTreeClient>();
-  ModuleTreeLinker::Fetch(url, GetDocument().Fetcher(),
-                          mojom::RequestContextType::SCRIPT,
-                          ScriptFetchOptions(), GetModulator(),
-                          ModuleScriptCustomFetchType::kNone, registry, client);
+  GetModulator()->FetchTree(
+      sim_module.GetURL(), ModuleType::kJavaScript, GetDocument().Fetcher(),
+      mojom::blink::RequestContextType::SCRIPT,
+      network::mojom::RequestDestination::kScript, ScriptFetchOptions(),
+      ModuleScriptCustomFetchType::kNone, client);
 
   EXPECT_FALSE(client->WasNotifyFinished())
       << "ModuleTreeLinker should always finish asynchronously.";
   EXPECT_FALSE(client->GetModuleScript());
 
-  GetModulator()->ResolveSingleModuleScriptFetch(url, {"./dep1.js"});
+  sim_module.CompleteWithImports({"./dep1.js"});
+  test::RunPendingTasks();
+
   EXPECT_FALSE(client->WasNotifyFinished());
 
-  KURL url_dep1("http://example.com/dep1.js");
+  sim_module_dep.CompleteWithImports({});
+  test::RunPendingTasks();
 
-  GetModulator()->ResolveDependentTreeFetch(
-      url_dep1, ModuleTreeLinkerTestModulator::ResolveResult::kSuccess);
   EXPECT_TRUE(client->WasNotifyFinished());
-
-  ASSERT_TRUE(client->GetModuleScript());
-  EXPECT_TRUE(GetModulator()->HasInstantiated(client->GetModuleScript()));
+  ModuleScript* module_script = client->GetModuleScript();
+  ASSERT_TRUE(module_script);
+  EXPECT_TRUE(HasInstantiated(module_script));
 }
 
 TEST_F(ModuleTreeLinkerTest, FetchTreeWith3Deps) {
-  ModuleTreeLinkerRegistry* registry =
-      MakeGarbageCollected<ModuleTreeLinkerRegistry>();
+  SimModuleRequest sim_module(KURL("http://example.com/root.js"));
 
-  KURL url("http://example.com/root.js");
   TestModuleTreeClient* client = MakeGarbageCollected<TestModuleTreeClient>();
-  ModuleTreeLinker::Fetch(url, GetDocument().Fetcher(),
-                          mojom::RequestContextType::SCRIPT,
-                          ScriptFetchOptions(), GetModulator(),
-                          ModuleScriptCustomFetchType::kNone, registry, client);
+  GetModulator()->FetchTree(
+      sim_module.GetURL(), ModuleType::kJavaScript, GetDocument().Fetcher(),
+      mojom::blink::RequestContextType::SCRIPT,
+      network::mojom::RequestDestination::kScript, ScriptFetchOptions(),
+      ModuleScriptCustomFetchType::kNone, client);
 
   EXPECT_FALSE(client->WasNotifyFinished())
       << "ModuleTreeLinker should always finish asynchronously.";
   EXPECT_FALSE(client->GetModuleScript());
 
-  GetModulator()->ResolveSingleModuleScriptFetch(
-      url, {"./dep1.js", "./dep2.js", "./dep3.js"});
-  EXPECT_FALSE(client->WasNotifyFinished());
-
-  Vector<KURL> url_deps;
+  Vector<std::unique_ptr<SimModuleRequest>> sim_module_deps;
   for (int i = 1; i <= 3; ++i) {
     StringBuilder url_dep_str;
     url_dep_str.Append("http://example.com/dep");
@@ -310,40 +194,39 @@ TEST_F(ModuleTreeLinkerTest, FetchTreeWith3Deps) {
     url_dep_str.Append(".js");
 
     KURL url_dep(url_dep_str.ToString());
-    url_deps.push_back(url_dep);
+    sim_module_deps.push_back(std::make_unique<SimModuleRequest>(url_dep));
   }
 
-  for (const auto& url_dep : url_deps) {
+  sim_module.CompleteWithImports({"./dep1.js", "./dep2.js", "./dep3.js"});
+  test::RunPendingTasks();
+
+  for (const auto& sim_module_dep : sim_module_deps) {
     EXPECT_FALSE(client->WasNotifyFinished());
-    GetModulator()->ResolveDependentTreeFetch(
-        url_dep, ModuleTreeLinkerTestModulator::ResolveResult::kSuccess);
+    sim_module_dep->CompleteWithImports({});
+    test::RunPendingTasks();
   }
 
   EXPECT_TRUE(client->WasNotifyFinished());
-  ASSERT_TRUE(client->GetModuleScript());
-  EXPECT_TRUE(GetModulator()->HasInstantiated(client->GetModuleScript()));
+  ModuleScript* module_script = client->GetModuleScript();
+  ASSERT_TRUE(module_script);
+  EXPECT_TRUE(HasInstantiated(module_script));
 }
 
 TEST_F(ModuleTreeLinkerTest, FetchTreeWith3Deps1Fail) {
-  ModuleTreeLinkerRegistry* registry =
-      MakeGarbageCollected<ModuleTreeLinkerRegistry>();
+  SimModuleRequest sim_module(KURL("http://example.com/root.js"));
 
-  KURL url("http://example.com/root.js");
   TestModuleTreeClient* client = MakeGarbageCollected<TestModuleTreeClient>();
-  ModuleTreeLinker::Fetch(url, GetDocument().Fetcher(),
-                          mojom::RequestContextType::SCRIPT,
-                          ScriptFetchOptions(), GetModulator(),
-                          ModuleScriptCustomFetchType::kNone, registry, client);
+  GetModulator()->FetchTree(
+      sim_module.GetURL(), ModuleType::kJavaScript, GetDocument().Fetcher(),
+      mojom::blink::RequestContextType::SCRIPT,
+      network::mojom::RequestDestination::kScript, ScriptFetchOptions(),
+      ModuleScriptCustomFetchType::kNone, client);
 
   EXPECT_FALSE(client->WasNotifyFinished())
       << "ModuleTreeLinker should always finish asynchronously.";
   EXPECT_FALSE(client->GetModuleScript());
 
-  GetModulator()->ResolveSingleModuleScriptFetch(
-      url, {"./dep1.js", "./dep2.js", "./dep3.js"});
-  EXPECT_FALSE(client->WasNotifyFinished());
-
-  Vector<KURL> url_deps;
+  Vector<std::unique_ptr<SimModuleRequest>> sim_module_deps;
   for (int i = 1; i <= 3; ++i) {
     StringBuilder url_dep_str;
     url_dep_str.Append("http://example.com/dep");
@@ -351,86 +234,56 @@ TEST_F(ModuleTreeLinkerTest, FetchTreeWith3Deps1Fail) {
     url_dep_str.Append(".js");
 
     KURL url_dep(url_dep_str.ToString());
-    url_deps.push_back(url_dep);
+    sim_module_deps.push_back(std::make_unique<SimModuleRequest>(url_dep));
   }
 
-  for (const auto& url_dep : url_deps) {
-    SCOPED_TRACE(url_dep.GetString());
+  sim_module.CompleteWithImports({"./dep1.js", "./dep2.js", "./dep3.js"});
+  test::RunPendingTasks();
+
+  for (int i = 0; i < 3; ++i) {
+    const auto& sim_module_dep = sim_module_deps[i];
+
+    EXPECT_FALSE(client->WasNotifyFinished());
+    if (i == 1) {
+      // Complete the request with un-parsable JavaScript fragment.
+      sim_module_dep->Complete("%!#$@#$@#$@");
+    } else {
+      sim_module_dep->CompleteWithImports({});
+    }
+
+    test::RunPendingTasks();
   }
 
-  auto url_dep = url_deps.back();
-  url_deps.pop_back();
-  GetModulator()->ResolveDependentTreeFetch(
-      url_dep, ModuleTreeLinkerTestModulator::ResolveResult::kSuccess);
-  EXPECT_FALSE(client->WasNotifyFinished());
-  url_dep = url_deps.back();
-  url_deps.pop_back();
-  GetModulator()->ResolveDependentTreeFetch(
-      url_dep, ModuleTreeLinkerTestModulator::ResolveResult::kFailure);
-
-  // TODO(kouhei): This may not hold once we implement early failure reporting.
-  EXPECT_FALSE(client->WasNotifyFinished());
-
-  // Check below doesn't crash.
-  url_dep = url_deps.back();
-  url_deps.pop_back();
-  GetModulator()->ResolveDependentTreeFetch(
-      url_dep, ModuleTreeLinkerTestModulator::ResolveResult::kSuccess);
-  EXPECT_TRUE(url_deps.IsEmpty());
-
   EXPECT_TRUE(client->WasNotifyFinished());
-  ASSERT_TRUE(client->GetModuleScript());
-  EXPECT_FALSE(client->GetModuleScript()->HasParseError());
-  EXPECT_TRUE(client->GetModuleScript()->HasErrorToRethrow());
-}
-
-TEST_F(ModuleTreeLinkerTest, FetchDependencyTree) {
-  ModuleTreeLinkerRegistry* registry =
-      MakeGarbageCollected<ModuleTreeLinkerRegistry>();
-
-  KURL url("http://example.com/depth1.js");
-  TestModuleTreeClient* client = MakeGarbageCollected<TestModuleTreeClient>();
-  ModuleTreeLinker::Fetch(url, GetDocument().Fetcher(),
-                          mojom::RequestContextType::SCRIPT,
-                          ScriptFetchOptions(), GetModulator(),
-                          ModuleScriptCustomFetchType::kNone, registry, client);
-
-  EXPECT_FALSE(client->WasNotifyFinished())
-      << "ModuleTreeLinker should always finish asynchronously.";
-  EXPECT_FALSE(client->GetModuleScript());
-
-  GetModulator()->ResolveSingleModuleScriptFetch(url, {"./depth2.js"});
-
-  KURL url_dep2("http://example.com/depth2.js");
-
-  GetModulator()->ResolveDependentTreeFetch(
-      url_dep2, ModuleTreeLinkerTestModulator::ResolveResult::kSuccess);
-
-  EXPECT_TRUE(client->WasNotifyFinished());
-  ASSERT_TRUE(client->GetModuleScript());
-  EXPECT_TRUE(GetModulator()->HasInstantiated(client->GetModuleScript()));
+  ModuleScript* module_script = client->GetModuleScript();
+  ASSERT_TRUE(module_script);
+  EXPECT_FALSE(HasInstantiated(module_script));
+  EXPECT_FALSE(module_script->HasParseError());
+  EXPECT_TRUE(module_script->HasErrorToRethrow());
 }
 
 TEST_F(ModuleTreeLinkerTest, FetchDependencyOfCyclicGraph) {
-  ModuleTreeLinkerRegistry* registry =
-      MakeGarbageCollected<ModuleTreeLinkerRegistry>();
+  SimModuleRequest sim_module(KURL("http://example.com/a.js"));
 
-  KURL url("http://example.com/a.js");
   TestModuleTreeClient* client = MakeGarbageCollected<TestModuleTreeClient>();
-  ModuleTreeLinker::Fetch(url, GetDocument().Fetcher(),
-                          mojom::RequestContextType::SCRIPT,
-                          ScriptFetchOptions(), GetModulator(),
-                          ModuleScriptCustomFetchType::kNone, registry, client);
+  GetModulator()->FetchTree(
+      sim_module.GetURL(), ModuleType::kJavaScript, GetDocument().Fetcher(),
+      mojom::blink::RequestContextType::SCRIPT,
+      network::mojom::RequestDestination::kScript, ScriptFetchOptions(),
+      ModuleScriptCustomFetchType::kNone, client);
 
   EXPECT_FALSE(client->WasNotifyFinished())
       << "ModuleTreeLinker should always finish asynchronously.";
   EXPECT_FALSE(client->GetModuleScript());
 
-  GetModulator()->ResolveSingleModuleScriptFetch(url, {"./a.js"});
+  sim_module.CompleteWithImports({"./a.js"});
+  test::RunPendingTasks();
 
   EXPECT_TRUE(client->WasNotifyFinished());
-  ASSERT_TRUE(client->GetModuleScript());
-  EXPECT_TRUE(GetModulator()->HasInstantiated(client->GetModuleScript()));
+  ModuleScript* module_script = client->GetModuleScript();
+  ASSERT_TRUE(module_script);
+  EXPECT_TRUE(HasInstantiated(module_script));
+  EXPECT_FALSE(module_script->HasParseError());
 }
 
 }  // namespace blink

@@ -45,18 +45,38 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/validation_message_client.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/text/bidi_text_run.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
-using namespace html_names;
+namespace {
+
+void InvalidateShadowIncludingAncestorForms(ContainerNode& insertion_point) {
+  if (!RuntimeEnabledFeatures::AutofillShadowDOMEnabled())
+    return;
+
+  // Let any forms in the shadow including ancestors know that this
+  // ListedElement has changed. Don't include any forms inside the same
+  // TreeScope know because that relationship isn't tracked by listed elements
+  // including shadow trees.
+  for (ContainerNode* parent = insertion_point.OwnerShadowHost(); parent;
+       parent = parent->ParentOrShadowHostNode()) {
+    if (HTMLFormElement* form = DynamicTo<HTMLFormElement>(parent)) {
+      form->InvalidateListedElementsIncludingShadowTrees();
+      return;
+    }
+  }
+}
+
+}  // namespace
 
 class FormAttributeTargetObserver : public IdTargetObserver {
  public:
   FormAttributeTargetObserver(const AtomicString& id, ListedElement*);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
   void IdTargetChanged() override;
 
  private:
@@ -75,7 +95,7 @@ ListedElement::~ListedElement() {
   // We can't call setForm here because it contains virtual calls.
 }
 
-void ListedElement::Trace(Visitor* visitor) {
+void ListedElement::Trace(Visitor* visitor) const {
   visitor->Trace(form_attribute_target_observer_);
   visitor->Trace(form_);
   visitor->Trace(validity_state_);
@@ -89,7 +109,7 @@ ValidityState* ListedElement::validity() {
 }
 
 void ListedElement::DidMoveToNewDocument(Document& old_document) {
-  if (ToHTMLElement().FastHasAttribute(kFormAttr))
+  if (ToHTMLElement().FastHasAttribute(html_names::kFormAttr))
     SetFormAttributeTargetObserver(nullptr);
 }
 
@@ -107,7 +127,7 @@ void ListedElement::InsertedInto(ContainerNode& insertion_point) {
 
   HTMLElement& element = ToHTMLElement();
   if (insertion_point.isConnected()) {
-    if (element.FastHasAttribute(kFormAttr))
+    if (element.FastHasAttribute(html_names::kFormAttr))
       ResetFormAttributeTargetObserver();
   }
 
@@ -124,6 +144,8 @@ void ListedElement::InsertedInto(ContainerNode& insertion_point) {
   // Trigger for elements outside of forms.
   if (!form_ && insertion_point.isConnected())
     element.GetDocument().DidAssociateFormControl(&element);
+
+  InvalidateShadowIncludingAncestorForms(insertion_point);
 }
 
 void ListedElement::RemovedFrom(ContainerNode& insertion_point) {
@@ -135,8 +157,12 @@ void ListedElement::RemovedFrom(ContainerNode& insertion_point) {
   UpdateWillValidateCache();
 
   HTMLElement& element = ToHTMLElement();
-  if (insertion_point.isConnected() && element.FastHasAttribute(kFormAttr)) {
+  if (insertion_point.isConnected() &&
+      element.FastHasAttribute(html_names::kFormAttr)) {
     SetFormAttributeTargetObserver(nullptr);
+    ResetFormOwner();
+  } else if (!form_ && insertion_point.isConnected()) {
+    // An unassociated listed element is detached from the document.
     ResetFormOwner();
   } else {
     // If the form and element are both in the same tree, preserve the
@@ -156,6 +182,8 @@ void ListedElement::RemovedFrom(ContainerNode& insertion_point) {
         .GetFormController()
         .InvalidateStatefulFormControlList();
   }
+
+  InvalidateShadowIncludingAncestorForms(insertion_point);
 }
 
 HTMLFormElement* ListedElement::FindAssociatedForm(
@@ -172,7 +200,7 @@ HTMLFormElement* ListedElement::FindAssociatedForm(
     // 3.2. Abort the "reset the form owner" steps.
     Element* new_form_candidate =
         element->GetTreeScope().getElementById(form_id);
-    return ToHTMLFormElementOrNull(new_form_candidate);
+    return DynamicTo<HTMLFormElement>(new_form_candidate);
   }
   // 4. Otherwise, if the form-associated element in question has an ancestor
   // form element, then associate the form-associated element with the nearest
@@ -196,6 +224,10 @@ void ListedElement::AssociateByParser(HTMLFormElement* form) {
 }
 
 void ListedElement::SetForm(HTMLFormElement* new_form) {
+  if (!form_ || !new_form) {
+    // Element was unassociated, or is becoming unassociated.
+    ToHTMLElement().GetDocument().MarkUnassociatedListedElementsDirty();
+  }
   if (form_.Get() == new_form)
     return;
   WillChangeForm();
@@ -246,7 +278,7 @@ void ListedElement::FieldSetAncestorsSetNeedsValidityCheck(Node* node) {
 void ListedElement::ResetFormOwner() {
   form_was_set_by_parser_ = false;
   HTMLElement& element = ToHTMLElement();
-  const AtomicString& form_id(element.FastGetAttribute(kFormAttr));
+  const AtomicString& form_id(element.FastGetAttribute(html_names::kFormAttr));
   HTMLFormElement* nearest_form = element.FindFormAncestor();
   // 1. If the element's form owner is not null, and either the element is not
   // reassociateable or its form content attribute is not present, and the
@@ -315,8 +347,7 @@ void ListedElement::UpdateWillValidateCache() {
 }
 
 bool ListedElement::CustomError() const {
-  return ToHTMLElement().willValidate() &&
-         !custom_validation_message_.IsEmpty();
+  return !custom_validation_message_.IsEmpty();
 }
 
 bool ListedElement::HasBadInput() const {
@@ -372,7 +403,9 @@ void ListedElement::SetCustomValidationMessage(const String& message) {
 }
 
 String ListedElement::validationMessage() const {
-  return CustomError() ? custom_validation_message_ : String();
+  return ToHTMLElement().willValidate() && CustomError()
+             ? custom_validation_message_
+             : String();
 }
 
 String ListedElement::ValidationSubMessage() const {
@@ -478,9 +511,9 @@ void ListedElement::ShowValidationMessage() {
   Element& element = ValidationAnchor();
   element.scrollIntoViewIfNeeded(false);
   if (element.IsFocusable())
-    element.focus();
+    element.Focus();
   else
-    ToHTMLElement().focus();
+    ToHTMLElement().Focus();
   UpdateVisibleValidationMessage();
 }
 
@@ -491,22 +524,7 @@ bool ListedElement::reportValidity() {
     return is_valid;
   DCHECK_EQ(unhandled_invalid_controls.size(), 1u);
   DCHECK_EQ(unhandled_invalid_controls[0].Get(), this);
-  // Update layout now before calling IsFocusable(), which has
-  // !LayoutObject()->NeedsLayout() assertion.
-  HTMLElement& element = ToHTMLElement();
-  element.GetDocument().UpdateStyleAndLayout();
-  if (element.IsFocusable()) {
-    ShowValidationMessage();
-    return false;
-  }
-  if (element.GetDocument().GetFrame()) {
-    String message(
-        "An invalid form control with name='%name' is not focusable.");
-    message.Replace("%name", GetName());
-    element.GetDocument().AddConsoleMessage(
-        ConsoleMessage::Create(mojom::ConsoleMessageSource::kRendering,
-                               mojom::ConsoleMessageLevel::kError, message));
-  }
+  ShowValidationMessage();
   return false;
 }
 
@@ -558,6 +576,10 @@ void ListedElement::DisabledAttributeChanged() {
   DisabledStateMightBeChanged();
 }
 
+void ListedElement::ReadonlyAttributeChanged() {
+  UpdateWillValidateCache();
+}
+
 void ListedElement::UpdateAncestorDisabledState() const {
   if (!may_have_field_set_ancestor_) {
     ancestor_disabled_state_ = AncestorDisabledState::kEnabled;
@@ -570,15 +592,15 @@ void ListedElement::UpdateAncestorDisabledState() const {
   ContainerNode* last_legend_ancestor = nullptr;
   for (auto* ancestor = Traversal<HTMLElement>::FirstAncestor(ToHTMLElement());
        ancestor; ancestor = Traversal<HTMLElement>::FirstAncestor(*ancestor)) {
-    if (IsHTMLLegendElement(*ancestor)) {
+    if (IsA<HTMLLegendElement>(*ancestor)) {
       last_legend_ancestor = ancestor;
       continue;
     }
-    if (!IsHTMLFieldSetElement(*ancestor))
+    if (!IsA<HTMLFieldSetElement>(*ancestor))
       continue;
     may_have_field_set_ancestor_ = true;
     if (ancestor->IsDisabledFormControl()) {
-      auto* fieldset = ToHTMLFieldSetElement(ancestor);
+      auto* fieldset = To<HTMLFieldSetElement>(ancestor);
       if (last_legend_ancestor && last_legend_ancestor == fieldset->Legend())
         continue;
       disabled_fieldset_ancestor = fieldset;
@@ -642,7 +664,7 @@ void ListedElement::SetFormAttributeTargetObserver(
 
 void ListedElement::ResetFormAttributeTargetObserver() {
   HTMLElement& element = ToHTMLElement();
-  const AtomicString& form_id(element.FastGetAttribute(kFormAttr));
+  const AtomicString& form_id(element.FastGetAttribute(html_names::kFormAttr));
   if (!form_id.IsNull() && element.isConnected()) {
     SetFormAttributeTargetObserver(
         MakeGarbageCollected<FormAttributeTargetObserver>(form_id, this));
@@ -676,7 +698,7 @@ ListedElement* ListedElement::From(Element& element) {
     return form_control_element;
   if (html_element->IsFormAssociatedCustomElement())
     return &element.EnsureElementInternals();
-  if (auto* object = ToHTMLObjectElementOrNull(html_element))
+  if (auto* object = DynamicTo<HTMLObjectElement>(html_element))
     return object;
   return nullptr;
 }
@@ -701,7 +723,7 @@ FormAttributeTargetObserver::FormAttributeTargetObserver(const AtomicString& id,
           id),
       element_(element) {}
 
-void FormAttributeTargetObserver::Trace(Visitor* visitor) {
+void FormAttributeTargetObserver::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
   IdTargetObserver::Trace(visitor);
 }

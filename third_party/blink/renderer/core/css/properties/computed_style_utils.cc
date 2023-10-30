@@ -7,18 +7,21 @@
 #include "third_party/blink/renderer/core/css/basic_shape_functions.h"
 #include "third_party/blink/renderer/core/css/css_border_image.h"
 #include "third_party/blink/renderer/core/css/css_border_image_slice_value.h"
-#include "third_party/blink/renderer/core/css/css_color_value.h"
+#include "third_party/blink/renderer/core/css/css_bracketed_value_list.h"
+#include "third_party/blink/renderer/core/css/css_color.h"
 #include "third_party/blink/renderer/core/css/css_counter_value.h"
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_font_family_value.h"
 #include "third_party/blink/renderer/core/css/css_font_style_range_value.h"
 #include "third_party/blink/renderer/core/css/css_function_value.h"
-#include "third_party/blink/renderer/core/css/css_grid_line_names_value.h"
+#include "third_party/blink/renderer/core/css/css_grid_auto_repeat_value.h"
+#include "third_party/blink/renderer/core/css/css_grid_integer_repeat_value.h"
 #include "third_party/blink/renderer/core/css/css_initial_value.h"
 #include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value_mappings.h"
 #include "third_party/blink/renderer/core/css/css_quad_value.h"
 #include "third_party/blink/renderer/core/css/css_reflect_value.h"
+#include "third_party/blink/renderer/core/css/css_scroll_value.h"
 #include "third_party/blink/renderer/core/css/css_shadow_value.h"
 #include "third_party/blink/renderer/core/css/css_string_value.h"
 #include "third_party/blink/renderer/core/css/css_timing_function_value.h"
@@ -26,23 +29,32 @@
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/css_value_pair.h"
+#include "third_party/blink/renderer/core/css/cssom/cross_thread_color_value.h"
 #include "third_party/blink/renderer/core/css/cssom/cross_thread_keyword_value.h"
 #include "third_party/blink/renderer/core/css/cssom/cross_thread_unit_value.h"
+#include "third_party/blink/renderer/core/css/cssom/cross_thread_unparsed_value.h"
 #include "third_party/blink/renderer/core/css/cssom/cross_thread_unsupported_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_keyword_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_unit_value.h"
+#include "third_party/blink/renderer/core/css/cssom/css_unparsed_value.h"
+#include "third_party/blink/renderer/core/css/cssom/css_unsupported_color.h"
 #include "third_party/blink/renderer/core/css/style_color.h"
 #include "third_party/blink/renderer/core/layout/layout_block.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_grid.h"
+#include "third_party/blink/renderer/core/layout/ng/grid/layout_ng_grid_interface.h"
+#include "third_party/blink/renderer/core/layout/svg/transform_helper.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
+#include "third_party/blink/renderer/core/style/style_intrinsic_length.h"
 #include "third_party/blink/renderer/core/style/style_svg_resource.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
-#include "third_party/blink/renderer/core/svg/svg_element.h"
+#include "third_party/blink/renderer/core/svg_element_type_helpers.h"
+#include "third_party/blink/renderer/platform/transforms/matrix_3d_transform_operation.h"
+#include "third_party/blink/renderer/platform/transforms/matrix_transform_operation.h"
+#include "third_party/blink/renderer/platform/transforms/perspective_transform_operation.h"
+#include "third_party/blink/renderer/platform/transforms/skew_transform_operation.h"
 
 namespace blink {
-
-using namespace cssvalue;
 
 // TODO(rjwright): make this const
 CSSValue* ComputedStyleUtils::ZoomAdjustedPixelValueForLength(
@@ -67,7 +79,6 @@ CSSValue* ComputedStyleUtils::ValueForPosition(const LengthPoint& position,
 
 CSSValue* ComputedStyleUtils::ValueForOffset(const ComputedStyle& style,
                                              const LayoutObject* layout_object,
-                                             const Node* styled_node,
                                              bool allow_visited_style) {
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
   if (RuntimeEnabledFeatures::CSSOffsetPositionAnchorEnabled()) {
@@ -84,7 +95,7 @@ CSSValue* ComputedStyleUtils::ValueForOffset(const ComputedStyle& style,
                                             &GetCSSPropertyOffsetRotate()};
   for (const CSSProperty* longhand : longhands) {
     const CSSValue* value = longhand->CSSValueFromComputedStyle(
-        style, layout_object, styled_node, allow_visited_style);
+        style, layout_object, allow_visited_style);
     DCHECK(value);
     list->Append(*value);
   }
@@ -106,38 +117,48 @@ CSSValue* ComputedStyleUtils::ValueForOffset(const ComputedStyle& style,
 
 CSSValue* ComputedStyleUtils::CurrentColorOrValidColor(
     const ComputedStyle& style,
-    const StyleColor& color) {
-  // This function does NOT look at visited information, so that computed style
-  // doesn't expose that.
-  return CSSColorValue::Create(color.Resolve(style.GetColor()).Rgb());
+    const StyleColor& color,
+    CSSValuePhase value_phase) {
+  return cssvalue::CSSColor::Create(
+      color.Resolve(style.GetCurrentColor(), style.UsedColorScheme()));
 }
 
 const blink::Color ComputedStyleUtils::BorderSideColor(
     const ComputedStyle& style,
     const StyleColor& color,
     EBorderStyle border_style,
-    bool visited_link) {
-  if (!color.IsCurrentColor())
-    return color.GetColor();
-  // FIXME: Treating styled borders with initial color differently causes
-  // problems, see crbug.com/316559, crbug.com/276231
-  if (!visited_link && (border_style == EBorderStyle::kInset ||
-                        border_style == EBorderStyle::kOutset ||
-                        border_style == EBorderStyle::kRidge ||
-                        border_style == EBorderStyle::kGroove))
-    return blink::Color(238, 238, 238);
-  return visited_link ? style.InternalVisitedColor() : style.GetColor();
+    bool visited_link,
+    bool* is_current_color) {
+  Color current_color;
+  if (visited_link) {
+    current_color = style.GetInternalVisitedCurrentColor();
+  } else if (border_style == EBorderStyle::kInset ||
+             border_style == EBorderStyle::kOutset ||
+             border_style == EBorderStyle::kRidge ||
+             border_style == EBorderStyle::kGroove) {
+    // FIXME: Treating styled borders with initial color differently causes
+    // problems, see crbug.com/316559, crbug.com/276231
+    current_color = blink::Color(238, 238, 238);
+  } else {
+    current_color = style.GetCurrentColor();
+  }
+  return color.Resolve(current_color, style.UsedColorScheme(),
+                       is_current_color);
 }
 
 const CSSValue* ComputedStyleUtils::BackgroundImageOrWebkitMaskImage(
+    const ComputedStyle& style,
+    bool allow_visited_style,
     const FillLayer& fill_layer) {
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   const FillLayer* curr_layer = &fill_layer;
   for (; curr_layer; curr_layer = curr_layer->Next()) {
-    if (curr_layer->GetImage())
-      list->Append(*curr_layer->GetImage()->ComputedCSSValue());
-    else
+    if (curr_layer->GetImage()) {
+      list->Append(*curr_layer->GetImage()->ComputedCSSValue(
+          style, allow_visited_style));
+    } else {
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kNone));
+    }
   }
   return list;
 }
@@ -155,11 +176,10 @@ const CSSValue* ComputedStyleUtils::ValueForFillSize(
     return ZoomAdjustedPixelValueForLength(fill_size.size.Width(), style);
   }
 
-  CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  list->Append(*ZoomAdjustedPixelValueForLength(fill_size.size.Width(), style));
-  list->Append(
-      *ZoomAdjustedPixelValueForLength(fill_size.size.Height(), style));
-  return list;
+  return MakeGarbageCollected<CSSValuePair>(
+      ZoomAdjustedPixelValueForLength(fill_size.size.Width(), style),
+      ZoomAdjustedPixelValueForLength(fill_size.size.Height(), style),
+      CSSValuePair::kKeepIdenticalValues);
 }
 
 const CSSValue* ComputedStyleUtils::BackgroundImageOrWebkitMaskSize(
@@ -219,7 +239,6 @@ const CSSValue* ComputedStyleUtils::ValueForFillRepeat(EFillRepeat x_repeat,
 const CSSValueList* ComputedStyleUtils::ValuesForBackgroundShorthand(
     const ComputedStyle& style,
     const LayoutObject* layout_object,
-    const Node* styled_node,
     bool allow_visited_style) {
   CSSValueList* result = CSSValueList::CreateCommaSeparated();
   const FillLayer* curr_layer = &style.BackgroundLayers();
@@ -229,12 +248,13 @@ const CSSValueList* ComputedStyleUtils::ValuesForBackgroundShorthand(
     if (!curr_layer->Next()) {  // color only for final layer
       const CSSValue* value =
           GetCSSPropertyBackgroundColor().CSSValueFromComputedStyle(
-              style, layout_object, styled_node, allow_visited_style);
+              style, layout_object, allow_visited_style);
       DCHECK(value);
       before_slash->Append(*value);
     }
     before_slash->Append(curr_layer->GetImage()
-                             ? *curr_layer->GetImage()->ComputedCSSValue()
+                             ? *curr_layer->GetImage()->ComputedCSSValue(
+                                   style, allow_visited_style)
                              : *CSSIdentifierValue::Create(CSSValueID::kNone));
     before_slash->Append(
         *ValueForFillRepeat(curr_layer->RepeatX(), curr_layer->RepeatY()));
@@ -279,8 +299,15 @@ const CSSValue* ComputedStyleUtils::BackgroundPositionXOrWebkitMaskPositionX(
     const FillLayer* curr_layer) {
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   for (; curr_layer; curr_layer = curr_layer->Next()) {
-    list->Append(
-        *ZoomAdjustedPixelValueForLength(curr_layer->PositionX(), style));
+    const Length& from_edge = curr_layer->PositionX();
+    if (curr_layer->BackgroundXOrigin() == BackgroundEdgeOrigin::kRight) {
+      // TODO(crbug.com/610627): This should use two-value syntax once the
+      // parser accepts it.
+      list->Append(*ZoomAdjustedPixelValueForLength(
+          from_edge.SubtractFromOneHundredPercent(), style));
+    } else {
+      list->Append(*ZoomAdjustedPixelValueForLength(from_edge, style));
+    }
   }
   return list;
 }
@@ -290,79 +317,59 @@ const CSSValue* ComputedStyleUtils::BackgroundPositionYOrWebkitMaskPositionY(
     const FillLayer* curr_layer) {
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   for (; curr_layer; curr_layer = curr_layer->Next()) {
-    list->Append(
-        *ZoomAdjustedPixelValueForLength(curr_layer->PositionY(), style));
+    const Length& from_edge = curr_layer->PositionY();
+    if (curr_layer->BackgroundYOrigin() == BackgroundEdgeOrigin::kBottom) {
+      // TODO(crbug.com/610627): This should use two-value syntax once the
+      // parser accepts it.
+      list->Append(*ZoomAdjustedPixelValueForLength(
+          from_edge.SubtractFromOneHundredPercent(), style));
+    } else {
+      list->Append(*ZoomAdjustedPixelValueForLength(from_edge, style));
+    }
   }
   return list;
 }
 
-CSSBorderImageSliceValue* ComputedStyleUtils::ValueForNinePieceImageSlice(
-    const NinePieceImage& image) {
+static CSSNumericLiteralValue* ValueForImageSlice(const Length& slice) {
+  // TODO(alancutter): Make this code aware of calc lengths.
+  return CSSNumericLiteralValue::Create(
+      slice.Value(), slice.IsPercentOrCalc()
+                         ? CSSPrimitiveValue::UnitType::kPercentage
+                         : CSSPrimitiveValue::UnitType::kNumber);
+}
+
+cssvalue::CSSBorderImageSliceValue*
+ComputedStyleUtils::ValueForNinePieceImageSlice(const NinePieceImage& image) {
+  const LengthBox& slices = image.ImageSlices();
+
   // Create the slices.
-  CSSPrimitiveValue* top = nullptr;
+  CSSPrimitiveValue* top = ValueForImageSlice(slices.Top());
+
   CSSPrimitiveValue* right = nullptr;
   CSSPrimitiveValue* bottom = nullptr;
   CSSPrimitiveValue* left = nullptr;
-
-  // TODO(alancutter): Make this code aware of calc lengths.
-  if (image.ImageSlices().Top().IsPercentOrCalc()) {
-    top = CSSNumericLiteralValue::Create(
-        image.ImageSlices().Top().Value(),
-        CSSPrimitiveValue::UnitType::kPercentage);
-  } else {
-    top = CSSNumericLiteralValue::Create(image.ImageSlices().Top().Value(),
-                                         CSSPrimitiveValue::UnitType::kNumber);
-  }
-
-  if (image.ImageSlices().Right() == image.ImageSlices().Top() &&
-      image.ImageSlices().Bottom() == image.ImageSlices().Top() &&
-      image.ImageSlices().Left() == image.ImageSlices().Top()) {
+  if (slices.Right() == slices.Top() && slices.Bottom() == slices.Top() &&
+      slices.Left() == slices.Top()) {
     right = top;
     bottom = top;
     left = top;
   } else {
-    if (image.ImageSlices().Right().IsPercentOrCalc()) {
-      right = CSSNumericLiteralValue::Create(
-          image.ImageSlices().Right().Value(),
-          CSSPrimitiveValue::UnitType::kPercentage);
-    } else {
-      right =
-          CSSNumericLiteralValue::Create(image.ImageSlices().Right().Value(),
-                                         CSSPrimitiveValue::UnitType::kNumber);
-    }
+    right = ValueForImageSlice(slices.Right());
 
-    if (image.ImageSlices().Bottom() == image.ImageSlices().Top() &&
-        image.ImageSlices().Right() == image.ImageSlices().Left()) {
+    if (slices.Bottom() == slices.Top() && slices.Right() == slices.Left()) {
       bottom = top;
       left = right;
     } else {
-      if (image.ImageSlices().Bottom().IsPercentOrCalc()) {
-        bottom = CSSNumericLiteralValue::Create(
-            image.ImageSlices().Bottom().Value(),
-            CSSPrimitiveValue::UnitType::kPercentage);
-      } else {
-        bottom = CSSNumericLiteralValue::Create(
-            image.ImageSlices().Bottom().Value(),
-            CSSPrimitiveValue::UnitType::kNumber);
-      }
+      bottom = ValueForImageSlice(slices.Bottom());
 
-      if (image.ImageSlices().Left() == image.ImageSlices().Right()) {
+      if (slices.Left() == slices.Right())
         left = right;
-      } else {
-        if (image.ImageSlices().Left().IsPercentOrCalc()) {
-          left = CSSNumericLiteralValue::Create(
-              image.ImageSlices().Left().Value(),
-              CSSPrimitiveValue::UnitType::kPercentage);
-        } else {
-          left = CSSNumericLiteralValue::Create(
-              image.ImageSlices().Left().Value(),
-              CSSPrimitiveValue::UnitType::kNumber);
-        }
-      }
+      else
+        left = ValueForImageSlice(slices.Left());
     }
   }
 
-  return MakeGarbageCollected<CSSBorderImageSliceValue>(
+  return MakeGarbageCollected<cssvalue::CSSBorderImageSliceValue>(
       MakeGarbageCollected<CSSQuadValue>(top, right, bottom, left,
                                          CSSQuadValue::kSerializeAsQuad),
       image.Fill());
@@ -445,17 +452,21 @@ CSSValue* ComputedStyleUtils::ValueForNinePieceImageRepeat(
 
 CSSValue* ComputedStyleUtils::ValueForNinePieceImage(
     const NinePieceImage& image,
-    const ComputedStyle& style) {
+    const ComputedStyle& style,
+    bool allow_visited_style) {
   if (!image.HasImage())
     return CSSIdentifierValue::Create(CSSValueID::kNone);
 
   // Image first.
   CSSValue* image_value = nullptr;
-  if (image.GetImage())
-    image_value = image.GetImage()->ComputedCSSValue();
+  if (image.GetImage()) {
+    image_value =
+        image.GetImage()->ComputedCSSValue(style, allow_visited_style);
+  }
 
   // Create the image slice.
-  CSSBorderImageSliceValue* image_slices = ValueForNinePieceImageSlice(image);
+  cssvalue::CSSBorderImageSliceValue* image_slices =
+      ValueForNinePieceImageSlice(image);
 
   // Create the border area slices.
   CSSValue* border_slices =
@@ -473,7 +484,8 @@ CSSValue* ComputedStyleUtils::ValueForNinePieceImage(
 
 CSSValue* ComputedStyleUtils::ValueForReflection(
     const StyleReflection* reflection,
-    const ComputedStyle& style) {
+    const ComputedStyle& style,
+    bool allow_visited_style) {
   if (!reflection)
     return CSSIdentifierValue::Create(CSSValueID::kNone);
 
@@ -503,20 +515,15 @@ CSSValue* ComputedStyleUtils::ValueForReflection(
       break;
   }
 
-  return MakeGarbageCollected<CSSReflectValue>(
-      direction, offset, ValueForNinePieceImage(reflection->Mask(), style));
+  return MakeGarbageCollected<cssvalue::CSSReflectValue>(
+      direction, offset,
+      ValueForNinePieceImage(reflection->Mask(), style, allow_visited_style));
 }
 
 CSSValue* ComputedStyleUtils::MinWidthOrMinHeightAuto(
-    const Node* styled_node,
     const ComputedStyle& style) {
-  LayoutObject* layout_object =
-      styled_node ? styled_node->GetLayoutObject() : nullptr;
-  if (layout_object && layout_object->IsBox() &&
-      (ToLayoutBox(layout_object)->IsFlexItemIncludingNG() ||
-       ToLayoutBox(layout_object)->IsGridItem())) {
+  if (style.IsFlexOrGridOrCustomItem() && !style.IsEnsuredInDisplayNone())
     return CSSIdentifierValue::Create(CSSValueID::kAuto);
-  }
   return ZoomAdjustedPixelValue(0, style);
 }
 
@@ -552,25 +559,23 @@ CSSValue* ComputedStyleUtils::ValueForPositionOffset(
   const Length& offset = *positions.first;
   const Length& opposite = *positions.second;
 
-  if (offset.IsPercentOrCalc() && layout_object && layout_object->IsBox() &&
-      layout_object->IsPositioned()) {
+  const auto* box = DynamicTo<LayoutBox>(layout_object);
+  if (offset.IsPercentOrCalc() && box && layout_object->IsPositioned()) {
     LayoutUnit containing_block_size;
     if (layout_object->IsStickyPositioned()) {
-      const LayoutBox& enclosing_scrollport_box =
-          ToLayoutBox(layout_object)->EnclosingScrollportBox();
-      bool use_inline_size = is_horizontal_property ==
-                             enclosing_scrollport_box.IsHorizontalWritingMode();
-      containing_block_size =
-          use_inline_size ? enclosing_scrollport_box.ContentLogicalWidth()
-                          : enclosing_scrollport_box.ContentLogicalHeight();
+      const LayoutBox* scroll_container = box->ContainingScrollContainer();
+      DCHECK(scroll_container);
+      bool use_inline_size =
+          is_horizontal_property == scroll_container->IsHorizontalWritingMode();
+      containing_block_size = use_inline_size
+                                  ? scroll_container->ContentLogicalWidth()
+                                  : scroll_container->ContentLogicalHeight();
     } else {
       containing_block_size =
           is_horizontal_property ==
                   layout_object->ContainingBlock()->IsHorizontalWritingMode()
-              ? ToLayoutBox(layout_object)
-                    ->ContainingBlockLogicalWidthForContent()
-              : ToLayoutBox(layout_object)
-                    ->ContainingBlockLogicalHeightForGetComputedStyle();
+              ? box->ContainingBlockLogicalWidthForContent()
+              : box->ContainingBlockLogicalHeightForGetComputedStyle();
     }
 
     return ZoomAdjustedPixelValue(ValueForLength(offset, containing_block_size),
@@ -593,14 +598,12 @@ CSSValue* ComputedStyleUtils::ValueForPositionOffset(
       }
 
       if (opposite.IsPercentOrCalc()) {
-        if (layout_object->IsBox()) {
+        if (box) {
           LayoutUnit containing_block_size =
               is_horizontal_property == layout_object->ContainingBlock()
                                             ->IsHorizontalWritingMode()
-                  ? ToLayoutBox(layout_object)
-                        ->ContainingBlockLogicalWidthForContent()
-                  : ToLayoutBox(layout_object)
-                        ->ContainingBlockLogicalHeightForGetComputedStyle();
+                  ? box->ContainingBlockLogicalWidthForContent()
+                  : box->ContainingBlockLogicalHeightForGetComputedStyle();
           return ZoomAdjustedPixelValue(
               -FloatValueForLength(opposite, containing_block_size), style);
         }
@@ -619,30 +622,29 @@ CSSValue* ComputedStyleUtils::ValueForPositionOffset(
       // right are defined relative to the corresponding sides of the containing
       // block.
       LayoutBlock* container = layout_object->ContainingBlock();
-      const LayoutBox* layout_box = ToLayoutBox(layout_object);
 
       // clientOffset is the distance from this object's border edge to the
       // container's padding edge. Thus it includes margins which we subtract
       // below.
       const LayoutSize client_offset =
-          layout_box->LocationOffset() -
+          box->LocationOffset() -
           LayoutSize(container->ClientLeft(), container->ClientTop());
       LayoutUnit position;
 
       switch (property.PropertyID()) {
         case CSSPropertyID::kLeft:
-          position = client_offset.Width() - layout_box->MarginLeft();
+          position = client_offset.Width() - box->MarginLeft();
           break;
         case CSSPropertyID::kTop:
-          position = client_offset.Height() - layout_box->MarginTop();
+          position = client_offset.Height() - box->MarginTop();
           break;
         case CSSPropertyID::kRight:
-          position = container->ClientWidth() - layout_box->MarginRight() -
-                     (layout_box->OffsetWidth() + client_offset.Width());
+          position = container->ClientWidth() - box->MarginRight() -
+                     (box->OffsetWidth() + client_offset.Width());
           break;
         case CSSPropertyID::kBottom:
-          position = container->ClientHeight() - layout_box->MarginBottom() -
-                     (layout_box->OffsetHeight() + client_offset.Height());
+          position = container->ClientHeight() - box->MarginBottom() -
+                     (box->OffsetHeight() + client_offset.Height());
           break;
         default:
           NOTREACHED();
@@ -731,37 +733,64 @@ CSSValue* ComputedStyleUtils::ValueForLineHeight(const ComputedStyle& style) {
       style);
 }
 
-CSSValueID IdentifierForFamily(const AtomicString& family) {
-  if (family == font_family_names::kWebkitCursive)
-    return CSSValueID::kCursive;
-  if (family == font_family_names::kWebkitFantasy)
-    return CSSValueID::kFantasy;
-  if (family == font_family_names::kWebkitMonospace)
-    return CSSValueID::kMonospace;
-  if (family == font_family_names::kWebkitPictograph)
-    return CSSValueID::kWebkitPictograph;
-  if (family == font_family_names::kWebkitSansSerif)
-    return CSSValueID::kSansSerif;
-  if (family == font_family_names::kWebkitSerif)
-    return CSSValueID::kSerif;
-  return CSSValueID::kInvalid;
+CSSValue* ComputedStyleUtils::ComputedValueForLineHeight(
+    const ComputedStyle& style) {
+  const Length& length = style.LineHeight();
+  if (length.IsNegative())
+    return CSSIdentifierValue::Create(CSSValueID::kNormal);
+
+  if (length.IsPercent()) {
+    return CSSNumericLiteralValue::Create(length.GetFloatValue() / 100.0,
+                                          CSSPrimitiveValue::UnitType::kNumber);
+  } else {
+    return ZoomAdjustedPixelValue(
+        FloatValueForLength(length, style.GetFontDescription().ComputedSize()),
+        style);
+  }
 }
 
-CSSValue* ValueForFamily(const AtomicString& family) {
-  CSSValueID family_identifier = IdentifierForFamily(family);
-  if (IsValidCSSValueID(family_identifier))
-    return CSSIdentifierValue::Create(family_identifier);
-  return CSSFontFamilyValue::Create(family.GetString());
+CSSValueID IdentifierForFamily(const AtomicString& family) {
+  if (family == font_family_names::kCursive)
+    return CSSValueID::kCursive;
+  if (family == font_family_names::kFantasy)
+    return CSSValueID::kFantasy;
+  if (family == font_family_names::kMonospace)
+    return CSSValueID::kMonospace;
+  if (family == font_family_names::kSansSerif)
+    return CSSValueID::kSansSerif;
+  if (family == font_family_names::kSerif)
+    return CSSValueID::kSerif;
+  if (family == font_family_names::kSystemUi)
+    return CSSValueID::kSystemUi;
+  if (RuntimeEnabledFeatures::CSSFontFamilyMathEnabled() &&
+      family == font_family_names::kMath)
+    return CSSValueID::kMath;
+  // If family does not correspond to any of the above, then it was actually
+  // converted from -webkit-body by FontBuilder, so put this value back.
+  // TODO(crbug.com/1065468): This trick does not work if
+  // FontBuilder::StandardFontFamilyName() actually returned one of the generic
+  // family above.
+  return CSSValueID::kWebkitBody;
+}
+
+CSSValue* ValueForFamily(const FontFamily& family) {
+  if (family.FamilyIsGeneric())
+    return CSSIdentifierValue::Create(IdentifierForFamily(family.FamilyName()));
+  return CSSFontFamilyValue::Create(family.FamilyName());
+}
+
+CSSValueList* ComputedStyleUtils::ValueForFontFamily(
+    const FontFamily& font_family) {
+  CSSValueList* list = CSSValueList::CreateCommaSeparated();
+  for (const FontFamily* family = &font_family; family; family = family->Next())
+    list->Append(*ValueForFamily(*family));
+  return list;
 }
 
 CSSValueList* ComputedStyleUtils::ValueForFontFamily(
     const ComputedStyle& style) {
-  const FontFamily& first_family = style.GetFontDescription().Family();
-  CSSValueList* list = CSSValueList::CreateCommaSeparated();
-  for (const FontFamily* family = &first_family; family;
-       family = family->Next())
-    list->Append(*ValueForFamily(family->Family()));
-  return list;
+  return ComputedStyleUtils::ValueForFontFamily(
+      style.GetFontDescription().Family());
 }
 
 CSSPrimitiveValue* ComputedStyleUtils::ValueForFontSize(
@@ -793,11 +822,11 @@ CSSValue* ComputedStyleUtils::ValueForFontStyle(const ComputedStyle& style) {
   CSSValueList* oblique_values = CSSValueList::CreateSpaceSeparated();
   oblique_values->Append(*CSSNumericLiteralValue::Create(
       angle, CSSPrimitiveValue::UnitType::kDegrees));
-  return MakeGarbageCollected<CSSFontStyleRangeValue>(
+  return MakeGarbageCollected<cssvalue::CSSFontStyleRangeValue>(
       *CSSIdentifierValue::Create(CSSValueID::kOblique), *oblique_values);
 }
 
-CSSPrimitiveValue* ComputedStyleUtils::ValueForFontWeight(
+CSSNumericLiteralValue* ComputedStyleUtils::ValueForFontWeight(
     const ComputedStyle& style) {
   return CSSNumericLiteralValue::Create(style.GetFontDescription().Weight(),
                                         CSSPrimitiveValue::UnitType::kNumber);
@@ -999,13 +1028,18 @@ CSSValue* ComputedStyleUtils::ValueForFontVariantEastAsian(
 }
 
 CSSValue* ComputedStyleUtils::ValueForFont(const ComputedStyle& style) {
-  // Add a slash between size and line-height.
-  CSSValueList* size_and_line_height = CSSValueList::CreateSlashSeparated();
-  size_and_line_height->Append(*ValueForFontSize(style));
-  size_and_line_height->Append(*ValueForLineHeight(style));
+  auto AppendIfNotNormal = [](CSSValueList* list, const CSSValue& value) {
+    auto* identifier_value = DynamicTo<CSSIdentifierValue>(value);
+    if (identifier_value &&
+        identifier_value->GetValueID() == CSSValueID::kNormal) {
+      return;
+    }
+
+    list->Append(value);
+  };
 
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  list->Append(*ValueForFontStyle(style));
+  AppendIfNotNormal(list, *ValueForFontStyle(style));
 
   // Check that non-initial font-variant subproperties are not conflicting with
   // this serialization.
@@ -1014,15 +1048,15 @@ CSSValue* ComputedStyleUtils::ValueForFont(const ComputedStyle& style) {
   CSSValue* east_asian_value = ValueForFontVariantEastAsian(style);
   // FIXME: Use DataEquivalent<CSSValue>(...) once http://crbug.com/729447 is
   // resolved.
-  if (!DataEquivalent(ligatures_value,
-                      static_cast<CSSValue*>(
-                          CSSIdentifierValue::Create(CSSValueID::kNormal))) ||
-      !DataEquivalent(numeric_value,
-                      static_cast<CSSValue*>(
-                          CSSIdentifierValue::Create(CSSValueID::kNormal))) ||
-      !DataEquivalent(east_asian_value,
-                      static_cast<CSSValue*>(
-                          CSSIdentifierValue::Create(CSSValueID::kNormal))))
+  if (!base::ValuesEquivalent(ligatures_value,
+                              static_cast<CSSValue*>(CSSIdentifierValue::Create(
+                                  CSSValueID::kNormal))) ||
+      !base::ValuesEquivalent(numeric_value,
+                              static_cast<CSSValue*>(CSSIdentifierValue::Create(
+                                  CSSValueID::kNormal))) ||
+      !base::ValuesEquivalent(east_asian_value,
+                              static_cast<CSSValue*>(CSSIdentifierValue::Create(
+                                  CSSValueID::kNormal))))
     return nullptr;
 
   if (!ValueForFontStretchAsKeyword(style))
@@ -1032,11 +1066,32 @@ CSSValue* ComputedStyleUtils::ValueForFont(const ComputedStyle& style) {
   if (caps_value->GetValueID() != CSSValueID::kNormal &&
       caps_value->GetValueID() != CSSValueID::kSmallCaps)
     return nullptr;
-  list->Append(*caps_value);
+  AppendIfNotNormal(list, *caps_value);
 
-  list->Append(*ValueForFontWeight(style));
-  list->Append(*ValueForFontStretchAsKeyword(style));
-  list->Append(*size_and_line_height);
+  {
+    CSSNumericLiteralValue* font_weight = ValueForFontWeight(style);
+    if (font_weight->DoubleValue() != NormalWeightValue())
+      list->Append(*font_weight);
+  }
+
+  AppendIfNotNormal(list, *ValueForFontStretchAsKeyword(style));
+
+  {
+    CSSValue* line_height = ValueForLineHeight(style);
+    auto* identifier_line_height = DynamicTo<CSSIdentifierValue>(line_height);
+    if (identifier_line_height &&
+        identifier_line_height->GetValueID() == CSSValueID::kNormal) {
+      list->Append(*ValueForFontSize(style));
+    } else {
+      // Add a slash between size and line-height.
+      CSSValueList* size_and_line_height = CSSValueList::CreateSlashSeparated();
+      size_and_line_height->Append(*ValueForFontSize(style));
+      size_and_line_height->Append(*line_height);
+
+      list->Append(*size_and_line_height);
+    }
+  }
+
   list->Append(*ValueForFontFamily(style));
 
   return list;
@@ -1091,50 +1146,93 @@ CSSValue* ComputedStyleUtils::SpecifiedValueForGridTrackSize(
   return nullptr;
 }
 
+enum GridTrackListSerializationType {
+  kForGridElements,
+  kForNonGridElements,
+  kForRepeatNonGridElements,
+};
+
 class OrderedNamedLinesCollector {
   STACK_ALLOCATED();
 
  public:
-  OrderedNamedLinesCollector(const ComputedStyle& style,
-                             bool is_row_axis,
-                             size_t auto_repeat_tracks_count)
-      : ordered_named_grid_lines_(is_row_axis
-                                      ? style.OrderedNamedGridColumnLines()
-                                      : style.OrderedNamedGridRowLines()),
+  OrderedNamedLinesCollector(
+      const OrderedNamedGridLines& ordered_named_grid_lines,
+      const OrderedNamedGridLines& ordered_named_auto_repeat_grid_lines)
+      : ordered_named_grid_lines_(ordered_named_grid_lines),
         ordered_named_auto_repeat_grid_lines_(
-            is_row_axis ? style.AutoRepeatOrderedNamedGridColumnLines()
-                        : style.AutoRepeatOrderedNamedGridRowLines()),
-        insertion_point_(is_row_axis
-                             ? style.GridAutoRepeatColumnsInsertionPoint()
-                             : style.GridAutoRepeatRowsInsertionPoint()),
-        auto_repeat_total_tracks_(auto_repeat_tracks_count),
-        auto_repeat_track_list_length_(
-            is_row_axis ? style.GridAutoRepeatColumns().size()
-                        : style.GridAutoRepeatRows().size()) {}
+            ordered_named_auto_repeat_grid_lines) {}
+  OrderedNamedLinesCollector(const OrderedNamedLinesCollector&) = delete;
+  OrderedNamedLinesCollector& operator=(const OrderedNamedLinesCollector&) =
+      delete;
+  virtual ~OrderedNamedLinesCollector() = default;
 
   bool IsEmpty() const {
     return ordered_named_grid_lines_.IsEmpty() &&
            ordered_named_auto_repeat_grid_lines_.IsEmpty();
   }
-  void CollectLineNamesForIndex(CSSGridLineNamesValue&, size_t index) const;
+  virtual void CollectLineNamesForIndex(
+      cssvalue::CSSBracketedValueList&,
+      size_t index,
+      GridTrackListSerializationType named_line_type = kForGridElements) const;
 
- private:
+ protected:
   enum NamedLinesType { kNamedLines, kAutoRepeatNamedLines };
-  void AppendLines(CSSGridLineNamesValue&, size_t index, NamedLinesType) const;
+  void AppendLines(
+      cssvalue::CSSBracketedValueList&,
+      size_t index,
+      NamedLinesType,
+      GridTrackListSerializationType named_line_type = kForGridElements) const;
 
   const OrderedNamedGridLines& ordered_named_grid_lines_;
   const OrderedNamedGridLines& ordered_named_auto_repeat_grid_lines_;
+};
+
+class OrderedNamedLinesCollectorInsideAutoRepeat
+    : public OrderedNamedLinesCollector {
+ public:
+  OrderedNamedLinesCollectorInsideAutoRepeat(
+      const OrderedNamedGridLines& ordered_named_grid_lines,
+      const OrderedNamedGridLines& ordered_named_auto_repeat_grid_lines)
+      : OrderedNamedLinesCollector(ordered_named_grid_lines,
+                                   ordered_named_auto_repeat_grid_lines) {}
+  void CollectLineNamesForIndex(cssvalue::CSSBracketedValueList&,
+                                size_t index,
+                                GridTrackListSerializationType named_line_type =
+                                    kForGridElements) const override;
+};
+
+class OrderedNamedLinesCollectorInGridLayout
+    : public OrderedNamedLinesCollector {
+ public:
+  OrderedNamedLinesCollectorInGridLayout(
+      const OrderedNamedGridLines& ordered_named_grid_lines,
+      const OrderedNamedGridLines& ordered_named_auto_repeat_grid_lines,
+      size_t insertion_point,
+      size_t auto_repeat_tracks_count,
+      size_t auto_repeat_track_list_length)
+      : OrderedNamedLinesCollector(ordered_named_grid_lines,
+                                   ordered_named_auto_repeat_grid_lines),
+        insertion_point_(insertion_point),
+        auto_repeat_total_tracks_(auto_repeat_tracks_count),
+        auto_repeat_track_list_length_(auto_repeat_track_list_length) {}
+  void CollectLineNamesForIndex(cssvalue::CSSBracketedValueList&,
+                                size_t index,
+                                GridTrackListSerializationType named_line_type =
+                                    kForGridElements) const override;
+
+ private:
   size_t insertion_point_;
   size_t auto_repeat_total_tracks_;
   size_t auto_repeat_track_list_length_;
-  DISALLOW_COPY_AND_ASSIGN(OrderedNamedLinesCollector);
 };
 
 // RJW
 void OrderedNamedLinesCollector::AppendLines(
-    CSSGridLineNamesValue& line_names_value,
+    cssvalue::CSSBracketedValueList& line_names_value,
     size_t index,
-    NamedLinesType type) const {
+    NamedLinesType type,
+    GridTrackListSerializationType named_line_type) const {
   auto iter = type == kNamedLines
                   ? ordered_named_grid_lines_.find(index)
                   : ordered_named_auto_repeat_grid_lines_.find(index);
@@ -1144,18 +1242,48 @@ void OrderedNamedLinesCollector::AppendLines(
   if (iter == end_iter)
     return;
 
-  for (auto line_name : iter->value) {
-    line_names_value.Append(
-        *MakeGarbageCollected<CSSCustomIdentValue>(AtomicString(line_name)));
+  for (auto named_grid_line : iter->value) {
+    // A line name is appended when:
+    // 1. The layout object is the grid.
+    // 2. The layout object is not the grid and the named line isn't part of an
+    // integer repeat.
+    // 3. The layout object is not the grid, the named line is part of the
+    // repeat and is the first time it appears in |ordered_named_grid_lines_|.
+    const bool is_first_repeat =
+        named_grid_line.is_in_repeat && named_grid_line.is_first_repeat;
+    if (named_line_type == kForGridElements ||
+        (named_line_type == kForNonGridElements &&
+         !named_grid_line.is_in_repeat) ||
+        (named_line_type == kForRepeatNonGridElements && is_first_repeat)) {
+      line_names_value.Append(*MakeGarbageCollected<CSSCustomIdentValue>(
+          AtomicString(named_grid_line.line_name)));
+    }
   }
 }
 
-// RJW
 void OrderedNamedLinesCollector::CollectLineNamesForIndex(
-    CSSGridLineNamesValue& line_names_value,
-    size_t i) const {
+    cssvalue::CSSBracketedValueList& line_names_value,
+    size_t i,
+    GridTrackListSerializationType named_line_type) const {
   DCHECK(!IsEmpty());
-  if (ordered_named_auto_repeat_grid_lines_.IsEmpty() || i < insertion_point_) {
+  AppendLines(line_names_value, i, kNamedLines, named_line_type);
+}
+
+void OrderedNamedLinesCollectorInsideAutoRepeat::CollectLineNamesForIndex(
+    cssvalue::CSSBracketedValueList& line_names_value,
+    size_t i,
+    GridTrackListSerializationType named_line_type) const {
+  DCHECK(!IsEmpty());
+  AppendLines(line_names_value, i, kAutoRepeatNamedLines);
+}
+
+// RJW
+void OrderedNamedLinesCollectorInGridLayout::CollectLineNamesForIndex(
+    cssvalue::CSSBracketedValueList& line_names_value,
+    size_t i,
+    GridTrackListSerializationType named_line_type) const {
+  DCHECK(!IsEmpty());
+  if (auto_repeat_track_list_length_ == 0LU || i < insertion_point_) {
     AppendLines(line_names_value, i, kNamedLines);
     return;
   }
@@ -1191,87 +1319,222 @@ void OrderedNamedLinesCollector::CollectLineNamesForIndex(
               kAutoRepeatNamedLines);
 }
 
-void AddValuesForNamedGridLinesAtIndex(OrderedNamedLinesCollector& collector,
-                                       size_t i,
-                                       CSSValueList& list) {
+void AddValuesForNamedGridLinesAtIndex(
+    OrderedNamedLinesCollector& collector,
+    size_t i,
+    CSSValueList& list,
+    GridTrackListSerializationType named_line_type = kForGridElements) {
   if (collector.IsEmpty())
     return;
 
-  auto* line_names = MakeGarbageCollected<CSSGridLineNamesValue>();
-  collector.CollectLineNamesForIndex(*line_names, i);
+  auto* line_names = MakeGarbageCollected<cssvalue::CSSBracketedValueList>();
+  collector.CollectLineNamesForIndex(*line_names, i, named_line_type);
   if (line_names->length())
     list.Append(*line_names);
 }
 
-CSSValue* ComputedStyleUtils::ValueForGridTrackSizeList(
-    GridTrackSizingDirection direction,
+CSSValue* ComputedStyleUtils::ValueForGridAutoTrackList(
+    GridTrackSizingDirection track_direction,
+    const LayoutObject* layout_object,
     const ComputedStyle& style) {
-  const Vector<GridTrackSize>& auto_track_sizes =
-      direction == kForColumns ? style.GridAutoColumns() : style.GridAutoRows();
-
+  const GridTrackList& grid_auto_track_list = track_direction == kForColumns
+                                                  ? style.GridAutoColumns()
+                                                  : style.GridAutoRows();
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  for (auto& track_size : auto_track_sizes) {
-    list->Append(*SpecifiedValueForGridTrackSize(track_size, style));
+
+  if (layout_object && layout_object->IsLayoutNGGrid()) {
+    const NGGridTrackList& auto_track_list = grid_auto_track_list.NGTrackList();
+    if (auto_track_list.RepeaterCount() == 1) {
+      for (wtf_size_t i = 0; i < auto_track_list.RepeatSize(0); ++i) {
+        list->Append(*SpecifiedValueForGridTrackSize(
+            auto_track_list.RepeatTrackSize(0, i), style));
+      }
+    }
+  } else {
+    const Vector<GridTrackSize, 1>& auto_track_sizes =
+        grid_auto_track_list.LegacyTrackList();
+    for (auto& track_size : auto_track_sizes)
+      list->Append(*SpecifiedValueForGridTrackSize(track_size, style));
   }
   return list;
+}
+
+template <typename T, typename F>
+void PopulateGridTrackList(CSSValueList* list,
+                           OrderedNamedLinesCollector& collector,
+                           const Vector<T, 1>& tracks,
+                           F getTrackSize,
+                           wtf_size_t start,
+                           wtf_size_t end,
+                           int offset = 0) {
+  DCHECK_LE(start, end);
+  DCHECK_LE(end, tracks.size());
+
+  for (wtf_size_t i = start; i < end; ++i) {
+    if (offset >= 0 || i >= static_cast<wtf_size_t>(-offset))
+      AddValuesForNamedGridLinesAtIndex(collector, i + offset, *list);
+    list->Append(*getTrackSize(tracks[i]));
+  }
+  if (offset >= 0 || end >= static_cast<wtf_size_t>(-offset))
+    AddValuesForNamedGridLinesAtIndex(collector, end + offset, *list);
+}
+
+template <typename T, typename F>
+void PopulateGridTrackList(CSSValueList* list,
+                           OrderedNamedLinesCollector& collector,
+                           const Vector<T, 1>& tracks,
+                           F getTrackSize,
+                           int offset = 0) {
+  PopulateGridTrackList<T>(list, collector, tracks, getTrackSize, 0,
+                           tracks.size(), offset);
 }
 
 CSSValue* ComputedStyleUtils::ValueForGridTrackList(
     GridTrackSizingDirection direction,
     const LayoutObject* layout_object,
     const ComputedStyle& style) {
-  bool is_row_axis = direction == kForColumns;
-  const Vector<GridTrackSize>& track_sizes =
-      is_row_axis ? style.GridTemplateColumns() : style.GridTemplateRows();
-  const Vector<GridTrackSize>& auto_repeat_track_sizes =
-      is_row_axis ? style.GridAutoRepeatColumns() : style.GridAutoRepeatRows();
-  bool is_layout_grid = layout_object && layout_object->IsLayoutGrid();
+  const bool is_for_columns = direction == kForColumns;
+  const bool is_layout_ng = RuntimeEnabledFeatures::LayoutNGEnabled();
+  const ComputedGridTrackList& computed_grid_track_list =
+      is_for_columns ? style.GridTemplateColumns() : style.GridTemplateRows();
+  const Vector<GridTrackSize, 1>& legacy_track_sizes =
+      computed_grid_track_list.track_sizes.LegacyTrackList();
+  const Vector<GridTrackSize, 1>& auto_repeat_track_sizes =
+      computed_grid_track_list.auto_repeat_track_sizes;
+
+  const bool is_layout_grid =
+      layout_object && layout_object->IsLayoutGridIncludingNG();
 
   // Handle the 'none' case.
-  bool track_list_is_empty =
-      track_sizes.IsEmpty() && auto_repeat_track_sizes.IsEmpty();
-  if (is_layout_grid && track_list_is_empty) {
+  bool is_track_list_empty =
+      is_layout_ng
+          ? !computed_grid_track_list.TrackList().RepeaterCount()
+          : (legacy_track_sizes.IsEmpty() && auto_repeat_track_sizes.IsEmpty());
+  if (is_layout_grid && is_track_list_empty) {
     // For grids we should consider every listed track, whether implicitly or
     // explicitly created. Empty grids have a sole grid line per axis.
-    auto& positions = is_row_axis
-                          ? ToLayoutGrid(layout_object)->ColumnPositions()
-                          : ToLayoutGrid(layout_object)->RowPositions();
-    track_list_is_empty = positions.size() == 1;
+    const Vector<LayoutUnit>& positions =
+        is_for_columns
+            ? ToInterface<LayoutNGGridInterface>(layout_object)
+                  ->ColumnPositions()
+            : ToInterface<LayoutNGGridInterface>(layout_object)->RowPositions();
+    is_track_list_empty = positions.size() == 1;
   }
 
-  if (track_list_is_empty)
+  if (is_track_list_empty)
     return CSSIdentifierValue::Create(CSSValueID::kNone);
 
-  size_t auto_repeat_total_tracks =
-      is_layout_grid
-          ? ToLayoutGrid(layout_object)->AutoRepeatCountForDirection(direction)
-          : 0;
-  OrderedNamedLinesCollector collector(style, is_row_axis,
-                                       auto_repeat_total_tracks);
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  wtf_size_t insertion_index;
+  wtf_size_t auto_repeat_insertion_point =
+      computed_grid_track_list.auto_repeat_insertion_point;
+
+  // If the element is a grid container, the resolved value is the used value,
+  // specifying track sizes in pixels and expanding the repeat() notation.
   if (is_layout_grid) {
-    const auto* grid = ToLayoutGrid(layout_object);
-    Vector<LayoutUnit> computed_track_sizes =
-        grid->TrackSizesForComputedStyle(direction);
-    wtf_size_t num_tracks = computed_track_sizes.size();
-
-    for (wtf_size_t i = 0; i < num_tracks; ++i) {
-      AddValuesForNamedGridLinesAtIndex(collector, i, *list);
-      list->Append(*ZoomAdjustedPixelValue(computed_track_sizes[i], style));
-    }
-    AddValuesForNamedGridLinesAtIndex(collector, num_tracks + 1, *list);
-
-    insertion_index = num_tracks;
-  } else {
-    for (wtf_size_t i = 0; i < track_sizes.size(); ++i) {
-      AddValuesForNamedGridLinesAtIndex(collector, i, *list);
-      list->Append(*SpecifiedValueForGridTrackSize(track_sizes[i], style));
-    }
-    insertion_index = track_sizes.size();
+    const auto* grid = ToInterface<LayoutNGGridInterface>(layout_object);
+    OrderedNamedLinesCollectorInGridLayout collector(
+        computed_grid_track_list.ordered_named_grid_lines,
+        computed_grid_track_list.auto_repeat_ordered_named_grid_lines,
+        auto_repeat_insertion_point,
+        grid->AutoRepeatCountForDirection(direction),
+        auto_repeat_track_sizes.size());
+    auto getTrackSize = [&](const LayoutUnit& v) {
+      return ZoomAdjustedPixelValue(v, style);
+    };
+    // Named grid line indices are relative to the explicit grid, but we are
+    // including all tracks. So we need to subtract the number of leading
+    // implicit tracks in order to get the proper line index.
+    int offset = -base::checked_cast<int>(
+        grid->ExplicitGridStartForDirection(direction));
+    PopulateGridTrackList(list, collector,
+                          grid->TrackSizesForComputedStyle(direction),
+                          getTrackSize, offset);
+    return list;
   }
-  // Those are the trailing <string>* allowed in the syntax.
-  AddValuesForNamedGridLinesAtIndex(collector, insertion_index, *list);
+
+  // Otherwise, the resolved value is the computed value, preserving repeat().
+  OrderedNamedLinesCollector collector(
+      computed_grid_track_list.ordered_named_grid_lines,
+      computed_grid_track_list.auto_repeat_ordered_named_grid_lines);
+  auto getTrackSize = [&](const GridTrackSize& v) {
+    return SpecifiedValueForGridTrackSize(v, style);
+  };
+
+  if (auto_repeat_track_sizes.IsEmpty()) {
+    if (!is_layout_ng) {
+      // If it's legacy grid or there's no repeat(), just add all the line names
+      // and track sizes.
+      PopulateGridTrackList(list, collector, legacy_track_sizes, getTrackSize);
+      return list;
+    }
+
+    // TODO(ansollan): Add support for track lists with auto and integer
+    // repeaters.
+    wtf_size_t track_index = 0;
+    auto AppendValues = [&](CSSValueList* list, const GridTrackSize& track_size,
+                            GridTrackListSerializationType named_line_type) {
+      AddValuesForNamedGridLinesAtIndex(collector, track_index, *list,
+                                        named_line_type);
+      list->Append(*getTrackSize(track_size));
+      ++track_index;
+    };
+
+    const NGGridTrackList& ng_track_list = computed_grid_track_list.TrackList();
+    for (wtf_size_t i = 0; i < ng_track_list.RepeaterCount(); ++i) {
+      const auto repeat_type = ng_track_list.RepeatType(i);
+
+      // Add the line names and track sizes that aren't part of the repeat.
+      if (repeat_type == NGGridTrackRepeater::RepeatType::kNoRepeat) {
+        AppendValues(list, ng_track_list.RepeatTrackSize(i, 0),
+                     kForNonGridElements);
+        continue;
+      }
+
+      // Add a CSSGridIntegerRepeatValue with the contents of the repeat().
+      DCHECK_EQ(repeat_type, NGGridTrackRepeater::RepeatType::kInteger);
+      const wtf_size_t number_of_repetitions = ng_track_list.RepeatCount(i, 0);
+      const wtf_size_t repeat_size = ng_track_list.RepeatSize(i);
+      CSSValueList* repeated_values =
+          MakeGarbageCollected<cssvalue::CSSGridIntegerRepeatValue>(
+              number_of_repetitions);
+      AddValuesForNamedGridLinesAtIndex(collector, track_index, *list,
+                                        kForNonGridElements);
+      for (wtf_size_t j = 0; j < repeat_size; ++j) {
+        AppendValues(repeated_values, ng_track_list.RepeatTrackSize(i, j),
+                     kForRepeatNonGridElements);
+      }
+      AddValuesForNamedGridLinesAtIndex(
+          collector, track_index, *repeated_values, kForRepeatNonGridElements);
+      list->Append(*repeated_values);
+      // We need to update |track_index| to skip over added grid named lines
+      // that belong to the repeat we just found.
+      track_index += repeat_size * (number_of_repetitions - 1);
+    }
+    AddValuesForNamedGridLinesAtIndex(collector, track_index, *list,
+                                      kForNonGridElements);
+    return list;
+  }
+  // Add the line names and track sizes that precede the auto repeat().
+  PopulateGridTrackList(list, collector, legacy_track_sizes, getTrackSize, 0,
+                        auto_repeat_insertion_point);
+
+  // Add a CSSGridAutoRepeatValue with the contents of the auto repeat().
+  CSSValueList* repeated_values =
+      MakeGarbageCollected<cssvalue::CSSGridAutoRepeatValue>(
+          computed_grid_track_list.auto_repeat_type == AutoRepeatType::kAutoFill
+              ? CSSValueID::kAutoFill
+              : CSSValueID::kAutoFit);
+  OrderedNamedLinesCollectorInsideAutoRepeat repeat_collector(
+      computed_grid_track_list.ordered_named_grid_lines,
+      computed_grid_track_list.auto_repeat_ordered_named_grid_lines);
+  PopulateGridTrackList(repeated_values, repeat_collector,
+                        auto_repeat_track_sizes, getTrackSize);
+  list->Append(*repeated_values);
+
+  // Add the line names and track sizes that follow the auto repeat().
+  PopulateGridTrackList(list, collector, legacy_track_sizes, getTrackSize,
+                        auto_repeat_insertion_point, legacy_track_sizes.size(),
+                        1);
   return list;
 }
 
@@ -1302,37 +1565,49 @@ CSSValue* ComputedStyleUtils::ValueForGridPosition(
 
 static bool IsSVGObjectWithWidthAndHeight(const LayoutObject& layout_object) {
   DCHECK(layout_object.IsSVGChild());
-  return layout_object.IsSVGImage() || layout_object.IsSVGForeignObject() ||
+  return layout_object.IsSVGImage() ||
+         layout_object.IsSVGForeignObjectIncludingNG() ||
          (layout_object.IsSVGShape() &&
-          IsSVGRectElement(layout_object.GetNode()));
+          IsA<SVGRectElement>(layout_object.GetNode()));
 }
 
-FloatSize ComputedStyleUtils::UsedBoxSize(const LayoutObject& layout_object) {
+gfx::SizeF ComputedStyleUtils::UsedBoxSize(const LayoutObject& layout_object) {
   if (layout_object.IsSVGChild() &&
       IsSVGObjectWithWidthAndHeight(layout_object)) {
-    FloatSize size(layout_object.ObjectBoundingBox().Size());
+    gfx::SizeF size = layout_object.ObjectBoundingBox().size();
     // The object bounding box does not have zoom applied. Multiply with zoom
     // here since we'll divide by it when we produce the CSS value.
     size.Scale(layout_object.StyleRef().EffectiveZoom());
     return size;
   }
   if (!layout_object.IsBox())
-    return FloatSize();
-  const LayoutBox& box = ToLayoutBox(layout_object);
-  return FloatSize(box.StyleRef().BoxSizing() == EBoxSizing::kBorderBox
-                       ? box.BorderBoxRect().Size()
-                       : box.ComputedCSSContentBoxRect().Size());
+    return gfx::SizeF();
+  const auto& box = To<LayoutBox>(layout_object);
+  return gfx::SizeF(box.StyleRef().BoxSizing() == EBoxSizing::kBorderBox
+                        ? box.BorderBoxRect().Size()
+                        : box.ComputedCSSContentBoxRect().Size());
 }
 
 CSSValue* ComputedStyleUtils::RenderTextDecorationFlagsToCSSValue(
-    TextDecoration text_decoration) {
+    TextDecorationLine text_decoration) {
+  switch (text_decoration) {
+    case TextDecorationLine::kNone:
+      return CSSIdentifierValue::Create(CSSValueID::kNone);
+    case TextDecorationLine::kSpellingError:
+      return CSSIdentifierValue::Create(CSSValueID::kSpellingError);
+    case TextDecorationLine::kGrammarError:
+      return CSSIdentifierValue::Create(CSSValueID::kGrammarError);
+    default:
+      break;
+  }
+
   // Blink value is ignored.
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  if (EnumHasFlags(text_decoration, TextDecoration::kUnderline))
+  if (EnumHasFlags(text_decoration, TextDecorationLine::kUnderline))
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kUnderline));
-  if (EnumHasFlags(text_decoration, TextDecoration::kOverline))
+  if (EnumHasFlags(text_decoration, TextDecorationLine::kOverline))
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kOverline));
-  if (EnumHasFlags(text_decoration, TextDecoration::kLineThrough))
+  if (EnumHasFlags(text_decoration, TextDecorationLine::kLineThrough))
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kLineThrough));
 
   if (!list->length())
@@ -1369,30 +1644,27 @@ CSSValue* ComputedStyleUtils::ValueForTextDecorationSkipInk(
 CSSValue* ComputedStyleUtils::TouchActionFlagsToCSSValue(
     TouchAction touch_action) {
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  if (touch_action == TouchAction::kTouchActionAuto) {
+  if (touch_action == TouchAction::kAuto) {
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kAuto));
-  } else if (touch_action == TouchAction::kTouchActionNone) {
+  } else if (touch_action == TouchAction::kNone) {
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kNone));
-  } else if (touch_action == TouchAction::kTouchActionManipulation) {
+  } else if (touch_action == TouchAction::kManipulation) {
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kManipulation));
   } else {
-    if ((touch_action & TouchAction::kTouchActionPanX) ==
-        TouchAction::kTouchActionPanX)
+    if ((touch_action & TouchAction::kPanX) == TouchAction::kPanX)
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kPanX));
-    else if (touch_action & TouchAction::kTouchActionPanLeft)
+    else if ((touch_action & TouchAction::kPanLeft) != TouchAction::kNone)
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kPanLeft));
-    else if (touch_action & TouchAction::kTouchActionPanRight)
+    else if ((touch_action & TouchAction::kPanRight) != TouchAction::kNone)
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kPanRight));
-    if ((touch_action & TouchAction::kTouchActionPanY) ==
-        TouchAction::kTouchActionPanY)
+    if ((touch_action & TouchAction::kPanY) == TouchAction::kPanY)
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kPanY));
-    else if (touch_action & TouchAction::kTouchActionPanUp)
+    else if ((touch_action & TouchAction::kPanUp) != TouchAction::kNone)
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kPanUp));
-    else if (touch_action & TouchAction::kTouchActionPanDown)
+    else if ((touch_action & TouchAction::kPanDown) != TouchAction::kNone)
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kPanDown));
 
-    if ((touch_action & TouchAction::kTouchActionPinchZoom) ==
-        TouchAction::kTouchActionPinchZoom)
+    if ((touch_action & TouchAction::kPinchZoom) == TouchAction::kPinchZoom)
       list->Append(*CSSIdentifierValue::Create(CSSValueID::kPinchZoom));
   }
 
@@ -1504,8 +1776,8 @@ CSSValue* ComputedStyleUtils::CreateTimingFunctionValue(
     const TimingFunction* timing_function) {
   switch (timing_function->GetType()) {
     case TimingFunction::Type::CUBIC_BEZIER: {
-      const CubicBezierTimingFunction* bezier_timing_function =
-          ToCubicBezierTimingFunction(timing_function);
+      const auto* bezier_timing_function =
+          To<CubicBezierTimingFunction>(timing_function);
       if (bezier_timing_function->GetEaseType() !=
           CubicBezierTimingFunction::EaseType::CUSTOM) {
         CSSValueID value_id = CSSValueID::kInvalid;
@@ -1528,21 +1800,22 @@ CSSValue* ComputedStyleUtils::CreateTimingFunctionValue(
         }
         return CSSIdentifierValue::Create(value_id);
       }
-      return MakeGarbageCollected<CSSCubicBezierTimingFunctionValue>(
+      return MakeGarbageCollected<cssvalue::CSSCubicBezierTimingFunctionValue>(
           bezier_timing_function->X1(), bezier_timing_function->Y1(),
           bezier_timing_function->X2(), bezier_timing_function->Y2());
     }
 
     case TimingFunction::Type::STEPS: {
-      const StepsTimingFunction* steps_timing_function =
-          ToStepsTimingFunction(timing_function);
+      const auto* steps_timing_function =
+          To<StepsTimingFunction>(timing_function);
       StepsTimingFunction::StepPosition position =
           steps_timing_function->GetStepPosition();
       int steps = steps_timing_function->NumberOfSteps();
 
       // Canonical form of step timing function is step(n, type) or step(n) even
       // if initially parsed as step-start or step-end.
-      return CSSStepsTimingFunctionValue::Create(steps, position);
+      return MakeGarbageCollected<cssvalue::CSSStepsTimingFunctionValue>(
+          steps, position);
     }
 
     default:
@@ -1565,6 +1838,38 @@ CSSValue* ComputedStyleUtils::ValueForAnimationTimingFunction(
   return list;
 }
 
+CSSValue* ComputedStyleUtils::ValueForAnimationTimeline(
+    const StyleTimeline& timeline) {
+  if (timeline.IsKeyword()) {
+    DCHECK(timeline.GetKeyword() == CSSValueID::kAuto ||
+           timeline.GetKeyword() == CSSValueID::kNone);
+    return CSSIdentifierValue::Create(timeline.GetKeyword());
+  }
+  if (timeline.IsName())
+    return ValueForStyleName(timeline.GetName());
+  DCHECK(timeline.IsScroll());
+  const StyleTimeline::ScrollData& scroll_data = timeline.GetScroll();
+  CSSValue* axis = scroll_data.HasDefaultAxis()
+                       ? nullptr
+                       : CSSIdentifierValue::Create(scroll_data.GetAxis());
+  CSSValue* scroller =
+      scroll_data.HasDefaultScroller()
+          ? nullptr
+          : CSSIdentifierValue::Create(scroll_data.GetScroller());
+
+  return MakeGarbageCollected<cssvalue::CSSScrollValue>(axis, scroller);
+}
+
+CSSValue* ComputedStyleUtils::SingleValueForViewTimelineShorthand(
+    const AtomicString& name,
+    TimelineAxis axis) {
+  CSSValueList* list = CSSValueList::CreateSpaceSeparated();
+  list->Append(*ValueForCustomIdentOrNone(name));
+  if (axis != TimelineAxis::kBlock)
+    list->Append(*CSSIdentifierValue::Create(axis));
+  return list;
+}
+
 CSSValueList* ComputedStyleUtils::ValuesForBorderRadiusCorner(
     const LengthSize& radius,
     const ComputedStyle& style) {
@@ -1584,115 +1889,304 @@ CSSValueList* ComputedStyleUtils::ValuesForBorderRadiusCorner(
   return list;
 }
 
-const CSSValue& ComputedStyleUtils::ValueForBorderRadiusCorner(
+CSSValue* ComputedStyleUtils::ValueForBorderRadiusCorner(
     const LengthSize& radius,
     const ComputedStyle& style) {
-  CSSValueList& list = *ValuesForBorderRadiusCorner(radius, style);
-  if (list.Item(0) == list.Item(1))
-    return list.Item(0);
-  return list;
+  return MakeGarbageCollected<CSSValuePair>(
+      ZoomAdjustedPixelValueForLength(radius.Width(), style),
+      ZoomAdjustedPixelValueForLength(radius.Height(), style),
+      CSSValuePair::kDropIdenticalValues);
 }
 
-CSSFunctionValue* ValueForMatrixTransform(
-    const TransformationMatrix& transform_param,
-    const ComputedStyle& style) {
-  // Take TransformationMatrix by reference and then copy it because VC++
-  // doesn't guarantee alignment of function parameters.
-  TransformationMatrix transform = transform_param;
-  CSSFunctionValue* transform_value = nullptr;
-  transform.Zoom(1 / style.EffectiveZoom());
-  if (transform.IsAffine()) {
-    transform_value =
-        MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kMatrix);
-
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.A(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.B(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.C(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.D(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.E(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.F(), CSSPrimitiveValue::UnitType::kNumber));
+CSSFunctionValue* ComputedStyleUtils::ValueForTransformationMatrix(
+    const TransformationMatrix& matrix,
+    float zoom,
+    bool force_matrix3d) {
+  if (matrix.IsAffine() && !force_matrix3d) {
+    auto* result = MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kMatrix);
+    // CSS matrix values are returned in column-major order.
+    auto unzoomed = matrix.ToAffineTransform().Zoom(1.f / zoom);
+    for (double value : {unzoomed.A(), unzoomed.B(), unzoomed.C(), unzoomed.D(),
+                         unzoomed.E(), unzoomed.F()}) {
+      result->Append(*CSSNumericLiteralValue::Create(
+          value, CSSPrimitiveValue::UnitType::kNumber));
+    }
+    return result;
   } else {
-    transform_value =
+    CSSFunctionValue* result =
         MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kMatrix3d);
-
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M11(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M12(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M13(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M14(), CSSPrimitiveValue::UnitType::kNumber));
-
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M21(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M22(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M23(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M24(), CSSPrimitiveValue::UnitType::kNumber));
-
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M31(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M32(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M33(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M34(), CSSPrimitiveValue::UnitType::kNumber));
-
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M41(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M42(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M43(), CSSPrimitiveValue::UnitType::kNumber));
-    transform_value->Append(*CSSNumericLiteralValue::Create(
-        transform.M44(), CSSPrimitiveValue::UnitType::kNumber));
+    // CSS matrix values are returned in column-major order.
+    auto unzoomed = matrix;
+    unzoomed.Zoom(1.f / zoom);
+    for (int i = 0; i < 16; i++) {
+      result->Append(*CSSNumericLiteralValue::Create(
+          unzoomed.ColMajorData()[i], CSSPrimitiveValue::UnitType::kNumber));
+    }
+    return result;
   }
-
-  return transform_value;
 }
 
-FloatRect ComputedStyleUtils::ReferenceBoxForTransform(
+CSSValueID ComputedStyleUtils::CSSValueIDForScaleOperation(
+    const TransformOperation::OperationType type) {
+  switch (type) {
+    case TransformOperation::kScaleX:
+      return CSSValueID::kScaleX;
+    case TransformOperation::kScaleY:
+      return CSSValueID::kScaleY;
+    case TransformOperation::kScaleZ:
+      return CSSValueID::kScaleZ;
+    case TransformOperation::kScale3D:
+      return CSSValueID::kScale3d;
+    default:
+      DCHECK(type == TransformOperation::kScale);
+      return CSSValueID::kScale;
+  }
+}
+
+CSSValueID ComputedStyleUtils::CSSValueIDForTranslateOperation(
+    const TransformOperation::OperationType type) {
+  switch (type) {
+    case TransformOperation::kTranslateX:
+      return CSSValueID::kTranslateX;
+    case TransformOperation::kTranslateY:
+      return CSSValueID::kTranslateY;
+    case TransformOperation::kTranslateZ:
+      return CSSValueID::kTranslateZ;
+    case TransformOperation::kTranslate3D:
+      return CSSValueID::kTranslate3d;
+    default:
+      DCHECK(type == TransformOperation::kTranslate);
+      return CSSValueID::kTranslate;
+  }
+}
+
+CSSValueID ComputedStyleUtils::CSSValueIDForRotateOperation(
+    const TransformOperation::OperationType type) {
+  switch (type) {
+    case TransformOperation::kRotateX:
+      return CSSValueID::kRotateX;
+    case TransformOperation::kRotateY:
+      return CSSValueID::kRotateY;
+    case TransformOperation::kRotateZ:
+      return CSSValueID::kRotateZ;
+    case TransformOperation::kRotate3D:
+      return CSSValueID::kRotate3d;
+    default:
+      return CSSValueID::kRotate;
+  }
+}
+
+// We collapse functions like translateX into translate, since we will reify
+// them as a translate anyway.
+CSSFunctionValue* ComputedStyleUtils::ValueForTransformOperation(
+    const TransformOperation& operation,
+    float zoom,
+    gfx::SizeF box_size) {
+  switch (operation.GetType()) {
+    case TransformOperation::kScaleX:
+    case TransformOperation::kScaleY:
+    case TransformOperation::kScaleZ:
+    case TransformOperation::kScale:
+    case TransformOperation::kScale3D: {
+      const auto& scale = To<ScaleTransformOperation>(operation);
+
+      CSSValueID id = CSSValueIDForScaleOperation(operation.GetType());
+
+      CSSFunctionValue* result = MakeGarbageCollected<CSSFunctionValue>(id);
+      if (id == CSSValueID::kScaleX || id == CSSValueID::kScale ||
+          id == CSSValueID::kScale3d) {
+        result->Append(*CSSNumericLiteralValue::Create(
+            scale.X(), CSSPrimitiveValue::UnitType::kNumber));
+      }
+      if (id == CSSValueID::kScaleY ||
+          (id == CSSValueID::kScale && scale.Y() != scale.X()) ||
+          id == CSSValueID::kScale3d) {
+        result->Append(*CSSNumericLiteralValue::Create(
+            scale.Y(), CSSPrimitiveValue::UnitType::kNumber));
+      }
+      if (id == CSSValueID::kScale3d || id == CSSValueID::kScaleZ) {
+        result->Append(*CSSNumericLiteralValue::Create(
+            scale.Z(), CSSPrimitiveValue::UnitType::kNumber));
+      }
+      return result;
+    }
+    case TransformOperation::kTranslateX:
+    case TransformOperation::kTranslateY:
+    case TransformOperation::kTranslateZ:
+    case TransformOperation::kTranslate:
+    case TransformOperation::kTranslate3D: {
+      const auto& translate = To<TranslateTransformOperation>(operation);
+
+      CSSValueID id = CSSValueIDForTranslateOperation(operation.GetType());
+
+      CSSFunctionValue* result = MakeGarbageCollected<CSSFunctionValue>(id);
+      if (id == CSSValueID::kTranslateX || id == CSSValueID::kTranslate ||
+          id == CSSValueID::kTranslate3d) {
+        result->Append(
+            *CSSPrimitiveValue::CreateFromLength(translate.X(), zoom));
+      }
+      if (id == CSSValueID::kTranslateY ||
+          (id == CSSValueID::kTranslate && (translate.Y().Value() != 0.f)) ||
+          id == CSSValueID::kTranslate3d) {
+        result->Append(
+            *CSSPrimitiveValue::CreateFromLength(translate.Y(), zoom));
+      }
+      if (id == CSSValueID::kTranslate3d || id == CSSValueID::kTranslateZ) {
+        // Since this is pixel length, we must unzoom (CreateFromLength above
+        // does the division internally).
+        result->Append(*CSSNumericLiteralValue::Create(
+            translate.Z() / zoom, CSSPrimitiveValue::UnitType::kPixels));
+      }
+      return result;
+    }
+    case TransformOperation::kRotateX:
+    case TransformOperation::kRotateY:
+    case TransformOperation::kRotateZ:
+    case TransformOperation::kRotate3D:
+    case TransformOperation::kRotate: {
+      const auto& rotate = To<RotateTransformOperation>(operation);
+      CSSValueID id = CSSValueIDForRotateOperation(operation.GetType());
+
+      CSSFunctionValue* result = MakeGarbageCollected<CSSFunctionValue>(id);
+      if (id == CSSValueID::kRotate3d) {
+        result->Append(*CSSNumericLiteralValue::Create(
+            rotate.X(), CSSPrimitiveValue::UnitType::kNumber));
+        result->Append(*CSSNumericLiteralValue::Create(
+            rotate.Y(), CSSPrimitiveValue::UnitType::kNumber));
+        result->Append(*CSSNumericLiteralValue::Create(
+            rotate.Z(), CSSPrimitiveValue::UnitType::kNumber));
+      }
+      result->Append(*CSSNumericLiteralValue::Create(
+          rotate.Angle(), CSSPrimitiveValue::UnitType::kDegrees));
+      return result;
+    }
+    case TransformOperation::kRotateAroundOrigin: {
+      // TODO(https://github.com/w3c/csswg-drafts/issues/5011):
+      // Update this once there is consensus.
+      TransformationMatrix matrix;
+      operation.Apply(matrix, gfx::SizeF(0, 0));
+      return ValueForTransformationMatrix(matrix, zoom,
+                                          /*force_matrix3d=*/false);
+    }
+    case TransformOperation::kSkewX: {
+      const auto& skew = To<SkewTransformOperation>(operation);
+      auto* result = MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kSkewX);
+      result->Append(*CSSNumericLiteralValue::Create(
+          skew.AngleX(), CSSPrimitiveValue::UnitType::kDegrees));
+      return result;
+    }
+    case TransformOperation::kSkewY: {
+      const auto& skew = To<SkewTransformOperation>(operation);
+      auto* result = MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kSkewY);
+      result->Append(*CSSNumericLiteralValue::Create(
+          skew.AngleY(), CSSPrimitiveValue::UnitType::kDegrees));
+      return result;
+    }
+    case TransformOperation::kSkew: {
+      const auto& skew = To<SkewTransformOperation>(operation);
+      auto* result = MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kSkew);
+      result->Append(*CSSNumericLiteralValue::Create(
+          skew.AngleX(), CSSPrimitiveValue::UnitType::kDegrees));
+      result->Append(*CSSNumericLiteralValue::Create(
+          skew.AngleY(), CSSPrimitiveValue::UnitType::kDegrees));
+      return result;
+    }
+    case TransformOperation::kPerspective: {
+      const auto& perspective = To<PerspectiveTransformOperation>(operation);
+      auto* result =
+          MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kPerspective);
+      if (perspective.Perspective()) {
+        result->Append(*CSSNumericLiteralValue::Create(
+            *perspective.Perspective() / zoom,
+            CSSPrimitiveValue::UnitType::kPixels));
+      } else {
+        result->Append(*CSSIdentifierValue::Create(CSSValueID::kNone));
+      }
+      return result;
+    }
+    case TransformOperation::kMatrix: {
+      const auto& matrix = To<MatrixTransformOperation>(operation).Matrix();
+      return ValueForTransformationMatrix(matrix, zoom,
+                                          /*force_matrix3d=*/false);
+    }
+    case TransformOperation::kMatrix3D: {
+      const auto& matrix = To<Matrix3DTransformOperation>(operation).Matrix();
+      // Force matrix3d serialization
+      return ValueForTransformationMatrix(matrix, zoom,
+                                          /*force_matrix3d=*/true);
+    }
+    case TransformOperation::kInterpolated:
+      // TODO(https://github.com/w3c/csswg-drafts/issues/2854):
+      // Deferred interpolations are currently unreperesentable in CSS.
+      // This currently converts the operation to a matrix, using box_size if
+      // provided, 0x0 if not (returning all but the relative translate
+      // portion of the transform). Update this once the spec is updated.
+      TransformationMatrix matrix;
+      operation.Apply(matrix, box_size);
+      return ValueForTransformationMatrix(matrix, zoom,
+                                          /*force_matrix3d=*/false);
+  }
+}
+
+CSSValue* ComputedStyleUtils::ValueForTransformList(
+    const TransformOperations& transform_list,
+    float zoom,
+    gfx::SizeF box_size) {
+  if (!transform_list.Operations().size())
+    return CSSIdentifierValue::Create(CSSValueID::kNone);
+
+  CSSValueList* components = CSSValueList::CreateSpaceSeparated();
+  for (const auto& operation : transform_list.Operations()) {
+    CSSValue* op_value = ValueForTransformOperation(*operation, zoom, box_size);
+    components->Append(*op_value);
+  }
+  return components;
+}
+
+gfx::RectF ComputedStyleUtils::ReferenceBoxForTransform(
     const LayoutObject& layout_object,
     UsePixelSnappedBox pixel_snap_box) {
   if (layout_object.IsSVGChild())
-    return ComputeSVGTransformReferenceBox(layout_object);
+    return TransformHelper::ComputeReferenceBox(layout_object);
   if (layout_object.IsBox()) {
-    const auto& layout_box = ToLayoutBox(layout_object);
+    const auto& layout_box = To<LayoutBox>(layout_object);
     if (pixel_snap_box == kUsePixelSnappedBox)
-      return FloatRect(layout_box.PixelSnappedBorderBoxRect());
-    return FloatRect(layout_box.BorderBoxRect());
+      return gfx::RectF(layout_box.PixelSnappedBorderBoxRect());
+    return gfx::RectF(layout_box.BorderBoxRect());
   }
-  return FloatRect();
+  return gfx::RectF();
 }
 
-CSSValue* ComputedStyleUtils::ComputedTransform(
+CSSValue* ComputedStyleUtils::ComputedTransformList(
+    const ComputedStyle& style,
+    const LayoutObject* layout_object) {
+  gfx::SizeF box_size(0, 0);
+  if (layout_object)
+    box_size = ReferenceBoxForTransform(*layout_object).size();
+
+  return ValueForTransformList(style.Transform(), style.EffectiveZoom(),
+                               box_size);
+}
+
+CSSValue* ComputedStyleUtils::ResolvedTransform(
     const LayoutObject* layout_object,
     const ComputedStyle& style) {
-  if (!layout_object || !style.HasTransform())
+  if (!layout_object || !style.HasTransformOperations())
     return CSSIdentifierValue::Create(CSSValueID::kNone);
 
-  FloatRect reference_box = ReferenceBoxForTransform(*layout_object);
+  gfx::RectF reference_box = ReferenceBoxForTransform(*layout_object);
 
   TransformationMatrix transform;
-  style.ApplyTransform(transform, reference_box,
-                       ComputedStyle::kExcludeTransformOrigin,
-                       ComputedStyle::kExcludeMotionPath,
-                       ComputedStyle::kExcludeIndependentTransformProperties);
+  style.ApplyTransform(
+      transform, reference_box, ComputedStyle::kIncludeTransformOperations,
+      ComputedStyle::kExcludeTransformOrigin, ComputedStyle::kExcludeMotionPath,
+      ComputedStyle::kExcludeIndependentTransformProperties);
 
   // FIXME: Need to print out individual functions
   // (https://bugs.webkit.org/show_bug.cgi?id=23924)
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  list->Append(*ValueForMatrixTransform(transform, style));
+  list->Append(*ValueForTransformationMatrix(transform, style.EffectiveZoom(),
+                                             /*force_matrix3d=*/false));
 
   return list;
 }
@@ -1739,7 +2233,13 @@ CSSValueID ValueForQuoteType(const QuoteType quote_type) {
   return CSSValueID::kInvalid;
 }
 
-CSSValue* ComputedStyleUtils::ValueForContentData(const ComputedStyle& style) {
+CSSValue* ComputedStyleUtils::ValueForContentData(const ComputedStyle& style,
+                                                  bool allow_visited_style) {
+  if (style.ContentPreventsBoxGeneration())
+    return CSSIdentifierValue::Create(CSSValueID::kNone);
+  if (style.ContentBehavesAsNormal())
+    return CSSIdentifierValue::Create(CSSValueID::kNormal);
+
   CSSValueList* outer_list = CSSValueList::CreateSlashSeparated();
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
 
@@ -1749,28 +2249,19 @@ CSSValue* ComputedStyleUtils::ValueForContentData(const ComputedStyle& style) {
   for (const ContentData* content_data = style.GetContentData(); content_data;
        content_data = content_data->Next()) {
     if (content_data->IsCounter()) {
-      const CounterContent* counter =
-          To<CounterContentData>(content_data)->Counter();
-      DCHECK(counter);
+      const CounterContentData& counter = To<CounterContentData>(*content_data);
       auto* identifier =
-          MakeGarbageCollected<CSSCustomIdentValue>(counter->Identifier());
+          MakeGarbageCollected<CSSCustomIdentValue>(counter.Identifier());
       auto* separator =
-          MakeGarbageCollected<CSSStringValue>(counter->Separator());
-      CSSValueID list_style_ident = CSSValueID::kNone;
-      if (counter->ListStyle() != EListStyleType::kNone) {
-        // TODO(sashab): Change this to use a converter instead of
-        // CSSPrimitiveValueMappings.
-        list_style_ident =
-            CSSIdentifierValue::Create(counter->ListStyle())->GetValueID();
-      }
-      CSSIdentifierValue* list_style =
-          CSSIdentifierValue::Create(list_style_ident);
+          MakeGarbageCollected<CSSStringValue>(counter.Separator());
+      auto* list_style =
+          MakeGarbageCollected<CSSCustomIdentValue>(counter.ListStyle());
       list->Append(*MakeGarbageCollected<cssvalue::CSSCounterValue>(
           identifier, list_style, separator));
     } else if (content_data->IsImage()) {
       const StyleImage* image = To<ImageContentData>(content_data)->GetImage();
       DCHECK(image);
-      list->Append(*image->ComputedCSSValue());
+      list->Append(*image->ComputedCSSValue(style, allow_visited_style));
     } else if (content_data->IsText()) {
       list->Append(*MakeGarbageCollected<CSSStringValue>(
           To<TextContentData>(content_data)->GetText()));
@@ -1784,12 +2275,7 @@ CSSValue* ComputedStyleUtils::ValueForContentData(const ComputedStyle& style) {
       NOTREACHED();
     }
   }
-  if (!list->length()) {
-    PseudoId pseudoId = style.StyleType();
-    if (pseudoId == kPseudoIdBefore || pseudoId == kPseudoIdAfter)
-      return CSSIdentifierValue::Create(CSSValueID::kNone);
-    return CSSIdentifierValue::Create(CSSValueID::kNormal);
-  }
+  DCHECK(list->length());
 
   outer_list->Append(*list);
   if (alt_text)
@@ -1799,21 +2285,42 @@ CSSValue* ComputedStyleUtils::ValueForContentData(const ComputedStyle& style) {
 
 CSSValue* ComputedStyleUtils::ValueForCounterDirectives(
     const ComputedStyle& style,
-    bool is_increment) {
+    CounterNode::Type type) {
   const CounterDirectiveMap* map = style.GetCounterDirectives();
   if (!map)
     return CSSIdentifierValue::Create(CSSValueID::kNone);
 
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
   for (const auto& item : *map) {
-    bool is_valid_counter_value =
-        is_increment ? item.value.IsIncrement() : item.value.IsReset();
+    bool is_valid_counter_value = false;
+    switch (type) {
+      case CounterNode::kIncrementType:
+        is_valid_counter_value = item.value.IsIncrement();
+        break;
+      case CounterNode::kResetType:
+        is_valid_counter_value = item.value.IsReset();
+        break;
+      case CounterNode::kSetType:
+        is_valid_counter_value = item.value.IsSet();
+        break;
+    }
+
     if (!is_valid_counter_value)
       continue;
 
     list->Append(*MakeGarbageCollected<CSSCustomIdentValue>(item.key));
-    int32_t number =
-        is_increment ? item.value.IncrementValue() : item.value.ResetValue();
+    int32_t number = 0;
+    switch (type) {
+      case CounterNode::kIncrementType:
+        number = item.value.IncrementValue();
+        break;
+      case CounterNode::kResetType:
+        number = item.value.ResetValue();
+        break;
+      case CounterNode::kSetType:
+        number = item.value.SetValue();
+        break;
+    }
     list->Append(*CSSNumericLiteralValue::Create(
         (double)number, CSSPrimitiveValue::UnitType::kInteger));
   }
@@ -1825,14 +2332,17 @@ CSSValue* ComputedStyleUtils::ValueForCounterDirectives(
 }
 
 CSSValue* ComputedStyleUtils::ValueForShape(const ComputedStyle& style,
+                                            bool allow_visited_style,
                                             ShapeValue* shape_value) {
   if (!shape_value)
     return CSSIdentifierValue::Create(CSSValueID::kNone);
   if (shape_value->GetType() == ShapeValue::kBox)
     return CSSIdentifierValue::Create(shape_value->CssBox());
   if (shape_value->GetType() == ShapeValue::kImage) {
-    if (shape_value->GetImage())
-      return shape_value->GetImage()->ComputedCSSValue();
+    if (shape_value->GetImage()) {
+      return shape_value->GetImage()->ComputedCSSValue(style,
+                                                       allow_visited_style);
+    }
     return CSSIdentifierValue::Create(CSSValueID::kNone);
   }
 
@@ -1916,63 +2426,65 @@ CSSValue* ComputedStyleUtils::StrokeDashArrayToCSSValueList(
   return list;
 }
 
-CSSValue* ComputedStyleUtils::AdjustSVGPaintForCurrentColor(
-    const SVGPaint& paint,
-    const Color& current_color) {
-  if (paint.type >= SVG_PAINTTYPE_URI_NONE) {
+CSSValue* ComputedStyleUtils::ValueForSVGPaint(const SVGPaint& paint,
+                                               const ComputedStyle& style) {
+  if (paint.type >= SVGPaintType::kUriNone) {
     CSSValueList* values = CSSValueList::CreateSpaceSeparated();
-    values->Append(*CSSURIValue::Create(paint.GetUrl()));
-    if (paint.type == SVG_PAINTTYPE_URI_NONE)
+    values->Append(
+        *MakeGarbageCollected<cssvalue::CSSURIValue>(paint.GetUrl()));
+    if (paint.type == SVGPaintType::kUriNone) {
       values->Append(*CSSIdentifierValue::Create(CSSValueID::kNone));
-    else if (paint.type == SVG_PAINTTYPE_URI_CURRENTCOLOR)
-      values->Append(*CSSColorValue::Create(current_color.Rgb()));
-    else if (paint.type == SVG_PAINTTYPE_URI_RGBCOLOR)
-      values->Append(*CSSColorValue::Create(paint.GetColor().Rgb()));
+    } else if (paint.type == SVGPaintType::kUriColor) {
+      values->Append(*CurrentColorOrValidColor(style, paint.GetColor(),
+                                               CSSValuePhase::kComputedValue));
+    }
     return values;
   }
-  if (paint.type == SVG_PAINTTYPE_NONE)
+  if (paint.type == SVGPaintType::kNone)
     return CSSIdentifierValue::Create(CSSValueID::kNone);
-  if (paint.type == SVG_PAINTTYPE_CURRENTCOLOR)
-    return CSSColorValue::Create(current_color.Rgb());
 
-  return CSSColorValue::Create(paint.GetColor().Rgb());
+  return CurrentColorOrValidColor(style, paint.GetColor(),
+                                  CSSValuePhase::kComputedValue);
 }
 
 CSSValue* ComputedStyleUtils::ValueForSVGResource(
     const StyleSVGResource* resource) {
   if (resource)
-    return CSSURIValue::Create(resource->Url());
+    return MakeGarbageCollected<cssvalue::CSSURIValue>(resource->Url());
   return CSSIdentifierValue::Create(CSSValueID::kNone);
 }
 
 CSSValue* ComputedStyleUtils::ValueForShadowData(const ShadowData& shadow,
                                                  const ComputedStyle& style,
-                                                 bool use_spread) {
+                                                 bool use_spread,
+                                                 CSSValuePhase value_phase) {
   CSSPrimitiveValue* x = ZoomAdjustedPixelValue(shadow.X(), style);
   CSSPrimitiveValue* y = ZoomAdjustedPixelValue(shadow.Y(), style);
   CSSPrimitiveValue* blur = ZoomAdjustedPixelValue(shadow.Blur(), style);
   CSSPrimitiveValue* spread =
       use_spread ? ZoomAdjustedPixelValue(shadow.Spread(), style) : nullptr;
   CSSIdentifierValue* shadow_style =
-      shadow.Style() == kNormal
+      shadow.Style() == ShadowStyle::kNormal
           ? nullptr
           : CSSIdentifierValue::Create(CSSValueID::kInset);
-  CSSValue* color = CurrentColorOrValidColor(style, shadow.GetColor());
+  CSSValue* color =
+      CurrentColorOrValidColor(style, shadow.GetColor(), value_phase);
   return MakeGarbageCollected<CSSShadowValue>(x, y, blur, spread, shadow_style,
                                               color);
 }
 
 CSSValue* ComputedStyleUtils::ValueForShadowList(const ShadowList* shadow_list,
                                                  const ComputedStyle& style,
-                                                 bool use_spread) {
+                                                 bool use_spread,
+                                                 CSSValuePhase value_phase) {
   if (!shadow_list)
     return CSSIdentifierValue::Create(CSSValueID::kNone);
 
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   wtf_size_t shadow_count = shadow_list->Shadows().size();
   for (wtf_size_t i = 0; i < shadow_count; ++i) {
-    list->Append(
-        *ValueForShadowData(shadow_list->Shadows()[i], style, use_spread));
+    list->Append(*ValueForShadowData(shadow_list->Shadows()[i], style,
+                                     use_spread, value_phase));
   }
   return list;
 }
@@ -1990,40 +2502,40 @@ CSSValue* ComputedStyleUtils::ValueForFilter(
   for (const auto& operation : filter_operations.Operations()) {
     FilterOperation* filter_operation = operation.Get();
     switch (filter_operation->GetType()) {
-      case FilterOperation::REFERENCE:
+      case FilterOperation::OperationType::kReference:
         filter_value = MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kUrl);
         filter_value->Append(*MakeGarbageCollected<CSSStringValue>(
             To<ReferenceFilterOperation>(filter_operation)->Url()));
         break;
-      case FilterOperation::GRAYSCALE:
+      case FilterOperation::OperationType::kGrayscale:
         filter_value =
             MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kGrayscale);
         filter_value->Append(*CSSNumericLiteralValue::Create(
             To<BasicColorMatrixFilterOperation>(filter_operation)->Amount(),
             CSSPrimitiveValue::UnitType::kNumber));
         break;
-      case FilterOperation::SEPIA:
+      case FilterOperation::OperationType::kSepia:
         filter_value =
             MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kSepia);
         filter_value->Append(*CSSNumericLiteralValue::Create(
             To<BasicColorMatrixFilterOperation>(filter_operation)->Amount(),
             CSSPrimitiveValue::UnitType::kNumber));
         break;
-      case FilterOperation::SATURATE:
+      case FilterOperation::OperationType::kSaturate:
         filter_value =
             MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kSaturate);
         filter_value->Append(*CSSNumericLiteralValue::Create(
             To<BasicColorMatrixFilterOperation>(filter_operation)->Amount(),
             CSSPrimitiveValue::UnitType::kNumber));
         break;
-      case FilterOperation::HUE_ROTATE:
+      case FilterOperation::OperationType::kHueRotate:
         filter_value =
             MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kHueRotate);
         filter_value->Append(*CSSNumericLiteralValue::Create(
             To<BasicColorMatrixFilterOperation>(filter_operation)->Amount(),
             CSSPrimitiveValue::UnitType::kDegrees));
         break;
-      case FilterOperation::INVERT:
+      case FilterOperation::OperationType::kInvert:
         filter_value =
             MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kInvert);
         filter_value->Append(*CSSNumericLiteralValue::Create(
@@ -2031,7 +2543,7 @@ CSSValue* ComputedStyleUtils::ValueForFilter(
                 ->Amount(),
             CSSPrimitiveValue::UnitType::kNumber));
         break;
-      case FilterOperation::OPACITY:
+      case FilterOperation::OperationType::kOpacity:
         filter_value =
             MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kOpacity);
         filter_value->Append(*CSSNumericLiteralValue::Create(
@@ -2039,7 +2551,7 @@ CSSValue* ComputedStyleUtils::ValueForFilter(
                 ->Amount(),
             CSSPrimitiveValue::UnitType::kNumber));
         break;
-      case FilterOperation::BRIGHTNESS:
+      case FilterOperation::OperationType::kBrightness:
         filter_value =
             MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kBrightness);
         filter_value->Append(*CSSNumericLiteralValue::Create(
@@ -2047,7 +2559,7 @@ CSSValue* ComputedStyleUtils::ValueForFilter(
                 ->Amount(),
             CSSPrimitiveValue::UnitType::kNumber));
         break;
-      case FilterOperation::CONTRAST:
+      case FilterOperation::OperationType::kContrast:
         filter_value =
             MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kContrast);
         filter_value->Append(*CSSNumericLiteralValue::Create(
@@ -2055,14 +2567,14 @@ CSSValue* ComputedStyleUtils::ValueForFilter(
                 ->Amount(),
             CSSPrimitiveValue::UnitType::kNumber));
         break;
-      case FilterOperation::BLUR:
+      case FilterOperation::OperationType::kBlur:
         filter_value =
             MakeGarbageCollected<CSSFunctionValue>(CSSValueID::kBlur);
         filter_value->Append(*ZoomAdjustedPixelValue(
             To<BlurFilterOperation>(filter_operation)->StdDeviation().Value(),
             style));
         break;
-      case FilterOperation::DROP_SHADOW: {
+      case FilterOperation::OperationType::kDropShadow: {
         const auto& drop_shadow_operation =
             To<DropShadowFilterOperation>(*filter_operation);
         filter_value =
@@ -2070,7 +2582,8 @@ CSSValue* ComputedStyleUtils::ValueForFilter(
         // We want our computed style to look like that of a text shadow (has
         // neither spread nor inset style).
         filter_value->Append(
-            *ValueForShadowData(drop_shadow_operation.Shadow(), style, false));
+            *ValueForShadowData(drop_shadow_operation.Shadow(), style, false,
+                                CSSValuePhase::kComputedValue));
         break;
       }
       default:
@@ -2204,30 +2717,44 @@ CSSValueList* ComputedStyleUtils::ValuesForShorthandProperty(
     const StylePropertyShorthand& shorthand,
     const ComputedStyle& style,
     const LayoutObject* layout_object,
-    const Node* styled_node,
     bool allow_visited_style) {
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
   for (unsigned i = 0; i < shorthand.length(); ++i) {
     const CSSValue* value =
         shorthand.properties()[i]->CSSValueFromComputedStyle(
-            style, layout_object, styled_node, allow_visited_style);
+            style, layout_object, allow_visited_style);
     DCHECK(value);
     list->Append(*value);
   }
   return list;
 }
 
+CSSValuePair* ComputedStyleUtils::ValuesForGapShorthand(
+    const StylePropertyShorthand& shorthand,
+    const ComputedStyle& style,
+    const LayoutObject* layout_object,
+    bool allow_visited_style) {
+  const CSSValue* row_gap_value =
+      shorthand.properties()[0]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
+  const CSSValue* column_gap_value =
+      shorthand.properties()[1]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
+
+  return MakeGarbageCollected<CSSValuePair>(row_gap_value, column_gap_value,
+                                            CSSValuePair::kDropIdenticalValues);
+}
+
 CSSValueList* ComputedStyleUtils::ValuesForGridShorthand(
     const StylePropertyShorthand& shorthand,
     const ComputedStyle& style,
     const LayoutObject* layout_object,
-    const Node* styled_node,
     bool allow_visited_style) {
   CSSValueList* list = CSSValueList::CreateSlashSeparated();
   for (unsigned i = 0; i < shorthand.length(); ++i) {
     const CSSValue* value =
         shorthand.properties()[i]->CSSValueFromComputedStyle(
-            style, layout_object, styled_node, allow_visited_style);
+            style, layout_object, allow_visited_style);
     DCHECK(value);
     list->Append(*value);
   }
@@ -2238,30 +2765,31 @@ CSSValueList* ComputedStyleUtils::ValuesForSidesShorthand(
     const StylePropertyShorthand& shorthand,
     const ComputedStyle& style,
     const LayoutObject* layout_object,
-    const Node* styled_node,
     bool allow_visited_style) {
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
   // Assume the properties are in the usual order top, right, bottom, left.
   const CSSValue* top_value =
-      shorthand.properties()[0]->CSSValueFromComputedStyle(
-          style, layout_object, styled_node, allow_visited_style);
+      shorthand.properties()[0]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
   const CSSValue* right_value =
-      shorthand.properties()[1]->CSSValueFromComputedStyle(
-          style, layout_object, styled_node, allow_visited_style);
+      shorthand.properties()[1]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
   const CSSValue* bottom_value =
-      shorthand.properties()[2]->CSSValueFromComputedStyle(
-          style, layout_object, styled_node, allow_visited_style);
+      shorthand.properties()[2]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
   const CSSValue* left_value =
-      shorthand.properties()[3]->CSSValueFromComputedStyle(
-          style, layout_object, styled_node, allow_visited_style);
+      shorthand.properties()[3]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
 
   // All 4 properties must be specified.
   if (!top_value || !right_value || !bottom_value || !left_value)
     return nullptr;
 
-  bool show_left = !DataEquivalent(right_value, left_value);
-  bool show_bottom = !DataEquivalent(top_value, bottom_value) || show_left;
-  bool show_right = !DataEquivalent(top_value, right_value) || show_bottom;
+  bool show_left = !base::ValuesEquivalent(right_value, left_value);
+  bool show_bottom =
+      !base::ValuesEquivalent(top_value, bottom_value) || show_left;
+  bool show_right =
+      !base::ValuesEquivalent(top_value, right_value) || show_bottom;
 
   list->Append(*top_value);
   if (show_right)
@@ -2278,14 +2806,13 @@ CSSValuePair* ComputedStyleUtils::ValuesForInlineBlockShorthand(
     const StylePropertyShorthand& shorthand,
     const ComputedStyle& style,
     const LayoutObject* layout_object,
-    const Node* styled_node,
     bool allow_visited_style) {
   const CSSValue* start_value =
-      shorthand.properties()[0]->CSSValueFromComputedStyle(
-          style, layout_object, styled_node, allow_visited_style);
+      shorthand.properties()[0]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
   const CSSValue* end_value =
-      shorthand.properties()[1]->CSSValueFromComputedStyle(
-          style, layout_object, styled_node, allow_visited_style);
+      shorthand.properties()[1]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
   // Both properties must be specified.
   if (!start_value || !end_value)
     return nullptr;
@@ -2299,14 +2826,13 @@ CSSValuePair* ComputedStyleUtils::ValuesForPlaceShorthand(
     const StylePropertyShorthand& shorthand,
     const ComputedStyle& style,
     const LayoutObject* layout_object,
-    const Node* styled_node,
     bool allow_visited_style) {
   const CSSValue* align_value =
-      shorthand.properties()[0]->CSSValueFromComputedStyle(
-          style, layout_object, styled_node, allow_visited_style);
+      shorthand.properties()[0]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
   const CSSValue* justify_value =
-      shorthand.properties()[1]->CSSValueFromComputedStyle(
-          style, layout_object, styled_node, allow_visited_style);
+      shorthand.properties()[1]->CSSValueFromComputedStyle(style, layout_object,
+                                                           allow_visited_style);
 
   return MakeGarbageCollected<CSSValuePair>(align_value, justify_value,
                                             CSSValuePair::kDropIdenticalValues);
@@ -2325,7 +2851,6 @@ static CSSValue* ExpandNoneLigaturesValue() {
 CSSValue* ComputedStyleUtils::ValuesForFontVariantProperty(
     const ComputedStyle& style,
     const LayoutObject* layout_object,
-    const Node* styled_node,
     bool allow_visited_style) {
   enum VariantShorthandCases {
     kAllNormal,
@@ -2337,7 +2862,7 @@ CSSValue* ComputedStyleUtils::ValuesForFontVariantProperty(
   for (unsigned i = 0; i < shorthand.length(); ++i) {
     const CSSValue* value =
         shorthand.properties()[i]->CSSValueFromComputedStyle(
-            style, layout_object, styled_node, allow_visited_style);
+            style, layout_object, allow_visited_style);
 
     auto* identifier_value = DynamicTo<CSSIdentifierValue>(value);
     if (shorthand_case == kAllNormal && identifier_value &&
@@ -2362,7 +2887,7 @@ CSSValue* ComputedStyleUtils::ValuesForFontVariantProperty(
       for (unsigned i = 0; i < shorthand.length(); ++i) {
         const CSSValue* value =
             shorthand.properties()[i]->CSSValueFromComputedStyle(
-                style, layout_object, styled_node, allow_visited_style);
+                style, layout_object, allow_visited_style);
         DCHECK(value);
         auto* identifier_value = DynamicTo<CSSIdentifierValue>(value);
         if (identifier_value &&
@@ -2379,6 +2904,135 @@ CSSValue* ComputedStyleUtils::ValuesForFontVariantProperty(
       NOTREACHED();
       return nullptr;
   }
+}
+
+CSSValue* ComputedStyleUtils::ValuesForFontSynthesisProperty(
+    const ComputedStyle& style,
+    const LayoutObject* layout_object,
+    bool allow_visited_style) {
+  enum FontSynthesisShorthandCases { kAllNone, kConcatenateAuto };
+  StylePropertyShorthand shorthand = fontSynthesisShorthand();
+  FontSynthesisShorthandCases shorthand_case = kAllNone;
+  for (unsigned i = 0; i < shorthand.length(); ++i) {
+    const CSSValue* value =
+        shorthand.properties()[i]->CSSValueFromComputedStyle(
+            style, layout_object, allow_visited_style);
+    auto* identifier_value = DynamicTo<CSSIdentifierValue>(value);
+    if (shorthand.properties()[i]->IDEquals(
+            CSSPropertyID::kFontSynthesisWeight) &&
+        identifier_value->GetValueID() == CSSValueID::kAuto) {
+      shorthand_case = kConcatenateAuto;
+    } else if (shorthand.properties()[i]->IDEquals(
+                   CSSPropertyID::kFontSynthesisStyle) &&
+               identifier_value->GetValueID() == CSSValueID::kAuto) {
+      shorthand_case = kConcatenateAuto;
+    } else if (shorthand.properties()[i]->IDEquals(
+                   CSSPropertyID::kFontSynthesisSmallCaps) &&
+               identifier_value->GetValueID() == CSSValueID::kAuto) {
+      shorthand_case = kConcatenateAuto;
+    }
+  }
+
+  switch (shorthand_case) {
+    case kAllNone:
+      return CSSIdentifierValue::Create(CSSValueID::kNone);
+    case kConcatenateAuto: {
+      CSSValueList* list = CSSValueList::CreateSpaceSeparated();
+      for (unsigned i = 0; i < shorthand.length(); ++i) {
+        const CSSValue* value =
+            shorthand.properties()[i]->CSSValueFromComputedStyle(
+                style, layout_object, allow_visited_style);
+        auto* identifier_value = DynamicTo<CSSIdentifierValue>(value);
+        if (shorthand.properties()[i]->IDEquals(
+                CSSPropertyID::kFontSynthesisWeight) &&
+            identifier_value->GetValueID() == CSSValueID::kAuto) {
+          list->Append(*CSSIdentifierValue::Create(CSSValueID::kWeight));
+        } else if (shorthand.properties()[i]->IDEquals(
+                       CSSPropertyID::kFontSynthesisStyle) &&
+                   identifier_value->GetValueID() == CSSValueID::kAuto) {
+          list->Append(*CSSIdentifierValue::Create(CSSValueID::kStyle));
+        } else if (shorthand.properties()[i]->IDEquals(
+                       CSSPropertyID::kFontSynthesisSmallCaps) &&
+                   identifier_value->GetValueID() == CSSValueID::kAuto) {
+          list->Append(*CSSIdentifierValue::Create(CSSValueID::kSmallCaps));
+        }
+      }
+      return list;
+    }
+    default:
+      NOTREACHED();
+      return nullptr;
+  }
+}
+
+CSSValueList* ComputedStyleUtils::ValuesForContainerShorthand(
+    const ComputedStyle& style,
+    const LayoutObject* layout_object,
+    bool allow_visited_style) {
+  CHECK_EQ(containerShorthand().length(), 2u);
+  CHECK_EQ(containerShorthand().properties()[0],
+           &GetCSSPropertyContainerName());
+  CHECK_EQ(containerShorthand().properties()[1],
+           &GetCSSPropertyContainerType());
+
+  CSSValueList* list = CSSValueList::CreateSlashSeparated();
+
+  const CSSValue* name =
+      GetCSSPropertyContainerName().CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style);
+  const CSSValue* type =
+      GetCSSPropertyContainerType().CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style);
+
+  DCHECK(name);
+  DCHECK(type);
+
+  list->Append(*name);
+
+  if (!(IsA<CSSIdentifierValue>(type) &&
+        To<CSSIdentifierValue>(*type).GetValueID() == CSSValueID::kNormal)) {
+    list->Append(*type);
+  }
+
+  return list;
+}
+
+CSSValueList* ComputedStyleUtils::ValuesForScrollTimelineShorthand(
+    const ComputedStyle& style,
+    const LayoutObject* layout_object,
+    bool allow_visited_style) {
+  CHECK_EQ(scrollTimelineShorthand().length(), 2u);
+  CHECK_EQ(scrollTimelineShorthand().properties()[0],
+           &GetCSSPropertyScrollTimelineAxis());
+  CHECK_EQ(scrollTimelineShorthand().properties()[1],
+           &GetCSSPropertyScrollTimelineName());
+
+  CSSValueList* list = CSSValueList::CreateSpaceSeparated();
+
+  const CSSValue* axis =
+      GetCSSPropertyScrollTimelineAxis().CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style);
+  const CSSValue* name =
+      GetCSSPropertyScrollTimelineName().CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style);
+
+  DCHECK(axis);
+  DCHECK(name);
+
+  // Append any value that's not the initial value.
+  if (To<CSSIdentifierValue>(*axis).GetValueID() != CSSValueID::kBlock) {
+    list->Append(*axis);
+  }
+  if (!(IsA<CSSIdentifierValue>(name) &&
+        To<CSSIdentifierValue>(*name).GetValueID() == CSSValueID::kNone)) {
+    list->Append(*name);
+  }
+
+  // If both values were the initial value, we append axis.
+  if (!list->length())
+    list->Append(*axis);
+
+  return list;
 }
 
 // Returns up to two values for 'scroll-customization' property. The values
@@ -2415,11 +3069,62 @@ CSSValue* ComputedStyleUtils::ScrollCustomizationFlagsToCSSValue(
   return list;
 }
 
-CSSValue* ComputedStyleUtils::ValueForGapLength(const GapLength& gap_length,
-                                                const ComputedStyle& style) {
-  if (gap_length.IsNormal())
+CSSValue* ComputedStyleUtils::ValueForGapLength(
+    const absl::optional<Length>& gap_length,
+    const ComputedStyle& style) {
+  if (!gap_length)
     return CSSIdentifierValue::Create(CSSValueID::kNormal);
-  return ZoomAdjustedPixelValueForLength(gap_length.GetLength(), style);
+  return ZoomAdjustedPixelValueForLength(*gap_length, style);
+}
+
+CSSValue* ComputedStyleUtils::ValueForStyleName(const StyleName& name) {
+  if (name.IsCustomIdent())
+    return MakeGarbageCollected<CSSCustomIdentValue>(name.GetValue());
+  return MakeGarbageCollected<CSSStringValue>(name.GetValue());
+}
+
+CSSValue* ComputedStyleUtils::ValueForStyleNameOrKeyword(
+    const StyleNameOrKeyword& value) {
+  if (value.IsKeyword())
+    return CSSIdentifierValue::Create(value.GetKeyword());
+  return ValueForStyleName(value.GetName());
+}
+
+CSSValue* ComputedStyleUtils::ValueForCustomIdentOrNone(
+    const AtomicString& ident) {
+  if (ident.IsEmpty())
+    return CSSIdentifierValue::Create(CSSValueID::kNone);
+  return MakeGarbageCollected<CSSCustomIdentValue>(ident);
+}
+
+const CSSValue* ComputedStyleUtils::ValueForStyleAutoColor(
+    const ComputedStyle& style,
+    const StyleAutoColor& color,
+    CSSValuePhase value_phase) {
+  if (color.IsAutoColor()) {
+    return cssvalue::CSSColor::Create(StyleColor::CurrentColor().Resolve(
+        style.GetCurrentColor(), style.UsedColorScheme()));
+  }
+  return ComputedStyleUtils::CurrentColorOrValidColor(
+      style, color.ToStyleColor(), value_phase);
+}
+
+CSSValue* ComputedStyleUtils::ValueForIntrinsicLength(
+    const ComputedStyle& style,
+    const absl::optional<StyleIntrinsicLength>& intrinsic_length) {
+  CSSValue* length = nullptr;
+  if (intrinsic_length) {
+    length = ComputedStyleUtils::ZoomAdjustedPixelValueForLength(
+        intrinsic_length->GetLength(), style);
+  }
+
+  if (!intrinsic_length)
+    return CSSIdentifierValue::Create(CSSValueID::kNone);
+  CSSValueList* list = CSSValueList::CreateSpaceSeparated();
+  if (intrinsic_length->HasAuto())
+    list->Append(*CSSIdentifierValue::Create(CSSValueID::kAuto));
+  list->Append(*length);
+  return list;
 }
 
 std::unique_ptr<CrossThreadStyleValue>
@@ -2428,15 +3133,93 @@ ComputedStyleUtils::CrossThreadStyleValueFromCSSStyleValue(
   switch (style_value->GetType()) {
     case CSSStyleValue::StyleValueType::kKeywordType:
       return std::make_unique<CrossThreadKeywordValue>(
-          To<CSSKeywordValue>(style_value)->value().IsolatedCopy());
+          To<CSSKeywordValue>(style_value)->value());
     case CSSStyleValue::StyleValueType::kUnitType:
       return std::make_unique<CrossThreadUnitValue>(
           To<CSSUnitValue>(style_value)->value(),
           To<CSSUnitValue>(style_value)->GetInternalUnit());
+    case CSSStyleValue::StyleValueType::kUnsupportedColorType:
+      return std::make_unique<CrossThreadColorValue>(
+          To<CSSUnsupportedColor>(style_value)->Value());
+    case CSSStyleValue::StyleValueType::kUnparsedType:
+      return std::make_unique<CrossThreadUnparsedValue>(
+          To<CSSUnparsedValue>(style_value)->ToString());
     default:
-      // Make an isolated copy to ensure that it is safe to pass cross thread.
       return std::make_unique<CrossThreadUnsupportedValue>(
-          style_value->toString().IsolatedCopy());
+          style_value->toString());
+  }
+}
+
+const CSSValue* ComputedStyleUtils::ComputedPropertyValue(
+    const CSSProperty& property,
+    const ComputedStyle& style,
+    const LayoutObject* layout_object) {
+  switch (property.PropertyID()) {
+    // Computed value is usually relative so that multiple fonts in child
+    // elements work properly, but resolved value is always a pixel length.
+    case CSSPropertyID::kLineHeight:
+      return ComputedStyleUtils::ComputedValueForLineHeight(style);
+
+    // Returns a transform list instead of converting to a (resolved) matrix.
+    case CSSPropertyID::kTransform:
+      return ComputedStyleUtils::ComputedTransformList(style, layout_object);
+
+    // For the following properties, the resolved value is the used value, which
+    // is not what we want. Obtain the computed value instead.
+    case CSSPropertyID::kBackgroundColor:
+      return ComputedStyleUtils::CurrentColorOrValidColor(
+          style, style.BackgroundColor(), CSSValuePhase::kComputedValue);
+    case CSSPropertyID::kBorderBlockEndColor:
+    case CSSPropertyID::kBorderBlockStartColor:
+    case CSSPropertyID::kBorderInlineEndColor:
+    case CSSPropertyID::kBorderInlineStartColor:
+      return ComputedStyleUtils::ComputedPropertyValue(
+          property.ResolveDirectionAwareProperty(style.Direction(),
+                                                 style.GetWritingMode()),
+          style, layout_object);
+    case CSSPropertyID::kBorderBottomColor:
+      return ComputedStyleUtils::CurrentColorOrValidColor(
+          style, style.BorderBottomColor(), CSSValuePhase::kComputedValue);
+    case CSSPropertyID::kBorderLeftColor:
+      return ComputedStyleUtils::CurrentColorOrValidColor(
+          style, style.BorderLeftColor(), CSSValuePhase::kComputedValue);
+    case CSSPropertyID::kBorderRightColor:
+      return ComputedStyleUtils::CurrentColorOrValidColor(
+          style, style.BorderRightColor(), CSSValuePhase::kComputedValue);
+    case CSSPropertyID::kBorderTopColor:
+      return ComputedStyleUtils::CurrentColorOrValidColor(
+          style, style.BorderTopColor(), CSSValuePhase::kComputedValue);
+    case CSSPropertyID::kBoxShadow:
+      return ComputedStyleUtils::ValueForShadowList(
+          style.BoxShadow(), style, true, CSSValuePhase::kComputedValue);
+    case CSSPropertyID::kCaretColor:
+      return ComputedStyleUtils::ValueForStyleAutoColor(
+          style, style.CaretColor(), CSSValuePhase::kComputedValue);
+    case CSSPropertyID::kColor:
+      return ComputedStyleUtils::CurrentColorOrValidColor(
+          style, style.GetColor(), CSSValuePhase::kComputedValue);
+    case CSSPropertyID::kMinHeight: {
+      if (style.MinHeight().IsAuto())
+        return CSSIdentifierValue::Create(CSSValueID::kAuto);
+      return property.CSSValueFromComputedStyle(
+          style, /*layout_object=*/nullptr, false);
+    }
+    case CSSPropertyID::kMinWidth: {
+      if (style.MinWidth().IsAuto())
+        return CSSIdentifierValue::Create(CSSValueID::kAuto);
+      return property.CSSValueFromComputedStyle(
+          style, /*layout_object=*/nullptr, false);
+    }
+    case CSSPropertyID::kOutlineColor:
+      return ComputedStyleUtils::CurrentColorOrValidColor(
+          style, style.OutlineColor(), CSSValuePhase::kComputedValue);
+
+    // For all other properties, the resolved value is either always the same
+    // as the computed value (most properties), or the same as the computed
+    // value when there is no layout box ('width' and friends).
+    default:
+      return property.CSSValueFromComputedStyle(
+          style, /*layout_object=*/nullptr, false);
   }
 }
 

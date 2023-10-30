@@ -20,21 +20,17 @@ class IceTransportAdapterImpl final : public IceTransportAdapter,
  public:
   // Must be constructed on the WebRTC worker thread.
   // |delegate| must outlive the IceTransportAdapter.
-  // |thread| should be the rtc::Thread instance associated with the WebRTC
-  // worker thread.
   IceTransportAdapterImpl(
       Delegate* delegate,
       std::unique_ptr<cricket::PortAllocator> port_allocator,
-      std::unique_ptr<webrtc::AsyncResolverFactory> async_resolver_factory,
-      rtc::Thread* thread);
+      std::unique_ptr<webrtc::AsyncResolverFactory> async_resolver_factory);
 
   // Create an IceTransportAdapter for an existing |ice_transport_channel|
-  // object. In this case, |port_allocator_|, |async_resolver_factory_| and
-  // |quic_packet_transport_adapter_| are not used (and null).
+  // object. In this case, |port_allocator_|, |async_resolver_factory_| is not
+  // used (and null).
   IceTransportAdapterImpl(
       Delegate* delegate,
-      rtc::scoped_refptr<webrtc::IceTransportInterface> ice_transport_channel,
-      rtc::Thread* thread);
+      rtc::scoped_refptr<webrtc::IceTransportInterface> ice_transport_channel);
 
   ~IceTransportAdapterImpl() override;
 
@@ -50,7 +46,6 @@ class IceTransportAdapterImpl final : public IceTransportAdapter,
   void HandleRemoteRestart(
       const cricket::IceParameters& new_remote_parameters) override;
   void AddRemoteCandidate(const cricket::Candidate& candidate) override;
-  P2PQuicPacketTransport* packet_transport() const override;
 
  private:
   cricket::IceTransportInternal* ice_transport_channel() {
@@ -70,7 +65,6 @@ class IceTransportAdapterImpl final : public IceTransportAdapter,
   std::unique_ptr<cricket::PortAllocator> port_allocator_;
   std::unique_ptr<webrtc::AsyncResolverFactory> async_resolver_factory_;
   rtc::scoped_refptr<webrtc::IceTransportInterface> ice_transport_channel_;
-  std::unique_ptr<P2PQuicPacketTransport> quic_packet_transport_adapter_;
 };
 
 }  // namespace blink

@@ -33,8 +33,7 @@
 
 #include "third_party/blink/renderer/core/svg/properties/svg_animated_property.h"
 #include "third_party/blink/renderer/core/svg/svg_string_list_tear_off.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -43,11 +42,8 @@ class SVGElement;
 // SVGStringList property implementations for SVGTests properties.
 // Inherits SVGAnimatedPropertyBase to enable XML attribute synchronization, but
 // this is never animated.
-class SVGStaticStringList final
-    : public GarbageCollectedFinalized<SVGStaticStringList>,
-      public SVGAnimatedPropertyBase {
-  USING_GARBAGE_COLLECTED_MIXIN(SVGStaticStringList);
-
+class SVGStaticStringList final : public GarbageCollected<SVGStaticStringList>,
+                                  public SVGAnimatedPropertyBase {
  public:
   template <char list_delimiter>
   static SVGStaticStringList* Create(SVGElement* context_element,
@@ -63,7 +59,6 @@ class SVGStaticStringList final
   ~SVGStaticStringList() override;
 
   // SVGAnimatedPropertyBase:
-  SVGPropertyBase* CurrentValueBase() override;
   const SVGPropertyBase& BaseValueBase() const override;
   bool IsAnimating() const override;
   SVGPropertyBase* CreateAnimatedValue() override;
@@ -75,7 +70,7 @@ class SVGStaticStringList final
   SVGStringListBase* Value() { return value_.Get(); }
   SVGStringListTearOff* TearOff();
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   Member<SVGStringListBase> value_;
@@ -84,4 +79,4 @@ class SVGStaticStringList final
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_STATIC_STRING_LIST_H_

@@ -1,11 +1,11 @@
 <!---
   The live version of this document can be viewed at:
-  https://chromium.googlesource.com/chromium/src/+/master/third_party/blink/renderer/core/layout/README.md
+  https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/core/layout/README.md
 -->
 
 # Blink Layout
 
-The `Source/core/layout` directory contains the implementation of layout objects.
+The `renderer/core/layout` directory contains the implementation of layout objects.
 It covers the following document lifecycle states:
 
 * LayoutSubtreeChange (`InLayoutSubtreeChange` and `LayoutSubtreeChangeClean`)
@@ -101,7 +101,7 @@ positive.
 In all cases, the term 'scrollOffset' (or just 'offset') is used to represent the distance
 of the scrolling viewport from its location when scrolled to the beginning of content, and
 it uses type ScrollOffset. The term 'scrollPosition' (or just 'position') represents a
-point in the coordinate space defined by the overflow rect, and it uses type FloatPoint.
+point in the coordinate space defined by the overflow rect, and it uses type gfx::PointF.
 
 For illustrations of these concepts, see these files:
 
@@ -222,6 +222,10 @@ The final location of these within an 800x600 frame is as:
 
     container: (492, 8  300x200)
     relpos:    (662, 58 70x80)
+
+The 8px is the default margin of HTML body element
+per https://html.spec.whatwg.org/multipage/rendering.html#the-page,
+which is specified in ../html/resources/html.css.
 
 See the [diagram](resources/flipped-blocks-relpos.svg) for full detail on
 dimensions of the involved elements.

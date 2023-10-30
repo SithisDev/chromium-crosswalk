@@ -53,8 +53,7 @@ TEST_F(ReplaceSelectionCommandTest, pastingEmptySpan) {
       GetDocument(), fragment, options);
 
   EXPECT_TRUE(command->Apply()) << "the replace command should have succeeded";
-  EXPECT_EQ("foo", GetDocument().body()->InnerHTMLAsString())
-      << "no DOM tree mutation";
+  EXPECT_EQ("foo", GetDocument().body()->innerHTML()) << "no DOM tree mutation";
 }
 
 // This is a regression test for https://crbug.com/668808
@@ -79,37 +78,8 @@ TEST_F(ReplaceSelectionCommandTest, pasteSpanInText) {
       GetDocument(), fragment, options);
 
   EXPECT_TRUE(command->Apply()) << "the replace command should have succeeded";
-  EXPECT_EQ("<b>t</b>bar<b>ext</b>", GetDocument().body()->InnerHTMLAsString())
+  EXPECT_EQ("<b>t</b>bar<b>ext</b>", GetDocument().body()->innerHTML())
       << "'bar' should have been inserted";
-}
-
-// This is a regression test for https://crbug.com/121163
-TEST_F(ReplaceSelectionCommandTest, styleTagsInPastedHeadIncludedInContent) {
-  GetDocument().setDesignMode("on");
-  UpdateAllLifecyclePhasesForTest();
-  GetDummyPageHolder().GetFrame().Selection().SetSelection(
-      SelectionInDOMTree::Builder()
-          .Collapse(Position(GetDocument().body(), 0))
-          .Build(),
-      SetSelectionOptions());
-
-  DocumentFragment* fragment = GetDocument().createDocumentFragment();
-  fragment->ParseHTML(
-      "<head><style>foo { bar: baz; }</style></head>"
-      "<body><p>Text</p></body>",
-      GetDocument().documentElement(), kDisallowScriptingAndPluginContent);
-
-  ReplaceSelectionCommand::CommandOptions options = 0;
-  auto* command = MakeGarbageCollected<ReplaceSelectionCommand>(
-      GetDocument(), fragment, options);
-  EXPECT_TRUE(command->Apply()) << "the replace command should have succeeded";
-
-  EXPECT_EQ(
-      "<head><style>foo { bar: baz; }</style></head>"
-      "<body><p>Text</p></body>",
-      GetDocument().body()->InnerHTMLAsString())
-      << "the STYLE and P elements should have been pasted into the body "
-      << "of the document";
 }
 
 // Helper function to set autosizing multipliers on a document.
@@ -122,8 +92,8 @@ bool SetTextAutosizingMultiplier(Document* document, float multiplier) {
           ComputedStyle::Clone(layout_object->StyleRef());
       modified_style->SetTextAutosizingMultiplier(multiplier);
       EXPECT_EQ(multiplier, modified_style->TextAutosizingMultiplier());
-      layout_object->SetModifiedStyleOutsideStyleRecalc(
-          std::move(modified_style), LayoutObject::ApplyStyleChanges::kNo);
+      layout_object->SetStyle(std::move(modified_style),
+                              LayoutObject::ApplyStyleChanges::kNo);
       multiplier_set = true;
     }
   }
@@ -211,8 +181,114 @@ TEST_F(ReplaceSelectionCommandTest, SmartPlainTextPaste) {
 
   EXPECT_TRUE(command.Apply());
   // Smart paste inserts a space before pasted text.
-  EXPECT_EQ(u8"<div contenteditable>abc<div>def XYZ|</div></div>",
+  EXPECT_EQ("<div contenteditable>abc<div>def XYZ|</div></div>",
             GetSelectionTextFromBody());
 }
 
+// http://crbug.com/1155687
+TEST_F(ReplaceSelectionCommandTest, TableAndImages) {
+  GetDocument().setDesignMode("on");
+  SetBodyContent("<table>&#x20;<tbody></tbody>&#x20;</table>");
+  Element* tbody = GetDocument().QuerySelector("tbody");
+  tbody->AppendChild(GetDocument().CreateRawElement(html_names::kImgTag));
+  Selection().SetSelection(
+      SelectionInDOMTree::Builder().Collapse(Position(tbody, 1)).Build(),
+      SetSelectionOptions());
+
+  DocumentFragment* fragment = GetDocument().createDocumentFragment();
+  fragment->AppendChild(GetDocument().CreateRawElement(html_names::kImgTag));
+  auto& command = *MakeGarbageCollected<ReplaceSelectionCommand>(
+      GetDocument(), fragment, ReplaceSelectionCommand::kPreventNesting,
+      InputEvent::InputType::kNone);
+
+  // Should not crash
+  EXPECT_TRUE(command.Apply());
+  EXPECT_EQ("<table> <tbody><img><img>|</tbody><br> </table>",
+            GetSelectionTextFromBody());
+}
+
+// https://crbug.com/1186610
+TEST_F(ReplaceSelectionCommandTest, InsertImageAfterEmptyBlockInInline) {
+  GetDocument().setDesignMode("on");
+  Selection().SetSelection(SetSelectionTextToBody("<span><div></div>|a</span>"),
+                           SetSelectionOptions());
+
+  DocumentFragment& fragment = *GetDocument().createDocumentFragment();
+  fragment.appendChild(GetDocument().CreateRawElement(html_names::kImgTag));
+  auto& command = *MakeGarbageCollected<ReplaceSelectionCommand>(
+      GetDocument(), &fragment, ReplaceSelectionCommand::kPreventNesting,
+      InputEvent::InputType::kNone);
+
+  // Should not crash
+  EXPECT_TRUE(command.Apply());
+  EXPECT_EQ("<span><div></div></span><img>|<span>a</span>",
+            GetSelectionTextFromBody());
+}
+
+// https://crbug.com/1173134
+TEST_F(ReplaceSelectionCommandTest, InsertImageAfterWhiteSpace) {
+  GetDocument().setDesignMode("on");
+  Selection().SetSelection(
+      SetSelectionTextToBody(
+          "<button><div></div><svg></svg>&#x20;|</button>x<input>"),
+      SetSelectionOptions());
+
+  DocumentFragment& fragment = *GetDocument().createDocumentFragment();
+  fragment.appendChild(GetDocument().CreateRawElement(html_names::kImgTag));
+  auto& command = *MakeGarbageCollected<ReplaceSelectionCommand>(
+      GetDocument(), &fragment, ReplaceSelectionCommand::kPreventNesting,
+      InputEvent::InputType::kNone);
+
+  // Should not crash
+  EXPECT_TRUE(command.Apply());
+  EXPECT_EQ("<button><div></div><svg></svg></button><img>|x<input>",
+            GetSelectionTextFromBody());
+}
+
+// https://crbug.com/1246674
+TEST_F(ReplaceSelectionCommandTest, InsertImageInNonEditableBlock1) {
+  GetDocument().setDesignMode("on");
+  Selection().SetSelection(
+      SetSelectionTextToBody(
+          "<div contenteditable=\"false\"><span contenteditable>"
+          "a|b</span></div>"),
+      SetSelectionOptions());
+
+  DocumentFragment& fragment = *GetDocument().createDocumentFragment();
+  fragment.appendChild(GetDocument().CreateRawElement(html_names::kImgTag));
+  auto& command = *MakeGarbageCollected<ReplaceSelectionCommand>(
+      GetDocument(), &fragment, ReplaceSelectionCommand::kPreventNesting,
+      InputEvent::InputType::kNone);
+
+  // Should not crash
+  EXPECT_TRUE(command.Apply());
+  EXPECT_EQ(
+      "<div contenteditable=\"false\"><span contenteditable>"
+      "a<img>|<br>b</span></div>",
+      GetSelectionTextFromBody());
+}
+
+// https://crbug.com/1246674
+TEST_F(ReplaceSelectionCommandTest, InsertImageInNonEditableBlock2) {
+  GetDocument().setDesignMode("on");
+  Selection().SetSelection(
+      SetSelectionTextToBody("<strong xml:space><div contenteditable=\"false\">"
+                             "<span contenteditable><div>a|b</div></span>"
+                             "</div></strong>"),
+      SetSelectionOptions());
+
+  DocumentFragment& fragment = *GetDocument().createDocumentFragment();
+  fragment.appendChild(GetDocument().CreateRawElement(html_names::kImgTag));
+  auto& command = *MakeGarbageCollected<ReplaceSelectionCommand>(
+      GetDocument(), &fragment, ReplaceSelectionCommand::kPreventNesting,
+      InputEvent::InputType::kNone);
+
+  // Should not crash
+  EXPECT_TRUE(command.Apply());
+  EXPECT_EQ(
+      "<strong xml:space><div contenteditable=\"false\">"
+      "<span contenteditable><div>a</div><img>|<div>b</div></span>"
+      "</div></strong>",
+      GetSelectionTextFromBody());
+}
 }  // namespace blink

@@ -22,8 +22,7 @@
 
 #include "third_party/blink/renderer/core/svg/gradient_attributes.h"
 #include "third_party/blink/renderer/core/svg/svg_length.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -70,7 +69,7 @@ struct LinearGradientAttributes : GradientAttributes {
   bool HasX2() const { return x2_set_; }
   bool HasY2() const { return y2_set_; }
 
-  void Trace(blink::Visitor* visitor) {
+  void Trace(Visitor* visitor) const {
     visitor->Trace(x1_);
     visitor->Trace(y1_);
     visitor->Trace(x2_);
@@ -92,8 +91,8 @@ struct LinearGradientAttributes : GradientAttributes {
 };
 
 // Wrapper object for the LinearGradientAttributes part object.
-class LinearGradientAttributesWrapper
-    : public GarbageCollectedFinalized<LinearGradientAttributesWrapper> {
+class LinearGradientAttributesWrapper final
+    : public GarbageCollected<LinearGradientAttributesWrapper> {
  public:
   LinearGradientAttributesWrapper() = default;
 
@@ -101,7 +100,7 @@ class LinearGradientAttributesWrapper
   void Set(const LinearGradientAttributes& attributes) {
     attributes_ = attributes;
   }
-  void Trace(blink::Visitor* visitor) { visitor->Trace(attributes_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(attributes_); }
 
  private:
   LinearGradientAttributes attributes_;

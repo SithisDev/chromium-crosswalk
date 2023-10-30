@@ -7,7 +7,6 @@
 #include "base/test/simple_test_tick_clock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -25,8 +24,7 @@ class RuntimeCallStatsTest : public testing::Test {
   void SetUp() override {
     // Add one millisecond because RuntimeCallTimer uses |start_ticks_| =
     // base::TimeTicks() to represent that the timer is not running.
-    clock_.SetNowTicks(base::TimeTicks() +
-                       base::TimeDelta::FromMilliseconds(1));
+    clock_.SetNowTicks(base::TimeTicks() + base::Milliseconds(1));
   }
 
   void TearDown() override {
@@ -34,7 +32,7 @@ class RuntimeCallStatsTest : public testing::Test {
   }
 
   void AdvanceClock(int milliseconds) {
-    clock_.Advance(base::TimeDelta::FromMilliseconds(milliseconds));
+    clock_.Advance(base::Milliseconds(milliseconds));
   }
 
   const base::TickClock* clock() { return &clock_; }
@@ -302,7 +300,7 @@ TEST_F(RuntimeCallStatsTest, TestScopeWithOptionalMacroWithCallStatsDisabled) {
   RuntimeCallCounter* counter = stats.GetCounter(test_counter_1_id);
 
   {
-    base::Optional<RuntimeCallTimerScope> scope;
+    absl::optional<RuntimeCallTimerScope> scope;
     RUNTIME_CALL_TIMER_SCOPE_WITH_OPTIONAL_RCS(scope, &stats,
                                                test_counter_1_id);
     AdvanceClock(25);
@@ -318,7 +316,7 @@ TEST_F(RuntimeCallStatsTest, TestScopeWithOptionalMacroWithCallStatsEnabled) {
   RuntimeCallCounter* counter = stats.GetCounter(test_counter_1_id);
 
   {
-    base::Optional<RuntimeCallTimerScope> scope;
+    absl::optional<RuntimeCallTimerScope> scope;
     RUNTIME_CALL_TIMER_SCOPE_WITH_OPTIONAL_RCS(scope, &stats,
                                                test_counter_1_id);
     AdvanceClock(25);

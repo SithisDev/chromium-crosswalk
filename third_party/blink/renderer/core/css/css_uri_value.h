@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_URI_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_URI_VALUE_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
@@ -20,16 +21,10 @@ namespace cssvalue {
 
 class CORE_EXPORT CSSURIValue : public CSSValue {
  public:
-  static CSSURIValue* Create(const String& relative_url, const KURL& url) {
-    return MakeGarbageCollected<CSSURIValue>(AtomicString(relative_url), url);
-  }
-  static CSSURIValue* Create(const AtomicString& absolute_url) {
-    return MakeGarbageCollected<CSSURIValue>(absolute_url, absolute_url);
-  }
-
   CSSURIValue(const AtomicString&, const KURL&);
   CSSURIValue(const AtomicString& relative_url,
               const AtomicString& absolute_url);
+  CSSURIValue(const AtomicString& absolute_url);
   ~CSSURIValue();
 
   SVGResource* EnsureResourceReference() const;
@@ -49,7 +44,7 @@ class CORE_EXPORT CSSURIValue : public CSSValue {
   CSSURIValue* ValueWithURLMadeAbsolute(const KURL& base_url,
                                         const WTF::TextEncoding&) const;
 
-  void TraceAfterDispatch(blink::Visitor*);
+  void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   KURL AbsoluteUrl() const;

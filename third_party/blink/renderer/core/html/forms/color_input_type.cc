@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/html/forms/color_input_type.h"
 
+#include "third_party/blink/public/mojom/choosers/color_chooser.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
@@ -44,17 +45,18 @@
 #include "third_party/blink/renderer/core/html/forms/html_option_element.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "ui/base/ui_base_features.h"
 
 namespace blink {
-
-using namespace html_names;
 
 // Upper limit of number of datalist suggestions shown.
 static const unsigned kMaxSuggestions = 1000;
@@ -75,11 +77,12 @@ static bool IsValidColorString(const String& value) {
 }
 
 ColorInputType::ColorInputType(HTMLInputElement& element)
-    : InputType(element), KeyboardClickableInputTypeView(element) {}
+    : InputType(Type::kColor, element),
+      KeyboardClickableInputTypeView(element) {}
 
 ColorInputType::~ColorInputType() = default;
 
-void ColorInputType::Trace(Visitor* visitor) {
+void ColorInputType::Trace(Visitor* visitor) const {
   visitor->Trace(chooser_);
   KeyboardClickableInputTypeView::Trace(visitor);
   ColorChooserClient::Trace(visitor);
@@ -114,7 +117,7 @@ String ColorInputType::SanitizeValue(const String& proposed_value) const {
 
 Color ColorInputType::ValueAsColor() const {
   Color color;
-  bool success = color.SetFromString(GetElement().value());
+  bool success = color.SetFromString(GetElement().Value());
   DCHECK(success);
   return color;
 }
@@ -147,25 +150,51 @@ void ColorInputType::HandleDOMActivateEvent(Event& event) {
     return;
 
   Document& document = GetElement().GetDocument();
-  if (!LocalFrame::HasTransientUserActivation(document.GetFrame()))
+  if (!LocalFrame::HasTransientUserActivation(document.GetFrame())) {
+    document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kJavaScript,
+        mojom::blink::ConsoleMessageLevel::kWarning,
+        "A user gesture is required to show the color picker."));
     return;
+  }
 
   ChromeClient* chrome_client = GetChromeClient();
-  if (chrome_client && !chooser_) {
+  if (chrome_client && !HasOpenedPopup()) {
     UseCounter::Count(
         document,
         (event.UnderlyingEvent() && event.UnderlyingEvent()->isTrusted())
             ? WebFeature::kColorInputTypeChooserByTrustedClick
             : WebFeature::kColorInputTypeChooserByUntrustedClick);
-    chooser_ = chrome_client->OpenColorChooser(document.GetFrame(), this,
-                                               ValueAsColor());
+    OpenPopupView();
   }
 
   event.SetDefaultHandled();
 }
 
+ControlPart ColorInputType::AutoAppearance() const {
+  return GetElement().FastHasAttribute(html_names::kListAttr)
+             ? kMenulistPart
+             : kSquareButtonPart;
+}
+
+void ColorInputType::OpenPopupView() {
+  ChromeClient* chrome_client = GetChromeClient();
+  Document& document = GetElement().GetDocument();
+  chooser_ = chrome_client->OpenColorChooser(document.GetFrame(), this,
+                                             ValueAsColor());
+  if (GetElement().GetLayoutObject()) {
+    // Invalidate paint to ensure that the focus ring is removed.
+    GetElement().GetLayoutObject()->SetShouldDoFullPaintInvalidation();
+  }
+}
+
 void ColorInputType::ClosePopupView() {
-  EndColorChooser();
+  if (chooser_)
+    chooser_->EndChooser();
+}
+
+bool ColorInputType::HasOpenedPopup() const {
+  return chooser_;
 }
 
 bool ColorInputType::ShouldRespectListAttribute() {
@@ -177,7 +206,7 @@ bool ColorInputType::TypeMismatchFor(const String& value) const {
 }
 
 void ColorInputType::WarnIfValueIsInvalid(const String& value) const {
-  if (!DeprecatedEqualIgnoringCase(value, GetElement().SanitizeValue(value)))
+  if (!EqualIgnoringASCIICase(value, GetElement().SanitizeValue(value)))
     AddWarningToConsole(
         "The specified value %s does not conform to the required format.  The "
         "format is \"#rrggbb\" where rr, gg, bb are two-digit hexadecimal "
@@ -191,24 +220,22 @@ void ColorInputType::ValueAttributeChanged() {
 }
 
 void ColorInputType::DidChooseColor(const Color& color) {
-  if (GetElement().IsDisabledFormControl() || color == ValueAsColor())
+  if (will_be_destroyed_ || GetElement().IsDisabledFormControl() ||
+      color == ValueAsColor())
     return;
   EventQueueScope scope;
-  GetElement().SetValueFromRenderer(color.Serialized());
+  // TODO(crbug.com/1333988): Serialize as CSSColor
+  GetElement().SetValueFromRenderer(color.SerializeAsCanvasColor());
   GetElement().UpdateView();
-  if (!LayoutTheme::GetTheme().IsModalColorChooser())
-    GetElement().DispatchFormControlChangeEvent();
 }
 
 void ColorInputType::DidEndChooser() {
-  if (LayoutTheme::GetTheme().IsModalColorChooser())
-    GetElement().EnqueueChangeEvent();
+  GetElement().EnqueueChangeEvent();
   chooser_.Clear();
-}
-
-void ColorInputType::EndColorChooser() {
-  if (chooser_)
-    chooser_->EndChooser();
+  if (GetElement().GetLayoutObject()) {
+    // Invalidate paint to ensure that the focus ring is shown.
+    GetElement().GetLayoutObject()->SetShouldDoFullPaintInvalidation();
+  }
 }
 
 void ColorInputType::UpdateView() {
@@ -217,7 +244,7 @@ void ColorInputType::UpdateView() {
     return;
 
   color_swatch->SetInlineStyleProperty(CSSPropertyID::kBackgroundColor,
-                                       GetElement().value());
+                                       GetElement().Value());
 }
 
 HTMLElement* ColorInputType::ShadowColorSwatch() const {
@@ -233,7 +260,7 @@ Element& ColorInputType::OwnerElement() const {
   return GetElement();
 }
 
-IntRect ColorInputType::ElementRectRelativeToViewport() const {
+gfx::Rect ColorInputType::ElementRectRelativeToViewport() const {
   return GetElement().GetDocument().View()->FrameToViewport(
       GetElement().PixelSnappedBoundingBox());
 }
@@ -243,7 +270,7 @@ Color ColorInputType::CurrentColor() {
 }
 
 bool ColorInputType::ShouldShowSuggestions() const {
-  return GetElement().FastHasAttribute(kListAttr);
+  return GetElement().FastHasAttribute(html_names::kListAttr);
 }
 
 Vector<mojom::blink::ColorSuggestionPtr> ColorInputType::Suggestions() const {
@@ -275,5 +302,6 @@ AXObject* ColorInputType::PopupRootAXObject() {
 ColorChooserClient* ColorInputType::GetColorChooserClient() {
   return this;
 }
+
 
 }  // namespace blink

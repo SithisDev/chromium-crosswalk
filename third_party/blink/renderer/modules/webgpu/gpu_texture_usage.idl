@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://github.com/gpuweb/gpuweb/blob/master/design/sketch.webidl
+// https://gpuweb.github.io/gpuweb/
 
-typedef unsigned long GPUTextureUsageFlags;
+typedef [EnforceRange] unsigned long GPUTextureUsageFlags;
 [
-    RuntimeEnabled=WebGPU
-] interface GPUTextureUsage {
-    const unsigned long NONE = 0;
+    Exposed(Window WebGPU, DedicatedWorker WebGPU),
+    SecureContext
+] namespace GPUTextureUsage {
     const unsigned long COPY_SRC = 1;
     const unsigned long COPY_DST = 2;
-    const unsigned long SAMPLED = 4;
-    const unsigned long STORAGE = 8;
-    const unsigned long OUTPUT_ATTACHMENT = 16;
+    const unsigned long TEXTURE_BINDING = 4;
+    const unsigned long STORAGE_BINDING = 8;
+    const unsigned long RENDER_ATTACHMENT = 16;
 };

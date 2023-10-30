@@ -32,15 +32,16 @@
 #include "third_party/blink/renderer/core/animation/css/css_animation_data.h"
 #include "third_party/blink/renderer/core/css/css_border_image_slice_value.h"
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
+#include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value_mappings.h"
 #include "third_party/blink/renderer/core/css/css_quad_value.h"
+#include "third_party/blink/renderer/core/css/css_scroll_value.h"
 #include "third_party/blink/renderer/core/css/css_timing_function_value.h"
 #include "third_party/blink/renderer/core/css/css_value_pair.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder_converter.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/style/border_image_length_box.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style/fill_layer.h"
@@ -145,7 +146,8 @@ void CSSToStyleMap::MapFillImage(StyleResolverState& state,
   CSSPropertyID property = layer->GetType() == EFillLayerType::kBackground
                                ? CSSPropertyID::kBackgroundImage
                                : CSSPropertyID::kWebkitMaskImage;
-  layer->SetImage(state.GetStyleImage(property, value));
+  layer->SetImage(
+      state.GetStyleImage(property, state.ResolveLightDarkPair(value)));
 }
 
 void CSSToStyleMap::MapFillRepeatX(StyleResolverState&,
@@ -286,35 +288,6 @@ void CSSToStyleMap::MapFillPositionY(StyleResolverState& state,
   }
 }
 
-void CSSToStyleMap::MapFillMaskSourceType(StyleResolverState&,
-                                          FillLayer* layer,
-                                          const CSSValue& value) {
-  EMaskSourceType type = FillLayer::InitialFillMaskSourceType(layer->GetType());
-  if (value.IsInitialValue()) {
-    layer->SetMaskSourceType(type);
-    return;
-  }
-
-  const auto* identifier_value = DynamicTo<CSSIdentifierValue>(value);
-  if (!identifier_value)
-    return;
-
-  switch (identifier_value->GetValueID()) {
-    case CSSValueID::kAlpha:
-      type = EMaskSourceType::kAlpha;
-      break;
-    case CSSValueID::kLuminance:
-      type = EMaskSourceType::kLuminance;
-      break;
-    case CSSValueID::kAuto:
-      break;
-    default:
-      NOTREACHED();
-  }
-
-  layer->SetMaskSourceType(type);
-}
-
 double CSSToStyleMap::MapAnimationDelay(const CSSValue& value) {
   if (value.IsInitialValue())
     return CSSTimingData::InitialDelay();
@@ -383,6 +356,36 @@ AtomicString CSSToStyleMap::MapAnimationName(const CSSValue& value) {
     return AtomicString(custom_ident_value->Value());
   DCHECK_EQ(To<CSSIdentifierValue>(value).GetValueID(), CSSValueID::kNone);
   return CSSAnimationData::InitialName();
+}
+
+StyleTimeline CSSToStyleMap::MapAnimationTimeline(const CSSValue& value) {
+  if (value.IsInitialValue())
+    return CSSAnimationData::InitialTimeline();
+  if (auto* ident = DynamicTo<CSSIdentifierValue>(value)) {
+    DCHECK(ident->GetValueID() == CSSValueID::kAuto ||
+           ident->GetValueID() == CSSValueID::kNone);
+    return StyleTimeline(ident->GetValueID());
+  }
+  if (auto* custom_ident = DynamicTo<CSSCustomIdentValue>(value)) {
+    return StyleTimeline(
+        StyleName(custom_ident->Value(), StyleName::Type::kCustomIdent));
+  }
+  if (auto* string_value = DynamicTo<CSSStringValue>(value)) {
+    return StyleTimeline(StyleName(AtomicString(string_value->Value()),
+                                   StyleName::Type::kString));
+  }
+  const auto& scroll_value = To<cssvalue::CSSScrollValue>(value);
+  const auto* axis_value = DynamicTo<CSSIdentifierValue>(scroll_value.Axis());
+  const auto* scroller_value =
+      DynamicTo<CSSIdentifierValue>(scroll_value.Scroller());
+
+  TimelineAxis axis = axis_value ? axis_value->ConvertTo<TimelineAxis>()
+                                 : StyleTimeline::ScrollData::DefaultAxis();
+  TimelineScroller scroller =
+      scroller_value ? scroller_value->ConvertTo<TimelineScroller>()
+                     : StyleTimeline::ScrollData::DefaultScroller();
+
+  return StyleTimeline(StyleTimeline::ScrollData(axis, scroller));
 }
 
 EAnimPlayState CSSToStyleMap::MapAnimationPlayState(const CSSValue& value) {
@@ -594,14 +597,17 @@ BorderImageLengthBox CSSToStyleMap::MapNinePieceImageQuad(
 void CSSToStyleMap::MapNinePieceImageRepeat(StyleResolverState&,
                                             const CSSValue& value,
                                             NinePieceImage& image) {
-  const auto* pair = DynamicTo<CSSValuePair>(value);
-  if (!pair)
-    return;
+  CSSValueID first_identifier;
+  CSSValueID second_identifier;
 
-  CSSValueID first_identifier =
-      To<CSSIdentifierValue>(pair->First()).GetValueID();
-  CSSValueID second_identifier =
-      To<CSSIdentifierValue>(pair->Second()).GetValueID();
+  const auto* pair = DynamicTo<CSSValuePair>(value);
+  if (pair != nullptr) {
+    first_identifier = To<CSSIdentifierValue>(pair->First()).GetValueID();
+    second_identifier = To<CSSIdentifierValue>(pair->Second()).GetValueID();
+  } else {
+    first_identifier = second_identifier =
+        To<CSSIdentifierValue>(value).GetValueID();
+  }
 
   ENinePieceImageRule horizontal_rule;
   switch (first_identifier) {

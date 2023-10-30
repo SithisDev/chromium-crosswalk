@@ -12,43 +12,30 @@
 #include "base/metrics/histogram_macros.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/media_log.h"
+#include "third_party/blink/public/common/scheme_registry.h"
 #include "third_party/blink/public/platform/url_conversion.h"
 #include "third_party/blink/public/platform/web_media_player_encrypted_media_client.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
+#include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-
-using namespace media;
 
 namespace {
 
-std::string LoadTypeToString(blink::WebMediaPlayer::LoadType load_type) {
-  switch (load_type) {
-    case blink::WebMediaPlayer::kLoadTypeURL:
-      return "SRC";
-    case blink::WebMediaPlayer::kLoadTypeMediaSource:
-      return "MSE";
-    case blink::WebMediaPlayer::kLoadTypeMediaStream:
-      return "MS";
-  }
-
-  NOTREACHED();
-  return "Unknown";
-}
-
 void RunSetSinkIdCallback(blink::WebSetSinkIdCompleteCallback callback,
-                          OutputDeviceStatus result) {
+                          media::OutputDeviceStatus result) {
   switch (result) {
-    case OUTPUT_DEVICE_STATUS_OK:
-      std::move(callback).Run(/*error =*/base::nullopt);
+    case media::OUTPUT_DEVICE_STATUS_OK:
+      std::move(callback).Run(/*error =*/absl::nullopt);
       break;
-    case OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND:
+    case media::OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND:
       std::move(callback).Run(blink::WebSetSinkIdError::kNotFound);
       break;
-    case OUTPUT_DEVICE_STATUS_ERROR_NOT_AUTHORIZED:
+    case media::OUTPUT_DEVICE_STATUS_ERROR_NOT_AUTHORIZED:
       std::move(callback).Run(blink::WebSetSinkIdError::kNotAuthorized);
       break;
-    case OUTPUT_DEVICE_STATUS_ERROR_TIMED_OUT:
-    case OUTPUT_DEVICE_STATUS_ERROR_INTERNAL:
+    case media::OUTPUT_DEVICE_STATUS_ERROR_TIMED_OUT:
+    case media::OUTPUT_DEVICE_STATUS_ERROR_INTERNAL:
       std::move(callback).Run(blink::WebSetSinkIdError::kAborted);
       break;
   }
@@ -83,15 +70,17 @@ media::mojom::MediaURLScheme GetMediaURLScheme(const WebURL& url) {
     return media::mojom::MediaURLScheme::kContentId;
 
   // Some internals pages and extension pages play media.
-  if (url.ProtocolIs("chrome"))
+  KURL kurl(url);
+  if (SchemeRegistry::IsWebUIScheme(kurl.Protocol()))
     return media::mojom::MediaURLScheme::kChrome;
-  if (url.ProtocolIs("chrome-extension"))
+  if (CommonSchemeRegistry::IsExtensionScheme(kurl.Protocol().Ascii()))
     return media::mojom::MediaURLScheme::kChromeExtension;
 
   return media::mojom::MediaURLScheme::kUnknown;
 }
 
-WebTimeRanges ConvertToWebTimeRanges(const Ranges<base::TimeDelta>& ranges) {
+WebTimeRanges ConvertToWebTimeRanges(
+    const media::Ranges<base::TimeDelta>& ranges) {
   WebTimeRanges result(ranges.size());
   for (size_t i = 0; i < ranges.size(); ++i) {
     result[i].start = ranges.start(i).InSecondsF();
@@ -100,32 +89,35 @@ WebTimeRanges ConvertToWebTimeRanges(const Ranges<base::TimeDelta>& ranges) {
   return result;
 }
 
-WebMediaPlayer::NetworkState PipelineErrorToNetworkState(PipelineStatus error) {
-  switch (error) {
-    case PIPELINE_ERROR_NETWORK:
-    case PIPELINE_ERROR_READ:
-    case CHUNK_DEMUXER_ERROR_EOS_STATUS_NETWORK_ERROR:
+WebMediaPlayer::NetworkState PipelineErrorToNetworkState(
+    media::PipelineStatus error) {
+  switch (error.code()) {
+    case media::PIPELINE_ERROR_NETWORK:
+    case media::PIPELINE_ERROR_READ:
+    case media::CHUNK_DEMUXER_ERROR_EOS_STATUS_NETWORK_ERROR:
       return WebMediaPlayer::kNetworkStateNetworkError;
 
-    case PIPELINE_ERROR_INITIALIZATION_FAILED:
-    case PIPELINE_ERROR_COULD_NOT_RENDER:
-    case PIPELINE_ERROR_EXTERNAL_RENDERER_FAILED:
-    case DEMUXER_ERROR_COULD_NOT_OPEN:
-    case DEMUXER_ERROR_COULD_NOT_PARSE:
-    case DEMUXER_ERROR_NO_SUPPORTED_STREAMS:
-    case DEMUXER_ERROR_DETECTED_HLS:
-    case DECODER_ERROR_NOT_SUPPORTED:
+    case media::PIPELINE_ERROR_INITIALIZATION_FAILED:
+    case media::PIPELINE_ERROR_COULD_NOT_RENDER:
+    case media::PIPELINE_ERROR_EXTERNAL_RENDERER_FAILED:
+    case media::DEMUXER_ERROR_COULD_NOT_OPEN:
+    case media::DEMUXER_ERROR_COULD_NOT_PARSE:
+    case media::DEMUXER_ERROR_NO_SUPPORTED_STREAMS:
+    case media::DEMUXER_ERROR_DETECTED_HLS:
+    case media::DECODER_ERROR_NOT_SUPPORTED:
       return WebMediaPlayer::kNetworkStateFormatError;
 
-    case PIPELINE_ERROR_DECODE:
-    case PIPELINE_ERROR_ABORT:
-    case PIPELINE_ERROR_INVALID_STATE:
-    case CHUNK_DEMUXER_ERROR_APPEND_FAILED:
-    case CHUNK_DEMUXER_ERROR_EOS_STATUS_DECODE_ERROR:
-    case AUDIO_RENDERER_ERROR:
+    case media::PIPELINE_ERROR_DECODE:
+    case media::PIPELINE_ERROR_ABORT:
+    case media::PIPELINE_ERROR_INVALID_STATE:
+    case media::PIPELINE_ERROR_HARDWARE_CONTEXT_RESET:
+    case media::PIPELINE_ERROR_DISCONNECTED:
+    case media::CHUNK_DEMUXER_ERROR_APPEND_FAILED:
+    case media::CHUNK_DEMUXER_ERROR_EOS_STATUS_DECODE_ERROR:
+    case media::AUDIO_RENDERER_ERROR:
       return WebMediaPlayer::kNetworkStateDecodeError;
 
-    case PIPELINE_OK:
+    case media::PIPELINE_OK:
       NOTREACHED() << "Unexpected status! " << error;
   }
   return WebMediaPlayer::kNetworkStateFormatError;
@@ -134,7 +126,7 @@ WebMediaPlayer::NetworkState PipelineErrorToNetworkState(PipelineStatus error) {
 void ReportMetrics(WebMediaPlayer::LoadType load_type,
                    const WebURL& url,
                    const WebLocalFrame& frame,
-                   MediaLog* media_log) {
+                   media::MediaLog* media_log) {
   DCHECK(media_log);
 
   // Report URL scheme, such as http, https, file, blob etc. Only do this for
@@ -147,36 +139,13 @@ void ReportMetrics(WebMediaPlayer::LoadType load_type,
                             WebMediaPlayer::kLoadTypeMax + 1);
 
   // Report load type separately for ad frames.
-  if (frame.IsAdSubframe()) {
+  if (frame.IsAdFrame()) {
     UMA_HISTOGRAM_ENUMERATION("Ads.Media.LoadType", load_type,
                               WebMediaPlayer::kLoadTypeMax + 1);
   }
-
-  // Report the origin from where the media player is created.
-  media_log->RecordRapporWithSecurityOrigin("Media.OriginUrl." +
-                                            LoadTypeToString(load_type));
-
-  // For MSE, also report usage by secure/insecure origin.
-  if (load_type == WebMediaPlayer::kLoadTypeMediaSource) {
-    if (frame.GetSecurityOrigin().IsPotentiallyTrustworthy()) {
-      media_log->RecordRapporWithSecurityOrigin("Media.OriginUrl.MSE.Secure");
-    } else {
-      media_log->RecordRapporWithSecurityOrigin("Media.OriginUrl.MSE.Insecure");
-    }
-  }
 }
 
-void ReportPipelineError(WebMediaPlayer::LoadType load_type,
-                         PipelineStatus error,
-                         MediaLog* media_log) {
-  DCHECK_NE(PIPELINE_OK, error);
-
-  // Report the origin from where the media player is created.
-  media_log->RecordRapporWithSecurityOrigin(
-      "Media.OriginUrl." + LoadTypeToString(load_type) + ".PipelineError");
-}
-
-OutputDeviceStatusCB ConvertToOutputDeviceStatusCB(
+media::OutputDeviceStatusCB ConvertToOutputDeviceStatusCB(
     WebSetSinkIdCompleteCallback callback) {
   return media::BindToCurrentLoop(
       WTF::Bind(RunSetSinkIdCallback, std::move(callback)));

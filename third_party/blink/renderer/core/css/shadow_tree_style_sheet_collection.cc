@@ -28,6 +28,7 @@
 
 #include "third_party/blink/renderer/core/css/shadow_tree_style_sheet_collection.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_observable_array_css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
@@ -45,7 +46,7 @@ ShadowTreeStyleSheetCollection::ShadowTreeStyleSheetCollection(
     : TreeScopeStyleSheetCollection(shadow_root) {}
 
 void ShadowTreeStyleSheetCollection::CollectStyleSheets(
-    StyleEngine& master_engine,
+    StyleEngine& engine,
     StyleSheetCollection& collection) {
   for (Node* n : style_sheet_candidate_nodes_) {
     StyleSheetCandidate candidate(*n);
@@ -59,26 +60,26 @@ void ShadowTreeStyleSheetCollection::CollectStyleSheets(
     if (candidate.CanBeActivated(g_null_atom)) {
       CSSStyleSheet* css_sheet = To<CSSStyleSheet>(sheet);
       collection.AppendActiveStyleSheet(
-          std::make_pair(css_sheet, master_engine.RuleSetForSheet(*css_sheet)));
+          std::make_pair(css_sheet, engine.RuleSetForSheet(*css_sheet)));
     }
   }
   if (!GetTreeScope().HasAdoptedStyleSheets())
     return;
 
-  for (CSSStyleSheet* sheet : GetTreeScope().AdoptedStyleSheets()) {
+  for (CSSStyleSheet* sheet : *GetTreeScope().AdoptedStyleSheets()) {
     if (!sheet || !sheet->CanBeActivated(g_null_atom))
       continue;
-    DCHECK_EQ(GetTreeScope().GetDocument(), sheet->AssociatedDocument());
+    DCHECK_EQ(GetTreeScope().GetDocument(), sheet->ConstructorDocument());
     collection.AppendActiveStyleSheet(
-        std::make_pair(sheet, master_engine.RuleSetForSheet(*sheet)));
+        std::make_pair(sheet, engine.RuleSetForSheet(*sheet)));
   }
 }
 
 void ShadowTreeStyleSheetCollection::UpdateActiveStyleSheets(
-    StyleEngine& master_engine) {
+    StyleEngine& engine) {
   // StyleSheetCollection is GarbageCollected<>, allocate it on the heap.
   auto* collection = MakeGarbageCollected<StyleSheetCollection>();
-  CollectStyleSheets(master_engine, *collection);
+  CollectStyleSheets(engine, *collection);
   ApplyActiveStyleSheetChanges(*collection);
 }
 

@@ -34,9 +34,11 @@
 #include "third_party/blink/renderer/core/html/track/cue_timeline.h"
 #include "third_party/blink/renderer/core/html/track/text_track.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/core/layout/layout_video.h"
 #include "third_party/blink/renderer/core/resize_observer/resize_observer.h"
 #include "third_party/blink/renderer/core/resize_observer/resize_observer_entry.h"
+#include "ui/accessibility/accessibility_features.h"
 
 namespace blink {
 
@@ -50,12 +52,12 @@ class VideoElementResizeDelegate final : public ResizeObserver::Delegate {
   void OnResize(
       const HeapVector<Member<ResizeObserverEntry>>& entries) override {
     DCHECK_EQ(entries.size(), 1u);
-    DCHECK(IsHTMLVideoElement(entries[0]->target()));
+    DCHECK(IsA<HTMLVideoElement>(entries[0]->target()));
     text_track_container_->UpdateDefaultFontSize(
         entries[0]->target()->GetLayoutObject());
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(text_track_container_);
     ResizeObserver::Delegate::Trace(visitor);
   }
@@ -71,11 +73,11 @@ TextTrackContainer::TextTrackContainer(HTMLMediaElement& media_element)
       media_element_(&media_element),
       default_font_size_(0) {
   SetShadowPseudoId(AtomicString("-webkit-media-text-track-container"));
-  if (IsHTMLVideoElement(*media_element_))
+  if (IsA<HTMLVideoElement>(*media_element_))
     ObserveSizeChanges(*media_element_);
 }
 
-void TextTrackContainer::Trace(Visitor* visitor) {
+void TextTrackContainer::Trace(Visitor* visitor) const {
   visitor->Trace(media_element_);
   visitor->Trace(video_size_observer_);
   HTMLDivElement::Trace(visitor);
@@ -84,7 +86,7 @@ void TextTrackContainer::Trace(Visitor* visitor) {
 Node::InsertionNotificationRequest TextTrackContainer::InsertedInto(
     ContainerNode& root) {
   if (!video_size_observer_ && media_element_->isConnected() &&
-      IsHTMLVideoElement(*media_element_)) {
+      IsA<HTMLVideoElement>(*media_element_)) {
     ObserveSizeChanges(*media_element_);
   }
 
@@ -102,31 +104,38 @@ void TextTrackContainer::RemovedFrom(ContainerNode& insertion_point) {
   }
 }
 
-LayoutObject* TextTrackContainer::CreateLayoutObject(const ComputedStyle&,
-                                                     LegacyLayout) {
+bool TextTrackContainer::TypeShouldForceLegacyLayout() const {
+  return !RuntimeEnabledFeatures::LayoutNGVTTCueEnabled();
+}
+
+LayoutObject* TextTrackContainer::CreateLayoutObject(const ComputedStyle& style,
+                                                     LegacyLayout legacy) {
+  if (RuntimeEnabledFeatures::LayoutNGVTTCueEnabled())
+    return LayoutObjectFactory::CreateBlockFlow(*this, style, legacy);
   // TODO(mstensho): Should use LayoutObjectFactory to create the right type of
   // object here, to enable LayoutNG, but currently we can't, because this will
   // typically be a child of LayoutVideo (a legacy type), and we'll typically
   // also insert a LayoutVTTCue (a LayoutBlockFlow type) child, which also isn't
   // implemented in NG.
-  return new LayoutBlockFlow(this);
+  return MakeGarbageCollected<LayoutBlockFlow>(this);
 }
 
 void TextTrackContainer::ObserveSizeChanges(Element& element) {
   video_size_observer_ = ResizeObserver::Create(
-      GetDocument(), MakeGarbageCollected<VideoElementResizeDelegate>(*this));
+      GetDocument().domWindow(),
+      MakeGarbageCollected<VideoElementResizeDelegate>(*this));
   video_size_observer_->observe(&element);
 }
 
 void TextTrackContainer::UpdateDefaultFontSize(
     LayoutObject* media_layout_object) {
-  if (!media_layout_object || !media_layout_object->IsVideo())
+  if (!media_layout_object || !IsA<LayoutVideo>(media_layout_object))
     return;
   // FIXME: The video size is used to calculate the font size (a workaround
   // for lack of per-spec vh/vw support) but the whole media element is used
   // for cue rendering. This is inconsistent. See also the somewhat related
   // spec bug: https://www.w3.org/Bugs/Public/show_bug.cgi?id=28105
-  LayoutSize video_size = ToLayoutBox(media_layout_object)->ContentSize();
+  LayoutSize video_size = To<LayoutBox>(media_layout_object)->ContentSize();
   LayoutUnit smallest_dimension =
       std::min(video_size.Height(), video_size.Width());
   float font_size = smallest_dimension * 0.05f;
@@ -159,11 +168,11 @@ void TextTrackContainer::UpdateDisplay(HTMLMediaElement& media_element,
   // 1. If the media element is an audio element, or is another playback
   // mechanism with no rendering area, abort these steps. There is nothing to
   // render.
-  if (IsHTMLAudioElement(media_element))
+  if (IsA<HTMLAudioElement>(media_element))
     return;
 
   // 2. Let video be the media element or other playback mechanism.
-  HTMLVideoElement& video = ToHTMLVideoElement(media_element);
+  auto& video = To<HTMLVideoElement>(media_element);
 
   // 3. Let output be an empty list of absolutely positioned CSS block boxes.
 
@@ -214,7 +223,10 @@ void TextTrackContainer::UpdateDisplay(HTMLMediaElement& media_element,
     if (!cue->track() || !cue->track()->IsRendered() || !cue->IsActive())
       continue;
 
-    cue->UpdateDisplay(*this);
+    if (!cue->track()->IsSpokenKind()) {
+      cue->UpdateDisplay(*this);
+    }
+
     cue->UpdatePastAndFutureNodes(movie_time);
   }
 

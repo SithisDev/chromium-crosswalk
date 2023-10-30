@@ -13,8 +13,18 @@ class ManifestUmaUtil {
  public:
   enum FetchFailureReason {
     FETCH_EMPTY_URL = 0,
-    FETCH_FROM_UNIQUE_ORIGIN,
+    FETCH_FROM_OPAQUE_ORIGIN,
     FETCH_UNSPECIFIED_REASON
+  };
+
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  enum class ParseIdResultType {
+    kSucceed = 0,
+    kDefaultToStartUrl = 1,
+    kInvalidStartUrl = 2,
+    kFeatureDisabled = 3,
+    kMaxValue = kFeatureDisabled,
   };
 
   // Record that the Manifest was successfully parsed. If it is an empty
@@ -31,6 +41,9 @@ class ManifestUmaUtil {
   // Record that the Manifest fetching failed and takes the |reason| why it
   // failed.
   static void FetchFailed(FetchFailureReason reason);
+
+  // Record the result of parsing manifest id.
+  static void ParseIdResult(ParseIdResultType result);
 };
 
 }  // namespace blink

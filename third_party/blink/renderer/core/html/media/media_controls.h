@@ -6,8 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_MEDIA_MEDIA_CONTROLS_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/visitor.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -77,11 +77,7 @@ class CORE_EXPORT MediaControls : public GarbageCollectedMixin {
   virtual HTMLDivElement* PanelElement() = 0;
   virtual void OnMediaControlsEnabledChange() = 0;
 
-  // This is required for showing a context menu upon pressing right soft key
-  // on a touchless device.
-  virtual void ShowContextMenu() = 0;
-
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   Member<HTMLMediaElement> media_element_;

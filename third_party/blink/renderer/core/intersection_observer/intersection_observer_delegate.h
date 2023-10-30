@@ -7,7 +7,8 @@
 
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -16,18 +17,19 @@ class IntersectionObserver;
 class IntersectionObserverEntry;
 
 class IntersectionObserverDelegate
-    : public GarbageCollectedFinalized<IntersectionObserverDelegate>,
+    : public GarbageCollected<IntersectionObserverDelegate>,
       public NameClient {
  public:
-  virtual ~IntersectionObserverDelegate() = default;
+  ~IntersectionObserverDelegate() override = default;
 
+  virtual LocalFrameUkmAggregator::MetricId GetUkmMetricId() const = 0;
   virtual IntersectionObserver::DeliveryBehavior GetDeliveryBehavior()
       const = 0;
 
   virtual void Deliver(const HeapVector<Member<IntersectionObserverEntry>>&,
                        IntersectionObserver&) = 0;
   virtual ExecutionContext* GetExecutionContext() const = 0;
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
   const char* NameInHeapSnapshot() const override {
     return "IntersectionObserverDelegate";
   }

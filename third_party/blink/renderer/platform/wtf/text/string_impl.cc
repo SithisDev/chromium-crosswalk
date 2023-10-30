@@ -27,32 +27,41 @@
 
 #include <algorithm>
 #include <memory>
+
+#include "base/callback.h"
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/dynamic_annotations.h"
 #include "third_party/blink/renderer/platform/wtf/leak_annotations.h"
+#include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 #include "third_party/blink/renderer/platform/wtf/static_constructors.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_table.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
+#include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
+#include "third_party/blink/renderer/platform/wtf/text/unicode.h"
+#include "third_party/blink/renderer/platform/wtf/text/unicode_string.h"
 
 using std::numeric_limits;
 
 namespace WTF {
 
-// As of Jan 2017, StringImpl needs 2 * sizeof(int) + 29 bits of data, and
-// sizeof(ThreadRestrictionVerifier) is 16 bytes. Thus, in DCHECK mode the
-// class may be padded to 32 bytes.
+namespace {
+
+struct SameSizeAsStringImpl {
 #if DCHECK_IS_ON()
-static_assert(sizeof(StringImpl) <= 8 * sizeof(int),
-              "StringImpl should stay small");
-#else
-static_assert(sizeof(StringImpl) <= 3 * sizeof(int),
-              "StringImpl should stay small");
+  unsigned int ref_count_change_count;
 #endif
+  int fields[3];
+};
+
+ASSERT_SIZE(StringImpl, SameSizeAsStringImpl);
+
+}  // namespace
 
 void* StringImpl::operator new(size_t size) {
   DCHECK_EQ(size, sizeof(StringImpl));
@@ -65,33 +74,39 @@ void StringImpl::operator delete(void* ptr) {
 
 inline StringImpl::~StringImpl() {
   DCHECK(!IsStatic());
-
-  if (IsAtomic())
-    AtomicStringTable::Instance().Remove(this);
 }
 
-void StringImpl::DestroyIfNotStatic() const {
-  if (!IsStatic())
+void StringImpl::DestroyIfNeeded() const {
+  if (hash_and_flags_.load(std::memory_order_acquire) & kIsAtomic) {
+    // TODO: Remove const_cast
+    if (AtomicStringTable::Instance().ReleaseAndRemoveIfNeeded(
+            const_cast<StringImpl*>(this))) {
+      delete this;
+    } else {
+      // AtomicStringTable::Add() revived this before we started really
+      // killing it.
+    }
+  } else {
+    // This is not necessary but TSAN bots don't like the load in the
+    // caller to have relaxed memory order. Adding this check here instead
+    // of changing the load memory order to minimize perf impact.
+    int ref_count = ref_count_.load(std::memory_order_acquire);
+    DCHECK_EQ(ref_count, 1);
     delete this;
+  }
 }
 
-void StringImpl::UpdateContainsOnlyASCIIOrEmpty() const {
-  contains_only_ascii_ = Is8Bit()
-                             ? CharactersAreAllASCII(Characters8(), length())
-                             : CharactersAreAllASCII(Characters16(), length());
-  needs_ascii_check_ = false;
-}
-
-bool StringImpl::IsSafeToSendToAnotherThread() const {
-  if (IsStatic())
-    return true;
-  // AtomicStrings are not safe to send between threads as ~StringImpl()
-  // will try to remove them from the wrong AtomicStringTable.
-  if (IsAtomic())
-    return false;
-  if (HasOneRef())
-    return true;
-  return false;
+unsigned StringImpl::ComputeASCIIFlags() const {
+  ASCIIStringAttributes ascii_attributes =
+      Is8Bit() ? CharacterAttributes(Characters8(), length())
+               : CharacterAttributes(Characters16(), length());
+  uint32_t new_flags = ASCIIStringAttributesToFlags(ascii_attributes);
+  const uint32_t previous_flags =
+      hash_and_flags_.fetch_or(new_flags, std::memory_order_relaxed);
+  static constexpr uint32_t mask =
+      kAsciiPropertyCheckDone | kContainsOnlyAscii | kIsLowerAscii;
+  DCHECK((previous_flags & mask) == 0 || (previous_flags & mask) == new_flags);
+  return new_flags;
 }
 
 #if DCHECK_IS_ON()
@@ -248,6 +263,21 @@ scoped_refptr<StringImpl> StringImpl::Create(const LChar* characters,
   return string;
 }
 
+scoped_refptr<StringImpl> StringImpl::Create(
+    const LChar* characters,
+    wtf_size_t length,
+    ASCIIStringAttributes ascii_attributes) {
+  scoped_refptr<StringImpl> ret = Create(characters, length);
+  if (length) {
+    // If length is 0 then `ret` is empty_ and should not have its
+    // attributes calculated or changed.
+    uint32_t new_flags = ASCIIStringAttributesToFlags(ascii_attributes);
+    ret->hash_and_flags_.fetch_or(new_flags, std::memory_order_relaxed);
+  }
+
+  return ret;
+}
+
 scoped_refptr<StringImpl> StringImpl::Create8BitIfPossible(
     const UChar* characters,
     wtf_size_t length) {
@@ -270,7 +300,7 @@ scoped_refptr<StringImpl> StringImpl::Create(const LChar* string) {
   if (!string)
     return empty_;
   size_t length = strlen(reinterpret_cast<const char*>(string));
-  return Create(string, SafeCast<wtf_size_t>(length));
+  return Create(string, base::checked_cast<wtf_size_t>(length));
 }
 
 bool StringImpl::ContainsOnlyWhitespaceOrEmpty() {
@@ -338,250 +368,26 @@ wtf_size_t StringImpl::CopyTo(UChar* buffer,
   return number_of_characters_to_copy;
 }
 
+class StringImplAllocator {
+ public:
+  using ResultStringType = scoped_refptr<StringImpl>;
+
+  template <typename CharType>
+  scoped_refptr<StringImpl> Alloc(wtf_size_t length, CharType*& buffer) {
+    return StringImpl::CreateUninitialized(length, buffer);
+  }
+
+  scoped_refptr<StringImpl> CoerceOriginal(const StringImpl& string) {
+    return const_cast<StringImpl*>(&string);
+  }
+};
+
 scoped_refptr<StringImpl> StringImpl::LowerASCII() {
-  // First scan the string for uppercase and non-ASCII characters:
-  if (Is8Bit()) {
-    wtf_size_t first_index_to_be_lowered = length_;
-    for (wtf_size_t i = 0; i < length_; ++i) {
-      LChar ch = Characters8()[i];
-      if (IsASCIIUpper(ch)) {
-        first_index_to_be_lowered = i;
-        break;
-      }
-    }
-
-    // Nothing to do if the string is all ASCII with no uppercase.
-    if (first_index_to_be_lowered == length_) {
-      return this;
-    }
-
-    LChar* data8;
-    scoped_refptr<StringImpl> new_impl = CreateUninitialized(length_, data8);
-    memcpy(data8, Characters8(), first_index_to_be_lowered);
-
-    for (wtf_size_t i = first_index_to_be_lowered; i < length_; ++i) {
-      LChar ch = Characters8()[i];
-      data8[i] = IsASCIIUpper(ch) ? ToASCIILower(ch) : ch;
-    }
-    return new_impl;
-  }
-  bool no_upper = true;
-  UChar ored = 0;
-
-  const UChar* end = Characters16() + length_;
-  for (const UChar* chp = Characters16(); chp != end; ++chp) {
-    if (IsASCIIUpper(*chp))
-      no_upper = false;
-    ored |= *chp;
-  }
-  // Nothing to do if the string is all ASCII with no uppercase.
-  if (no_upper && !(ored & ~0x7F))
-    return this;
-
-  CHECK_LE(length_, static_cast<wtf_size_t>(numeric_limits<wtf_size_t>::max()));
-  wtf_size_t length = length_;
-
-  UChar* data16;
-  scoped_refptr<StringImpl> new_impl = CreateUninitialized(length_, data16);
-
-  for (wtf_size_t i = 0; i < length; ++i) {
-    UChar c = Characters16()[i];
-    data16[i] = IsASCIIUpper(c) ? ToASCIILower(c) : c;
-  }
-  return new_impl;
-}
-
-scoped_refptr<StringImpl> StringImpl::LowerUnicode() {
-  // Note: This is a hot function in the Dromaeo benchmark, specifically the
-  // no-op code path up through the first 'return' statement.
-
-  // First scan the string for uppercase and non-ASCII characters:
-  if (Is8Bit()) {
-    wtf_size_t first_index_to_be_lowered = length_;
-    for (wtf_size_t i = 0; i < length_; ++i) {
-      LChar ch = Characters8()[i];
-      if (UNLIKELY(IsASCIIUpper(ch) || ch & ~0x7F)) {
-        first_index_to_be_lowered = i;
-        break;
-      }
-    }
-
-    // Nothing to do if the string is all ASCII with no uppercase.
-    if (first_index_to_be_lowered == length_)
-      return this;
-
-    LChar* data8;
-    scoped_refptr<StringImpl> new_impl = CreateUninitialized(length_, data8);
-    memcpy(data8, Characters8(), first_index_to_be_lowered);
-
-    for (wtf_size_t i = first_index_to_be_lowered; i < length_; ++i) {
-      LChar ch = Characters8()[i];
-      data8[i] = UNLIKELY(ch & ~0x7F) ? static_cast<LChar>(unicode::ToLower(ch))
-                                      : ToASCIILower(ch);
-    }
-
-    return new_impl;
-  }
-
-  bool no_upper = true;
-  UChar ored = 0;
-
-  const UChar* end = Characters16() + length_;
-  for (const UChar* chp = Characters16(); chp != end; ++chp) {
-    if (UNLIKELY(IsASCIIUpper(*chp)))
-      no_upper = false;
-    ored |= *chp;
-  }
-  // Nothing to do if the string is all ASCII with no uppercase.
-  if (no_upper && !(ored & ~0x7F))
-    return this;
-
-  CHECK_LE(length_, static_cast<wtf_size_t>(numeric_limits<int32_t>::max()));
-  int32_t length = length_;
-
-  if (!(ored & ~0x7F)) {
-    UChar* data16;
-    scoped_refptr<StringImpl> new_impl = CreateUninitialized(length_, data16);
-
-    for (int32_t i = 0; i < length; ++i) {
-      UChar c = Characters16()[i];
-      data16[i] = ToASCIILower(c);
-    }
-    return new_impl;
-  }
-
-  // Do a slower implementation for cases that include non-ASCII characters.
-  UChar* data16;
-  scoped_refptr<StringImpl> new_impl = CreateUninitialized(length_, data16);
-
-  bool error;
-  int32_t real_length =
-      unicode::ToLower(data16, length, Characters16(), length_, &error);
-  if (!error && real_length == length)
-    return new_impl;
-
-  new_impl = CreateUninitialized(real_length, data16);
-  unicode::ToLower(data16, real_length, Characters16(), length_, &error);
-  if (error)
-    return this;
-  return new_impl;
-}
-
-scoped_refptr<StringImpl> StringImpl::UpperUnicode() {
-  // This function could be optimized for no-op cases the way LowerUnicode() is,
-  // but in empirical testing, few actual calls to UpperUnicode() are no-ops, so
-  // it wouldn't be worth the extra time for pre-scanning.
-
-  CHECK_LE(length_, static_cast<wtf_size_t>(numeric_limits<int32_t>::max()));
-  int32_t length = length_;
-
-  if (Is8Bit()) {
-    LChar* data8;
-    scoped_refptr<StringImpl> new_impl = CreateUninitialized(length_, data8);
-
-    // Do a faster loop for the case where all the characters are ASCII.
-    LChar ored = 0;
-    for (int i = 0; i < length; ++i) {
-      LChar c = Characters8()[i];
-      ored |= c;
-      data8[i] = ToASCIIUpper(c);
-    }
-    if (!(ored & ~0x7F))
-      return new_impl;
-
-    // Do a slower implementation for cases that include non-ASCII Latin-1
-    // characters.
-    int number_sharp_s_characters = 0;
-
-    // There are two special cases.
-    //  1. latin-1 characters when converted to upper case are 16 bit
-    //     characters.
-    //  2. Lower case sharp-S converts to "SS" (two characters)
-    for (int32_t i = 0; i < length; ++i) {
-      LChar c = Characters8()[i];
-      if (UNLIKELY(c == kSmallLetterSharpSCharacter))
-        ++number_sharp_s_characters;
-      UChar upper = static_cast<UChar>(unicode::ToUpper(c));
-      if (UNLIKELY(upper > 0xff)) {
-        // Since this upper-cased character does not fit in an 8-bit string, we
-        // need to take the 16-bit path.
-        goto upconvert;
-      }
-      data8[i] = static_cast<LChar>(upper);
-    }
-
-    if (!number_sharp_s_characters)
-      return new_impl;
-
-    // We have numberSSCharacters sharp-s characters, but none of the other
-    // special characters.
-    new_impl = CreateUninitialized(length_ + number_sharp_s_characters, data8);
-
-    LChar* dest = data8;
-
-    for (int32_t i = 0; i < length; ++i) {
-      LChar c = Characters8()[i];
-      if (c == kSmallLetterSharpSCharacter) {
-        *dest++ = 'S';
-        *dest++ = 'S';
-      } else {
-        *dest++ = static_cast<LChar>(unicode::ToUpper(c));
-      }
-    }
-
-    return new_impl;
-  }
-
-upconvert:
-  scoped_refptr<StringImpl> upconverted = UpconvertedString();
-  const UChar* source16 = upconverted->Characters16();
-
-  UChar* data16;
-  scoped_refptr<StringImpl> new_impl = CreateUninitialized(length_, data16);
-
-  // Do a faster loop for the case where all the characters are ASCII.
-  UChar ored = 0;
-  for (int i = 0; i < length; ++i) {
-    UChar c = source16[i];
-    ored |= c;
-    data16[i] = ToASCIIUpper(c);
-  }
-  if (!(ored & ~0x7F))
-    return new_impl;
-
-  // Do a slower implementation for cases that include non-ASCII characters.
-  bool error;
-  int32_t real_length =
-      unicode::ToUpper(data16, length, source16, length_, &error);
-  if (!error && real_length == length)
-    return new_impl;
-  new_impl = CreateUninitialized(real_length, data16);
-  unicode::ToUpper(data16, real_length, source16, length_, &error);
-  if (error)
-    return this;
-  return new_impl;
+  return ConvertASCIICase(*this, LowerConverter(), StringImplAllocator());
 }
 
 scoped_refptr<StringImpl> StringImpl::UpperASCII() {
-  if (Is8Bit()) {
-    LChar* data8;
-    scoped_refptr<StringImpl> new_impl = CreateUninitialized(length_, data8);
-
-    for (wtf_size_t i = 0; i < length_; ++i) {
-      LChar c = Characters8()[i];
-      data8[i] = IsASCIILower(c) ? ToASCIIUpper(c) : c;
-    }
-    return new_impl;
-  }
-
-  UChar* data16;
-  scoped_refptr<StringImpl> new_impl = CreateUninitialized(length_, data16);
-
-  for (wtf_size_t i = 0; i < length_; ++i) {
-    UChar c = Characters16()[i];
-    data16[i] = IsASCIILower(c) ? ToASCIIUpper(c) : c;
-  }
-  return new_impl;
+  return ConvertASCIICase(*this, UpperConverter(), StringImplAllocator());
 }
 
 scoped_refptr<StringImpl> StringImpl::Fill(UChar character) {
@@ -864,12 +670,19 @@ wtf_size_t StringImpl::ToUInt(NumberParsingOptions options, bool* ok) const {
 }
 
 wtf_size_t StringImpl::HexToUIntStrict(bool* ok) {
+  constexpr auto kStrict = NumberParsingOptions::Strict();
   if (Is8Bit()) {
-    return HexCharactersToUInt(Characters8(), length_,
-                               NumberParsingOptions::kStrict, ok);
+    return HexCharactersToUInt(Characters8(), length_, kStrict, ok);
   }
-  return HexCharactersToUInt(Characters16(), length_,
-                             NumberParsingOptions::kStrict, ok);
+  return HexCharactersToUInt(Characters16(), length_, kStrict, ok);
+}
+
+uint64_t StringImpl::HexToUInt64Strict(bool* ok) {
+  constexpr auto kStrict = NumberParsingOptions::Strict();
+  if (Is8Bit()) {
+    return HexCharactersToUInt64(Characters8(), length_, kStrict, ok);
+  }
+  return HexCharactersToUInt64(Characters16(), length_, kStrict, ok);
 }
 
 int64_t StringImpl::ToInt64(NumberParsingOptions options, bool* ok) const {
@@ -967,6 +780,26 @@ wtf_size_t StringImpl::Find(CharacterMatchFunctionPtr match_function,
   if (Is8Bit())
     return WTF::Find(Characters8(), length_, match_function, start);
   return WTF::Find(Characters16(), length_, match_function, start);
+}
+
+wtf_size_t StringImpl::Find(base::RepeatingCallback<bool(UChar)> match_callback,
+                            wtf_size_t index) const {
+  if (Is8Bit()) {
+    const LChar* characters8 = Characters8();
+    while (index < length_) {
+      if (match_callback.Run(characters8[index]))
+        return index;
+      ++index;
+    }
+    return kNotFound;
+  }
+  const UChar* characters16 = Characters16();
+  while (index < length_) {
+    if (match_callback.Run(characters16[index]))
+      return index;
+    ++index;
+  }
+  return kNotFound;
 }
 
 template <typename SearchCharacterType, typename MatchCharacterType>
@@ -1868,15 +1701,14 @@ int CodeUnitCompareIgnoringASCIICase(wtf_size_t l1,
   return (l1 > l2) ? 1 : -1;
 }
 
+template <typename CharacterType>
 int CodeUnitCompareIgnoringASCIICase(const StringImpl* string1,
-                                     const LChar* string2) {
-  wtf_size_t length1 = string1 ? string1->length() : 0;
-  wtf_size_t length2 = SafeCast<wtf_size_t>(
-      string2 ? strlen(reinterpret_cast<const char*>(string2)) : 0);
-
+                                     const CharacterType* string2,
+                                     wtf_size_t length2) {
   if (!string1)
     return length2 > 0 ? -1 : 0;
 
+  wtf_size_t length1 = string1->length();
   if (!string2)
     return length1 > 0 ? 1 : 0;
 
@@ -1886,6 +1718,23 @@ int CodeUnitCompareIgnoringASCIICase(const StringImpl* string1,
   }
   return CodeUnitCompareIgnoringASCIICase(length1, length2,
                                           string1->Characters16(), string2);
+}
+
+int CodeUnitCompareIgnoringASCIICase(const StringImpl* string1,
+                                     const LChar* string2) {
+  return CodeUnitCompareIgnoringASCIICase(
+      string1, string2,
+      string2 ? strlen(reinterpret_cast<const char*>(string2)) : 0);
+}
+
+int CodeUnitCompareIgnoringASCIICase(const StringImpl* string1,
+                                     const StringImpl* string2) {
+  if (!string2)
+    return string1 && string1->length() > 0 ? 1 : 0;
+  return VisitCharacters(
+      *string2, [string1](const auto* chars, wtf_size_t length) {
+        return CodeUnitCompareIgnoringASCIICase(string1, chars, length);
+      });
 }
 
 }  // namespace WTF

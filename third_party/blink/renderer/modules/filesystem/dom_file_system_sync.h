@@ -32,7 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_FILESYSTEM_DOM_FILE_SYSTEM_SYNC_H_
 
 #include "third_party/blink/renderer/modules/filesystem/dom_file_system_base.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -60,7 +60,7 @@ class DOMFileSystemSync final : public DOMFileSystemBase {
   File* CreateFile(const FileEntrySync*, ExceptionState&);
   FileWriterSync* CreateWriter(const FileEntrySync*, ExceptionState&);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   Member<DirectoryEntrySync> root_entry_;

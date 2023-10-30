@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_TRAVERSAL_ROOT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_STYLE_TRAVERSAL_ROOT_H_
 
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/container_node.h"
 
@@ -36,9 +37,10 @@ class CORE_EXPORT StyleTraversalRoot {
   // marked as having dirty children.
   void Update(ContainerNode* common_ancestor, Node* dirty_node);
 
-  // Clear the root if the removal caused the current root_node_ to be
-  // disconnected.
-  void ChildrenRemoved(ContainerNode& parent);
+  // Update the root node if the current has been removed from the tree.
+  // The 'tree' here may refer to the flat tree if marking ancestors happen in
+  // the flat for the given subclass.
+  virtual void SubtreeModified(ContainerNode& parent) = 0;
 
   Node* GetRootNode() const { return root_node_; }
   void Clear() {
@@ -46,7 +48,7 @@ class CORE_EXPORT StyleTraversalRoot {
     root_type_ = RootType::kSingleRoot;
   }
 
-  void Trace(blink::Visitor* visitor) { visitor->Trace(root_node_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(root_node_); }
 
  protected:
   virtual ~StyleTraversalRoot() = default;
@@ -56,15 +58,12 @@ class CORE_EXPORT StyleTraversalRoot {
   // is a root.
   virtual ContainerNode* Parent(const Node&) const = 0;
 
-  // Return true if the given node has dirty descendants.
-  virtual bool IsChildDirty(const ContainerNode&) const = 0;
+  // Return true if the given node is marked dirty or child-dirty.
+  virtual bool IsChildDirty(const Node&) const = 0;
 #endif  // DCHECK_IS_ON()
 
   // Return true if the given node is dirty.
   virtual bool IsDirty(const Node&) const = 0;
-
-  // Clear the child-dirty flag on the ancestors of the given node.
-  virtual void ClearChildDirtyForAncestors(ContainerNode& parent) const = 0;
 
   bool IsSingleRoot() const { return root_type_ == RootType::kSingleRoot; }
 
@@ -72,8 +71,16 @@ class CORE_EXPORT StyleTraversalRoot {
   friend class StyleTraversalRootTestImpl;
 
 #if DCHECK_IS_ON()
-  bool IsConnectedToDocument(Node&) const;
-#endif  // DCHECK_IS_ON()
+  bool IsModifyingFlatTree() const;
+#endif
+
+  void AssertRootNodeInvariants() {
+#if DCHECK_IS_ON()
+    DCHECK(!root_node_ || root_node_->IsDocumentNode() ||
+           IsDirty(*root_node_) || IsChildDirty(*root_node_) ||
+           IsModifyingFlatTree());
+#endif
+  }
 
   // The current root for dirty nodes.
   Member<Node> root_node_;

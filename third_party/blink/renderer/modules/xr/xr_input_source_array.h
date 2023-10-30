@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/modules/xr/xr_input_source.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 
 namespace blink {
 
@@ -23,7 +24,7 @@ class XRInputSourceArray : public ScriptWrappable {
   void RemoveWithSourceId(uint32_t source_id);
   void SetWithSourceId(uint32_t source_id, XRInputSource* input_source);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   HeapHashMap<uint32_t, Member<XRInputSource>> input_sources_;

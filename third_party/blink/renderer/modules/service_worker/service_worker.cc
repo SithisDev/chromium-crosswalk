@@ -31,15 +31,20 @@
 #include "third_party/blink/renderer/modules/service_worker/service_worker.h"
 
 #include <memory>
+#include <utility>
+
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_state.mojom-blink.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/post_message_helper.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_post_message_options.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/messaging/blink_transferable_message.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
-#include "third_party/blink/renderer/core/messaging/post_message_options.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_container.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_global_scope.h"
@@ -54,7 +59,7 @@ const AtomicString& ServiceWorker::InterfaceName() const {
 
 void ServiceWorker::postMessage(ScriptState* script_state,
                                 const ScriptValue& message,
-                                Vector<ScriptValue>& transfer,
+                                HeapVector<ScriptValue>& transfer,
                                 ExceptionState& exception_state) {
   PostMessageOptions* options = PostMessageOptions::Create();
   if (!transfer.IsEmpty())
@@ -85,13 +90,37 @@ void ServiceWorker::postMessage(ScriptState* script_state,
 
   BlinkTransferableMessage msg;
   msg.message = serialized_message;
+  msg.sender_origin =
+      GetExecutionContext()->GetSecurityOrigin()->IsolatedCopy();
   msg.ports = MessagePort::DisentanglePorts(
       ExecutionContext::From(script_state), transferables.message_ports,
       exception_state);
   if (exception_state.HadException())
     return;
 
-  host_->PostMessageToServiceWorker(std::move(msg));
+  if (msg.message->IsLockedToAgentCluster()) {
+    msg.locked_agent_cluster_id = GetExecutionContext()->GetAgentClusterID();
+  } else {
+    msg.locked_agent_cluster_id = absl::nullopt;
+  }
+
+  // Defer postMessage() from a prerendered page until page activation.
+  // https://wicg.github.io/nav-speculation/prerendering.html#patch-service-workers
+  if (GetExecutionContext()->IsWindow()) {
+    Document* document = To<LocalDOMWindow>(GetExecutionContext())->document();
+    if (document->IsPrerendering()) {
+      document->AddPostPrerenderingActivationStep(
+          WTF::Bind(&ServiceWorker::PostMessageInternal,
+                    WrapWeakPersistent(this), std::move(msg)));
+      return;
+    }
+  }
+
+  PostMessageInternal(std::move(msg));
+}
+
+void ServiceWorker::PostMessageInternal(BlinkTransferableMessage message) {
+  host_->PostMessageToServiceWorker(std::move(message));
 }
 
 ScriptPromise ServiceWorker::InternalsTerminate(ScriptState* script_state) {
@@ -105,7 +134,7 @@ ScriptPromise ServiceWorker::InternalsTerminate(ScriptState* script_state) {
 
 void ServiceWorker::StateChanged(mojom::blink::ServiceWorkerState new_state) {
   state_ = new_state;
-  this->DispatchEvent(*Event::Create(event_type_names::kStatechange));
+  DispatchEvent(*Event::Create(event_type_names::kStatechange));
 }
 
 String ServiceWorker::scriptURL() const {
@@ -114,10 +143,8 @@ String ServiceWorker::scriptURL() const {
 
 String ServiceWorker::state() const {
   switch (state_) {
-    case mojom::blink::ServiceWorkerState::kUnknown:
-      // The web platform should never see this internal state
-      NOTREACHED();
-      return "unknown";
+    case mojom::blink::ServiceWorkerState::kParsed:
+      return "parsed";
     case mojom::blink::ServiceWorkerState::kInstalling:
       return "installing";
     case mojom::blink::ServiceWorkerState::kInstalled:
@@ -138,10 +165,10 @@ ServiceWorker* ServiceWorker::From(
     mojom::blink::ServiceWorkerObjectInfoPtr info) {
   if (!info)
     return nullptr;
-  return From(context, WebServiceWorkerObjectInfo(
-                           info->version_id, info->state, info->url,
-                           info->host_ptr_info.PassHandle(),
-                           info->request.PassHandle()));
+  return From(context, WebServiceWorkerObjectInfo(info->version_id, info->state,
+                                                  info->url,
+                                                  std::move(info->host_remote),
+                                                  std::move(info->receiver)));
 }
 
 ServiceWorker* ServiceWorker::From(ExecutionContext* context,
@@ -155,7 +182,7 @@ ServiceWorker* ServiceWorker::From(ExecutionContext* context,
     return scope->GetOrCreateServiceWorker(std::move(info));
   }
 
-  return ServiceWorkerContainer::From(To<Document>(context))
+  return ServiceWorkerContainer::From(*To<LocalDOMWindow>(context))
       ->GetOrCreateServiceWorker(std::move(info));
 }
 
@@ -168,37 +195,32 @@ bool ServiceWorker::HasPendingActivity() const {
 void ServiceWorker::ContextLifecycleStateChanged(
     mojom::FrameLifecycleState state) {}
 
-void ServiceWorker::ContextDestroyed(ExecutionContext*) {
+void ServiceWorker::ContextDestroyed() {
   was_stopped_ = true;
 }
 
 ServiceWorker::ServiceWorker(ExecutionContext* execution_context,
                              WebServiceWorkerObjectInfo info)
     : AbstractWorker(execution_context),
-      was_stopped_(false),
       url_(info.url),
       state_(info.state),
-      binding_(this) {
+      host_(execution_context),
+      receiver_(this, execution_context) {
   DCHECK_NE(mojom::blink::kInvalidServiceWorkerVersionId, info.version_id);
   host_.Bind(
-      mojom::blink::ServiceWorkerObjectHostAssociatedPtrInfo(
-          std::move(info.host_ptr_info),
-          mojom::blink::ServiceWorkerObjectHost::Version_),
+      std::move(info.host_remote),
       execution_context->GetTaskRunner(blink::TaskType::kInternalDefault));
-  binding_.Bind(
-      mojom::blink::ServiceWorkerObjectAssociatedRequest(
-          std::move(info.request)),
+  receiver_.Bind(
+      mojo::PendingAssociatedReceiver<mojom::blink::ServiceWorkerObject>(
+          std::move(info.receiver)),
       execution_context->GetTaskRunner(blink::TaskType::kInternalDefault));
 }
 
 ServiceWorker::~ServiceWorker() = default;
 
-void ServiceWorker::Dispose() {
-  host_.reset();
-  binding_.Close();
-}
-
-void ServiceWorker::Trace(blink::Visitor* visitor) {
+void ServiceWorker::Trace(Visitor* visitor) const {
+  visitor->Trace(host_);
+  visitor->Trace(receiver_);
   AbstractWorker::Trace(visitor);
 }
 

@@ -29,12 +29,13 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBDATABASE_DATABASE_THREAD_H_
 
 #include <memory>
+#include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "base/thread_annotations.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
-#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
+#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
 namespace blink {
 
@@ -43,11 +44,11 @@ class DatabaseTask;
 class SQLTransactionClient;
 class SQLTransactionCoordinator;
 
-class DatabaseThread : public GarbageCollectedFinalized<DatabaseThread> {
+class DatabaseThread final : public GarbageCollected<DatabaseThread> {
  public:
   DatabaseThread();
   ~DatabaseThread();
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
   // Callable only from the main thread.
   void Start();
@@ -74,7 +75,7 @@ class DatabaseThread : public GarbageCollectedFinalized<DatabaseThread> {
   void CleanupDatabaseThread();
   void CleanupDatabaseThreadCompleted();
 
-  std::unique_ptr<blink::Thread> thread_;
+  std::unique_ptr<blink::NonMainThread> thread_;
 
   // This set keeps track of the open databases that have been used on this
   // thread.  This must be updated in the database thread though it is
@@ -85,8 +86,8 @@ class DatabaseThread : public GarbageCollectedFinalized<DatabaseThread> {
   CrossThreadPersistent<SQLTransactionCoordinator> transaction_coordinator_;
   base::WaitableEvent* cleanup_sync_;
 
-  Mutex termination_requested_mutex_;
-  bool termination_requested_;
+  base::Lock termination_requested_lock_;
+  bool termination_requested_ GUARDED_BY(termination_requested_lock_);
 };
 
 }  // namespace blink

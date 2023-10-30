@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+typedef (DOMString or CSSKeywordValue) CSSKeywordish;
+
 // CSSKeywordValue represents CSS Values that are specified as keywords, for
 // example "initial".
 // https://drafts.css-houdini.org/css-typed-om/#keywordvalue-objects
 [
-    Constructor(CSSOMString keyword),
-    Exposed=(Window,LayoutWorklet,PaintWorklet),
-    RaisesException=Constructor
+    Exposed=(Window,LayoutWorklet,PaintWorklet)
 ] interface CSSKeywordValue : CSSStyleValue {
+    [RaisesException] constructor(CSSOMString keyword);
     [RaisesException=Setter] attribute CSSOMString value;
 };

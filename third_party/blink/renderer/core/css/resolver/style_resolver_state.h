@@ -23,20 +23,20 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_STYLE_RESOLVER_STATE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_RESOLVER_STYLE_RESOLVER_STATE_H_
 
-#include <memory>
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/animation/css/css_animation_update.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css/css_pending_substitution_value.h"
+#include "third_party/blink/renderer/core/css/css_property_name.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
 #include "third_party/blink/renderer/core/css/resolver/css_to_style_map.h"
 #include "third_party/blink/renderer/core/css/resolver/element_resolve_context.h"
 #include "third_party/blink/renderer/core/css/resolver/element_style_resources.h"
 #include "third_party/blink/renderer/core/css/resolver/font_builder.h"
+#include "third_party/blink/renderer/core/css/style_recalc_context.h"
+#include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/style/cached_ua_style.h"
 
 namespace blink {
 
@@ -50,18 +50,21 @@ class PseudoElement;
 class CORE_EXPORT StyleResolverState {
   STACK_ALLOCATED();
 
+  enum class ElementType { kElement, kPseudoElement };
+
  public:
   StyleResolverState(Document&,
-                     const ElementResolveContext&,
-                     PseudoElement* pseudo_element,
-                     const ComputedStyle* parent_style,
-                     const ComputedStyle* layout_parent_style);
-  StyleResolverState(Document&,
                      Element&,
-                     PseudoElement* pseudo_element,
-                     const ComputedStyle* parent_style = nullptr,
-                     const ComputedStyle* layout_parent_style = nullptr);
+                     const StyleRecalcContext* = nullptr,
+                     const StyleRequest& = StyleRequest());
+  StyleResolverState(const StyleResolverState&) = delete;
+  StyleResolverState& operator=(const StyleResolverState&) = delete;
   ~StyleResolverState();
+
+  bool IsForPseudoElement() const {
+    return element_type_ == ElementType::kPseudoElement;
+  }
+  bool IsInheritedForUnset(const CSSProperty& property) const;
 
   // In FontFaceSet and CanvasRenderingContext2D, we don't have an element to
   // grab the document from.  This is why we have to store the document
@@ -69,18 +72,16 @@ class CORE_EXPORT StyleResolverState {
   Document& GetDocument() const { return *document_; }
   // These are all just pass-through methods to ElementResolveContext.
   Element& GetElement() const { return element_context_.GetElement(); }
-  TreeScope& GetTreeScope() const;
   const ContainerNode* ParentNode() const {
     return element_context_.ParentNode();
   }
   const ComputedStyle* RootElementStyle() const {
-    return element_context_.RootElementStyle();
+    if (const auto* root_element_style = element_context_.RootElementStyle())
+      return root_element_style;
+    return Style();
   }
   EInsideLink ElementLinkState() const {
     return element_context_.ElementLinkState();
-  }
-  bool DistributedToV0InsertionPoint() const {
-    return element_context_.DistributedToV0InsertionPoint();
   }
 
   const ElementResolveContext& ElementContext() const {
@@ -91,6 +92,10 @@ class CORE_EXPORT StyleResolverState {
   const ComputedStyle* Style() const { return style_.get(); }
   ComputedStyle* Style() { return style_.get(); }
   ComputedStyle& StyleRef() {
+    DCHECK(style_);
+    return *style_;
+  }
+  const ComputedStyle& StyleRef() const {
     DCHECK(style_);
     return *style_;
   }
@@ -115,19 +120,11 @@ class CORE_EXPORT StyleResolverState {
     return animation_update_;
   }
 
-  bool IsAnimationInterpolationMapReady() const {
-    return is_animation_interpolation_map_ready_;
-  }
-  void SetIsAnimationInterpolationMapReady() {
-    is_animation_interpolation_map_ready_ = true;
-  }
+  Element* GetAnimatingElement() const;
 
-  bool IsAnimatingCustomProperties() const {
-    return is_animating_custom_properties_;
-  }
-  void SetIsAnimatingCustomProperties(bool value) {
-    is_animating_custom_properties_ = value;
-  }
+  // Returns the pseudo element if the style resolution is targeting a pseudo
+  // element, null otherwise.
+  PseudoElement* GetPseudoElement() const;
 
   void SetParentStyle(scoped_refptr<const ComputedStyle>);
   const ComputedStyle* ParentStyle() const { return parent_style_.get(); }
@@ -135,12 +132,6 @@ class CORE_EXPORT StyleResolverState {
   void SetLayoutParentStyle(scoped_refptr<const ComputedStyle>);
   const ComputedStyle* LayoutParentStyle() const {
     return layout_parent_style_.get();
-  }
-
-  void CacheUserAgentBorderAndBackground();
-
-  const CachedUAStyle* GetCachedUAStyle() const {
-    return cached_ua_style_.get();
   }
 
   ElementStyleResources& GetElementStyleResources() {
@@ -170,19 +161,56 @@ class CORE_EXPORT StyleResolverState {
   void SetWritingMode(WritingMode);
   void SetTextOrientation(ETextOrientation);
 
-  void SetHasDirAutoAttribute(bool value) { has_dir_auto_attribute_ = value; }
-  bool HasDirAutoAttribute() const { return has_dir_auto_attribute_; }
+  CSSParserMode GetParserMode() const;
 
-  HeapHashMap<CSSPropertyID, Member<const CSSValue>>&
-  ParsedPropertiesForPendingSubstitutionCache(
-      const cssvalue::CSSPendingSubstitutionValue&) const;
+  // If the input CSSValue is a CSSLightDarkValuePair, return the light or dark
+  // CSSValue based on the UsedColorScheme. For all other values, just return a
+  // reference to the passed value.
+  const CSSValue& ResolveLightDarkPair(const CSSValue&);
+
+  const ComputedStyle* OriginatingElementStyle() const {
+    return originating_element_style_.get();
+  }
+  bool IsForHighlight() const { return is_for_highlight_; }
+  bool UsesHighlightPseudoInheritance() const {
+    return uses_highlight_pseudo_inheritance_;
+  }
+
+  bool CanCacheBaseStyle() const { return can_cache_base_style_; }
+
+  bool HadNoMatchedProperties() const { return had_no_matched_properties_; }
+  void SetHadNoMatchedProperties() { had_no_matched_properties_ = true; }
+
+  // True if the cascade observed any  "animation" or "transition" properties,
+  // or when such properties were found within non-matching container queries.
+  //
+  // The flag is supposed to represent whether or not animations can be
+  // affected by at least one of the style variations produced by evaluating
+  // @container rules differently.
+  bool CanAffectAnimations() const { return can_affect_animations_; }
+  void SetCanAffectAnimations() { can_affect_animations_ = true; }
+
+  bool AffectsCompositorSnapshots() const {
+    return affects_compositor_snapshots_;
+  }
+  void SetAffectsCompositorSnapshots() { affects_compositor_snapshots_ = true; }
+
+  bool RejectedLegacyOverlapping() const {
+    return rejected_legacy_overlapping_;
+  }
+  void SetRejectedLegacyOverlapping() { rejected_legacy_overlapping_ = true; }
+
+  // Update the Font object on the ComputedStyle and the CSSLengthResolver to
+  // reflect applied font properties.
+  void UpdateFont();
 
  private:
+  void UpdateLengthConversionData();
   CSSToLengthConversionData UnzoomedLengthConversionData(
       const ComputedStyle* font_style) const;
 
   ElementResolveContext element_context_;
-  Member<Document> document_;
+  Document* document_;
 
   // style_ is the primary output for each element's style resolve.
   scoped_refptr<ComputedStyle> style_;
@@ -198,22 +226,40 @@ class CORE_EXPORT StyleResolverState {
   scoped_refptr<const ComputedStyle> layout_parent_style_;
 
   CSSAnimationUpdate animation_update_;
-  bool is_animation_interpolation_map_ready_;
-  bool is_animating_custom_properties_;
-
-  bool has_dir_auto_attribute_;
+  StyleRequest::RequestType pseudo_request_type_;
 
   FontBuilder font_builder_;
 
-  std::unique_ptr<CachedUAStyle> cached_ua_style_;
-
+  PseudoElement* pseudo_element_;
   ElementStyleResources element_style_resources_;
+  ElementType element_type_;
+  Element* container_unit_context_;
 
-  mutable HeapHashMap<
-      Member<const cssvalue::CSSPendingSubstitutionValue>,
-      Member<HeapHashMap<CSSPropertyID, Member<const CSSValue>>>>
-      parsed_properties_for_pending_substitution_cache_;
-  DISALLOW_COPY_AND_ASSIGN(StyleResolverState);
+  scoped_refptr<const ComputedStyle> originating_element_style_;
+  // True if we are resolving styles for a highlight pseudo-element.
+  const bool is_for_highlight_;
+  // True if this is a highlight style request, and highlight inheritance
+  // should be used for this highlight pseudo.
+  const bool uses_highlight_pseudo_inheritance_;
+
+  // True if the base style can be cached to optimize style recalculations for
+  // animation updates or transition retargeting.
+  bool can_cache_base_style_ = false;
+
+  // Set to true if a given style resolve produced an empty MatchResult.
+  // This is used to return a nullptr style for pseudo-element style resolves.
+  bool had_no_matched_properties_ = false;
+
+  // True whenever a matching rule in a non-matching container query contains
+  // any properties that can affect animations or transitions.
+  bool can_affect_animations_ = false;
+
+  // True if snapshots of composited keyframes require re-validation.
+  bool affects_compositor_snapshots_ = false;
+
+  // True if the cascade rejected any properties with the kLegacyOverlapping
+  // flag.
+  bool rejected_legacy_overlapping_ = false;
 };
 
 }  // namespace blink

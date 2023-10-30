@@ -31,7 +31,7 @@
 #include "third_party/blink/renderer/core/svg/svg_transform_tear_off.h"
 
 #include "third_party/blink/renderer/core/svg/svg_matrix_tear_off.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -48,7 +48,7 @@ SVGTransformTearOff::SVGTransformTearOff(
 
 SVGTransformTearOff::~SVGTransformTearOff() = default;
 
-void SVGTransformTearOff::Trace(blink::Visitor* visitor) {
+void SVGTransformTearOff::Trace(Visitor* visitor) const {
   visitor->Trace(matrix_tearoff_);
   SVGPropertyTearOff<SVGTransform>::Trace(visitor);
 }

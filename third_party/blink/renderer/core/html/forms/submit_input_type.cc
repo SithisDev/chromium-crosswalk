@@ -31,7 +31,10 @@
 
 #include "third_party/blink/renderer/core/html/forms/submit_input_type.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
@@ -42,7 +45,7 @@
 namespace blink {
 
 SubmitInputType::SubmitInputType(HTMLInputElement& element)
-    : BaseButtonInputType(element) {
+    : BaseButtonInputType(Type::kSubmit, element) {
   UseCounter::Count(element.GetDocument(), WebFeature::kInputTypeSubmit);
 }
 
@@ -74,7 +77,7 @@ bool SubmitInputType::CanBeSuccessfulSubmitButton() {
 }
 
 String SubmitInputType::DefaultLabel() const {
-  return GetLocale().QueryString(WebLocalizedString::kSubmitButtonDefaultLabel);
+  return GetLocale().QueryString(IDS_FORM_SUBMIT_LABEL);
 }
 
 bool SubmitInputType::IsTextButton() const {

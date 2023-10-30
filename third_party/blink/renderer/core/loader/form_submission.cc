@@ -30,10 +30,17 @@
 
 #include "third_party/blink/renderer/core/loader/form_submission.h"
 
-#include "third_party/blink/public/platform/web_insecure_request_policy.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
+#include "third_party/blink/public/common/security_context/insecure_request_policy.h"
+#include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/policy_container.h"
+#include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/form_data.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
@@ -41,18 +48,17 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/network/form_data_encoder.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
-
-using namespace html_names;
 
 static int64_t GenerateFormDataIdentifier() {
   // Initialize to the current time to reduce the likelihood of generating
@@ -67,7 +73,7 @@ static void AppendMailtoPostFormDataToURL(KURL& url,
                                           const String& encoding_type) {
   String body = data.FlattenToString();
 
-  if (DeprecatedEqualIgnoringCase(encoding_type, "text/plain")) {
+  if (EqualIgnoringASCIICase(encoding_type, "text/plain")) {
     // Convention seems to be to decode, and s/&/\r\n/. Also, spaces are encoded
     // as %20.
     body = DecodeURLEscapeSequences(
@@ -95,9 +101,9 @@ void FormSubmission::Attributes::ParseAction(const String& action) {
 }
 
 AtomicString FormSubmission::Attributes::ParseEncodingType(const String& type) {
-  if (DeprecatedEqualIgnoringCase(type, "multipart/form-data"))
+  if (EqualIgnoringASCIICase(type, "multipart/form-data"))
     return AtomicString("multipart/form-data");
-  if (DeprecatedEqualIgnoringCase(type, "text/plain"))
+  if (EqualIgnoringASCIICase(type, "text/plain"))
     return AtomicString("text/plain");
   return AtomicString("application/x-www-form-urlencoded");
 }
@@ -109,9 +115,9 @@ void FormSubmission::Attributes::UpdateEncodingType(const String& type) {
 
 FormSubmission::SubmitMethod FormSubmission::Attributes::ParseMethodType(
     const String& type) {
-  if (DeprecatedEqualIgnoringCase(type, "post"))
+  if (EqualIgnoringASCIICase(type, "post"))
     return FormSubmission::kPostMethod;
-  if (DeprecatedEqualIgnoringCase(type, "dialog"))
+  if (EqualIgnoringASCIICase(type, "dialog"))
     return FormSubmission::kDialogMethod;
   return FormSubmission::kGetMethod;
 }
@@ -143,39 +149,49 @@ void FormSubmission::Attributes::CopyFrom(const Attributes& other) {
   accept_charset_ = other.accept_charset_;
 }
 
-inline FormSubmission::FormSubmission(SubmitMethod method,
-                                      const KURL& action,
-                                      const AtomicString& target,
-                                      const AtomicString& content_type,
-                                      HTMLFormElement* form,
-                                      scoped_refptr<EncodedFormData> data,
-                                      const String& boundary,
-                                      Event* event)
+inline FormSubmission::FormSubmission(
+    SubmitMethod method,
+    const KURL& action,
+    const AtomicString& target,
+    const AtomicString& content_type,
+    HTMLFormElement* form,
+    scoped_refptr<EncodedFormData> data,
+    const Event* event,
+    NavigationPolicy navigation_policy,
+    mojom::blink::TriggeringEventInfo triggering_event_info,
+    ClientNavigationReason reason,
+    std::unique_ptr<ResourceRequest> resource_request,
+    Frame* target_frame,
+    WebFrameLoadType load_type,
+    LocalDOMWindow* origin_window,
+    const LocalFrameToken& initiator_frame_token,
+    std::unique_ptr<SourceLocation> source_location,
+    mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>
+        initiator_policy_container_keep_alive_handle)
     : method_(method),
       action_(action),
       target_(target),
       content_type_(content_type),
       form_(form),
       form_data_(std::move(data)),
-      boundary_(boundary) {
-  if (event) {
-    triggering_event_info_ = event->isTrusted()
-                                 ? WebTriggeringEventInfo::kFromTrustedEvent
-                                 : WebTriggeringEventInfo::kFromUntrustedEvent;
-    if (event->UnderlyingEvent())
-      event = event->UnderlyingEvent();
-  } else {
-    triggering_event_info_ = WebTriggeringEventInfo::kNotFromEvent;
-  }
-  navigation_policy_ = NavigationPolicyFromEvent(event);
-}
+      navigation_policy_(navigation_policy),
+      triggering_event_info_(triggering_event_info),
+      reason_(reason),
+      resource_request_(std::move(resource_request)),
+      target_frame_(target_frame),
+      load_type_(load_type),
+      origin_window_(origin_window),
+      initiator_frame_token_(initiator_frame_token),
+      source_location_(std::move(source_location)),
+      initiator_policy_container_keep_alive_handle_(
+          std::move(initiator_policy_container_keep_alive_handle)) {}
 
 inline FormSubmission::FormSubmission(const String& result)
     : method_(kDialogMethod), result_(result) {}
 
 FormSubmission* FormSubmission::Create(HTMLFormElement* form,
                                        const Attributes& attributes,
-                                       Event* event,
+                                       const Event* event,
                                        HTMLFormControlElement* submit_button) {
   DCHECK(form);
 
@@ -183,16 +199,20 @@ FormSubmission* FormSubmission::Create(HTMLFormElement* form,
   copied_attributes.CopyFrom(attributes);
   if (submit_button) {
     AtomicString attribute_value;
-    if (!(attribute_value = submit_button->FastGetAttribute(kFormactionAttr))
+    if (!(attribute_value =
+              submit_button->FastGetAttribute(html_names::kFormactionAttr))
              .IsNull())
       copied_attributes.ParseAction(attribute_value);
-    if (!(attribute_value = submit_button->FastGetAttribute(kFormenctypeAttr))
+    if (!(attribute_value =
+              submit_button->FastGetAttribute(html_names::kFormenctypeAttr))
              .IsNull())
       copied_attributes.UpdateEncodingType(attribute_value);
-    if (!(attribute_value = submit_button->FastGetAttribute(kFormmethodAttr))
+    if (!(attribute_value =
+              submit_button->FastGetAttribute(html_names::kFormmethodAttr))
              .IsNull())
       copied_attributes.UpdateMethodType(attribute_value);
-    if (!(attribute_value = submit_button->FastGetAttribute(kFormtargetAttr))
+    if (!(attribute_value =
+              submit_button->FastGetAttribute(html_names::kFormtargetAttr))
              .IsNull())
       copied_attributes.SetTarget(attribute_value);
   }
@@ -210,11 +230,13 @@ FormSubmission* FormSubmission::Create(HTMLFormElement* form,
                                              ? document.Url().GetString()
                                              : copied_attributes.Action());
 
-  if (document.GetInsecureRequestPolicy() & kUpgradeInsecureRequests &&
+  if ((document.domWindow()->GetSecurityContext().GetInsecureRequestPolicy() &
+       mojom::blink::InsecureRequestPolicy::kUpgradeInsecureRequests) !=
+          mojom::blink::InsecureRequestPolicy::kLeaveInsecureRequestsAlone &&
       action_url.ProtocolIs("http") &&
-      !SecurityOrigin::Create(action_url)->IsPotentiallyTrustworthy()) {
+      !network::IsUrlPotentiallyTrustworthy(GURL(action_url))) {
     UseCounter::Count(document,
-                      WebFeature::kUpgradeInsecureRequestsUpgradedRequest);
+                      WebFeature::kUpgradeInsecureRequestsUpgradedRequestForm);
     action_url.SetProtocol("https");
     if (action_url.Port() == 80)
       action_url.SetPort(443);
@@ -263,59 +285,118 @@ FormSubmission* FormSubmission::Create(HTMLFormElement* form,
   AtomicString target_or_base_target = copied_attributes.Target().IsEmpty()
                                            ? document.BaseTarget()
                                            : copied_attributes.Target();
-  return MakeGarbageCollected<FormSubmission>(
-      copied_attributes.Method(), action_url, target_or_base_target,
-      encoding_type, form, std::move(form_data), boundary, event);
-}
 
-void FormSubmission::Trace(blink::Visitor* visitor) {
-  visitor->Trace(form_);
-}
-
-KURL FormSubmission::RequestURL() const {
-  if (method_ == FormSubmission::kPostMethod ||
-      action_.ProtocolIsJavaScript()) {
-    return action_;
+  if (copied_attributes.Method() != FormSubmission::kPostMethod &&
+      !action_url.ProtocolIsJavaScript()) {
+    action_url.SetQuery(form_data->FlattenToString());
   }
 
-  KURL request_url(action_);
-  request_url.SetQuery(form_data_->FlattenToString());
-  return request_url;
+  std::unique_ptr<ResourceRequest> resource_request =
+      std::make_unique<ResourceRequest>(action_url);
+  ClientNavigationReason reason = ClientNavigationReason::kFormSubmissionGet;
+  if (copied_attributes.Method() == FormSubmission::kPostMethod) {
+    reason = ClientNavigationReason::kFormSubmissionPost;
+    resource_request->SetHttpMethod(http_names::kPOST);
+    resource_request->SetHttpBody(form_data);
+
+    // construct some user headers if necessary
+    if (boundary.IsEmpty()) {
+      resource_request->SetHTTPContentType(encoding_type);
+    } else {
+      resource_request->SetHTTPContentType(encoding_type +
+                                           "; boundary=" + boundary);
+    }
+  }
+  resource_request->SetHasUserGesture(
+      LocalFrame::HasTransientUserActivation(form->GetDocument().GetFrame()));
+  resource_request->SetFormSubmission(true);
+
+  mojom::blink::TriggeringEventInfo triggering_event_info;
+  if (event) {
+    triggering_event_info =
+        event->isTrusted()
+            ? mojom::blink::TriggeringEventInfo::kFromTrustedEvent
+            : mojom::blink::TriggeringEventInfo::kFromUntrustedEvent;
+    if (event->UnderlyingEvent())
+      event = event->UnderlyingEvent();
+  } else {
+    triggering_event_info = mojom::blink::TriggeringEventInfo::kNotFromEvent;
+  }
+
+  FrameLoadRequest frame_request(form->GetDocument().domWindow(),
+                                 *resource_request);
+  frame_request.SetNavigationPolicy(NavigationPolicyFromEvent(event));
+  frame_request.SetClientRedirectReason(reason);
+  frame_request.SetForm(form);
+  frame_request.SetTriggeringEventInfo(triggering_event_info);
+
+  if (RuntimeEnabledFeatures::FormRelAttributeEnabled() &&
+      form->HasRel(HTMLFormElement::kNoReferrer)) {
+    frame_request.SetNoReferrer();
+    frame_request.SetNoOpener();
+  }
+  if (RuntimeEnabledFeatures::FormRelAttributeEnabled() &&
+      (form->HasRel(HTMLFormElement::kNoOpener) ||
+       (EqualIgnoringASCIICase(target_or_base_target, "_blank") &&
+        !form->HasRel(HTMLFormElement::kOpener) &&
+        form->GetDocument()
+            .domWindow()
+            ->GetFrame()
+            ->GetSettings()
+            ->GetTargetBlankImpliesNoOpenerEnabledWillBeRemoved()))) {
+    frame_request.SetNoOpener();
+  }
+
+  Frame* target_frame =
+      form->GetDocument()
+          .GetFrame()
+          ->Tree()
+          .FindOrCreateFrameForNavigation(frame_request, target_or_base_target)
+          .frame;
+
+  WebFrameLoadType load_type = WebFrameLoadType::kStandard;
+  LocalFrame* target_local_frame = DynamicTo<LocalFrame>(target_frame);
+  if (target_local_frame &&
+      !target_local_frame->GetDocument()->LoadEventFinished() &&
+      !LocalFrame::HasTransientUserActivation(target_local_frame))
+    load_type = WebFrameLoadType::kReplaceCurrentItem;
+
+  return MakeGarbageCollected<FormSubmission>(
+      copied_attributes.Method(), action_url, target_or_base_target,
+      encoding_type, form, std::move(form_data), event,
+      frame_request.GetNavigationPolicy(), triggering_event_info, reason,
+      std::move(resource_request), target_frame, load_type,
+      form->GetDocument().domWindow(),
+      form->GetDocument().GetFrame()->GetLocalFrameToken(),
+      CaptureSourceLocation(form->GetDocument().domWindow()),
+      form->GetDocument()
+          .domWindow()
+          ->GetPolicyContainer()
+          ->IssueKeepAliveHandle());
+}
+
+void FormSubmission::Trace(Visitor* visitor) const {
+  visitor->Trace(form_);
+  visitor->Trace(target_frame_);
+  visitor->Trace(origin_window_);
 }
 
 void FormSubmission::Navigate() {
-  ResourceRequest resource_request(RequestURL());
-  ClientNavigationReason reason = ClientNavigationReason::kFormSubmissionGet;
-  if (method_ == FormSubmission::kPostMethod) {
-    reason = ClientNavigationReason::kFormSubmissionPost;
-    resource_request.SetHttpMethod(http_names::kPOST);
-    resource_request.SetHttpBody(form_data_);
-
-    // construct some user headers if necessary
-    if (boundary_.IsEmpty()) {
-      resource_request.SetHTTPContentType(content_type_);
-    } else {
-      resource_request.SetHTTPContentType(content_type_ +
-                                          "; boundary=" + boundary_);
-    }
-  }
-  resource_request.SetHasUserGesture(
-      LocalFrame::HasTransientUserActivation(form_->GetDocument().GetFrame()));
-
-  FrameLoadRequest frame_request(&form_->GetDocument(), resource_request);
+  FrameLoadRequest frame_request(origin_window_.Get(), *resource_request_);
   frame_request.SetNavigationPolicy(navigation_policy_);
-  frame_request.SetClientRedirectReason(reason);
+  frame_request.SetClientRedirectReason(reason_);
   frame_request.SetForm(form_);
   frame_request.SetTriggeringEventInfo(triggering_event_info_);
+  frame_request.SetInitiatorFrameToken(initiator_frame_token_);
+  frame_request.SetInitiatorPolicyContainerKeepAliveHandle(
+      std::move(initiator_policy_container_keep_alive_handle_));
+  frame_request.SetSourceLocation(std::move(source_location_));
 
-  Frame* target_frame =
-      form_->GetDocument()
-          .GetFrame()
-          ->Tree()
-          .FindOrCreateFrameForNavigation(frame_request, target_)
-          .frame;
-  if (target_frame)
-    target_frame->Navigate(frame_request, WebFrameLoadType::kStandard);
+  if (target_frame_ && !target_frame_->GetPage())
+    return;
+
+  if (target_frame_)
+    target_frame_->Navigate(frame_request, load_type_);
 }
 
 }  // namespace blink

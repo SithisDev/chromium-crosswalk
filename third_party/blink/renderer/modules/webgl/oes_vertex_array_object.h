@@ -27,6 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_OES_VERTEX_ARRAY_OBJECT_H_
 
 #include "third_party/blink/renderer/modules/webgl/webgl_extension.h"
+#include "third_party/khronos/GLES2/gl2.h"
 
 namespace blink {
 
@@ -37,7 +38,6 @@ class OESVertexArrayObject final : public WebGLExtension {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static OESVertexArrayObject* Create(WebGLRenderingContextBase*);
   static bool Supported(WebGLRenderingContextBase*);
   static const char* ExtensionName();
 

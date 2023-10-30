@@ -27,7 +27,9 @@
 
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
+#include "third_party/blink/renderer/core/layout/layout_ruby.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -76,6 +78,7 @@ Element& VTTElement::CloneWithoutAttributesAndChildren(
   auto* clone = MakeGarbageCollected<VTTElement>(
       static_cast<VTTNodeType>(web_vtt_node_type_), &factory);
   clone->SetLanguage(language_);
+  clone->SetTrack(track_);
   return *clone;
 }
 
@@ -85,32 +88,32 @@ HTMLElement* VTTElement::CreateEquivalentHTMLElement(Document& document) {
     case kVTTNodeTypeClass:
     case kVTTNodeTypeLanguage:
     case kVTTNodeTypeVoice:
-      html_element = document.CreateRawElement(html_names::kSpanTag,
-                                               CreateElementFlags::ByParser());
+      html_element =
+          document.CreateRawElement(html_names::kSpanTag, CreateElementFlags());
       html_element->setAttribute(html_names::kTitleAttr,
                                  getAttribute(VoiceAttributeName()));
       html_element->setAttribute(html_names::kLangAttr,
                                  getAttribute(LangAttributeName()));
       break;
     case kVTTNodeTypeItalic:
-      html_element = document.CreateRawElement(html_names::kITag,
-                                               CreateElementFlags::ByParser());
+      html_element =
+          document.CreateRawElement(html_names::kITag, CreateElementFlags());
       break;
     case kVTTNodeTypeBold:
-      html_element = document.CreateRawElement(html_names::kBTag,
-                                               CreateElementFlags::ByParser());
+      html_element =
+          document.CreateRawElement(html_names::kBTag, CreateElementFlags());
       break;
     case kVTTNodeTypeUnderline:
-      html_element = document.CreateRawElement(html_names::kUTag,
-                                               CreateElementFlags::ByParser());
+      html_element =
+          document.CreateRawElement(html_names::kUTag, CreateElementFlags());
       break;
     case kVTTNodeTypeRuby:
-      html_element = document.CreateRawElement(html_names::kRubyTag,
-                                               CreateElementFlags::ByParser());
+      html_element =
+          document.CreateRawElement(html_names::kRubyTag, CreateElementFlags());
       break;
     case kVTTNodeTypeRubyText:
-      html_element = document.CreateRawElement(html_names::kRtTag,
-                                               CreateElementFlags::ByParser());
+      html_element =
+          document.CreateRawElement(html_names::kRtTag, CreateElementFlags());
       break;
     default:
       NOTREACHED();
@@ -130,6 +133,26 @@ void VTTElement::SetIsPastNode(bool is_past_node) {
       kLocalStyleChange,
       StyleChangeReasonForTracing::CreateWithExtraData(
           style_change_reason::kPseudoClass, style_change_extra_data::g_past));
+}
+
+void VTTElement::SetTrack(TextTrack* track) {
+  track_ = track;
+}
+
+void VTTElement::Trace(Visitor* visitor) const {
+  visitor->Trace(track_);
+  Element::Trace(visitor);
+}
+
+LayoutObject* VTTElement::CreateLayoutObject(const ComputedStyle& style,
+                                             LegacyLayout legacy) {
+  switch (web_vtt_node_type_) {
+    case kVTTNodeTypeRuby:
+      return MakeGarbageCollected<LayoutRubyAsInline>(this);
+    case kVTTNodeTypeRubyText:
+      return LayoutObjectFactory::CreateRubyText(this, style, legacy);
+  }
+  return LayoutObject::CreateObject(this, style, legacy);
 }
 
 }  // namespace blink

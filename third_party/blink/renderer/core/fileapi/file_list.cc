@@ -25,6 +25,7 @@
 
 #include "third_party/blink/renderer/core/fileapi/file_list.h"
 
+#include "base/files/file_path.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
 
 namespace blink {
@@ -51,7 +52,7 @@ Vector<base::FilePath> FileList::PathsForUserVisibleFiles() const {
   return paths;
 }
 
-void FileList::Trace(blink::Visitor* visitor) {
+void FileList::Trace(Visitor* visitor) const {
   visitor->Trace(files_);
   ScriptWrappable::Trace(visitor);
 }

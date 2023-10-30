@@ -10,8 +10,9 @@
 #include "third_party/blink/public/mojom/devtools/devtools_agent.mojom-blink.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/inspector_protocol/encoding/encoding.h"
+#include "third_party/inspector_protocol/crdtp/span.h"
 
 namespace blink {
 class InspectorAgentState;
@@ -51,20 +52,15 @@ class CORE_EXPORT InspectorAgentState {
   // implementations below; they just delegate to protocol::Value parsing
   // and serialization.
   static void Serialize(bool v, WebVector<uint8_t>* out);
-  static bool Deserialize(::inspector_protocol_encoding::span<uint8_t> in,
-                          bool* v);
+  static bool Deserialize(crdtp::span<uint8_t> in, bool* v);
   static void Serialize(int32_t v, WebVector<uint8_t>* out);
-  static bool Deserialize(::inspector_protocol_encoding::span<uint8_t> in,
-                          int32_t* v);
+  static bool Deserialize(crdtp::span<uint8_t> in, int32_t* v);
   static void Serialize(double v, WebVector<uint8_t>* out);
-  static bool Deserialize(::inspector_protocol_encoding::span<uint8_t> in,
-                          double* v);
+  static bool Deserialize(crdtp::span<uint8_t> in, double* v);
   static void Serialize(const WTF::String& v, WebVector<uint8_t>* out);
-  static bool Deserialize(::inspector_protocol_encoding::span<uint8_t> in,
-                          WTF::String* v);
+  static bool Deserialize(crdtp::span<uint8_t> in, WTF::String* v);
   static void Serialize(const std::vector<uint8_t>& v, WebVector<uint8_t>* out);
-  static bool Deserialize(::inspector_protocol_encoding::span<uint8_t> in,
-                          std::vector<uint8_t>* v);
+  static bool Deserialize(crdtp::span<uint8_t> in, std::vector<uint8_t>* v);
 
  public:
   // A field is connected to the |agent_state|, which initializes the field
@@ -150,8 +146,7 @@ class CORE_EXPORT InspectorAgentState {
         return;
       auto it = reattach_state->entries.find(prefix_key_);
       if (it != reattach_state->entries.end()) {
-        Deserialize(::inspector_protocol_encoding::span<uint8_t>(
-                        it->value->data(), it->value->size()),
+        Deserialize(crdtp::span<uint8_t>(it->value->data(), it->value->size()),
                     &value_);
       }
     }
@@ -183,8 +178,7 @@ class CORE_EXPORT InspectorAgentState {
       // TODO(johannes): It'd be nice to avoid copying; unfortunately
       // it didn't seem easy to return map_.Keys().
       Vector<WTF::String> keys;
-      for (const WTF::String& s : map_.Keys())
-        keys.push_back(s);
+      WTF::CopyKeysToVector(map_, keys);
       return keys;
     }
 
@@ -247,9 +241,9 @@ class CORE_EXPORT InspectorAgentState {
           continue;
         WTF::String suffix_key = entry.key.Substring(prefix_key_.length());
         ValueType v;
-        if (Deserialize(::inspector_protocol_encoding::span<uint8_t>(
-                            entry.value->data(), entry.value->size()),
-                        &v)) {
+        if (Deserialize(
+                crdtp::span<uint8_t>(entry.value->data(), entry.value->size()),
+                &v)) {
           map_.Set(suffix_key, v);
         }
       }
@@ -290,4 +284,4 @@ class CORE_EXPORT InspectorAgentState {
 };
 }  // namespace blink
 
-#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_SESSION_STATE_H_
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_SESSION_STATE_H_

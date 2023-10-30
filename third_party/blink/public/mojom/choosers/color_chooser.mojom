@@ -11,9 +11,13 @@ struct ColorSuggestion {
 
 // A ColorChooser window is shown for <input type="color">.
 interface ColorChooserFactory {
+  // OpenColorChooser opens a platform specific color chooser in the browser.
+  // Enabled on platfoms that opt in using the "is_using_open_color_chooser"
+  // enabled_features option.
+  [EnableIf=is_using_open_color_chooser]
   OpenColorChooser(
-      ColorChooser& chooser,
-      ColorChooserClient client,
+      pending_receiver<ColorChooser> chooser,
+      pending_remote<ColorChooserClient> client,
       uint32 color,
       array<ColorSuggestion> suggestions);
 };
@@ -28,3 +32,8 @@ interface ColorChooserClient {
   DidChooseColor(uint32 color);
 };
 
+// Interface exposed by the browser to the renderer.
+interface EyeDropperChooser {
+  // EyeDropper window is shown.
+  Choose() => (bool success, uint32 color);
+};

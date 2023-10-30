@@ -31,6 +31,7 @@
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
+#include "third_party/fdlibm/ieee754.h"
 
 #if defined(ARCH_CPU_X86_FAMILY)
 #include <emmintrin.h>
@@ -118,13 +119,13 @@ void SincResampler::InitializeKernel() {
       // Compute the sinc() with offset.
       double s =
           sinc_scale_factor * kPiDouble * (i - half_size - subsample_offset);
-      double sinc = !s ? 1.0 : std::sin(s) / s;
+      double sinc = !s ? 1.0 : fdlibm::sin(s) / s;
       sinc *= sinc_scale_factor;
 
       // Compute Blackman window, matching the offset of the sinc().
       double x = (i - subsample_offset) / n;
-      double window = a0 - a1 * std::cos(kTwoPiDouble * x) +
-                      a2 * std::cos(kTwoPiDouble * 2.0 * x);
+      double window = a0 - a1 * fdlibm::cos(kTwoPiDouble * x) +
+                      a2 * fdlibm::cos(kTwoPiDouble * 2.0 * x);
 
       // Window the sinc() function and store at the correct offset.
       kernel_storage_[i + offset_index * kernel_size_] = sinc * window;
@@ -135,8 +136,6 @@ void SincResampler::InitializeKernel() {
 void SincResampler::ConsumeSource(float* buffer,
                                   unsigned number_of_source_frames) {
   DCHECK(source_provider_);
-  if (!source_provider_)
-    return;
 
   // Wrap the provided buffer by an AudioBus for use by the source provider.
   scoped_refptr<AudioBus> bus =
@@ -145,7 +144,8 @@ void SincResampler::ConsumeSource(float* buffer,
   // FIXME: Find a way to make the following const-correct:
   bus->SetChannelMemory(0, buffer, number_of_source_frames);
 
-  source_provider_->ProvideInput(bus.get(), number_of_source_frames);
+  source_provider_->ProvideInput(
+      bus.get(), base::checked_cast<int>(number_of_source_frames));
 }
 
 namespace {
@@ -154,27 +154,28 @@ namespace {
 
 class BufferSourceProvider final : public AudioSourceProvider {
  public:
-  BufferSourceProvider(const float* source, uint32_t number_of_source_frames)
+  BufferSourceProvider(const float* source, int number_of_source_frames)
       : source_(source), source_frames_available_(number_of_source_frames) {}
 
   // Consumes samples from the in-memory buffer.
-  void ProvideInput(AudioBus* bus, uint32_t frames_to_process) override {
+  void ProvideInput(AudioBus* bus, int frames_to_process) override {
     DCHECK(source_);
     DCHECK(bus);
-    if (!source_ || !bus)
+    if (!source_ || !bus) {
       return;
+    }
 
     float* buffer = bus->Channel(0)->MutableData();
 
     // Clamp to number of frames available and zero-pad.
-    uint32_t frames_to_copy =
-        std::min(source_frames_available_, frames_to_process);
+    int frames_to_copy = std::min(source_frames_available_, frames_to_process);
     memcpy(buffer, source_, sizeof(float) * frames_to_copy);
 
     // Zero-pad if necessary.
-    if (frames_to_copy < frames_to_process)
+    if (frames_to_copy < frames_to_process) {
       memset(buffer + frames_to_copy, 0,
              sizeof(float) * (frames_to_process - frames_to_copy));
+    }
 
     source_frames_available_ -= frames_to_copy;
     source_ += frames_to_copy;
@@ -182,14 +183,14 @@ class BufferSourceProvider final : public AudioSourceProvider {
 
  private:
   const float* source_;
-  uint32_t source_frames_available_;
+  int source_frames_available_;
 };
 
 }  // namespace
 
 void SincResampler::Process(const float* source,
                             float* destination,
-                            unsigned number_of_source_frames) {
+                            int number_of_source_frames) {
   // Resample an in-memory buffer using an AudioSourceProvider.
   BufferSourceProvider source_provider(source, number_of_source_frames);
 
@@ -209,12 +210,10 @@ void SincResampler::Process(const float* source,
 void SincResampler::Process(AudioSourceProvider* source_provider,
                             float* destination,
                             uint32_t frames_to_process) {
-  bool is_good = source_provider && block_size_ > kernel_size_ &&
-                 input_buffer_.size() >= block_size_ + kernel_size_ &&
-                 !(kernel_size_ % 2);
-  DCHECK(is_good);
-  if (!is_good)
-    return;
+  DCHECK(source_provider);
+  DCHECK_GT(block_size_, kernel_size_);
+  DCHECK_GE(input_buffer_.size(), block_size_ + kernel_size_);
+  DCHECK_EQ(kernel_size_ % 2, 0u);
 
   source_provider_ = source_provider;
 
@@ -477,8 +476,9 @@ void SincResampler::Process(AudioSourceProvider* source_provider,
       virtual_source_index_ += scale_factor_;
 
       --number_of_destination_frames;
-      if (!number_of_destination_frames)
+      if (!number_of_destination_frames) {
         return;
+      }
     }
 
     // Wrap back around to the start.

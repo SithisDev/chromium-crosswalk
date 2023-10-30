@@ -17,8 +17,6 @@ class MediaControlsImpl;
 // buttons and sliders.
 class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
                                                 public MediaControlElementBase {
-  USING_GARBAGE_COLLECTED_MIXIN(MediaControlInputElement);
-
  public:
   static bool ShouldRecordDisplayStates(const HTMLMediaElement&);
 
@@ -31,15 +29,15 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
   void SetOverflowElementIsWanted(bool) final;
   void MaybeRecordDisplayed() final;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   MediaControlInputElement* OverflowElementForTests() const {
     return overflow_element_;
   }
 
   // Get the size of the element in pixels or the default if we cannot get the
-  // size because the element has not been layed out yet.
-  WebSize GetSizeOrDefault() const override;
+  // size because the element has not been laid out yet.
+  gfx::Size GetSizeOrDefault() const override;
   bool IsDisabled() const override;
 
  protected:
@@ -49,10 +47,10 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
   // will be used as a suffix for histograms.
   virtual const char* GetNameForHistograms() const = 0;
 
-  // Returns a string representation of the media control element.
-  // Subclasses should override this method to return the string representation
+  // Returns a string resource id of the media control element.
+  // Subclasses should override this method to return the string resource id
   // of the overflow button.
-  virtual WebLocalizedString::Name GetOverflowStringName() const;
+  virtual int GetOverflowStringId() const;
 
   // Implements a default event handler to record interaction on click.
   void DefaultEventHandler(Event&) override;
@@ -80,6 +78,7 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
 
  private:
   friend class MediaControlInputElementTest;
+  friend class MediaControlPopupMenuElementTest;
 
   bool IsMouseFocusable() const override;
   bool IsMediaControlElement() const final;
@@ -106,7 +105,7 @@ class MODULES_EXPORT MediaControlInputElement : public HTMLInputElement,
   enum class CTREvent {
     kDisplayed = 0,
     kInteracted,
-    kCount,
+    kMaxValue = kInteracted,
   };
 
   // Records the CTR event.

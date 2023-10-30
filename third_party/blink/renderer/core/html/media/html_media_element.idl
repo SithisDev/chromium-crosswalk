@@ -36,7 +36,7 @@ enum CanPlayTypeResult { "" /* empty string */, "maybe", "probably" };
     readonly attribute MediaError? error;
 
     // network state
-    [CEReactions, Reflect, URL, RaisesException=Setter] attribute URLString src;
+    [CEReactions, Reflect, URL] attribute USVString src;
     // FIXME: attribute MediaProvider? srcObject; crbug.com/387740
     readonly attribute DOMString currentSrc;
     [CEReactions, Reflect, ReflectOnly=("anonymous","use-credentials"), ReflectEmpty="anonymous", ReflectInvalid="anonymous"] attribute DOMString? crossOrigin;
@@ -48,7 +48,7 @@ enum CanPlayTypeResult { "" /* empty string */, "maybe", "probably" };
     [CEReactions] attribute DOMString preload;
     readonly attribute TimeRanges buffered;
     void load();
-    [HighEntropy, Measure] CanPlayTypeResult canPlayType(DOMString type);
+    [CallWith=ExecutionContext, HighEntropy, Measure] CanPlayTypeResult canPlayType(DOMString type);
 
     // ready state
     const unsigned short HAVE_NOTHING = 0;
@@ -74,6 +74,9 @@ enum CanPlayTypeResult { "" /* empty string */, "maybe", "probably" };
     [CEReactions, Reflect] attribute boolean loop;
     [CallWith=ScriptState, ImplementedAs=playForBindings] Promise<void> play();
     void pause();
+    [RuntimeEnabled=MediaLatencyHint, CEReactions]
+    attribute double latencyHint;
+    attribute boolean preservesPitch;
 
     // controls
     [CEReactions, Reflect] attribute boolean controls;

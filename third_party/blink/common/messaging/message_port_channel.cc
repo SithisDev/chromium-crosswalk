@@ -4,7 +4,31 @@
 
 #include "third_party/blink/public/common/messaging/message_port_channel.h"
 
+#include "base/memory/ref_counted.h"
+#include "base/synchronization/lock.h"
+#include "mojo/public/cpp/system/message_pipe.h"
+#include "third_party/blink/public/common/messaging/message_port_descriptor.h"
+
 namespace blink {
+
+class MessagePortChannel::State : public base::RefCountedThreadSafe<State> {
+ public:
+  State();
+  explicit State(MessagePortDescriptor handle);
+
+  MessagePortDescriptor TakeHandle();
+
+  const MessagePortDescriptor& handle() const { return handle_; }
+
+ private:
+  friend class base::RefCountedThreadSafe<State>;
+  ~State();
+
+  // Guards access to the fields below.
+  base::Lock lock_;
+
+  MessagePortDescriptor handle_;
+};
 
 MessagePortChannel::~MessagePortChannel() = default;
 
@@ -19,21 +43,21 @@ MessagePortChannel& MessagePortChannel::operator=(
   return *this;
 }
 
-MessagePortChannel::MessagePortChannel(mojo::ScopedMessagePipeHandle handle)
+MessagePortChannel::MessagePortChannel(MessagePortDescriptor handle)
     : state_(new State(std::move(handle))) {}
 
-const mojo::ScopedMessagePipeHandle& MessagePortChannel::GetHandle() const {
+const MessagePortDescriptor& MessagePortChannel::GetHandle() const {
   return state_->handle();
 }
 
-mojo::ScopedMessagePipeHandle MessagePortChannel::ReleaseHandle() const {
+MessagePortDescriptor MessagePortChannel::ReleaseHandle() const {
   return state_->TakeHandle();
 }
 
 // static
-std::vector<mojo::ScopedMessagePipeHandle> MessagePortChannel::ReleaseHandles(
+std::vector<MessagePortDescriptor> MessagePortChannel::ReleaseHandles(
     const std::vector<MessagePortChannel>& ports) {
-  std::vector<mojo::ScopedMessagePipeHandle> handles(ports.size());
+  std::vector<MessagePortDescriptor> handles(ports.size());
   for (size_t i = 0; i < ports.size(); ++i)
     handles[i] = ports[i].ReleaseHandle();
   return handles;
@@ -41,7 +65,7 @@ std::vector<mojo::ScopedMessagePipeHandle> MessagePortChannel::ReleaseHandles(
 
 // static
 std::vector<MessagePortChannel> MessagePortChannel::CreateFromHandles(
-    std::vector<mojo::ScopedMessagePipeHandle> handles) {
+    std::vector<MessagePortDescriptor> handles) {
   std::vector<MessagePortChannel> ports(handles.size());
   for (size_t i = 0; i < handles.size(); ++i)
     ports[i] = MessagePortChannel(std::move(handles[i]));
@@ -50,10 +74,10 @@ std::vector<MessagePortChannel> MessagePortChannel::CreateFromHandles(
 
 MessagePortChannel::State::State() = default;
 
-MessagePortChannel::State::State(mojo::ScopedMessagePipeHandle handle)
+MessagePortChannel::State::State(MessagePortDescriptor handle)
     : handle_(std::move(handle)) {}
 
-mojo::ScopedMessagePipeHandle MessagePortChannel::State::TakeHandle() {
+MessagePortDescriptor MessagePortChannel::State::TakeHandle() {
   base::AutoLock lock(lock_);
   return std::move(handle_);
 }

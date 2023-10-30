@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_INSERT_INCREMENTAL_TEXT_COMMAND_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_INSERT_INCREMENTAL_TEXT_COMMAND_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/commands/insert_text_command.h"
 
 namespace blink {
@@ -12,14 +13,10 @@ namespace blink {
 class CORE_EXPORT InsertIncrementalTextCommand final
     : public InsertTextCommand {
  public:
-  static InsertIncrementalTextCommand* Create(
+  InsertIncrementalTextCommand(
       Document&,
-      const String&,
+      const String& text,
       RebalanceType = kRebalanceLeadingAndTrailingWhitespaces);
-
-  InsertIncrementalTextCommand(Document&,
-                               const String& text,
-                               RebalanceType);
 
  private:
   void DoApply(EditingState*) override;

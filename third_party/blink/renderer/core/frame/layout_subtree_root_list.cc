@@ -9,7 +9,7 @@
 namespace blink {
 
 void LayoutSubtreeRootList::ClearAndMarkContainingBlocksForLayout() {
-  for (auto* const iter : Unordered())
+  for (const auto& iter : Unordered())
     iter->MarkContainerChainForLayout(false);
   Clear();
 }
@@ -23,10 +23,16 @@ void LayoutSubtreeRootList::CountObjectsNeedingLayoutInRoot(
     const LayoutObject* object,
     unsigned& needs_layout_objects,
     unsigned& total_objects) {
-  for (const LayoutObject* o = object; o; o = o->NextInPreOrder(object)) {
+  for (const LayoutObject* o = object; o;) {
     ++total_objects;
-    if (o->NeedsLayout())
+    bool display_locked = o->ChildLayoutBlockedByDisplayLock();
+    if (o->SelfNeedsLayout() || (!display_locked && o->NeedsLayout()))
       ++needs_layout_objects;
+
+    if (display_locked)
+      o = o->NextInPreOrderAfterChildren(object);
+    else
+      o = o->NextInPreOrder(object);
   }
 }
 
@@ -34,7 +40,7 @@ void LayoutSubtreeRootList::CountObjectsNeedingLayout(
     unsigned& needs_layout_objects,
     unsigned& total_objects) {
   // TODO(leviw): This will double-count nested roots crbug.com/509141
-  for (auto* const root : Unordered())
+  for (const auto& root : Unordered())
     CountObjectsNeedingLayoutInRoot(root, needs_layout_objects, total_objects);
 }
 

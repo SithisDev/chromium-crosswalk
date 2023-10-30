@@ -13,11 +13,7 @@ void* PartitionAllocator::AllocateBacking(size_t size, const char* type_name) {
   return Partitions::BufferMalloc(size, type_name);
 }
 
-void PartitionAllocator::FreeVectorBacking(void* address) {
-  Partitions::BufferFree(address);
-}
-
-void PartitionAllocator::FreeHashTableBacking(void* address) {
+void PartitionAllocator::FreeBacking(void* address) {
   Partitions::BufferFree(address);
 }
 
@@ -25,12 +21,6 @@ template <>
 char* PartitionAllocator::AllocateVectorBacking<char>(size_t size) {
   return reinterpret_cast<char*>(
       AllocateBacking(size, "PartitionAllocator::allocateVectorBacking<char>"));
-}
-
-template <>
-char* PartitionAllocator::AllocateExpandedVectorBacking<char>(size_t size) {
-  return reinterpret_cast<char*>(AllocateBacking(
-      size, "PartitionAllocator::allocateExpandedVectorBacking<char>"));
 }
 
 }  // namespace WTF

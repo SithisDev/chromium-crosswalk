@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/css/cssom/css_transform_value.h"
 
+#include "base/ranges/algorithm.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/cssom/css_transform_component.h"
 #include "third_party/blink/renderer/core/geometry/dom_matrix.h"
@@ -49,8 +50,9 @@ CSSTransformValue* CSSTransformValue::FromCSSValue(const CSSValue& css_value) {
 }
 
 bool CSSTransformValue::is2D() const {
-  return std::all_of(transform_components_.begin(), transform_components_.end(),
-                     [](const auto& component) { return component->is2D(); });
+  return base::ranges::all_of(transform_components_, [](const auto& component) {
+    return component->is2D();
+  });
 }
 
 DOMMatrix* CSSTransformValue::toMatrix(ExceptionState& exception_state) const {
@@ -77,25 +79,25 @@ const CSSValue* CSSTransformValue::ToCSSValue() const {
   return transform_css_value;
 }
 
-bool CSSTransformValue::AnonymousIndexedSetter(
+IndexedPropertySetterResult CSSTransformValue::AnonymousIndexedSetter(
     unsigned index,
     const Member<CSSTransformComponent> component,
     ExceptionState& exception_state) {
   if (index < transform_components_.size()) {
     transform_components_[index] = component;
-    return true;
+    return IndexedPropertySetterResult::kIntercepted;
   }
 
   if (index == transform_components_.size()) {
     transform_components_.push_back(component);
-    return true;
+    return IndexedPropertySetterResult::kIntercepted;
   }
 
   exception_state.ThrowRangeError(
       ExceptionMessages::IndexOutsideRange<unsigned>(
           "index", index, 0, ExceptionMessages::kInclusiveBound,
           transform_components_.size(), ExceptionMessages::kInclusiveBound));
-  return false;
+  return IndexedPropertySetterResult::kIntercepted;
 }
 
 }  // namespace blink

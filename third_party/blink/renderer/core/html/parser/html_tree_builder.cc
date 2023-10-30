@@ -28,10 +28,12 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
+#include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/core/html/html_template_element.h"
@@ -40,8 +42,10 @@
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html/parser/html_stack_item.h"
 #include "third_party/blink/renderer/core/html/parser/html_token.h"
+#include "third_party/blink/renderer/core/html/parser/html_token_producer.h"
 #include "third_party/blink/renderer/core/html/parser/html_tokenizer.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/mathml_names.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/core/xlink_names.h"
@@ -50,21 +54,23 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
+#include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 
 namespace blink {
 
-using namespace html_names;
+using HTMLTag = html_names::HTMLTag;
 
 namespace {
 
 inline bool IsHTMLSpaceOrReplacementCharacter(UChar character) {
   return IsHTMLSpace<UChar>(character) || character == kReplacementCharacter;
 }
-}
+}  // namespace
 
 static TextPosition UninitializedPositionValue1() {
   return TextPosition(OrdinalNumber::FromOneBasedInt(-1),
@@ -81,41 +87,47 @@ static inline bool IsAllWhitespaceOrReplacementCharacters(
       .IsAllSpecialCharacters<IsHTMLSpaceOrReplacementCharacter>();
 }
 
-static bool IsNumberedHeaderTag(const AtomicString& tag_name) {
-  return tag_name == kH1Tag || tag_name == kH2Tag || tag_name == kH3Tag ||
-         tag_name == kH4Tag || tag_name == kH5Tag || tag_name == kH6Tag;
-}
+// The following macros are used in switch statements for some common types.
+// They are defined so that they can look like a normal case statement, e.g.:
+//   case FOO_CASES:
 
-static bool IsCaptionColOrColgroupTag(const AtomicString& tag_name) {
-  return tag_name == kCaptionTag || tag_name == kColTag ||
-         tag_name == kColgroupTag;
-}
+// Disable formatting as it mangles these macros.
+// clang-format off
 
-static bool IsTableCellContextTag(const AtomicString& tag_name) {
-  return tag_name == kThTag || tag_name == kTdTag;
-}
+#define CAPTION_COL_OR_COLGROUP_CASES \
+  HTMLTag::kCaption: \
+  case HTMLTag::kCol: \
+  case HTMLTag::kColgroup
 
-static bool IsTableBodyContextTag(const AtomicString& tag_name) {
-  return tag_name == kTbodyTag || tag_name == kTfootTag ||
-         tag_name == kTheadTag;
-}
+#define NUMBERED_HEADER_CASES \
+  HTMLTag::kH1: \
+  case HTMLTag::kH2: \
+  case HTMLTag::kH3: \
+  case HTMLTag::kH4: \
+  case HTMLTag::kH5: \
+  case HTMLTag::kH6
 
-static bool IsNonAnchorNonNobrFormattingTag(const AtomicString& tag_name) {
-  return tag_name == kBTag || tag_name == kBigTag || tag_name == kCodeTag ||
-         tag_name == kEmTag || tag_name == kFontTag || tag_name == kITag ||
-         tag_name == kSTag || tag_name == kSmallTag || tag_name == kStrikeTag ||
-         tag_name == kStrongTag || tag_name == kTtTag || tag_name == kUTag;
-}
+#define TABLE_BODY_CONTEXT_CASES \
+  HTMLTag::kTbody: \
+  case HTMLTag::kTfoot: \
+  case HTMLTag::kThead
 
-static bool IsNonAnchorFormattingTag(const AtomicString& tag_name) {
-  return tag_name == kNobrTag || IsNonAnchorNonNobrFormattingTag(tag_name);
+#define TABLE_CELL_CONTEXT_CASES \
+  HTMLTag::kTh: \
+  case HTMLTag::kTd
+
+// clang-format on
+
+static bool IsTableBodyContextTag(HTMLTag tag) {
+  switch (tag) {
+    case TABLE_BODY_CONTEXT_CASES:
+      return true;
+    default:
+      return false;
+  }
 }
 
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/parsing.html#formatting
-static bool IsFormattingTag(const AtomicString& tag_name) {
-  return tag_name == kATag || IsNonAnchorFormattingTag(tag_name);
-}
-
 class HTMLTreeBuilder::CharacterTokenBuffer {
  public:
   explicit CharacterTokenBuffer(AtomicHTMLToken* token)
@@ -129,6 +141,9 @@ class HTMLTreeBuilder::CharacterTokenBuffer {
       : characters_(characters.Impl()), current_(0), end_(characters.length()) {
     DCHECK(!IsEmpty());
   }
+
+  CharacterTokenBuffer(const CharacterTokenBuffer&) = delete;
+  CharacterTokenBuffer& operator=(const CharacterTokenBuffer&) = delete;
 
   ~CharacterTokenBuffer() { DCHECK(IsEmpty()); }
 
@@ -158,10 +173,9 @@ class HTMLTreeBuilder::CharacterTokenBuffer {
   }
 
   void GiveRemainingTo(StringBuilder& recipient) {
-    if (characters_->Is8Bit())
-      recipient.Append(characters_->Characters8() + current_, end_ - current_);
-    else
-      recipient.Append(characters_->Characters16() + current_, end_ - current_);
+    WTF::VisitCharacters(*characters_, [&](const auto* chars, unsigned length) {
+      recipient.Append(chars + current_, end_ - current_);
+    });
     current_ = end_;
   }
 
@@ -183,15 +197,16 @@ class HTMLTreeBuilder::CharacterTokenBuffer {
     if (length == start - end_)  // It's all whitespace.
       return String(characters_->Substring(start, start - end_));
 
-    StringBuilder result;
-    result.ReserveCapacity(length);
+    // All HTML spaces are ASCII.
+    StringBuffer<LChar> result(length);
+    unsigned j = 0;
     for (unsigned i = start; i < end_; ++i) {
       UChar c = (*characters_)[i];
-      if (IsHTMLSpace<UChar>(c))
-        result.Append(c);
+      if (IsHTMLSpace(c))
+        result[j++] = static_cast<LChar>(c);
     }
-
-    return result.ToString();
+    DCHECK_EQ(j, length);
+    return String::Adopt(result);
   }
 
  private:
@@ -215,32 +230,40 @@ class HTMLTreeBuilder::CharacterTokenBuffer {
   scoped_refptr<StringImpl> characters_;
   unsigned current_;
   unsigned end_;
-
-  DISALLOW_COPY_AND_ASSIGN(CharacterTokenBuffer);
 };
 
 HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
                                  Document& document,
                                  ParserContentPolicy parser_content_policy,
-                                 const HTMLParserOptions& options)
+                                 const HTMLParserOptions& options,
+                                 bool include_shadow_roots,
+                                 HTMLTokenProducer* token_producer)
     : frameset_ok_(true),
       tree_(parser->ReentryPermit(), document, parser_content_policy),
       insertion_mode_(kInitialMode),
       original_insertion_mode_(kInitialMode),
       should_skip_leading_newline_(false),
+      include_shadow_roots_(include_shadow_roots),
       parser_(parser),
       script_to_process_start_position_(UninitializedPositionValue1()),
-      options_(options) {}
+      options_(options),
+      token_producer_(token_producer) {
+  DCHECK(token_producer);
+}
 
 HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
                                  DocumentFragment* fragment,
                                  Element* context_element,
                                  ParserContentPolicy parser_content_policy,
-                                 const HTMLParserOptions& options)
+                                 const HTMLParserOptions& options,
+                                 bool include_shadow_roots,
+                                 HTMLTokenProducer* token_producer)
     : HTMLTreeBuilder(parser,
                       fragment->GetDocument(),
                       parser_content_policy,
-                      options) {
+                      options,
+                      include_shadow_roots,
+                      token_producer) {
   DCHECK(IsMainThread());
   DCHECK(context_element);
   tree_.InitFragmentParsing(fragment, context_element);
@@ -253,7 +276,7 @@ HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
   tree_.OpenElements()->PushRootNode(MakeGarbageCollected<HTMLStackItem>(
       fragment, HTMLStackItem::kItemForDocumentFragmentNode));
 
-  if (IsHTMLTemplateElement(*context_element))
+  if (IsA<HTMLTemplateElement>(*context_element))
     template_insertion_modes_.push_back(kTemplateContentsMode);
 
   ResetInsertionModeAppropriately();
@@ -270,12 +293,12 @@ void HTMLTreeBuilder::FragmentParsingContext::Init(DocumentFragment* fragment,
       context_element, HTMLStackItem::kItemForContextElement);
 }
 
-void HTMLTreeBuilder::FragmentParsingContext::Trace(Visitor* visitor) {
+void HTMLTreeBuilder::FragmentParsingContext::Trace(Visitor* visitor) const {
   visitor->Trace(fragment_);
   visitor->Trace(context_element_stack_item_);
 }
 
-void HTMLTreeBuilder::Trace(Visitor* visitor) {
+void HTMLTreeBuilder::Trace(Visitor* visitor) const {
   visitor->Trace(fragment_context_);
   visitor->Trace(tree_);
   visitor->Trace(parser_);
@@ -314,21 +337,21 @@ void HTMLTreeBuilder::ConstructTree(AtomicHTMLToken* token) {
   else
     ProcessToken(token);
 
-  if (parser_->Tokenizer()) {
-    bool in_foreign_content = false;
-    if (!tree_.IsEmpty()) {
-      HTMLStackItem* adjusted_current_node = AdjustedCurrentStackItem();
-      in_foreign_content =
-          !adjusted_current_node->IsInHTMLNamespace() &&
-          !HTMLElementStack::IsHTMLIntegrationPoint(adjusted_current_node) &&
-          !HTMLElementStack::IsMathMLTextIntegrationPoint(
-              adjusted_current_node);
-    }
+  if (parser_->IsDetached())
+    return;
 
-    parser_->Tokenizer()->SetForceNullCharacterReplacement(
-        insertion_mode_ == kTextMode || in_foreign_content);
-    parser_->Tokenizer()->SetShouldAllowCDATA(in_foreign_content);
+  bool in_foreign_content = false;
+  if (!tree_.IsEmpty()) {
+    HTMLStackItem* adjusted_current_node = AdjustedCurrentStackItem();
+    in_foreign_content =
+        !adjusted_current_node->IsInHTMLNamespace() &&
+        !HTMLElementStack::IsHTMLIntegrationPoint(adjusted_current_node) &&
+        !HTMLElementStack::IsMathMLTextIntegrationPoint(adjusted_current_node);
   }
+
+  token_producer_->SetForceNullCharacterReplacement(
+      GetInsertionMode() == kTextMode || in_foreign_content);
+  token_producer_->SetShouldAllowCDATA(in_foreign_content);
 
   tree_.ExecuteQueuedTasks();
   // We might be detached now.
@@ -371,12 +394,12 @@ void HTMLTreeBuilder::ProcessToken(AtomicHTMLToken* token) {
 
 void HTMLTreeBuilder::ProcessDoctypeToken(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::DOCTYPE);
-  if (insertion_mode_ == kInitialMode) {
+  if (GetInsertionMode() == kInitialMode) {
     tree_.InsertDoctype(token);
     SetInsertionMode(kBeforeHTMLMode);
     return;
   }
-  if (insertion_mode_ == kInTableTextMode) {
+  if (GetInsertionMode() == kInTableTextMode) {
     DefaultForInTableText();
     ProcessDoctypeToken(token);
     return;
@@ -384,41 +407,40 @@ void HTMLTreeBuilder::ProcessDoctypeToken(AtomicHTMLToken* token) {
   ParseError(token);
 }
 
-void HTMLTreeBuilder::ProcessFakeStartTag(const QualifiedName& tag_name,
+void HTMLTreeBuilder::ProcessFakeStartTag(HTMLTag tag,
                                           const Vector<Attribute>& attributes) {
   // FIXME: We'll need a fancier conversion than just "localName" for SVG/MathML
   // tags.
-  AtomicHTMLToken fake_token(HTMLToken::kStartTag, tag_name.LocalName(),
-                             attributes);
+  AtomicHTMLToken fake_token(HTMLToken::kStartTag, tag, attributes);
   ProcessStartTag(&fake_token);
 }
 
-void HTMLTreeBuilder::ProcessFakeEndTag(const AtomicString& tag_name) {
-  AtomicHTMLToken fake_token(HTMLToken::kEndTag, tag_name);
+void HTMLTreeBuilder::ProcessFakeEndTag(HTMLTag tag) {
+  AtomicHTMLToken fake_token(HTMLToken::kEndTag, tag);
   ProcessEndTag(&fake_token);
 }
 
-void HTMLTreeBuilder::ProcessFakeEndTag(const QualifiedName& tag_name) {
-  // FIXME: We'll need a fancier conversion than just "localName" for SVG/MathML
-  // tags.
-  ProcessFakeEndTag(tag_name.LocalName());
+void HTMLTreeBuilder::ProcessFakeEndTag(const HTMLStackItem& stack_item) {
+  AtomicHTMLToken fake_token(HTMLToken::kEndTag, stack_item.GetTokenName());
+  ProcessEndTag(&fake_token);
 }
 
 void HTMLTreeBuilder::ProcessFakePEndTagIfPInButtonScope() {
-  if (!tree_.OpenElements()->InButtonScope(kPTag.LocalName()))
+  if (!tree_.OpenElements()->InButtonScope(HTMLTag::kP))
     return;
-  AtomicHTMLToken end_p(HTMLToken::kEndTag, kPTag.LocalName());
+  AtomicHTMLToken end_p(HTMLToken::kEndTag, HTMLTag::kP);
   ProcessEndTag(&end_p);
 }
 
 namespace {
 
 bool IsLi(const HTMLStackItem* item) {
-  return item->HasTagName(kLiTag);
+  return item->MatchesHTMLTag(HTMLTag::kLi);
 }
 
 bool IsDdOrDt(const HTMLStackItem* item) {
-  return item->HasTagName(kDdTag) || item->HasTagName(kDtTag);
+  return item->MatchesHTMLTag(HTMLTag::kDd) ||
+         item->MatchesHTMLTag(HTMLTag::kDt);
 }
 
 }  // namespace
@@ -428,15 +450,16 @@ void HTMLTreeBuilder::ProcessCloseWhenNestedTag(AtomicHTMLToken* token) {
   frameset_ok_ = false;
   HTMLElementStack::ElementRecord* node_record =
       tree_.OpenElements()->TopRecord();
-  while (1) {
+  while (true) {
     HTMLStackItem* item = node_record->StackItem();
     if (shouldClose(item)) {
       DCHECK(item->IsElementNode());
-      ProcessFakeEndTag(item->LocalName());
+      ProcessFakeEndTag(*item);
       break;
     }
-    if (item->IsSpecialNode() && !item->HasTagName(kAddressTag) &&
-        !item->HasTagName(kDivTag) && !item->HasTagName(kPTag))
+    if (item->IsSpecialNode() && !item->MatchesHTMLTag(HTMLTag::kAddress) &&
+        !item->MatchesHTMLTag(HTMLTag::kDiv) &&
+        !item->MatchesHTMLTag(HTMLTag::kP))
       break;
     node_record = node_record->Next();
   }
@@ -444,12 +467,13 @@ void HTMLTreeBuilder::ProcessCloseWhenNestedTag(AtomicHTMLToken* token) {
   tree_.InsertHTMLElement(token);
 }
 
+namespace {
 typedef HashMap<AtomicString, QualifiedName> PrefixedNameToQualifiedNameMap;
 
 template <typename TableQualifiedName>
-static void MapLoweredLocalNameToName(PrefixedNameToQualifiedNameMap* map,
-                                      const TableQualifiedName* const* names,
-                                      size_t length) {
+void MapLoweredLocalNameToName(PrefixedNameToQualifiedNameMap* map,
+                               const TableQualifiedName* const* names,
+                               size_t length) {
   for (size_t i = 0; i < length; ++i) {
     const QualifiedName& name = *names[i];
     const AtomicString& local_name = name.LocalName();
@@ -459,52 +483,76 @@ static void MapLoweredLocalNameToName(PrefixedNameToQualifiedNameMap* map,
   }
 }
 
-// "Any other start tag" bullet in
-// https://html.spec.whatwg.org/C/#parsing-main-inforeign
-static void AdjustSVGTagNameCase(AtomicHTMLToken* token) {
-  static PrefixedNameToQualifiedNameMap* case_map = nullptr;
-  if (!case_map) {
-    case_map = new PrefixedNameToQualifiedNameMap;
-    std::unique_ptr<const SVGQualifiedName* []> svg_tags = svg_names::GetTags();
-    MapLoweredLocalNameToName(case_map, svg_tags.get(), svg_names::kTagsCount);
-  }
-
-  const QualifiedName& cased_name = case_map->at(token->GetName());
-  if (cased_name.LocalName().IsNull())
-    return;
-  token->SetName(cased_name.LocalName());
+void AddManualLocalName(PrefixedNameToQualifiedNameMap* map, const char* name) {
+  const QualifiedName item(g_null_atom, name, g_null_atom);
+  const blink::QualifiedName* const names = &item;
+  MapLoweredLocalNameToName<QualifiedName>(map, &names, 1);
 }
 
-template <std::unique_ptr<const QualifiedName* []> getAttrs(), unsigned length>
-static void AdjustAttributes(AtomicHTMLToken* token) {
+// "Any other start tag" bullet in
+// https://html.spec.whatwg.org/C/#parsing-main-inforeign
+void AdjustSVGTagNameCase(AtomicHTMLToken* token) {
   static PrefixedNameToQualifiedNameMap* case_map = nullptr;
   if (!case_map) {
     case_map = new PrefixedNameToQualifiedNameMap;
-    std::unique_ptr<const QualifiedName* []> attrs = getAttrs();
+    std::unique_ptr<const SVGQualifiedName*[]> svg_tags = svg_names::GetTags();
+    MapLoweredLocalNameToName(case_map, svg_tags.get(), svg_names::kTagsCount);
+    // These tags aren't implemented by Chromium, so they don't exist in
+    // svg_tag_names.json5.
+    AddManualLocalName(case_map, "altGlyph");
+    AddManualLocalName(case_map, "altGlyphDef");
+    AddManualLocalName(case_map, "altGlyphItem");
+    AddManualLocalName(case_map, "glyphRef");
+  }
+
+  const auto it = case_map->find(token->GetName());
+  if (it != case_map->end()) {
+    DCHECK(!it->value.LocalName().IsNull());
+    token->SetTokenName(HTMLTokenName::FromLocalName(it->value.LocalName()));
+  }
+}
+
+template <std::unique_ptr<const QualifiedName* []> getAttrs(),
+          unsigned length,
+          bool forSVG>
+void AdjustAttributes(AtomicHTMLToken* token) {
+  static PrefixedNameToQualifiedNameMap* case_map = nullptr;
+  if (!case_map) {
+    case_map = new PrefixedNameToQualifiedNameMap;
+    std::unique_ptr<const QualifiedName*[]> attrs = getAttrs();
     MapLoweredLocalNameToName(case_map, attrs.get(), length);
+    if (forSVG) {
+      // This attribute isn't implemented by Chromium, so it doesn't exist in
+      // svg_attribute_names.json5.
+      AddManualLocalName(case_map, "viewTarget");
+    }
   }
 
   for (auto& token_attribute : token->Attributes()) {
-    const QualifiedName& cased_name = case_map->at(token_attribute.LocalName());
-    if (!cased_name.LocalName().IsNull())
-      token_attribute.ParserSetName(cased_name);
+    const auto it = case_map->find(token_attribute.LocalName());
+    if (it != case_map->end()) {
+      DCHECK(!it->value.LocalName().IsNull());
+      token_attribute.ParserSetName(it->value);
+    }
   }
 }
 
 // https://html.spec.whatwg.org/C/#adjust-svg-attributes
-static void AdjustSVGAttributes(AtomicHTMLToken* token) {
-  AdjustAttributes<svg_names::GetAttrs, svg_names::kAttrsCount>(token);
+void AdjustSVGAttributes(AtomicHTMLToken* token) {
+  AdjustAttributes<svg_names::GetAttrs, svg_names::kAttrsCount,
+                   /*forSVG*/ true>(token);
 }
 
 // https://html.spec.whatwg.org/C/#adjust-mathml-attributes
-static void AdjustMathMLAttributes(AtomicHTMLToken* token) {
-  AdjustAttributes<mathml_names::GetAttrs, mathml_names::kAttrsCount>(token);
+void AdjustMathMLAttributes(AtomicHTMLToken* token) {
+  AdjustAttributes<mathml_names::GetAttrs, mathml_names::kAttrsCount,
+                   /*forSVG*/ false>(token);
 }
 
-static void AddNamesWithPrefix(PrefixedNameToQualifiedNameMap* map,
-                               const AtomicString& prefix,
-                               const QualifiedName* const* names,
-                               size_t length) {
+void AddNamesWithPrefix(PrefixedNameToQualifiedNameMap* map,
+                        const AtomicString& prefix,
+                        const QualifiedName* const* names,
+                        size_t length) {
   for (size_t i = 0; i < length; ++i) {
     const QualifiedName* name = names[i];
     const AtomicString& local_name = name->LocalName();
@@ -514,16 +562,16 @@ static void AddNamesWithPrefix(PrefixedNameToQualifiedNameMap* map,
   }
 }
 
-static void AdjustForeignAttributes(AtomicHTMLToken* token) {
+void AdjustForeignAttributes(AtomicHTMLToken* token) {
   static PrefixedNameToQualifiedNameMap* map = nullptr;
   if (!map) {
     map = new PrefixedNameToQualifiedNameMap;
 
-    std::unique_ptr<const QualifiedName* []> attrs = xlink_names::GetAttrs();
+    std::unique_ptr<const QualifiedName*[]> attrs = xlink_names::GetAttrs();
     AddNamesWithPrefix(map, g_xlink_atom, attrs.get(),
                        xlink_names::kAttrsCount);
 
-    std::unique_ptr<const QualifiedName* []> xml_attrs = xml_names::GetAttrs();
+    std::unique_ptr<const QualifiedName*[]> xml_attrs = xml_names::GetAttrs();
     AddNamesWithPrefix(map, g_xml_atom, xml_attrs.get(),
                        xml_names::kAttrsCount);
 
@@ -534,352 +582,461 @@ static void AdjustForeignAttributes(AtomicHTMLToken* token) {
 
   for (unsigned i = 0; i < token->Attributes().size(); ++i) {
     Attribute& token_attribute = token->Attributes().at(i);
-    const QualifiedName& name = map->at(token_attribute.LocalName());
-    if (!name.LocalName().IsNull())
-      token_attribute.ParserSetName(name);
+    const auto it = map->find(token_attribute.LocalName());
+    if (it != map->end()) {
+      DCHECK(!it->value.LocalName().IsNull());
+      token_attribute.ParserSetName(it->value);
+    }
   }
 }
+
+}  // namespace
 
 void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kStartTag);
-  if (token->GetName() == kHTMLTag) {
-    ProcessHtmlStartTagForInBody(token);
-    return;
-  }
-  if (token->GetName() == kBaseTag || token->GetName() == kBasefontTag ||
-      token->GetName() == kBgsoundTag || token->GetName() == kCommandTag ||
-      token->GetName() == kLinkTag || token->GetName() == kMetaTag ||
-      token->GetName() == kNoframesTag || token->GetName() == kScriptTag ||
-      token->GetName() == kStyleTag || token->GetName() == kTitleTag ||
-      token->GetName() == kTemplateTag) {
-    bool did_process = ProcessStartTagForInHead(token);
-    DCHECK(did_process);
-    return;
-  }
-  if (token->GetName() == kBodyTag) {
-    ParseError(token);
-    if (!tree_.OpenElements()->SecondElementIsHTMLBodyElement() ||
-        tree_.OpenElements()->HasOnlyOneElement() ||
-        tree_.OpenElements()->HasTemplateInHTMLScope()) {
-      DCHECK(IsParsingFragmentOrTemplateContents());
-      return;
+  switch (token->GetHTMLTag()) {
+    case HTMLTag::kHTML:
+      ProcessHtmlStartTagForInBody(token);
+      break;
+    case HTMLTag::kBase:
+    case HTMLTag::kBasefont:
+    case HTMLTag::kBgsound:
+    case HTMLTag::kCommand:
+    case HTMLTag::kLink:
+    case HTMLTag::kMeta:
+    case HTMLTag::kNoframes:
+    case HTMLTag::kScript:
+    case HTMLTag::kStyle:
+    case HTMLTag::kTitle:
+    case HTMLTag::kTemplate: {
+      bool did_process = ProcessStartTagForInHead(token);
+      DCHECK(did_process);
+      break;
     }
-    frameset_ok_ = false;
-    tree_.InsertHTMLBodyStartTagInBody(token);
-    return;
-  }
-  if (token->GetName() == kFramesetTag) {
-    ParseError(token);
-    if (!tree_.OpenElements()->SecondElementIsHTMLBodyElement() ||
-        tree_.OpenElements()->HasOnlyOneElement()) {
-      DCHECK(IsParsingFragmentOrTemplateContents());
-      return;
-    }
-    if (!frameset_ok_)
-      return;
-    tree_.OpenElements()->BodyElement()->remove(ASSERT_NO_EXCEPTION);
-    tree_.OpenElements()->PopUntil(tree_.OpenElements()->BodyElement());
-    tree_.OpenElements()->PopHTMLBodyElement();
-
-    // Note: in the fragment case the root is a DocumentFragment instead of
-    // a proper html element which is a quirk in Blink's implementation.
-    DCHECK(!IsParsingTemplateContents());
-    DCHECK(!IsParsingFragment() ||
-           To<DocumentFragment>(tree_.OpenElements()->TopNode()));
-    DCHECK(IsParsingFragment() ||
-           tree_.OpenElements()->Top() == tree_.OpenElements()->HtmlElement());
-    tree_.InsertHTMLElement(token);
-    SetInsertionMode(kInFramesetMode);
-    return;
-  }
-  if (token->GetName() == kAddressTag || token->GetName() == kArticleTag ||
-      token->GetName() == kAsideTag || token->GetName() == kBlockquoteTag ||
-      token->GetName() == kCenterTag || token->GetName() == kDetailsTag ||
-      token->GetName() == kDirTag || token->GetName() == kDivTag ||
-      token->GetName() == kDlTag || token->GetName() == kFieldsetTag ||
-      token->GetName() == kFigcaptionTag || token->GetName() == kFigureTag ||
-      token->GetName() == kFooterTag || token->GetName() == kHeaderTag ||
-      token->GetName() == kHgroupTag || token->GetName() == kMainTag ||
-      token->GetName() == kMenuTag || token->GetName() == kNavTag ||
-      token->GetName() == kOlTag || token->GetName() == kPTag ||
-      token->GetName() == kSectionTag || token->GetName() == kSummaryTag ||
-      token->GetName() == kUlTag) {
-    ProcessFakePEndTagIfPInButtonScope();
-    tree_.InsertHTMLElement(token);
-    return;
-  }
-  if (IsNumberedHeaderTag(token->GetName())) {
-    ProcessFakePEndTagIfPInButtonScope();
-    if (tree_.CurrentStackItem()->IsNumberedHeaderElement()) {
+    case HTMLTag::kBody:
       ParseError(token);
-      tree_.OpenElements()->Pop();
-    }
-    tree_.InsertHTMLElement(token);
-    return;
-  }
-  if (token->GetName() == kPreTag || token->GetName() == kListingTag) {
-    ProcessFakePEndTagIfPInButtonScope();
-    tree_.InsertHTMLElement(token);
-    should_skip_leading_newline_ = true;
-    frameset_ok_ = false;
-    return;
-  }
-  if (token->GetName() == kFormTag) {
-    if (tree_.IsFormElementPointerNonNull() && !IsParsingTemplateContents()) {
-      ParseError(token);
-      UseCounter::Count(tree_.CurrentNode()->GetDocument(),
-                        WebFeature::kHTMLParseErrorNestedForm);
-      return;
-    }
-    ProcessFakePEndTagIfPInButtonScope();
-    tree_.InsertHTMLFormElement(token);
-    return;
-  }
-  if (token->GetName() == kLiTag) {
-    ProcessCloseWhenNestedTag<IsLi>(token);
-    return;
-  }
-  if (token->GetName() == kDdTag || token->GetName() == kDtTag) {
-    ProcessCloseWhenNestedTag<IsDdOrDt>(token);
-    return;
-  }
-  if (token->GetName() == kPlaintextTag) {
-    ProcessFakePEndTagIfPInButtonScope();
-    tree_.InsertHTMLElement(token);
-    if (parser_->Tokenizer())
-      parser_->Tokenizer()->SetState(HTMLTokenizer::kPLAINTEXTState);
-    return;
-  }
-  if (token->GetName() == kButtonTag) {
-    if (tree_.OpenElements()->InScope(kButtonTag)) {
-      ParseError(token);
-      ProcessFakeEndTag(kButtonTag);
-      ProcessStartTag(token);  // FIXME: Could we just fall through here?
-      return;
-    }
-    tree_.ReconstructTheActiveFormattingElements();
-    tree_.InsertHTMLElement(token);
-    frameset_ok_ = false;
-    return;
-  }
-  if (token->GetName() == kATag) {
-    Element* active_a_tag =
-        tree_.ActiveFormattingElements()->ClosestElementInScopeWithName(
-            kATag.LocalName());
-    if (active_a_tag) {
-      ParseError(token);
-      ProcessFakeEndTag(kATag);
-      tree_.ActiveFormattingElements()->Remove(active_a_tag);
-      if (tree_.OpenElements()->Contains(active_a_tag))
-        tree_.OpenElements()->Remove(active_a_tag);
-    }
-    tree_.ReconstructTheActiveFormattingElements();
-    tree_.InsertFormattingElement(token);
-    return;
-  }
-  if (IsNonAnchorNonNobrFormattingTag(token->GetName())) {
-    tree_.ReconstructTheActiveFormattingElements();
-    tree_.InsertFormattingElement(token);
-    return;
-  }
-  if (token->GetName() == kNobrTag) {
-    tree_.ReconstructTheActiveFormattingElements();
-    if (tree_.OpenElements()->InScope(kNobrTag)) {
-      ParseError(token);
-      ProcessFakeEndTag(kNobrTag);
-      tree_.ReconstructTheActiveFormattingElements();
-    }
-    tree_.InsertFormattingElement(token);
-    return;
-  }
-  if (token->GetName() == kAppletTag || token->GetName() == kEmbedTag ||
-      token->GetName() == kObjectTag) {
-    if (!PluginContentIsAllowed(tree_.GetParserContentPolicy()))
-      return;
-  }
-  if (token->GetName() == kAppletTag || token->GetName() == kMarqueeTag ||
-      token->GetName() == kObjectTag) {
-    tree_.ReconstructTheActiveFormattingElements();
-    tree_.InsertHTMLElement(token);
-    tree_.ActiveFormattingElements()->AppendMarker();
-    frameset_ok_ = false;
-    return;
-  }
-  if (token->GetName() == kTableTag) {
-    if (!tree_.InQuirksMode() && tree_.OpenElements()->InButtonScope(kPTag))
-      ProcessFakeEndTag(kPTag);
-    tree_.InsertHTMLElement(token);
-    frameset_ok_ = false;
-    SetInsertionMode(kInTableMode);
-    return;
-  }
-  if (token->GetName() == kImageTag) {
-    ParseError(token);
-    // Apparently we're not supposed to ask.
-    token->SetName(kImgTag.LocalName());
-    // Note the fall through to the kImgTag handling below!
-  }
-  if (token->GetName() == kAreaTag || token->GetName() == kBrTag ||
-      token->GetName() == kEmbedTag || token->GetName() == kImgTag ||
-      token->GetName() == kKeygenTag || token->GetName() == kWbrTag) {
-    tree_.ReconstructTheActiveFormattingElements();
-    tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
-    frameset_ok_ = false;
-    return;
-  }
-  if (token->GetName() == kInputTag) {
-    // Per spec https://html.spec.whatwg.org/C/#parsing-main-inbody,
-    // section "A start tag whose tag name is "input""
-
-    Attribute* type_attribute = token->GetAttributeItem(kTypeAttr);
-    bool disable_frameset =
-        !type_attribute ||
-        !DeprecatedEqualIgnoringCase(type_attribute->Value(), "hidden");
-
-    tree_.ReconstructTheActiveFormattingElements();
-    tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
-
-    if (disable_frameset)
+      if (!tree_.OpenElements()->SecondElementIsHTMLBodyElement() ||
+          tree_.OpenElements()->HasOnlyOneElement() ||
+          tree_.OpenElements()->HasTemplateInHTMLScope()) {
+        DCHECK(IsParsingFragmentOrTemplateContents());
+        break;
+      }
       frameset_ok_ = false;
-    return;
-  }
-  if (token->GetName() == kParamTag || token->GetName() == kSourceTag ||
-      token->GetName() == kTrackTag) {
-    tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
-    return;
-  }
-  if (token->GetName() == kHrTag) {
-    ProcessFakePEndTagIfPInButtonScope();
-    tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
-    frameset_ok_ = false;
-    return;
-  }
-  if (token->GetName() == kTextareaTag) {
-    tree_.InsertHTMLElement(token);
-    should_skip_leading_newline_ = true;
-    if (parser_->Tokenizer())
-      parser_->Tokenizer()->SetState(HTMLTokenizer::kRCDATAState);
-    original_insertion_mode_ = insertion_mode_;
-    frameset_ok_ = false;
-    SetInsertionMode(kTextMode);
-    return;
-  }
-  if (token->GetName() == kXmpTag) {
-    ProcessFakePEndTagIfPInButtonScope();
-    tree_.ReconstructTheActiveFormattingElements();
-    frameset_ok_ = false;
-    ProcessGenericRawTextStartTag(token);
-    return;
-  }
-  if (token->GetName() == kIFrameTag) {
-    frameset_ok_ = false;
-    ProcessGenericRawTextStartTag(token);
-    return;
-  }
-  if (token->GetName() == kNoembedTag) {
-    ProcessGenericRawTextStartTag(token);
-    return;
-  }
-  if (token->GetName() == kNoscriptTag && options_.script_enabled) {
-    ProcessGenericRawTextStartTag(token);
-    return;
-  }
-  if (token->GetName() == kSelectTag) {
-    tree_.ReconstructTheActiveFormattingElements();
-    tree_.InsertHTMLElement(token);
-    frameset_ok_ = false;
-    if (insertion_mode_ == kInTableMode || insertion_mode_ == kInCaptionMode ||
-        insertion_mode_ == kInColumnGroupMode ||
-        insertion_mode_ == kInTableBodyMode || insertion_mode_ == kInRowMode ||
-        insertion_mode_ == kInCellMode)
-      SetInsertionMode(kInSelectInTableMode);
-    else
-      SetInsertionMode(kInSelectMode);
-    return;
-  }
-  if (token->GetName() == kOptgroupTag || token->GetName() == kOptionTag) {
-    if (tree_.CurrentStackItem()->HasTagName(kOptionTag)) {
-      AtomicHTMLToken end_option(HTMLToken::kEndTag, kOptionTag.LocalName());
-      ProcessEndTag(&end_option);
+      tree_.InsertHTMLBodyStartTagInBody(token);
+      break;
+    case HTMLTag::kFrameset:
+      ParseError(token);
+      if (!tree_.OpenElements()->SecondElementIsHTMLBodyElement() ||
+          tree_.OpenElements()->HasOnlyOneElement()) {
+        DCHECK(IsParsingFragmentOrTemplateContents());
+        break;
+      }
+      if (!frameset_ok_)
+        break;
+      tree_.OpenElements()->BodyElement()->remove(ASSERT_NO_EXCEPTION);
+      tree_.OpenElements()->PopUntil(tree_.OpenElements()->BodyElement());
+      tree_.OpenElements()->PopHTMLBodyElement();
+
+      // Note: in the fragment case the root is a DocumentFragment instead of
+      // a proper html element which is a quirk in Blink's implementation.
+      DCHECK(!IsParsingTemplateContents());
+      DCHECK(!IsParsingFragment() ||
+             To<DocumentFragment>(tree_.OpenElements()->TopNode()));
+      DCHECK(IsParsingFragment() || tree_.OpenElements()->Top() ==
+                                        tree_.OpenElements()->HtmlElement());
+      tree_.InsertHTMLElement(token);
+      SetInsertionMode(kInFramesetMode);
+      break;
+    case HTMLTag::kAddress:
+    case HTMLTag::kArticle:
+    case HTMLTag::kAside:
+    case HTMLTag::kBlockquote:
+    case HTMLTag::kCenter:
+    case HTMLTag::kDetails:
+    case HTMLTag::kDialog:
+    case HTMLTag::kDir:
+    case HTMLTag::kDiv:
+    case HTMLTag::kDl:
+    case HTMLTag::kFieldset:
+    case HTMLTag::kFigcaption:
+    case HTMLTag::kFigure:
+    case HTMLTag::kFooter:
+    case HTMLTag::kHeader:
+    case HTMLTag::kHgroup:
+    case HTMLTag::kMain:
+    case HTMLTag::kMenu:
+    case HTMLTag::kNav:
+    case HTMLTag::kOl:
+    case HTMLTag::kP:
+    case HTMLTag::kSection:
+    case HTMLTag::kSummary:
+    case HTMLTag::kUl:
+      // https://html.spec.whatwg.org/multipage/parsing.html#:~:text=A%20start%20tag%20whose%20tag%20name%20is%20one%20of%3A%20%22address%22%2C
+      ProcessFakePEndTagIfPInButtonScope();
+      tree_.InsertHTMLElement(token);
+      break;
+    case HTMLTag::kLi:
+      ProcessCloseWhenNestedTag<IsLi>(token);
+      break;
+    case HTMLTag::kInput: {
+      // Per spec https://html.spec.whatwg.org/C/#parsing-main-inbody,
+      // section "A start tag whose tag name is "input""
+
+      Attribute* type_attribute =
+          token->GetAttributeItem(html_names::kTypeAttr);
+      bool disable_frameset =
+          !type_attribute ||
+          !EqualIgnoringASCIICase(type_attribute->Value(), "hidden");
+
+      tree_.ReconstructTheActiveFormattingElements();
+      tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+
+      if (disable_frameset)
+        frameset_ok_ = false;
+      break;
     }
-    tree_.ReconstructTheActiveFormattingElements();
-    tree_.InsertHTMLElement(token);
-    return;
-  }
-  if (token->GetName() == kRbTag || token->GetName() == kRTCTag) {
-    if (tree_.OpenElements()->InScope(kRubyTag.LocalName())) {
-      tree_.GenerateImpliedEndTags();
-      if (!tree_.CurrentStackItem()->HasTagName(kRubyTag))
+    case HTMLTag::kButton:
+      if (tree_.OpenElements()->InScope(HTMLTag::kButton)) {
         ParseError(token);
-    }
-    tree_.InsertHTMLElement(token);
-    return;
-  }
-  if (token->GetName() == kRtTag || token->GetName() == kRpTag) {
-    if (tree_.OpenElements()->InScope(kRubyTag.LocalName())) {
-      tree_.GenerateImpliedEndTagsWithExclusion(kRTCTag.LocalName());
-      if (!tree_.CurrentStackItem()->HasTagName(kRubyTag) &&
-          !tree_.CurrentStackItem()->HasTagName(kRTCTag))
+        ProcessFakeEndTag(HTMLTag::kButton);
+        ProcessStartTag(token);  // FIXME: Could we just fall through here?
+        break;
+      }
+      tree_.ReconstructTheActiveFormattingElements();
+      tree_.InsertHTMLElement(token);
+      frameset_ok_ = false;
+      break;
+    case NUMBERED_HEADER_CASES:
+      ProcessFakePEndTagIfPInButtonScope();
+      if (tree_.CurrentStackItem()->IsNumberedHeaderElement()) {
         ParseError(token);
+        tree_.OpenElements()->Pop();
+      }
+      tree_.InsertHTMLElement(token);
+      break;
+    case HTMLTag::kListing:
+    case HTMLTag::kPre:
+      ProcessFakePEndTagIfPInButtonScope();
+      tree_.InsertHTMLElement(token);
+      should_skip_leading_newline_ = true;
+      frameset_ok_ = false;
+      break;
+    case HTMLTag::kForm:
+      if (tree_.IsFormElementPointerNonNull() && !IsParsingTemplateContents()) {
+        ParseError(token);
+        UseCounter::Count(tree_.CurrentNode()->GetDocument(),
+                          WebFeature::kHTMLParseErrorNestedForm);
+        break;
+      }
+      ProcessFakePEndTagIfPInButtonScope();
+      tree_.InsertHTMLFormElement(token);
+      break;
+    case HTMLTag::kDd:
+    case HTMLTag::kDt:
+      ProcessCloseWhenNestedTag<IsDdOrDt>(token);
+      break;
+    case HTMLTag::kPlaintext:
+      ProcessFakePEndTagIfPInButtonScope();
+      tree_.InsertHTMLElement(token);
+      token_producer_->SetTokenizerState(HTMLTokenizer::kPLAINTEXTState);
+      break;
+    case HTMLTag::kA: {
+      Element* active_a_tag =
+          tree_.ActiveFormattingElements()->ClosestElementInScopeWithName(
+              token->GetName());
+      if (active_a_tag) {
+        ParseError(token);
+        ProcessFakeEndTag(HTMLTag::kA);
+        tree_.ActiveFormattingElements()->Remove(active_a_tag);
+        if (tree_.OpenElements()->Contains(active_a_tag))
+          tree_.OpenElements()->Remove(active_a_tag);
+      }
+      tree_.ReconstructTheActiveFormattingElements();
+      tree_.InsertFormattingElement(token);
+      break;
     }
-    tree_.InsertHTMLElement(token);
-    return;
+    case HTMLTag::kB:
+    case HTMLTag::kBig:
+    case HTMLTag::kCode:
+    case HTMLTag::kEm:
+    case HTMLTag::kFont:
+    case HTMLTag::kI:
+    case HTMLTag::kS:
+    case HTMLTag::kSmall:
+    case HTMLTag::kStrike:
+    case HTMLTag::kStrong:
+    case HTMLTag::kTt:
+    case HTMLTag::kU:
+      tree_.ReconstructTheActiveFormattingElements();
+      tree_.InsertFormattingElement(token);
+      break;
+    case HTMLTag::kNobr:
+      tree_.ReconstructTheActiveFormattingElements();
+      if (tree_.OpenElements()->InScope(HTMLTag::kNobr)) {
+        ParseError(token);
+        ProcessFakeEndTag(HTMLTag::kNobr);
+        tree_.ReconstructTheActiveFormattingElements();
+      }
+      tree_.InsertFormattingElement(token);
+      break;
+    case HTMLTag::kApplet:
+    case HTMLTag::kObject:
+      if (!PluginContentIsAllowed(tree_.GetParserContentPolicy()))
+        break;
+      [[fallthrough]];
+    case HTMLTag::kMarquee:
+      tree_.ReconstructTheActiveFormattingElements();
+      tree_.InsertHTMLElement(token);
+      tree_.ActiveFormattingElements()->AppendMarker();
+      frameset_ok_ = false;
+      break;
+    case HTMLTag::kTable:
+      if (!tree_.InQuirksMode() &&
+          tree_.OpenElements()->InButtonScope(HTMLTag::kP))
+        ProcessFakeEndTag(HTMLTag::kP);
+      tree_.InsertHTMLElement(token);
+      frameset_ok_ = false;
+      SetInsertionMode(kInTableMode);
+      break;
+    case HTMLTag::kImage:
+      ParseError(token);
+      // Apparently we're not supposed to ask.
+      token->SetTokenName(HTMLTokenName(HTMLTag::kImg));
+      [[fallthrough]];
+    case HTMLTag::kArea:  // Includes kImgTag, thus the
+    case HTMLTag::kBr:    // fallthrough.
+    case HTMLTag::kEmbed:
+    case HTMLTag::kImg:
+    case HTMLTag::kKeygen:
+    case HTMLTag::kWbr:
+      if (token->GetHTMLTag() == HTMLTag::kEmbed &&
+          !PluginContentIsAllowed(tree_.GetParserContentPolicy())) {
+        break;
+      }
+      tree_.ReconstructTheActiveFormattingElements();
+      tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+      frameset_ok_ = false;
+      break;
+    case HTMLTag::kParam:
+    case HTMLTag::kSource:
+    case HTMLTag::kTrack:
+      tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+      break;
+    case HTMLTag::kHr:
+      ProcessFakePEndTagIfPInButtonScope();
+      tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+      frameset_ok_ = false;
+      break;
+    case HTMLTag::kTextarea:
+      tree_.InsertHTMLElement(token);
+      should_skip_leading_newline_ = true;
+      token_producer_->SetTokenizerState(HTMLTokenizer::kRCDATAState);
+      original_insertion_mode_ = insertion_mode_;
+      frameset_ok_ = false;
+      SetInsertionMode(kTextMode);
+      break;
+    case HTMLTag::kXmp:
+      ProcessFakePEndTagIfPInButtonScope();
+      tree_.ReconstructTheActiveFormattingElements();
+      frameset_ok_ = false;
+      ProcessGenericRawTextStartTag(token);
+      break;
+    case HTMLTag::kIFrame:
+      frameset_ok_ = false;
+      ProcessGenericRawTextStartTag(token);
+      break;
+    case HTMLTag::kNoembed:
+      ProcessGenericRawTextStartTag(token);
+      break;
+    case HTMLTag::kNoscript:
+      if (options_.scripting_flag) {
+        ProcessGenericRawTextStartTag(token);
+      } else {
+        tree_.ReconstructTheActiveFormattingElements();
+        tree_.InsertHTMLElement(token);
+      }
+      break;
+    case HTMLTag::kSelect:
+      tree_.ReconstructTheActiveFormattingElements();
+      tree_.InsertHTMLElement(token);
+      frameset_ok_ = false;
+      if (GetInsertionMode() == kInTableMode ||
+          GetInsertionMode() == kInCaptionMode ||
+          GetInsertionMode() == kInColumnGroupMode ||
+          GetInsertionMode() == kInTableBodyMode ||
+          GetInsertionMode() == kInRowMode || GetInsertionMode() == kInCellMode)
+        SetInsertionMode(kInSelectInTableMode);
+      else
+        SetInsertionMode(kInSelectMode);
+      break;
+    case HTMLTag::kOptgroup:
+    case HTMLTag::kOption:
+      if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kOption)) {
+        AtomicHTMLToken end_option(HTMLToken::kEndTag, HTMLTag::kOption);
+        ProcessEndTag(&end_option);
+      }
+      tree_.ReconstructTheActiveFormattingElements();
+      tree_.InsertHTMLElement(token);
+      break;
+    case HTMLTag::kRb:
+    case HTMLTag::kRTC:
+      if (tree_.OpenElements()->InScope(HTMLTag::kRuby)) {
+        tree_.GenerateImpliedEndTags();
+        if (!tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kRuby))
+          ParseError(token);
+      }
+      tree_.InsertHTMLElement(token);
+      break;
+    case HTMLTag::kRt:
+    case HTMLTag::kRp:
+      if (tree_.OpenElements()->InScope(HTMLTag::kRuby)) {
+        tree_.GenerateImpliedEndTagsWithExclusion(HTMLTokenName(HTMLTag::kRTC));
+        if (!tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kRuby) &&
+            !tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kRTC))
+          ParseError(token);
+      }
+      tree_.InsertHTMLElement(token);
+      break;
+    case HTMLTag::kCaption:
+    case HTMLTag::kCol:
+    case HTMLTag::kColgroup:
+    case HTMLTag::kFrame:
+    case HTMLTag::kHead:
+    case HTMLTag::kTbody:
+    case HTMLTag::kTfoot:
+    case HTMLTag::kThead:
+    case HTMLTag::kTh:
+    case HTMLTag::kTd:
+    case HTMLTag::kTr:
+      ParseError(token);
+      break;
+    default:
+      if (token->GetName() == mathml_names::kMathTag.LocalName()) {
+        tree_.ReconstructTheActiveFormattingElements();
+        AdjustMathMLAttributes(token);
+        AdjustForeignAttributes(token);
+        tree_.InsertForeignElement(token, mathml_names::kNamespaceURI);
+      } else if (token->GetName() == svg_names::kSVGTag.LocalName()) {
+        tree_.ReconstructTheActiveFormattingElements();
+        AdjustSVGAttributes(token);
+        AdjustForeignAttributes(token);
+        tree_.InsertForeignElement(token, svg_names::kNamespaceURI);
+      } else {
+        tree_.ReconstructTheActiveFormattingElements();
+        tree_.InsertHTMLElement(token);
+      }
+      break;
   }
-  if (token->GetName() == mathml_names::kMathTag.LocalName()) {
-    tree_.ReconstructTheActiveFormattingElements();
-    AdjustMathMLAttributes(token);
-    AdjustForeignAttributes(token);
-    tree_.InsertForeignElement(token, mathml_names::kNamespaceURI);
-    return;
-  }
-  if (token->GetName() == svg_names::kSVGTag.LocalName()) {
-    tree_.ReconstructTheActiveFormattingElements();
-    AdjustSVGAttributes(token);
-    AdjustForeignAttributes(token);
-    tree_.InsertForeignElement(token, svg_names::kNamespaceURI);
-    return;
-  }
-  if (IsCaptionColOrColgroupTag(token->GetName()) ||
-      token->GetName() == kFrameTag || token->GetName() == kHeadTag ||
-      IsTableBodyContextTag(token->GetName()) ||
-      IsTableCellContextTag(token->GetName()) || token->GetName() == kTrTag) {
-    ParseError(token);
-    return;
-  }
-  tree_.ReconstructTheActiveFormattingElements();
-  tree_.InsertHTMLElement(token);
 }
+
+namespace {
+DeclarativeShadowRootType DeclarativeShadowRootTypeFromToken(
+    AtomicHTMLToken* token,
+    const Document& document,
+    bool include_shadow_roots) {
+  Attribute* type_attribute =
+      token->GetAttributeItem(html_names::kShadowrootAttr);
+  if (!type_attribute)
+    return DeclarativeShadowRootType::kNone;
+
+  if (!include_shadow_roots) {
+    document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kOther,
+        mojom::blink::ConsoleMessageLevel::kWarning,
+        "Found declarative shadowroot attribute on a template, but declarative "
+        "Shadow DOM has not been enabled by includeShadowRoots."));
+    return DeclarativeShadowRootType::kNone;
+  }
+
+  String shadow_mode = type_attribute->Value();
+  if (EqualIgnoringASCIICase(shadow_mode, "open"))
+    return DeclarativeShadowRootType::kOpen;
+  if (EqualIgnoringASCIICase(shadow_mode, "closed"))
+    return DeclarativeShadowRootType::kClosed;
+
+  document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+      mojom::blink::ConsoleMessageSource::kOther,
+      mojom::blink::ConsoleMessageLevel::kWarning,
+      "Invalid declarative shadowroot attribute value \"" + shadow_mode +
+          "\". Valid values include \"open\" and \"closed\"."));
+  return DeclarativeShadowRootType::kNone;
+}
+}  // namespace
 
 void HTMLTreeBuilder::ProcessTemplateStartTag(AtomicHTMLToken* token) {
   tree_.ActiveFormattingElements()->AppendMarker();
-  tree_.InsertHTMLElement(token);
+  tree_.InsertHTMLTemplateElement(
+      token,
+      DeclarativeShadowRootTypeFromToken(
+          token, tree_.OwnerDocumentForCurrentNode(), include_shadow_roots_));
   frameset_ok_ = false;
   template_insertion_modes_.push_back(kTemplateContentsMode);
   SetInsertionMode(kTemplateContentsMode);
 }
 
 bool HTMLTreeBuilder::ProcessTemplateEndTag(AtomicHTMLToken* token) {
-  DCHECK_EQ(token->GetName(), kTemplateTag.LocalName());
+  DCHECK_EQ(token->GetName(), html_names::kTemplateTag.LocalName());
   if (!tree_.OpenElements()->HasTemplateInHTMLScope()) {
     DCHECK(template_insertion_modes_.IsEmpty() ||
            (template_insertion_modes_.size() == 1 &&
-            IsHTMLTemplateElement(fragment_context_.ContextElement())));
+            IsA<HTMLTemplateElement>(fragment_context_.ContextElement())));
     ParseError(token);
     return false;
   }
   tree_.GenerateImpliedEndTags();
-  if (!tree_.CurrentStackItem()->HasTagName(kTemplateTag))
+  if (!tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kTemplate))
     ParseError(token);
-  tree_.OpenElements()->PopUntilPopped(kTemplateTag);
+  tree_.OpenElements()->PopUntil(HTMLTag::kTemplate);
+  HTMLStackItem* template_stack_item =
+      tree_.OpenElements()->TopRecord()->StackItem();
+  tree_.OpenElements()->Pop();
+  HTMLStackItem* shadow_host_stack_item =
+      tree_.OpenElements()->TopRecord()->StackItem();
   tree_.ActiveFormattingElements()->ClearToLastMarker();
   template_insertion_modes_.pop_back();
   ResetInsertionModeAppropriately();
+  if (template_stack_item) {
+    DCHECK(template_stack_item->IsElementNode());
+    HTMLTemplateElement* template_element =
+        DynamicTo<HTMLTemplateElement>(template_stack_item->GetElement());
+    // 9. If the start tag for the declarative template element did not have an
+    // attribute with the name "shadowroot" whose value was an ASCII
+    // case-insensitive match for the strings "open" or "closed", then stop this
+    // algorithm.
+    if (template_element->IsDeclarativeShadowRoot()) {
+      if (shadow_host_stack_item->GetNode() ==
+          tree_.OpenElements()->RootNode()) {
+        // 10. If the adjusted current node is the topmost element in the stack
+        // of open elements, then stop this algorithm.
+        template_element->SetDeclarativeShadowRootType(
+            DeclarativeShadowRootType::kNone);
+      } else {
+        DCHECK(shadow_host_stack_item);
+        DCHECK(shadow_host_stack_item->IsElementNode());
+        bool delegates_focus = template_stack_item->GetAttributeItem(
+            html_names::kShadowrootdelegatesfocusAttr);
+        // TODO(crbug.com/1063157): Add an attribute for imperative slot
+        // assignment.
+        bool manual_slotting = false;
+        shadow_host_stack_item->GetElement()->AttachDeclarativeShadowRoot(
+            template_element,
+            template_element->GetDeclarativeShadowRootType() ==
+                    DeclarativeShadowRootType::kOpen
+                ? ShadowRootType::kOpen
+                : ShadowRootType::kClosed,
+            delegates_focus ? FocusDelegation::kDelegateFocus
+                            : FocusDelegation::kNone,
+            manual_slotting ? SlotAssignmentMode::kManual
+                            : SlotAssignmentMode::kNamed);
+      }
+    }
+  }
   return true;
 }
 
 bool HTMLTreeBuilder::ProcessEndOfFileForInTemplateContents(
     AtomicHTMLToken* token) {
-  AtomicHTMLToken end_template(HTMLToken::kEndTag, kTemplateTag.LocalName());
+  AtomicHTMLToken end_template(HTMLToken::kEndTag, HTMLTag::kTemplate);
   if (!ProcessTemplateEndTag(&end_template))
     return false;
 
@@ -889,7 +1046,7 @@ bool HTMLTreeBuilder::ProcessEndOfFileForInTemplateContents(
 
 bool HTMLTreeBuilder::ProcessColgroupEndTagForInColumnGroup() {
   if (tree_.CurrentIsRootNode() ||
-      IsHTMLTemplateElement(*tree_.CurrentNode())) {
+      IsA<HTMLTemplateElement>(*tree_.CurrentNode())) {
     DCHECK(IsParsingFragmentOrTemplateContents());
     // FIXME: parse error
     return false;
@@ -911,83 +1068,85 @@ HTMLStackItem* HTMLTreeBuilder::AdjustedCurrentStackItem() const {
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/tokenization.html#close-the-cell
 void HTMLTreeBuilder::CloseTheCell() {
   DCHECK_EQ(GetInsertionMode(), kInCellMode);
-  if (tree_.OpenElements()->InTableScope(kTdTag)) {
-    DCHECK(!tree_.OpenElements()->InTableScope(kThTag));
-    ProcessFakeEndTag(kTdTag);
+  if (tree_.OpenElements()->InTableScope(HTMLTag::kTd)) {
+    DCHECK(!tree_.OpenElements()->InTableScope(HTMLTag::kTh));
+    ProcessFakeEndTag(HTMLTag::kTd);
     return;
   }
-  DCHECK(tree_.OpenElements()->InTableScope(kThTag));
-  ProcessFakeEndTag(kThTag);
+  DCHECK(tree_.OpenElements()->InTableScope(HTMLTag::kTh));
+  ProcessFakeEndTag(HTMLTag::kTh);
   DCHECK_EQ(GetInsertionMode(), kInRowMode);
 }
 
 void HTMLTreeBuilder::ProcessStartTagForInTable(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kStartTag);
-  if (token->GetName() == kCaptionTag) {
-    tree_.OpenElements()->PopUntilTableScopeMarker();
-    tree_.ActiveFormattingElements()->AppendMarker();
-    tree_.InsertHTMLElement(token);
-    SetInsertionMode(kInCaptionMode);
-    return;
-  }
-  if (token->GetName() == kColgroupTag) {
-    tree_.OpenElements()->PopUntilTableScopeMarker();
-    tree_.InsertHTMLElement(token);
-    SetInsertionMode(kInColumnGroupMode);
-    return;
-  }
-  if (token->GetName() == kColTag) {
-    ProcessFakeStartTag(kColgroupTag);
-    DCHECK(kInColumnGroupMode);
-    ProcessStartTag(token);
-    return;
-  }
-  if (IsTableBodyContextTag(token->GetName())) {
-    tree_.OpenElements()->PopUntilTableScopeMarker();
-    tree_.InsertHTMLElement(token);
-    SetInsertionMode(kInTableBodyMode);
-    return;
-  }
-  if (IsTableCellContextTag(token->GetName()) || token->GetName() == kTrTag) {
-    ProcessFakeStartTag(kTbodyTag);
-    DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
-    ProcessStartTag(token);
-    return;
-  }
-  if (token->GetName() == kTableTag) {
-    ParseError(token);
-    if (!ProcessTableEndTagForInTable()) {
-      DCHECK(IsParsingFragmentOrTemplateContents());
+  switch (token->GetHTMLTag()) {
+    case HTMLTag::kCaption:
+      tree_.OpenElements()->PopUntilTableScopeMarker();
+      tree_.ActiveFormattingElements()->AppendMarker();
+      tree_.InsertHTMLElement(token);
+      SetInsertionMode(kInCaptionMode);
       return;
-    }
-    ProcessStartTag(token);
-    return;
-  }
-  if (token->GetName() == kStyleTag || token->GetName() == kScriptTag) {
-    ProcessStartTagForInHead(token);
-    return;
-  }
-  if (token->GetName() == kInputTag) {
-    Attribute* type_attribute = token->GetAttributeItem(kTypeAttr);
-    if (type_attribute &&
-        DeprecatedEqualIgnoringCase(type_attribute->Value(), "hidden")) {
+    case HTMLTag::kColgroup:
+      tree_.OpenElements()->PopUntilTableScopeMarker();
+      tree_.InsertHTMLElement(token);
+      SetInsertionMode(kInColumnGroupMode);
+      return;
+    case HTMLTag::kCol:
+      ProcessFakeStartTag(HTMLTag::kColgroup);
+      DCHECK(kInColumnGroupMode);
+      ProcessStartTag(token);
+      return;
+    case HTMLTag::kTbody:
+    case HTMLTag::kTfoot:
+    case HTMLTag::kThead:
+      tree_.OpenElements()->PopUntilTableScopeMarker();
+      tree_.InsertHTMLElement(token);
+      SetInsertionMode(kInTableBodyMode);
+      return;
+    case HTMLTag::kTd:
+    case HTMLTag::kTh:
+    case HTMLTag::kTr:
+      ProcessFakeStartTag(HTMLTag::kTbody);
+      DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
+      ProcessStartTag(token);
+      return;
+    case HTMLTag::kTable:
       ParseError(token);
-      tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+      if (!ProcessTableEndTagForInTable()) {
+        DCHECK(IsParsingFragmentOrTemplateContents());
+        return;
+      }
+      ProcessStartTag(token);
       return;
+    case HTMLTag::kStyle:
+    case HTMLTag::kScript:
+      ProcessStartTagForInHead(token);
+      return;
+    case HTMLTag::kInput: {
+      Attribute* type_attribute =
+          token->GetAttributeItem(html_names::kTypeAttr);
+      if (type_attribute &&
+          EqualIgnoringASCIICase(type_attribute->Value(), "hidden")) {
+        ParseError(token);
+        tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+        return;
+      }
+      // break to hit "anything else" case.
+      break;
     }
-    // Fall through to "anything else" case.
-  }
-  if (token->GetName() == kFormTag) {
-    ParseError(token);
-    if (tree_.IsFormElementPointerNonNull() && !IsParsingTemplateContents())
+    case HTMLTag::kForm:
+      ParseError(token);
+      if (tree_.IsFormElementPointerNonNull() && !IsParsingTemplateContents())
+        return;
+      tree_.InsertHTMLFormElement(token, true);
+      tree_.OpenElements()->Pop();
       return;
-    tree_.InsertHTMLFormElement(token, true);
-    tree_.OpenElements()->Pop();
-    return;
-  }
-  if (token->GetName() == kTemplateTag) {
-    ProcessTemplateStartTag(token);
-    return;
+    case HTMLTag::kTemplate:
+      ProcessTemplateStartTag(token);
+      return;
+    default:
+      break;
   }
   ParseError(token);
   HTMLConstructionSite::RedirectToFosterParentGuard redirecter(tree_);
@@ -996,111 +1155,117 @@ void HTMLTreeBuilder::ProcessStartTagForInTable(AtomicHTMLToken* token) {
 
 void HTMLTreeBuilder::ProcessStartTag(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kStartTag);
+  const HTMLTag tag = token->GetHTMLTag();
   switch (GetInsertionMode()) {
     case kInitialMode:
-      DCHECK_EQ(GetInsertionMode(), kInitialMode);
       DefaultForInitial();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kBeforeHTMLMode:
       DCHECK_EQ(GetInsertionMode(), kBeforeHTMLMode);
-      if (token->GetName() == kHTMLTag) {
+      if (tag == HTMLTag::kHTML) {
         tree_.InsertHTMLHtmlStartTagBeforeHTML(token);
         SetInsertionMode(kBeforeHeadMode);
         return;
       }
       DefaultForBeforeHTML();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kBeforeHeadMode:
       DCHECK_EQ(GetInsertionMode(), kBeforeHeadMode);
-      if (token->GetName() == kHTMLTag) {
+      if (tag == HTMLTag::kHTML) {
         ProcessHtmlStartTagForInBody(token);
         return;
       }
-      if (token->GetName() == kHeadTag) {
+      if (tag == HTMLTag::kHead) {
         tree_.InsertHTMLHeadElement(token);
         SetInsertionMode(kInHeadMode);
         return;
       }
       DefaultForBeforeHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kInHeadMode:
       DCHECK_EQ(GetInsertionMode(), kInHeadMode);
       if (ProcessStartTagForInHead(token))
         return;
       DefaultForInHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kAfterHeadMode:
       DCHECK_EQ(GetInsertionMode(), kAfterHeadMode);
-      if (token->GetName() == kHTMLTag) {
-        ProcessHtmlStartTagForInBody(token);
-        return;
-      }
-      if (token->GetName() == kBodyTag) {
-        frameset_ok_ = false;
-        tree_.InsertHTMLBodyElement(token);
-        SetInsertionMode(kInBodyMode);
-        return;
-      }
-      if (token->GetName() == kFramesetTag) {
-        tree_.InsertHTMLElement(token);
-        SetInsertionMode(kInFramesetMode);
-        return;
-      }
-      if (token->GetName() == kBaseTag || token->GetName() == kBasefontTag ||
-          token->GetName() == kBgsoundTag || token->GetName() == kLinkTag ||
-          token->GetName() == kMetaTag || token->GetName() == kNoframesTag ||
-          token->GetName() == kScriptTag || token->GetName() == kStyleTag ||
-          token->GetName() == kTemplateTag || token->GetName() == kTitleTag) {
-        ParseError(token);
-        DCHECK(tree_.Head());
-        tree_.OpenElements()->PushHTMLHeadElement(tree_.HeadStackItem());
-        ProcessStartTagForInHead(token);
-        tree_.OpenElements()->RemoveHTMLHeadElement(tree_.Head());
-        return;
-      }
-      if (token->GetName() == kHeadTag) {
-        ParseError(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kHTML:
+          ProcessHtmlStartTagForInBody(token);
+          return;
+        case HTMLTag::kBody:
+          frameset_ok_ = false;
+          tree_.InsertHTMLBodyElement(token);
+          SetInsertionMode(kInBodyMode);
+          return;
+        case HTMLTag::kFrameset:
+          tree_.InsertHTMLElement(token);
+          SetInsertionMode(kInFramesetMode);
+          return;
+        case HTMLTag::kBase:
+        case HTMLTag::kBasefont:
+        case HTMLTag::kBgsound:
+        case HTMLTag::kLink:
+        case HTMLTag::kMeta:
+        case HTMLTag::kNoframes:
+        case HTMLTag::kScript:
+        case HTMLTag::kStyle:
+        case HTMLTag::kTemplate:
+        case HTMLTag::kTitle:
+          ParseError(token);
+          DCHECK(tree_.Head());
+          tree_.OpenElements()->PushHTMLHeadElement(tree_.HeadStackItem());
+          ProcessStartTagForInHead(token);
+          tree_.OpenElements()->RemoveHTMLHeadElement(tree_.Head());
+          return;
+        case HTMLTag::kHead:
+          ParseError(token);
+          return;
+        default:
+          break;
       }
       DefaultForAfterHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kInBodyMode:
       DCHECK_EQ(GetInsertionMode(), kInBodyMode);
       ProcessStartTagForInBody(token);
       break;
+
     case kInTableMode:
-      DCHECK_EQ(GetInsertionMode(), kInTableMode);
       ProcessStartTagForInTable(token);
       break;
     case kInCaptionMode:
-      DCHECK_EQ(GetInsertionMode(), kInCaptionMode);
-      if (IsCaptionColOrColgroupTag(token->GetName()) ||
-          IsTableBodyContextTag(token->GetName()) ||
-          IsTableCellContextTag(token->GetName()) ||
-          token->GetName() == kTrTag) {
-        ParseError(token);
-        if (!ProcessCaptionEndTagForInCaption()) {
-          DCHECK(IsParsingFragment());
+      switch (tag) {
+        case CAPTION_COL_OR_COLGROUP_CASES:
+        case TABLE_BODY_CONTEXT_CASES:
+        case TABLE_CELL_CONTEXT_CASES:
+        case HTMLTag::kTr:
+          ParseError(token);
+          if (!ProcessCaptionEndTagForInCaption()) {
+            DCHECK(IsParsingFragment());
+            return;
+          }
+          ProcessStartTag(token);
           return;
-        }
-        ProcessStartTag(token);
-        return;
+        default:
+          break;
       }
       ProcessStartTagForInBody(token);
       break;
     case kInColumnGroupMode:
-      DCHECK_EQ(GetInsertionMode(), kInColumnGroupMode);
-      if (token->GetName() == kHTMLTag) {
-        ProcessHtmlStartTagForInBody(token);
-        return;
-      }
-      if (token->GetName() == kColTag) {
-        tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
-        return;
-      }
-      if (token->GetName() == kTemplateTag) {
-        ProcessTemplateStartTag(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kHTML:
+          ProcessHtmlStartTagForInBody(token);
+          return;
+        case HTMLTag::kCol:
+          tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+          return;
+        case HTMLTag::kTemplate:
+          ProcessTemplateStartTag(token);
+          return;
+        default:
+          break;
       }
       if (!ProcessColgroupEndTagForInColumnGroup()) {
         DCHECK(IsParsingFragmentOrTemplateContents());
@@ -1109,85 +1274,86 @@ void HTMLTreeBuilder::ProcessStartTag(AtomicHTMLToken* token) {
       ProcessStartTag(token);
       break;
     case kInTableBodyMode:
-      DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
-      if (token->GetName() == kTrTag) {
-        // How is there ever anything to pop?
-        tree_.OpenElements()->PopUntilTableBodyScopeMarker();
-        tree_.InsertHTMLElement(token);
-        SetInsertionMode(kInRowMode);
-        return;
-      }
-      if (IsTableCellContextTag(token->GetName())) {
-        ParseError(token);
-        ProcessFakeStartTag(kTrTag);
-        DCHECK_EQ(GetInsertionMode(), kInRowMode);
-        ProcessStartTag(token);
-        return;
-      }
-      if (IsCaptionColOrColgroupTag(token->GetName()) ||
-          IsTableBodyContextTag(token->GetName())) {
-        // FIXME: This is slow.
-        if (!tree_.OpenElements()->InTableScope(kTbodyTag) &&
-            !tree_.OpenElements()->InTableScope(kTheadTag) &&
-            !tree_.OpenElements()->InTableScope(kTfootTag)) {
-          DCHECK(IsParsingFragmentOrTemplateContents());
-          ParseError(token);
+      switch (tag) {
+        case HTMLTag::kTr:
+          // How is there ever anything to pop?
+          tree_.OpenElements()->PopUntilTableBodyScopeMarker();
+          tree_.InsertHTMLElement(token);
+          SetInsertionMode(kInRowMode);
           return;
-        }
-        tree_.OpenElements()->PopUntilTableBodyScopeMarker();
-        DCHECK(IsTableBodyContextTag(tree_.CurrentStackItem()->LocalName()));
-        ProcessFakeEndTag(tree_.CurrentStackItem()->LocalName());
-        ProcessStartTag(token);
-        return;
+        case TABLE_CELL_CONTEXT_CASES:
+          ParseError(token);
+          ProcessFakeStartTag(HTMLTag::kTr);
+          DCHECK_EQ(GetInsertionMode(), kInRowMode);
+          ProcessStartTag(token);
+          return;
+        case CAPTION_COL_OR_COLGROUP_CASES:
+        case TABLE_BODY_CONTEXT_CASES:
+          // FIXME: This is slow.
+          if (!tree_.OpenElements()->InTableScope(HTMLTag::kTbody) &&
+              !tree_.OpenElements()->InTableScope(HTMLTag::kThead) &&
+              !tree_.OpenElements()->InTableScope(HTMLTag::kTfoot)) {
+            DCHECK(IsParsingFragmentOrTemplateContents());
+            ParseError(token);
+            return;
+          }
+          tree_.OpenElements()->PopUntilTableBodyScopeMarker();
+          DCHECK(IsTableBodyContextTag(tree_.CurrentStackItem()->GetHTMLTag()));
+          ProcessFakeEndTag(*tree_.CurrentStackItem());
+          ProcessStartTag(token);
+          return;
+        default:
+          break;
       }
       ProcessStartTagForInTable(token);
       break;
     case kInRowMode:
-      DCHECK_EQ(GetInsertionMode(), kInRowMode);
-      if (IsTableCellContextTag(token->GetName())) {
-        tree_.OpenElements()->PopUntilTableRowScopeMarker();
-        tree_.InsertHTMLElement(token);
-        SetInsertionMode(kInCellMode);
-        tree_.ActiveFormattingElements()->AppendMarker();
-        return;
-      }
-      if (token->GetName() == kTrTag ||
-          IsCaptionColOrColgroupTag(token->GetName()) ||
-          IsTableBodyContextTag(token->GetName())) {
-        if (!ProcessTrEndTagForInRow()) {
-          DCHECK(IsParsingFragmentOrTemplateContents());
+      switch (tag) {
+        case TABLE_CELL_CONTEXT_CASES:
+          tree_.OpenElements()->PopUntilTableRowScopeMarker();
+          tree_.InsertHTMLElement(token);
+          SetInsertionMode(kInCellMode);
+          tree_.ActiveFormattingElements()->AppendMarker();
           return;
-        }
-        DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
-        ProcessStartTag(token);
-        return;
+        case HTMLTag::kTr:
+        case CAPTION_COL_OR_COLGROUP_CASES:
+        case TABLE_BODY_CONTEXT_CASES:
+          if (!ProcessTrEndTagForInRow()) {
+            DCHECK(IsParsingFragmentOrTemplateContents());
+            return;
+          }
+          DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
+          ProcessStartTag(token);
+          return;
+        default:
+          break;
       }
       ProcessStartTagForInTable(token);
       break;
     case kInCellMode:
-      DCHECK_EQ(GetInsertionMode(), kInCellMode);
-      if (IsCaptionColOrColgroupTag(token->GetName()) ||
-          IsTableCellContextTag(token->GetName()) ||
-          token->GetName() == kTrTag ||
-          IsTableBodyContextTag(token->GetName())) {
-        // FIXME: This could be more efficient.
-        if (!tree_.OpenElements()->InTableScope(kTdTag) &&
-            !tree_.OpenElements()->InTableScope(kThTag)) {
-          DCHECK(IsParsingFragment());
-          ParseError(token);
+      switch (tag) {
+        case CAPTION_COL_OR_COLGROUP_CASES:
+        case TABLE_CELL_CONTEXT_CASES:
+        case HTMLTag::kTr:
+        case TABLE_BODY_CONTEXT_CASES:
+          // FIXME: This could be more efficient.
+          if (!tree_.OpenElements()->InTableScope(HTMLTag::kTd) &&
+              !tree_.OpenElements()->InTableScope(HTMLTag::kTh)) {
+            DCHECK(IsParsingFragment());
+            ParseError(token);
+            return;
+          }
+          CloseTheCell();
+          ProcessStartTag(token);
           return;
-        }
-        CloseTheCell();
-        ProcessStartTag(token);
-        return;
+        default:
+          break;
       }
       ProcessStartTagForInBody(token);
       break;
     case kAfterBodyMode:
     case kAfterAfterBodyMode:
-      DCHECK(GetInsertionMode() == kAfterBodyMode ||
-             GetInsertionMode() == kAfterAfterBodyMode);
-      if (token->GetName() == kHTMLTag) {
+      if (tag == HTMLTag::kHTML) {
         ProcessHtmlStartTagForInBody(token);
         return;
       }
@@ -1195,128 +1361,130 @@ void HTMLTreeBuilder::ProcessStartTag(AtomicHTMLToken* token) {
       ProcessStartTag(token);
       break;
     case kInHeadNoscriptMode:
-      DCHECK_EQ(GetInsertionMode(), kInHeadNoscriptMode);
-      if (token->GetName() == kHTMLTag) {
-        ProcessHtmlStartTagForInBody(token);
-        return;
-      }
-      if (token->GetName() == kBasefontTag || token->GetName() == kBgsoundTag ||
-          token->GetName() == kLinkTag || token->GetName() == kMetaTag ||
-          token->GetName() == kNoframesTag || token->GetName() == kStyleTag) {
-        bool did_process = ProcessStartTagForInHead(token);
-        DCHECK(did_process);
-        return;
-      }
-      if (token->GetName() == kHTMLTag || token->GetName() == kNoscriptTag) {
-        ParseError(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kHTML:
+          ProcessHtmlStartTagForInBody(token);
+          return;
+        case HTMLTag::kBasefont:
+        case HTMLTag::kBgsound:
+        case HTMLTag::kLink:
+        case HTMLTag::kMeta:
+        case HTMLTag::kNoframes:
+        case HTMLTag::kStyle: {
+          bool did_process = ProcessStartTagForInHead(token);
+          DCHECK(did_process);
+          return;
+        }
+        case HTMLTag::kNoscript:
+          ParseError(token);
+          return;
+        default:
+          break;
       }
       DefaultForInHeadNoscript();
       ProcessToken(token);
       break;
     case kInFramesetMode:
-      DCHECK_EQ(GetInsertionMode(), kInFramesetMode);
-      if (token->GetName() == kHTMLTag) {
-        ProcessHtmlStartTagForInBody(token);
-        return;
-      }
-      if (token->GetName() == kFramesetTag) {
-        tree_.InsertHTMLElement(token);
-        return;
-      }
-      if (token->GetName() == kFrameTag) {
-        tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
-        return;
-      }
-      if (token->GetName() == kNoframesTag) {
-        ProcessStartTagForInHead(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kHTML:
+          ProcessHtmlStartTagForInBody(token);
+          return;
+        case HTMLTag::kFrameset:
+          tree_.InsertHTMLElement(token);
+          return;
+        case HTMLTag::kFrame:
+          tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+          return;
+        case HTMLTag::kNoframes:
+          ProcessStartTagForInHead(token);
+          return;
+        default:
+          break;
       }
       ParseError(token);
       break;
     case kAfterFramesetMode:
     case kAfterAfterFramesetMode:
-      DCHECK(GetInsertionMode() == kAfterFramesetMode ||
-             GetInsertionMode() == kAfterAfterFramesetMode);
-      if (token->GetName() == kHTMLTag) {
+      if (tag == HTMLTag::kHTML) {
         ProcessHtmlStartTagForInBody(token);
         return;
       }
-      if (token->GetName() == kNoframesTag) {
+      if (tag == HTMLTag::kNoframes) {
         ProcessStartTagForInHead(token);
         return;
       }
       ParseError(token);
       break;
     case kInSelectInTableMode:
-      DCHECK_EQ(GetInsertionMode(), kInSelectInTableMode);
-      if (token->GetName() == kCaptionTag || token->GetName() == kTableTag ||
-          IsTableBodyContextTag(token->GetName()) ||
-          token->GetName() == kTrTag ||
-          IsTableCellContextTag(token->GetName())) {
-        ParseError(token);
-        AtomicHTMLToken end_select(HTMLToken::kEndTag, kSelectTag.LocalName());
-        ProcessEndTag(&end_select);
-        ProcessStartTag(token);
-        return;
-      }
-      FALLTHROUGH;
-    case kInSelectMode:
-      DCHECK(GetInsertionMode() == kInSelectMode ||
-             GetInsertionMode() == kInSelectInTableMode);
-      if (token->GetName() == kHTMLTag) {
-        ProcessHtmlStartTagForInBody(token);
-        return;
-      }
-      if (token->GetName() == kOptionTag) {
-        if (tree_.CurrentStackItem()->HasTagName(kOptionTag)) {
-          AtomicHTMLToken end_option(HTMLToken::kEndTag,
-                                     kOptionTag.LocalName());
-          ProcessEndTag(&end_option);
-        }
-        tree_.InsertHTMLElement(token);
-        return;
-      }
-      if (token->GetName() == kOptgroupTag) {
-        if (tree_.CurrentStackItem()->HasTagName(kOptionTag)) {
-          AtomicHTMLToken end_option(HTMLToken::kEndTag,
-                                     kOptionTag.LocalName());
-          ProcessEndTag(&end_option);
-        }
-        if (tree_.CurrentStackItem()->HasTagName(kOptgroupTag)) {
-          AtomicHTMLToken end_optgroup(HTMLToken::kEndTag,
-                                       kOptgroupTag.LocalName());
-          ProcessEndTag(&end_optgroup);
-        }
-        tree_.InsertHTMLElement(token);
-        return;
-      }
-      if (token->GetName() == kSelectTag) {
-        ParseError(token);
-        AtomicHTMLToken end_select(HTMLToken::kEndTag, kSelectTag.LocalName());
-        ProcessEndTag(&end_select);
-        return;
-      }
-      if (token->GetName() == kInputTag || token->GetName() == kKeygenTag ||
-          token->GetName() == kTextareaTag) {
-        ParseError(token);
-        if (!tree_.OpenElements()->InSelectScope(kSelectTag)) {
-          DCHECK(IsParsingFragment());
+      switch (tag) {
+        case HTMLTag::kCaption:
+        case HTMLTag::kTable:
+        case TABLE_BODY_CONTEXT_CASES:
+        case HTMLTag::kTr:
+        case TABLE_CELL_CONTEXT_CASES: {
+          ParseError(token);
+          AtomicHTMLToken end_select(HTMLToken::kEndTag, HTMLTag::kSelect);
+          ProcessEndTag(&end_select);
+          ProcessStartTag(token);
           return;
         }
-        AtomicHTMLToken end_select(HTMLToken::kEndTag, kSelectTag.LocalName());
-        ProcessEndTag(&end_select);
-        ProcessStartTag(token);
-        return;
+        default:
+          break;
       }
-      if (token->GetName() == kScriptTag) {
-        bool did_process = ProcessStartTagForInHead(token);
-        DCHECK(did_process);
-        return;
-      }
-      if (token->GetName() == kTemplateTag) {
-        ProcessTemplateStartTag(token);
-        return;
+      [[fallthrough]];
+    case kInSelectMode:
+      switch (tag) {
+        case HTMLTag::kHTML:
+          ProcessHtmlStartTagForInBody(token);
+          return;
+        case HTMLTag::kOption:
+          if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kOption)) {
+            AtomicHTMLToken end_option(HTMLToken::kEndTag, HTMLTag::kOption);
+            ProcessEndTag(&end_option);
+          }
+          tree_.InsertHTMLElement(token);
+          return;
+        case HTMLTag::kOptgroup:
+          if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kOption)) {
+            AtomicHTMLToken end_option(HTMLToken::kEndTag, HTMLTag::kOption);
+            ProcessEndTag(&end_option);
+          }
+          if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kOptgroup)) {
+            AtomicHTMLToken end_optgroup(HTMLToken::kEndTag,
+                                         HTMLTag::kOptgroup);
+            ProcessEndTag(&end_optgroup);
+          }
+          tree_.InsertHTMLElement(token);
+          return;
+        case HTMLTag::kSelect: {
+          ParseError(token);
+          AtomicHTMLToken end_select(HTMLToken::kEndTag, HTMLTag::kSelect);
+          ProcessEndTag(&end_select);
+          return;
+        }
+        case HTMLTag::kInput:
+        case HTMLTag::kKeygen:
+        case HTMLTag::kTextarea: {
+          ParseError(token);
+          if (!tree_.OpenElements()->InSelectScope(HTMLTag::kSelect)) {
+            DCHECK(IsParsingFragment());
+            return;
+          }
+          AtomicHTMLToken end_select(HTMLToken::kEndTag, HTMLTag::kSelect);
+          ProcessEndTag(&end_select);
+          ProcessStartTag(token);
+          return;
+        }
+        case HTMLTag::kScript: {
+          bool did_process = ProcessStartTagForInHead(token);
+          DCHECK(did_process);
+          return;
+        }
+        case HTMLTag::kTemplate:
+          ProcessTemplateStartTag(token);
+          return;
+        default:
+          break;
       }
       break;
     case kInTableTextMode:
@@ -1327,29 +1495,40 @@ void HTMLTreeBuilder::ProcessStartTag(AtomicHTMLToken* token) {
       NOTREACHED();
       break;
     case kTemplateContentsMode:
-      if (token->GetName() == kTemplateTag) {
-        ProcessTemplateStartTag(token);
-        return;
-      }
-
-      if (token->GetName() == kLinkTag || token->GetName() == kScriptTag ||
-          token->GetName() == kStyleTag || token->GetName() == kMetaTag) {
-        ProcessStartTagForInHead(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kTemplate:
+          ProcessTemplateStartTag(token);
+          return;
+        case HTMLTag::kLink:
+        case HTMLTag::kScript:
+        case HTMLTag::kStyle:
+        case HTMLTag::kMeta:
+          ProcessStartTagForInHead(token);
+          return;
+        default:
+          break;
       }
 
       InsertionMode insertion_mode = kTemplateContentsMode;
-      if (token->GetName() == kColTag)
-        insertion_mode = kInColumnGroupMode;
-      else if (IsCaptionColOrColgroupTag(token->GetName()) ||
-               IsTableBodyContextTag(token->GetName()))
-        insertion_mode = kInTableMode;
-      else if (token->GetName() == kTrTag)
-        insertion_mode = kInTableBodyMode;
-      else if (IsTableCellContextTag(token->GetName()))
-        insertion_mode = kInRowMode;
-      else
-        insertion_mode = kInBodyMode;
+      switch (tag) {
+        case HTMLTag::kCol:
+          insertion_mode = kInColumnGroupMode;
+          break;
+        case HTMLTag::kCaption:
+        case HTMLTag::kColgroup:
+        case TABLE_BODY_CONTEXT_CASES:
+          insertion_mode = kInTableMode;
+          break;
+        case HTMLTag::kTr:
+          insertion_mode = kInTableBodyMode;
+          break;
+        case TABLE_CELL_CONTEXT_CASES:
+          insertion_mode = kInRowMode;
+          break;
+        default:
+          insertion_mode = kInBodyMode;
+          break;
+      }
 
       DCHECK_NE(insertion_mode, kTemplateContentsMode);
       DCHECK_EQ(template_insertion_modes_.back(), kTemplateContentsMode);
@@ -1372,13 +1551,13 @@ void HTMLTreeBuilder::ProcessHtmlStartTagForInBody(AtomicHTMLToken* token) {
 
 bool HTMLTreeBuilder::ProcessBodyEndTagForInBody(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kEndTag);
-  DCHECK(token->GetName() == kBodyTag);
-  if (!tree_.OpenElements()->InScope(kBodyTag.LocalName())) {
+  DCHECK_EQ(token->GetHTMLTag(), HTMLTag::kBody);
+  if (!tree_.OpenElements()->InScope(HTMLTag::kBody)) {
     ParseError(token);
     return false;
   }
   // Emit a more specific parse error based on stack contents.
-  DVLOG(1) << "Not implmeneted.";
+  DVLOG(1) << "Not implemented.";
   SetInsertionMode(kAfterBodyMode);
   return true;
 }
@@ -1386,11 +1565,11 @@ bool HTMLTreeBuilder::ProcessBodyEndTagForInBody(AtomicHTMLToken* token) {
 void HTMLTreeBuilder::ProcessAnyOtherEndTagForInBody(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kEndTag);
   HTMLElementStack::ElementRecord* record = tree_.OpenElements()->TopRecord();
-  while (1) {
+  while (true) {
     HTMLStackItem* item = record->StackItem();
-    if (item->MatchesHTMLTag(token->GetName())) {
-      tree_.GenerateImpliedEndTagsWithExclusion(token->GetName());
-      if (!tree_.CurrentStackItem()->MatchesHTMLTag(token->GetName()))
+    if (item->MatchesHTMLTag(token->GetTokenName())) {
+      tree_.GenerateImpliedEndTagsWithExclusion(token->GetTokenName());
+      if (!tree_.CurrentStackItem()->MatchesHTMLTag(token->GetTokenName()))
         ParseError(token);
       tree_.OpenElements()->PopUntilPopped(item->GetElement());
       return;
@@ -1408,13 +1587,26 @@ void HTMLTreeBuilder::CallTheAdoptionAgency(AtomicHTMLToken* token) {
   // The adoption agency algorithm is N^2. We limit the number of iterations
   // to stop from hanging the whole browser. This limit is specified in the
   // adoption agency algorithm:
-  // http://www.whatwg.org/specs/web-apps/current-work/multipage/tree-construction.html#parsing-main-inbody
+  // https://html.spec.whatwg.org/multipage/parsing.html#adoption-agency-algorithm
   static const int kOuterIterationLimit = 8;
   static const int kInnerIterationLimit = 3;
+
+  // 2. If the current node is an HTML element whose tag name is subject,
+  // and the current node is not in the list of active formatting elements,
+  // then pop the current node off the stack of open elements and return.
+  if (!tree_.IsEmpty() && tree_.CurrentStackItem()->IsElementNode() &&
+      tree_.CurrentElement()->HasLocalName(token->GetName()) &&
+      !tree_.ActiveFormattingElements()->Contains(tree_.CurrentElement())) {
+    tree_.OpenElements()->Pop();
+    return;
+  }
 
   // 1, 2, 3 and 16 are covered by the for() loop.
   for (int i = 0; i < kOuterIterationLimit; ++i) {
     // 4.
+    // ClosestElementInScopeWithName() returns null for non-html tags.
+    if (!token->IsValidHTMLTag())
+      return ProcessAnyOtherEndTagForInBody(token);
     Element* formatting_element =
         tree_.ActiveFormattingElements()->ClosestElementInScopeWithName(
             token->GetName());
@@ -1518,58 +1710,62 @@ void HTMLTreeBuilder::ResetInsertionModeAppropriately() {
   bool last = false;
   HTMLElementStack::ElementRecord* node_record =
       tree_.OpenElements()->TopRecord();
-  while (1) {
+  while (true) {
     HTMLStackItem* item = node_record->StackItem();
     if (item->GetNode() == tree_.OpenElements()->RootNode()) {
       last = true;
       if (IsParsingFragment())
         item = fragment_context_.ContextElementStackItem();
     }
-    if (item->HasTagName(kTemplateTag))
-      return SetInsertionMode(template_insertion_modes_.back());
-    if (item->HasTagName(kSelectTag)) {
-      if (!last) {
-        while (item->GetNode() != tree_.OpenElements()->RootNode() &&
-               !item->HasTagName(kTemplateTag)) {
-          node_record = node_record->Next();
-          item = node_record->StackItem();
-          if (item->HasTagName(kTableTag))
-            return SetInsertionMode(kInSelectInTableMode);
-        }
-      }
-      return SetInsertionMode(kInSelectMode);
-    }
-    if (item->HasTagName(kTdTag) || item->HasTagName(kThTag))
-      return SetInsertionMode(kInCellMode);
-    if (item->HasTagName(kTrTag))
-      return SetInsertionMode(kInRowMode);
-    if (item->HasTagName(kTbodyTag) || item->HasTagName(kTheadTag) ||
-        item->HasTagName(kTfootTag))
-      return SetInsertionMode(kInTableBodyMode);
-    if (item->HasTagName(kCaptionTag))
-      return SetInsertionMode(kInCaptionMode);
-    if (item->HasTagName(kColgroupTag)) {
-      return SetInsertionMode(kInColumnGroupMode);
-    }
-    if (item->HasTagName(kTableTag))
-      return SetInsertionMode(kInTableMode);
-    if (item->HasTagName(kHeadTag)) {
-      if (!fragment_context_.Fragment() ||
-          fragment_context_.ContextElement() != item->GetNode())
-        return SetInsertionMode(kInHeadMode);
-      return SetInsertionMode(kInBodyMode);
-    }
-    if (item->HasTagName(kBodyTag))
-      return SetInsertionMode(kInBodyMode);
-    if (item->HasTagName(kFramesetTag)) {
-      return SetInsertionMode(kInFramesetMode);
-    }
-    if (item->HasTagName(kHTMLTag)) {
-      if (tree_.HeadStackItem())
-        return SetInsertionMode(kAfterHeadMode);
+    const HTMLTag tag = item->GetHTMLTag();
+    if (item->IsHTMLNamespace()) {
+      switch (tag) {
+        case HTMLTag::kTemplate:
+          return SetInsertionMode(template_insertion_modes_.back());
+        case HTMLTag::kSelect:
+          if (!last) {
+            while (item->GetNode() != tree_.OpenElements()->RootNode() &&
+                   !item->MatchesHTMLTag(HTMLTag::kTemplate)) {
+              node_record = node_record->Next();
+              item = node_record->StackItem();
+              if (item->MatchesHTMLTag(HTMLTag::kTable))
+                return SetInsertionMode(kInSelectInTableMode);
+            }
+          }
+          return SetInsertionMode(kInSelectMode);
+        case HTMLTag::kTd:
+        case HTMLTag::kTh:
+          return SetInsertionMode(kInCellMode);
+        case HTMLTag::kTr:
+          return SetInsertionMode(kInRowMode);
+        case HTMLTag::kTbody:
+        case HTMLTag::kThead:
+        case HTMLTag::kTfoot:
+          return SetInsertionMode(kInTableBodyMode);
+        case HTMLTag::kCaption:
+          return SetInsertionMode(kInCaptionMode);
+        case HTMLTag::kColgroup:
+          return SetInsertionMode(kInColumnGroupMode);
+        case HTMLTag::kTable:
+          return SetInsertionMode(kInTableMode);
+        case HTMLTag::kHead:
+          if (!fragment_context_.Fragment() ||
+              fragment_context_.ContextElement() != item->GetNode())
+            return SetInsertionMode(kInHeadMode);
+          return SetInsertionMode(kInBodyMode);
+        case HTMLTag::kBody:
+          return SetInsertionMode(kInBodyMode);
+        case HTMLTag::kFrameset:
+          return SetInsertionMode(kInFramesetMode);
+        case HTMLTag::kHTML:
+          if (tree_.HeadStackItem())
+            return SetInsertionMode(kAfterHeadMode);
 
-      DCHECK(IsParsingFragment());
-      return SetInsertionMode(kBeforeHeadMode);
+          DCHECK(IsParsingFragment());
+          return SetInsertionMode(kBeforeHeadMode);
+        default:
+          break;
+      }
     }
     if (last) {
       DCHECK(IsParsingFragment());
@@ -1581,284 +1777,328 @@ void HTMLTreeBuilder::ResetInsertionModeAppropriately() {
 
 void HTMLTreeBuilder::ProcessEndTagForInTableBody(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kEndTag);
-  if (IsTableBodyContextTag(token->GetName())) {
-    if (!tree_.OpenElements()->InTableScope(token->GetName())) {
+  const HTMLTag tag = token->GetHTMLTag();
+  switch (tag) {
+    case TABLE_BODY_CONTEXT_CASES:
+      if (!tree_.OpenElements()->InTableScope(tag)) {
+        ParseError(token);
+        return;
+      }
+      tree_.OpenElements()->PopUntilTableBodyScopeMarker();
+      tree_.OpenElements()->Pop();
+      SetInsertionMode(kInTableMode);
+      return;
+    case HTMLTag::kTable:
+      // FIXME: This is slow.
+      if (!tree_.OpenElements()->InTableScope(HTMLTag::kTbody) &&
+          !tree_.OpenElements()->InTableScope(HTMLTag::kThead) &&
+          !tree_.OpenElements()->InTableScope(HTMLTag::kTfoot)) {
+        DCHECK(IsParsingFragmentOrTemplateContents());
+        ParseError(token);
+        return;
+      }
+      tree_.OpenElements()->PopUntilTableBodyScopeMarker();
+      DCHECK(IsTableBodyContextTag(tree_.CurrentStackItem()->GetHTMLTag()));
+      ProcessFakeEndTag(*tree_.CurrentStackItem());
+      ProcessEndTag(token);
+      return;
+    case HTMLTag::kBody:
+    case CAPTION_COL_OR_COLGROUP_CASES:
+    case HTMLTag::kHTML:
+    case TABLE_CELL_CONTEXT_CASES:
+    case HTMLTag::kTr:
       ParseError(token);
       return;
-    }
-    tree_.OpenElements()->PopUntilTableBodyScopeMarker();
-    tree_.OpenElements()->Pop();
-    SetInsertionMode(kInTableMode);
-    return;
-  }
-  if (token->GetName() == kTableTag) {
-    // FIXME: This is slow.
-    if (!tree_.OpenElements()->InTableScope(kTbodyTag) &&
-        !tree_.OpenElements()->InTableScope(kTheadTag) &&
-        !tree_.OpenElements()->InTableScope(kTfootTag)) {
-      DCHECK(IsParsingFragmentOrTemplateContents());
-      ParseError(token);
-      return;
-    }
-    tree_.OpenElements()->PopUntilTableBodyScopeMarker();
-    DCHECK(IsTableBodyContextTag(tree_.CurrentStackItem()->LocalName()));
-    ProcessFakeEndTag(tree_.CurrentStackItem()->LocalName());
-    ProcessEndTag(token);
-    return;
-  }
-  if (token->GetName() == kBodyTag ||
-      IsCaptionColOrColgroupTag(token->GetName()) ||
-      token->GetName() == kHTMLTag || IsTableCellContextTag(token->GetName()) ||
-      token->GetName() == kTrTag) {
-    ParseError(token);
-    return;
+    default:
+      break;
   }
   ProcessEndTagForInTable(token);
 }
 
 void HTMLTreeBuilder::ProcessEndTagForInRow(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kEndTag);
-  if (token->GetName() == kTrTag) {
-    ProcessTrEndTagForInRow();
-    return;
-  }
-  if (token->GetName() == kTableTag) {
-    if (!ProcessTrEndTagForInRow()) {
-      DCHECK(IsParsingFragmentOrTemplateContents());
+  const HTMLTag tag = token->GetHTMLTag();
+  switch (tag) {
+    case HTMLTag::kTr:
+      ProcessTrEndTagForInRow();
       return;
-    }
-    DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
-    ProcessEndTag(token);
-    return;
-  }
-  if (IsTableBodyContextTag(token->GetName())) {
-    if (!tree_.OpenElements()->InTableScope(token->GetName())) {
+    case HTMLTag::kTable:
+      if (!ProcessTrEndTagForInRow()) {
+        DCHECK(IsParsingFragmentOrTemplateContents());
+        return;
+      }
+      DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
+      ProcessEndTag(token);
+      return;
+    case TABLE_BODY_CONTEXT_CASES:
+      if (!tree_.OpenElements()->InTableScope(tag)) {
+        ParseError(token);
+        return;
+      }
+      ProcessFakeEndTag(HTMLTag::kTr);
+      DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
+      ProcessEndTag(token);
+      return;
+    case HTMLTag::kBody:
+    case CAPTION_COL_OR_COLGROUP_CASES:
+    case HTMLTag::kHTML:
+    case TABLE_CELL_CONTEXT_CASES:
       ParseError(token);
       return;
-    }
-    ProcessFakeEndTag(kTrTag);
-    DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
-    ProcessEndTag(token);
-    return;
-  }
-  if (token->GetName() == kBodyTag ||
-      IsCaptionColOrColgroupTag(token->GetName()) ||
-      token->GetName() == kHTMLTag || IsTableCellContextTag(token->GetName())) {
-    ParseError(token);
-    return;
+    default:
+      break;
   }
   ProcessEndTagForInTable(token);
 }
 
 void HTMLTreeBuilder::ProcessEndTagForInCell(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kEndTag);
-  if (IsTableCellContextTag(token->GetName())) {
-    if (!tree_.OpenElements()->InTableScope(token->GetName())) {
+  const HTMLTag tag = token->GetHTMLTag();
+  switch (tag) {
+    case TABLE_CELL_CONTEXT_CASES:
+      if (!tree_.OpenElements()->InTableScope(tag)) {
+        ParseError(token);
+        return;
+      }
+      tree_.GenerateImpliedEndTags();
+      if (!tree_.CurrentStackItem()->MatchesHTMLTag(tag))
+        ParseError(token);
+      tree_.OpenElements()->PopUntilPopped(tag);
+      tree_.ActiveFormattingElements()->ClearToLastMarker();
+      SetInsertionMode(kInRowMode);
+      return;
+    case HTMLTag::kBody:
+    case CAPTION_COL_OR_COLGROUP_CASES:
+    case HTMLTag::kHTML:
       ParseError(token);
       return;
-    }
-    tree_.GenerateImpliedEndTags();
-    if (!tree_.CurrentStackItem()->MatchesHTMLTag(token->GetName()))
-      ParseError(token);
-    tree_.OpenElements()->PopUntilPopped(token->GetName());
-    tree_.ActiveFormattingElements()->ClearToLastMarker();
-    SetInsertionMode(kInRowMode);
-    return;
-  }
-  if (token->GetName() == kBodyTag ||
-      IsCaptionColOrColgroupTag(token->GetName()) ||
-      token->GetName() == kHTMLTag) {
-    ParseError(token);
-    return;
-  }
-  if (token->GetName() == kTableTag || token->GetName() == kTrTag ||
-      IsTableBodyContextTag(token->GetName())) {
-    if (!tree_.OpenElements()->InTableScope(token->GetName())) {
-      DCHECK(IsTableBodyContextTag(token->GetName()) ||
-             tree_.OpenElements()->InTableScope(kTemplateTag) ||
-             IsParsingFragment());
-      ParseError(token);
+    case HTMLTag::kTable:
+    case HTMLTag::kTr:
+    case TABLE_BODY_CONTEXT_CASES:
+      if (!tree_.OpenElements()->InTableScope(tag)) {
+        DCHECK(IsTableBodyContextTag(tag) ||
+               tree_.OpenElements()->InTableScope(HTMLTag::kTemplate) ||
+               IsParsingFragment());
+        ParseError(token);
+        return;
+      }
+      CloseTheCell();
+      ProcessEndTag(token);
       return;
-    }
-    CloseTheCell();
-    ProcessEndTag(token);
-    return;
+    default:
+      break;
   }
   ProcessEndTagForInBody(token);
 }
 
 void HTMLTreeBuilder::ProcessEndTagForInBody(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kEndTag);
-  if (token->GetName() == kBodyTag) {
-    ProcessBodyEndTagForInBody(token);
-    return;
-  }
-  if (token->GetName() == kHTMLTag) {
-    AtomicHTMLToken end_body(HTMLToken::kEndTag, kBodyTag.LocalName());
-    if (ProcessBodyEndTagForInBody(&end_body))
-      ProcessEndTag(token);
-    return;
-  }
-  if (token->GetName() == kAddressTag || token->GetName() == kArticleTag ||
-      token->GetName() == kAsideTag || token->GetName() == kBlockquoteTag ||
-      token->GetName() == kButtonTag || token->GetName() == kCenterTag ||
-      token->GetName() == kDetailsTag || token->GetName() == kDirTag ||
-      token->GetName() == kDivTag || token->GetName() == kDlTag ||
-      token->GetName() == kFieldsetTag || token->GetName() == kFigcaptionTag ||
-      token->GetName() == kFigureTag || token->GetName() == kFooterTag ||
-      token->GetName() == kHeaderTag || token->GetName() == kHgroupTag ||
-      token->GetName() == kListingTag || token->GetName() == kMainTag ||
-      token->GetName() == kMenuTag || token->GetName() == kNavTag ||
-      token->GetName() == kOlTag || token->GetName() == kPreTag ||
-      token->GetName() == kSectionTag || token->GetName() == kSummaryTag ||
-      token->GetName() == kUlTag) {
-    if (!tree_.OpenElements()->InScope(token->GetName())) {
-      ParseError(token);
+  const HTMLTag tag = token->GetHTMLTag();
+  switch (tag) {
+    case HTMLTag::kBody:
+      ProcessBodyEndTagForInBody(token);
+      return;
+    case HTMLTag::kHTML: {
+      AtomicHTMLToken end_body(HTMLToken::kEndTag, HTMLTag::kBody);
+      if (ProcessBodyEndTagForInBody(&end_body))
+        ProcessEndTag(token);
       return;
     }
-    tree_.GenerateImpliedEndTags();
-    if (!tree_.CurrentStackItem()->MatchesHTMLTag(token->GetName()))
-      ParseError(token);
-    tree_.OpenElements()->PopUntilPopped(token->GetName());
-    return;
-  }
-  if (token->GetName() == kFormTag && !IsParsingTemplateContents()) {
-    Element* node = tree_.TakeForm();
-    if (!node || !tree_.OpenElements()->InScope(node)) {
-      ParseError(token);
+      // https://html.spec.whatwg.org/multipage/parsing.html#:~:text=An%20end%20tag%20whose%20tag%20name%20is%20one%20of%3A%20%22address%22%2C
+    case HTMLTag::kAddress:
+    case HTMLTag::kArticle:
+    case HTMLTag::kAside:
+    case HTMLTag::kBlockquote:
+    case HTMLTag::kButton:
+    case HTMLTag::kCenter:
+    case HTMLTag::kDetails:
+    case HTMLTag::kDialog:
+    case HTMLTag::kDir:
+    case HTMLTag::kDiv:
+    case HTMLTag::kDl:
+    case HTMLTag::kFieldset:
+    case HTMLTag::kFigcaption:
+    case HTMLTag::kFigure:
+    case HTMLTag::kFooter:
+    case HTMLTag::kHeader:
+    case HTMLTag::kHgroup:
+    case HTMLTag::kListing:
+    case HTMLTag::kMain:
+    case HTMLTag::kMenu:
+    case HTMLTag::kNav:
+    case HTMLTag::kOl:
+    case HTMLTag::kPre:
+    case HTMLTag::kSection:
+    case HTMLTag::kSummary:
+    case HTMLTag::kUl:
+      if (!tree_.OpenElements()->InScope(tag)) {
+        ParseError(token);
+        return;
+      }
+      tree_.GenerateImpliedEndTags();
+      if (!tree_.CurrentStackItem()->MatchesHTMLTag(tag))
+        ParseError(token);
+      tree_.OpenElements()->PopUntilPopped(tag);
       return;
-    }
-    tree_.GenerateImpliedEndTags();
-    if (tree_.CurrentElement() != node)
-      ParseError(token);
-    tree_.OpenElements()->Remove(node);
-  }
-  if (token->GetName() == kPTag) {
-    if (!tree_.OpenElements()->InButtonScope(token->GetName())) {
-      ParseError(token);
-      ProcessFakeStartTag(kPTag);
-      DCHECK(tree_.OpenElements()->InScope(token->GetName()));
-      ProcessEndTag(token);
+    case HTMLTag::kForm:
+      if (!IsParsingTemplateContents()) {
+        Element* node = tree_.TakeForm();
+        if (!node || !tree_.OpenElements()->InScope(node)) {
+          ParseError(token);
+          return;
+        }
+        tree_.GenerateImpliedEndTags();
+        if (tree_.CurrentElement() != node)
+          ParseError(token);
+        tree_.OpenElements()->Remove(node);
+      }
+      break;
+    case HTMLTag::kP:
+      if (!tree_.OpenElements()->InButtonScope(tag)) {
+        ParseError(token);
+        ProcessFakeStartTag(HTMLTag::kP);
+        DCHECK(tree_.OpenElements()->InScope(tag));
+        ProcessEndTag(token);
+        return;
+      }
+      tree_.GenerateImpliedEndTagsWithExclusion(token->GetTokenName());
+      if (!tree_.CurrentStackItem()->MatchesHTMLTag(tag))
+        ParseError(token);
+      tree_.OpenElements()->PopUntilPopped(tag);
       return;
-    }
-    tree_.GenerateImpliedEndTagsWithExclusion(token->GetName());
-    if (!tree_.CurrentStackItem()->MatchesHTMLTag(token->GetName()))
-      ParseError(token);
-    tree_.OpenElements()->PopUntilPopped(token->GetName());
-    return;
-  }
-  if (token->GetName() == kLiTag) {
-    if (!tree_.OpenElements()->InListItemScope(token->GetName())) {
-      ParseError(token);
+    case HTMLTag::kLi:
+      if (!tree_.OpenElements()->InListItemScope(tag)) {
+        ParseError(token);
+        return;
+      }
+      tree_.GenerateImpliedEndTagsWithExclusion(token->GetTokenName());
+      if (!tree_.CurrentStackItem()->MatchesHTMLTag(tag))
+        ParseError(token);
+      tree_.OpenElements()->PopUntilPopped(tag);
       return;
-    }
-    tree_.GenerateImpliedEndTagsWithExclusion(token->GetName());
-    if (!tree_.CurrentStackItem()->MatchesHTMLTag(token->GetName()))
-      ParseError(token);
-    tree_.OpenElements()->PopUntilPopped(token->GetName());
-    return;
-  }
-  if (token->GetName() == kDdTag || token->GetName() == kDtTag) {
-    if (!tree_.OpenElements()->InScope(token->GetName())) {
-      ParseError(token);
+    case HTMLTag::kDd:
+    case HTMLTag::kDt:
+      if (!tree_.OpenElements()->InScope(tag)) {
+        ParseError(token);
+        return;
+      }
+      tree_.GenerateImpliedEndTagsWithExclusion(token->GetTokenName());
+      if (!tree_.CurrentStackItem()->MatchesHTMLTag(tag))
+        ParseError(token);
+      tree_.OpenElements()->PopUntilPopped(tag);
       return;
-    }
-    tree_.GenerateImpliedEndTagsWithExclusion(token->GetName());
-    if (!tree_.CurrentStackItem()->MatchesHTMLTag(token->GetName()))
-      ParseError(token);
-    tree_.OpenElements()->PopUntilPopped(token->GetName());
-    return;
-  }
-  if (IsNumberedHeaderTag(token->GetName())) {
-    if (!tree_.OpenElements()->HasNumberedHeaderElementInScope()) {
-      ParseError(token);
+    case HTMLTag::kH1:
+    case HTMLTag::kH2:
+    case HTMLTag::kH3:
+    case HTMLTag::kH4:
+    case HTMLTag::kH5:
+    case HTMLTag::kH6:
+      if (!tree_.OpenElements()->HasNumberedHeaderElementInScope()) {
+        ParseError(token);
+        return;
+      }
+      tree_.GenerateImpliedEndTags();
+      if (!tree_.CurrentStackItem()->MatchesHTMLTag(tag))
+        ParseError(token);
+      tree_.OpenElements()->PopUntilNumberedHeaderElementPopped();
       return;
-    }
-    tree_.GenerateImpliedEndTags();
-    if (!tree_.CurrentStackItem()->MatchesHTMLTag(token->GetName()))
-      ParseError(token);
-    tree_.OpenElements()->PopUntilNumberedHeaderElementPopped();
-    return;
-  }
-  if (IsFormattingTag(token->GetName())) {
-    CallTheAdoptionAgency(token);
-    return;
-  }
-  if (token->GetName() == kAppletTag || token->GetName() == kMarqueeTag ||
-      token->GetName() == kObjectTag) {
-    if (!tree_.OpenElements()->InScope(token->GetName())) {
-      ParseError(token);
+    case HTMLTag::kA:
+    case HTMLTag::kNobr:
+    case HTMLTag::kB:
+    case HTMLTag::kBig:
+    case HTMLTag::kCode:
+    case HTMLTag::kEm:
+    case HTMLTag::kFont:
+    case HTMLTag::kI:
+    case HTMLTag::kS:
+    case HTMLTag::kSmall:
+    case HTMLTag::kStrike:
+    case HTMLTag::kStrong:
+    case HTMLTag::kTt:
+    case HTMLTag::kU:
+      CallTheAdoptionAgency(token);
       return;
-    }
-    tree_.GenerateImpliedEndTags();
-    if (!tree_.CurrentStackItem()->MatchesHTMLTag(token->GetName()))
+    case HTMLTag::kApplet:
+    case HTMLTag::kMarquee:
+    case HTMLTag::kObject:
+      if (!tree_.OpenElements()->InScope(tag)) {
+        ParseError(token);
+        return;
+      }
+      tree_.GenerateImpliedEndTags();
+      if (!tree_.CurrentStackItem()->MatchesHTMLTag(tag))
+        ParseError(token);
+      tree_.OpenElements()->PopUntilPopped(tag);
+      tree_.ActiveFormattingElements()->ClearToLastMarker();
+      return;
+    case HTMLTag::kBr:
       ParseError(token);
-    tree_.OpenElements()->PopUntilPopped(token->GetName());
-    tree_.ActiveFormattingElements()->ClearToLastMarker();
-    return;
-  }
-  if (token->GetName() == kBrTag) {
-    ParseError(token);
-    ProcessFakeStartTag(kBrTag);
-    return;
-  }
-  if (token->GetName() == kTemplateTag) {
-    ProcessTemplateEndTag(token);
-    return;
+      ProcessFakeStartTag(HTMLTag::kBr);
+      return;
+    case HTMLTag::kTemplate:
+      ProcessTemplateEndTag(token);
+      return;
+    default:
+      break;
   }
   ProcessAnyOtherEndTagForInBody(token);
 }
 
 bool HTMLTreeBuilder::ProcessCaptionEndTagForInCaption() {
-  if (!tree_.OpenElements()->InTableScope(kCaptionTag.LocalName())) {
+  if (!tree_.OpenElements()->InTableScope(HTMLTag::kCaption)) {
     DCHECK(IsParsingFragment());
     // FIXME: parse error
     return false;
   }
   tree_.GenerateImpliedEndTags();
-  // FIXME: parse error if (!tree_.CurrentStackItem()->HasTagName(kCaptionTag))
-  tree_.OpenElements()->PopUntilPopped(kCaptionTag.LocalName());
+  // FIXME: parse error if
+  // (!tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kCaption))
+  tree_.OpenElements()->PopUntilPopped(HTMLTag::kCaption);
   tree_.ActiveFormattingElements()->ClearToLastMarker();
   SetInsertionMode(kInTableMode);
   return true;
 }
 
 bool HTMLTreeBuilder::ProcessTrEndTagForInRow() {
-  if (!tree_.OpenElements()->InTableScope(kTrTag)) {
+  if (!tree_.OpenElements()->InTableScope(HTMLTag::kTr)) {
     DCHECK(IsParsingFragmentOrTemplateContents());
     // FIXME: parse error
     return false;
   }
   tree_.OpenElements()->PopUntilTableRowScopeMarker();
-  DCHECK(tree_.CurrentStackItem()->HasTagName(kTrTag));
+  DCHECK(tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kTr));
   tree_.OpenElements()->Pop();
   SetInsertionMode(kInTableBodyMode);
   return true;
 }
 
 bool HTMLTreeBuilder::ProcessTableEndTagForInTable() {
-  if (!tree_.OpenElements()->InTableScope(kTableTag)) {
+  if (!tree_.OpenElements()->InTableScope(HTMLTag::kTable)) {
     DCHECK(IsParsingFragmentOrTemplateContents());
     // FIXME: parse error.
     return false;
   }
-  tree_.OpenElements()->PopUntilPopped(kTableTag.LocalName());
+  tree_.OpenElements()->PopUntilPopped(HTMLTag::kTable);
   ResetInsertionModeAppropriately();
   return true;
 }
 
 void HTMLTreeBuilder::ProcessEndTagForInTable(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kEndTag);
-  if (token->GetName() == kTableTag) {
-    ProcessTableEndTagForInTable();
-    return;
-  }
-  if (token->GetName() == kBodyTag ||
-      IsCaptionColOrColgroupTag(token->GetName()) ||
-      token->GetName() == kHTMLTag || IsTableBodyContextTag(token->GetName()) ||
-      IsTableCellContextTag(token->GetName()) || token->GetName() == kTrTag) {
-    ParseError(token);
-    return;
+  switch (token->GetHTMLTag()) {
+    case HTMLTag::kTable:
+      ProcessTableEndTagForInTable();
+      return;
+    case HTMLTag::kBody:
+    case CAPTION_COL_OR_COLGROUP_CASES:
+    case HTMLTag::kHTML:
+    case TABLE_BODY_CONTEXT_CASES:
+    case TABLE_CELL_CONTEXT_CASES:
+    case HTMLTag::kTr:
+      ParseError(token);
+      return;
+    default:
+      break;
   }
   ParseError(token);
   // Is this redirection necessary here?
@@ -1868,106 +2108,118 @@ void HTMLTreeBuilder::ProcessEndTagForInTable(AtomicHTMLToken* token) {
 
 void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kEndTag);
+  const HTMLTag tag = token->GetHTMLTag();
   switch (GetInsertionMode()) {
     case kInitialMode:
-      DCHECK_EQ(GetInsertionMode(), kInitialMode);
       DefaultForInitial();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kBeforeHTMLMode:
-      DCHECK_EQ(GetInsertionMode(), kBeforeHTMLMode);
-      if (token->GetName() != kHeadTag && token->GetName() != kBodyTag &&
-          token->GetName() != kHTMLTag && token->GetName() != kBrTag) {
-        ParseError(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kHead:
+        case HTMLTag::kBody:
+        case HTMLTag::kHTML:
+        case HTMLTag::kBr:
+          break;
+        default:
+          ParseError(token);
+          return;
       }
       DefaultForBeforeHTML();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kBeforeHeadMode:
-      DCHECK_EQ(GetInsertionMode(), kBeforeHeadMode);
-      if (token->GetName() != kHeadTag && token->GetName() != kBodyTag &&
-          token->GetName() != kHTMLTag && token->GetName() != kBrTag) {
-        ParseError(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kHead:
+        case HTMLTag::kBody:
+        case HTMLTag::kHTML:
+        case HTMLTag::kBr:
+          break;
+        default:
+          ParseError(token);
+          return;
       }
       DefaultForBeforeHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kInHeadMode:
-      DCHECK_EQ(GetInsertionMode(), kInHeadMode);
       // FIXME: This case should be broken out into processEndTagForInHead,
       // because other end tag cases now refer to it ("process the token for
       // using the rules of the "in head" insertion mode"). but because the
       // logic falls through to AfterHeadMode, that gets a little messy.
-      if (token->GetName() == kTemplateTag) {
-        ProcessTemplateEndTag(token);
-        return;
-      }
-      if (token->GetName() == kHeadTag) {
-        tree_.OpenElements()->PopHTMLHeadElement();
-        SetInsertionMode(kAfterHeadMode);
-        return;
-      }
-      if (token->GetName() != kBodyTag && token->GetName() != kHTMLTag &&
-          token->GetName() != kBrTag) {
-        ParseError(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kTemplate:
+          ProcessTemplateEndTag(token);
+          return;
+        case HTMLTag::kHead:
+          tree_.OpenElements()->PopHTMLHeadElement();
+          SetInsertionMode(kAfterHeadMode);
+          return;
+        case HTMLTag::kBody:
+        case HTMLTag::kHTML:
+        case HTMLTag::kBr:
+          break;
+        default:
+          ParseError(token);
+          return;
       }
       DefaultForInHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kAfterHeadMode:
-      DCHECK_EQ(GetInsertionMode(), kAfterHeadMode);
-      if (token->GetName() != kBodyTag && token->GetName() != kHTMLTag &&
-          token->GetName() != kBrTag) {
-        ParseError(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kBody:
+        case HTMLTag::kHTML:
+        case HTMLTag::kBr:
+          break;
+        default:
+          ParseError(token);
+          return;
       }
       DefaultForAfterHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kInBodyMode:
-      DCHECK_EQ(GetInsertionMode(), kInBodyMode);
       ProcessEndTagForInBody(token);
       break;
     case kInTableMode:
-      DCHECK_EQ(GetInsertionMode(), kInTableMode);
       ProcessEndTagForInTable(token);
       break;
     case kInCaptionMode:
-      DCHECK_EQ(GetInsertionMode(), kInCaptionMode);
-      if (token->GetName() == kCaptionTag) {
-        ProcessCaptionEndTagForInCaption();
-        return;
-      }
-      if (token->GetName() == kTableTag) {
-        ParseError(token);
-        if (!ProcessCaptionEndTagForInCaption()) {
-          DCHECK(IsParsingFragment());
+      switch (tag) {
+        case HTMLTag::kCaption:
+          ProcessCaptionEndTagForInCaption();
           return;
-        }
-        ProcessEndTag(token);
-        return;
-      }
-      if (token->GetName() == kBodyTag || token->GetName() == kColTag ||
-          token->GetName() == kColgroupTag || token->GetName() == kHTMLTag ||
-          IsTableBodyContextTag(token->GetName()) ||
-          IsTableCellContextTag(token->GetName()) ||
-          token->GetName() == kTrTag) {
-        ParseError(token);
-        return;
+        case HTMLTag::kTable:
+          ParseError(token);
+          if (!ProcessCaptionEndTagForInCaption()) {
+            DCHECK(IsParsingFragment());
+            return;
+          }
+          ProcessEndTag(token);
+          return;
+        case HTMLTag::kBody:
+        case HTMLTag::kCol:
+        case HTMLTag::kColgroup:
+        case HTMLTag::kHTML:
+        case TABLE_BODY_CONTEXT_CASES:
+        case TABLE_CELL_CONTEXT_CASES:
+        case HTMLTag::kTr:
+          ParseError(token);
+          return;
+        default:
+          break;
       }
       ProcessEndTagForInBody(token);
       break;
     case kInColumnGroupMode:
-      DCHECK_EQ(GetInsertionMode(), kInColumnGroupMode);
-      if (token->GetName() == kColgroupTag) {
-        ProcessColgroupEndTagForInColumnGroup();
-        return;
-      }
-      if (token->GetName() == kColTag) {
-        ParseError(token);
-        return;
-      }
-      if (token->GetName() == kTemplateTag) {
-        ProcessTemplateEndTag(token);
-        return;
+      switch (tag) {
+        case HTMLTag::kColgroup:
+          ProcessColgroupEndTagForInColumnGroup();
+          return;
+        case HTMLTag::kCol:
+          ParseError(token);
+          return;
+        case HTMLTag::kTemplate:
+          ProcessTemplateEndTag(token);
+          return;
+        default:
+          break;
       }
       if (!ProcessColgroupEndTagForInColumnGroup()) {
         DCHECK(IsParsingFragmentOrTemplateContents());
@@ -1976,20 +2228,16 @@ void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
       ProcessEndTag(token);
       break;
     case kInRowMode:
-      DCHECK_EQ(GetInsertionMode(), kInRowMode);
       ProcessEndTagForInRow(token);
       break;
     case kInCellMode:
-      DCHECK_EQ(GetInsertionMode(), kInCellMode);
       ProcessEndTagForInCell(token);
       break;
     case kInTableBodyMode:
-      DCHECK_EQ(GetInsertionMode(), kInTableBodyMode);
       ProcessEndTagForInTableBody(token);
       break;
     case kAfterBodyMode:
-      DCHECK_EQ(GetInsertionMode(), kAfterBodyMode);
-      if (token->GetName() == kHTMLTag) {
+      if (tag == HTMLTag::kHTML) {
         if (IsParsingFragment()) {
           ParseError(token);
           return;
@@ -1997,24 +2245,21 @@ void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
         SetInsertionMode(kAfterAfterBodyMode);
         return;
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     case kAfterAfterBodyMode:
-      DCHECK(GetInsertionMode() == kAfterBodyMode ||
-             GetInsertionMode() == kAfterAfterBodyMode);
       ParseError(token);
       SetInsertionMode(kInBodyMode);
       ProcessEndTag(token);
       break;
     case kInHeadNoscriptMode:
-      DCHECK_EQ(GetInsertionMode(), kInHeadNoscriptMode);
-      if (token->GetName() == kNoscriptTag) {
-        DCHECK(tree_.CurrentStackItem()->HasTagName(kNoscriptTag));
+      if (tag == HTMLTag::kNoscript) {
+        DCHECK(tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kNoscript));
         tree_.OpenElements()->Pop();
-        DCHECK(tree_.CurrentStackItem()->HasTagName(kHeadTag));
+        DCHECK(tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kHead));
         SetInsertionMode(kInHeadMode);
         return;
       }
-      if (token->GetName() != kBrTag) {
+      if (tag != HTMLTag::kBr) {
         ParseError(token);
         return;
       }
@@ -2022,8 +2267,8 @@ void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
       ProcessToken(token);
       break;
     case kTextMode:
-      if (token->GetName() == kScriptTag &&
-          tree_.CurrentStackItem()->HasTagName(kScriptTag)) {
+      if (tag == HTMLTag::kScript &&
+          tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kScript)) {
         // Pause ourselves so that parsing stops until the script can be
         // processed by the caller.
         if (ScriptingContentIsAllowed(tree_.GetParserContentPolicy()))
@@ -2031,19 +2276,16 @@ void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
         tree_.OpenElements()->Pop();
         SetInsertionMode(original_insertion_mode_);
 
-        if (parser_->Tokenizer()) {
-          // We must set the tokenizer's state to DataState explicitly if the
-          // tokenizer didn't have a chance to.
-          parser_->Tokenizer()->SetState(HTMLTokenizer::kDataState);
-        }
+        // We must set the tokenizer's state to DataState explicitly if the
+        // tokenizer didn't have a chance to.
+        token_producer_->SetTokenizerState(HTMLTokenizer::kDataState);
         return;
       }
       tree_.OpenElements()->Pop();
       SetInsertionMode(original_insertion_mode_);
       break;
     case kInFramesetMode:
-      DCHECK_EQ(GetInsertionMode(), kInFramesetMode);
-      if (token->GetName() == kFramesetTag) {
+      if (tag == HTMLTag::kFrameset) {
         bool ignore_frameset_for_fragment_parsing = tree_.CurrentIsRootNode();
         ignore_frameset_for_fragment_parsing =
             ignore_frameset_for_fragment_parsing ||
@@ -2055,75 +2297,73 @@ void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
         }
         tree_.OpenElements()->Pop();
         if (!IsParsingFragment() &&
-            !tree_.CurrentStackItem()->HasTagName(kFramesetTag))
+            !tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kFrameset)) {
           SetInsertionMode(kAfterFramesetMode);
+        }
         return;
       }
       break;
     case kAfterFramesetMode:
-      DCHECK_EQ(GetInsertionMode(), kAfterFramesetMode);
-      if (token->GetName() == kHTMLTag) {
+      if (tag == HTMLTag::kHTML) {
         SetInsertionMode(kAfterAfterFramesetMode);
         return;
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     case kAfterAfterFramesetMode:
-      DCHECK(GetInsertionMode() == kAfterFramesetMode ||
-             GetInsertionMode() == kAfterAfterFramesetMode);
       ParseError(token);
       break;
     case kInSelectInTableMode:
-      DCHECK(GetInsertionMode() == kInSelectInTableMode);
-      if (token->GetName() == kCaptionTag || token->GetName() == kTableTag ||
-          IsTableBodyContextTag(token->GetName()) ||
-          token->GetName() == kTrTag ||
-          IsTableCellContextTag(token->GetName())) {
-        ParseError(token);
-        if (tree_.OpenElements()->InTableScope(token->GetName())) {
-          AtomicHTMLToken end_select(HTMLToken::kEndTag,
-                                     kSelectTag.LocalName());
-          ProcessEndTag(&end_select);
-          ProcessEndTag(token);
-        }
-        return;
+      switch (tag) {
+        case HTMLTag::kCaption:
+        case HTMLTag::kTable:
+        case TABLE_BODY_CONTEXT_CASES:
+        case HTMLTag::kTr:
+        case TABLE_CELL_CONTEXT_CASES:
+          ParseError(token);
+          if (tree_.OpenElements()->InTableScope(tag)) {
+            AtomicHTMLToken end_select(HTMLToken::kEndTag, HTMLTag::kSelect);
+            ProcessEndTag(&end_select);
+            ProcessEndTag(token);
+          }
+          return;
+        default:
+          break;
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     case kInSelectMode:
-      DCHECK(GetInsertionMode() == kInSelectMode ||
-             GetInsertionMode() == kInSelectInTableMode);
-      if (token->GetName() == kOptgroupTag) {
-        if (tree_.CurrentStackItem()->HasTagName(kOptionTag) &&
-            tree_.OneBelowTop() &&
-            tree_.OneBelowTop()->HasTagName(kOptgroupTag))
-          ProcessFakeEndTag(kOptionTag);
-        if (tree_.CurrentStackItem()->HasTagName(kOptgroupTag)) {
-          tree_.OpenElements()->Pop();
-          return;
-        }
-        ParseError(token);
-        return;
-      }
-      if (token->GetName() == kOptionTag) {
-        if (tree_.CurrentStackItem()->HasTagName(kOptionTag)) {
-          tree_.OpenElements()->Pop();
-          return;
-        }
-        ParseError(token);
-        return;
-      }
-      if (token->GetName() == kSelectTag) {
-        if (!tree_.OpenElements()->InSelectScope(token->GetName())) {
-          DCHECK(IsParsingFragment());
+      switch (tag) {
+        case HTMLTag::kOptgroup:
+          if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kOption) &&
+              tree_.OneBelowTop() &&
+              tree_.OneBelowTop()->MatchesHTMLTag(HTMLTag::kOptgroup))
+            ProcessFakeEndTag(HTMLTag::kOption);
+          if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kOptgroup)) {
+            tree_.OpenElements()->Pop();
+            return;
+          }
           ParseError(token);
           return;
-        }
-        tree_.OpenElements()->PopUntilPopped(kSelectTag.LocalName());
-        ResetInsertionModeAppropriately();
-        return;
-      }
-      if (token->GetName() == kTemplateTag) {
-        ProcessTemplateEndTag(token);
-        return;
+        case HTMLTag::kOption:
+          if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kOption)) {
+            tree_.OpenElements()->Pop();
+            return;
+          }
+          ParseError(token);
+          return;
+        case HTMLTag::kSelect:
+          if (!tree_.OpenElements()->InSelectScope(tag)) {
+            DCHECK(IsParsingFragment());
+            ParseError(token);
+            return;
+          }
+          tree_.OpenElements()->PopUntilPopped(HTMLTag::kSelect);
+          ResetInsertionModeAppropriately();
+          return;
+        case HTMLTag::kTemplate:
+          ProcessTemplateEndTag(token);
+          return;
+        default:
+          break;
       }
       break;
     case kInTableTextMode:
@@ -2131,7 +2371,7 @@ void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
       ProcessEndTag(token);
       break;
     case kTemplateContentsMode:
-      if (token->GetName() == kTemplateTag) {
+      if (tag == HTMLTag::kTemplate) {
         ProcessTemplateEndTag(token);
         return;
       }
@@ -2141,17 +2381,18 @@ void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
 
 void HTMLTreeBuilder::ProcessComment(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kComment);
-  if (insertion_mode_ == kInitialMode || insertion_mode_ == kBeforeHTMLMode ||
-      insertion_mode_ == kAfterAfterBodyMode ||
-      insertion_mode_ == kAfterAfterFramesetMode) {
+  if (GetInsertionMode() == kInitialMode ||
+      GetInsertionMode() == kBeforeHTMLMode ||
+      GetInsertionMode() == kAfterAfterBodyMode ||
+      GetInsertionMode() == kAfterAfterFramesetMode) {
     tree_.InsertCommentOnDocument(token);
     return;
   }
-  if (insertion_mode_ == kAfterBodyMode) {
+  if (GetInsertionMode() == kAfterBodyMode) {
     tree_.InsertCommentOnHTMLHtmlElement(token);
     return;
   }
-  if (insertion_mode_ == kInTableTextMode) {
+  if (GetInsertionMode() == kInTableTextMode) {
     DefaultForInTableText();
     ProcessComment(token);
     return;
@@ -2187,15 +2428,13 @@ ReprocessBuffer:
 
   switch (GetInsertionMode()) {
     case kInitialMode: {
-      DCHECK_EQ(GetInsertionMode(), kInitialMode);
       buffer.SkipLeadingWhitespace();
       if (buffer.IsEmpty())
         return;
       DefaultForInitial();
-      FALLTHROUGH;
+      [[fallthrough]];
     }
     case kBeforeHTMLMode: {
-      DCHECK_EQ(GetInsertionMode(), kBeforeHTMLMode);
       buffer.SkipLeadingWhitespace();
       if (buffer.IsEmpty())
         return;
@@ -2204,60 +2443,50 @@ ReprocessBuffer:
         buffer.SkipRemaining();
         return;
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     }
     case kBeforeHeadMode: {
-      DCHECK_EQ(GetInsertionMode(), kBeforeHeadMode);
       buffer.SkipLeadingWhitespace();
       if (buffer.IsEmpty())
         return;
       DefaultForBeforeHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     }
     case kInHeadMode: {
-      DCHECK_EQ(GetInsertionMode(), kInHeadMode);
       StringView leading_whitespace = buffer.TakeLeadingWhitespace();
       if (!leading_whitespace.IsEmpty())
         tree_.InsertTextNode(leading_whitespace, kAllWhitespace);
       if (buffer.IsEmpty())
         return;
       DefaultForInHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     }
     case kAfterHeadMode: {
-      DCHECK_EQ(GetInsertionMode(), kAfterHeadMode);
       StringView leading_whitespace = buffer.TakeLeadingWhitespace();
       if (!leading_whitespace.IsEmpty())
         tree_.InsertTextNode(leading_whitespace, kAllWhitespace);
       if (buffer.IsEmpty())
         return;
       DefaultForAfterHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     }
     case kInBodyMode:
     case kInCaptionMode:
     case kTemplateContentsMode:
     case kInCellMode: {
-      DCHECK(GetInsertionMode() == kInBodyMode ||
-             GetInsertionMode() == kInCaptionMode ||
-             GetInsertionMode() == kInCellMode ||
-             GetInsertionMode() == kTemplateContentsMode);
       ProcessCharacterBufferForInBody(buffer);
       break;
     }
     case kInTableMode:
     case kInTableBodyMode:
     case kInRowMode: {
-      DCHECK(GetInsertionMode() == kInTableMode ||
-             GetInsertionMode() == kInTableBodyMode ||
-             GetInsertionMode() == kInRowMode);
       DCHECK(pending_table_characters_.IsEmpty());
       if (tree_.CurrentStackItem()->IsElementNode() &&
-          (tree_.CurrentStackItem()->HasTagName(kTableTag) ||
-           tree_.CurrentStackItem()->HasTagName(kTbodyTag) ||
-           tree_.CurrentStackItem()->HasTagName(kTfootTag) ||
-           tree_.CurrentStackItem()->HasTagName(kTheadTag) ||
-           tree_.CurrentStackItem()->HasTagName(kTrTag))) {
+          (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kTable) ||
+           tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kTbody) ||
+           tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kTfoot) ||
+           tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kThead) ||
+           tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kTr))) {
         original_insertion_mode_ = insertion_mode_;
         SetInsertionMode(kInTableTextMode);
         // Note that we fall through to the InTableTextMode case below.
@@ -2266,14 +2495,13 @@ ReprocessBuffer:
         ProcessCharacterBufferForInBody(buffer);
         break;
       }
-      FALLTHROUGH;
+      [[fallthrough]];
     }
     case kInTableTextMode: {
       buffer.GiveRemainingTo(pending_table_characters_);
       break;
     }
     case kInColumnGroupMode: {
-      DCHECK_EQ(GetInsertionMode(), kInColumnGroupMode);
       StringView leading_whitespace = buffer.TakeLeadingWhitespace();
       if (!leading_whitespace.IsEmpty())
         tree_.InsertTextNode(leading_whitespace, kAllWhitespace);
@@ -2290,19 +2518,24 @@ ReprocessBuffer:
     }
     case kAfterBodyMode:
     case kAfterAfterBodyMode: {
-      DCHECK(GetInsertionMode() == kAfterBodyMode ||
-             GetInsertionMode() == kAfterAfterBodyMode);
       // FIXME: parse error
+      StringView leading_whitespace = buffer.TakeLeadingWhitespace();
+      if (!leading_whitespace.IsEmpty()) {
+        InsertionMode mode = GetInsertionMode();
+        SetInsertionMode(kInBodyMode);
+        tree_.InsertTextNode(leading_whitespace, kAllWhitespace);
+        SetInsertionMode(mode);
+      }
+      if (buffer.IsEmpty())
+        return;
       SetInsertionMode(kInBodyMode);
       goto ReprocessBuffer;
     }
     case kTextMode: {
-      DCHECK_EQ(GetInsertionMode(), kTextMode);
       tree_.InsertTextNode(buffer.TakeRemaining());
       break;
     }
     case kInHeadNoscriptMode: {
-      DCHECK_EQ(GetInsertionMode(), kInHeadNoscriptMode);
       StringView leading_whitespace = buffer.TakeLeadingWhitespace();
       if (!leading_whitespace.IsEmpty())
         tree_.InsertTextNode(leading_whitespace, kAllWhitespace);
@@ -2313,9 +2546,6 @@ ReprocessBuffer:
     }
     case kInFramesetMode:
     case kAfterFramesetMode: {
-      DCHECK(GetInsertionMode() == kInFramesetMode ||
-             GetInsertionMode() == kAfterFramesetMode ||
-             GetInsertionMode() == kAfterAfterFramesetMode);
       String leading_whitespace = buffer.TakeRemainingWhitespace();
       if (!leading_whitespace.IsEmpty())
         tree_.InsertTextNode(leading_whitespace, kAllWhitespace);
@@ -2325,8 +2555,6 @@ ReprocessBuffer:
     }
     case kInSelectInTableMode:
     case kInSelectMode: {
-      DCHECK(GetInsertionMode() == kInSelectMode ||
-             GetInsertionMode() == kInSelectInTableMode);
       tree_.InsertTextNode(buffer.TakeRemaining());
       break;
     }
@@ -2356,34 +2584,24 @@ void HTMLTreeBuilder::ProcessEndOfFile(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kEndOfFile);
   switch (GetInsertionMode()) {
     case kInitialMode:
-      DCHECK_EQ(GetInsertionMode(), kInitialMode);
       DefaultForInitial();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kBeforeHTMLMode:
-      DCHECK_EQ(GetInsertionMode(), kBeforeHTMLMode);
       DefaultForBeforeHTML();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kBeforeHeadMode:
-      DCHECK_EQ(GetInsertionMode(), kBeforeHeadMode);
       DefaultForBeforeHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kInHeadMode:
-      DCHECK_EQ(GetInsertionMode(), kInHeadMode);
       DefaultForInHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kAfterHeadMode:
-      DCHECK_EQ(GetInsertionMode(), kAfterHeadMode);
       DefaultForAfterHead();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kInBodyMode:
     case kInCellMode:
     case kInCaptionMode:
     case kInRowMode:
-      DCHECK(GetInsertionMode() == kInBodyMode ||
-             GetInsertionMode() == kInCellMode ||
-             GetInsertionMode() == kInCaptionMode ||
-             GetInsertionMode() == kInRowMode ||
-             GetInsertionMode() == kTemplateContentsMode);
       // Emit parse error based on what elements are still open.
       DVLOG(1) << "Not implemented.";
       if (!template_insertion_modes_.IsEmpty() &&
@@ -2392,39 +2610,28 @@ void HTMLTreeBuilder::ProcessEndOfFile(AtomicHTMLToken* token) {
       break;
     case kAfterBodyMode:
     case kAfterAfterBodyMode:
-      DCHECK(GetInsertionMode() == kAfterBodyMode ||
-             GetInsertionMode() == kAfterAfterBodyMode);
       break;
     case kInHeadNoscriptMode:
-      DCHECK_EQ(GetInsertionMode(), kInHeadNoscriptMode);
       DefaultForInHeadNoscript();
       ProcessEndOfFile(token);
       return;
     case kAfterFramesetMode:
     case kAfterAfterFramesetMode:
-      DCHECK(GetInsertionMode() == kAfterFramesetMode ||
-             GetInsertionMode() == kAfterAfterFramesetMode);
       break;
     case kInColumnGroupMode:
       if (tree_.CurrentIsRootNode()) {
         DCHECK(IsParsingFragment());
         return;  // FIXME: Should we break here instead of returning?
       }
-      DCHECK(tree_.CurrentNode()->HasTagName(kColgroupTag) ||
-             IsHTMLTemplateElement(tree_.CurrentNode()));
+      DCHECK(tree_.CurrentNode()->HasTagName(html_names::kColgroupTag) ||
+             IsA<HTMLTemplateElement>(tree_.CurrentNode()));
       ProcessColgroupEndTagForInColumnGroup();
-      FALLTHROUGH;
+      [[fallthrough]];
     case kInFramesetMode:
     case kInTableMode:
     case kInTableBodyMode:
     case kInSelectInTableMode:
     case kInSelectMode:
-      DCHECK(GetInsertionMode() == kInSelectMode ||
-             GetInsertionMode() == kInSelectInTableMode ||
-             GetInsertionMode() == kInTableMode ||
-             GetInsertionMode() == kInFramesetMode ||
-             GetInsertionMode() == kInTableBodyMode ||
-             GetInsertionMode() == kInColumnGroupMode);
       if (tree_.CurrentNode() != tree_.OpenElements()->RootNode())
         ParseError(token);
       if (!template_insertion_modes_.IsEmpty() &&
@@ -2437,12 +2644,12 @@ void HTMLTreeBuilder::ProcessEndOfFile(AtomicHTMLToken* token) {
       return;
     case kTextMode: {
       ParseError(token);
-      if (tree_.CurrentStackItem()->HasTagName(kScriptTag)) {
+      if (tree_.CurrentStackItem()->MatchesHTMLTag(HTMLTag::kScript)) {
         // Mark the script element as "already started".
         DVLOG(1) << "Not implemented.";
       }
       Element* el = tree_.OpenElements()->Top();
-      if (IsHTMLTextAreaElement(el))
+      if (IsA<HTMLTextAreaElement>(el))
         To<HTMLFormControlElement>(el)->SetBlocksFormSubmission(true);
       tree_.OpenElements()->Pop();
       DCHECK_NE(original_insertion_mode_, kTextMode);
@@ -2466,28 +2673,28 @@ void HTMLTreeBuilder::DefaultForInitial() {
 }
 
 void HTMLTreeBuilder::DefaultForBeforeHTML() {
-  AtomicHTMLToken start_html(HTMLToken::kStartTag, kHTMLTag.LocalName());
+  AtomicHTMLToken start_html(HTMLToken::kStartTag, HTMLTag::kHTML);
   tree_.InsertHTMLHtmlStartTagBeforeHTML(&start_html);
   SetInsertionMode(kBeforeHeadMode);
 }
 
 void HTMLTreeBuilder::DefaultForBeforeHead() {
-  AtomicHTMLToken start_head(HTMLToken::kStartTag, kHeadTag.LocalName());
+  AtomicHTMLToken start_head(HTMLToken::kStartTag, HTMLTag::kHead);
   ProcessStartTag(&start_head);
 }
 
 void HTMLTreeBuilder::DefaultForInHead() {
-  AtomicHTMLToken end_head(HTMLToken::kEndTag, kHeadTag.LocalName());
+  AtomicHTMLToken end_head(HTMLToken::kEndTag, HTMLTag::kHead);
   ProcessEndTag(&end_head);
 }
 
 void HTMLTreeBuilder::DefaultForInHeadNoscript() {
-  AtomicHTMLToken end_noscript(HTMLToken::kEndTag, kNoscriptTag.LocalName());
+  AtomicHTMLToken end_noscript(HTMLToken::kEndTag, HTMLTag::kNoscript);
   ProcessEndTag(&end_noscript);
 }
 
 void HTMLTreeBuilder::DefaultForAfterHead() {
-  AtomicHTMLToken start_body(HTMLToken::kStartTag, kBodyTag.LocalName());
+  AtomicHTMLToken start_body(HTMLToken::kStartTag, HTMLTag::kBody);
   ProcessStartTag(&start_body);
   frameset_ok_ = true;
 }
@@ -2510,55 +2717,53 @@ void HTMLTreeBuilder::DefaultForInTableText() {
 
 bool HTMLTreeBuilder::ProcessStartTagForInHead(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kStartTag);
-  if (token->GetName() == kHTMLTag) {
-    ProcessHtmlStartTagForInBody(token);
-    return true;
-  }
-  if (token->GetName() == kBaseTag || token->GetName() == kBasefontTag ||
-      token->GetName() == kBgsoundTag || token->GetName() == kCommandTag ||
-      token->GetName() == kLinkTag || token->GetName() == kMetaTag) {
-    tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
-    // Note: The custom processing for the <meta> tag is done in
-    // HTMLMetaElement::process().
-    return true;
-  }
-  if (token->GetName() == kTitleTag) {
-    ProcessGenericRCDATAStartTag(token);
-    return true;
-  }
-  if (token->GetName() == kNoscriptTag) {
-    if (options_.script_enabled) {
+  switch (token->GetHTMLTag()) {
+    case HTMLTag::kHTML:
+      ProcessHtmlStartTagForInBody(token);
+      return true;
+    case HTMLTag::kBase:
+    case HTMLTag::kBasefont:
+    case HTMLTag::kBgsound:
+    case HTMLTag::kCommand:
+    case HTMLTag::kLink:
+    case HTMLTag::kMeta:
+      tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
+      // Note: The custom processing for the <meta> tag is done in
+      // HTMLMetaElement::process().
+      return true;
+    case HTMLTag::kTitle:
+      ProcessGenericRCDATAStartTag(token);
+      return true;
+    case HTMLTag::kNoscript:
+      if (options_.scripting_flag) {
+        ProcessGenericRawTextStartTag(token);
+        return true;
+      }
+      tree_.InsertHTMLElement(token);
+      SetInsertionMode(kInHeadNoscriptMode);
+      return true;
+    case HTMLTag::kNoframes:
+    case HTMLTag::kStyle:
       ProcessGenericRawTextStartTag(token);
       return true;
-    }
-    tree_.InsertHTMLElement(token);
-    SetInsertionMode(kInHeadNoscriptMode);
-    return true;
+    case HTMLTag::kScript:
+      ProcessScriptStartTag(token);
+      return true;
+    case HTMLTag::kTemplate:
+      ProcessTemplateStartTag(token);
+      return true;
+    case HTMLTag::kHead:
+      ParseError(token);
+      return true;
+    default:
+      return false;
   }
-  if (token->GetName() == kNoframesTag || token->GetName() == kStyleTag) {
-    ProcessGenericRawTextStartTag(token);
-    return true;
-  }
-  if (token->GetName() == kScriptTag) {
-    ProcessScriptStartTag(token);
-    return true;
-  }
-  if (token->GetName() == kTemplateTag) {
-    ProcessTemplateStartTag(token);
-    return true;
-  }
-  if (token->GetName() == kHeadTag) {
-    ParseError(token);
-    return true;
-  }
-  return false;
 }
 
 void HTMLTreeBuilder::ProcessGenericRCDATAStartTag(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kStartTag);
   tree_.InsertHTMLElement(token);
-  if (parser_->Tokenizer())
-    parser_->Tokenizer()->SetState(HTMLTokenizer::kRCDATAState);
+  token_producer_->SetTokenizerState(HTMLTokenizer::kRCDATAState);
   original_insertion_mode_ = insertion_mode_;
   SetInsertionMode(kTextMode);
 }
@@ -2566,8 +2771,7 @@ void HTMLTreeBuilder::ProcessGenericRCDATAStartTag(AtomicHTMLToken* token) {
 void HTMLTreeBuilder::ProcessGenericRawTextStartTag(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kStartTag);
   tree_.InsertHTMLElement(token);
-  if (parser_->Tokenizer())
-    parser_->Tokenizer()->SetState(HTMLTokenizer::kRAWTEXTState);
+  token_producer_->SetTokenizerState(HTMLTokenizer::kRAWTEXTState);
   original_insertion_mode_ = insertion_mode_;
   SetInsertionMode(kTextMode);
 }
@@ -2575,8 +2779,7 @@ void HTMLTreeBuilder::ProcessGenericRawTextStartTag(AtomicHTMLToken* token) {
 void HTMLTreeBuilder::ProcessScriptStartTag(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kStartTag);
   tree_.InsertScriptElement(token);
-  if (parser_->Tokenizer())
-    parser_->Tokenizer()->SetState(HTMLTokenizer::kScriptDataState);
+  token_producer_->SetTokenizerState(HTMLTokenizer::kScriptDataState);
   original_insertion_mode_ = insertion_mode_;
 
   TextPosition position = parser_->GetTextPosition();
@@ -2638,38 +2841,64 @@ void HTMLTreeBuilder::ProcessTokenInForeignContent(AtomicHTMLToken* token) {
       ParseError(token);
       break;
     case HTMLToken::kStartTag: {
-      if (token->GetName() == kBTag || token->GetName() == kBigTag ||
-          token->GetName() == kBlockquoteTag || token->GetName() == kBodyTag ||
-          token->GetName() == kBrTag || token->GetName() == kCenterTag ||
-          token->GetName() == kCodeTag || token->GetName() == kDdTag ||
-          token->GetName() == kDivTag || token->GetName() == kDlTag ||
-          token->GetName() == kDtTag || token->GetName() == kEmTag ||
-          token->GetName() == kEmbedTag ||
-          IsNumberedHeaderTag(token->GetName()) ||
-          token->GetName() == kHeadTag || token->GetName() == kHrTag ||
-          token->GetName() == kITag || token->GetName() == kImgTag ||
-          token->GetName() == kLiTag || token->GetName() == kListingTag ||
-          token->GetName() == kMenuTag || token->GetName() == kMetaTag ||
-          token->GetName() == kNobrTag || token->GetName() == kOlTag ||
-          token->GetName() == kPTag || token->GetName() == kPreTag ||
-          token->GetName() == kRubyTag || token->GetName() == kSTag ||
-          token->GetName() == kSmallTag || token->GetName() == kSpanTag ||
-          token->GetName() == kStrongTag || token->GetName() == kStrikeTag ||
-          token->GetName() == kSubTag || token->GetName() == kSupTag ||
-          token->GetName() == kTableTag || token->GetName() == kTtTag ||
-          token->GetName() == kUTag || token->GetName() == kUlTag ||
-          token->GetName() == kVarTag ||
-          (token->GetName() == kFontTag &&
-           (token->GetAttributeItem(kColorAttr) ||
-            token->GetAttributeItem(kFaceAttr) ||
-            token->GetAttributeItem(kSizeAttr)))) {
-        ParseError(token);
-        tree_.OpenElements()->PopUntilForeignContentScopeMarker();
-        ProcessStartTag(token);
-        return;
+      const HTMLTag tag = token->GetHTMLTag();
+      switch (tag) {
+        case HTMLTag::kFont:
+          if (!token->GetAttributeItem(html_names::kColorAttr) &&
+              !token->GetAttributeItem(html_names::kFaceAttr) &&
+              !token->GetAttributeItem(html_names::kSizeAttr)) {
+            break;
+          }
+          [[fallthrough]];
+        case HTMLTag::kB:
+        case HTMLTag::kBig:
+        case HTMLTag::kBlockquote:
+        case HTMLTag::kBody:
+        case HTMLTag::kBr:
+        case HTMLTag::kCenter:
+        case HTMLTag::kCode:
+        case HTMLTag::kDd:
+        case HTMLTag::kDiv:
+        case HTMLTag::kDl:
+        case HTMLTag::kDt:
+        case HTMLTag::kEm:
+        case HTMLTag::kEmbed:
+        case NUMBERED_HEADER_CASES:
+        case HTMLTag::kHead:
+        case HTMLTag::kHr:
+        case HTMLTag::kI:
+        case HTMLTag::kImg:
+        case HTMLTag::kLi:
+        case HTMLTag::kListing:
+        case HTMLTag::kMenu:
+        case HTMLTag::kMeta:
+        case HTMLTag::kNobr:
+        case HTMLTag::kOl:
+        case HTMLTag::kP:
+        case HTMLTag::kPre:
+        case HTMLTag::kRuby:
+        case HTMLTag::kS:
+        case HTMLTag::kSmall:
+        case HTMLTag::kSpan:
+        case HTMLTag::kStrong:
+        case HTMLTag::kStrike:
+        case HTMLTag::kSub:
+        case HTMLTag::kSup:
+        case HTMLTag::kTable:
+        case HTMLTag::kTt:
+        case HTMLTag::kU:
+        case HTMLTag::kUl:
+        case HTMLTag::kVar:
+          ParseError(token);
+          tree_.OpenElements()->PopUntilForeignContentScopeMarker();
+          ProcessStartTag(token);
+          return;
+        case HTMLTag::kScript:
+          script_to_process_start_position_ = parser_->GetTextPosition();
+          break;
+        default:
+          break;
       }
-      if (token->GetName() == kScriptTag)
-        script_to_process_start_position_ = parser_->GetTextPosition();
       const AtomicString& current_namespace =
           adjusted_current_node->NamespaceURI();
       if (current_namespace == mathml_names::kNamespaceURI)
@@ -2693,6 +2922,13 @@ void HTMLTreeBuilder::ProcessTokenInForeignContent(AtomicHTMLToken* token) {
         tree_.OpenElements()->Pop();
         return;
       }
+      const HTMLTag tag = token->GetHTMLTag();
+      if (tag == HTMLTag::kBr || tag == HTMLTag::kP) {
+        ParseError(token);
+        tree_.OpenElements()->PopUntilForeignContentScopeMarker();
+        ProcessEndTag(token);
+        return;
+      }
       if (!tree_.CurrentStackItem()->IsInHTMLNamespace()) {
         // FIXME: This code just wants an Element* iterator, instead of an
         // ElementRecord*
@@ -2700,7 +2936,7 @@ void HTMLTreeBuilder::ProcessTokenInForeignContent(AtomicHTMLToken* token) {
             tree_.OpenElements()->TopRecord();
         if (!node_record->StackItem()->HasLocalName(token->GetName()))
           ParseError(token);
-        while (1) {
+        while (true) {
           if (node_record->StackItem()->HasLocalName(token->GetName())) {
             tree_.OpenElements()->PopUntilPopped(node_record->GetElement());
             return;

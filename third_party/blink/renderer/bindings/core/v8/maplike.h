@@ -11,8 +11,15 @@
 
 namespace blink {
 
-template <typename KeyType, typename ValueType>
-class Maplike : public PairIterable<KeyType, ValueType> {
+// KeyType and ValueType define the key and value types correspondingly.
+// IDLKey and IDLValue only define the types of
+// ToV8Traits<[IDLKey,IDLValue]>::ToV8 converters.
+template <typename KeyType,
+          typename IDLKeyType,
+          typename ValueType,
+          typename IDLValueType>
+class Maplike
+    : public PairIterable<KeyType, IDLKeyType, ValueType, IDLValueType> {
  public:
   bool hasForBinding(ScriptState* script_state,
                      const KeyType& key,
@@ -26,10 +33,11 @@ class Maplike : public PairIterable<KeyType, ValueType> {
                             ExceptionState& exception_state) {
     ValueType value;
     if (GetMapEntry(script_state, key, value, exception_state))
-      return ScriptValue(script_state,
+      return ScriptValue(script_state->GetIsolate(),
                          ToV8(value, script_state->GetContext()->Global(),
                               script_state->GetIsolate()));
-    return ScriptValue(script_state, v8::Undefined(script_state->GetIsolate()));
+    return ScriptValue(script_state->GetIsolate(),
+                       v8::Undefined(script_state->GetIsolate()));
   }
 
  private:
@@ -38,6 +46,12 @@ class Maplike : public PairIterable<KeyType, ValueType> {
                            ValueType&,
                            ExceptionState&) = 0;
 };
+
+// KeyType and ValueType define the key and value types correspondingly.
+// IDLKey and IDLValue only define the types of
+// ToV8Traits<[IDLKey,IDLValue]>::ToV8 converters.
+template <typename KeyType, typename IDLKeyType>
+class Setlike : public Maplike<KeyType, IDLKeyType, KeyType, IDLKeyType> {};
 
 }  // namespace blink
 

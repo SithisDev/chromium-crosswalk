@@ -29,6 +29,9 @@
 #include "third_party/blink/renderer/core/loader/resource/image_resource_observer.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
 #include "third_party/blink/renderer/platform/geometry/layout_size.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
@@ -44,7 +47,7 @@ class ImageResourceObserver;
 // alternatives via the referenced CSSImageSetValue.
 class StyleFetchedImageSet final : public StyleImage,
                                    public ImageResourceObserver {
-  USING_PRE_FINALIZER(StyleFetchedImageSet, Dispose);
+  USING_PRE_FINALIZER(StyleFetchedImageSet, Prefinalize);
 
  public:
   StyleFetchedImageSet(ImageResourceContent*,
@@ -54,7 +57,8 @@ class StyleFetchedImageSet final : public StyleImage,
   ~StyleFetchedImageSet() override;
 
   CSSValue* CssValue() const override;
-  CSSValue* ComputedCSSValue() const override;
+  CSSValue* ComputedCSSValue(const ComputedStyle&,
+                             bool allow_visited_style) const override;
 
   // FIXME: This is used by StyleImage for equals comparison, but this
   // implementation only looks at the image from the set that we have loaded.
@@ -64,26 +68,32 @@ class StyleFetchedImageSet final : public StyleImage,
   bool CanRender() const override;
   bool IsLoaded() const override;
   bool ErrorOccurred() const override;
-  FloatSize ImageSize(const Document&,
-                      float multiplier,
-                      const LayoutSize& default_object_size) const override;
+  bool IsAccessAllowed(String&) const override;
+
+  gfx::SizeF ImageSize(float multiplier,
+                       const gfx::SizeF& default_object_size,
+                       RespectImageOrientationEnum) const override;
   bool HasIntrinsicSize() const override;
   void AddClient(ImageResourceObserver*) override;
   void RemoveClient(ImageResourceObserver*) override;
   scoped_refptr<Image> GetImage(const ImageResourceObserver&,
                                 const Document&,
                                 const ComputedStyle&,
-                                const FloatSize& target_size) const override;
+                                const gfx::SizeF& target_size) const override;
   float ImageScaleFactor() const override { return image_scale_factor_; }
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const override;
   ImageResourceContent* CachedImage() const override;
 
-  void Trace(blink::Visitor*) override;
+  RespectImageOrientationEnum ForceOrientationIfNecessary(
+      RespectImageOrientationEnum default_orientation) const override;
+
+  void Trace(Visitor*) const override;
 
  private:
   bool IsEqual(const StyleImage& other) const override;
-  void Dispose();
+  void Prefinalize();
 
+  // ImageResourceObserver overrides
   String DebugName() const override { return "StyleFetchedImageSet"; }
 
   Member<ImageResourceContent> best_fit_image_;

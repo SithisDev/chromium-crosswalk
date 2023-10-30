@@ -33,8 +33,8 @@
 
 #include "third_party/blink/renderer/core/clipboard/data_object.h"
 #include "third_party/blink/renderer/core/clipboard/dragged_isolated_file_system.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -43,11 +43,9 @@ namespace blink {
 class DOMFileSystem;
 
 class DraggedIsolatedFileSystemImpl final
-    : public GarbageCollectedFinalized<DraggedIsolatedFileSystemImpl>,
+    : public GarbageCollected<DraggedIsolatedFileSystemImpl>,
       public DraggedIsolatedFileSystem,
       public Supplement<DataObject> {
-  USING_GARBAGE_COLLECTED_MIXIN(DraggedIsolatedFileSystemImpl);
-
  public:
   static const char kSupplementName[];
 
@@ -57,9 +55,9 @@ class DraggedIsolatedFileSystemImpl final
 
   static DraggedIsolatedFileSystemImpl* From(DataObject*);
 
-  DraggedIsolatedFileSystemImpl() = default;
+  DraggedIsolatedFileSystemImpl() : Supplement(nullptr) {}
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   static void PrepareForDataObject(DataObject*);
 

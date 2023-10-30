@@ -32,19 +32,33 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_V8_BINDING_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_V8_BINDING_H_
 
-#include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/string_resource.h"
-#include "third_party/blink/renderer/platform/bindings/v8_binding_macros.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/bindings/v8_value_cache.h"
+#include "third_party/blink/renderer/platform/bindings/wrapper_type_info.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
-#include "v8/include/v8.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
+#include "v8/include/v8-container.h"
+#include "v8/include/v8-forward.h"
+#include "v8/include/v8-function-callback.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-local-handle.h"
+#include "v8/include/v8-maybe.h"
+#include "v8/include/v8-persistent-handle.h"
+#include "v8/include/v8-primitive.h"
+#include "v8/include/v8-value.h"
 
 namespace blink {
+
+class ExceptionState;
+
+namespace bindings {
+class DictionaryBase;
+}
 
 // This file contains bindings helper functions that do not have dependencies
 // to core/ or bindings/core. For core-specific helper functions, see
@@ -96,6 +110,11 @@ inline void V8SetReturnValue(const CallbackInfo& info, int32_t value) {
 template <typename CallbackInfo>
 inline void V8SetReturnValue(const CallbackInfo& info, uint32_t value) {
   info.GetReturnValue().Set(value);
+}
+
+template <typename CallbackInfo>
+inline void V8SetReturnValue(const CallbackInfo& info, uint64_t value) {
+  info.GetReturnValue().Set(static_cast<double>(value));
 }
 
 template <typename CallbackInfo>
@@ -152,64 +171,18 @@ inline void V8SetReturnValueStringOrNull(const CallbackInfo& info,
       info.GetReturnValue(), string.Impl());
 }
 
-template <typename CallbackInfo>
-inline void V8SetReturnValue(const CallbackInfo& callback_info,
-                             ScriptWrappable* impl,
-                             v8::Local<v8::Object> creation_context) {
-  if (UNLIKELY(!impl)) {
-    V8SetReturnValueNull(callback_info);
-    return;
-  }
-  if (DOMDataStore::SetReturnValue(callback_info.GetReturnValue(), impl))
-    return;
-  v8::Local<v8::Object> wrapper =
-      impl->Wrap(callback_info.GetIsolate(), creation_context);
-  V8SetReturnValue(callback_info, wrapper);
+// Dictionary
+template <class CallbackInfo>
+void V8SetReturnValue(const CallbackInfo& info,
+                      bindings::DictionaryBase* value,
+                      v8::Local<v8::Object> creation_context) {
+  V8SetReturnValue(info, ToV8(value, creation_context, info.GetIsolate()));
 }
 
-template <typename CallbackInfo>
-inline void V8SetReturnValue(const CallbackInfo& callback_info,
-                             ScriptWrappable* impl) {
-  V8SetReturnValue(callback_info, impl, callback_info.Holder());
-}
-
-template <typename CallbackInfo>
-inline void V8SetReturnValueForMainWorld(const CallbackInfo& callback_info,
-                                         ScriptWrappable* impl) {
-  DCHECK(DOMWrapperWorld::Current(callback_info.GetIsolate()).IsMainWorld());
-  if (UNLIKELY(!impl)) {
-    V8SetReturnValueNull(callback_info);
-    return;
-  }
-  if (DOMDataStore::SetReturnValueForMainWorld(callback_info.GetReturnValue(),
-                                               impl))
-    return;
-  v8::Local<v8::Object> wrapper =
-      impl->Wrap(callback_info.GetIsolate(), callback_info.Holder());
-  V8SetReturnValue(callback_info, wrapper);
-}
-
-template <typename CallbackInfo>
-inline void V8SetReturnValueFast(const CallbackInfo& callback_info,
-                                 ScriptWrappable* impl,
-                                 const ScriptWrappable* wrappable) {
-  if (UNLIKELY(!impl)) {
-    V8SetReturnValueNull(callback_info);
-    return;
-  }
-  if (DOMDataStore::SetReturnValueFast(callback_info.GetReturnValue(), impl,
-                                       callback_info.Holder(), wrappable))
-    return;
-  v8::Local<v8::Object> wrapper =
-      impl->Wrap(callback_info.GetIsolate(), callback_info.Holder());
-  V8SetReturnValue(callback_info, wrapper);
-}
-
-template <typename CallbackInfo, typename T>
-inline void V8SetReturnValueFast(const CallbackInfo& callback_info,
-                                 const v8::Local<T> handle,
-                                 const ScriptWrappable*) {
-  V8SetReturnValue(callback_info, handle);
+template <class CallbackInfo>
+void V8SetReturnValue(const CallbackInfo& info,
+                      bindings::DictionaryBase* value) {
+  V8SetReturnValue(info, ToV8(value, info.Holder(), info.GetIsolate()));
 }
 
 // Convert v8::String to a WTF::String. If the V8 string is not already
@@ -358,6 +331,71 @@ static void IndexedPropertyEnumerator(
 // If the argument isn't an object, this will crash.
 PLATFORM_EXPORT v8::Local<v8::Value> FreezeV8Object(v8::Local<v8::Value>,
                                                     v8::Isolate*);
+
+// Return values of indexed properties and named properties
+
+enum class IndexedPropertySetterResult {
+  kDidNotIntercept,  // Fallback to the default set operation.
+  kIntercepted,      // Intercepted regardless of whether it succeeded or not.
+};
+
+enum class NamedPropertySetterResult {
+  kDidNotIntercept,  // Fallback to the default set operation.
+  kIntercepted,      // Intercepted regardless of whether it succeeded or not.
+};
+
+enum class NamedPropertyDeleterResult {
+  kDidNotIntercept,  // Fallback to the default delete operation.
+  kDeleted,          // Successfully deleted.
+  kDidNotDelete,     // Intercepted but failed to delete.
+};
+
+// Gets the url of the currently executing script. Returns empty string, if no
+// script is executing (e.g. during parsing of a meta tag in markup), or the
+// script context is otherwise unavailable.
+PLATFORM_EXPORT String GetCurrentScriptUrl();
+
+// Gets the urls of the scripts at the top of the currently executing stack.
+// If available, returns up to |unique_url_count| urls, filtering out duplicate
+// urls (e.g. if the stack includes multiple frames from the same script).
+// Returns an empty vector, if no script is executing (e.g. during parsing of a
+// meta tag in markup), or the script context is otherwise unavailable.
+// To minimize the cost of walking the stack, only the top frames (currently 10)
+// are examined, regardless of the value of |unique_url_count|.
+PLATFORM_EXPORT Vector<String> GetScriptUrlsFromCurrentStack(
+    wtf_size_t unique_url_count);
+
+namespace bindings {
+
+struct V8PropertyDescriptorBag {
+ private:
+  STACK_ALLOCATED();
+
+ public:
+  bool has_enumerable = false;
+  bool has_configurable = false;
+  bool has_value = false;
+  bool has_writable = false;
+  bool has_get = false;
+  bool has_set = false;
+
+  bool enumerable = false;
+  bool configurable = false;
+  bool writable = false;
+  v8::Local<v8::Value> value;
+  v8::Local<v8::Value> get;
+  v8::Local<v8::Value> set;
+};
+
+// ToPropertyDescriptor
+// https://tc39.es/ecma262/#sec-topropertydescriptor
+PLATFORM_EXPORT void V8ObjectToPropertyDescriptor(
+    v8::Isolate* isolate,
+    v8::Local<v8::Value> descriptor_object,
+    V8PropertyDescriptorBag& descriptor_bag,
+    ExceptionState& exception_state);
+
+}  // namespace bindings
 
 }  // namespace blink
 

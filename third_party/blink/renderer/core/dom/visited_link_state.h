@@ -40,7 +40,7 @@ namespace blink {
 
 class Document;
 
-class VisitedLinkState : public GarbageCollectedFinalized<VisitedLinkState> {
+class VisitedLinkState final : public GarbageCollected<VisitedLinkState> {
  public:
   explicit VisitedLinkState(const Document&);
 
@@ -53,7 +53,7 @@ class VisitedLinkState : public GarbageCollectedFinalized<VisitedLinkState> {
     return EInsideLink::kNotInsideLink;
   }
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   const Document& GetDocument() const { return *document_; }
@@ -66,4 +66,4 @@ class VisitedLinkState : public GarbageCollectedFinalized<VisitedLinkState> {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_DOM_VISITED_LINK_STATE_H_

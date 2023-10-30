@@ -22,23 +22,29 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_FE_LIGHT_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_FE_LIGHT_ELEMENT_H_
 
-#include "third_party/blink/renderer/core/svg/svg_animated_number.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/graphics/filters/light_source.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+
+namespace gfx {
+class Point3F;
+}
 
 namespace blink {
 
 class Filter;
+class FELighting;
+class LightSource;
+class SVGAnimatedNumber;
 
 class SVGFELightElement : public SVGElement {
  public:
-  virtual scoped_refptr<LightSource> GetLightSource(Filter*) const = 0;
   static SVGFELightElement* FindLightElement(const SVGElement&);
 
-  FloatPoint3D GetPosition() const;
-  FloatPoint3D PointsAt() const;
+  virtual scoped_refptr<LightSource> GetLightSource(Filter*) const = 0;
+  absl::optional<bool> SetLightSourceAttribute(FELighting*,
+                                               const QualifiedName&) const;
 
   SVGAnimatedNumber* azimuth() { return azimuth_.Get(); }
   const SVGAnimatedNumber* azimuth() const { return azimuth_.Get(); }
@@ -65,13 +71,16 @@ class SVGFELightElement : public SVGElement {
     return limiting_cone_angle_.Get();
   }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   SVGFELightElement(const QualifiedName&, Document&);
 
+  gfx::Point3F GetPosition() const;
+  gfx::Point3F PointsAt() const;
+
  private:
-  void SvgAttributeChanged(const QualifiedName&) final;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) final;
   void ChildrenChanged(const ChildrenChange&) final;
 
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override {
@@ -90,14 +99,23 @@ class SVGFELightElement : public SVGElement {
   Member<SVGAnimatedNumber> limiting_cone_angle_;
 };
 
-inline bool IsSVGFELightElement(const SVGElement& element) {
-  return element.HasTagName(svg_names::kFEDistantLightTag) ||
-         element.HasTagName(svg_names::kFEPointLightTag) ||
-         element.HasTagName(svg_names::kFESpotLightTag);
+template <>
+inline bool IsElementOfType<const SVGFELightElement>(const Node& node) {
+  return IsA<SVGFELightElement>(node);
 }
-
-DEFINE_SVGELEMENT_TYPE_CASTS_WITH_FUNCTION(SVGFELightElement);
+template <>
+struct DowncastTraits<SVGFELightElement> {
+  static bool AllowFrom(const Node& node) {
+    auto* svg_element = DynamicTo<SVGElement>(node);
+    return svg_element && AllowFrom(*svg_element);
+  }
+  static bool AllowFrom(const SVGElement& svg_element) {
+    return svg_element.HasTagName(svg_names::kFEDistantLightTag) ||
+           svg_element.HasTagName(svg_names::kFEPointLightTag) ||
+           svg_element.HasTagName(svg_names::kFESpotLightTag);
+  }
+};
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_FE_LIGHT_ELEMENT_H_

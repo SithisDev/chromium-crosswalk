@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_astc.h"
 
-#include "base/stl_util.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
 
 namespace blink {
@@ -32,12 +31,14 @@ WebGLCompressedTextureASTC::WebGLCompressedTextureASTC(
   context->ExtensionsUtil()->EnsureExtensionEnabled(
       "GL_KHR_texture_compression_astc_ldr");
 
+  supports_hdr = context->ExtensionsUtil()->EnsureExtensionEnabled(
+      "GL_KHR_texture_compression_astc_hdr");
+
   const int kAlphaFormatGap =
       GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR - GL_COMPRESSED_RGBA_ASTC_4x4_KHR;
 
   for (size_t i = 0;
-       i < base::size(WebGLCompressedTextureASTC::kBlockSizeCompressASTC);
-       i++) {
+       i < std::size(WebGLCompressedTextureASTC::kBlockSizeCompressASTC); i++) {
     /* GL_COMPRESSED_RGBA_ASTC(0x93B0 ~ 0x93BD) */
     context->AddCompressedTextureFormat(
         WebGLCompressedTextureASTC::kBlockSizeCompressASTC[i].compress_type);
@@ -52,11 +53,6 @@ WebGLExtensionName WebGLCompressedTextureASTC::GetName() const {
   return kWebGLCompressedTextureASTCName;
 }
 
-WebGLCompressedTextureASTC* WebGLCompressedTextureASTC::Create(
-    WebGLRenderingContextBase* context) {
-  return MakeGarbageCollected<WebGLCompressedTextureASTC>(context);
-}
-
 bool WebGLCompressedTextureASTC::Supported(WebGLRenderingContextBase* context) {
   Extensions3DUtil* extensions_util = context->ExtensionsUtil();
   return extensions_util->SupportsExtension(
@@ -64,9 +60,15 @@ bool WebGLCompressedTextureASTC::Supported(WebGLRenderingContextBase* context) {
 }
 
 const char* WebGLCompressedTextureASTC::ExtensionName() {
-  // TODO(cyzero.kim): implement extension for
-  // GL_KHR_texture_compression_astc_hdr.
   return "WEBGL_compressed_texture_astc";
+}
+
+Vector<String> WebGLCompressedTextureASTC::getSupportedProfiles() {
+  Vector<String> result = {"ldr"};
+  if (supports_hdr) {
+    result.emplace_back("hdr");
+  }
+  return result;
 }
 
 }  // namespace blink

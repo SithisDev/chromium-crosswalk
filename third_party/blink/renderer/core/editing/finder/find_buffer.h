@@ -5,6 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_FINDER_FIND_BUFFER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_FINDER_FIND_BUFFER_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_context.h"
 #include "third_party/blink/renderer/core/editing/finder/find_options.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_searcher_icu.h"
@@ -29,7 +31,23 @@ class CORE_EXPORT FindBuffer {
   static EphemeralRangeInFlatTree FindMatchInRange(
       const EphemeralRangeInFlatTree& range,
       String search_text,
-      const FindOptions);
+      const FindOptions,
+      absl::optional<base::TimeDelta> timeout_ms = absl::nullopt);
+
+  // Returns the closest ancestor of |start_node| (including the node itself)
+  // that is block level.
+  static const Node& GetFirstBlockLevelAncestorInclusive(
+      const Node& start_node);
+
+  // Returns true if start and end nodes are in the same layout block flow and
+  // there are no nodes in between that can be considered blocks. Otherwise,
+  // returns false.
+  static bool IsInSameUninterruptedBlock(const Node& start_node,
+                                         const Node& end_node);
+
+  // See |GetVisibleTextNode|.
+  static Node* ForwardVisibleTextNode(Node& start_node);
+  static Node* BackwardVisibleTextNode(Node& start_node);
 
   // A match result, containing the starting position of the match and
   // the length of the match.
@@ -49,24 +67,32 @@ class CORE_EXPORT FindBuffer {
   // All match results for this buffer. We can iterate through the
   // BufferMatchResults one by one using the Iterator.
   class CORE_EXPORT Results {
+    STACK_ALLOCATED();
+
    public:
     Results();
 
-    Results(const Vector<UChar>& buffer,
-            String search_text,
+    Results(const FindBuffer& find_buffer,
+            TextSearcherICU* text_searcher,
+            const Vector<UChar>& buffer,
+            const String& search_text,
             const blink::FindOptions options);
 
     class CORE_EXPORT Iterator
         : public std::iterator<std::forward_iterator_tag, BufferMatchResult> {
+      STACK_ALLOCATED();
+
      public:
       Iterator() = default;
-      Iterator(TextSearcherICU* text_searcher, String search_text_);
+      Iterator(const FindBuffer& find_buffer,
+               TextSearcherICU* text_searcher,
+               const String& search_text);
 
-      bool operator==(const Iterator& other) {
+      bool operator==(const Iterator& other) const {
         return has_match_ == other.has_match_;
       }
 
-      bool operator!=(const Iterator& other) {
+      bool operator!=(const Iterator& other) const {
         return has_match_ != other.has_match_;
       }
 
@@ -75,32 +101,34 @@ class CORE_EXPORT FindBuffer {
       void operator++();
 
      private:
+      const FindBuffer* find_buffer_;
       TextSearcherICU* text_searcher_;
       MatchResultICU match_;
       bool has_match_ = false;
     };
 
-    Iterator begin();
+    Iterator begin() const;
 
     Iterator end() const;
 
-    bool IsEmpty();
+    bool IsEmpty() const;
 
-    BufferMatchResult front();
+    BufferMatchResult front() const;
 
-    BufferMatchResult back();
+    BufferMatchResult back() const;
 
-    unsigned CountForTesting();
+    unsigned CountForTesting() const;
 
    private:
     String search_text_;
-    TextSearcherICU text_searcher_;
+    const FindBuffer* find_buffer_;
+    TextSearcherICU* text_searcher_;
     bool empty_result_ = false;
   };
 
   // Finds all the match for |search_text| in |buffer_|.
-  std::unique_ptr<Results> FindMatches(const WebString& search_text,
-                                       const blink::FindOptions options) const;
+  Results FindMatches(const WebString& search_text,
+                      const blink::FindOptions options);
 
   // Gets a flat tree range corresponding to text in the [start_index,
   // end_index) of |buffer|.
@@ -113,6 +141,8 @@ class CORE_EXPORT FindBuffer {
     return PositionInFlatTree::FirstPositionInNode(*node_after_block_);
   }
 
+  bool IsInvalidMatch(MatchResultICU match) const;
+
  private:
   // Collects text for one LayoutBlockFlow located within |range| to |buffer_|,
   // might be stopped without finishing one full LayoutBlockFlow  if we
@@ -121,18 +151,8 @@ class CORE_EXPORT FindBuffer {
   // another LayoutBlockFlow or after |end_position|) to |node_after_block_|.
   void CollectTextUntilBlockBoundary(const EphemeralRangeInFlatTree& range);
 
-  // Adds the ScopedForcedUpdate of |element|'s DisplayLockContext (if it's
-  // there) to |scoped_forced_update_list_|. Returns true if we added a
-  // ScopedForceUpdate.
-  bool PushScopedForcedUpdateIfNeeded(const Element& element);
-
-  // Collects all ScopedForceUpdates of any activatable-locked element
-  // within the range of [start_node, search_range_end_node] or
-  // [start_node, node_after_block) whichever is smaller, to
-  // |scoped_forced_update_list_|.
-  void CollectScopedForcedUpdates(Node& start_node,
-                                  const Node* search_range_end_node,
-                                  const Node* node_after_block);
+  // Replaces nodes that should be ignored with appropriate char constants.
+  void ReplaceNodeWithCharConstants(const Node& node);
 
   // Mapping for position in buffer -> actual node where the text came from,
   // along with the offset in the NGOffsetMapping of this find_buffer.
@@ -164,7 +184,7 @@ class CORE_EXPORT FindBuffer {
     const unsigned offset_in_mapping;
   };
 
-  BufferNodeMapping MappingForIndex(unsigned index) const;
+  const BufferNodeMapping* MappingForIndex(unsigned index) const;
 
   PositionInFlatTree PositionAtStartOfCharacterAtIndex(unsigned index) const;
 
@@ -175,10 +195,10 @@ class CORE_EXPORT FindBuffer {
                        LayoutBlockFlow& block_flow,
                        const EphemeralRangeInFlatTree& range);
 
-  Member<Node> node_after_block_;
+  Node* node_after_block_ = nullptr;
   Vector<UChar> buffer_;
   Vector<BufferNodeMapping> buffer_node_mappings_;
-  Vector<DisplayLockContext::ScopedForcedUpdate> scoped_forced_update_list_;
+  TextSearcherICU text_searcher_;
 
   const NGOffsetMapping* offset_mapping_ = nullptr;
 };

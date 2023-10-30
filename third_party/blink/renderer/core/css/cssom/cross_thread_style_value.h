@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 
 namespace blink {
@@ -20,10 +19,14 @@ class CORE_EXPORT CrossThreadStyleValue {
  public:
   enum class StyleValueType {
     kUnknownType,
+    kUnparsedType,
     kKeywordType,
     kUnitType,
+    kColorType,
   };
 
+  CrossThreadStyleValue(const CrossThreadStyleValue&) = delete;
+  CrossThreadStyleValue& operator=(const CrossThreadStyleValue&) = delete;
   virtual ~CrossThreadStyleValue() = default;
 
   virtual StyleValueType GetType() const = 0;
@@ -34,11 +37,8 @@ class CORE_EXPORT CrossThreadStyleValue {
 
  protected:
   CrossThreadStyleValue() = default;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CrossThreadStyleValue);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_CROSS_THREAD_STYLE_VALUE_H_

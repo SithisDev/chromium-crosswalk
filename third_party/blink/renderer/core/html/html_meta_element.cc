@@ -22,29 +22,38 @@
 
 #include "third_party/blink/renderer/core/html/html_meta_element.h"
 
+#include "third_party/blink/public/mojom/frame/color_scheme.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/viewport_data.h"
+#include "third_party/blink/renderer/core/html/client_hints_util.h"
 #include "third_party/blink/renderer/core/html/html_head_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/loader/frame_client_hints_preferences_context.h"
+#include "third_party/blink/renderer/core/loader/frame_fetch_context.h"
 #include "third_party/blink/renderer/core/loader/http_equiv.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/graphics/color_scheme.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/loader/fetch/client_hints_preferences.h"
+#include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 
 namespace blink {
 
-using namespace html_names;
-
-HTMLMetaElement::HTMLMetaElement(Document& document)
-    : HTMLElement(kMetaTag, document) {}
+HTMLMetaElement::HTMLMetaElement(Document& document,
+                                 const CreateElementFlags flags)
+    : HTMLElement(html_names::kMetaTag, document),
+      is_sync_parser_(flags.IsCreatedByParser() &&
+                      !flags.IsAsyncCustomElements() &&
+                      !document.IsInDocumentWrite()) {}
 
 static bool IsInvalidSeparator(UChar c) {
   return c == ';';
@@ -127,9 +136,9 @@ void HTMLMetaElement::ParseContentAttribute(
     String message =
         "Error parsing a meta element's content: ';' is not a valid key-value "
         "pair separator. Please use ',' instead.";
-    document->AddConsoleMessage(
-        ConsoleMessage::Create(mojom::ConsoleMessageSource::kRendering,
-                               mojom::ConsoleMessageLevel::kWarning, message));
+    document->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+        mojom::ConsoleMessageSource::kRendering,
+        mojom::ConsoleMessageLevel::kWarning, message));
   }
 }
 
@@ -201,11 +210,12 @@ Length HTMLMetaElement::ParseViewportValueAsLength(Document* document,
   if (value < 0)
     return Length();  // auto
 
+  value = ClampLengthValue(value);
   if (document && document->GetPage()) {
-    value =
-        document->GetPage()->GetChromeClient().WindowToViewportScalar(value);
+    value = document->GetPage()->GetChromeClient().WindowToViewportScalar(
+        document->GetFrame(), value);
   }
-  return Length::Fixed(ClampLengthValue(value));
+  return Length::Fixed(value);
 }
 
 float HTMLMetaElement::ParseViewportValueAsZoom(
@@ -432,9 +442,9 @@ void HTMLMetaElement::ReportViewportWarning(Document* document,
 
   // FIXME: This message should be moved off the console once a solution to
   // https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
-  document->AddConsoleMessage(
-      ConsoleMessage::Create(mojom::ConsoleMessageSource::kRendering,
-                             ViewportErrorMessageLevel(error_code), message));
+  document->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+      mojom::ConsoleMessageSource::kRendering,
+      ViewportErrorMessageLevel(error_code), message));
 }
 
 void HTMLMetaElement::GetViewportDescriptionFromContentAttribute(
@@ -476,28 +486,34 @@ void HTMLMetaElement::ProcessViewportContentAttribute(
 }
 
 void HTMLMetaElement::NameRemoved(const AtomicString& name_value) {
-  const AtomicString& content_value = FastGetAttribute(kContentAttr);
+  const AtomicString& content_value =
+      FastGetAttribute(html_names::kContentAttr);
   if (content_value.IsNull())
     return;
   if (EqualIgnoringASCIICase(name_value, "theme-color") &&
       GetDocument().GetFrame()) {
-    GetDocument().GetFrame()->Client()->DispatchDidChangeThemeColor();
+    GetDocument().GetFrame()->DidChangeThemeColor(
+        /*update_theme_color_cache=*/true);
   } else if (EqualIgnoringASCIICase(name_value, "color-scheme")) {
     GetDocument().ColorSchemeMetaChanged();
+  } else if (EqualIgnoringASCIICase(name_value, "supports-reduced-motion")) {
+    GetDocument().SupportsReducedMotionMetaChanged();
   }
 }
 
 void HTMLMetaElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == kNameAttr) {
+  if (params.name == html_names::kNameAttr) {
     if (IsInDocumentTree())
       NameRemoved(params.old_value);
     ProcessContent();
-  } else if (params.name == kContentAttr) {
+  } else if (params.name == html_names::kContentAttr) {
     ProcessContent();
     ProcessHttpEquiv();
-  } else if (params.name == kHttpEquivAttr) {
+  } else if (params.name == html_names::kHttpEquivAttr) {
     ProcessHttpEquiv();
+  } else if (params.name == html_names::kMediaAttr) {
+    ProcessContent();
   } else {
     HTMLElement::ParseAttribute(params);
   }
@@ -518,7 +534,7 @@ void HTMLMetaElement::RemovedFrom(ContainerNode& insertion_point) {
   HTMLElement::RemovedFrom(insertion_point);
   if (!insertion_point.IsInDocumentTree())
     return;
-  const AtomicString& name_value = FastGetAttribute(kNameAttr);
+  const AtomicString& name_value = FastGetAttribute(html_names::kNameAttr);
   if (!name_value.IsEmpty())
     NameRemoved(name_value);
 }
@@ -533,33 +549,42 @@ static bool InDocumentHead(HTMLMetaElement* element) {
 void HTMLMetaElement::ProcessHttpEquiv() {
   if (!IsInDocumentTree())
     return;
-  const AtomicString& content_value = FastGetAttribute(kContentAttr);
+  const AtomicString& content_value =
+      FastGetAttribute(html_names::kContentAttr);
   if (content_value.IsNull())
     return;
-  const AtomicString& http_equiv_value = FastGetAttribute(kHttpEquivAttr);
+  const AtomicString& http_equiv_value =
+      FastGetAttribute(html_names::kHttpEquivAttr);
   if (http_equiv_value.IsEmpty())
     return;
   HttpEquiv::Process(GetDocument(), http_equiv_value, content_value,
-                     InDocumentHead(this), this);
+                     InDocumentHead(this), is_sync_parser_, this);
 }
 
 void HTMLMetaElement::ProcessContent() {
   if (!IsInDocumentTree())
     return;
 
-  const AtomicString& name_value = FastGetAttribute(kNameAttr);
+  const AtomicString& name_value = FastGetAttribute(html_names::kNameAttr);
   if (name_value.IsEmpty())
     return;
 
-  const AtomicString& content_value = FastGetAttribute(kContentAttr);
+  const AtomicString& content_value =
+      FastGetAttribute(html_names::kContentAttr);
 
   if (EqualIgnoringASCIICase(name_value, "theme-color") &&
       GetDocument().GetFrame()) {
-    GetDocument().GetFrame()->Client()->DispatchDidChangeThemeColor();
+    GetDocument().GetFrame()->DidChangeThemeColor(
+        /*update_theme_color_cache=*/true);
     return;
   }
   if (EqualIgnoringASCIICase(name_value, "color-scheme")) {
     GetDocument().ColorSchemeMetaChanged();
+    return;
+  }
+
+  if (EqualIgnoringASCIICase(name_value, "supports-reduced-motion")) {
+    GetDocument().SupportsReducedMotionMetaChanged();
     return;
   }
 
@@ -571,9 +596,17 @@ void HTMLMetaElement::ProcessContent() {
   if (EqualIgnoringASCIICase(name_value, "viewport")) {
     ProcessViewportContentAttribute(content_value,
                                     ViewportDescription::kViewportMeta);
-  } else if (EqualIgnoringASCIICase(name_value, "referrer")) {
-    GetDocument().ParseAndSetReferrerPolicy(content_value,
-                                            true /* support legacy keywords */);
+  } else if (EqualIgnoringASCIICase(name_value, "referrer") &&
+             GetExecutionContext()) {
+    UseCounter::Count(&GetDocument(),
+                      WebFeature::kHTMLMetaElementReferrerPolicy);
+    if (!IsDescendantOf(GetDocument().head())) {
+      UseCounter::Count(&GetDocument(),
+                        WebFeature::kHTMLMetaElementReferrerPolicyOutsideHead);
+    }
+
+    GetExecutionContext()->ParseAndSetReferrerPolicy(content_value,
+                                                     kPolicySourceMetaTag);
   } else if (EqualIgnoringASCIICase(name_value, "handheldfriendly") &&
              EqualIgnoringASCIICase(content_value, "true")) {
     ProcessViewportContentAttribute("width=device-width",
@@ -581,6 +614,14 @@ void HTMLMetaElement::ProcessContent() {
   } else if (EqualIgnoringASCIICase(name_value, "mobileoptimized")) {
     ProcessViewportContentAttribute("width=device-width, initial-scale=1",
                                     ViewportDescription::kMobileOptimizedMeta);
+  } else if (EqualIgnoringASCIICase(name_value, "monetization")) {
+    // TODO(1031476): The Web Monetization specification is an unofficial draft,
+    // available at https://webmonetization.org/specification.html
+    // For now, only use counters are implemented in Blink.
+    if (GetDocument().IsInOutermostMainFrame()) {
+      UseCounter::Count(&GetDocument(),
+                        WebFeature::kHTMLMetaElementMonetization);
+    }
   }
 }
 
@@ -593,14 +634,79 @@ WTF::TextEncoding HTMLMetaElement::ComputeEncoding() const {
 }
 
 const AtomicString& HTMLMetaElement::Content() const {
-  return getAttribute(kContentAttr);
+  return FastGetAttribute(html_names::kContentAttr);
 }
 
 const AtomicString& HTMLMetaElement::HttpEquiv() const {
-  return getAttribute(kHttpEquivAttr);
+  return FastGetAttribute(html_names::kHttpEquivAttr);
+}
+
+const AtomicString& HTMLMetaElement::Media() const {
+  return FastGetAttribute(html_names::kMediaAttr);
 }
 
 const AtomicString& HTMLMetaElement::GetName() const {
-  return GetNameAttribute();
+  return FastGetAttribute(html_names::kNameAttr);
 }
+
+const AtomicString& HTMLMetaElement::Property() const {
+  return FastGetAttribute(html_names::kPropertyAttr);
 }
+
+const AtomicString& HTMLMetaElement::Itemprop() const {
+  return FastGetAttribute(html_names::kItempropAttr);
+}
+
+// static
+void HTMLMetaElement::ProcessMetaCH(Document& document,
+                                    const AtomicString& content,
+                                    network::MetaCHType type,
+                                    bool is_doc_preloader_or_sync_parser) {
+  switch (type) {
+    case network::MetaCHType::HttpEquivAcceptCH:
+      if (!RuntimeEnabledFeatures::ClientHintsMetaHTTPEquivAcceptCHEnabled())
+        return;
+      break;
+    case network::MetaCHType::HttpEquivDelegateCH:
+      if (!RuntimeEnabledFeatures::ClientHintsMetaEquivDelegateCHEnabled())
+        return;
+      break;
+  }
+
+  LocalFrame* frame = document.GetFrame();
+  if (!frame)
+    return;
+
+  if (!frame->IsMainFrame()) {
+    return;
+  }
+
+  if (!FrameFetchContext::AllowScriptFromSourceWithoutNotifying(
+          document.Url(), frame->GetContentSettingsClient(),
+          frame->GetSettings())) {
+    // Do not allow configuring client hints if JavaScript is disabled.
+    return;
+  }
+
+  switch (type) {
+    case network::MetaCHType::HttpEquivAcceptCH:
+      UseCounter::Count(document,
+                        WebFeature::kClientHintsMetaHTTPEquivAcceptCH);
+      break;
+    case network::MetaCHType::HttpEquivDelegateCH:
+      UseCounter::Count(document, WebFeature::kClientHintsMetaEquivDelegateCH);
+      break;
+  }
+  FrameClientHintsPreferencesContext hints_context(frame);
+  UpdateWindowPermissionsPolicyWithDelegationSupportForClientHints(
+      frame->GetClientHintsPreferences(), document.domWindow(), content,
+      document.Url(), &hints_context, type, is_doc_preloader_or_sync_parser);
+}
+
+void HTMLMetaElement::FinishParsingChildren() {
+  // Flag the tag was parsed so if it's re-read we know it was modified.
+  is_sync_parser_ = false;
+  HTMLElement::FinishParsingChildren();
+}
+
+}  // namespace blink

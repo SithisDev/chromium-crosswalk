@@ -5,33 +5,49 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_NFC_NDEF_MESSAGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_NFC_NDEF_MESSAGE_H_
 
+#include <stdint.h>
+
 #include "services/device/public/mojom/nfc.mojom-blink-forward.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
+class ExceptionState;
 class NDEFMessageInit;
 class NDEFRecord;
+class ScriptState;
 
 class MODULES_EXPORT NDEFMessage final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static NDEFMessage* Create(const NDEFMessageInit*);
+  // |is_embedded| indicates if this message serves as payload for a parent
+  // record.
+  static NDEFMessage* Create(const ScriptState*,
+                             const NDEFMessageInit*,
+                             ExceptionState&,
+                             uint8_t records_depth = 0U,
+                             bool is_embedded = false);
+  static NDEFMessage* Create(const ScriptState*,
+                             const V8NDEFMessageSource* source,
+                             ExceptionState& exception_state);
+  static NDEFMessage* CreateAsPayloadOfSmartPoster(const ScriptState*,
+                                                   const NDEFMessageInit*,
+                                                   ExceptionState&,
+                                                   uint8_t records_depth);
 
-  NDEFMessage(const NDEFMessageInit*);
-  NDEFMessage(const device::mojom::blink::NDEFMessage&);
+  NDEFMessage();
+  explicit NDEFMessage(const device::mojom::blink::NDEFMessage&);
 
-  const String& url() const;
   const HeapVector<Member<NDEFRecord>>& records() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
-  String url_;
   HeapVector<Member<NDEFRecord>> records_;
 };
 

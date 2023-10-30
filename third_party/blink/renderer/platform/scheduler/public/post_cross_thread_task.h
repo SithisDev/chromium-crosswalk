@@ -7,40 +7,25 @@
 
 #include <utility>
 #include "base/location.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
 // For cross-thread posting. Can be called from any thread.
-inline void PostCrossThreadTask(base::SequencedTaskRunner& task_runner,
-                                const base::Location& location,
-                                WTF::CrossThreadClosure task) {
-  task_runner.PostDelayedTask(location, ConvertToBaseCallback(std::move(task)),
-                              base::TimeDelta());
-}
-
-inline void PostCrossThreadTask(base::SequencedTaskRunner& task_runner,
+inline bool PostCrossThreadTask(base::SequencedTaskRunner& task_runner,
                                 const base::Location& location,
                                 WTF::CrossThreadOnceClosure task) {
-  task_runner.PostDelayedTask(
-      location, ConvertToBaseOnceCallback(std::move(task)), base::TimeDelta());
+  return task_runner.PostTask(location,
+                              ConvertToBaseOnceCallback(std::move(task)));
 }
 
-inline void PostDelayedCrossThreadTask(base::SequencedTaskRunner& task_runner,
-                                       const base::Location& location,
-                                       WTF::CrossThreadClosure task,
-                                       base::TimeDelta delay) {
-  task_runner.PostDelayedTask(location, ConvertToBaseCallback(std::move(task)),
-                              delay);
-}
-
-inline void PostDelayedCrossThreadTask(base::SequencedTaskRunner& task_runner,
+inline bool PostDelayedCrossThreadTask(base::SequencedTaskRunner& task_runner,
                                        const base::Location& location,
                                        WTF::CrossThreadOnceClosure task,
                                        base::TimeDelta delay) {
-  task_runner.PostDelayedTask(
+  return task_runner.PostDelayedTask(
       location, ConvertToBaseOnceCallback(std::move(task)), delay);
 }
 

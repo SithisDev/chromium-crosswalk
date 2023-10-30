@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://wicg.github.io/mediasession/#enumdef-mediasessionplaybackstate
+// https://w3c.github.io/mediasession/#enumdef-mediasessionplaybackstate
 
 enum MediaSessionPlaybackState {
     "none",
@@ -10,7 +10,7 @@ enum MediaSessionPlaybackState {
     "playing"
 };
 
-// https://wicg.github.io/mediasession/#the-mediasession-interface
+// https://w3c.github.io/mediasession/#the-mediasession-interface
 
 enum MediaSessionAction {
   "play",
@@ -21,10 +21,13 @@ enum MediaSessionAction {
   "seekforward",
   "skipad",
   "stop",
-  "seekto"
+  "seekto",
+  "togglemicrophone",
+  "togglecamera",
+  "hangup"
 };
 
-callback MediaSessionActionHandler = void ([RuntimeEnabled=MediaSessionSeeking] MediaSessionActionDetails details);
+callback MediaSessionActionHandler = void (MediaSessionActionDetails details);
 
 [
     Exposed=Window,
@@ -35,4 +38,13 @@ callback MediaSessionActionHandler = void ([RuntimeEnabled=MediaSessionSeeking] 
 
     [Measure, RaisesException] void setActionHandler(MediaSessionAction action,
                                     MediaSessionActionHandler? handler);
+
+    [Measure, RaisesException]
+    void setPositionState(optional MediaPositionState state = {});
+
+    [Measure, RuntimeEnabled=MediaSessionWebRTC]
+    void setMicrophoneActive(boolean active);
+
+    [Measure, RuntimeEnabled=MediaSessionWebRTC]
+    void setCameraActive(boolean active);
 };

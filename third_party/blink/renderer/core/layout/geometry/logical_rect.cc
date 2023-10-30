@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/layout/geometry/logical_rect.h"
 
 #include <algorithm>
+#include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -32,9 +33,15 @@ void LogicalRect::Unite(const LogicalRect& other) {
     return;
   }
 
+  UniteEvenIfEmpty(other);
+}
+
+void LogicalRect::UniteEvenIfEmpty(const LogicalRect& other) {
   LogicalOffset new_end_offset(Max(EndOffset(), other.EndOffset()));
-  offset = Min(offset, other.offset);
-  size = new_end_offset - offset;
+  LogicalOffset new_start_offset(Min(offset, other.offset));
+  size = new_end_offset - new_start_offset;
+  offset = {new_end_offset.inline_offset - size.inline_size,
+            new_end_offset.block_offset - size.block_size};
 }
 
 String LogicalRect::ToString() const {

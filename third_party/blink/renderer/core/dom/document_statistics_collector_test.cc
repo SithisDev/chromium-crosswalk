@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/html/html_head_element.h"
 #include "third_party/blink/renderer/core/html/html_link_element.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -35,7 +36,7 @@ class DocumentStatisticsCollectorTest : public PageTestBase {
 
 void DocumentStatisticsCollectorTest::SetHtmlInnerHTML(
     const String& html_content) {
-  GetDocument().documentElement()->SetInnerHTMLFromString((html_content));
+  GetDocument().documentElement()->setInnerHTML((html_content));
 }
 
 // This test checks open graph articles can be recognized.
@@ -135,7 +136,7 @@ TEST_F(DocumentStatisticsCollectorTest, CountScoreSaturation) {
     }
     html.Append("</p>");
   }
-  SetHtmlInnerHTML(html.ToString());
+  SetHtmlInnerHTML(html.ReleaseString());
   WebDistillabilityFeatures features =
       DocumentStatisticsCollector::CollectStatistics(GetDocument());
 

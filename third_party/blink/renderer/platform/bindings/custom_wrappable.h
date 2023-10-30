@@ -5,26 +5,24 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_CUSTOM_WRAPPABLE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_CUSTOM_WRAPPABLE_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 // See the comment on CustomWrappableAdaptor.
 class PLATFORM_EXPORT CustomWrappable
-    : public GarbageCollectedFinalized<CustomWrappable>,
+    : public GarbageCollected<CustomWrappable>,
       public NameClient {
  public:
-  virtual ~CustomWrappable() = default;
-  virtual void Trace(Visitor*) {}
+  CustomWrappable(const CustomWrappable&) = delete;
+  CustomWrappable& operator=(const CustomWrappable&) = delete;
+  ~CustomWrappable() override = default;
+  virtual void Trace(Visitor*) const {}
   const char* NameInHeapSnapshot() const override { return "CustomWrappable"; }
 
  protected:
   CustomWrappable() = default;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CustomWrappable);
 };
 
 }  // namespace blink

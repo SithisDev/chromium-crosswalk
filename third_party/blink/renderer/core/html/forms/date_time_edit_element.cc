@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
+#include "third_party/blink/renderer/core/frame/use_counter_impl.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_field_elements.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_fields_state.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
@@ -36,15 +37,13 @@
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/text/date_time_format.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 
 namespace blink {
-
-using namespace html_names;
 
 class DateTimeEditBuilder : private DateTimeFormat::TokenHandler {
  public:
@@ -76,7 +75,7 @@ class DateTimeEditBuilder : private DateTimeFormat::TokenHandler {
 
   DateTimeEditElement& EditElement() const;
 
-  Member<DateTimeEditElement> edit_element_;
+  DateTimeEditElement* edit_element_;
   const DateComponents date_value_;
   const DateTimeEditElement::LayoutParameters& parameters_;
   DateTimeNumericFieldElement::Range day_range_;
@@ -293,7 +292,12 @@ void DateTimeEditBuilder::VisitField(DateTimeFormat::FieldType field_type,
       return;
     }
 
-    case DateTimeFormat::kFieldTypePeriod: {
+    // TODO(crbug.com/1261272): We don't support UI for
+    // kFieldTypePeriodAmPmNoonMidnight and kFieldTypePeriodFlexible. Apply
+    // the normal am/pm UI instead.
+    case DateTimeFormat::kFieldTypePeriod:
+    case DateTimeFormat::kFieldTypePeriodAmPmNoonMidnight:
+    case DateTimeFormat::kFieldTypePeriodFlexible: {
       DateTimeFieldElement* field =
           MakeGarbageCollected<DateTimeAMPMFieldElement>(
               document, EditElement(), parameters_.locale.TimeAMPMLabels());
@@ -487,9 +491,10 @@ void DateTimeEditBuilder::VisitLiteral(const String& text) {
     WTF::unicode::CharDirection dir = WTF::unicode::Direction(text[0]);
     if (dir == WTF::unicode::kSegmentSeparator ||
         dir == WTF::unicode::kWhiteSpaceNeutral ||
-        dir == WTF::unicode::kOtherNeutral)
-      element->AppendChild(Text::Create(EditElement().GetDocument(),
-                                        String(&kRightToLeftMarkCharacter, 1)));
+        dir == WTF::unicode::kOtherNeutral) {
+      element->AppendChild(Text::Create(
+          EditElement().GetDocument(), String(&kRightToLeftMarkCharacter, 1u)));
+    }
   }
   element->AppendChild(Text::Create(EditElement().GetDocument(), text));
   EditElement().FieldsWrapperElement()->AppendChild(element);
@@ -536,12 +541,12 @@ DateTimeEditElement::DateTimeEditElement(Document& document,
     : HTMLDivElement(document), edit_control_owner_(&edit_control_owner) {
   SetHasCustomStyleCallbacks();
   SetShadowPseudoId(AtomicString("-webkit-datetime-edit"));
-  setAttribute(kIdAttr, shadow_element_names::DateTimeEdit());
+  setAttribute(html_names::kIdAttr, shadow_element_names::kIdDateTimeEdit);
 }
 
 DateTimeEditElement::~DateTimeEditElement() = default;
 
-void DateTimeEditElement::Trace(Visitor* visitor) {
+void DateTimeEditElement::Trace(Visitor* visitor) const {
   visitor->Trace(fields_);
   visitor->Trace(edit_control_owner_);
   HTMLDivElement::Trace(visitor);
@@ -572,11 +577,12 @@ void DateTimeEditElement::BlurByOwner() {
     field->blur();
 }
 
-scoped_refptr<ComputedStyle> DateTimeEditElement::CustomStyleForLayoutObject() {
-  // FIXME: This is a kind of layout. We might want to introduce new
-  // layoutObject.
-  scoped_refptr<ComputedStyle> original_style = OriginalStyleForLayoutObject();
-  scoped_refptr<ComputedStyle> style = ComputedStyle::Clone(*original_style);
+scoped_refptr<ComputedStyle> DateTimeEditElement::CustomStyleForLayoutObject(
+    const StyleRecalcContext& style_recalc_context) {
+  // TODO(crbug.com/1181868): This is a kind of layout. We might want to
+  // introduce new LayoutObject.
+  scoped_refptr<ComputedStyle> style =
+      OriginalStyleForLayoutObject(style_recalc_context);
   float width = 0;
   for (Node* child = FieldsWrapperElement()->firstChild(); child;
        child = child->nextSibling()) {
@@ -596,15 +602,16 @@ scoped_refptr<ComputedStyle> DateTimeEditElement::CustomStyleForLayoutObject() {
     }
   }
   style->SetWidth(Length::Fixed(ceilf(width)));
+  style->SetCustomStyleCallbackDependsOnFont();
   return style;
 }
 
-void DateTimeEditElement::DidBlurFromField(WebFocusType focus_type) {
+void DateTimeEditElement::DidBlurFromField(mojom::blink::FocusType focus_type) {
   if (edit_control_owner_)
     edit_control_owner_->DidBlurFromControl(focus_type);
 }
 
-void DateTimeEditElement::DidFocusOnField(WebFocusType focus_type) {
+void DateTimeEditElement::DidFocusOnField(mojom::blink::FocusType focus_type) {
   if (edit_control_owner_)
     edit_control_owner_->DidFocusOnControl(focus_type);
 }
@@ -641,7 +648,7 @@ void DateTimeEditElement::FocusByOwner(Element* old_focused_element) {
     wtf_size_t index = FieldIndexOf(*old_focused_field);
     GetDocument().UpdateStyleAndLayoutTreeForNode(old_focused_field);
     if (index != kInvalidFieldIndex && old_focused_field->IsFocusable()) {
-      old_focused_field->focus();
+      old_focused_field->Focus();
       return;
     }
   }
@@ -672,7 +679,7 @@ bool DateTimeEditElement::FocusOnNextFocusableField(wtf_size_t start_index) {
   for (wtf_size_t field_index = start_index; field_index < fields_.size();
        ++field_index) {
     if (fields_[field_index]->IsFocusable()) {
-      fields_[field_index]->focus();
+      fields_[field_index]->Focus();
       return true;
     }
   }
@@ -696,11 +703,29 @@ bool DateTimeEditElement::FocusOnPreviousField(
   while (field_index > 0) {
     --field_index;
     if (fields_[field_index]->IsFocusable()) {
-      fields_[field_index]->focus();
+      fields_[field_index]->Focus();
       return true;
     }
   }
   return false;
+}
+
+void DateTimeEditElement::HandleAmPmRollover(
+    DateTimeFieldElement::FieldRolloverType rollover_type) {
+  auto* ampm_field = GetField(DateTimeField::kAMPM);
+  if (!ampm_field)
+    return;
+  DateTimeFieldsState date_time_fields_state = ValueAsDateTimeFieldsState();
+  ampm_field->PopulateDateTimeFieldsState(date_time_fields_state);
+  bool was_am =
+      (date_time_fields_state.Ampm() == DateTimeFieldsState::kAMPMValueAM);
+  date_time_fields_state.SetAMPM(DateTimeFieldsState::kAMPMValuePM);
+  if (rollover_type != DateTimeFieldElement::FieldRolloverType::kToPm &&
+      !was_am)
+    date_time_fields_state.SetAMPM(DateTimeFieldsState::kAMPMValueAM);
+  ampm_field->SetValueAsDateTimeFieldsState(date_time_fields_state);
+  // No need to call EditControlValueChanged since change that triggered
+  // rollover will do so.
 }
 
 bool DateTimeEditElement::IsDateTimeEditElement() const {
@@ -761,7 +786,7 @@ void DateTimeEditElement::GetLayout(const LayoutParameters& layout_parameters,
     }
     if (DateTimeFieldElement* field =
             FieldAt(std::min(focused_field_index, fields_.size() - 1)))
-      field->focus();
+      field->Focus();
   }
 
   if (last_child_to_be_removed) {
@@ -831,8 +856,38 @@ void DateTimeEditElement::SetEmptyValue(
     field->SetEmptyValue(DateTimeFieldElement::kDispatchNoEvent);
 }
 
+DateTimeFieldElement* DateTimeEditElement::GetField(DateTimeField type) const {
+  auto* it = std::find_if(
+      fields_.begin(), fields_.end(),
+      [&type](const auto& field) { return field->Type() == type; });
+  if (it == fields_.end())
+    return nullptr;
+  return *it;
+}
+
+bool DateTimeEditElement::HasField(DateTimeField type) const {
+  for (const auto& field : fields_) {
+    if (field->Type() == type)
+      return true;
+  }
+
+  return false;
+}
+
+bool DateTimeEditElement::IsFirstFieldAMPM() const {
+  const auto* first_field = FieldAt(0);
+  return first_field && first_field->Type() == DateTimeField::kAMPM;
+}
+
 bool DateTimeEditElement::HasFocusedField() {
   return FocusedFieldIndex() != kInvalidFieldIndex;
+}
+
+void PopulateOnlyYearMonthDay(const DateComponents& date,
+                              DateTimeFieldsState& date_time_fields_state) {
+  date_time_fields_state.SetYear(date.FullYear());
+  date_time_fields_state.SetMonth(date.Month() + 1);
+  date_time_fields_state.SetDayOfMonth(date.MonthDay());
 }
 
 void DateTimeEditElement::SetOnlyYearMonthDay(const DateComponents& date) {
@@ -842,9 +897,48 @@ void DateTimeEditElement::SetOnlyYearMonthDay(const DateComponents& date) {
     return;
 
   DateTimeFieldsState date_time_fields_state = ValueAsDateTimeFieldsState();
-  date_time_fields_state.SetYear(date.FullYear());
-  date_time_fields_state.SetMonth(date.Month() + 1);
-  date_time_fields_state.SetDayOfMonth(date.MonthDay());
+  PopulateOnlyYearMonthDay(date, date_time_fields_state);
+  SetValueAsDateTimeFieldsState(date_time_fields_state);
+  edit_control_owner_->EditControlValueChanged();
+}
+
+void PopulateOnlyTime(const DateComponents& date,
+                      DateTimeFieldsState& date_time_fields_state) {
+  date_time_fields_state.SetHour(date.Hour() % 12 ? date.Hour() % 12 : 12);
+  date_time_fields_state.SetMinute(date.Minute());
+  date_time_fields_state.SetSecond(date.Second());
+  date_time_fields_state.SetMillisecond(date.Millisecond());
+  date_time_fields_state.SetAMPM(date.Hour() >= 12
+                                     ? DateTimeFieldsState::kAMPMValuePM
+                                     : DateTimeFieldsState::kAMPMValueAM);
+}
+
+void DateTimeEditElement::SetOnlyTime(const DateComponents& date) {
+  DCHECK_EQ(date.GetType(), DateComponents::kTime);
+
+  if (!edit_control_owner_)
+    return;
+
+  DateTimeFieldsState date_time_fields_state = ValueAsDateTimeFieldsState();
+  PopulateOnlyTime(date, date_time_fields_state);
+  SetValueAsDateTimeFieldsState(date_time_fields_state);
+  edit_control_owner_->EditControlValueChanged();
+}
+
+void PopulateDateTimeLocal(const DateComponents& date,
+                           DateTimeFieldsState& date_time_fields_state) {
+  PopulateOnlyYearMonthDay(date, date_time_fields_state);
+  PopulateOnlyTime(date, date_time_fields_state);
+}
+
+void DateTimeEditElement::SetDateTimeLocal(const DateComponents& date) {
+  DCHECK_EQ(date.GetType(), DateComponents::kDateTimeLocal);
+
+  if (!edit_control_owner_)
+    return;
+
+  DateTimeFieldsState date_time_fields_state = ValueAsDateTimeFieldsState();
+  PopulateDateTimeLocal(date, date_time_fields_state);
   SetValueAsDateTimeFieldsState(date_time_fields_state);
   edit_control_owner_->EditControlValueChanged();
 }

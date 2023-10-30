@@ -40,57 +40,42 @@
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_error.h"
 #include "third_party/blink/public/web/modules/service_worker/web_service_worker_context_client.h"
 #include "third_party/blink/public/web/web_serialized_script_value.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/headers.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
-#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
-#include "third_party/blink/renderer/core/workers/parent_execution_context_task_runners.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/modules/exported/web_embedded_worker_impl.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_global_scope.h"
 #include "third_party/blink/renderer/modules/service_worker/wait_until_observer.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
 
-ServiceWorkerGlobalScopeProxy* ServiceWorkerGlobalScopeProxy::Create(
-    WebEmbeddedWorkerImpl& embedded_worker,
-    WebServiceWorkerContextClient& client) {
-  return MakeGarbageCollected<ServiceWorkerGlobalScopeProxy>(embedded_worker,
-                                                             client);
-}
-
 ServiceWorkerGlobalScopeProxy::~ServiceWorkerGlobalScopeProxy() {
-  DCHECK(IsMainThread());
+  DCHECK(parent_thread_default_task_runner_->BelongsToCurrentThread());
   // Verify that the proxy has been detached.
   DCHECK(!embedded_worker_);
 }
 
-void ServiceWorkerGlobalScopeProxy::Trace(blink::Visitor* visitor) {
-  visitor->Trace(parent_execution_context_task_runners_);
-}
-
 void ServiceWorkerGlobalScopeProxy::BindServiceWorker(
-    mojo::ScopedMessagePipeHandle request) {
+    CrossVariantMojoReceiver<mojom::blink::ServiceWorkerInterfaceBase>
+        receiver) {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  WorkerGlobalScope()->BindServiceWorker(
-      mojom::blink::ServiceWorkerRequest(std::move(request)));
+  WorkerGlobalScope()->BindServiceWorker(std::move(receiver));
 }
 
 void ServiceWorkerGlobalScopeProxy::BindControllerServiceWorker(
-    mojo::ScopedMessagePipeHandle request) {
+    CrossVariantMojoReceiver<mojom::blink::ControllerServiceWorkerInterfaceBase>
+        receiver) {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  WorkerGlobalScope()->BindControllerServiceWorker(
-      mojo::PendingReceiver<mojom::blink::ControllerServiceWorker>(
-          std::move(request)));
+  WorkerGlobalScope()->BindControllerServiceWorker(std::move(receiver));
 }
 
 void ServiceWorkerGlobalScopeProxy::OnNavigationPreloadResponse(
@@ -127,14 +112,6 @@ void ServiceWorkerGlobalScopeProxy::CountFeature(WebFeature feature) {
   Client().CountFeature(feature);
 }
 
-void ServiceWorkerGlobalScopeProxy::CountDeprecation(WebFeature feature) {
-  DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  // Go through the same code path with countFeature() because a deprecation
-  // message is already shown on the worker console and a remaining work is
-  // just to record an API use.
-  CountFeature(feature);
-}
-
 void ServiceWorkerGlobalScopeProxy::ReportException(
     const String& error_message,
     std::unique_ptr<SourceLocation> location,
@@ -156,8 +133,6 @@ void ServiceWorkerGlobalScopeProxy::ReportConsoleMessage(
 
 void ServiceWorkerGlobalScopeProxy::WillInitializeWorkerContext() {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  TRACE_EVENT_BEGIN0("ServiceWorker",
-                     "ServiceWorkerGlobalScopeProxy::InitializeWorkerContext");
   Client().WillInitializeWorkerContext();
 }
 
@@ -173,37 +148,19 @@ void ServiceWorkerGlobalScopeProxy::DidCreateWorkerGlobalScope(
   Client().WorkerContextStarted(this, std::move(worker_task_runner));
 }
 
-void ServiceWorkerGlobalScopeProxy::DidInitializeWorkerContext() {
-  DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  ScriptState::Scope scope(
-      WorkerGlobalScope()->ScriptController()->GetScriptState());
-  Client().DidInitializeWorkerContext(
-      this, WorkerGlobalScope()->ScriptController()->GetContext());
-  TRACE_EVENT_END0("ServiceWorker",
-                   "ServiceWorkerGlobalScopeProxy::InitializeWorkerContext");
-}
-
 void ServiceWorkerGlobalScopeProxy::DidLoadClassicScript() {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
   Client().WorkerScriptLoadedOnWorkerThread();
 }
 
-void ServiceWorkerGlobalScopeProxy::DidFailToLoadClassicScript() {
-  DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  // Tell ServiceWorkerContextClient about the failure. The generic
-  // WorkerContextFailedToStart() wouldn't make sense because
-  // WorkerContextStarted() was already called.
-  Client().FailedToLoadClassicScript();
-}
-
-void ServiceWorkerGlobalScopeProxy::DidFetchScript(int64_t /* app_cache_id */) {
+void ServiceWorkerGlobalScopeProxy::DidFetchScript() {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
   Client().WorkerScriptLoadedOnWorkerThread();
 }
 
 void ServiceWorkerGlobalScopeProxy::DidFailToFetchClassicScript() {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  Client().FailedToLoadClassicScript();
+  Client().FailedToFetchClassicScript();
 }
 
 void ServiceWorkerGlobalScopeProxy::DidFailToFetchModuleScript() {
@@ -211,45 +168,24 @@ void ServiceWorkerGlobalScopeProxy::DidFailToFetchModuleScript() {
   Client().FailedToFetchModuleScript();
 }
 
-void ServiceWorkerGlobalScopeProxy::WillEvaluateClassicScript(
-    size_t script_size,
-    size_t cached_metadata_size) {
+void ServiceWorkerGlobalScopeProxy::WillEvaluateScript() {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  TRACE_EVENT_ASYNC_BEGIN0(
-      "ServiceWorker", "ServiceWorkerGlobalScopeProxy::EvaluateClassicScript",
-      this);
-  // TODO(asamidoi): Remove CountWorkerScript which is called for recording
-  // metrics if the metrics are no longer referenced, and then merge
-  // WillEvaluateClassicScript and WillEvaluateModuleScript for cleanup.
-  worker_global_scope_->CountWorkerScript(script_size, cached_metadata_size);
-  Client().WillEvaluateScript();
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(
+      "ServiceWorker", "ServiceWorkerGlobalScopeProxy::EvaluateTopLevelScript",
+      TRACE_ID_LOCAL(this));
+  ScriptState::Scope scope(
+      WorkerGlobalScope()->ScriptController()->GetScriptState());
+  Client().WillEvaluateScript(
+      WorkerGlobalScope()->ScriptController()->GetContext());
 }
 
-void ServiceWorkerGlobalScopeProxy::WillEvaluateImportedClassicScript(
-    size_t script_size,
-    size_t cached_metadata_size) {
-  DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  worker_global_scope_->CountImportedScript(script_size, cached_metadata_size);
-}
-
-void ServiceWorkerGlobalScopeProxy::WillEvaluateModuleScript() {
-  DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  Client().WillEvaluateScript();
-}
-
-void ServiceWorkerGlobalScopeProxy::DidEvaluateClassicScript(bool success) {
+void ServiceWorkerGlobalScopeProxy::DidEvaluateTopLevelScript(bool success) {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
   WorkerGlobalScope()->DidEvaluateScript();
   Client().DidEvaluateScript(success);
-  TRACE_EVENT_ASYNC_END1("ServiceWorker",
-                         "ServiceWorkerGlobalScopeProxy::EvaluateClassicScript",
-                         this, "success", success);
-}
-
-void ServiceWorkerGlobalScopeProxy::DidEvaluateModuleScript(bool success) {
-  DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  WorkerGlobalScope()->DidEvaluateScript();
-  Client().DidEvaluateScript(success);
+  TRACE_EVENT_NESTABLE_ASYNC_END1(
+      "ServiceWorker", "ServiceWorkerGlobalScopeProxy::EvaluateTopLevelScript",
+      TRACE_ID_LOCAL(this), "success", success);
 }
 
 void ServiceWorkerGlobalScopeProxy::DidCloseWorkerGlobalScope() {
@@ -264,8 +200,7 @@ void ServiceWorkerGlobalScopeProxy::DidCloseWorkerGlobalScope() {
   // ServiceWorkerGlobalScope expects us to terminate the thread, so request
   // that here.
   PostCrossThreadTask(
-      *parent_execution_context_task_runners_->Get(TaskType::kInternalDefault),
-      FROM_HERE,
+      *parent_thread_default_task_runner_, FROM_HERE,
       CrossThreadBindOnce(&WebEmbeddedWorkerImpl::TerminateWorkerContext,
                           CrossThreadUnretained(embedded_worker_)));
 
@@ -296,51 +231,59 @@ bool ServiceWorkerGlobalScopeProxy::IsServiceWorkerGlobalScopeProxy() const {
 void ServiceWorkerGlobalScopeProxy::SetupNavigationPreload(
     int fetch_event_id,
     const KURL& url,
-    mojom::blink::FetchEventPreloadHandlePtr preload_handle) {
+    mojo::PendingReceiver<network::mojom::blink::URLLoaderClient>
+        preload_url_loader_client_receiver) {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  auto web_preload_handle = std::make_unique<WebFetchEventPreloadHandle>();
-  web_preload_handle->url_loader = preload_handle->url_loader.PassHandle();
-  web_preload_handle->url_loader_client_request =
-      preload_handle->url_loader_client_request.PassMessagePipe();
-  Client().SetupNavigationPreload(fetch_event_id, url,
-                                  std::move(web_preload_handle));
+  Client().SetupNavigationPreload(
+      fetch_event_id, url, std::move(preload_url_loader_client_receiver));
 }
 
 void ServiceWorkerGlobalScopeProxy::RequestTermination(
-    base::OnceCallback<void(bool)> callback) {
+    CrossThreadOnceFunction<void(bool)> callback) {
   DCHECK_CALLED_ON_VALID_THREAD(worker_thread_checker_);
-  Client().RequestTermination(std::move(callback));
+  Client().RequestTermination(ConvertToBaseOnceCallback(std::move(callback)));
 }
 
 ServiceWorkerGlobalScopeProxy::ServiceWorkerGlobalScopeProxy(
     WebEmbeddedWorkerImpl& embedded_worker,
-    WebServiceWorkerContextClient& client)
+    WebServiceWorkerContextClient& client,
+    scoped_refptr<base::SingleThreadTaskRunner>
+        parent_thread_default_task_runner)
     : embedded_worker_(&embedded_worker),
+      parent_thread_default_task_runner_(
+          std::move(parent_thread_default_task_runner)),
       client_(&client),
       worker_global_scope_(nullptr) {
-  DCHECK(IsMainThread());
   DETACH_FROM_THREAD(worker_thread_checker_);
-  // ServiceWorker can sometimes run tasks that are initiated by/associated
-  // with a document's frame but these documents can be from a different
-  // process. So we intentionally populate the task runners with default task
-  // runners of the main thread.
-  parent_execution_context_task_runners_ =
-      ParentExecutionContextTaskRunners::Create();
+  DCHECK(parent_thread_default_task_runner_);
 }
 
 void ServiceWorkerGlobalScopeProxy::Detach() {
-  DCHECK(IsMainThread());
+  DCHECK(parent_thread_default_task_runner_->BelongsToCurrentThread());
   embedded_worker_ = nullptr;
   client_ = nullptr;
 }
 
 void ServiceWorkerGlobalScopeProxy::TerminateWorkerContext() {
-  DCHECK(IsMainThread());
+  DCHECK(parent_thread_default_task_runner_->BelongsToCurrentThread());
   embedded_worker_->TerminateWorkerContext();
 }
 
 bool ServiceWorkerGlobalScopeProxy::IsWindowInteractionAllowed() {
   return WorkerGlobalScope()->IsWindowInteractionAllowed();
+}
+
+void ServiceWorkerGlobalScopeProxy::PauseEvaluation() {
+  WorkerGlobalScope()->PauseEvaluation();
+}
+
+void ServiceWorkerGlobalScopeProxy::ResumeEvaluation() {
+  WorkerGlobalScope()->ResumeEvaluation();
+}
+
+mojom::blink::ServiceWorkerFetchHandlerType
+ServiceWorkerGlobalScopeProxy::FetchHandlerType() {
+  return WorkerGlobalScope()->FetchHandlerType();
 }
 
 WebServiceWorkerContextClient& ServiceWorkerGlobalScopeProxy::Client() const {

@@ -28,7 +28,6 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/create_element_flags.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
-#include "third_party/blink/renderer/platform/bindings/shared_persistent.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -37,11 +36,6 @@ class HTMLImageLoader;
 class LayoutEmbeddedContent;
 class LayoutEmbeddedObject;
 class WebPluginContainerImpl;
-
-enum PreferPlugInsForImagesOption {
-  kShouldPreferPlugInsForImages,
-  kShouldNotPreferPlugInsForImages
-};
 
 class PluginParameters {
  public:
@@ -53,7 +47,7 @@ class PluginParameters {
   const Vector<String>& Values() const;
   void AppendAttribute(const Attribute&);
   void AppendNameWithValue(const String& name, const String& value);
-  int FindStringInNames(const String&);
+  void MapDataParamToSrc();
 
  private:
   Vector<String> names_;
@@ -63,17 +57,15 @@ class PluginParameters {
 class CORE_EXPORT HTMLPlugInElement
     : public HTMLFrameOwnerElement,
       public ActiveScriptWrappable<HTMLPlugInElement> {
-  USING_GARBAGE_COLLECTED_MIXIN(HTMLPlugInElement);
-
  public:
   ~HTMLPlugInElement() override;
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   bool IsPlugin() const final { return true; }
 
   bool HasPendingActivity() const final;
 
-  void SetFocused(bool, WebFocusType) override;
+  void SetFocused(bool, mojom::blink::FocusType) override;
   void ResetInstance();
   // TODO(dcheng): Consider removing this, since HTMLEmbedElementLegacyCall
   // and HTMLObjectElementLegacyCall usage is extremely low.
@@ -100,19 +92,20 @@ class CORE_EXPORT HTMLPlugInElement
 
   bool ShouldAccelerate() const;
 
-  ParsedFeaturePolicy ConstructContainerPolicy(
-      Vector<String>* /* messages */) const override;
+  ParsedPermissionsPolicy ConstructContainerPolicy() const override;
 
   bool IsImageType() const;
   HTMLImageLoader* ImageLoader() const { return image_loader_.Get(); }
+  virtual bool UseFallbackContent() const;
 
  protected:
   HTMLPlugInElement(const QualifiedName& tag_name,
                     Document&,
-                    const CreateElementFlags,
-                    PreferPlugInsForImagesOption);
+                    const CreateElementFlags);
 
   // Node functions:
+  InsertionNotificationRequest InsertedInto(
+      ContainerNode& insertion_point) override;
   void RemovedFrom(ContainerNode& insertion_point) override;
   void DidMoveToNewDocument(Document& old_document) override;
   void AttachLayoutTree(AttachContext&) override;
@@ -125,7 +118,6 @@ class CORE_EXPORT HTMLPlugInElement
       MutableCSSPropertyValueSet*) override;
 
   virtual bool HasFallbackContent() const;
-  virtual bool UseFallbackContent() const;
   // Create or update the LayoutEmbeddedContent and return it, triggering layout
   // if necessary.
   virtual LayoutEmbeddedContent* LayoutEmbeddedContentForJSBindings() const;
@@ -176,7 +168,8 @@ class CORE_EXPORT HTMLPlugInElement
   bool IsFocusableStyle() const final;
   bool IsKeyboardFocusable() const final;
   void DidAddUserAgentShadowRoot(ShadowRoot&) final;
-  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() final;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject(
+      const StyleRecalcContext&) final;
 
   // HTMLElement overrides:
   bool HasCustomFocusLogic() const override;
@@ -200,6 +193,7 @@ class CORE_EXPORT HTMLPlugInElement
   bool AllowedToLoadPlugin(const KURL&, const String& mime_type);
   // Perform checks based on the URL and MIME-type of the object to load.
   bool AllowedToLoadObject(const KURL&, const String& mime_type);
+  void RemovePluginFromFrameView(WebPluginContainerImpl* plugin);
 
   enum class ObjectContentType {
     kNone,
@@ -216,7 +210,6 @@ class CORE_EXPORT HTMLPlugInElement
 
   v8::Global<v8::Object> plugin_wrapper_;
   bool needs_plugin_update_;
-  bool should_prefer_plug_ins_for_images_;
   // Represents |layoutObject() && layoutObject()->isEmbeddedObject() &&
   // !layoutEmbeddedItem().showsUnavailablePluginIndicator()|.  We want to
   // avoid accessing |layoutObject()| in layoutObjectIsFocusable().
@@ -235,11 +228,20 @@ class CORE_EXPORT HTMLPlugInElement
   bool dispose_view_ = false;
 };
 
-inline bool IsHTMLPlugInElement(const HTMLElement& element) {
-  return element.IsPluginElement();
+template <>
+inline bool IsElementOfType<const HTMLPlugInElement>(const Node& node) {
+  return IsA<HTMLPlugInElement>(node);
 }
-
-DEFINE_HTMLELEMENT_TYPE_CASTS_WITH_FUNCTION(HTMLPlugInElement);
+template <>
+struct DowncastTraits<HTMLPlugInElement> {
+  static bool AllowFrom(const Node& node) {
+    auto* html_element = DynamicTo<HTMLElement>(node);
+    return html_element && AllowFrom(*html_element);
+  }
+  static bool AllowFrom(const HTMLElement& html_element) {
+    return html_element.IsPluginElement();
+  }
+};
 
 }  // namespace blink
 

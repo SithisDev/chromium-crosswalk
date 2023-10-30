@@ -35,17 +35,20 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_chooser.h"
 #include "third_party/blink/renderer/core/page/page_popup_client.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
 class ChromeClient;
 class DateTimeChooserClient;
+class LocalFrame;
 class PagePopup;
 
 class CORE_EXPORT DateTimeChooserImpl final : public DateTimeChooser,
                                               public PagePopupClient {
  public:
-  DateTimeChooserImpl(ChromeClient*,
+  DateTimeChooserImpl(LocalFrame*,
                       DateTimeChooserClient*,
                       const DateTimeChooserParameters&);
   ~DateTimeChooserImpl() override;
@@ -54,20 +57,21 @@ class CORE_EXPORT DateTimeChooserImpl final : public DateTimeChooser,
   void EndChooser() override;
   AXObject* RootAXObject() override;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   // PagePopupClient functions:
   void WriteDocument(SharedBuffer*) override;
-  void SelectFontsFromOwnerDocument(Document&) override {}
   Locale& GetLocale() override;
   void SetValueAndClosePopup(int, const String&) override;
   void SetValue(const String&) override;
   void CancelPopup() override;
   Element& OwnerElement() override;
+  ChromeClient& GetChromeClient() override;
   void DidClosePopup() override;
+  void AdjustSettings(Settings& popup_settings) override;
 
-  Member<ChromeClient> chrome_client_;
+  Member<LocalFrame> frame_;
   Member<DateTimeChooserClient> client_;
   PagePopup* popup_;
   // This pointer is valid only in the constructor.

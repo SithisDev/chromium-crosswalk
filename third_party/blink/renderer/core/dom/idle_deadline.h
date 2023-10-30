@@ -5,10 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_IDLE_DEADLINE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_IDLE_DEADLINE_H_
 
+#include "base/time/time.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace base {
 class TickClock;
@@ -20,15 +19,14 @@ class CORE_EXPORT IdleDeadline : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  // These values are persisted to logs. Entries should not be renumbered and
-  // numeric values should never be reused.
   enum class CallbackType {
-    kCalledWhenIdle = 0,
-    kCalledByTimeout = 1,
-    kMaxValue = kCalledByTimeout
+    kCalledWhenIdle,
+    kCalledByTimeout,
   };
 
-  IdleDeadline(base::TimeTicks deadline, CallbackType);
+  IdleDeadline(base::TimeTicks deadline,
+               bool cross_origin_isolated_capability,
+               CallbackType);
 
   double timeRemaining() const;
 
@@ -42,6 +40,7 @@ class CORE_EXPORT IdleDeadline : public ScriptWrappable {
 
  private:
   base::TimeTicks deadline_;
+  bool cross_origin_isolated_capability_;
   CallbackType callback_type_;
   const base::TickClock* clock_;
 };

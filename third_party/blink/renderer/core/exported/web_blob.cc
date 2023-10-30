@@ -37,19 +37,21 @@
 #include "third_party/blink/renderer/core/fileapi/blob.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 WebBlob WebBlob::CreateFromUUID(const WebString& uuid,
                                 const WebString& type,
                                 uint64_t size) {
-  return Blob::Create(BlobDataHandle::Create(uuid, type, size));
+  return MakeGarbageCollected<Blob>(BlobDataHandle::Create(uuid, type, size));
 }
 
 WebBlob WebBlob::CreateFromFile(const WebString& path, uint64_t size) {
   auto blob_data = std::make_unique<BlobData>();
-  blob_data->AppendFile(path, 0, size, InvalidFileTime());
-  return Blob::Create(BlobDataHandle::Create(std::move(blob_data), size));
+  blob_data->AppendFile(path, 0, size, absl::nullopt);
+  return MakeGarbageCollected<Blob>(
+      BlobDataHandle::Create(std::move(blob_data), size));
 }
 
 WebBlob WebBlob::FromV8Value(v8::Local<v8::Value> value) {
@@ -80,7 +82,8 @@ v8::Local<v8::Value> WebBlob::ToV8Value(v8::Local<v8::Object> creation_context,
                                         v8::Isolate* isolate) {
   // We no longer use |creationContext| because it's often misused and points
   // to a context faked by user script.
-  DCHECK(creation_context->CreationContext() == isolate->GetCurrentContext());
+  DCHECK(creation_context->GetCreationContextChecked() ==
+         isolate->GetCurrentContext());
   if (!private_.Get())
     return v8::Local<v8::Value>();
   return ToV8(private_.Get(), isolate->GetCurrentContext()->Global(), isolate);

@@ -5,36 +5,36 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_GEOLOCATION_GEO_NOTIFIER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_GEOLOCATION_GEO_NOTIFIER_H_
 
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_position_callback.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_position_error_callback.h"
-#include "third_party/blink/renderer/modules/geolocation/position_options.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_position_options.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/timer.h"
 
 namespace blink {
 
 class Geolocation;
+class GeolocationPositionError;
 class Geoposition;
-class PositionError;
 
-class GeoNotifier final : public GarbageCollectedFinalized<GeoNotifier>,
+class GeoNotifier final : public GarbageCollected<GeoNotifier>,
                           public NameClient {
  public:
   GeoNotifier(Geolocation*,
               V8PositionCallback*,
               V8PositionErrorCallback*,
               const PositionOptions*);
-  ~GeoNotifier() = default;
-  void Trace(blink::Visitor*);
+  ~GeoNotifier() override = default;
+  void Trace(Visitor*) const;
   const char* NameInHeapSnapshot() const override { return "GeoNotifier"; }
 
   const PositionOptions* Options() const { return options_; }
 
   // Sets the given error as the fatal error if there isn't one yet.
   // Starts the timer with an interval of 0.
-  void SetFatalError(PositionError*);
+  void SetFatalError(GeolocationPositionError*);
 
   bool UseCachedPosition() const { return use_cached_position_; }
 
@@ -43,7 +43,7 @@ class GeoNotifier final : public GarbageCollectedFinalized<GeoNotifier>,
   void SetUseCachedPosition();
 
   void RunSuccessCallback(Geoposition*);
-  void RunErrorCallback(PositionError*);
+  void RunErrorCallback(GeolocationPositionError*);
 
   void StartTimer();
   void StopTimer();
@@ -54,14 +54,14 @@ class GeoNotifier final : public GarbageCollectedFinalized<GeoNotifier>,
   // notifier and the Geolocation. The timer should run only when the notifier
   // is owned by the Geolocation. When the Geolocation removes a notifier, the
   // timer should be stopped beforehand.
-  class Timer final : public GarbageCollectedFinalized<Timer> {
+  class Timer final : public GarbageCollected<Timer> {
    public:
     explicit Timer(scoped_refptr<base::SingleThreadTaskRunner> web_task_runner,
                    GeoNotifier* notifier,
                    void (GeoNotifier::*member_func)(TimerBase*))
         : timer_(web_task_runner, notifier, member_func), notifier_(notifier) {}
 
-    void Trace(blink::Visitor*);
+    void Trace(Visitor*) const;
 
     // TimerBase-compatible API
     void StartOneShot(base::TimeDelta interval, const base::Location& caller);
@@ -69,7 +69,7 @@ class GeoNotifier final : public GarbageCollectedFinalized<GeoNotifier>,
     bool IsActive() const { return timer_.IsActive(); }
 
    private:
-    TaskRunnerTimer<GeoNotifier> timer_;
+    HeapTaskRunnerTimer<GeoNotifier> timer_;
     Member<GeoNotifier> notifier_;
   };
 
@@ -83,7 +83,7 @@ class GeoNotifier final : public GarbageCollectedFinalized<GeoNotifier>,
   Member<V8PositionErrorCallback> error_callback_;
   Member<const PositionOptions> options_;
   Member<Timer> timer_;
-  Member<PositionError> fatal_error_;
+  Member<GeolocationPositionError> fatal_error_;
   bool use_cached_position_;
 };
 

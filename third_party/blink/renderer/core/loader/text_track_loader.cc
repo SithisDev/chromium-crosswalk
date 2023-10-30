@@ -28,15 +28,17 @@
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 
 namespace blink {
 
@@ -106,7 +108,8 @@ bool TextTrackLoader::Load(const KURL& url,
                            CrossOriginAttributeValue cross_origin) {
   CancelLoad();
 
-  ResourceLoaderOptions options;
+  ResourceLoaderOptions options(
+      GetDocument().GetExecutionContext()->GetCurrentWorld());
   options.initiator_info.name = fetch_initiator_type_names::kTrack;
 
   // Let |request| be the result of creating a potential-CORS request
@@ -119,7 +122,7 @@ bool TextTrackLoader::Load(const KURL& url,
         network::mojom::RequestMode::kSameOrigin);
   } else {
     cue_fetch_params.SetCrossOriginAccessControl(
-        GetDocument().GetSecurityOrigin(), cross_origin);
+        GetDocument().GetExecutionContext()->GetSecurityOrigin(), cross_origin);
   }
 
   ResourceFetcher* fetcher = GetDocument().Fetcher();
@@ -150,10 +153,18 @@ void TextTrackLoader::GetNewCues(
     cue_parser_->GetNewCues(output_cues);
 }
 
-void TextTrackLoader::Trace(blink::Visitor* visitor) {
+void TextTrackLoader::GetNewStyleSheets(
+    HeapVector<Member<CSSStyleSheet>>& output_sheets) {
+  DCHECK(cue_parser_);
+  if (cue_parser_)
+    cue_parser_->GetNewStyleSheets(output_sheets);
+}
+
+void TextTrackLoader::Trace(Visitor* visitor) const {
   visitor->Trace(client_);
   visitor->Trace(cue_parser_);
   visitor->Trace(document_);
+  visitor->Trace(cue_load_timer_);
   RawResourceClient::Trace(visitor);
   VTTParserClient::Trace(visitor);
 }

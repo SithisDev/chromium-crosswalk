@@ -34,29 +34,31 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/time/time.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/loader/frame_loader_types.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
 
 class CORE_EXPORT HttpRefreshScheduler final
-    : public GarbageCollectedFinalized<HttpRefreshScheduler> {
+    : public GarbageCollected<HttpRefreshScheduler> {
  public:
   explicit HttpRefreshScheduler(Document*);
+  HttpRefreshScheduler(const HttpRefreshScheduler&) = delete;
+  HttpRefreshScheduler& operator=(const HttpRefreshScheduler&) = delete;
   ~HttpRefreshScheduler() = default;
 
-  bool IsScheduledWithin(double interval_in_seconds) const;
-  void Schedule(double delay, const KURL&, Document::HttpRefreshType);
+  bool IsScheduledWithin(base::TimeDelta interval) const;
+  void Schedule(base::TimeDelta delay, const KURL&, Document::HttpRefreshType);
   void MaybeStartTimer();
   void Cancel();
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   void NavigateTask();
@@ -66,7 +68,7 @@ class CORE_EXPORT HttpRefreshScheduler final
 
   struct ScheduledHttpRefresh {
    public:
-    ScheduledHttpRefresh(double delay,
+    ScheduledHttpRefresh(base::TimeDelta delay,
                          const KURL& url,
                          ClientNavigationReason reason,
                          base::TimeTicks input_timestamp)
@@ -75,14 +77,12 @@ class CORE_EXPORT HttpRefreshScheduler final
           reason(reason),
           input_timestamp(input_timestamp) {}
 
-    double delay;
+    base::TimeDelta delay;
     KURL url;
     ClientNavigationReason reason;
     base::TimeTicks input_timestamp;
   };
   std::unique_ptr<ScheduledHttpRefresh> refresh_;
-
-  DISALLOW_COPY_AND_ASSIGN(HttpRefreshScheduler);
 };
 
 }  // namespace blink

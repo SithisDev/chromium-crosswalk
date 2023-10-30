@@ -19,10 +19,12 @@
  * Boston, MA 02110-1301, USA.
  */
 
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/xml/xsl_style_sheet.h"
 
 #include <libxml/uri.h>
 #include <libxslt/xsltutils.h>
+#include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/dom/transform_source.h"
@@ -126,7 +128,7 @@ bool XSLStyleSheet::ParseString(const String& source) {
 
   xmlParserCtxtPtr ctxt = xmlCreateMemoryParserCtxt(input.Data(), input.size());
   if (!ctxt)
-    return 0;
+    return false;
 
   if (parent_style_sheet_) {
     // The XSL transform may leave the newly-transformed document
@@ -222,7 +224,8 @@ void XSLStyleSheet::LoadChildSheet(const String& href) {
   }
 
   const String& url_string = url.GetString();
-  ResourceLoaderOptions fetch_options;
+  ResourceLoaderOptions fetch_options(
+      OwnerDocument()->GetExecutionContext()->GetCurrentWorld());
   fetch_options.initiator_info.name = fetch_initiator_type_names::kXml;
   FetchParameters params(
       ResourceRequest(OwnerDocument()->CompleteURL(url_string)), fetch_options);
@@ -314,7 +317,7 @@ void XSLStyleSheet::MarkAsProcessed() {
   stylesheet_doc_taken_ = true;
 }
 
-void XSLStyleSheet::Trace(blink::Visitor* visitor) {
+void XSLStyleSheet::Trace(Visitor* visitor) const {
   visitor->Trace(owner_node_);
   visitor->Trace(children_);
   visitor->Trace(parent_style_sheet_);

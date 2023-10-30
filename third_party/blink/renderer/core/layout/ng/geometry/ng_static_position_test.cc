@@ -39,6 +39,16 @@ struct NGStaticPositionTestData {
      {PhysicalOffset(20, 30), HorizontalEdge::kRight, VerticalEdge::kBottom},
      WritingMode::kHorizontalTb,
      TextDirection::kLtr},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineCenter, BlockEdge::kBlockStart},
+     {PhysicalOffset(20, 30), HorizontalEdge::kHorizontalCenter,
+      VerticalEdge::kTop},
+     WritingMode::kHorizontalTb,
+     TextDirection::kLtr},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockCenter},
+     {PhysicalOffset(20, 30), HorizontalEdge::kLeft,
+      VerticalEdge::kVerticalCenter},
+     WritingMode::kHorizontalTb,
+     TextDirection::kLtr},
     // |WritingMode::kHorizontalTb|, |TextDirection::kRtl|
     {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockStart},
      {PhysicalOffset(80, 30), HorizontalEdge::kRight, VerticalEdge::kTop},
@@ -54,6 +64,16 @@ struct NGStaticPositionTestData {
      TextDirection::kRtl},
     {{LogicalOffset(20, 30), InlineEdge::kInlineEnd, BlockEdge::kBlockEnd},
      {PhysicalOffset(80, 30), HorizontalEdge::kLeft, VerticalEdge::kBottom},
+     WritingMode::kHorizontalTb,
+     TextDirection::kRtl},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineCenter, BlockEdge::kBlockStart},
+     {PhysicalOffset(80, 30), HorizontalEdge::kHorizontalCenter,
+      VerticalEdge::kTop},
+     WritingMode::kHorizontalTb,
+     TextDirection::kRtl},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockCenter},
+     {PhysicalOffset(80, 30), HorizontalEdge::kRight,
+      VerticalEdge::kVerticalCenter},
      WritingMode::kHorizontalTb,
      TextDirection::kRtl},
     // |WritingMode::kVerticalRl|, |TextDirection::kLtr|
@@ -73,6 +93,16 @@ struct NGStaticPositionTestData {
      {PhysicalOffset(70, 20), HorizontalEdge::kLeft, VerticalEdge::kBottom},
      WritingMode::kVerticalRl,
      TextDirection::kLtr},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineCenter, BlockEdge::kBlockStart},
+     {PhysicalOffset(70, 20), HorizontalEdge::kRight,
+      VerticalEdge::kVerticalCenter},
+     WritingMode::kVerticalRl,
+     TextDirection::kLtr},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockCenter},
+     {PhysicalOffset(70, 20), HorizontalEdge::kHorizontalCenter,
+      VerticalEdge::kTop},
+     WritingMode::kVerticalRl,
+     TextDirection::kLtr},
     // |WritingMode::kVerticalRl|, |TextDirection::kRtl|
     {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockStart},
      {PhysicalOffset(70, 80), HorizontalEdge::kRight, VerticalEdge::kBottom},
@@ -88,6 +118,16 @@ struct NGStaticPositionTestData {
      TextDirection::kRtl},
     {{LogicalOffset(20, 30), InlineEdge::kInlineEnd, BlockEdge::kBlockEnd},
      {PhysicalOffset(70, 80), HorizontalEdge::kLeft, VerticalEdge::kTop},
+     WritingMode::kVerticalRl,
+     TextDirection::kRtl},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineCenter, BlockEdge::kBlockStart},
+     {PhysicalOffset(70, 80), HorizontalEdge::kRight,
+      VerticalEdge::kVerticalCenter},
+     WritingMode::kVerticalRl,
+     TextDirection::kRtl},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockCenter},
+     {PhysicalOffset(70, 80), HorizontalEdge::kHorizontalCenter,
+      VerticalEdge::kBottom},
      WritingMode::kVerticalRl,
      TextDirection::kRtl},
     // |WritingMode::kVerticalLr|, |TextDirection::kLtr|
@@ -107,6 +147,16 @@ struct NGStaticPositionTestData {
      {PhysicalOffset(30, 20), HorizontalEdge::kRight, VerticalEdge::kBottom},
      WritingMode::kVerticalLr,
      TextDirection::kLtr},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineCenter, BlockEdge::kBlockStart},
+     {PhysicalOffset(30, 20), HorizontalEdge::kLeft,
+      VerticalEdge::kVerticalCenter},
+     WritingMode::kVerticalLr,
+     TextDirection::kLtr},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockCenter},
+     {PhysicalOffset(30, 20), HorizontalEdge::kHorizontalCenter,
+      VerticalEdge::kTop},
+     WritingMode::kVerticalLr,
+     TextDirection::kLtr},
     // |WritingMode::kVerticalLr|, |TextDirection::kRtl|
     {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockStart},
      {PhysicalOffset(30, 80), HorizontalEdge::kLeft, VerticalEdge::kBottom},
@@ -122,6 +172,16 @@ struct NGStaticPositionTestData {
      TextDirection::kRtl},
     {{LogicalOffset(20, 30), InlineEdge::kInlineEnd, BlockEdge::kBlockEnd},
      {PhysicalOffset(30, 80), HorizontalEdge::kRight, VerticalEdge::kTop},
+     WritingMode::kVerticalLr,
+     TextDirection::kRtl},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineCenter, BlockEdge::kBlockStart},
+     {PhysicalOffset(30, 80), HorizontalEdge::kLeft,
+      VerticalEdge::kVerticalCenter},
+     WritingMode::kVerticalLr,
+     TextDirection::kRtl},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockCenter},
+     {PhysicalOffset(30, 80), HorizontalEdge::kHorizontalCenter,
+      VerticalEdge::kBottom},
      WritingMode::kVerticalLr,
      TextDirection::kRtl},
     // |WritingMode::kSidewaysLr|, |TextDirection::kLtr|
@@ -141,6 +201,16 @@ struct NGStaticPositionTestData {
      {PhysicalOffset(30, 80), HorizontalEdge::kRight, VerticalEdge::kTop},
      WritingMode::kSidewaysLr,
      TextDirection::kLtr},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineCenter, BlockEdge::kBlockStart},
+     {PhysicalOffset(30, 80), HorizontalEdge::kLeft,
+      VerticalEdge::kVerticalCenter},
+     WritingMode::kSidewaysLr,
+     TextDirection::kLtr},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockCenter},
+     {PhysicalOffset(30, 80), HorizontalEdge::kHorizontalCenter,
+      VerticalEdge::kBottom},
+     WritingMode::kSidewaysLr,
+     TextDirection::kLtr},
     // |WritingMode::kSidewaysLr|, |TextDirection::kRtl|
     {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockStart},
      {PhysicalOffset(30, 20), HorizontalEdge::kLeft, VerticalEdge::kTop},
@@ -158,6 +228,16 @@ struct NGStaticPositionTestData {
      {PhysicalOffset(30, 20), HorizontalEdge::kRight, VerticalEdge::kBottom},
      WritingMode::kSidewaysLr,
      TextDirection::kRtl},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineCenter, BlockEdge::kBlockStart},
+     {PhysicalOffset(30, 20), HorizontalEdge::kLeft,
+      VerticalEdge::kVerticalCenter},
+     WritingMode::kSidewaysLr,
+     TextDirection::kRtl},
+    {{LogicalOffset(20, 30), InlineEdge::kInlineStart, BlockEdge::kBlockCenter},
+     {PhysicalOffset(30, 20), HorizontalEdge::kHorizontalCenter,
+      VerticalEdge::kTop},
+     WritingMode::kSidewaysLr,
+     TextDirection::kRtl},
 };
 
 class NGStaticPositionTest
@@ -173,14 +253,16 @@ TEST_P(NGStaticPositionTest, Convert) {
   // It asserts that it is the same as the expected physical static-position,
   // then performs the same operation in reverse.
 
-  NGPhysicalStaticPosition physical_result = data.logical.ConvertToPhysical(
-      data.writing_mode, data.direction, PhysicalSize(100, 100));
+  const WritingModeConverter converter({data.writing_mode, data.direction},
+                                       PhysicalSize(100, 100));
+  NGPhysicalStaticPosition physical_result =
+      data.logical.ConvertToPhysical(converter);
   EXPECT_EQ(physical_result.offset, data.physical.offset);
   EXPECT_EQ(physical_result.horizontal_edge, data.physical.horizontal_edge);
   EXPECT_EQ(physical_result.vertical_edge, data.physical.vertical_edge);
 
-  NGLogicalStaticPosition logical_result = data.physical.ConvertToLogical(
-      data.writing_mode, data.direction, PhysicalSize(100, 100));
+  NGLogicalStaticPosition logical_result =
+      data.physical.ConvertToLogical(converter);
   EXPECT_EQ(logical_result.offset, data.logical.offset);
   EXPECT_EQ(logical_result.inline_edge, data.logical.inline_edge);
   EXPECT_EQ(logical_result.block_edge, data.logical.block_edge);

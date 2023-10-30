@@ -5,9 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_STYLEABLE_MARKER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_STYLEABLE_MARKER_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker.h"
+#include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
-#include "ui/base/ime/mojo/ime_types.mojom-blink.h"
+#include "ui/base/ime/mojom/ime_types.mojom-blink.h"
 
 namespace blink {
 
@@ -19,22 +21,28 @@ class CORE_EXPORT StyleableMarker : public DocumentMarker {
                   unsigned end_offset,
                   Color underline_color,
                   ui::mojom::ImeTextSpanThickness,
+                  ui::mojom::ImeTextSpanUnderlineStyle,
+                  Color text_color,
                   Color background_color);
+  StyleableMarker(const StyleableMarker&) = delete;
+  StyleableMarker& operator=(const StyleableMarker&) = delete;
 
   // StyleableMarker-specific
   Color UnderlineColor() const;
   bool HasThicknessNone() const;
   bool HasThicknessThin() const;
   bool HasThicknessThick() const;
+  ui::mojom::ImeTextSpanUnderlineStyle UnderlineStyle() const;
   bool UseTextColor() const;
   Color BackgroundColor() const;
+  Color TextColor() const;
 
  private:
   const Color underline_color_;
   const Color background_color_;
   const ui::mojom::ImeTextSpanThickness thickness_;
-
-  DISALLOW_COPY_AND_ASSIGN(StyleableMarker);
+  const ui::mojom::ImeTextSpanUnderlineStyle underline_style_;
+  const Color text_color_;
 };
 
 bool CORE_EXPORT IsStyleableMarker(const DocumentMarker&);
@@ -48,4 +56,4 @@ struct DowncastTraits<StyleableMarker> {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_MARKERS_STYLEABLE_MARKER_H_

@@ -5,29 +5,35 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_IMAGE_DOWNLOADER_IMAGE_DOWNLOADER_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_IMAGE_DOWNLOADER_IMAGE_DOWNLOADER_IMPL_H_
 
-#include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/blink/public/mojom/image_downloader/image_downloader.mojom-blink.h"
-#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
+
+namespace gfx {
+class Size;
+}  // namespace gfx
 
 namespace blink {
 
 class KURL;
 class LocalFrame;
 class MultiResolutionImageResourceFetcher;
+class WebString;
 
-class ImageDownloaderImpl final
-    : public GarbageCollectedFinalized<ImageDownloaderImpl>,
-      public Supplement<LocalFrame>,
-      public ContextLifecycleObserver,
-      public mojom::blink::ImageDownloader {
-  USING_PRE_FINALIZER(ImageDownloaderImpl, Dispose);
-  USING_GARBAGE_COLLECTED_MIXIN(ImageDownloaderImpl);
-
+class ImageDownloaderImpl final : public GarbageCollected<ImageDownloaderImpl>,
+                                  public Supplement<LocalFrame>,
+                                  public ExecutionContextLifecycleObserver,
+                                  public mojom::blink::ImageDownloader {
  public:
   static const char kSupplementName[];
 
   explicit ImageDownloaderImpl(LocalFrame&);
+
+  ImageDownloaderImpl(const ImageDownloaderImpl&) = delete;
+  ImageDownloaderImpl& operator=(const ImageDownloaderImpl&) = delete;
+
   ~ImageDownloaderImpl() override;
 
   using DownloadCallback =
@@ -37,16 +43,17 @@ class ImageDownloaderImpl final
 
   static void ProvideTo(LocalFrame&);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
-  // OverContextLifecycleObserver overrides.
-  void ContextDestroyed(ExecutionContext*) override;
+  // OverExecutionContextLifecycleObserver overrides.
+  void ContextDestroyed() override;
 
  private:
   // ImageDownloader implementation. Request to asynchronously download an
   // image. When done, |callback| will be called.
   void DownloadImage(const KURL& url,
                      bool is_favicon,
+                     const gfx::Size& preferred_size,
                      uint32_t max_bitmap_size,
                      bool bypass_cache,
                      DownloadImageCallback callback) override;
@@ -61,10 +68,9 @@ class ImageDownloaderImpl final
                         int32_t http_status_code,
                         const WTF::Vector<SkBitmap>& images);
 
-  void CreateMojoService(mojom::blink::ImageDownloaderRequest request);
+  void CreateMojoService(
+      mojo::PendingReceiver<mojom::blink::ImageDownloader> receiver);
 
-  // USING_PRE_FINALIZER interface.
-  // Called before the object gets garbage collected.
   void Dispose();
 
   // Requests to fetch an image. When done, the image downloader is notified by
@@ -73,6 +79,7 @@ class ImageDownloaderImpl final
   // are returned.
   void FetchImage(const KURL& image_url,
                   bool is_favicon,
+                  const gfx::Size& preferred_size,
                   bool bypass_cache,
                   DownloadCallback callback);
 
@@ -80,8 +87,10 @@ class ImageDownloaderImpl final
   // successfully or with a failure. See FetchImage for more
   // details.
   void DidFetchImage(DownloadCallback callback,
+                     const gfx::Size& preferred_size,
                      MultiResolutionImageResourceFetcher* fetcher,
-                     const WTF::Vector<SkBitmap>& images);
+                     const std::string& image_data,
+                     const WebString& mime_type);
 
   typedef WTF::Vector<std::unique_ptr<MultiResolutionImageResourceFetcher>>
       ImageResourceFetcherList;
@@ -89,9 +98,10 @@ class ImageDownloaderImpl final
   // ImageResourceFetchers schedule via FetchImage.
   ImageResourceFetcherList image_fetchers_;
 
-  mojo::Binding<mojom::blink::ImageDownloader> binding_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ImageDownloaderImpl);
+  HeapMojoReceiver<mojom::blink::ImageDownloader,
+                   ImageDownloaderImpl,
+                   HeapMojoWrapperMode::kForceWithoutContextObserver>
+      receiver_;
 };
 
 }  // namespace blink

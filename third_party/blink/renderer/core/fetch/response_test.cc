@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/fetch/response.h"
 
 #include <memory>
+
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
@@ -13,11 +14,14 @@
 #include "third_party/blink/renderer/core/fetch/bytes_consumer_test_util.h"
 #include "third_party/blink/renderer/core/fetch/fetch_response_data.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
+#include "third_party/blink/renderer/platform/loader/fetch/text_resource_decoder_options.h"
 #include "third_party/blink/renderer/platform/loader/testing/replaying_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -26,7 +30,7 @@ namespace blink {
 namespace {
 
 TEST(ServiceWorkerResponseTest, FromFetchResponseData) {
-  auto page = std::make_unique<DummyPageHolder>(IntSize(1, 1));
+  auto page = std::make_unique<DummyPageHolder>(gfx::Size(1, 1));
   const KURL url("http://www.response.com");
 
   FetchResponseData* fetch_response_data = FetchResponseData::Create();
@@ -34,7 +38,7 @@ TEST(ServiceWorkerResponseTest, FromFetchResponseData) {
   url_list.push_back(url);
   fetch_response_data->SetURLList(url_list);
   Response* response =
-      Response::Create(&page->GetDocument(), fetch_response_data);
+      Response::Create(page->GetFrame().DomWindow(), fetch_response_data);
   DCHECK(response);
   EXPECT_EQ(url, response->url());
 }
@@ -81,9 +85,13 @@ void CheckResponseStream(ScriptState* script_state,
   EXPECT_CALL(*client2, DidFetchDataLoadedString(String("Hello, world")));
 
   response->InternalBodyBuffer()->StartLoading(
-      FetchDataLoader::CreateLoaderAsString(), client1, ASSERT_NO_EXCEPTION);
+      FetchDataLoader::CreateLoaderAsString(
+          TextResourceDecoderOptions::CreateUTF8Decode()),
+      client1, ASSERT_NO_EXCEPTION);
   cloned_response->InternalBodyBuffer()->StartLoading(
-      FetchDataLoader::CreateLoaderAsString(), client2, ASSERT_NO_EXCEPTION);
+      FetchDataLoader::CreateLoaderAsString(
+          TextResourceDecoderOptions::CreateUTF8Decode()),
+      client2, ASSERT_NO_EXCEPTION);
   blink::test::RunPendingTasks();
 }
 
@@ -95,7 +103,8 @@ BodyStreamBuffer* CreateHelloWorldBuffer(ScriptState* script_state) {
   src->Add(Command(Command::kData, "Hello, "));
   src->Add(Command(Command::kData, "world"));
   src->Add(Command(Command::kDone));
-  return MakeGarbageCollected<BodyStreamBuffer>(script_state, src, nullptr);
+  return BodyStreamBuffer::Create(script_state, src, nullptr,
+                                  /*cached_metadata_handler=*/nullptr);
 }
 
 TEST(ServiceWorkerResponseTest, BodyStreamBufferCloneDefault) {
@@ -159,9 +168,10 @@ TEST(ServiceWorkerResponseTest, BodyStreamBufferCloneOpaque) {
 
 TEST(ServiceWorkerResponseTest, BodyStreamBufferCloneError) {
   V8TestingScope scope;
-  BodyStreamBuffer* buffer = MakeGarbageCollected<BodyStreamBuffer>(
+  BodyStreamBuffer* buffer = BodyStreamBuffer::Create(
       scope.GetScriptState(),
-      BytesConsumer::CreateErrored(BytesConsumer::Error()), nullptr);
+      BytesConsumer::CreateErrored(BytesConsumer::Error()), nullptr,
+      /*cached_metadata_handler=*/nullptr);
   FetchResponseData* fetch_response_data =
       FetchResponseData::CreateWithBuffer(buffer);
   Vector<KURL> url_list;
@@ -182,9 +192,13 @@ TEST(ServiceWorkerResponseTest, BodyStreamBufferCloneError) {
   EXPECT_CALL(*client2, DidFetchDataLoadFailed());
 
   response->InternalBodyBuffer()->StartLoading(
-      FetchDataLoader::CreateLoaderAsString(), client1, ASSERT_NO_EXCEPTION);
+      FetchDataLoader::CreateLoaderAsString(
+          TextResourceDecoderOptions::CreateUTF8Decode()),
+      client1, ASSERT_NO_EXCEPTION);
   cloned_response->InternalBodyBuffer()->StartLoading(
-      FetchDataLoader::CreateLoaderAsString(), client2, ASSERT_NO_EXCEPTION);
+      FetchDataLoader::CreateLoaderAsString(
+          TextResourceDecoderOptions::CreateUTF8Decode()),
+      client2, ASSERT_NO_EXCEPTION);
   blink::test::RunPendingTasks();
 }
 

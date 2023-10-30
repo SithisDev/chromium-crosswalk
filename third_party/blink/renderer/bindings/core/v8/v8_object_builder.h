@@ -7,7 +7,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "v8/include/v8.h"
 
@@ -47,7 +47,7 @@ class CORE_EXPORT V8ObjectBuilder final {
  private:
   void AddInternal(const StringView& name, v8::Local<v8::Value>);
 
-  Member<ScriptState> script_state_;
+  ScriptState* script_state_;
   v8::Local<v8::Object> object_;
 };
 

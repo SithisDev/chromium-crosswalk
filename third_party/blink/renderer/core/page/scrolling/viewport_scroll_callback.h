@@ -7,7 +7,8 @@
 
 #include "third_party/blink/renderer/core/page/scrolling/scroll_state_callback.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "ui/events/types/scroll_types.h"
 
 namespace blink {
 
@@ -41,11 +42,11 @@ class ViewportScrollCallback : public ScrollStateCallback {
   void Invoke(ScrollState*) override;
   void SetScroller(ScrollableArea*);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   bool ShouldScrollBrowserControls(const ScrollOffset&,
-                                   ScrollGranularity) const;
+                                   ui::ScrollGranularity) const;
   bool ScrollBrowserControls(ScrollState&);
 
   ScrollResult PerformNativeScroll(ScrollState&);

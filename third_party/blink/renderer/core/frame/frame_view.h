@@ -5,8 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_VIEW_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FRAME_VIEW_H_
 
-#include "third_party/blink/public/common/frame/occlusion_state.h"
-#include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink.h"
+#include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/frame/viewport_intersection_state.mojom-blink-forward.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/embedded_content_view.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -18,13 +21,15 @@ struct IntrinsicSizingInfo;
 
 class CORE_EXPORT FrameView : public EmbeddedContentView {
  public:
-  FrameView(const IntRect& frame_rect) : EmbeddedContentView(frame_rect) {}
+  explicit FrameView(const gfx::Rect& frame_rect);
   ~FrameView() override = default;
 
   // parent_flags is the result of calling GetIntersectionObservationFlags on
   // the LocalFrameView parent of this FrameView (if any). It contains dirty
   // bits based on whether geometry may have changed in the parent frame.
-  virtual bool UpdateViewportIntersectionsForSubtree(unsigned parent_flags) = 0;
+  virtual bool UpdateViewportIntersectionsForSubtree(
+      unsigned parent_flags,
+      absl::optional<base::TimeTicks>& monotonic_time) = 0;
 
   virtual bool GetIntrinsicSizingInfo(IntrinsicSizingInfo&) const = 0;
   virtual bool HasIntrinsicSizingInfo() const = 0;
@@ -39,6 +44,7 @@ class CORE_EXPORT FrameView : public EmbeddedContentView {
   bool CanThrottleRenderingForPropagation() const;
 
   bool IsFrameView() const override { return true; }
+  virtual bool ShouldReportMainFrameIntersection() const { return false; }
 
   Frame& GetFrame() const;
   blink::mojom::FrameVisibility GetFrameVisibility() const {
@@ -49,16 +55,24 @@ class CORE_EXPORT FrameView : public EmbeddedContentView {
   // lifecycle updates in the child frame will skip rendering work.
   bool IsHiddenForThrottling() const { return hidden_for_throttling_; }
   bool IsSubtreeThrottled() const { return subtree_throttled_; }
-  void UpdateRenderThrottlingStatus(bool hidden_for_throttling,
-                                    bool subtree_throttled,
-                                    bool recurse = false);
+  // This indicates whether this is an iframe whose contents are display-locked
+  // due to an active DisplayLock in the parent frame. Note that this value must
+  // be stable between main frames, and only gets updated based on the current
+  // state of display locking in the parent frame when
+  // UpdateViewportIntersection is run during post-lifecycle steps.
+  bool IsDisplayLocked() const { return display_locked_; }
+  virtual void UpdateRenderThrottlingStatus(bool hidden_for_throttling,
+                                            bool subtree_throttled,
+                                            bool display_locked,
+                                            bool recurse = false);
 
   bool RectInParentIsStable(const base::TimeTicks& timestamp) const;
 
  protected:
-  virtual void SetViewportIntersection(const IntRect& viewport_intersection,
-                                       FrameOcclusionState occlusion_state) = 0;
-  virtual void RenderThrottlingStatusChanged() = 0;
+  virtual bool NeedsViewportOffset() const { return false; }
+  virtual void SetViewportIntersection(
+      const mojom::blink::ViewportIntersectionState& intersection_state) = 0;
+  virtual void VisibilityForThrottlingChanged() = 0;
   virtual bool LifecycleUpdatesThrottled() const { return false; }
   void UpdateViewportIntersection(unsigned, bool);
   // FrameVisibility is tracked by the browser process, which may suppress
@@ -67,13 +81,15 @@ class CORE_EXPORT FrameView : public EmbeddedContentView {
 
   bool DisplayLockedInParentFrame();
 
+  virtual void VisibilityChanged(blink::mojom::FrameVisibility visibilty) = 0;
+
  private:
   PhysicalRect rect_in_parent_;
   base::TimeTicks rect_in_parent_stable_since_;
-  blink::mojom::FrameVisibility frame_visibility_ =
-      blink::mojom::FrameVisibility::kRenderedInViewport;
-  bool hidden_for_throttling_;
-  bool subtree_throttled_;
+  blink::mojom::FrameVisibility frame_visibility_;
+  bool hidden_for_throttling_ = false;
+  bool subtree_throttled_ = false;
+  bool display_locked_ = false;
 };
 
 template <>

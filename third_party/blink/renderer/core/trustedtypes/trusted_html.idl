@@ -4,12 +4,12 @@
 
 // https://github.com/wicg/trusted-types
 
-typedef (DOMString or TrustedHTML) HTMLString;
+typedef [StringContext=TrustedHTML] DOMString HTMLString;
 
 [
-    Exposed=Window,
-    RuntimeEnabled=TrustedDOMTypes
+    Exposed=(Window, Worker)
 ] interface TrustedHTML {
     stringifier;
+    DOMString toJSON();
 };
 

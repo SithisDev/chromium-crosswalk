@@ -21,16 +21,17 @@
 
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
 
-#include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/document_policy_feature.mojom-blink.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
-#include "third_party/blink/renderer/core/html/media/media_element_parser_helpers.h"
-#include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/layout/layout_image_resource.h"
-#include "third_party/blink/renderer/core/layout/layout_replaced.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_image.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_preserve_aspect_ratio.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
@@ -38,7 +39,10 @@ namespace blink {
 SVGImageElement::SVGImageElement(Document& document)
     : SVGGraphicsElement(svg_names::kImageTag, document),
       SVGURIReference(this),
-      is_default_overridden_intrinsic_size_(false),
+      is_default_overridden_intrinsic_size_(
+          GetExecutionContext() &&
+          !GetExecutionContext()->IsFeatureEnabled(
+              mojom::blink::DocumentPolicyFeature::kUnsizedMedia)),
       x_(MakeGarbageCollected<SVGAnimatedLength>(
           this,
           svg_names::kXAttr,
@@ -73,16 +77,9 @@ SVGImageElement::SVGImageElement(Document& document)
   AddToPropertyMap(width_);
   AddToPropertyMap(height_);
   AddToPropertyMap(preserve_aspect_ratio_);
-
-  if (media_element_parser_helpers::IsMediaElement(this) &&
-      !document.IsFeatureEnabled(mojom::FeaturePolicyFeature::kUnsizedMedia)) {
-    is_default_overridden_intrinsic_size_ = true;
-    overridden_intrinsic_size_ =
-        IntSize(LayoutReplaced::kDefaultWidth, LayoutReplaced::kDefaultHeight);
-  }
 }
 
-void SVGImageElement::Trace(blink::Visitor* visitor) {
+void SVGImageElement::Trace(Visitor* visitor) const {
   visitor->Trace(x_);
   visitor->Trace(y_);
   visitor->Trace(width_);
@@ -94,7 +91,7 @@ void SVGImageElement::Trace(blink::Visitor* visitor) {
 }
 
 bool SVGImageElement::CurrentFrameHasSingleSecurityOrigin() const {
-  if (LayoutSVGImage* layout_svg_image = ToLayoutSVGImage(GetLayoutObject())) {
+  if (auto* layout_svg_image = To<LayoutSVGImage>(GetLayoutObject())) {
     LayoutImageResource* layout_image_resource =
         layout_svg_image->ImageResource();
     ImageResourceContent* image_content = layout_image_resource->CachedImage();
@@ -134,7 +131,9 @@ void SVGImageElement::CollectStyleForPresentationAttribute(
   }
 }
 
-void SVGImageElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGImageElement::SvgAttributeChanged(
+    const SvgAttributeChangedParams& params) {
+  const QualifiedName& attr_name = params.name;
   bool is_length_attribute =
       attr_name == svg_names::kXAttr || attr_name == svg_names::kYAttr ||
       attr_name == svg_names::kWidthAttr || attr_name == svg_names::kHeightAttr;
@@ -168,7 +167,7 @@ void SVGImageElement::SvgAttributeChanged(const QualifiedName& attr_name) {
     return;
   }
 
-  SVGGraphicsElement::SvgAttributeChanged(attr_name);
+  SVGGraphicsElement::SvgAttributeChanged(params);
 }
 
 void SVGImageElement::ParseAttribute(
@@ -176,24 +175,6 @@ void SVGImageElement::ParseAttribute(
   if (params.name == svg_names::kDecodingAttr) {
     UseCounter::Count(GetDocument(), WebFeature::kImageDecodingAttribute);
     decoding_mode_ = ParseImageDecodingMode(params.new_value);
-  } else if (params.name == svg_names::kIntrinsicsizeAttr &&
-             RuntimeEnabledFeatures::
-                 ExperimentalProductivityFeaturesEnabled()) {
-    String message;
-    bool intrinsic_size_changed =
-        media_element_parser_helpers::ParseIntrinsicSizeAttribute(
-            params.new_value, this, &overridden_intrinsic_size_,
-            &is_default_overridden_intrinsic_size_, &message);
-    if (!message.IsEmpty()) {
-      GetDocument().AddConsoleMessage(ConsoleMessage::Create(
-          mojom::ConsoleMessageSource::kOther,
-          mojom::ConsoleMessageLevel::kWarning, message));
-    }
-
-    if (intrinsic_size_changed) {
-      if (LayoutSVGImage* layout_obj = ToLayoutSVGImage(GetLayoutObject()))
-        MarkForLayoutAndParentResourceInvalidation(*layout_obj);
-    }
   } else {
     SVGElement::ParseAttribute(params);
   }
@@ -207,7 +188,7 @@ bool SVGImageElement::SelfHasRelativeLengths() const {
 
 LayoutObject* SVGImageElement::CreateLayoutObject(const ComputedStyle&,
                                                   LegacyLayout) {
-  return new LayoutSVGImage(this);
+  return MakeGarbageCollected<LayoutSVGImage>(this);
 }
 
 bool SVGImageElement::HaveLoadedRequiredResources() {
@@ -217,7 +198,7 @@ bool SVGImageElement::HaveLoadedRequiredResources() {
 void SVGImageElement::AttachLayoutTree(AttachContext& context) {
   SVGGraphicsElement::AttachLayoutTree(context);
 
-  if (LayoutSVGImage* image_obj = ToLayoutSVGImage(GetLayoutObject())) {
+  if (auto* image_obj = To<LayoutSVGImage>(GetLayoutObject())) {
     LayoutImageResource* layout_image_resource = image_obj->ImageResource();
     if (layout_image_resource->HasImage())
       return;
@@ -241,9 +222,9 @@ const AtomicString SVGImageElement::ImageSourceURL() const {
 }
 
 void SVGImageElement::DidMoveToNewDocument(Document& old_document) {
-  GetImageLoader().UpdateFromElement(ImageLoader::kUpdateIgnorePreviousError);
   GetImageLoader().ElementDidMoveToNewDocument();
   SVGGraphicsElement::DidMoveToNewDocument(old_document);
+  GetImageLoader().UpdateFromElement(ImageLoader::kUpdateIgnorePreviousError);
 }
 
 }  // namespace blink

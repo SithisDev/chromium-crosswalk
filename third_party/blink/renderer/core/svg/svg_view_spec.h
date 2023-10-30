@@ -21,7 +21,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_VIEW_SPEC_H_
 
 #include "third_party/blink/renderer/core/svg/svg_zoom_and_pan.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -30,10 +31,10 @@ class SVGRect;
 class SVGTransformList;
 class SVGViewElement;
 
-class SVGViewSpec final : public GarbageCollectedFinalized<SVGViewSpec> {
+class SVGViewSpec final : public GarbageCollected<SVGViewSpec> {
  public:
-  static SVGViewSpec* CreateFromFragment(const String&);
-  static SVGViewSpec* CreateForViewElement(const SVGViewElement&);
+  static const SVGViewSpec* CreateFromFragment(const String&);
+  static const SVGViewSpec* CreateForViewElement(const SVGViewElement&);
 
   SVGViewSpec();
 
@@ -44,7 +45,7 @@ class SVGViewSpec final : public GarbageCollectedFinalized<SVGViewSpec> {
   const SVGTransformList* Transform() const { return transform_; }
   SVGZoomAndPanType ZoomAndPan() const { return zoom_and_pan_; }
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   bool ParseViewSpec(const String&);

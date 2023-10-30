@@ -4,13 +4,15 @@
 
 #include "third_party/blink/renderer/modules/canvas/imagebitmap/image_bitmap_rendering_context_base.h"
 
-#include "third_party/blink/renderer/bindings/modules/v8/html_canvas_element_or_offscreen_canvas.h"
-#include "third_party/blink/renderer/bindings/modules/v8/rendering_context.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_htmlcanvaselement_offscreencanvas.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
+#include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
+#include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/image_layer_bridge.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
+#include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
@@ -19,39 +21,62 @@ namespace blink {
 ImageBitmapRenderingContextBase::ImageBitmapRenderingContextBase(
     CanvasRenderingContextHost* host,
     const CanvasContextCreationAttributesCore& attrs)
-    : CanvasRenderingContext(host, attrs),
+    : CanvasRenderingContext(host, attrs, CanvasRenderingAPI::kBitmaprenderer),
       image_layer_bridge_(MakeGarbageCollected<ImageLayerBridge>(
           attrs.alpha ? kNonOpaque : kOpaque)) {}
 
 ImageBitmapRenderingContextBase::~ImageBitmapRenderingContextBase() = default;
 
-void ImageBitmapRenderingContextBase::getHTMLOrOffscreenCanvas(
-    HTMLCanvasElementOrOffscreenCanvas& result) const {
+V8UnionHTMLCanvasElementOrOffscreenCanvas*
+ImageBitmapRenderingContextBase::getHTMLOrOffscreenCanvas() const {
   if (Host()->IsOffscreenCanvas()) {
-    result.SetOffscreenCanvas(static_cast<OffscreenCanvas*>(Host()));
-  } else {
-    result.SetHTMLCanvasElement(static_cast<HTMLCanvasElement*>(Host()));
+    return MakeGarbageCollected<V8UnionHTMLCanvasElementOrOffscreenCanvas>(
+        static_cast<OffscreenCanvas*>(Host()));
   }
+  return MakeGarbageCollected<V8UnionHTMLCanvasElementOrOffscreenCanvas>(
+      static_cast<HTMLCanvasElement*>(Host()));
 }
 
 void ImageBitmapRenderingContextBase::Stop() {
   image_layer_bridge_->Dispose();
 }
 
+void ImageBitmapRenderingContextBase::Dispose() {
+  Stop();
+  CanvasRenderingContext::Dispose();
+}
+
+void ImageBitmapRenderingContextBase::ResetInternalBitmapToBlackTransparent(
+    int width,
+    int height) {
+  SkBitmap black_bitmap;
+  if (black_bitmap.tryAllocN32Pixels(width, height)) {
+    black_bitmap.eraseARGB(0, 0, 0, 0);
+    auto image = SkImage::MakeFromBitmap(black_bitmap);
+    if (image) {
+      image_layer_bridge_->SetImage(
+          UnacceleratedStaticBitmapImage::Create(image));
+    }
+  }
+}
+
 void ImageBitmapRenderingContextBase::SetImage(ImageBitmap* image_bitmap) {
   DCHECK(!image_bitmap || !image_bitmap->IsNeutered());
 
-  image_layer_bridge_->SetImage(image_bitmap ? image_bitmap->BitmapImage()
-                                             : nullptr);
+  // According to the standard TransferFromImageBitmap(null) has to reset the
+  // internal bitmap and create a black transparent one.
+  if (image_bitmap)
+    image_layer_bridge_->SetImage(image_bitmap->BitmapImage());
+  else
+    ResetInternalBitmapToBlackTransparent(Host()->width(), Host()->height());
 
-  DidDraw();
+  DidDraw(CanvasPerformanceMonitor::DrawType::kOther);
 
   if (image_bitmap)
     image_bitmap->close();
 }
 
-scoped_refptr<StaticBitmapImage> ImageBitmapRenderingContextBase::GetImage(
-    AccelerationHint) const {
+scoped_refptr<StaticBitmapImage> ImageBitmapRenderingContextBase::GetImage() {
   return image_layer_bridge_->GetImage();
 }
 
@@ -61,17 +86,14 @@ ImageBitmapRenderingContextBase::GetImageAndResetInternal() {
     return nullptr;
   scoped_refptr<StaticBitmapImage> copy_image = image_layer_bridge_->GetImage();
 
-  SkBitmap black_bitmap;
-  black_bitmap.allocN32Pixels(copy_image->width(), copy_image->height());
-  black_bitmap.eraseColor(SkColorSetRGB(0, 0, 0));
-  image_layer_bridge_->SetImage(
-      StaticBitmapImage::Create(SkImage::MakeFromBitmap(black_bitmap)));
+  ResetInternalBitmapToBlackTransparent(copy_image->width(),
+                                        copy_image->height());
 
   return copy_image;
 }
 
-void ImageBitmapRenderingContextBase::SetUV(const FloatPoint& left_top,
-                                            const FloatPoint& right_bottom) {
+void ImageBitmapRenderingContextBase::SetUV(const gfx::PointF& left_top,
+                                            const gfx::PointF& right_bottom) {
   image_layer_bridge_->SetUV(left_top, right_bottom);
 }
 
@@ -83,7 +105,7 @@ bool ImageBitmapRenderingContextBase::IsPaintable() const {
   return !!image_layer_bridge_->GetImage();
 }
 
-void ImageBitmapRenderingContextBase::Trace(blink::Visitor* visitor) {
+void ImageBitmapRenderingContextBase::Trace(Visitor* visitor) const {
   visitor->Trace(image_layer_bridge_);
   CanvasRenderingContext::Trace(visitor);
 }
@@ -99,23 +121,28 @@ bool ImageBitmapRenderingContextBase::CanCreateCanvas2dResourceProvider()
   return !!static_cast<OffscreenCanvas*>(Host())->GetOrCreateResourceProvider();
 }
 
-void ImageBitmapRenderingContextBase::PushFrame() {
+bool ImageBitmapRenderingContextBase::PushFrame() {
   DCHECK(Host());
   DCHECK(Host()->IsOffscreenCanvas());
   if (!CanCreateCanvas2dResourceProvider())
-    return;
+    return false;
 
   scoped_refptr<StaticBitmapImage> image = image_layer_bridge_->GetImage();
+  if (!image) {
+    return false;
+  }
   cc::PaintFlags paint_flags;
   paint_flags.setBlendMode(SkBlendMode::kSrc);
   Host()->ResourceProvider()->Canvas()->drawImage(
-      image->PaintImageForCurrentFrame(), 0, 0, &paint_flags);
+      image->PaintImageForCurrentFrame(), 0, 0, SkSamplingOptions(),
+      &paint_flags);
   scoped_refptr<CanvasResource> resource =
       Host()->ResourceProvider()->ProduceCanvasResource();
   Host()->PushFrame(
       std::move(resource),
-      SkIRect::MakeWH(image_layer_bridge_->GetImage()->Size().Width(),
-                      image_layer_bridge_->GetImage()->Size().Height()));
+      SkIRect::MakeWH(image_layer_bridge_->GetImage()->Size().width(),
+                      image_layer_bridge_->GetImage()->Size().height()));
+  return true;
 }
 
 bool ImageBitmapRenderingContextBase::IsOriginTopLeft() const {

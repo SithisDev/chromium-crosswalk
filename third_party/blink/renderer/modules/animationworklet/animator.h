@@ -12,8 +12,8 @@
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
 #include "third_party/blink/renderer/platform/graphics/animation_worklet_mutators_state.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -23,18 +23,18 @@ class AnimatorDefinition;
 // Represents an animator instance. It owns the underlying |v8::Object| for the
 // instance and knows how to invoke the |animate| function on it.
 // See also |AnimationWorkletGlobalScope::CreateInstance|.
-class Animator final : public GarbageCollectedFinalized<Animator>,
-                       public NameClient {
+class Animator final : public GarbageCollected<Animator>, public NameClient {
  public:
   Animator(v8::Isolate*,
            AnimatorDefinition*,
            v8::Local<v8::Value> instance,
            const String& name,
            WorkletAnimationOptions options,
-           const Vector<base::Optional<base::TimeDelta>>& local_times,
-           const Vector<Timing>& timings);
-  ~Animator();
-  void Trace(blink::Visitor*);
+           const Vector<absl::optional<base::TimeDelta>>& local_times,
+           const Vector<Timing>& timings,
+           const Vector<Timing::NormalizedTiming>& normalized_timings);
+  ~Animator() final;
+  void Trace(Visitor*) const;
   const char* NameInHeapSnapshot() const override { return "Animator"; }
 
   // Returns true if it successfully invoked animate callback in JS. It receives
@@ -58,6 +58,7 @@ class Animator final : public GarbageCollectedFinalized<Animator>,
   }
 
   Vector<Timing> GetTimings() const;
+  Vector<Timing::NormalizedTiming> GetNormalizedTimings() const;
   bool IsStateful() const;
 
   const String& name() const { return name_; }

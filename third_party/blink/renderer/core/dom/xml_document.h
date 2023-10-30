@@ -28,7 +28,7 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -50,7 +50,12 @@ class XMLDocument final : public Document {
               DocumentClassFlags document_classes = kXMLDocumentClass);
 };
 
-DEFINE_DOCUMENT_TYPE_CASTS(XMLDocument);
+template <>
+struct DowncastTraits<XMLDocument> {
+  static bool AllowFrom(const Document& document) {
+    return document.IsXMLDocument();
+  }
+};
 
 }  // namespace blink
 

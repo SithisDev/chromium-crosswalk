@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/animation/interpolation_types_map.h"
 #include "third_party/blink/renderer/core/animation/primitive_interpolation.h"
 #include "third_party/blink/renderer/core/animation/typed_interpolation_value.h"
+#include "third_party/blink/renderer/core/core_export.h"
 
 namespace blink {
 
@@ -55,7 +56,7 @@ class CORE_EXPORT InvalidatableInterpolation : public Interpolation {
     return cached_value_.get();
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(start_keyframe_);
     visitor->Trace(end_keyframe_);
     Interpolation::Trace(visitor);
@@ -67,10 +68,10 @@ class CORE_EXPORT InvalidatableInterpolation : public Interpolation {
   std::unique_ptr<TypedInterpolationValue> MaybeConvertUnderlyingValue(
       const InterpolationEnvironment&) const;
   const TypedInterpolationValue* EnsureValidConversion(
-      const InterpolationEnvironment&,
+      InterpolationEnvironment&,
       const UnderlyingValueOwner&) const;
-  void EnsureValidInterpolationTypes(const InterpolationEnvironment&) const;
-  void ClearConversionCache() const;
+  void EnsureValidInterpolationTypes(InterpolationEnvironment&) const;
+  void ClearConversionCache(InterpolationEnvironment& environment) const;
   bool IsConversionCacheValid(const InterpolationEnvironment&,
                               const UnderlyingValueOwner&) const;
   bool IsNeutralKeyframeActive() const;
@@ -98,11 +99,12 @@ class CORE_EXPORT InvalidatableInterpolation : public Interpolation {
   mutable std::unique_ptr<TypedInterpolationValue> cached_value_;
 };
 
-DEFINE_TYPE_CASTS(InvalidatableInterpolation,
-                  Interpolation,
-                  value,
-                  value->IsInvalidatableInterpolation(),
-                  value.IsInvalidatableInterpolation());
+template <>
+struct DowncastTraits<InvalidatableInterpolation> {
+  static bool AllowFrom(const Interpolation& value) {
+    return value.IsInvalidatableInterpolation();
+  }
+};
 
 }  // namespace blink
 

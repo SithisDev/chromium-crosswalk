@@ -27,6 +27,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_MEDIA_HTML_AUDIO_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_MEDIA_HTML_AUDIO_ELEMENT_H_
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 
@@ -49,9 +50,8 @@ class CORE_EXPORT HTMLAudioElement final : public HTMLMediaElement {
   // WebMediaPlayerClient implementation.
   void MediaRemotingStarted(
       const WebString& remote_device_friendly_name) override {}
-  void MediaRemotingStopped(WebLocalizedString::Name error_msg) override {}
+  void MediaRemotingStopped(int error_code) override {}
   void OnPictureInPictureStateChange() final { NOTREACHED(); }
-  void ActivateViewportIntersectionMonitoring(bool) final {}
 };
 
 }  // namespace blink

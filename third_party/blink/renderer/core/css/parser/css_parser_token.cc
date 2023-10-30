@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/css/css_markup.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_property_parser.h"
+#include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -30,7 +31,7 @@ CSSParserToken::CSSParserToken(CSSParserTokenType type,
       unit_(static_cast<unsigned>(CSSPrimitiveValue::UnitType::kNumber)) {
   DCHECK_EQ(type, kNumberToken);
   numeric_value_ =
-      clampTo<double>(numeric_value, -std::numeric_limits<float>::max(),
+      ClampTo<double>(numeric_value, -std::numeric_limits<float>::max(),
                       std::numeric_limits<float>::max());
 }
 
@@ -86,9 +87,10 @@ double CSSParserToken::NumericValue() const {
 }
 
 CSSPropertyID CSSParserToken::ParseAsUnresolvedCSSPropertyID(
+    const ExecutionContext* execution_context,
     CSSParserMode mode) const {
   DCHECK_EQ(type_, static_cast<unsigned>(kIdentToken));
-  return UnresolvedCSSPropertyID(Value(), mode);
+  return UnresolvedCSSPropertyID(execution_context, Value(), mode);
 }
 
 AtRuleDescriptorID CSSParserToken::ParseAsAtRuleDescriptorID() const {
@@ -114,6 +116,9 @@ CSSValueID CSSParserToken::FunctionId() const {
 
 bool CSSParserToken::HasStringBacking() const {
   CSSParserTokenType token_type = GetType();
+  if (value_is_inline_) {
+    return false;
+  }
   return token_type == kIdentToken || token_type == kFunctionToken ||
          token_type == kAtKeywordToken || token_type == kHashToken ||
          token_type == kUrlToken || token_type == kDimensionToken ||
@@ -137,19 +142,19 @@ bool CSSParserToken::ValueDataCharRawEqual(const CSSParserToken& other) const {
 
   if (value_is_8bit_) {
     return other.value_is_8bit_
-               ? Equal(static_cast<const LChar*>(value_data_char_raw_),
-                       static_cast<const LChar*>(other.value_data_char_raw_),
+               ? Equal(static_cast<const LChar*>(ValueDataCharRaw()),
+                       static_cast<const LChar*>(other.ValueDataCharRaw()),
                        value_length_)
-               : Equal(static_cast<const LChar*>(value_data_char_raw_),
-                       static_cast<const UChar*>(other.value_data_char_raw_),
+               : Equal(static_cast<const LChar*>(ValueDataCharRaw()),
+                       static_cast<const UChar*>(other.ValueDataCharRaw()),
                        value_length_);
   } else {
     return other.value_is_8bit_
-               ? Equal(static_cast<const UChar*>(value_data_char_raw_),
-                       static_cast<const LChar*>(other.value_data_char_raw_),
+               ? Equal(static_cast<const UChar*>(ValueDataCharRaw()),
+                       static_cast<const LChar*>(other.ValueDataCharRaw()),
                        value_length_)
-               : Equal(static_cast<const UChar*>(value_data_char_raw_),
-                       static_cast<const UChar*>(other.value_data_char_raw_),
+               : Equal(static_cast<const UChar*>(ValueDataCharRaw()),
+                       static_cast<const UChar*>(other.ValueDataCharRaw()),
                        value_length_);
   }
 }
@@ -163,7 +168,7 @@ bool CSSParserToken::operator==(const CSSParserToken& other) const {
     case kHashToken:
       if (hash_token_type_ != other.hash_token_type_)
         return false;
-      FALLTHROUGH;
+      [[fallthrough]];
     case kIdentToken:
     case kFunctionToken:
     case kStringToken:
@@ -172,7 +177,7 @@ bool CSSParserToken::operator==(const CSSParserToken& other) const {
     case kDimensionToken:
       if (!ValueDataCharRawEqual(other))
         return false;
-      FALLTHROUGH;
+      [[fallthrough]];
     case kNumberToken:
     case kPercentageToken:
       return numeric_sign_ == other.numeric_sign_ &&

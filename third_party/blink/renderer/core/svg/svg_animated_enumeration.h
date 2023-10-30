@@ -32,7 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_ANIMATED_ENUMERATION_H_
 
 #include "third_party/blink/renderer/core/svg/svg_animated_enumeration_base.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -45,40 +45,20 @@ class SVGAnimatedEnumeration : public SVGAnimatedEnumerationBase {
       : SVGAnimatedEnumerationBase(
             context_element,
             attribute_name,
-            MakeGarbageCollected<SVGEnumeration<Enum>>(initial_value),
+            MakeGarbageCollected<SVGEnumeration>(initial_value),
             static_cast<unsigned>(initial_value)) {}
 
   SVGAnimatedEnumeration(SVGElement* context_element,
                          const QualifiedName& attribute_name,
-                         SVGEnumeration<Enum>* initial_value)
+                         SVGEnumeration* initial_value)
       : SVGAnimatedEnumerationBase(
             context_element,
             attribute_name,
             initial_value,
-            static_cast<unsigned>(initial_value->EnumValue())) {}
+            static_cast<unsigned>(initial_value->EnumValue<Enum>())) {}
 
-  SVGAnimatedEnumeration(SVGElement* context_element,
-                         const QualifiedName& attribute_name,
-                         SVGEnumeration<Enum>* initial_value,
-                         unsigned initial_enum_value)
-      : SVGAnimatedEnumerationBase(context_element,
-                                   attribute_name,
-                                   initial_value,
-                                   initial_enum_value) {}
-
-  SVGEnumeration<Enum>* BaseValue() {
-    return static_cast<SVGEnumeration<Enum>*>(
-        SVGAnimatedEnumerationBase::BaseValue());
-  }
-
-  SVGEnumeration<Enum>* CurrentValue() {
-    return static_cast<SVGEnumeration<Enum>*>(
-        SVGAnimatedEnumerationBase::CurrentValue());
-  }
-
-  const SVGEnumeration<Enum>* CurrentValue() const {
-    return static_cast<const SVGEnumeration<Enum>*>(
-        SVGAnimatedEnumerationBase::CurrentValue());
+  Enum CurrentEnumValue() const {
+    return CurrentValue()->template EnumValue<Enum>();
   }
 };
 

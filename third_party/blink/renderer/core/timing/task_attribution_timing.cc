@@ -11,19 +11,16 @@
 namespace blink {
 
 TaskAttributionTiming::TaskAttributionTiming(const AtomicString& name,
-                                             const String& container_type,
-                                             const String& container_src,
-                                             const String& container_id,
-                                             const String& container_name,
-                                             double start_time,
-                                             double finish_time,
-                                             const String& script_url)
-    : PerformanceEntry(name, start_time, finish_time),
+                                             const AtomicString& container_type,
+                                             const AtomicString& container_src,
+                                             const AtomicString& container_id,
+                                             const AtomicString& container_name,
+                                             const uint32_t navigation_id)
+    : PerformanceEntry(name, 0.0, 0.0, navigation_id),
       container_type_(container_type),
       container_src_(container_src),
       container_id_(container_id),
-      container_name_(container_name),
-      script_url_(script_url) {}
+      container_name_(container_name) {}
 
 TaskAttributionTiming::~TaskAttributionTiming() = default;
 
@@ -35,23 +32,19 @@ PerformanceEntryType TaskAttributionTiming::EntryTypeEnum() const {
   return PerformanceEntry::EntryType::kTaskAttribution;
 }
 
-String TaskAttributionTiming::scriptURL() const {
-  return script_url_;
-}
-
-String TaskAttributionTiming::containerType() const {
+AtomicString TaskAttributionTiming::containerType() const {
   return container_type_;
 }
 
-String TaskAttributionTiming::containerSrc() const {
+AtomicString TaskAttributionTiming::containerSrc() const {
   return container_src_;
 }
 
-String TaskAttributionTiming::containerId() const {
+AtomicString TaskAttributionTiming::containerId() const {
   return container_id_;
 }
 
-String TaskAttributionTiming::containerName() const {
+AtomicString TaskAttributionTiming::containerName() const {
   return container_name_;
 }
 
@@ -63,7 +56,7 @@ void TaskAttributionTiming::BuildJSONValue(V8ObjectBuilder& builder) const {
   builder.AddString("containerName", containerName());
 }
 
-void TaskAttributionTiming::Trace(blink::Visitor* visitor) {
+void TaskAttributionTiming::Trace(Visitor* visitor) const {
   PerformanceEntry::Trace(visitor);
 }
 

@@ -27,6 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FULLSCREEN_DOCUMENT_FULLSCREEN_H_
 
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -36,13 +37,13 @@ namespace blink {
 class Document;
 class Element;
 
-class DocumentFullscreen {
+class CORE_EXPORT DocumentFullscreen {
   STATIC_ONLY(DocumentFullscreen);
 
  public:
   static bool fullscreenEnabled(Document&);
   static Element* fullscreenElement(Document&);
-  static ScriptPromise exitFullscreen(ScriptState*, Document&);
+  static ScriptPromise exitFullscreen(ScriptState*, Document&, ExceptionState&);
   static void webkitExitFullscreen(Document&);
 
   DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(fullscreenchange, kFullscreenchange)

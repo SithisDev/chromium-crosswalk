@@ -25,10 +25,12 @@
 
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/core/animation_frame/worker_animation_frame_provider.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_context_creation_attributes_core.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_image_source.h"
-#include "third_party/blink/renderer/core/workers/worker_animation_frame_provider.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -37,62 +39,20 @@ namespace blink {
 
 CanvasRenderingContext::CanvasRenderingContext(
     CanvasRenderingContextHost* host,
-    const CanvasContextCreationAttributesCore& attrs)
+    const CanvasContextCreationAttributesCore& attrs,
+    CanvasRenderingAPI canvas_rendering_API)
     : host_(host),
-      color_params_(kSRGBCanvasColorSpace, kRGBA8CanvasPixelFormat, kNonOpaque),
-      creation_attributes_(attrs) {
-  // Supported color spaces and pixel formats: sRGB in uint8, e-sRGB in f16,
-  // linear sRGB and p3 and rec2020 with linear gamma transfer function in f16.
-  // For wide gamut color spaces, user must explicitly request half float
-  // storage. Otherwise, we fall back to sRGB in uint8. Invalid requests fall
-  // back to sRGB in uint8 too.
-  if (creation_attributes_.pixel_format == kF16CanvasPixelFormatName) {
-    color_params_.SetCanvasPixelFormat(kF16CanvasPixelFormat);
-    if (creation_attributes_.color_space == kLinearRGBCanvasColorSpaceName)
-      color_params_.SetCanvasColorSpace(kLinearRGBCanvasColorSpace);
-    if (creation_attributes_.color_space == kRec2020CanvasColorSpaceName)
-      color_params_.SetCanvasColorSpace(kRec2020CanvasColorSpace);
-    else if (creation_attributes_.color_space == kP3CanvasColorSpaceName)
-      color_params_.SetCanvasColorSpace(kP3CanvasColorSpace);
-  }
+      color_params_(attrs.color_space, attrs.pixel_format, attrs.alpha),
+      creation_attributes_(attrs),
+      canvas_rendering_type_(canvas_rendering_API) {}
 
-  if (!creation_attributes_.alpha)
-    color_params_.SetOpacityMode(kOpaque);
-
-  // Make creation_attributes_ reflect the effective color_space and
-  // pixel_format rather than the requested one.
-  creation_attributes_.color_space = ColorSpaceAsString();
-  creation_attributes_.pixel_format = PixelFormatAsString();
-}
-
-WTF::String CanvasRenderingContext::ColorSpaceAsString() const {
-  switch (color_params_.ColorSpace()) {
-    case kSRGBCanvasColorSpace:
-      return kSRGBCanvasColorSpaceName;
-    case kLinearRGBCanvasColorSpace:
-      return kLinearRGBCanvasColorSpaceName;
-    case kRec2020CanvasColorSpace:
-      return kRec2020CanvasColorSpaceName;
-    case kP3CanvasColorSpace:
-      return kP3CanvasColorSpaceName;
-  };
-  CHECK(false);
-  return "";
-}
-
-WTF::String CanvasRenderingContext::PixelFormatAsString() const {
-  switch (color_params_.PixelFormat()) {
-    case kRGBA8CanvasPixelFormat:
-      return kRGBA8CanvasPixelFormatName;
-    case kF16CanvasPixelFormat:
-      return kF16CanvasPixelFormatName;
-  };
-  CHECK(false);
-  return "";
+SkColorInfo CanvasRenderingContext::CanvasRenderingContextSkColorInfo() const {
+  return SkColorInfo(kN32_SkColorType, kPremul_SkAlphaType,
+                     SkColorSpace::MakeSRGB());
 }
 
 void CanvasRenderingContext::Dispose() {
-  StopListeningForDidProcessTask();
+  RenderTaskEnded();
 
   // HTMLCanvasElement and CanvasRenderingContext have a circular reference.
   // When the pair is no longer reachable, their destruction order is non-
@@ -106,57 +66,143 @@ void CanvasRenderingContext::Dispose() {
   }
 }
 
-void CanvasRenderingContext::DidDraw(const SkIRect& dirty_rect) {
-  Host()->DidDraw(SkRect::Make(dirty_rect));
-  StartListeningForDidProcessTask();
+NoAllocDirectCallHost* CanvasRenderingContext::AsNoAllocDirectCallHost() {
+  return nullptr;
 }
 
-void CanvasRenderingContext::DidDraw() {
-  Host()->DidDraw();
-  StartListeningForDidProcessTask();
-}
+void CanvasRenderingContext::DidDraw(
+    const SkIRect& dirty_rect,
+    CanvasPerformanceMonitor::DrawType draw_type) {
+  Host()->DidDraw(dirty_rect);
 
-void CanvasRenderingContext::NeedsFinalizeFrame() {
-  StartListeningForDidProcessTask();
+  auto& monitor = GetCanvasPerformanceMonitor();
+  monitor.DidDraw(draw_type);
+  if (did_draw_in_current_task_)
+    return;
+
+  monitor.CurrentTaskDrawsToContext(this);
+  did_draw_in_current_task_ = true;
+  // We need to store whether the document is being printed because the
+  // document may exit printing state by the time DidProcessTast is called.
+  // This is an issue with beforeprint event listeners.
+  did_print_in_current_task_ = Host()->IsPrinting();
+  Thread::Current()->AddTaskObserver(this);
 }
 
 void CanvasRenderingContext::DidProcessTask(
     const base::PendingTask& /* pending_task */) {
-  StopListeningForDidProcessTask();
+  RenderTaskEnded();
 
   // The end of a script task that drew content to the canvas is the point
   // at which the current frame may be considered complete.
   if (Host())
-    Host()->FinalizeFrame();
-  FinalizeFrame();
+    Host()->PreFinalizeFrame();
+  FinalizeFrame(did_print_in_current_task_);
+  did_print_in_current_task_ = false;
+  if (Host())
+    Host()->PostFinalizeFrame();
 }
 
-CanvasRenderingContext::ContextType CanvasRenderingContext::ContextTypeFromId(
-    const String& id) {
+void CanvasRenderingContext::RecordUMACanvasRenderingAPI() {
+  if (auto* window =
+          DynamicTo<LocalDOMWindow>(Host()->GetTopExecutionContext())) {
+    WebFeature feature;
+    if (Host()->IsOffscreenCanvas()) {
+      switch (canvas_rendering_type_) {
+        default:
+          NOTREACHED();
+          U_FALLTHROUGH;
+        case CanvasRenderingContext::CanvasRenderingAPI::k2D:
+          feature = WebFeature::kOffscreenCanvas_2D;
+          break;
+        case CanvasRenderingContext::CanvasRenderingAPI::kWebgl:
+          feature = WebFeature::kOffscreenCanvas_WebGL;
+          break;
+        case CanvasRenderingContext::CanvasRenderingAPI::kWebgl2:
+          feature = WebFeature::kOffscreenCanvas_WebGL2;
+          break;
+        case CanvasRenderingContext::CanvasRenderingAPI::kBitmaprenderer:
+          feature = WebFeature::kOffscreenCanvas_BitmapRenderer;
+          break;
+        case CanvasRenderingContext::CanvasRenderingAPI::kWebgpu:
+          feature = WebFeature::kOffscreenCanvas_WebGPU;
+          break;
+      }
+    } else {
+      switch (canvas_rendering_type_) {
+        default:
+          NOTREACHED();
+          U_FALLTHROUGH;
+        case CanvasRenderingContext::CanvasRenderingAPI::k2D:
+          feature = WebFeature::kHTMLCanvasElement_2D;
+          break;
+        case CanvasRenderingContext::CanvasRenderingAPI::kWebgl:
+          feature = WebFeature::kHTMLCanvasElement_WebGL;
+          break;
+        case CanvasRenderingContext::CanvasRenderingAPI::kWebgl2:
+          feature = WebFeature::kHTMLCanvasElement_WebGL2;
+          break;
+        case CanvasRenderingContext::CanvasRenderingAPI::kBitmaprenderer:
+          feature = WebFeature::kHTMLCanvasElement_BitmapRenderer;
+          break;
+        case CanvasRenderingContext::CanvasRenderingAPI::kWebgpu:
+          feature = WebFeature::kHTMLCanvasElement_WebGPU;
+          break;
+      }
+    }
+    UseCounter::Count(window->document(), feature);
+  }
+}
+
+void CanvasRenderingContext::RecordUKMCanvasRenderingAPI() {
+  DCHECK(Host());
+  const auto& ukm_params = Host()->GetUkmParameters();
+  if (Host()->IsOffscreenCanvas()) {
+    ukm::builders::ClientRenderingAPI(ukm_params.source_id)
+        .SetOffscreenCanvas_RenderingContext(
+            static_cast<int>(canvas_rendering_type_))
+        .Record(ukm_params.ukm_recorder);
+  } else {
+    ukm::builders::ClientRenderingAPI(ukm_params.source_id)
+        .SetCanvas_RenderingContext(static_cast<int>(canvas_rendering_type_))
+        .Record(ukm_params.ukm_recorder);
+  }
+}
+
+void CanvasRenderingContext::RecordUKMCanvasDrawnToRenderingAPI() {
+  DCHECK(Host());
+  const auto& ukm_params = Host()->GetUkmParameters();
+  if (Host()->IsOffscreenCanvas()) {
+    ukm::builders::ClientRenderingAPI(ukm_params.source_id)
+        .SetOffscreenCanvas_RenderingContextDrawnTo(
+            static_cast<int>(canvas_rendering_type_))
+        .Record(ukm_params.ukm_recorder);
+  } else {
+    ukm::builders::ClientRenderingAPI(ukm_params.source_id)
+        .SetCanvas_RenderingContextDrawnTo(
+            static_cast<int>(canvas_rendering_type_))
+        .Record(ukm_params.ukm_recorder);
+  }
+}
+
+CanvasRenderingContext::CanvasRenderingAPI
+CanvasRenderingContext::RenderingAPIFromId(
+    const String& id,
+    const ExecutionContext* execution_context) {
   if (id == "2d")
-    return kContext2d;
+    return CanvasRenderingAPI::k2D;
   if (id == "experimental-webgl")
-    return kContextExperimentalWebgl;
+    return CanvasRenderingAPI::kWebgl;
   if (id == "webgl")
-    return kContextWebgl;
+    return CanvasRenderingAPI::kWebgl;
   if (id == "webgl2")
-    return kContextWebgl2;
-  if (id == "webgl2-compute" &&
-      RuntimeEnabledFeatures::WebGL2ComputeContextEnabled())
-    return kContextWebgl2Compute;
+    return CanvasRenderingAPI::kWebgl2;
   if (id == "bitmaprenderer")
-    return kContextImageBitmap;
-  if (id == "gpupresent" && RuntimeEnabledFeatures::WebGPUEnabled())
-    return kContextGPUPresent;
-  return kContextTypeUnknown;
-}
-
-CanvasRenderingContext::ContextType
-CanvasRenderingContext::ResolveContextTypeAliases(
-    CanvasRenderingContext::ContextType type) {
-  if (type == kContextExperimentalWebgl)
-    return kContextWebgl;
-  return type;
+    return CanvasRenderingAPI::kBitmaprenderer;
+  if ((id == "webgpu") &&
+      RuntimeEnabledFeatures::WebGPUEnabled(execution_context))
+    return CanvasRenderingAPI::kWebgpu;
+  return CanvasRenderingAPI::kUnknown;
 }
 
 bool CanvasRenderingContext::WouldTaintOrigin(CanvasImageSource* image_source) {
@@ -175,25 +221,25 @@ bool CanvasRenderingContext::WouldTaintOrigin(CanvasImageSource* image_source) {
   return image_source->WouldTaintOrigin();
 }
 
-void CanvasRenderingContext::Trace(Visitor* visitor) {
+void CanvasRenderingContext::Trace(Visitor* visitor) const {
   visitor->Trace(host_);
   ScriptWrappable::Trace(visitor);
+  ActiveScriptWrappable::Trace(visitor);
 }
 
-void CanvasRenderingContext::StartListeningForDidProcessTask() {
-  if (listening_for_did_process_task_)
-    return;
-
-  listening_for_did_process_task_ = true;
-  Thread::Current()->AddTaskObserver(this);
-}
-
-void CanvasRenderingContext::StopListeningForDidProcessTask() {
-  if (!listening_for_did_process_task_)
+void CanvasRenderingContext::RenderTaskEnded() {
+  if (!did_draw_in_current_task_)
     return;
 
   Thread::Current()->RemoveTaskObserver(this);
-  listening_for_did_process_task_ = false;
+  did_draw_in_current_task_ = false;
+}
+
+CanvasPerformanceMonitor&
+CanvasRenderingContext::GetCanvasPerformanceMonitor() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadSpecific<CanvasPerformanceMonitor>,
+                                  monitor, ());
+  return *monitor;
 }
 
 }  // namespace blink

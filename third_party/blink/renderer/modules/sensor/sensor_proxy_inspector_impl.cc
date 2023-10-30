@@ -7,24 +7,22 @@
 #include "services/device/public/cpp/generic_sensor/sensor_traits.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/sensor/sensor_reading_remapper.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
 
-using namespace device::mojom::blink;
-
 SensorProxyInspectorImpl::SensorProxyInspectorImpl(
-    SensorType sensor_type,
+    device::mojom::blink::SensorType sensor_type,
     SensorProviderProxy* provider,
     Page* page)
     : SensorProxy(sensor_type, provider, page) {}
 
 SensorProxyInspectorImpl::~SensorProxyInspectorImpl() {}
 
-void SensorProxyInspectorImpl::Trace(blink::Visitor* visitor) {
+void SensorProxyInspectorImpl::Trace(Visitor* visitor) const {
   SensorProxy::Trace(visitor);
 }
 
@@ -37,18 +35,19 @@ void SensorProxyInspectorImpl::Initialize() {
   auto callback = WTF::Bind(&SensorProxyInspectorImpl::OnSensorCreated,
                             WrapWeakPersistent(this));
 
-  Thread::Current()->GetTaskRunner()->PostTask(FROM_HERE, std::move(callback));
+  Thread::Current()->GetDeprecatedTaskRunner()->PostTask(FROM_HERE,
+                                                         std::move(callback));
 }
 
 void SensorProxyInspectorImpl::AddConfiguration(
-    SensorConfigurationPtr configuration,
+    device::mojom::blink::SensorConfigurationPtr configuration,
     base::OnceCallback<void(bool)> callback) {
   DCHECK(IsInitialized());
   std::move(callback).Run(true);
 }
 
 void SensorProxyInspectorImpl::RemoveConfiguration(
-    SensorConfigurationPtr configuration) {
+    device::mojom::blink::SensorConfigurationPtr configuration) {
   DCHECK(IsInitialized());
 }
 

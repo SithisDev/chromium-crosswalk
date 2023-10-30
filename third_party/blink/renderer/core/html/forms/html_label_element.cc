@@ -24,14 +24,18 @@
 
 #include "third_party/blink/renderer/core/html/forms/html_label_element.h"
 
+#include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
+#include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
+#include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/selection_controller.h"
 #include "third_party/blink/renderer/core/editing/visible_selection.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/custom/element_internals.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 #include "third_party/blink/renderer/core/html/forms/listed_element.h"
@@ -42,14 +46,12 @@
 
 namespace blink {
 
-using namespace html_names;
-
 HTMLLabelElement::HTMLLabelElement(Document& document)
-    : HTMLElement(kLabelTag, document), processing_click_(false) {}
+    : HTMLElement(html_names::kLabelTag, document), processing_click_(false) {}
 
 HTMLElement* HTMLLabelElement::control() const {
   // https://html.spec.whatwg.org/C/#labeled-control
-  const AtomicString& control_id = getAttribute(kForAttr);
+  const AtomicString& control_id = FastGetAttribute(html_names::kForAttr);
   if (control_id.IsNull()) {
     // "If the for attribute is not specified, but the label element has a
     // labelable element descendant, then the first such descendant in tree
@@ -88,7 +90,7 @@ HTMLElement* HTMLLabelElement::control() const {
 
 HTMLFormElement* HTMLLabelElement::form() const {
   if (HTMLElement* control = this->control()) {
-    if (auto* form_control_element = ToHTMLFormControlElementOrNull(control))
+    if (auto* form_control_element = DynamicTo<HTMLFormControlElement>(control))
       return form_control_element->Form();
     if (control->IsFormAssociatedCustomElement())
       return control->EnsureElementInternals().Form();
@@ -144,10 +146,9 @@ void HTMLLabelElement::DefaultEventHandler(Event& evt) {
     // event, then there's no need for us to do anything.
     if (!element)
       return;
-    if (evt.target()) {
-      Node* target_node = evt.target()->ToNode();
-      if (target_node &&
-          element->IsShadowIncludingInclusiveAncestorOf(*target_node))
+    Node* target_node = evt.target() ? evt.target()->ToNode() : nullptr;
+    if (target_node) {
+      if (element->IsShadowIncludingInclusiveAncestorOf(*target_node))
         return;
 
       if (IsInInteractiveContent(target_node))
@@ -170,7 +171,8 @@ void HTMLLabelElement::DefaultEventHandler(Event& evt) {
     // click event to control element.
     // Note: check if it is a MouseEvent because a click event may
     // not be an instance of a MouseEvent if created by document.createEvent().
-    if (evt.IsMouseEvent() && ToMouseEvent(evt).HasPosition()) {
+    auto* mouse_event = DynamicTo<MouseEvent>(evt);
+    if (mouse_event && mouse_event->HasPosition()) {
       if (LocalFrame* frame = GetDocument().GetFrame()) {
         // Check if there is a selection and click is not on the
         // selection.
@@ -181,30 +183,32 @@ void HTMLLabelElement::DefaultEventHandler(Event& evt) {
             !frame->GetEventHandler()
                  .GetSelectionController()
                  .MouseDownWasSingleClickInSelection() &&
-            evt.target()->ToNode()->CanStartSelection())
+            target_node->CanStartSelection()) {
           is_label_text_selected = true;
-        // If selection is there and is single click i.e. text is
-        // selected by dragging over label text, then return.
-        // Click count >=2, meaning double click or triple click,
-        // should pass click event to control element.
-        // Only in case of drag, *neither* we pass the click event,
-        // *nor* we focus the control element.
-        if (is_label_text_selected && ToMouseEvent(evt).ClickCount() == 1)
-          return;
+
+          // If selection is there and is single click i.e. text is
+          // selected by dragging over label text, then return.
+          // Click count >=2, meaning double click or triple click,
+          // should pass click event to control element.
+          // Only in case of drag, *neither* we pass the click event,
+          // *nor* we focus the control element.
+          if (mouse_event->ClickCount() == 1)
+            return;
+        }
       }
     }
 
     processing_click_ = true;
 
-    GetDocument().UpdateStyleAndLayout();
+    GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kInput);
     if (element->IsMouseFocusable()) {
       // If the label is *not* selected, or if the click happened on
       // selection of label, only then focus the control element.
       // In case of double click or triple click, selection will be there,
       // so do not focus the control element.
       if (!is_label_text_selected) {
-        element->focus(FocusParams(SelectionBehaviorOnFocus::kRestore,
-                                   kWebFocusTypeMouse, nullptr));
+        element->Focus(FocusParams(SelectionBehaviorOnFocus::kRestore,
+                                   mojom::blink::FocusType::kMouse, nullptr));
       }
     }
 
@@ -230,28 +234,29 @@ bool HTMLLabelElement::WillRespondToMouseClickEvents() {
   return HTMLElement::WillRespondToMouseClickEvents();
 }
 
-void HTMLLabelElement::focus(const FocusParams& params) {
+void HTMLLabelElement::Focus(const FocusParams& params) {
   GetDocument().UpdateStyleAndLayoutTreeForNode(this);
   if (IsFocusable()) {
-    HTMLElement::focus(params);
+    HTMLElement::Focus(params);
     return;
   }
 
-  if (params.type == blink::kWebFocusTypeAccessKey)
+  if (params.type == blink::mojom::blink::FocusType::kAccessKey)
     return;
 
   // To match other browsers, always restore previous selection.
   if (HTMLElement* element = control()) {
-    element->focus(FocusParams(SelectionBehaviorOnFocus::kRestore, params.type,
+    element->Focus(FocusParams(SelectionBehaviorOnFocus::kRestore, params.type,
                                params.source_capabilities, params.options));
   }
 }
 
-void HTMLLabelElement::AccessKeyAction(bool send_mouse_events) {
+void HTMLLabelElement::AccessKeyAction(
+    SimulatedClickCreationScope creation_scope) {
   if (HTMLElement* element = control())
-    element->AccessKeyAction(send_mouse_events);
+    element->AccessKeyAction(creation_scope);
   else
-    HTMLElement::AccessKeyAction(send_mouse_events);
+    HTMLElement::AccessKeyAction(creation_scope);
 }
 
 }  // namespace blink

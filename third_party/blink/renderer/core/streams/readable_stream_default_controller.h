@@ -5,15 +5,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_STREAMS_READABLE_STREAM_DEFAULT_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STREAMS_READABLE_STREAM_DEFAULT_CONTROLLER_H_
 
-#include "base/optional.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_controller.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
 class ExceptionState;
 class QueueWithSizes;
-class ReadableStreamNative;
+class ReadableStream;
 class ScriptState;
 class ScriptValue;
 class StrategySizeAlgorithm;
@@ -21,14 +23,14 @@ class StreamAlgorithm;
 class StreamPromiseResolver;
 class StreamStartAlgorithm;
 
-class ReadableStreamDefaultController : public ScriptWrappable {
+class ReadableStreamDefaultController : public ReadableStreamController {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   ReadableStreamDefaultController();
 
   // https://streams.spec.whatwg.org/#rs-default-controller-desired-size
-  double desiredSize(bool& is_null) const;
+  absl::optional<double> desiredSize() const { return GetDesiredSize(); }
 
   // https://streams.spec.whatwg.org/#rs-default-controller-close
   void close(ScriptState*, ExceptionState&);
@@ -56,7 +58,7 @@ class ReadableStreamDefaultController : public ScriptWrappable {
                     v8::Local<v8::Value> e);
 
   // https://streams.spec.whatwg.org/#readable-stream-default-controller-get-desired-size
-  base::Optional<double> GetDesiredSize() const;
+  absl::optional<double> GetDesiredSize() const;
 
   //
   // Used by TransformStream
@@ -70,17 +72,24 @@ class ReadableStreamDefaultController : public ScriptWrappable {
   static const char* EnqueueExceptionMessage(
       const ReadableStreamDefaultController*);
 
-  void Trace(Visitor*) override;
+  bool IsDefaultController() const override { return true; }
+  bool IsByteStreamController() const override { return false; }
 
- private:
-  friend class ReadableStreamNative;
-  friend class ReadableStreamReader;
+  void Trace(Visitor*) const override;
 
   // https://streams.spec.whatwg.org/#rs-default-controller-private-cancel
-  v8::Local<v8::Promise> CancelSteps(ScriptState*, v8::Local<v8::Value> reason);
+  v8::Local<v8::Promise> CancelSteps(ScriptState*,
+                                     v8::Local<v8::Value> reason) override;
 
   // https://streams.spec.whatwg.org/#rs-default-controller-private-pull
-  StreamPromiseResolver* PullSteps(ScriptState*);
+  StreamPromiseResolver* PullSteps(ScriptState*) override;
+
+  // https://streams.spec.whatwg.org/#abstract-opdef-readablestreamdefaultcontroller-releasesteps
+  void ReleaseSteps() override;
+
+ private:
+  friend class ReadableStream;
+  friend class ReadableStreamDefaultReader;
 
   // https://streams.spec.whatwg.org/#readable-stream-default-controller-call-pull-if-needed
   static void CallPullIfNeeded(ScriptState*, ReadableStreamDefaultController*);
@@ -93,7 +102,7 @@ class ReadableStreamDefaultController : public ScriptWrappable {
 
   // https://streams.spec.whatwg.org/#set-up-readable-stream-default-controller
   static void SetUp(ScriptState*,
-                    ReadableStreamNative*,
+                    ReadableStream*,
                     ReadableStreamDefaultController*,
                     StreamStartAlgorithm* start_algorithm,
                     StreamAlgorithm* pull_algorithm,
@@ -104,7 +113,7 @@ class ReadableStreamDefaultController : public ScriptWrappable {
 
   // https://streams.spec.whatwg.org/#set-up-readable-stream-default-controller-from-underlying-source
   static void SetUpFromUnderlyingSource(ScriptState*,
-                                        ReadableStreamNative*,
+                                        ReadableStream*,
                                         v8::Local<v8::Object> underlying_source,
                                         double high_water_mark,
                                         StrategySizeAlgorithm* size_algorithm,
@@ -117,11 +126,18 @@ class ReadableStreamDefaultController : public ScriptWrappable {
   bool is_pulling_ = false;
   bool is_started_ = false;
   Member<StreamAlgorithm> cancel_algorithm_;
-  Member<ReadableStreamNative> controlled_readable_stream_;
+  Member<ReadableStream> controlled_readable_stream_;
   Member<StreamAlgorithm> pull_algorithm_;
   Member<QueueWithSizes> queue_;
   double strategy_high_water_mark_ = 0.0;
   Member<StrategySizeAlgorithm> strategy_size_algorithm_;
+};
+
+template <>
+struct DowncastTraits<ReadableStreamDefaultController> {
+  static bool AllowFrom(const ReadableStreamController& controller) {
+    return controller.IsDefaultController();
+  }
 };
 
 }  // namespace blink

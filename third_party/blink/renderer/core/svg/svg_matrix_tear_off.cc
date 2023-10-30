@@ -32,7 +32,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_transform_tear_off.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -44,7 +44,7 @@ SVGMatrixTearOff::SVGMatrixTearOff(SVGTransformTearOff* transform)
   DCHECK(transform);
 }
 
-void SVGMatrixTearOff::Trace(blink::Visitor* visitor) {
+void SVGMatrixTearOff::Trace(Visitor* visitor) const {
   visitor->Trace(context_transform_);
   ScriptWrappable::Trace(visitor);
 }

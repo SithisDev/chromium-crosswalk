@@ -39,4 +39,16 @@ TypeConverter<blink::MediaSessionSeekToActionDetails*,
   return blink_details;
 }
 
+media_session::mojom::blink::MediaPositionPtr TypeConverter<
+    media_session::mojom::blink::MediaPositionPtr,
+    blink::MediaPositionState*>::Convert(const blink::MediaPositionState*
+                                             position) {
+  return media_session::mojom::blink::MediaPosition::New(
+      position->hasPlaybackRate() ? position->playbackRate() : 1.0,
+      base::Seconds(position->duration()),
+      position->hasPosition() ? base::Seconds(position->position())
+                              : base::TimeDelta(),
+      base::TimeTicks::Now());
+}
+
 }  // namespace mojo

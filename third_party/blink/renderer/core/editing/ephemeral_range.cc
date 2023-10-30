@@ -5,6 +5,9 @@
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 
 #include <ostream>  // NOLINT
+
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/abstract_range.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/range.h"
@@ -27,7 +30,7 @@ EphemeralRangeTemplate<Strategy>::EphemeralRangeTemplate(
     const PositionTemplate<Strategy>& start,
     const PositionTemplate<Strategy>& end)
     : start_position_(start),
-      end_position_(end)
+      end_position_(start.IsEquivalent(end) ? start : end)
 #if DCHECK_IS_ON()
       ,
       dom_tree_version_(start.IsNull() ? 0
@@ -56,6 +59,14 @@ template <typename Strategy>
 EphemeralRangeTemplate<Strategy>::EphemeralRangeTemplate(
     const PositionTemplate<Strategy>& position)
     : EphemeralRangeTemplate(position, position) {}
+
+template <typename Strategy>
+EphemeralRangeTemplate<Strategy>::EphemeralRangeTemplate(
+    const AbstractRange* range)
+    : EphemeralRangeTemplate(PositionTemplate<Strategy>(range->startContainer(),
+                                                        range->startOffset()),
+                             PositionTemplate<Strategy>(range->endContainer(),
+                                                        range->endOffset())) {}
 
 template <typename Strategy>
 EphemeralRangeTemplate<Strategy>::EphemeralRangeTemplate(const Range* range) {
@@ -208,6 +219,21 @@ std::ostream& operator<<(std::ostream& ostream, const EphemeralRange& range) {
 std::ostream& operator<<(std::ostream& ostream,
                          const EphemeralRangeInFlatTree& range) {
   return PrintEphemeralRange(ostream, range);
+}
+
+EphemeralRangeInFlatTree ToEphemeralRangeInFlatTree(
+    const EphemeralRange& range) {
+  PositionInFlatTree start = ToPositionInFlatTree(range.StartPosition());
+  PositionInFlatTree end = ToPositionInFlatTree(range.EndPosition());
+  if (start.IsNull() || end.IsNull() ||
+      start.GetDocument() != end.GetDocument())
+    return EphemeralRangeInFlatTree();
+  if (!start.IsValidFor(*start.GetDocument()) ||
+      !end.IsValidFor(*end.GetDocument()))
+    return EphemeralRangeInFlatTree();
+  if (start <= end)
+    return EphemeralRangeInFlatTree(start, end);
+  return EphemeralRangeInFlatTree(end, start);
 }
 
 template class CORE_TEMPLATE_EXPORT EphemeralRangeTemplate<EditingStrategy>;

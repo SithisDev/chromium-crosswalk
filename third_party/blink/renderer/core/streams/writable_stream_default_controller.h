@@ -5,11 +5,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_STREAMS_WRITABLE_STREAM_DEFAULT_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STREAMS_WRITABLE_STREAM_DEFAULT_CONTROLLER_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
+class AbortSignal;
 class ExceptionState;
 class QueueWithSizes;
 class ScriptState;
@@ -17,17 +21,19 @@ class ScriptValue;
 class StrategySizeAlgorithm;
 class StreamAlgorithm;
 class StreamStartAlgorithm;
-class Visitor;
 class WritableStreamDefaultWriter;
-class WritableStreamNative;
+class WritableStream;
 
-class WritableStreamDefaultController final : public ScriptWrappable {
+class CORE_EXPORT WritableStreamDefaultController final
+    : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  static WritableStreamDefaultController* From(ScriptState*, ScriptValue);
+
   // The JavaScript-exposed constructor throws automatically as no constructor
   // is specified in the IDL. This constructor is used internally during
-  // creation of a WritableStreamNative object.
+  // creation of a WritableStream object.
   WritableStreamDefaultController();
 
   // https://streams.spec.whatwg.org/#ws-default-controller-error
@@ -35,7 +41,7 @@ class WritableStreamDefaultController final : public ScriptWrappable {
   void error(ScriptState*, ScriptValue e);
 
   //
-  // Methods used by WritableStreamNative
+  // Methods used by WritableStream
   //
 
   // https://streams.spec.whatwg.org/#ws-default-controller-private-abort
@@ -46,7 +52,7 @@ class WritableStreamDefaultController final : public ScriptWrappable {
 
   // https://streams.spec.whatwg.org/#set-up-writable-stream-default-controller
   static void SetUp(ScriptState*,
-                    WritableStreamNative*,
+                    WritableStream*,
                     WritableStreamDefaultController*,
                     StreamStartAlgorithm* start_algorithm,
                     StreamAlgorithm* write_algorithm,
@@ -58,7 +64,7 @@ class WritableStreamDefaultController final : public ScriptWrappable {
 
   // https://streams.spec.whatwg.org/#set-up-writable-stream-default-controller-from-underlying-sink
   static void SetUpFromUnderlyingSink(ScriptState*,
-                                      WritableStreamNative*,
+                                      WritableStream*,
                                       v8::Local<v8::Object> underlying_sink,
                                       double high_water_mark,
                                       StrategySizeAlgorithm* size_algorithm,
@@ -87,12 +93,12 @@ class WritableStreamDefaultController final : public ScriptWrappable {
                     double chunk_size);
 
   // https://streams.spec.whatwg.org/#writable-stream-default-controller-error
-  // TODO(yhirano): Make this private once we ship StreamsNative.
+  // TODO(ricea): Make this private.
   static void Error(ScriptState*,
                     WritableStreamDefaultController*,
                     v8::Local<v8::Value> error);
 
-  // Exposed to WritableStreamNative. Not part of the standard.
+  // Exposed to WritableStream. Not part of the standard.
   bool Started() const { return started_; }
 
   //
@@ -103,7 +109,10 @@ class WritableStreamDefaultController final : public ScriptWrappable {
                             WritableStreamDefaultController*,
                             v8::Local<v8::Value> error);
 
-  void Trace(Visitor*) override;
+  // IDL attributes
+  AbortSignal* signal() const { return signal_; }
+
+  void Trace(Visitor*) const override;
 
  private:
   // https://streams.spec.whatwg.org/#writable-stream-default-controller-clear-algorithms
@@ -129,13 +138,14 @@ class WritableStreamDefaultController final : public ScriptWrappable {
   // https://streams.spec.whatwg.org/#ws-default-controller-internal-slots.
   Member<StreamAlgorithm> abort_algorithm_;
   Member<StreamAlgorithm> close_algorithm_;
-  Member<WritableStreamNative> controlled_writable_stream_;
+  Member<WritableStream> controlled_writable_stream_;
 
   // |queue_| covers both the [[queue]] and [[queueTotalSize]] internal slots.
   // Instead of chunks in the queue being wrapped in an object, they are
   // stored-as-is, and the `"close"` marker in the queue is represented by an
   // empty queue together with the |close_queued_| flag being set.
   Member<QueueWithSizes> queue_;
+  Member<AbortSignal> signal_;
   bool close_queued_ = false;
   bool started_ = false;
   double strategy_high_water_mark_ = 0.0;

@@ -5,19 +5,19 @@
 #include "third_party/blink/renderer/core/html/html_rt_element.h"
 
 #include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/core/layout/layout_ruby_text.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
 
 namespace blink {
 
-using namespace html_names;
-
 HTMLRTElement::HTMLRTElement(Document& document)
-    : HTMLElement(kRtTag, document) {}
+    : HTMLElement(html_names::kRtTag, document) {}
 
 LayoutObject* HTMLRTElement::CreateLayoutObject(const ComputedStyle& style,
                                                 LegacyLayout legacy) {
   if (style.Display() == EDisplay::kBlock)
-    return new LayoutRubyText(this);
+    return LayoutObjectFactory::CreateRubyText(this, style, legacy);
   return LayoutObject::CreateObject(this, style, legacy);
 }
 

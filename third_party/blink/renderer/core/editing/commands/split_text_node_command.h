@@ -26,6 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_SPLIT_TEXT_NODE_COMMAND_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_SPLIT_TEXT_NODE_COMMAND_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/commands/edit_command.h"
 
 namespace blink {
@@ -36,7 +37,7 @@ class CORE_EXPORT SplitTextNodeCommand final : public SimpleEditCommand {
  public:
   SplitTextNodeCommand(Text*, int offset);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void DoApply(EditingState*) override;

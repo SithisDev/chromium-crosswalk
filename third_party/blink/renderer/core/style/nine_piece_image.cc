@@ -24,7 +24,7 @@
 
 #include "third_party/blink/renderer/core/style/nine_piece_image.h"
 
-#include "third_party/blink/renderer/core/style/data_equivalency.h"
+#include "base/memory/values_equivalent.h"
 
 namespace blink {
 
@@ -64,13 +64,10 @@ NinePieceImageData::NinePieceImageData()
                    Length::Percent(100),
                    Length::Percent(100)),
       border_slices(1.0, 1.0, 1.0, 1.0),
-      outset(Length::Fixed(0),
-             Length::Fixed(0),
-             Length::Fixed(0),
-             Length::Fixed(0)) {}
+      outset(0, 0, 0, 0) {}
 
 bool NinePieceImageData::operator==(const NinePieceImageData& other) const {
-  return DataEquivalent(image, other.image) &&
+  return base::ValuesEquivalent(image, other.image) &&
          image_slices == other.image_slices && fill == other.fill &&
          border_slices == other.border_slices && outset == other.outset &&
          horizontal_rule == other.horizontal_rule &&

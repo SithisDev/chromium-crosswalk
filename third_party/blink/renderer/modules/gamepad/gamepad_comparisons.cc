@@ -19,14 +19,12 @@ const double kButtonActivationThreshold = 0.9;
 }  // namespace
 
 // static
-bool GamepadComparisons::HasUserActivation(GamepadList* gamepads) {
-  if (!gamepads)
-    return false;
+bool GamepadComparisons::HasUserActivation(
+    const HeapVector<Member<Gamepad>> gamepads) {
   // A button press counts as a user activation if the button's value is greater
   // than the activation threshold. A threshold is used so that analog buttons
   // or triggers do not generate an activation from a light touch.
-  for (wtf_size_t pad_index = 0; pad_index < gamepads->length(); ++pad_index) {
-    Gamepad* pad = gamepads->item(pad_index);
+  for (Gamepad* pad : gamepads) {
     if (pad) {
       for (auto button : pad->buttons()) {
         if (button->value() > kButtonActivationThreshold)
@@ -49,10 +47,11 @@ void GamepadComparisons::HasGamepadConnectionChanged(bool old_connected,
     *gamepad_lost = id_changed || (old_connected && !new_connected);
 }
 
-GamepadStateCompareResult::GamepadStateCompareResult(GamepadList* old_gamepads,
-                                                     GamepadList* new_gamepads,
-                                                     bool compare_all_axes,
-                                                     bool compare_all_buttons) {
+GamepadStateCompareResult::GamepadStateCompareResult(
+    const HeapVector<Member<Gamepad>> old_gamepads,
+    const HeapVector<Member<Gamepad>> new_gamepads,
+    bool compare_all_axes,
+    bool compare_all_buttons) {
   any_change_ = CompareGamepads(old_gamepads, new_gamepads, compare_all_axes,
                                 compare_all_buttons);
 }
@@ -99,16 +98,15 @@ bool GamepadStateCompareResult::IsButtonUp(size_t pad_index,
   return button_up_[pad_index].test(button_index);
 }
 
-bool GamepadStateCompareResult::CompareGamepads(GamepadList* old_gamepads,
-                                                GamepadList* new_gamepads,
-                                                bool compare_all_axes,
-                                                bool compare_all_buttons) {
-  if (!new_gamepads)
-    return false;
+bool GamepadStateCompareResult::CompareGamepads(
+    const HeapVector<Member<Gamepad>> old_gamepads,
+    const HeapVector<Member<Gamepad>> new_gamepads,
+    bool compare_all_axes,
+    bool compare_all_buttons) {
   bool any_change = false;
-  for (uint32_t i = 0; i < device::Gamepads::kItemsLengthCap; ++i) {
-    Gamepad* old_gamepad = old_gamepads ? old_gamepads->item(i) : nullptr;
-    Gamepad* new_gamepad = new_gamepads->item(i);
+  for (uint32_t i = 0; i < new_gamepads.size(); ++i) {
+    Gamepad* old_gamepad = i < old_gamepads.size() ? old_gamepads[i] : nullptr;
+    Gamepad* new_gamepad = new_gamepads[i];
     // Check whether the gamepad is newly connected or disconnected.
     bool newly_connected = false;
     bool newly_disconnected = false;
@@ -127,14 +125,13 @@ bool GamepadStateCompareResult::CompareGamepads(GamepadList* old_gamepads,
         CompareAxes(old_gamepad, new_gamepad, i, compare_all_axes);
     bool any_button_updated =
         CompareButtons(old_gamepad, new_gamepad, i, compare_all_buttons);
-    bool pose_changed = ComparePose(old_gamepad, new_gamepad);
 
     if (newly_connected)
       gamepad_connected_.set(i);
     if (newly_disconnected)
       gamepad_disconnected_.set(i);
     if (newly_connected || newly_disconnected || any_axis_updated ||
-        any_button_updated || pose_changed) {
+        any_button_updated) {
       any_change = true;
     }
   }
@@ -226,70 +223,9 @@ bool GamepadStateCompareResult::CompareButtons(Gamepad* old_gamepad,
   return any_button_changed;
 }
 
-bool GamepadStateCompareResult::ComparePose(Gamepad* old_gamepad,
-                                            Gamepad* new_gamepad) {
-  if (!new_gamepad)
-    return false;
-  const auto* new_pose = new_gamepad->pose();
-  const auto* old_pose = old_gamepad ? old_gamepad->pose() : nullptr;
-  if (old_pose && new_pose) {
-    // Both poses are non-null. Compare pose members until a difference is
-    // found.
-    if (CompareFloat32Array(old_pose->orientation(), new_pose->orientation())) {
-      return true;
-    }
-    if (CompareFloat32Array(old_pose->position(), new_pose->position())) {
-      return true;
-    }
-    if (CompareFloat32Array(old_pose->angularVelocity(),
-                            new_pose->angularVelocity())) {
-      return true;
-    }
-    if (CompareFloat32Array(old_pose->linearVelocity(),
-                            new_pose->linearVelocity())) {
-      return true;
-    }
-    if (CompareFloat32Array(old_pose->angularAcceleration(),
-                            new_pose->angularAcceleration())) {
-      return true;
-    }
-    if (CompareFloat32Array(old_pose->linearAcceleration(),
-                            new_pose->linearAcceleration())) {
-      return true;
-    }
-  } else if (old_pose != new_pose) {
-    // Exactly one pose is non-null.
-    return true;
-  }
-  // Both poses are null, or the poses are identical.
-  return false;
-}
-
-bool GamepadStateCompareResult::CompareFloat32Array(
-    DOMFloat32Array* old_array,
-    DOMFloat32Array* new_array) {
-  if (old_array && new_array) {
-    // Both arrays are non-null. Compare elements until a difference is found.
-    uint32_t length = old_array->length();
-    if (length != new_array->length())
-      return true;
-    const float* old_data = old_array->Data();
-    const float* new_data = new_array->Data();
-    for (uint32_t i = 0; i < length; ++i) {
-      if (old_data[i] != new_data[i])
-        return true;
-    }
-  } else if (old_array != new_array) {
-    // Exactly one array is non-null.
-    return true;
-  }
-  // Both arrays are null, or the arrays are identical.
-  return false;
-}
-
 GamepadStateCompareResult GamepadComparisons::Compare(
-    GamepadList* old_gamepads,
-    GamepadList* new_gamepads,
+    const HeapVector<Member<Gamepad>> old_gamepads,
+    const HeapVector<Member<Gamepad>> new_gamepads,
     bool compare_all_axes,
     bool compare_all_buttons) {
   return GamepadStateCompareResult(old_gamepads, new_gamepads, compare_all_axes,

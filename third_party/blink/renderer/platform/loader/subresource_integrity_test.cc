@@ -4,8 +4,9 @@
 
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
 
+#include <algorithm>
+
 #include "base/memory/scoped_refptr.h"
-#include "base/stl_util.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/crypto.h"
@@ -21,12 +22,9 @@
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
-#include "third_party/blink/renderer/platform/wtf/dtoa/utils.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
-
-#include <algorithm>
 
 namespace blink {
 
@@ -221,18 +219,17 @@ class SubresourceIntegrityTest : public testing::Test {
       const KURL& url,
       network::mojom::RequestMode request_mode,
       network::mojom::FetchResponseType response_type) {
-    Resource* resource = RawResource::CreateForTest(
-        url, SecurityOrigin::CreateUniqueOpaque(), ResourceType::kRaw);
-
     ResourceRequest request;
     request.SetUrl(url);
     request.SetMode(request_mode);
+    request.SetRequestorOrigin(SecurityOrigin::CreateUniqueOpaque());
+    Resource* resource =
+        RawResource::CreateForTest(request, ResourceType::kRaw);
 
     ResourceResponse response(url);
     response.SetHttpStatusCode(200);
     response.SetType(response_type);
 
-    resource->SetResourceRequest(request);
     resource->SetResponse(response);
     return resource;
   }
@@ -259,9 +256,6 @@ TEST_F(SubresourceIntegrityTest, Prioritization) {
   EXPECT_EQ(
       IntegrityAlgorithm::kSha512,
       std::max({IntegrityAlgorithm::kSha512, IntegrityAlgorithm::kSha512}));
-  EXPECT_EQ(
-      IntegrityAlgorithm::kEd25519,
-      std::max({IntegrityAlgorithm::kEd25519, IntegrityAlgorithm::kEd25519}));
 
   // Check a mix of algorithms.
   EXPECT_EQ(IntegrityAlgorithm::kSha384,
@@ -270,11 +264,6 @@ TEST_F(SubresourceIntegrityTest, Prioritization) {
   EXPECT_EQ(IntegrityAlgorithm::kSha512,
             std::max({IntegrityAlgorithm::kSha384, IntegrityAlgorithm::kSha512,
                       IntegrityAlgorithm::kSha256}));
-  EXPECT_EQ(
-      IntegrityAlgorithm::kEd25519,
-      std::max({IntegrityAlgorithm::kSha384, IntegrityAlgorithm::kSha512,
-                IntegrityAlgorithm::kEd25519, IntegrityAlgorithm::kSha512,
-                IntegrityAlgorithm::kSha256, IntegrityAlgorithm::kSha512}));
 }
 
 TEST_F(SubresourceIntegrityTest, ParseAlgorithm) {
@@ -285,12 +274,7 @@ TEST_F(SubresourceIntegrityTest, ParseAlgorithm) {
   ExpectAlgorithm("sha-384-", IntegrityAlgorithm::kSha384);
   ExpectAlgorithm("sha-512-", IntegrityAlgorithm::kSha512);
 
-  {
-    ScopedSignatureBasedIntegrityForTest signature_based_integrity(true);
-    ExpectAlgorithm("ed25519-", IntegrityAlgorithm::kEd25519);
-  }
   ScopedSignatureBasedIntegrityForTest signature_based_integrity(false);
-  ExpectAlgorithmFailure("ed25519-", SubresourceIntegrity::kAlgorithmUnknown);
 
   ExpectAlgorithmFailure("sha1-", SubresourceIntegrity::kAlgorithmUnknown);
   ExpectAlgorithmFailure("sha-1-", SubresourceIntegrity::kAlgorithmUnknown);
@@ -298,8 +282,6 @@ TEST_F(SubresourceIntegrityTest, ParseAlgorithm) {
                          SubresourceIntegrity::kAlgorithmUnknown);
   ExpectAlgorithmFailure("foobar-", SubresourceIntegrity::kAlgorithmUnknown);
   ExpectAlgorithmFailure("-", SubresourceIntegrity::kAlgorithmUnknown);
-  ExpectAlgorithmFailure("ed-25519-", SubresourceIntegrity::kAlgorithmUnknown);
-  ExpectAlgorithmFailure("ed25518-", SubresourceIntegrity::kAlgorithmUnknown);
 
   ExpectAlgorithmFailure("sha256", SubresourceIntegrity::kAlgorithmUnparsable);
   ExpectAlgorithmFailure("", SubresourceIntegrity::kAlgorithmUnparsable);
@@ -419,7 +401,7 @@ TEST_F(SubresourceIntegrityTest, Parsing) {
       "sha384-XVVXBGoYw6AJOh9J+Z8pBDMVVPfkBpngexkA7JqZu8d5GENND6TEIup/tA1v5GPr "
       "sha512-tbUPioKbVBplr0b1ucnWB57SJWt4x9dOE0Vy2mzCXvH3FepqDZ+"
       "07yMK81ytlg0MPaIrPAjcHqba5csorDWtKg==",
-      valid_sha384_and_sha512, base::size(valid_sha384_and_sha512));
+      valid_sha384_and_sha512, std::size(valid_sha384_and_sha512));
 
   const IntegrityMetadata valid_sha256_and_sha256[] = {
       IntegrityMetadata("BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE=",
@@ -428,7 +410,7 @@ TEST_F(SubresourceIntegrityTest, Parsing) {
   };
   ExpectParseMultipleHashes(
       "sha256-BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE= sha256-deadbeef",
-      valid_sha256_and_sha256, base::size(valid_sha256_and_sha256));
+      valid_sha256_and_sha256, std::size(valid_sha256_and_sha256));
 
   const IntegrityMetadata valid_sha256_and_invalid_sha256[] = {
       IntegrityMetadata("BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE=",
@@ -437,7 +419,7 @@ TEST_F(SubresourceIntegrityTest, Parsing) {
   ExpectParseMultipleHashes(
       "sha256-BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE= sha256-!!!!",
       valid_sha256_and_invalid_sha256,
-      base::size(valid_sha256_and_invalid_sha256));
+      std::size(valid_sha256_and_invalid_sha256));
 
   const IntegrityMetadata invalid_sha256_and_valid_sha256[] = {
       IntegrityMetadata("BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE=",
@@ -446,7 +428,7 @@ TEST_F(SubresourceIntegrityTest, Parsing) {
   ExpectParseMultipleHashes(
       "sha256-!!! sha256-BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE=",
       invalid_sha256_and_valid_sha256,
-      base::size(invalid_sha256_and_valid_sha256));
+      std::size(invalid_sha256_and_valid_sha256));
 
   ExpectParse("sha256-BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE=?foo=bar",
               "BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE=",
@@ -476,25 +458,6 @@ TEST_F(SubresourceIntegrityTest, Parsing) {
   ExpectParse("sha256-BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE=?foo:bar",
               "BpfBw7ivV8q2jLiT13fxDYAe2tJllusRSZ273h2nFSE=",
               IntegrityAlgorithm::kSha256);
-
-  {
-    ScopedSignatureBasedIntegrityForTest signature_based_integrity(false);
-    ExpectEmptyParseResult("ed25519-xxxx");
-    ExpectEmptyParseResult(
-        "ed25519-qGFmwTxlocg707D1cX4w60iTwtfwbMLf8ITDyfko7s0=");
-  }
-
-  ScopedSignatureBasedIntegrityForTest signature_based_integrity(true);
-  ExpectParse("ed25519-xxxx", "xxxx", IntegrityAlgorithm::kEd25519);
-  ExpectParse("ed25519-qGFmwTxlocg707D1cX4w60iTwtfwbMLf8ITDyfko7s0=",
-              "qGFmwTxlocg707D1cX4w60iTwtfwbMLf8ITDyfko7s0=",
-              IntegrityAlgorithm::kEd25519);
-  ExpectParse("ed25519-qGFmwTxlocg707D1cX4w60iTwtfwbMLf8ITDyfko7s0=?foo=bar",
-              "qGFmwTxlocg707D1cX4w60iTwtfwbMLf8ITDyfko7s0=",
-              IntegrityAlgorithm::kEd25519);
-  ExpectEmptyParseResult("ed-25519-xxx");
-  ExpectEmptyParseResult(
-      "ed-25519-qGFmwTxlocg707D1cX4w60iTwtfwbMLf8ITDyfko7s0=");
 }
 
 TEST_F(SubresourceIntegrityTest, ParsingBase64) {
@@ -586,9 +549,6 @@ TEST_F(SubresourceIntegrityTest, FindBestAlgorithm) {
   EXPECT_EQ(IntegrityAlgorithm::kSha512,
             SubresourceIntegrity::FindBestAlgorithm(
                 IntegrityMetadataSet({{"", IntegrityAlgorithm::kSha512}})));
-  EXPECT_EQ(IntegrityAlgorithm::kEd25519,
-            SubresourceIntegrity::FindBestAlgorithm(
-                IntegrityMetadataSet({{"", IntegrityAlgorithm::kEd25519}})));
 
   // Test combinations of multiple algorithms.
   EXPECT_EQ(IntegrityAlgorithm::kSha384,
@@ -600,26 +560,6 @@ TEST_F(SubresourceIntegrityTest, FindBestAlgorithm) {
                 IntegrityMetadataSet({{"", IntegrityAlgorithm::kSha256},
                                       {"", IntegrityAlgorithm::kSha512},
                                       {"", IntegrityAlgorithm::kSha384}})));
-  EXPECT_EQ(IntegrityAlgorithm::kEd25519,
-            SubresourceIntegrity::FindBestAlgorithm(
-                IntegrityMetadataSet({{"", IntegrityAlgorithm::kSha256},
-                                      {"", IntegrityAlgorithm::kSha512},
-                                      {"", IntegrityAlgorithm::kEd25519}})));
-}
-
-TEST_F(SubresourceIntegrityTest, GetCheckFunctionForAlgorithm) {
-  EXPECT_TRUE(SubresourceIntegrity::CheckSubresourceIntegrityDigest ==
-              SubresourceIntegrity::GetCheckFunctionForAlgorithm(
-                  IntegrityAlgorithm::kSha256));
-  EXPECT_TRUE(SubresourceIntegrity::CheckSubresourceIntegrityDigest ==
-              SubresourceIntegrity::GetCheckFunctionForAlgorithm(
-                  IntegrityAlgorithm::kSha384));
-  EXPECT_TRUE(SubresourceIntegrity::CheckSubresourceIntegrityDigest ==
-              SubresourceIntegrity::GetCheckFunctionForAlgorithm(
-                  IntegrityAlgorithm::kSha512));
-  EXPECT_TRUE(SubresourceIntegrity::CheckSubresourceIntegritySignature ==
-              SubresourceIntegrity::GetCheckFunctionForAlgorithm(
-                  IntegrityAlgorithm::kEd25519));
 }
 
 }  // namespace blink

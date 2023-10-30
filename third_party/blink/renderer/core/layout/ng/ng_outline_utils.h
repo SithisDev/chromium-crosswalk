@@ -12,19 +12,12 @@ namespace blink {
 
 class ComputedStyle;
 class Node;
-class NGPhysicalFragment;
 
 class CORE_EXPORT NGOutlineUtils {
   STATIC_ONLY(NGOutlineUtils);
 
  public:
-
   static bool HasPaintedOutline(const ComputedStyle& style, const Node* node);
-
-  // First fragment paints the entire outline for LayoutInline.
-  // Returns true if this is the painting fragment.
-  static bool IsInlineOutlineNonpaintingFragment(
-      const NGPhysicalFragment& physical_fragment);
 };
 
 }  // namespace blink

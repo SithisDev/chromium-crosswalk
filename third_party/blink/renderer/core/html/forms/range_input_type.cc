@@ -34,32 +34,34 @@
 #include <algorithm>
 #include <limits>
 
+#include "third_party/blink/public/common/input/web_pointer_properties.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
+#include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/html_data_list_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_data_list_options_collection.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_option_element.h"
 #include "third_party/blink/renderer/core/html/forms/slider_thumb_element.h"
+#include "third_party/blink/renderer/core/html/forms/slider_track_element.h"
 #include "third_party/blink/renderer/core/html/forms/step_range.h"
-#include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
-#include "third_party/blink/renderer/core/layout/layout_slider.h"
+#include "third_party/blink/renderer/core/layout/layout_block.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
-
-using namespace html_names;
 
 static const int kRangeDefaultMinimum = 0;
 static const int kRangeDefaultMaximum = 100;
@@ -73,11 +75,11 @@ static Decimal EnsureMaximum(const Decimal& proposed_value,
 }
 
 RangeInputType::RangeInputType(HTMLInputElement& element)
-    : InputType(element),
+    : InputType(Type::kRange, element),
       InputTypeView(element),
       tick_mark_values_dirty_(true) {}
 
-void RangeInputType::Trace(Visitor* visitor) {
+void RangeInputType::Trace(Visitor* visitor) const {
   InputTypeView::Trace(visitor);
   InputType::Trace(visitor);
 }
@@ -93,7 +95,7 @@ InputType::ValueMode RangeInputType::GetValueMode() const {
 void RangeInputType::CountUsage() {
   CountUsageIfVisible(WebFeature::kInputTypeRange);
   if (const ComputedStyle* style = GetElement().GetComputedStyle()) {
-    if (style->Appearance() == kSliderVerticalPart) {
+    if (style->EffectiveAppearance() == kSliderVerticalPart) {
       UseCounter::Count(GetElement().GetDocument(),
                         WebFeature::kInputTypeRangeVerticalAppearance);
     }
@@ -105,7 +107,7 @@ const AtomicString& RangeInputType::FormControlType() const {
 }
 
 double RangeInputType::ValueAsDouble() const {
-  return ParseToDoubleForNumberType(GetElement().value());
+  return ParseToDoubleForNumberType(GetElement().Value());
 }
 
 void RangeInputType::SetValueAsDouble(double new_value,
@@ -130,26 +132,23 @@ StepRange RangeInputType::CreateStepRange(
       (kRangeDefaultStep, kRangeDefaultStepBase, kRangeStepScaleFactor));
 
   const Decimal step_base = FindStepBase(kRangeDefaultStepBase);
-  const Decimal minimum = ParseToNumber(GetElement().FastGetAttribute(kMinAttr),
-                                        kRangeDefaultMinimum);
-  const Decimal maximum =
-      EnsureMaximum(ParseToNumber(GetElement().FastGetAttribute(kMaxAttr),
-                                  kRangeDefaultMaximum),
-                    minimum);
+  const Decimal minimum =
+      ParseToNumber(GetElement().FastGetAttribute(html_names::kMinAttr),
+                    kRangeDefaultMinimum);
+  const Decimal maximum = EnsureMaximum(
+      ParseToNumber(GetElement().FastGetAttribute(html_names::kMaxAttr),
+                    kRangeDefaultMaximum),
+      minimum);
 
-  const Decimal step =
-      StepRange::ParseStep(any_step_handling, step_description,
-                           GetElement().FastGetAttribute(kStepAttr));
+  const Decimal step = StepRange::ParseStep(
+      any_step_handling, step_description,
+      GetElement().FastGetAttribute(html_names::kStepAttr));
   // Range type always has range limitations because it has default
   // minimum/maximum.
   // https://html.spec.whatwg.org/C/#range-state-(type=range):concept-input-min-default
   const bool kHasRangeLimitations = true;
-  return StepRange(step_base, minimum, maximum, kHasRangeLimitations, step,
-                   step_description);
-}
-
-bool RangeInputType::IsSteppable() const {
-  return true;
+  return StepRange(step_base, minimum, maximum, kHasRangeLimitations,
+                   /*has_reversed_range=*/false, step, step_description);
 }
 
 void RangeInputType::HandleMouseDownEvent(MouseEvent& event) {
@@ -177,26 +176,24 @@ void RangeInputType::HandleKeydownEvent(KeyboardEvent& event) {
 
   const String& key = event.key();
 
-  const Decimal current = ParseToNumberOrNaN(GetElement().value());
+  const Decimal current = ParseToNumberOrNaN(GetElement().Value());
   DCHECK(current.IsFinite());
 
   StepRange step_range(CreateStepRange(kRejectAny));
 
   // FIXME: We can't use stepUp() for the step value "any". So, we increase
   // or decrease the value by 1/100 of the value range. Is it reasonable?
-  const Decimal step = DeprecatedEqualIgnoringCase(
-                           GetElement().FastGetAttribute(kStepAttr), "any")
-                           ? (step_range.Maximum() - step_range.Minimum()) / 100
-                           : step_range.Step();
+  const Decimal step =
+      EqualIgnoringASCIICase(
+          GetElement().FastGetAttribute(html_names::kStepAttr), "any")
+          ? (step_range.Maximum() - step_range.Minimum()) / 100
+          : step_range.Step();
   const Decimal big_step =
       std::max((step_range.Maximum() - step_range.Minimum()) / 10, step);
 
   TextDirection dir = TextDirection::kLtr;
-  bool is_vertical = false;
   if (GetElement().GetLayoutObject()) {
     dir = ComputedTextDirection();
-    ControlPart part = GetElement().GetLayoutObject()->Style()->Appearance();
-    is_vertical = part == kSliderVerticalPart;
   }
 
   Decimal new_value;
@@ -205,19 +202,17 @@ void RangeInputType::HandleKeydownEvent(KeyboardEvent& event) {
   } else if (key == "ArrowDown") {
     new_value = current - step;
   } else if (key == "ArrowLeft") {
-    new_value = (is_vertical || dir == TextDirection::kRtl) ? current + step
-                                                            : current - step;
+    new_value = dir == TextDirection::kRtl ? current + step : current - step;
   } else if (key == "ArrowRight") {
-    new_value = (is_vertical || dir == TextDirection::kRtl) ? current - step
-                                                            : current + step;
+    new_value = dir == TextDirection::kRtl ? current - step : current + step;
   } else if (key == "PageUp") {
     new_value = current + big_step;
   } else if (key == "PageDown") {
     new_value = current - big_step;
   } else if (key == "Home") {
-    new_value = is_vertical ? step_range.Maximum() : step_range.Minimum();
+    new_value = step_range.Minimum();
   } else if (key == "End") {
-    new_value = is_vertical ? step_range.Minimum() : step_range.Maximum();
+    new_value = step_range.Maximum();
   } else {
     return;  // Did not match any key binding.
   }
@@ -242,18 +237,21 @@ void RangeInputType::CreateShadowSubtree() {
   DCHECK(IsShadowHost(GetElement()));
 
   Document& document = GetElement().GetDocument();
-  auto* track = MakeGarbageCollected<HTMLDivElement>(document);
-  track->SetShadowPseudoId(AtomicString("-webkit-slider-runnable-track"));
-  track->setAttribute(kIdAttr, shadow_element_names::SliderTrack());
+  auto* track = MakeGarbageCollected<blink::SliderTrackElement>(document);
+  track->SetShadowPseudoId(shadow_element_names::kPseudoSliderTrack);
+  track->setAttribute(html_names::kIdAttr,
+                      shadow_element_names::kIdSliderTrack);
   track->AppendChild(MakeGarbageCollected<SliderThumbElement>(document));
   auto* container = MakeGarbageCollected<SliderContainerElement>(document);
   container->AppendChild(track);
   GetElement().UserAgentShadowRoot()->AppendChild(container);
 }
 
-LayoutObject* RangeInputType::CreateLayoutObject(const ComputedStyle&,
-                                                 LegacyLayout) const {
-  return new LayoutSlider(&GetElement());
+LayoutObject* RangeInputType::CreateLayoutObject(const ComputedStyle& style,
+                                                 LegacyLayout legacy) const {
+  // TODO(crbug.com/1131352): input[type=range] should not use
+  // LayoutFlexibleBox.
+  return LayoutObjectFactory::CreateFlexibleBox(GetElement(), style, legacy);
 }
 
 Decimal RangeInputType::ParseToNumber(const String& src,
@@ -269,32 +267,35 @@ String RangeInputType::Serialize(const Decimal& value) const {
 
 // FIXME: Could share this with KeyboardClickableInputTypeView and
 // BaseCheckableInputType if we had a common base class.
-void RangeInputType::AccessKeyAction(bool send_mouse_events) {
-  InputTypeView::AccessKeyAction(send_mouse_events);
-
-  GetElement().DispatchSimulatedClick(
-      nullptr, send_mouse_events ? kSendMouseUpDownEvents : kSendNoEvents);
+void RangeInputType::AccessKeyAction(
+    SimulatedClickCreationScope creation_scope) {
+  InputTypeView::AccessKeyAction(creation_scope);
+  GetElement().DispatchSimulatedClick(nullptr, creation_scope);
 }
 
 void RangeInputType::SanitizeValueInResponseToMinOrMaxAttributeChange() {
   if (GetElement().HasDirtyValue())
-    GetElement().setValue(GetElement().value());
+    GetElement().SetValue(GetElement().Value());
   else
-    GetElement().SetNonDirtyValue(GetElement().value());
+    GetElement().SetNonDirtyValue(GetElement().Value());
   GetElement().UpdateView();
 }
 
 void RangeInputType::StepAttributeChanged() {
   if (GetElement().HasDirtyValue())
-    GetElement().setValue(GetElement().value());
+    GetElement().SetValue(GetElement().Value());
   else
-    GetElement().SetNonDirtyValue(GetElement().value());
+    GetElement().SetNonDirtyValue(GetElement().Value());
   GetElement().UpdateView();
 }
 
 void RangeInputType::DidSetValue(const String&, bool value_changed) {
   if (value_changed)
     GetElement().UpdateView();
+}
+
+ControlPart RangeInputType::AutoAppearance() const {
+  return kSliderHorizontalPart;
 }
 
 void RangeInputType::UpdateView() {
@@ -312,10 +313,7 @@ void RangeInputType::WarnIfValueIsInvalid(const String& value) const {
   if (value.IsEmpty() || !GetElement().SanitizeValue(value).IsEmpty())
     return;
   AddWarningToConsole(
-      "The specified value %s is not a valid number. The value must match to "
-      "the following regular expression: "
-      "-?(\\d+|\\d+\\.\\d+|\\.\\d+)([eE][-+]?\\d+)?",
-      value);
+      "The specified value %s cannot be parsed, or is out of range.", value);
 }
 
 void RangeInputType::DisabledAttributeChanged() {
@@ -330,12 +328,12 @@ bool RangeInputType::ShouldRespectListAttribute() {
 inline SliderThumbElement* RangeInputType::GetSliderThumbElement() const {
   return To<SliderThumbElement>(
       GetElement().UserAgentShadowRoot()->getElementById(
-          shadow_element_names::SliderThumb()));
+          shadow_element_names::kIdSliderThumb));
 }
 
 inline Element* RangeInputType::SliderTrackElement() const {
   return GetElement().UserAgentShadowRoot()->getElementById(
-      shadow_element_names::SliderTrack());
+      shadow_element_names::kIdSliderTrack);
 }
 
 void RangeInputType::ListAttributeTargetChanged() {
@@ -411,6 +409,14 @@ Decimal RangeInputType::FindClosestTickMarkValue(const Decimal& value) {
   if (closest_right - value < value - closest_left)
     return closest_right;
   return closest_left;
+}
+
+void RangeInputType::ValueAttributeChanged() {
+  UpdateView();
+}
+
+bool RangeInputType::IsDraggedSlider() const {
+  return GetSliderThumbElement()->IsActive();
 }
 
 }  // namespace blink

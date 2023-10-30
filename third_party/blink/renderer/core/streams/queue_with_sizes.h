@@ -6,26 +6,24 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STREAMS_QUEUE_WITH_SIZES_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_deque.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
 class ExceptionState;
-class Visitor;
 
 // Implementation of the "Queue-with-sizes" operations from the standard. Unlike
 // the standard, these operations do not operate polymorphically on the
 // container, but require it to have a QueueWithSizes member.
 // https://streams.spec.whatwg.org/#queue-with-sizes
 class CORE_EXPORT QueueWithSizes final
-    : public GarbageCollectedFinalized<QueueWithSizes> {
+    : public GarbageCollected<QueueWithSizes> {
  public:
   QueueWithSizes();
-  ~QueueWithSizes();
 
   // https://streams.spec.whatwg.org/#dequeue-value
   v8::Local<v8::Value> DequeueValue(v8::Isolate*);
@@ -49,7 +47,7 @@ class CORE_EXPORT QueueWithSizes final
   // https://streams.spec.whatwg.org/#reset-queue
   void ResetQueue();
 
-  void Trace(Visitor* visitor);
+  void Trace(Visitor* visitor) const;
 
  private:
   class ValueSizePair;

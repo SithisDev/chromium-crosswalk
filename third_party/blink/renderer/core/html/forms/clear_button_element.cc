@@ -26,20 +26,17 @@
 #include "third_party/blink/renderer/core/html/forms/clear_button_element.h"
 
 #include "third_party/blink/renderer/core/events/mouse_event.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 
 namespace blink {
 
-using namespace html_names;
-
 ClearButtonElement::ClearButtonElement(Document& document,
                                        ClearButtonOwner& clear_button_owner)
     : HTMLDivElement(document), clear_button_owner_(&clear_button_owner) {
   SetShadowPseudoId(AtomicString("-webkit-clear-button"));
-  setAttribute(kIdAttr, shadow_element_names::ClearButton());
+  setAttribute(html_names::kIdAttr, shadow_element_names::kIdClearButton);
 }
 
 void ClearButtonElement::DetachLayoutTree(bool performing_reattach) {
@@ -75,7 +72,7 @@ bool ClearButtonElement::IsClearButtonElement() const {
   return true;
 }
 
-void ClearButtonElement::Trace(Visitor* visitor) {
+void ClearButtonElement::Trace(Visitor* visitor) const {
   visitor->Trace(clear_button_owner_);
   HTMLDivElement::Trace(visitor);
 }

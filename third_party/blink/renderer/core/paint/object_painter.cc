@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
+#include "third_party/blink/renderer/core/paint/outline_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/style/border_edge.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
@@ -35,19 +36,16 @@ void ObjectPainter::PaintOutline(const PaintInfo& paint_info,
     return;
   }
 
+  LayoutObject::OutlineInfo info;
   auto outline_rects = layout_object_.OutlineRects(
-      paint_offset,
-      layout_object_.OutlineRectsShouldIncludeBlockVisualOverflow());
+      &info, paint_offset,
+      style_to_use.OutlineRectsShouldIncludeBlockVisualOverflow());
   if (outline_rects.IsEmpty())
     return;
 
-  if (DrawingRecorder::UseCachedDrawingIfPossible(
-          paint_info.context, layout_object_, paint_info.phase))
-    return;
-
-  DrawingRecorder recorder(paint_info.context, layout_object_,
-                           paint_info.phase);
-  PaintOutlineRects(paint_info, outline_rects, style_to_use);
+  OutlinePainter::PaintOutlineRects(paint_info, layout_object_, outline_rects,
+                                    info, style_to_use,
+                                    layout_object_.GetDocument());
 }
 
 void ObjectPainter::PaintInlineChildrenOutlines(const PaintInfo& paint_info) {
@@ -57,14 +55,14 @@ void ObjectPainter::PaintInlineChildrenOutlines(const PaintInfo& paint_info) {
   for (LayoutObject* child = layout_object_.SlowFirstChild(); child;
        child = child->NextSibling()) {
     if (child->IsLayoutInline() &&
-        !ToLayoutInline(child)->HasSelfPaintingLayer())
+        !To<LayoutInline>(child)->HasSelfPaintingLayer())
       child->Paint(paint_info_for_descendants);
   }
 }
 
-void ObjectPainter::AddPDFURLRectIfNeeded(const PaintInfo& paint_info,
-                                          const PhysicalOffset& paint_offset) {
-  DCHECK(paint_info.IsPrinting());
+void ObjectPainter::AddURLRectIfNeeded(const PaintInfo& paint_info,
+                                       const PhysicalOffset& paint_offset) {
+  DCHECK(paint_info.ShouldAddUrlMetadata());
   if (layout_object_.IsElementContinuation() || !layout_object_.GetNode() ||
       !layout_object_.GetNode()->IsLink() ||
       layout_object_.StyleRef().Visibility() != EVisibility::kVisible)
@@ -75,8 +73,8 @@ void ObjectPainter::AddPDFURLRectIfNeeded(const PaintInfo& paint_info,
     return;
 
   auto outline_rects = layout_object_.OutlineRects(
-      paint_offset, NGOutlineType::kIncludeBlockVisualOverflow);
-  IntRect rect = PixelSnappedIntRect(UnionRect(outline_rects));
+      nullptr, paint_offset, NGOutlineType::kIncludeBlockVisualOverflow);
+  gfx::Rect rect = ToPixelSnappedRect(UnionRect(outline_rects));
   if (rect.IsEmpty())
     return;
 
@@ -86,7 +84,7 @@ void ObjectPainter::AddPDFURLRectIfNeeded(const PaintInfo& paint_info,
     return;
 
   DrawingRecorder recorder(paint_info.context, layout_object_,
-                           DisplayItem::kPrintedContentPDFURLRect);
+                           DisplayItem::kPrintedContentPDFURLRect, rect);
   if (url.HasFragmentIdentifier() &&
       EqualIgnoringFragmentIdentifier(url,
                                       layout_object_.GetDocument().BaseURL())) {
@@ -99,10 +97,10 @@ void ObjectPainter::AddPDFURLRectIfNeeded(const PaintInfo& paint_info,
 }
 
 void ObjectPainter::PaintAllPhasesAtomically(const PaintInfo& paint_info) {
-  // Pass kSelection and kTextClip to the descendants so that
+  // Pass kSelectionDragImage and kTextClip to the descendants so that
   // they will paint for selection and text clip respectively. We don't need
   // complete painting for these phases.
-  if (paint_info.phase == PaintPhase::kSelection ||
+  if (paint_info.phase == PaintPhase::kSelectionDragImage ||
       paint_info.phase == PaintPhase::kTextClip) {
     layout_object_.Paint(paint_info);
     return;
@@ -113,6 +111,8 @@ void ObjectPainter::PaintAllPhasesAtomically(const PaintInfo& paint_info) {
 
   PaintInfo info(paint_info);
   info.phase = PaintPhase::kBlockBackground;
+  layout_object_.Paint(info);
+  info.phase = PaintPhase::kForcedColorsModeBackplate;
   layout_object_.Paint(info);
   info.phase = PaintPhase::kFloat;
   layout_object_.Paint(info);

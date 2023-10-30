@@ -27,7 +27,8 @@
 
 #include "third_party/blink/renderer/modules/peerconnection/rtc_legacy_stats_report.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_stats_response_base.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -46,9 +47,9 @@ class RTCStatsResponse final : public RTCStatsResponseBase {
   }
   RTCLegacyStatsReport* namedItem(const AtomicString& name);
 
-  void AddStats(const WebRTCLegacyStats&) override;
+  void AddStats(const RTCLegacyStats&) override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   HeapVector<Member<RTCLegacyStatsReport>> result_;

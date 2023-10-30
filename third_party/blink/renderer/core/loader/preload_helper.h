@@ -5,17 +5,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_PRELOAD_HELPER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_PRELOAD_HELPER_H_
 
-#include "base/optional.h"
-#include "third_party/blink/renderer/core/page/viewport_description.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 
 namespace blink {
 
 class AlternateSignedExchangeResourceInfo;
 class Document;
+class PendingLinkPreload;
 class LocalFrame;
-class SingleModuleClient;
 struct LinkLoadParameters;
+struct ViewportDescription;
 
 // PreloadHelper is a helper class for preload, module preload, prefetch,
 // DNS prefetch, and preconnect triggered by <link> elements and "Link" HTTP
@@ -41,11 +41,10 @@ class PreloadHelper final {
       Document*,  // can be nullptr
       CanLoadResources,
       MediaPreloadPolicy,
-      const base::Optional<ViewportDescription>&,
-      std::unique_ptr<AlternateSignedExchangeResourceInfo>);
-  static Resource* StartPreload(ResourceType,
-                                FetchParameters&,
-                                ResourceFetcher*);
+      const ViewportDescription*,  // can be nullptr
+      std::unique_ptr<AlternateSignedExchangeResourceInfo>,
+      const base::UnguessableToken* /* can be nullptr */);
+  static Resource* StartPreload(ResourceType, FetchParameters&, Document&);
 
   // Currently only used for UseCounter.
   enum LinkCaller {
@@ -61,19 +60,22 @@ class PreloadHelper final {
                                  Document*,
                                  LocalFrame*,
                                  LinkCaller);
-  static Resource* PrefetchIfNeeded(const LinkLoadParameters&, Document&);
-  static Resource* PreloadIfNeeded(const LinkLoadParameters&,
-                                   Document&,
-                                   const KURL& base_url,
-                                   LinkCaller,
-                                   const base::Optional<ViewportDescription>&,
-                                   ParserDisposition);
+  static void PrefetchIfNeeded(const LinkLoadParameters&,
+                               Document&,
+                               PendingLinkPreload*);
+  static void PreloadIfNeeded(const LinkLoadParameters&,
+                              Document&,
+                              const KURL& base_url,
+                              LinkCaller,
+                              const ViewportDescription*,
+                              ParserDisposition,
+                              PendingLinkPreload*);
   static void ModulePreloadIfNeeded(const LinkLoadParameters&,
                                     Document&,
-                                    const base::Optional<ViewportDescription>&,
-                                    SingleModuleClient*);
+                                    const ViewportDescription*,
+                                    PendingLinkPreload*);
 
-  static base::Optional<ResourceType> GetResourceTypeFromAsAttribute(
+  static absl::optional<ResourceType> GetResourceTypeFromAsAttribute(
       const String& as);
 };
 

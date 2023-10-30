@@ -5,10 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_TESTING_FUZZED_DATA_PROVIDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TESTING_FUZZED_DATA_PROVIDER_H_
 
-#include "base/macros.h"
+#include <fuzzer/FuzzedDataProvider.h>
+
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/libFuzzer/src/utils/FuzzedDataProvider.h"
 
 namespace blink {
 
@@ -18,6 +18,8 @@ class FuzzedDataProvider {
 
  public:
   FuzzedDataProvider(const uint8_t* bytes, size_t num_bytes);
+  FuzzedDataProvider(const FuzzedDataProvider&) = delete;
+  FuzzedDataProvider& operator=(const FuzzedDataProvider&) = delete;
 
   // Returns a string with length between 0 and max_length.
   String ConsumeRandomLengthString(size_t max_length);
@@ -27,6 +29,14 @@ class FuzzedDataProvider {
 
   // Returns a bool, or false when no data remains.
   bool ConsumeBool() { return provider_.ConsumeBool(); }
+
+  // Returns an enum value. The enum must start at 0 and be contiguous. It must
+  // also contain |kMaxValue| aliased to its largest (inclusive) value. Such as:
+  // enum class Foo { SomeValue, OtherValue, kMaxValue = OtherValue };
+  template <typename T>
+  T ConsumeEnum() {
+    return provider_.ConsumeEnum<T>();
+  }
 
   // Returns a number in the range [min, max] by consuming bytes from the input
   // data. The value might not be uniformly distributed in the given range. If
@@ -57,8 +67,6 @@ class FuzzedDataProvider {
 
  private:
   ::FuzzedDataProvider provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(FuzzedDataProvider);
 };
 
 }  // namespace blink

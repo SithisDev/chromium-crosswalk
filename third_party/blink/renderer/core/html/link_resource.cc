@@ -43,11 +43,11 @@ LinkResource::LinkResource(HTMLLinkElement* owner) : owner_(owner) {
 LinkResource::~LinkResource() = default;
 
 bool LinkResource::ShouldLoadResource() const {
-  return GetDocument().GetFrame() || GetDocument().ImportsController();
+  return GetDocument().GetFrame();
 }
 
 LocalFrame* LinkResource::LoadingFrame() const {
-  return owner_->GetDocument().MasterDocument().GetFrame();
+  return owner_->GetDocument().GetFrame();
 }
 
 Document& LinkResource::GetDocument() {
@@ -59,13 +59,17 @@ const Document& LinkResource::GetDocument() const {
 }
 
 WTF::TextEncoding LinkResource::GetCharset() const {
-  AtomicString charset = owner_->getAttribute(html_names::kCharsetAttr);
+  AtomicString charset = owner_->FastGetAttribute(html_names::kCharsetAttr);
   if (charset.IsEmpty() && GetDocument().GetFrame())
     return GetDocument().Encoding();
   return WTF::TextEncoding(charset);
 }
 
-void LinkResource::Trace(Visitor* visitor) {
+ExecutionContext* LinkResource::GetExecutionContext() {
+  return owner_->GetExecutionContext();
+}
+
+void LinkResource::Trace(Visitor* visitor) const {
   visitor->Trace(owner_);
 }
 

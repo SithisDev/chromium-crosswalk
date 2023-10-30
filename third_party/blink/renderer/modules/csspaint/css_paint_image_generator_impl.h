@@ -9,13 +9,13 @@
 #include "third_party/blink/renderer/core/css/cssom/css_style_value.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/scoped_persistent.h"
-#include "third_party/blink/renderer/platform/geometry/float_size.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "ui/gfx/geometry/size_f.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-class CSSSyntaxDescriptor;
+class CSSSyntaxDefinition;
 class Document;
 class DocumentPaintDefinition;
 class Image;
@@ -34,13 +34,12 @@ class MODULES_EXPORT CSSPaintImageGeneratorImpl final
 
   // The |container_size| is without subpixel snapping.
   scoped_refptr<Image> Paint(const ImageResourceObserver&,
-                             const FloatSize& container_size,
-                             const CSSStyleValueVector*,
-                             float device_scale_factor) final;
+                             const gfx::SizeF& container_size,
+                             const CSSStyleValueVector*) final;
   const Vector<CSSPropertyID>& NativeInvalidationProperties() const final;
   const Vector<AtomicString>& CustomInvalidationProperties() const final;
   bool HasAlpha() const final;
-  const Vector<CSSSyntaxDescriptor>& InputArgumentTypes() const final;
+  const Vector<CSSSyntaxDefinition>& InputArgumentTypes() const final;
   bool IsImageGeneratorReady() const final;
   int WorkletId() const final;
 
@@ -54,7 +53,7 @@ class MODULES_EXPORT CSSPaintImageGeneratorImpl final
   }
   unsigned GetRegisteredDefinitionCountForTesting() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   // Used for main-thread CSS Paint.

@@ -5,33 +5,36 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_GEOMETRY_DOM_MATRIX_READ_ONLY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_GEOMETRY_DOM_MATRIX_READ_ONLY_H_
 
-#include <memory>
-
-#include "third_party/blink/renderer/bindings/core/v8/string_or_unrestricted_double_sequence.h"
-#include "third_party/blink/renderer/core/geometry/dom_matrix_2d_init.h"
+#include "base/notreached.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 
 namespace blink {
 
+class DOMMatrix2DInit;
 class DOMMatrix;
 class DOMMatrixInit;
 class DOMPoint;
 class DOMPointInit;
+class ExecutionContext;
+class V8UnionStringOrUnrestrictedDoubleSequence;
 
 class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static DOMMatrixReadOnly* Create(ExecutionContext*, ExceptionState&);
-  static DOMMatrixReadOnly* Create(ExecutionContext*,
-                                   StringOrUnrestrictedDoubleSequence&,
-                                   ExceptionState&);
+  static DOMMatrixReadOnly* Create(
+      ExecutionContext* execution_context,
+      const V8UnionStringOrUnrestrictedDoubleSequence* init,
+      ExceptionState& exception_state);
   static DOMMatrixReadOnly* fromFloat32Array(NotShared<DOMFloat32Array>,
                                              ExceptionState&);
   static DOMMatrixReadOnly* fromFloat64Array(NotShared<DOMFloat64Array>,
@@ -47,12 +50,12 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
   template <typename T>
   DOMMatrixReadOnly(T sequence, int size) {
     if (size == 6) {
-      matrix_ = std::make_unique<TransformationMatrix>(
-          sequence[0], sequence[1], sequence[2], sequence[3], sequence[4],
-          sequence[5]);
+      matrix_ =
+          TransformationMatrix::Affine(sequence[0], sequence[1], sequence[2],
+                                       sequence[3], sequence[4], sequence[5]);
       is2d_ = true;
     } else if (size == 16) {
-      matrix_ = std::make_unique<TransformationMatrix>(
+      matrix_ = TransformationMatrix::ColMajor(
           sequence[0], sequence[1], sequence[2], sequence[3], sequence[4],
           sequence[5], sequence[6], sequence[7], sequence[8], sequence[9],
           sequence[10], sequence[11], sequence[12], sequence[13], sequence[14],
@@ -64,29 +67,29 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
   }
   ~DOMMatrixReadOnly() override;
 
-  double a() const { return matrix_->M11(); }
-  double b() const { return matrix_->M12(); }
-  double c() const { return matrix_->M21(); }
-  double d() const { return matrix_->M22(); }
-  double e() const { return matrix_->M41(); }
-  double f() const { return matrix_->M42(); }
+  double a() const { return m11(); }
+  double b() const { return m12(); }
+  double c() const { return m21(); }
+  double d() const { return m22(); }
+  double e() const { return m41(); }
+  double f() const { return m42(); }
 
-  double m11() const { return matrix_->M11(); }
-  double m12() const { return matrix_->M12(); }
-  double m13() const { return matrix_->M13(); }
-  double m14() const { return matrix_->M14(); }
-  double m21() const { return matrix_->M21(); }
-  double m22() const { return matrix_->M22(); }
-  double m23() const { return matrix_->M23(); }
-  double m24() const { return matrix_->M24(); }
-  double m31() const { return matrix_->M31(); }
-  double m32() const { return matrix_->M32(); }
-  double m33() const { return matrix_->M33(); }
-  double m34() const { return matrix_->M34(); }
-  double m41() const { return matrix_->M41(); }
-  double m42() const { return matrix_->M42(); }
-  double m43() const { return matrix_->M43(); }
-  double m44() const { return matrix_->M44(); }
+  double m11() const { return matrix_.rc(0, 0); }
+  double m12() const { return matrix_.rc(1, 0); }
+  double m13() const { return matrix_.rc(2, 0); }
+  double m14() const { return matrix_.rc(3, 0); }
+  double m21() const { return matrix_.rc(0, 1); }
+  double m22() const { return matrix_.rc(1, 1); }
+  double m23() const { return matrix_.rc(2, 1); }
+  double m24() const { return matrix_.rc(3, 1); }
+  double m31() const { return matrix_.rc(0, 2); }
+  double m32() const { return matrix_.rc(1, 2); }
+  double m33() const { return matrix_.rc(2, 2); }
+  double m34() const { return matrix_.rc(3, 2); }
+  double m41() const { return matrix_.rc(0, 3); }
+  double m42() const { return matrix_.rc(1, 3); }
+  double m43() const { return matrix_.rc(2, 3); }
+  double m44() const { return matrix_.rc(3, 3); }
 
   bool is2D() const;
   bool isIdentity() const;
@@ -128,11 +131,11 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
 
   ScriptValue toJSONForBinding(ScriptState*) const;
 
-  const TransformationMatrix& Matrix() const { return *matrix_; }
+  const TransformationMatrix& Matrix() const { return matrix_; }
 
   AffineTransform GetAffineTransform() const;
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     ScriptWrappable::Trace(visitor);
   }
 
@@ -143,14 +146,10 @@ class CORE_EXPORT DOMMatrixReadOnly : public ScriptWrappable {
 
   static bool ValidateAndFixup2D(DOMMatrix2DInit*);
   static bool ValidateAndFixup(DOMMatrixInit*, ExceptionState&);
-  // TransformationMatrix needs to be 16-byte aligned. PartitionAlloc
-  // supports 16-byte alignment but Oilpan doesn't. So we use an std::unique_ptr
-  // to allocate TransformationMatrix on PartitionAlloc.
-  // TODO(oilpan): Oilpan should support 16-byte aligned allocations.
-  std::unique_ptr<TransformationMatrix> matrix_;
+  TransformationMatrix matrix_;
   bool is2d_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_GEOMETRY_DOM_MATRIX_READ_ONLY_H_

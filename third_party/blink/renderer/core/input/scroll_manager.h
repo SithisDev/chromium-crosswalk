@@ -7,16 +7,17 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/callback_helpers.h"
 #include "cc/input/snap_fling_controller.h"
 #include "third_party/blink/public/platform/web_input_event_result.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/page/event_with_hit_test_results.h"
+#include "third_party/blink/renderer/core/page/scrolling/scroll_state.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/geometry/layout_size.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
@@ -34,16 +35,21 @@ class Scrollbar;
 class ScrollState;
 class WebGestureEvent;
 
+// Scroll directions used to check whether propagation is possible in a given
+// direction. Used in CanPropagate.
+enum class ScrollPropagationDirection { kHorizontal, kVertical, kBoth, kNone };
+
 // This class takes care of scrolling and resizing and the related states. The
 // user action that causes scrolling or resizing is determined in other *Manager
 // classes and they call into this class for doing the work.
-class CORE_EXPORT ScrollManager
-    : public GarbageCollectedFinalized<ScrollManager>,
-      public cc::SnapFlingClient {
+class CORE_EXPORT ScrollManager : public GarbageCollected<ScrollManager>,
+                                  public cc::SnapFlingClient {
  public:
   explicit ScrollManager(LocalFrame&);
+  ScrollManager(const ScrollManager&) = delete;
+  ScrollManager& operator=(const ScrollManager&) = delete;
   virtual ~ScrollManager() = default;
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
   void Clear();
 
@@ -62,15 +68,15 @@ class CORE_EXPORT ScrollManager
   // granularity - The units that the  scroll delta parameter is in.
   // startNode - Optional. If provided, start chaining from the given node.
   //             If not, use the current focus or last clicked node.
-  bool LogicalScroll(ScrollDirection,
-                     ScrollGranularity,
+  bool LogicalScroll(mojom::blink::ScrollDirection,
+                     ui::ScrollGranularity,
                      Node* start_node,
                      Node* mouse_press_node);
 
   // Performs a logical scroll that chains, crossing frames, starting from
   // the given node or a reasonable default (focus/last clicked).
-  bool BubblingScroll(ScrollDirection,
-                      ScrollGranularity,
+  bool BubblingScroll(mojom::blink::ScrollDirection,
+                      ui::ScrollGranularity,
                       Node* starting_node,
                       Node* mouse_press_node);
 
@@ -94,17 +100,25 @@ class CORE_EXPORT ScrollManager
   // Clears |m_resizeScrollableArea|. if |shouldNotBeNull| is true this
   // function DCHECKs to make sure that variable is indeed not null.
   void ClearResizeScrollableArea(bool should_not_be_null);
-  void SetResizeScrollableArea(PaintLayer*, IntPoint);
+  void SetResizeScrollableArea(PaintLayer*, gfx::Point);
 
   // SnapFlingClient implementation.
-  bool GetSnapFlingInfo(const gfx::Vector2dF& natural_displacement,
-                        gfx::Vector2dF* out_initial_position,
-                        gfx::Vector2dF* out_target_position) const override;
-  gfx::Vector2dF ScrollByForSnapFling(const gfx::Vector2dF& delta) override;
-  void ScrollEndForSnapFling() override;
+  bool GetSnapFlingInfoAndSetAnimatingSnapTarget(
+      const gfx::Vector2dF& natural_displacement,
+      gfx::PointF* out_initial_position,
+      gfx::PointF* out_target_position) const override;
+  gfx::PointF ScrollByForSnapFling(const gfx::Vector2dF& delta) override;
+  void ScrollEndForSnapFling(bool did_finish) override;
   void RequestAnimationForSnapFling() override;
 
   void AnimateSnapFling(base::TimeTicks monotonic_time);
+
+  // Determines whether the scroll-chain should be propagated upwards given a
+  // scroll direction.
+  static bool CanPropagate(const LayoutBox* layout_box,
+                           ScrollPropagationDirection direction);
+  static ScrollPropagationDirection ComputePropagationDirection(
+      const ScrollState&);
 
  private:
   Node* NodeTargetForScrollableAreaElementId(
@@ -119,6 +133,8 @@ class CORE_EXPORT ScrollManager
   WebInputEventResult PassScrollGestureEvent(const WebGestureEvent&,
                                              LayoutObject*);
 
+  Node* GetScrollEventTarget();
+
   void ClearGestureScrollState();
 
   void CustomizedScroll(ScrollState&);
@@ -129,18 +145,20 @@ class CORE_EXPORT ScrollManager
 
   void RecomputeScrollChain(const Node& start_node,
                             const ScrollState&,
-                            Deque<DOMNodeId>& scroll_chain);
-  bool CanScroll(const ScrollState&, const Node& current_node);
+                            Deque<DOMNodeId>& scroll_chain,
+                            bool is_autoscroll);
+  bool CanScroll(const ScrollState&,
+                 const Node& current_node,
+                 bool for_autoscroll);
 
-  // scroller_size is set only when scrolling non root scroller.
-  void ComputeScrollRelatedMetrics(
-      uint32_t* non_composited_main_thread_scrolling_reasons);
-  void RecordScrollRelatedMetrics(const WebGestureDevice);
+  uint32_t GetNonCompositedMainThreadScrollingReasons() const;
+  void RecordScrollRelatedMetrics(WebGestureDevice) const;
 
-  WebGestureEvent SynthesizeGestureScrollBegin(
-      const WebGestureEvent& update_event);
+  bool SnapAtGestureScrollEnd(const WebGestureEvent& end_event,
+                              base::ScopedClosureRunner callback);
 
-  bool SnapAtGestureScrollEnd();
+  void AdjustForSnapAtScrollUpdate(const WebGestureEvent& gesture_event,
+                                   ScrollStateData* scroll_state_data);
 
   void NotifyScrollPhaseBeginForCustomizedScroll(const ScrollState&);
   void NotifyScrollPhaseEndForCustomizedScroll();
@@ -165,6 +183,8 @@ class CORE_EXPORT ScrollManager
   // customization.
   Member<Node> previous_gesture_scrolled_node_;
 
+  ScrollOffset last_scroll_delta_for_scroll_gesture_;
+
   // True iff some of the delta has been consumed for the current
   // scroll sequence in this frame, or any child frames. Only used
   // with ScrollCustomization. If some delta has been consumed, a
@@ -185,8 +205,6 @@ class CORE_EXPORT ScrollManager
 
   LayoutSize
       offset_from_resize_corner_;  // In the coords of m_resizeScrollableArea.
-
-  DISALLOW_COPY_AND_ASSIGN(ScrollManager);
 };
 
 }  // namespace blink

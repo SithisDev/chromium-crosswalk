@@ -32,37 +32,46 @@
 #include <memory>
 #include <utility>
 
-#include "third_party/blink/public/platform/web_scroll_into_view_params.h"
+#include "base/allocator/partition_allocator/partition_alloc.h"
+#include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
+#include "third_party/blink/renderer/core/css/resolver/style_adjuster.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
+#include "third_party/blink/renderer/core/dom/css_toggle_map.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/first_letter_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
+#include "third_party/blink/renderer/core/editing/ime/input_method_controller.h"
 #include "third_party/blink/renderer/core/editing/layout_selection.h"
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
 #include "third_party/blink/renderer/core/editing/text_affinity.h"
 #include "third_party/blink/renderer/core/editing/visible_units.h"
-#include "third_party/blink/renderer/core/frame/deprecated_schedule_style_recalc_during_layout.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
+#include "third_party/blink/renderer/core/html/html_summary_element.h"
 #include "third_party/blink/renderer/core/html/html_table_cell_element.h"
 #include "third_party/blink/renderer/core/html/html_table_element.h"
+#include "third_party/blink/renderer/core/html/image_document.h"
+#include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
-#include "third_party/blink/renderer/core/layout/custom/layout_custom.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
+#include "third_party/blink/renderer/core/intersection_observer/element_intersection_observer_data.h"
 #include "third_party/blink/renderer/core/layout/geometry/transform_state.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_counter.h"
+#include "third_party/blink/renderer/core/layout/layout_custom_scrollbar_part.h"
 #include "third_party/blink/renderer/core/layout/layout_deprecated_flexible_box.h"
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 #include "third_party/blink/renderer/core/layout/layout_fieldset.h"
@@ -73,63 +82,55 @@
 #include "third_party/blink/renderer/core/layout/layout_image_resource_style_image.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_list_item.h"
+#include "third_party/blink/renderer/core/layout/layout_list_marker.h"
 #include "third_party/blink/renderer/core/layout/layout_multi_column_spanner_placeholder.h"
 #include "third_party/blink/renderer/core/layout/layout_object_factory.h"
-#include "third_party/blink/renderer/core/layout/layout_scrollbar_part.h"
+#include "third_party/blink/renderer/core/layout/layout_object_inl.h"
+#include "third_party/blink/renderer/core/layout/layout_object_inlines.h"
+#include "third_party/blink/renderer/core/layout/layout_ruby_run.h"
 #include "third_party/blink/renderer/core/layout/layout_table_caption.h"
-#include "third_party/blink/renderer/core/layout/layout_table_cell.h"
-#include "third_party/blink/renderer/core/layout/layout_table_col.h"
-#include "third_party/blink/renderer/core/layout/layout_table_row.h"
 #include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/layout_ng_text_combine.h"
 #include "third_party/blink/renderer/core/layout/ng/layout_ng_block_flow.h"
+#include "third_party/blink/renderer/core/layout/ng/list/layout_ng_list_item.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_node.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_outline_utils.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_unpositioned_float.h"
-#include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_clipper.h"
-#include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
-#include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
+#include "third_party/blink/renderer/core/layout/ng/table/layout_ng_table.h"
+#include "third_party/blink/renderer/core/layout/ng/table/layout_ng_table_cell.h"
 #include "third_party/blink/renderer/core/page/autoscroll_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/fragment_data_iterator.h"
 #include "third_party/blink/renderer/core/paint/image_element_timing.h"
-#include "third_party/blink/renderer/core/paint/ng/ng_paint_fragment.h"
 #include "third_party/blink/renderer/core/paint/object_paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
+#include "third_party/blink/renderer/core/paint/paint_property_tree_builder.h"
 #include "third_party/blink/renderer/core/paint/paint_timing_detector.h"
-#include "third_party/blink/renderer/core/scroll/smooth_scroll_sequencer.h"
+#include "third_party/blink/renderer/core/scroll/scroll_into_view_util.h"
 #include "third_party/blink/renderer/core/style/content_data.h"
 #include "third_party/blink/renderer/core/style/cursor_data.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/geometry_mapper.h"
 #include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/heap/thread_state_storage.h"
 #include "third_party/blink/renderer/platform/instrumentation/instance_counters.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
+#include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 namespace {
-
-// In order for an image to be rendered from the content property, there can be
-// at most one piece of image content data, followed by some optional
-// alternative text.
-bool ShouldUseContentData(const ContentData* content_data) {
-  if (!content_data)
-    return false;
-  if (!content_data->IsImage())
-    return false;
-  if (content_data->Next() && !content_data->Next()->IsAltText())
-    return false;
-
-  return true;
-}
 
 template <typename Predicate>
 LayoutObject* FindAncestorByPredicate(const LayoutObject* descendant,
@@ -140,11 +141,118 @@ LayoutObject* FindAncestorByPredicate(const LayoutObject* descendant,
       return object;
     if (skip_info)
       skip_info->Update(*object);
+
+    if (UNLIKELY(object->IsColumnSpanAll())) {
+      // The containing block chain goes directly from the column spanner to the
+      // multi-column container.
+      const auto* multicol_container =
+          object->SpannerPlaceholder()->MultiColumnBlockFlow();
+      if (multicol_container->IsLayoutNGObject()) {
+        while (object->Parent() != multicol_container) {
+          object = object->Parent();
+          if (skip_info)
+            skip_info->Update(*object);
+        }
+      }
+    }
   }
   return nullptr;
 }
 
+inline bool MightTraversePhysicalFragments(const LayoutObject& obj) {
+  if (!obj.IsLayoutNGObject()) {
+    // Non-NG objects should be painted, hit-tested, etc. by legacy.
+    if (obj.IsBox())
+      return false;
+    // Non-LayoutBox objects (such as LayoutInline) don't necessarily create NG
+    // LayoutObjects. If they are laid out by an NG container, though, we may be
+    // allowed to traverse their fragments. We can't check that at this point
+    // (potentially before initial layout), though. Unless there are other
+    // reasons that prevent us from allowing fragment traversal, we'll
+    // optimistically return true now, and check later.
+  }
+  // The NG paint system currently doesn't support replaced content.
+  if (obj.IsLayoutReplaced())
+    return false;
+  // The NG paint system currently doesn't support table-cells.
+  if (obj.IsTableCellLegacy())
+    return false;
+  // Text controls have some logic in the layout objects that will be missed if
+  // we traverse the fragment tree when hit-testing.
+  if (obj.IsTextControlIncludingNG())
+    return false;
+  return true;
+}
+
+bool HasNativeBackgroundPainter(Node* node) {
+  if (!RuntimeEnabledFeatures::CompositeBGColorAnimationEnabled())
+    return false;
+
+  Element* element = DynamicTo<Element>(node);
+  if (!element)
+    return false;
+
+  ElementAnimations* element_animations = element->GetElementAnimations();
+  if (!element_animations)
+    return false;
+
+  return element_animations->CompositedBackgroundColorStatus() ==
+         ElementAnimations::CompositedPaintStatus::kComposited;
+}
+
+StyleDifference AdjustForBackgroundColorPaint(
+    scoped_refptr<const ComputedStyle> old_style,
+    scoped_refptr<const ComputedStyle> new_style,
+    Node* node,
+    StyleDifference diff) {
+  // Background color changes that are triggered by animations on the compositor
+  // thread can skip paint invalidation.
+  bool had_background_color_animation =
+      old_style ? old_style->HasCurrentBackgroundColorAnimation() : false;
+  DCHECK(new_style);
+  bool has_background_color_animation =
+      new_style->HasCurrentBackgroundColorAnimation();
+  // If animation status changed, we need a paint invalidation regardless of
+  // whether the background color changed.
+  if (RuntimeEnabledFeatures::CompositeBGColorAnimationEnabled() &&
+      (had_background_color_animation != has_background_color_animation))
+    diff.SetNeedsPaintInvalidation();
+
+  bool skip_background_color_paint_invalidation =
+      !diff.BackgroundColorChanged() || HasNativeBackgroundPainter(node);
+  if (!skip_background_color_paint_invalidation)
+    diff.SetNeedsPaintInvalidation();
+
+  return diff;
+}
+
 }  // namespace
+
+static int g_allow_destroying_layout_object_in_finalizer = 0;
+
+void ApplyVisibleOverflowToClipRect(OverflowClipAxes overflow_clip,
+                                    PhysicalRect& clip_rect) {
+  DCHECK_NE(overflow_clip, kOverflowClipBothAxis);
+  const LayoutRect infinite_rect(LayoutRect::InfiniteIntRect());
+  if ((overflow_clip & kOverflowClipX) == kNoOverflowClip) {
+    clip_rect.offset.left = infinite_rect.X();
+    clip_rect.size.width = infinite_rect.Width();
+  }
+  if ((overflow_clip & kOverflowClipY) == kNoOverflowClip) {
+    clip_rect.offset.top = infinite_rect.Y();
+    clip_rect.size.height = infinite_rect.Height();
+  }
+}
+
+AllowDestroyingLayoutObjectInFinalizerScope::
+    AllowDestroyingLayoutObjectInFinalizerScope() {
+  ++g_allow_destroying_layout_object_in_finalizer;
+}
+AllowDestroyingLayoutObjectInFinalizerScope::
+    ~AllowDestroyingLayoutObjectInFinalizerScope() {
+  CHECK_GT(g_allow_destroying_layout_object_in_finalizer, 0);
+  --g_allow_destroying_layout_object_in_finalizer;
+}
 
 #if DCHECK_IS_ON()
 
@@ -160,39 +268,29 @@ LayoutObject::SetLayoutNeededForbiddenScope::~SetLayoutNeededForbiddenScope() {
 }
 #endif
 
-struct SameSizeAsLayoutObject : ImageResourceObserver, DisplayItemClient {
+struct SameSizeAsLayoutObject : public GarbageCollected<SameSizeAsLayoutObject>,
+                                ImageResourceObserver,
+                                DisplayItemClient {
   // Normally this field uses the gap between DisplayItemClient and
   // LayoutObject's other fields.
   uint8_t paint_invalidation_reason_;
+  uint8_t extra_bitfields_;
 #if DCHECK_IS_ON()
   unsigned debug_bitfields_;
 #endif
   unsigned bitfields_;
   unsigned bitfields2_;
   unsigned bitfields3_;
-  void* pointers[4];
-  Member<void*> members[1];
-  // The following fields are in FragmentData.
-  IntRect visual_rect_;
-  PhysicalOffset paint_offset_;
-  std::unique_ptr<int> rare_data_;
+  void* pointers[1];
+  Member<void*> members[5];
+#if DCHECK_IS_ON()
+  bool is_destroyed_;
+#endif
 };
 
-static_assert(sizeof(LayoutObject) == sizeof(SameSizeAsLayoutObject),
-              "LayoutObject should stay small");
+ASSERT_SIZE(LayoutObject, SameSizeAsLayoutObject);
 
 bool LayoutObject::affects_parent_block_ = false;
-
-void* LayoutObject::operator new(size_t sz) {
-  DCHECK(IsMainThread());
-  return WTF::Partitions::LayoutPartition()->Alloc(
-      sz, WTF_HEAP_PROFILER_TYPE_NAME(LayoutObject));
-}
-
-void LayoutObject::operator delete(void* ptr) {
-  DCHECK(IsMainThread());
-  base::PartitionFree(ptr);
-}
 
 LayoutObject* LayoutObject::CreateObject(Element* element,
                                          const ComputedStyle& style,
@@ -204,8 +302,9 @@ LayoutObject* LayoutObject::CreateObject(Element* element,
   // some optional alternative text. Otherwise acts as if we didn't support this
   // feature.
   const ContentData* content_data = style.GetContentData();
-  if (!element->IsPseudoElement() && ShouldUseContentData(content_data)) {
-    LayoutImage* image = new LayoutImage(element);
+  if (!element->IsPseudoElement() &&
+      ShouldUseContentDataForElement(content_data)) {
+    LayoutImage* image = MakeGarbageCollected<LayoutImage>(element);
     // LayoutImageResourceStyleImage requires a style being present on the
     // image but we don't want to trigger a style change now as the node is
     // not fully attached. Moving this code to style change doesn't make sense
@@ -222,6 +321,8 @@ LayoutObject* LayoutObject::CreateObject(Element* element,
     }
     image->SetStyleInternal(nullptr);
     return image;
+  } else if (element->GetPseudoId() == kPseudoIdMarker) {
+    return LayoutObjectFactory::CreateListMarker(*element, style, legacy);
   }
 
   switch (style.Display()) {
@@ -229,32 +330,35 @@ LayoutObject* LayoutObject::CreateObject(Element* element,
     case EDisplay::kContents:
       return nullptr;
     case EDisplay::kInline:
-      return new LayoutInline(element);
+      return MakeGarbageCollected<LayoutInline>(element);
     case EDisplay::kBlock:
     case EDisplay::kFlowRoot:
     case EDisplay::kInlineBlock:
-      return LayoutObjectFactory::CreateBlockFlow(*element, style, legacy);
     case EDisplay::kListItem:
-      return LayoutObjectFactory::CreateListItem(*element, style, legacy);
+      return LayoutObjectFactory::CreateBlockFlow(*element, style, legacy);
     case EDisplay::kTable:
     case EDisplay::kInlineTable:
-      return new LayoutTable(element);
+      return LayoutObjectFactory::CreateTable(*element, style, legacy);
     case EDisplay::kTableRowGroup:
     case EDisplay::kTableHeaderGroup:
     case EDisplay::kTableFooterGroup:
-      return new LayoutTableSection(element);
+      return LayoutObjectFactory::CreateTableSection(*element, style, legacy);
     case EDisplay::kTableRow:
-      return new LayoutTableRow(element);
+      return LayoutObjectFactory::CreateTableRow(*element, style, legacy);
     case EDisplay::kTableColumnGroup:
     case EDisplay::kTableColumn:
-      return new LayoutTableCol(element);
+      return LayoutObjectFactory::CreateTableColumn(*element, style, legacy);
     case EDisplay::kTableCell:
       return LayoutObjectFactory::CreateTableCell(*element, style, legacy);
     case EDisplay::kTableCaption:
       return LayoutObjectFactory::CreateTableCaption(*element, style, legacy);
     case EDisplay::kWebkitBox:
     case EDisplay::kWebkitInlineBox:
-      return new LayoutDeprecatedFlexibleBox(*element);
+      if (style.IsDeprecatedWebkitBoxWithVerticalLineClamp()) {
+        return LayoutObjectFactory::CreateBlockForLineClamp(*element, style,
+                                                            legacy);
+      }
+      return LayoutObjectFactory::CreateFlexibleBox(*element, style, legacy);
     case EDisplay::kFlex:
     case EDisplay::kInlineFlex:
       UseCounter::Count(element->GetDocument(), WebFeature::kCSSFlexibleBox);
@@ -262,10 +366,13 @@ LayoutObject* LayoutObject::CreateObject(Element* element,
     case EDisplay::kGrid:
     case EDisplay::kInlineGrid:
       UseCounter::Count(element->GetDocument(), WebFeature::kCSSGridLayout);
-      return new LayoutGrid(element);
+      return LayoutObjectFactory::CreateGrid(*element, style, legacy);
+    case EDisplay::kMath:
+    case EDisplay::kBlockMath:
+      return LayoutObjectFactory::CreateMath(*element, style, legacy);
     case EDisplay::kLayoutCustom:
     case EDisplay::kInlineLayoutCustom:
-      return new LayoutCustom(element);
+      return LayoutObjectFactory::CreateCustom(*element, style, legacy);
   }
 
   NOTREACHED();
@@ -274,6 +381,7 @@ LayoutObject* LayoutObject::CreateObject(Element* element,
 
 LayoutObject::LayoutObject(Node* node)
     : full_paint_invalidation_reason_(PaintInvalidationReason::kNone),
+      can_contain_absolute_position_objects_(false),
 #if DCHECK_IS_ON()
       has_ax_object_(false),
       set_needs_layout_forbidden_(false),
@@ -284,25 +392,23 @@ LayoutObject::LayoutObject(Node* node)
       node_(node),
       parent_(nullptr),
       previous_(nullptr),
-      next_(nullptr) {
+      next_(nullptr),
+      fragment_(MakeGarbageCollected<FragmentData>()) {
   InstanceCounters::IncrementCounter(InstanceCounters::kLayoutObjectCounter);
   if (node_)
     GetFrameView()->IncrementLayoutObjectCount();
-
-  if (const auto* element = DynamicTo<Element>(GetNode())) {
-    if (element->ShouldForceLegacyLayout())
-      SetForceLegacyLayout();
-  }
 }
 
 LayoutObject::~LayoutObject() {
+  DCHECK(bitfields_.BeingDestroyed());
 #if DCHECK_IS_ON()
-  DCHECK(!has_ax_object_);
+  DCHECK(is_destroyed_);
 #endif
   InstanceCounters::DecrementCounter(InstanceCounters::kLayoutObjectCounter);
 }
 
 bool LayoutObject::IsDescendantOf(const LayoutObject* obj) const {
+  NOT_DESTROYED();
   for (const LayoutObject* r = this; r; r = r->parent_) {
     if (r == obj)
       return true;
@@ -311,11 +417,22 @@ bool LayoutObject::IsDescendantOf(const LayoutObject* obj) const {
 }
 
 bool LayoutObject::IsHR() const {
-  return IsHTMLHRElement(GetNode());
+  NOT_DESTROYED();
+  return IsA<HTMLHRElement>(GetNode());
+}
+
+bool LayoutObject::IsStyleGenerated() const {
+  NOT_DESTROYED();
+  if (const auto* layout_text_fragment = DynamicTo<LayoutTextFragment>(this))
+    return !layout_text_fragment->AssociatedTextNode();
+
+  const Node* node = GetNode();
+  return !node || node->IsPseudoElement();
 }
 
 void LayoutObject::SetIsInsideFlowThreadIncludingDescendants(
     bool inside_flow_thread) {
+  NOT_DESTROYED();
   LayoutObject* next;
   for (LayoutObject* object = this; object; object = next) {
     // If object is a fragmentation context it already updated the descendants
@@ -332,13 +449,14 @@ void LayoutObject::SetIsInsideFlowThreadIncludingDescendants(
 
 bool LayoutObject::RequiresAnonymousTableWrappers(
     const LayoutObject* new_child) const {
+  NOT_DESTROYED();
   // Check should agree with:
   // CSS 2.1 Tables: 17.2.1 Anonymous table objects
   // http://www.w3.org/TR/CSS21/tables.html#anonymous-boxes
   if (new_child->IsLayoutTableCol()) {
-    const LayoutTableCol* new_table_column = ToLayoutTableCol(new_child);
     bool is_column_in_column_group =
-        new_table_column->IsTableColumn() && IsLayoutTableCol();
+        new_child->StyleRef().Display() == EDisplay::kTableColumn &&
+        IsLayoutTableCol();
     return !IsTable() && !is_column_in_column_group;
   }
   if (new_child->IsTableCaption())
@@ -352,10 +470,94 @@ bool LayoutObject::RequiresAnonymousTableWrappers(
   return false;
 }
 
+#if DCHECK_IS_ON()
+
+void LayoutObject::AssertFragmentTree(bool display_locked) const {
+  NOT_DESTROYED();
+  for (const LayoutObject* layout_object = this; layout_object;) {
+    // |LayoutNGMixin::UpdateInFlowBlockLayout| may |SetNeedsLayout| to its
+    // containing block. Don't check if it will be re-laid out.
+    if (layout_object->NeedsLayout()) {
+      layout_object = layout_object->NextInPreOrderAfterChildren(this);
+      continue;
+    }
+
+    // If display-locked, fragments may not be removed from the tree even after
+    // the |LayoutObject| was destroyed, but still they should be consistent.
+    if (!display_locked && layout_object->ChildLayoutBlockedByDisplayLock()) {
+      layout_object->AssertFragmentTree(
+          /* display_locked */ true);
+      layout_object = layout_object->NextInPreOrderAfterChildren(this);
+      continue;
+    }
+
+    // Check the direct children of the fragment. Grand-children and further
+    // descendants will be checked by descendant LayoutObjects.
+    if (const auto* box = DynamicTo<LayoutBox>(layout_object)) {
+      for (const NGPhysicalBoxFragment& fragment : box->PhysicalFragments()) {
+        DCHECK_EQ(box, fragment.OwnerLayoutBox());
+        fragment.AssertFragmentTreeChildren(
+            /* allow_destroyed_or_moved */ display_locked);
+      }
+    }
+    layout_object = layout_object->NextInPreOrder(this);
+  }
+}
+
+void LayoutObject::AssertClearedPaintInvalidationFlags() const {
+  NOT_DESTROYED();
+  if (ChildPrePaintBlockedByDisplayLock())
+    return;
+
+  if (PaintInvalidationStateIsDirty()) {
+    ShowLayoutTreeForThis();
+    NOTREACHED();
+  }
+
+  // Assert that the number of FragmentData and NGPhysicalBoxFragment objects
+  // are identical. This was added as part of investigating crbug.com/1244130
+
+  // Only LayoutBox has fragments. Bail if it's not a box, or if fragment
+  // traversal isn't supported here.
+  if (!IsBox() || !CanTraversePhysicalFragments())
+    return;
+
+  // Make an exception for table columns (unless they establish a layer, which
+  // would be dangerous (but hopefully also impossible)), since they don't
+  // produce fragments.
+  if (IsLayoutTableCol() && !HasLayer())
+    return;
+
+  // Make an exception for <frameset> children, which don't produce fragments
+  // if the number of children is larger than <rows count> * <cols count>.
+  if (Parent() && Parent()->IsFrameSetIncludingNG())
+    return;
+
+  // Sometimes we just have a Layout(NG)View with no children, and the view is
+  // not marked for layout, even if it has never been laid out. It seems that we
+  // don't actually paint under such circumstances, which means that it doesn't
+  // matter whether we have fragments or not. See crbug.com/1288742
+  if (IsLayoutView() && !EverHadLayout() && !SlowFirstChild())
+    return;
+
+  wtf_size_t fragment_count = 0;
+  for (const FragmentData* walker = &FirstFragment(); walker;
+       walker = walker->NextFragment())
+    fragment_count++;
+  if (fragment_count != To<LayoutBox>(this)->PhysicalFragmentCount()) {
+    ShowLayoutTreeForThis();
+    DCHECK_EQ(fragment_count, To<LayoutBox>(this)->PhysicalFragmentCount());
+  }
+}
+
+#endif  // DCHECK_IS_ON()
+
 DISABLE_CFI_PERF
 void LayoutObject::AddChild(LayoutObject* new_child,
                             LayoutObject* before_child) {
-  DCHECK(IsAllowedToModifyLayoutTreeStructure(GetDocument()));
+  NOT_DESTROYED();
+  DCHECK(IsAllowedToModifyLayoutTreeStructure(GetDocument()) ||
+         IsLayoutNGObjectForFormattedText());
 
   LayoutObjectChildList* children = VirtualChildren();
   DCHECK(children);
@@ -366,28 +568,65 @@ void LayoutObject::AddChild(LayoutObject* new_child,
     // Generate an anonymous table or reuse existing one from previous child
     // Per: 17.2.1 Anonymous table objects 3. Generate missing parents
     // http://www.w3.org/TR/CSS21/tables.html#anonymous-boxes
-    LayoutTable* table;
+    LayoutObject* table;
     LayoutObject* after_child =
         before_child ? before_child->PreviousSibling() : children->LastChild();
     if (after_child && after_child->IsAnonymous() && after_child->IsTable() &&
         !after_child->IsBeforeContent()) {
-      table = ToLayoutTable(after_child);
+      table = after_child;
     } else {
-      table = LayoutTable::CreateAnonymousWithParent(this);
+      table = LayoutObjectFactory::CreateAnonymousTableWithParent(
+          *this, !new_child->IsLayoutNGObject());
       children->InsertChildNode(this, table, before_child);
     }
     table->AddChild(new_child);
+  } else if (LIKELY(new_child->IsHorizontalWritingMode()) ||
+             !new_child->IsText()) {
+    children->InsertChildNode(this, new_child, before_child);
+  } else if (IsA<LayoutNGTextCombine>(*this)) {
+    DCHECK(LayoutNGTextCombine::ShouldBeParentOf(*new_child)) << new_child;
+    new_child->SetStyle(Style());
+    children->InsertChildNode(this, new_child, before_child);
+  } else if (!IsHorizontalWritingMode() &&
+             LayoutNGTextCombine::ShouldBeParentOf(*new_child)) {
+    if (before_child) {
+      if (IsA<LayoutNGTextCombine>(before_child)) {
+        DCHECK(!DynamicTo<LayoutNGTextCombine>(before_child->PreviousSibling()))
+            << before_child->PreviousSibling();
+        before_child->AddChild(new_child, before_child->SlowFirstChild());
+      } else if (auto* const previous_sibling = DynamicTo<LayoutNGTextCombine>(
+                     before_child->PreviousSibling())) {
+        previous_sibling->AddChild(new_child);
+      } else {
+        children->InsertChildNode(
+            this,
+            LayoutNGTextCombine::CreateAnonymous(To<LayoutText>(new_child)),
+            before_child);
+      }
+    } else if (auto* const last_child =
+                   DynamicTo<LayoutNGTextCombine>(SlowLastChild())) {
+      last_child->AddChild(new_child);
+    } else {
+      children->AppendChildNode(this, LayoutNGTextCombine::CreateAnonymous(
+                                          To<LayoutText>(new_child)));
+    }
   } else {
+    // In case of append/insert <br style="writing-mode:vertical-rl">
+    // See http://crbug.com/1222121 and http://crbug.com/1258331
+    DCHECK(!new_child->IsHorizontalWritingMode()) << new_child;
+    DCHECK(new_child->IsText()) << new_child;
     children->InsertChildNode(this, new_child, before_child);
   }
 
   if (new_child->IsText() &&
       new_child->StyleRef().TextTransform() == ETextTransform::kCapitalize)
-    ToLayoutText(new_child)->TransformText();
+    To<LayoutText>(new_child)->TransformText();
 }
 
 void LayoutObject::RemoveChild(LayoutObject* old_child) {
-  DCHECK(IsAllowedToModifyLayoutTreeStructure(GetDocument()));
+  NOT_DESTROYED();
+  DCHECK(IsAllowedToModifyLayoutTreeStructure(GetDocument()) ||
+         IsLayoutNGObjectForFormattedText());
 
   LayoutObjectChildList* children = VirtualChildren();
   DCHECK(children);
@@ -397,14 +636,22 @@ void LayoutObject::RemoveChild(LayoutObject* old_child) {
   children->RemoveChildNode(this, old_child);
 }
 
-void LayoutObject::SetDangerousOneWayParent(LayoutObject* parent) {
-  DCHECK(!PreviousSibling());
-  DCHECK(!NextSibling());
-  DCHECK(!parent || !parent_);
-  SetParent(parent);
+void LayoutObject::NotifyPriorityScrollAnchorStatusChanged() {
+  NOT_DESTROYED();
+  if (!Parent())
+    return;
+  for (auto* layer = Parent()->EnclosingLayer(); layer;
+       layer = layer->Parent()) {
+    if (PaintLayerScrollableArea* scrollable_area =
+            layer->GetScrollableArea()) {
+      DCHECK(scrollable_area->GetScrollAnchor());
+      scrollable_area->GetScrollAnchor()->ClearSelf();
+    }
+  }
 }
 
 void LayoutObject::RegisterSubtreeChangeListenerOnDescendants(bool value) {
+  NOT_DESTROYED();
   // If we're set to the same value then we're done as that means it's
   // set down the tree that way already.
   if (bitfields_.SubtreeChangeListenerRegistered() == value)
@@ -416,93 +663,147 @@ void LayoutObject::RegisterSubtreeChangeListenerOnDescendants(bool value) {
     curr->RegisterSubtreeChangeListenerOnDescendants(value);
 }
 
-void LayoutObject::NotifyAncestorsOfSubtreeChange() {
-  if (bitfields_.NotifiedOfSubtreeChange())
-    return;
-
+bool LayoutObject::NotifyOfSubtreeChange() {
+  NOT_DESTROYED();
+  if (!bitfields_.SubtreeChangeListenerRegistered() ||
+      bitfields_.NotifiedOfSubtreeChange()) {
+    return false;
+  }
   bitfields_.SetNotifiedOfSubtreeChange(true);
-  if (Parent())
-    Parent()->NotifyAncestorsOfSubtreeChange();
-}
-
-void LayoutObject::NotifyOfSubtreeChange() {
-  if (!bitfields_.SubtreeChangeListenerRegistered())
-    return;
-  if (bitfields_.NotifiedOfSubtreeChange())
-    return;
-
-  NotifyAncestorsOfSubtreeChange();
-
-  // We can modify the layout tree during layout which means that we may
-  // try to schedule this during performLayout. This should no longer
-  // happen when crbug.com/370457 is fixed.
-  DeprecatedScheduleStyleRecalcDuringLayout marker(GetDocument().Lifecycle());
-  GetDocument().ScheduleLayoutTreeUpdateIfNeeded();
+  return true;
 }
 
 void LayoutObject::HandleSubtreeModifications() {
-  DCHECK(WasNotifiedOfSubtreeChange());
-  DCHECK(GetDocument().Lifecycle().StateAllowsLayoutTreeNotifications());
-
+  NOT_DESTROYED();
   if (ConsumesSubtreeChangeNotification())
     SubtreeDidChange();
-
   bitfields_.SetNotifiedOfSubtreeChange(false);
-
-  for (LayoutObject* object = SlowFirstChild(); object;
-       object = object->NextSibling()) {
-    if (!object->WasNotifiedOfSubtreeChange())
-      continue;
-    object->HandleSubtreeModifications();
-  }
 }
 
 LayoutObject* LayoutObject::NextInPreOrder() const {
+  NOT_DESTROYED();
   if (LayoutObject* o = SlowFirstChild())
     return o;
 
   return NextInPreOrderAfterChildren();
 }
 
+bool LayoutObject::IsForElement() const {
+  if (!IsAnonymous()) {
+    return true;
+  }
+
+  // When a block is inside of an inline, the part of the inline that
+  // wraps the block is represented in the layout tree by a block that
+  // is marked as anonymous, but has a continuation that's not
+  // anonymous.
+
+  if (!IsBox()) {
+    return false;
+  }
+
+  auto* continuation = To<LayoutBox>(this)->Continuation();
+  if (!continuation || continuation->IsAnonymous()) {
+    return false;
+  }
+
+  DCHECK(continuation->IsInline());
+  DCHECK(IsLayoutBlockFlow());
+  return true;
+}
+
 bool LayoutObject::HasClipRelatedProperty() const {
-  // TODO(trchen): Refactor / remove this function.
+  NOT_DESTROYED();
   // This function detects a bunch of properties that can potentially affect
-  // clip inheritance chain. However such generalization is practially useless
+  // clip inheritance chain. However such generalization is practically useless
   // because these properties change clip inheritance in different way that
   // needs to be handled explicitly.
   // CSS clip applies clip to the current element and all descendants.
-  // CSS overflow clip applies only to containg-block descendants.
+  // CSS overflow clip applies only to containing-block descendants.
   // CSS contain:paint applies to all descendants by making itself a containing
   // block for all descendants.
   // CSS clip-path/mask/filter induces a stacking context and applies inherited
   // clip to that stacking context, while resetting clip for descendants. This
   // special behavior is already handled elsewhere.
-  if (HasClip() || HasOverflowClip() || ShouldApplyPaintContainment())
+  if (HasClip() || ShouldClipOverflowAlongEitherAxis())
     return true;
-  if (IsBox() && ToLayoutBox(this)->HasControlClip())
+  // Paint containment establishes isolation which creates clip isolation nodes.
+  // Style & Layout containment also establish isolation (see
+  // |NeedsIsolationNodes| in PaintPropertyTreeBuilder).
+  if (ShouldApplyPaintContainment() ||
+      (ShouldApplyStyleContainment() && ShouldApplyLayoutContainment())) {
+    return true;
+  }
+  if (IsBox() && To<LayoutBox>(this)->HasControlClip())
     return true;
   return false;
 }
 
 bool LayoutObject::IsRenderedLegendInternal() const {
+  NOT_DESTROYED();
   DCHECK(IsBox());
-  DCHECK(IsHTMLLegendElement());
+  DCHECK(IsRenderedLegendCandidate());
 
-  if (IsFloatingOrOutOfFlowPositioned())
-    return false;
   const auto* parent = Parent();
-  if (RuntimeEnabledFeatures::LayoutNGFieldsetEnabled()) {
-    // If there is a rendered legend, it will be found inside the anonymous
-    // fieldset wrapper.
-    if (parent->IsAnonymous() && parent->Parent()->IsLayoutNGFieldset())
-      parent = parent->Parent();
-  }
+  // We may not be inserted into the tree yet.
+  if (!parent)
+    return false;
+
   const auto* parent_layout_block = DynamicTo<LayoutBlock>(parent);
-  return parent_layout_block && IsHTMLFieldSetElement(parent->GetNode()) &&
+  return parent_layout_block && IsA<HTMLFieldSetElement>(parent->GetNode()) &&
          LayoutFieldset::FindInFlowLegend(*parent_layout_block) == this;
 }
 
+bool LayoutObject::IsListMarkerForSummary() const {
+  if (!IsListMarkerIncludingAll())
+    return false;
+  if (const auto* summary =
+          DynamicTo<HTMLSummaryElement>(Parent()->GetNode())) {
+    if (!summary->IsMainSummary())
+      return false;
+    if (ListMarker::GetListStyleCategory(GetDocument(), StyleRef()) !=
+        ListMarker::ListStyleCategory::kSymbol)
+      return false;
+    const AtomicString& name =
+        StyleRef().ListStyleType()->GetCounterStyleName();
+    return name == "disclosure-open" || name == "disclosure-closed";
+  }
+  return false;
+}
+
+bool LayoutObject::IsInListMarker() const {
+  // List markers are either leaf nodes (legacy LayoutListMarker), or have
+  // exactly one leaf child. So there's no need to traverse ancestors.
+  return Parent() && Parent()->IsListMarkerIncludingAll();
+}
+
+LayoutObject* LayoutObject::NonCulledParent() const {
+  LayoutObject* parent = Parent();
+  for (; parent; parent = parent->Parent()) {
+    if (const auto* parent_inline_box = DynamicTo<LayoutInline>(parent)) {
+      if (!parent_inline_box->AlwaysCreateLineBoxesForLayoutInline())
+        continue;
+    }
+    return parent;
+  }
+  return nullptr;
+}
+
+bool LayoutObject::IsTextDecorationBoundary(NGStyleVariant variant) const {
+  const LayoutObject* parent = NonCulledParent();
+  if (!parent)
+    return true;
+  const ComputedStyle& style = EffectiveStyle(variant);
+  const ComputedStyle& parent_style = variant == NGStyleVariant::kEllipsis
+                                          ? parent->FirstLineStyleRef()
+                                          : parent->EffectiveStyle(variant);
+  if (!style.IsAppliedTextDecorationsSame(parent_style))
+    return true;
+  return false;
+}
+
 LayoutObject* LayoutObject::NextInPreOrderAfterChildren() const {
+  NOT_DESTROYED();
   LayoutObject* o = NextSibling();
   if (!o) {
     o = Parent();
@@ -517,6 +818,7 @@ LayoutObject* LayoutObject::NextInPreOrderAfterChildren() const {
 
 LayoutObject* LayoutObject::NextInPreOrder(
     const LayoutObject* stay_within) const {
+  NOT_DESTROYED();
   if (LayoutObject* o = SlowFirstChild())
     return o;
 
@@ -525,6 +827,7 @@ LayoutObject* LayoutObject::NextInPreOrder(
 
 LayoutObject* LayoutObject::PreviousInPostOrder(
     const LayoutObject* stay_within) const {
+  NOT_DESTROYED();
   if (LayoutObject* o = SlowLastChild())
     return o;
 
@@ -533,6 +836,7 @@ LayoutObject* LayoutObject::PreviousInPostOrder(
 
 LayoutObject* LayoutObject::NextInPreOrderAfterChildren(
     const LayoutObject* stay_within) const {
+  NOT_DESTROYED();
   if (this == stay_within)
     return nullptr;
 
@@ -548,6 +852,7 @@ LayoutObject* LayoutObject::NextInPreOrderAfterChildren(
 
 LayoutObject* LayoutObject::PreviousInPostOrderBeforeChildren(
     const LayoutObject* stay_within) const {
+  NOT_DESTROYED();
   if (this == stay_within)
     return nullptr;
 
@@ -562,6 +867,7 @@ LayoutObject* LayoutObject::PreviousInPostOrderBeforeChildren(
 }
 
 LayoutObject* LayoutObject::PreviousInPreOrder() const {
+  NOT_DESTROYED();
   if (LayoutObject* o = PreviousSibling()) {
     while (LayoutObject* last_child = o->SlowLastChild())
       o = last_child;
@@ -573,13 +879,83 @@ LayoutObject* LayoutObject::PreviousInPreOrder() const {
 
 LayoutObject* LayoutObject::PreviousInPreOrder(
     const LayoutObject* stay_within) const {
+  NOT_DESTROYED();
   if (this == stay_within)
     return nullptr;
 
   return PreviousInPreOrder();
 }
 
+wtf_size_t LayoutObject::Depth() const {
+  wtf_size_t depth = 0;
+  for (const LayoutObject* object = this; object; object = object->Parent())
+    ++depth;
+  return depth;
+}
+
+LayoutObject* LayoutObject::CommonAncestor(const LayoutObject& other,
+                                           CommonAncestorData* data) const {
+  if (this == &other)
+    return const_cast<LayoutObject*>(this);
+
+  const wtf_size_t depth = Depth();
+  const wtf_size_t other_depth = other.Depth();
+  const LayoutObject* iterator = this;
+  const LayoutObject* other_iterator = &other;
+  const LayoutObject* last = nullptr;
+  const LayoutObject* other_last = nullptr;
+  if (depth > other_depth) {
+    for (wtf_size_t i = depth - other_depth; i; --i) {
+      last = iterator;
+      iterator = iterator->Parent();
+    }
+  } else if (other_depth > depth) {
+    for (wtf_size_t i = other_depth - depth; i; --i) {
+      other_last = other_iterator;
+      other_iterator = other_iterator->Parent();
+    }
+  }
+  while (iterator) {
+    DCHECK(other_iterator);
+    if (iterator == other_iterator) {
+      if (data) {
+        data->last = const_cast<LayoutObject*>(last);
+        data->other_last = const_cast<LayoutObject*>(other_last);
+      }
+      return const_cast<LayoutObject*>(iterator);
+    }
+    last = iterator;
+    iterator = iterator->Parent();
+    other_last = other_iterator;
+    other_iterator = other_iterator->Parent();
+  }
+  DCHECK(!other_iterator);
+  return nullptr;
+}
+
+bool LayoutObject::IsBeforeInPreOrder(const LayoutObject& other) const {
+  DCHECK_NE(this, &other);
+  CommonAncestorData data;
+  const LayoutObject* common_ancestor = CommonAncestor(other, &data);
+  DCHECK(common_ancestor);
+  DCHECK(data.last || data.other_last);
+  if (!data.last)
+    return true;  // |this| is the ancestor of |other|.
+  if (!data.other_last)
+    return false;  // |other| is the ancestor of |this|.
+  for (const LayoutObject* child = common_ancestor->SlowFirstChild(); child;
+       child = child->NextSibling()) {
+    if (child == data.last)
+      return true;
+    if (child == data.other_last)
+      return false;
+  }
+  NOTREACHED();
+  return false;
+}
+
 LayoutObject* LayoutObject::LastLeafChild() const {
+  NOT_DESTROYED();
   LayoutObject* r = SlowLastChild();
   while (r) {
     LayoutObject* n = nullptr;
@@ -604,7 +980,8 @@ static void AddLayers(LayoutObject* obj,
           new_object->Parent()->FindNextLayer(parent_layer, new_object);
       new_object = nullptr;
     }
-    parent_layer->AddChild(ToLayoutBoxModelObject(obj)->Layer(), before_child);
+    parent_layer->AddChild(To<LayoutBoxModelObject>(obj)->Layer(),
+                           before_child);
     return;
   }
 
@@ -614,6 +991,7 @@ static void AddLayers(LayoutObject* obj,
 }
 
 void LayoutObject::AddLayers(PaintLayer* parent_layer) {
+  NOT_DESTROYED();
   if (!parent_layer)
     return;
 
@@ -623,11 +1001,12 @@ void LayoutObject::AddLayers(PaintLayer* parent_layer) {
 }
 
 void LayoutObject::RemoveLayers(PaintLayer* parent_layer) {
+  NOT_DESTROYED();
   if (!parent_layer)
     return;
 
   if (HasLayer()) {
-    parent_layer->RemoveChild(ToLayoutBoxModelObject(this)->Layer());
+    parent_layer->RemoveChild(To<LayoutBoxModelObject>(this)->Layer());
     return;
   }
 
@@ -636,11 +1015,12 @@ void LayoutObject::RemoveLayers(PaintLayer* parent_layer) {
 }
 
 void LayoutObject::MoveLayers(PaintLayer* old_parent, PaintLayer* new_parent) {
+  NOT_DESTROYED();
   if (!new_parent)
     return;
 
   if (HasLayer()) {
-    PaintLayer* layer = ToLayoutBoxModelObject(this)->Layer();
+    PaintLayer* layer = To<LayoutBoxModelObject>(this)->Layer();
     DCHECK_EQ(old_parent, layer->Parent());
     if (old_parent)
       old_parent->RemoveChild(layer);
@@ -655,6 +1035,7 @@ void LayoutObject::MoveLayers(PaintLayer* old_parent, PaintLayer* new_parent) {
 PaintLayer* LayoutObject::FindNextLayer(PaintLayer* parent_layer,
                                         LayoutObject* start_point,
                                         bool check_parent) {
+  NOT_DESTROYED();
   // Error check the parent layer passed in. If it's null, we can't find
   // anything.
   if (!parent_layer)
@@ -663,7 +1044,7 @@ PaintLayer* LayoutObject::FindNextLayer(PaintLayer* parent_layer,
   // Step 1: If our layer is a child of the desired parent, then return our
   // layer.
   PaintLayer* our_layer =
-      HasLayer() ? ToLayoutBoxModelObject(this)->Layer() : nullptr;
+      HasLayer() ? To<LayoutBoxModelObject>(this)->Layer() : nullptr;
   if (our_layer && our_layer->Parent() == parent_layer)
     return our_layer;
 
@@ -695,10 +1076,11 @@ PaintLayer* LayoutObject::FindNextLayer(PaintLayer* parent_layer,
 }
 
 PaintLayer* LayoutObject::EnclosingLayer() const {
+  NOT_DESTROYED();
   for (const LayoutObject* current = this; current;
        current = current->Parent()) {
     if (current->HasLayer())
-      return ToLayoutBoxModelObject(current)->Layer();
+      return To<LayoutBoxModelObject>(current)->Layer();
   }
   // TODO(crbug.com/365897): we should get rid of detached layout subtrees, at
   // which point this code should not be reached.
@@ -706,24 +1088,28 @@ PaintLayer* LayoutObject::EnclosingLayer() const {
 }
 
 PaintLayer* LayoutObject::PaintingLayer() const {
+  NOT_DESTROYED();
+  auto FindContainer = [](const LayoutObject& object) -> const LayoutObject* {
+    // Column spanners paint through their multicolumn containers which can
+    // be accessed through the associated out-of-flow placeholder's parent.
+    if (object.IsColumnSpanAll())
+      return object.SpannerPlaceholder();
+    // Use ContainingBlock() instead of Parent() for floating objects to omit
+    // any self-painting layers of inline objects that don't paint the floating
+    // object. This is only needed for inline-level floats not managed by
+    // LayoutNG. LayoutNG floats are painted by the correct painting layer.
+    if (object.IsFloating() && !object.IsInLayoutNGInlineFormattingContext())
+      return object.ContainingBlock();
+    if (IsA<LayoutView>(object))
+      return object.GetFrame()->OwnerLayoutObject();
+    return object.Parent();
+  };
+
   for (const LayoutObject* current = this; current;
-       // Use containingBlock instead of parentCrossingFrames for floating
-       // objects to omit any self-painting layers of inline objects that don't
-       // paint the floating object.
-       // This is only needed for inline-level floats not managed by LayoutNG.
-       // LayoutNG floats are painted by the correct painting layer.
-       current = (current->IsFloating() &&
-                  !current->IsInLayoutNGInlineFormattingContext())
-                     ? current->ContainingBlock()
-                     : current->ParentCrossingFrames()) {
+       current = FindContainer(*current)) {
     if (current->HasLayer() &&
-        ToLayoutBoxModelObject(current)->Layer()->IsSelfPaintingLayer()) {
-      return ToLayoutBoxModelObject(current)->Layer();
-    } else if (current->IsColumnSpanAll()) {
-      // Column spanners paint through their multicolumn containers which can
-      // be accessed through the associated out-of-flow placeholder's parent.
-      current = current->SpannerPlaceholder();
-    }
+        To<LayoutBoxModelObject>(current)->Layer()->IsSelfPaintingLayer())
+      return To<LayoutBoxModelObject>(current)->Layer();
   }
   // TODO(crbug.com/365897): we should get rid of detached layout subtrees, at
   // which point this code should not be reached.
@@ -731,6 +1117,7 @@ PaintLayer* LayoutObject::PaintingLayer() const {
 }
 
 bool LayoutObject::IsFixedPositionObjectInPagedMedia() const {
+  NOT_DESTROYED();
   if (StyleRef().GetPosition() != EPosition::kFixed)
     return false;
   LayoutView* view = View();
@@ -740,31 +1127,12 @@ bool LayoutObject::IsFixedPositionObjectInPagedMedia() const {
          view->IsHorizontalWritingMode();
 }
 
-PhysicalRect LayoutObject::ScrollRectToVisible(
-    const PhysicalRect& rect,
-    const WebScrollIntoViewParams& params) {
-  LayoutBox* enclosing_box = EnclosingBox();
-  if (!enclosing_box)
-    return rect;
-
-  GetDocument().GetFrame()->GetSmoothScrollSequencer().AbortAnimations();
-  GetDocument().GetFrame()->GetSmoothScrollSequencer().SetScrollType(
-      params.GetScrollType());
-  WebScrollIntoViewParams new_params(params);
-  new_params.is_for_scroll_sequence |=
-      params.GetScrollType() == kProgrammaticScroll;
-  PhysicalRect new_location =
-      enclosing_box->ScrollRectToVisibleRecursive(rect, new_params);
-  GetDocument().GetFrame()->GetSmoothScrollSequencer().RunQueuedAnimations();
-
-  return new_location;
-}
-
 LayoutBox* LayoutObject::EnclosingBox() const {
+  NOT_DESTROYED();
   LayoutObject* curr = const_cast<LayoutObject*>(this);
   while (curr) {
     if (curr->IsBox())
-      return ToLayoutBox(curr);
+      return To<LayoutBox>(curr);
     curr = curr->Parent();
   }
 
@@ -772,73 +1140,74 @@ LayoutBox* LayoutObject::EnclosingBox() const {
   return nullptr;
 }
 
-LayoutBlockFlow* LayoutObject::RootInlineFormattingContext() const {
-  DCHECK(IsInline());
-  for (LayoutObject* parent = Parent(); parent; parent = parent->Parent()) {
-    if (auto* block_flow = DynamicTo<LayoutBlockFlow>(parent)) {
-      // Skip |LayoutFlowThread| because it is skipped when finding the first
-      // child in |GetLayoutObjectForFirstChildNode|.
-      if (UNLIKELY(block_flow->IsLayoutFlowThread()))
-        return DynamicTo<LayoutBlockFlow>(block_flow->Parent());
-      return block_flow;
-    }
-  }
-  return nullptr;
+LayoutBlockFlow* LayoutObject::FragmentItemsContainer() const {
+  NOT_DESTROYED();
+  DCHECK(!IsOutOfFlowPositioned());
+  auto* block_flow = DynamicTo<LayoutBlockFlow>(ContainingNGBlock());
+  if (!block_flow || !block_flow->IsLayoutNGObject())
+    return nullptr;
+#if EXPENSIVE_DCHECKS_ARE_ON()
+  // Make sure that we don't skip blocks in the ancestry chain (which might
+  // happen if there are out-of-flow positioned objects, for instance). In this
+  // method we don't want to escape the enclosing inline formatting context.
+  for (const LayoutObject* walker = Parent(); walker != block_flow;
+       walker = walker->Parent())
+    DCHECK(!walker->IsLayoutBlock());
+#endif
+  return block_flow;
 }
 
-LayoutBlockFlow* LayoutObject::ContainingNGBlockFlow() const {
-  DCHECK(IsInline());
+LayoutBlock* LayoutObject::ContainingNGBlock() const {
+  NOT_DESTROYED();
   if (!RuntimeEnabledFeatures::LayoutNGEnabled())
     return nullptr;
-  if (LayoutObject* parent = Parent()) {
-    LayoutBox* box = parent->EnclosingBox();
-    DCHECK(box);
-    if (NGBlockNode::CanUseNewLayout(*box)) {
-      DCHECK(box->IsLayoutBlockFlow());
-      return To<LayoutBlockFlow>(box);
-    }
-  }
-  return nullptr;
+  LayoutBlock* containing_block = ContainingBlock();
+  if (!containing_block)
+    return nullptr;
+  // Flow threads should be invisible to LayoutNG, so skip to the multicol
+  // container.
+  if (UNLIKELY(containing_block->IsLayoutFlowThread()))
+    containing_block = To<LayoutBlockFlow>(containing_block->Parent());
+  if (!containing_block->IsLayoutNGObject())
+    return nullptr;
+  return containing_block;
 }
 
-const NGPhysicalBoxFragment* LayoutObject::ContainingBlockFlowFragment() const {
-  DCHECK(IsInline() || IsText());
-  LayoutBlockFlow* const block_flow = ContainingNGBlockFlow();
-  if (!block_flow || !block_flow->ChildrenInline())
+LayoutBlock* LayoutObject::ContainingFragmentationContextRoot() const {
+  NOT_DESTROYED();
+  if (!MightBeInsideFragmentationContext())
     return nullptr;
-  // TODO(kojii): CurrentFragment isn't always available after layout clean.
-  // Investigate why.
-  return block_flow->CurrentFragment();
+  bool found_column_spanner = IsColumnSpanAll();
+  for (LayoutBlock* ancestor = ContainingBlock(); ancestor;
+       ancestor = ancestor->ContainingBlock()) {
+    if (ancestor->IsFragmentationContextRoot()) {
+      // Column spanners do not participate in the fragmentation context
+      // of their nearest fragmentation context, but rather the next above,
+      // if there is one.
+      if (found_column_spanner)
+        return ancestor->ContainingFragmentationContextRoot();
+      return ancestor;
+    }
+    if (ancestor->IsColumnSpanAll())
+      found_column_spanner = true;
+  }
+  return nullptr;
 }
 
 bool LayoutObject::IsFirstInlineFragmentSafe() const {
+  NOT_DESTROYED();
   DCHECK(IsInline());
-  LayoutBlockFlow* block_flow = ContainingNGBlockFlow();
+  LayoutBlockFlow* block_flow = FragmentItemsContainer();
   return block_flow && !block_flow->NeedsLayout();
 }
 
-LayoutBox* LayoutObject::EnclosingScrollableBox() const {
-  for (LayoutObject* ancestor = Parent(); ancestor;
-       ancestor = ancestor->Parent()) {
-    if (!ancestor->IsBox())
-      continue;
-
-    LayoutBox* ancestor_box = ToLayoutBox(ancestor);
-    if (ancestor_box->CanBeScrolledAndHasScrollableArea())
-      return ancestor_box;
-  }
-
-  return nullptr;
-}
-
 LayoutFlowThread* LayoutObject::LocateFlowThreadContainingBlock() const {
+  NOT_DESTROYED();
   DCHECK(IsInsideFlowThread());
 
   // See if we have the thread cached because we're in the middle of layout.
   if (LayoutView* view = View()) {
     if (LayoutState* layout_state = view->GetLayoutState()) {
-      // TODO(mstensho): We should really just return whatever
-      // layoutState->flowThread() returns here, also if the value is nullptr.
       if (LayoutFlowThread* flow_thread = layout_state->FlowThread())
         return flow_thread;
     }
@@ -852,11 +1221,15 @@ LayoutFlowThread* LayoutObject::LocateFlowThreadContainingBlock() const {
 static inline bool ObjectIsRelayoutBoundary(const LayoutObject* object) {
   // FIXME: In future it may be possible to broaden these conditions in order to
   // improve performance.
-  if (object->IsTextControl())
-    return true;
 
-  if (object->IsSVGRoot())
-    return true;
+  // Positioned objects always have self-painting layers and are safe to use as
+  // relayout boundaries.
+  bool is_svg_root = object->IsSVGRoot();
+  bool has_self_painting_layer =
+      object->HasLayer() &&
+      To<LayoutBoxModelObject>(object)->HasSelfPaintingLayer();
+  if (!has_self_painting_layer && !is_svg_root)
+    return false;
 
   // LayoutInline can't be relayout roots since LayoutBlockFlow is responsible
   // for layouting them.
@@ -868,13 +1241,63 @@ static inline bool ObjectIsRelayoutBoundary(const LayoutObject* object) {
   if (object->IsTablePart())
     return false;
 
+  // OOF-positioned objects which rely on their static-position for placement
+  // cannot be relayout boundaries (their final position would be incorrect).
   const ComputedStyle* style = object->Style();
-  if (object->ShouldApplyLayoutContainment() &&
-      object->ShouldApplySizeContainment())
-    return true;
-
-  if (!object->HasOverflowClip())
+  if (object->IsOutOfFlowPositioned() &&
+      (style->HasAutoLeftAndRight() || style->HasAutoTopAndBottom()))
     return false;
+
+  if (const auto* layout_box = DynamicTo<LayoutBox>(object)) {
+    // In general we can't relayout a flex item independently of its container;
+    // not only is the result incorrect due to the override size that's set, it
+    // also messes with the cached main size on the flexbox.
+    if (layout_box->IsFlexItemIncludingNG())
+      return false;
+
+    // Similarly to flex items, we can't relayout a grid item independently of
+    // its container. This also applies to out of flow items of the grid, as we
+    // need the cached information of the grid to recompute the out of flow
+    // item's containing block rect.
+    if (layout_box->ContainingBlock()->IsLayoutGridIncludingNG())
+      return false;
+
+    if (const NGLayoutResult* layout_result =
+            layout_box->GetCachedLayoutResult()) {
+      const NGPhysicalFragment& fragment = layout_result->PhysicalFragment();
+
+      // In LayoutNG, if box has any OOF descendants, they are propagated to
+      // parent. Therefore, we must mark parent chain for layout.
+      if (fragment.HasOutOfFlowPositionedDescendants())
+        return false;
+
+      // Anchor queries should be propagated across the layout boundaries, even
+      // when `contain: strict` is explicitly set.
+      if (fragment.HasAnchorQuery())
+        return false;
+    }
+
+    // A box which doesn't establish a new formating context can pass a whole
+    // bunch of state (floats, margins) to an arbitrary sibling, causing that
+    // sibling to position/size differently.
+    if (!layout_box->CreatesNewFormattingContext())
+      return false;
+  }
+
+  // MathML subtrees can't be relayout roots because of the embellished operator
+  // and space-like logic.
+  if (object->IsMathML() && !object->IsMathMLRoot())
+    return false;
+
+  if (object->ShouldApplyLayoutContainment() &&
+      object->ShouldApplySizeContainment()) {
+    return true;
+  }
+
+  // SVG roots are sufficiently self-contained to be a relayout boundary, even
+  // if their size is non-fixed.
+  if (is_svg_root)
+    return true;
 
   // If either dimension is percent-based, intrinsic, or anything but fixed,
   // this object cannot form a re-layout boundary. A non-fixed computed logical
@@ -884,26 +1307,16 @@ static inline bool ObjectIsRelayoutBoundary(const LayoutObject* object) {
   if (!style->Width().IsFixed() || !style->Height().IsFixed())
     return false;
 
-  // Scrollbar parts can be removed during layout. Avoid the complexity of
-  // having to deal with that.
-  if (object->IsLayoutScrollbarPart())
+  if (object->IsTextControlIncludingNG())
+    return true;
+
+  if (!object->ShouldClipOverflowAlongBothAxis())
     return false;
 
-  if (const LayoutBox* layout_box = ToLayoutBoxOrNull(object)) {
-    // In general we can't relayout a flex item independently of its container;
-    // not only is the result incorrect due to the override size that's set, it
-    // also messes with the cached main size on the flexbox.
-    if (layout_box->IsFlexItemIncludingNG())
-      return false;
-
-    // In LayoutNG, if box has any OOF descendants, they are propagated to
-    // parent. Therefore, we must mark parent chain for layout.
-    if (layout_box->GetCachedLayoutResult() &&
-        layout_box->GetCachedLayoutResult()
-            ->PhysicalFragment()
-            .HasOutOfFlowPositionedDescendants())
-      return false;
-  }
+  // Scrollbar parts can be removed during layout. Avoid the complexity of
+  // having to deal with that.
+  if (object->IsLayoutCustomScrollbarPart())
+    return false;
 
   // Inside multicol it's generally problematic to allow relayout roots. The
   // multicol container itself may be scheduled for relayout as well (due to
@@ -926,13 +1339,15 @@ static inline bool ObjectIsRelayoutBoundary(const LayoutObject* object) {
 // |this|. When invalidating on inline blocks, floats, or OOF, caller need to
 // pay attention whether it should mark its inner context or outer.
 void LayoutObject::SetNeedsCollectInlines() {
+  NOT_DESTROYED();
   if (!RuntimeEnabledFeatures::LayoutNGEnabled())
     return;
 
   if (NeedsCollectInlines())
     return;
 
-  if (UNLIKELY(IsSVGChild()))
+  if (UNLIKELY(IsSVGChild() && !IsNGSVGText() && !IsSVGInline() &&
+               !IsSVGInlineText() && !IsNGSVGForeignObject()))
     return;
 
   // Don't mark |LayoutFlowThread| because |CollectInlines()| skips them.
@@ -944,6 +1359,7 @@ void LayoutObject::SetNeedsCollectInlines() {
 }
 
 void LayoutObject::SetChildNeedsCollectInlines() {
+  NOT_DESTROYED();
   if (!RuntimeEnabledFeatures::LayoutNGEnabled())
     return;
 
@@ -971,8 +1387,10 @@ void LayoutObject::SetChildNeedsCollectInlines() {
 
 void LayoutObject::MarkContainerChainForLayout(bool schedule_relayout,
                                                SubtreeLayoutScope* layouter) {
+  NOT_DESTROYED();
 #if DCHECK_IS_ON()
   DCHECK(!IsSetNeedsLayoutForbidden());
+  DCHECK(!GetDocument().InPostLifecycleSteps());
 #endif
   DCHECK(!layouter || this != layouter->Root());
   // When we're in layout, we're marking a descendant as needing layout with
@@ -994,19 +1412,20 @@ void LayoutObject::MarkContainerChainForLayout(bool schedule_relayout,
 
     // Note that if the last element we processed was blocked by a display lock,
     // and the reason we're propagating a change is that a subtree needed layout
-    // (ie self doesn't need layout), then we can return and stop the dirty bit
-    // propagation. Note that it's not enough to check |object|, since the
-    // element that is actually locked needs its child bits set properly, we
-    // need to go one more iteration after that.
-    if (!last->SelfNeedsLayout() &&
-        last->LayoutBlockedByDisplayLock(DisplayLockContext::kChildren)) {
+    // (ie |last| doesn't need either self layout or positioned movement
+    // layout), then we can return and stop the dirty bit propagation. Note that
+    // it's not enough to check |object|, since the element that is actually
+    // locked needs its child bits set properly, we need to go one more
+    // iteration after that.
+    if (!last->SelfNeedsLayout() && !last->NeedsPositionedMovementLayout() &&
+        last->ChildLayoutBlockedByDisplayLock()) {
       return;
     }
 
     // Don't mark the outermost object of an unrooted subtree. That object will
     // be marked when the subtree is added to the document.
     LayoutObject* container = object->Container();
-    if (!container && !object->IsLayoutView())
+    if (!container && !IsA<LayoutView>(object))
       return;
     if (!last->IsTextOrSVGChild() && last->StyleRef().HasOutOfFlowPosition()) {
       object = last->ContainingBlock();
@@ -1066,8 +1485,10 @@ void LayoutObject::MarkContainerChainForLayout(bool schedule_relayout,
 //    static-position, simply insert the object up the NGLayoutResult chain with
 //    an invalid static-position.
 void LayoutObject::MarkParentForOutOfFlowPositionedChange() {
+  NOT_DESTROYED();
 #if DCHECK_IS_ON()
   DCHECK(!IsSetNeedsLayoutForbidden());
+  DCHECK(!GetDocument().InPostLifecycleSteps());
 #endif
 
   LayoutObject* object = Parent();
@@ -1092,7 +1513,8 @@ void LayoutObject::MarkParentForOutOfFlowPositionedChange() {
 
 #if DCHECK_IS_ON()
 void LayoutObject::CheckBlockPositionedObjectsNeedLayout() {
-  if (LayoutBlockedByDisplayLock(DisplayLockContext::kChildren))
+  NOT_DESTROYED();
+  if (ChildLayoutBlockedByDisplayLock())
     return;
   DCHECK(!NeedsLayout());
 
@@ -1102,16 +1524,47 @@ void LayoutObject::CheckBlockPositionedObjectsNeedLayout() {
 }
 #endif
 
-void LayoutObject::SetPreferredLogicalWidthsDirty(
+void LayoutObject::SetIntrinsicLogicalWidthsDirty(
     MarkingBehavior mark_parents) {
-  bitfields_.SetPreferredLogicalWidthsDirty(true);
+  NOT_DESTROYED();
+  bitfields_.SetIntrinsicLogicalWidthsDirty(true);
+  bitfields_.SetIntrinsicLogicalWidthsDependsOnBlockConstraints(true);
+  bitfields_.SetIntrinsicLogicalWidthsChildDependsOnBlockConstraints(true);
   if (mark_parents == kMarkContainerChain &&
       (IsText() || !StyleRef().HasOutOfFlowPosition()))
-    InvalidateContainerPreferredLogicalWidths();
+    InvalidateContainerIntrinsicLogicalWidths();
 }
 
-void LayoutObject::ClearPreferredLogicalWidthsDirty() {
-  bitfields_.SetPreferredLogicalWidthsDirty(false);
+void LayoutObject::ClearIntrinsicLogicalWidthsDirty() {
+  NOT_DESTROYED();
+  bitfields_.SetIntrinsicLogicalWidthsDirty(false);
+}
+
+bool LayoutObject::IsFontFallbackValid() const {
+  NOT_DESTROYED();
+  return StyleRef().GetFont().IsFallbackValid() &&
+         FirstLineStyle()->GetFont().IsFallbackValid();
+}
+
+void LayoutObject::InvalidateSubtreeLayoutForFontUpdates() {
+  NOT_DESTROYED();
+  if (!IsFontFallbackValid()) {
+    SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
+        layout_invalidation_reason::kFontsChanged);
+  }
+  for (LayoutObject* child = SlowFirstChild(); child;
+       child = child->NextSibling()) {
+    child->InvalidateSubtreeLayoutForFontUpdates();
+  }
+}
+
+void LayoutObject::InvalidateIntersectionObserverCachedRects() {
+  NOT_DESTROYED();
+  if (GetNode() && GetNode()->IsElementNode()) {
+    if (auto* data = To<Element>(GetNode())->IntersectionObserverData()) {
+      data->InvalidateCachedRects();
+    }
+  }
 }
 
 static inline bool NGKeepInvalidatingBeyond(LayoutObject* o) {
@@ -1121,28 +1574,43 @@ static inline bool NGKeepInvalidatingBeyond(LayoutObject* o) {
   // next block container.
   // Atomic inlines do not have this problem as they are treated like blocks
   // in this context.
+  // There's a similar issue for flow thread objects, as they are invisible to
+  // LayoutNG.
   if (!RuntimeEnabledFeatures::LayoutNGEnabled())
     return false;
-  if (o->IsLayoutInline() || o->IsText())
+  if (o->IsLayoutInline() || o->IsText() || o->IsLayoutFlowThread())
     return true;
   return false;
 }
 
-inline void LayoutObject::InvalidateContainerPreferredLogicalWidths() {
+inline void LayoutObject::InvalidateContainerIntrinsicLogicalWidths() {
+  NOT_DESTROYED();
   // In order to avoid pathological behavior when inlines are deeply nested, we
   // do include them in the chain that we mark dirty (even though they're kind
   // of irrelevant).
-  LayoutObject* o = IsTableCell() ? ContainingBlock() : Container();
+  auto IntrinsicContainer = [](const LayoutObject* current) -> LayoutObject* {
+    // Table cell intrinsic logical-widths are queried directly from a <table>
+    // rather than from their parents (sections or rows). Skip these when
+    // invalidating.
+    if (current->IsTableCell()) {
+      if (current->IsTableCellLegacy())
+        return current->ContainingBlock();
+      else
+        return To<LayoutNGTableCell>(current)->Table();
+    }
+    return current->Container();
+  };
+
+  LayoutObject* o = IntrinsicContainer(this);
   while (o &&
-         (!o->PreferredLogicalWidthsDirty() || NGKeepInvalidatingBeyond(o))) {
+         (!o->IntrinsicLogicalWidthsDirty() || NGKeepInvalidatingBeyond(o))) {
     // Don't invalidate the outermost object of an unrooted subtree. That object
     // will be invalidated when the subtree is added to the document.
-    LayoutObject* container =
-        o->IsTableCell() ? o->ContainingBlock() : o->Container();
-    if (!container && !o->IsLayoutView())
+    LayoutObject* container = IntrinsicContainer(o);
+    if (!container && !IsA<LayoutView>(o))
       break;
 
-    o->bitfields_.SetPreferredLogicalWidthsDirty(true);
+    o->bitfields_.SetIntrinsicLogicalWidthsDirty(true);
     // A positioned object has no effect on the min/max width of its containing
     // block ever. We can optimize this case and not go up any further.
     if (o->StyleRef().HasOutOfFlowPosition())
@@ -1153,99 +1621,117 @@ inline void LayoutObject::InvalidateContainerPreferredLogicalWidths() {
 
 LayoutObject* LayoutObject::ContainerForAbsolutePosition(
     AncestorSkipInfo* skip_info) const {
+  NOT_DESTROYED();
   return FindAncestorByPredicate(this, skip_info, [](LayoutObject* candidate) {
-    if (!candidate->StyleRef().CanContainAbsolutePositionObjects() &&
-        candidate->ShouldApplyLayoutContainment()) {
-      UseCounter::Count(candidate->GetDocument(),
-                        WebFeature::kCSSContainLayoutPositionedDescendants);
-    }
     return candidate->CanContainAbsolutePositionObjects();
   });
 }
 
 LayoutObject* LayoutObject::ContainerForFixedPosition(
     AncestorSkipInfo* skip_info) const {
+  NOT_DESTROYED();
   DCHECK(!IsText());
   return FindAncestorByPredicate(this, skip_info, [](LayoutObject* candidate) {
-    if (!candidate->StyleRef().CanContainFixedPositionObjects(
-            candidate->IsDocumentElement()) &&
-        candidate->ShouldApplyLayoutContainment()) {
-      UseCounter::Count(candidate->GetDocument(),
-                        WebFeature::kCSSContainLayoutPositionedDescendants);
-    }
     return candidate->CanContainFixedPositionObjects();
   });
 }
 
-LayoutBlock* LayoutObject::FindNonAnonymousContainingBlock(
-    LayoutObject* container,
-    LayoutObject::AncestorSkipInfo* skip_info) const {
-  // For inlines, we return the nearest non-anonymous enclosing
-  // block. We don't try to return the inline itself. This allows us to avoid
-  // having a positioned objects list in all LayoutInlines and lets us return a
-  // strongly-typed LayoutBlock* result from this method. The
-  // LayoutObject::Container() method can actually be used to obtain the inline
-  // directly.
-  if (container && container->IsInline() && !container->IsAtomicInlineLevel()) {
-    container = container->ContainingBlock(skip_info);
-  }
-
-  if (container && !container->IsLayoutBlock())
-    container = container->ContainingBlock(skip_info);
-
-  while (container && container->IsAnonymousBlock())
-    container = container->ContainingBlock(skip_info);
-
-  return DynamicTo<LayoutBlock>(container);
-}
-
 LayoutBlock* LayoutObject::ContainingBlockForAbsolutePosition(
     AncestorSkipInfo* skip_info) const {
+  NOT_DESTROYED();
   auto* container = ContainerForAbsolutePosition(skip_info);
   return FindNonAnonymousContainingBlock(container, skip_info);
 }
 
 LayoutBlock* LayoutObject::ContainingBlockForFixedPosition(
     AncestorSkipInfo* skip_info) const {
+  NOT_DESTROYED();
   auto* container = ContainerForFixedPosition(skip_info);
   return FindNonAnonymousContainingBlock(container, skip_info);
 }
 
 const LayoutBlock* LayoutObject::InclusiveContainingBlock() const {
+  NOT_DESTROYED();
   auto* layout_block = DynamicTo<LayoutBlock>(this);
   return layout_block ? layout_block : ContainingBlock();
 }
 
-LayoutBlock* LayoutObject::ContainingBlock(AncestorSkipInfo* skip_info) const {
-  if (!IsTextOrSVGChild()) {
-    if (style_->GetPosition() == EPosition::kFixed)
-      return ContainingBlockForFixedPosition(skip_info);
-    if (style_->GetPosition() == EPosition::kAbsolute)
-      return ContainingBlockForAbsolutePosition(skip_info);
-  }
-  LayoutObject* object;
-  if (IsColumnSpanAll()) {
-    object = SpannerPlaceholder()->ContainingBlock();
-  } else {
-    object = Parent();
-    if (!object && IsLayoutScrollbarPart())
-      object = ToLayoutScrollbarPart(this)->GetScrollableArea()->GetLayoutBox();
-    while (object && ((object->IsInline() && !object->IsAtomicInlineLevel()) ||
-                      !object->IsLayoutBlock())) {
-      if (skip_info)
-        skip_info->Update(*object);
-      object = object->Parent();
+const LayoutBox* LayoutObject::ContainingScrollContainer() const {
+  NOT_DESTROYED();
+  if (auto* layer = EnclosingLayer()) {
+    if (auto* box = layer->GetLayoutBox()) {
+      if (box != this && box->IsScrollContainer())
+        return box;
     }
+    if (auto* scroll_container_layer = layer->ContainingScrollContainerLayer())
+      return scroll_container_layer->GetLayoutBox();
   }
+  return nullptr;
+}
 
-  return DynamicTo<LayoutBlock>(object);
+LayoutObject* LayoutObject::NonAnonymousAncestor() const {
+  NOT_DESTROYED();
+  LayoutObject* ancestor = Parent();
+  while (ancestor && ancestor->IsAnonymous())
+    ancestor = ancestor->Parent();
+  return ancestor;
+}
+
+LayoutObject* LayoutObject::NearestAncestorForElement() const {
+  NOT_DESTROYED();
+  LayoutObject* ancestor = Parent();
+  while (ancestor && !ancestor->IsForElement())
+    ancestor = ancestor->Parent();
+  return ancestor;
+}
+
+bool LayoutObject::IsAnonymousNGMulticolInlineWrapper() const {
+  NOT_DESTROYED();
+  if (!IsLayoutNGBlockFlow() || !IsAnonymousBlock())
+    return false;
+
+  const LayoutBlock* containing_block = ContainingNGBlock();
+  if (!containing_block)
+    return false;
+
+  return containing_block->IsFragmentationContextRoot();
+}
+
+LayoutBlock* LayoutObject::FindNonAnonymousContainingBlock(
+    LayoutObject* container,
+    AncestorSkipInfo* skip_info) {
+  // For inlines, we return the nearest non-anonymous enclosing
+  // block. We don't try to return the inline itself. This allows us to avoid
+  // having a positioned objects list in all LayoutInlines and lets us return a
+  // strongly-typed LayoutBlock* result from this method. The
+  // LayoutObject::Container() method can actually be used to obtain the inline
+  // directly.
+  if (container && !container->IsLayoutBlock())
+    container = container->ContainingBlock(skip_info);
+
+  // Allow an NG anonymous wrapper of an inline to be the containing block if it
+  // is the direct child of a multicol. This avoids the multicol from
+  // incorrectly becoming the containing block in the case of an inline
+  // container.
+  while (container && container->IsAnonymousBlock() &&
+         !container->IsAnonymousNGMulticolInlineWrapper())
+    container = container->ContainingBlock(skip_info);
+
+  return DynamicTo<LayoutBlock>(container);
 }
 
 bool LayoutObject::ComputeIsFixedContainer(const ComputedStyle* style) const {
+  NOT_DESTROYED();
   if (!style)
     return false;
+  bool is_document_element = IsDocumentElement();
   // https://www.w3.org/TR/filter-effects-1/#FilterProperty
-  if (style->HasFilter() && !this->IsDocumentElement())
+  if (!is_document_element && style->HasNonInitialFilter())
+    return true;
+  // Backdrop-filter creates a containing block for fixed and absolute
+  // positioned elements:
+  // https://drafts.fxtf.org/filter-effects-2/#backdrop-filter-operation
+  if (!is_document_element && style->HasNonInitialBackdropFilter())
     return true;
   // The LayoutView is always a container of fixed positioned descendants. In
   // addition, SVG foreignObjects become such containers, so that descendants
@@ -1253,66 +1739,101 @@ bool LayoutObject::ComputeIsFixedContainer(const ComputedStyle* style) const {
   // select elements inside that are created by user agent shadow DOM, and we
   // have (C++) code that assumes that the elements are indeed contained by the
   // text control. So just make sure this is the case.
-  if (this->IsLayoutView() || this->IsSVGForeignObject() ||
-      this->IsTextControl())
+  if (IsA<LayoutView>(this) || IsSVGForeignObjectIncludingNG() ||
+      IsTextControlIncludingNG())
     return true;
+
+  // crbug.com/1153042: If <fieldset> is a fixed container, its anonymous
+  // content box should be a fixed container.
+  if (IsAnonymous() && Parent() && Parent()->IsLayoutNGFieldset() &&
+      Parent()->CanContainFixedPositionObjects()) {
+    return true;
+  }
+
   // https://www.w3.org/TR/css-transforms-1/#containing-block-for-all-descendants
-  if (style->HasTransformRelatedProperty()) {
-    if (!this->IsInline() || this->IsAtomicInlineLevel())
+
+  // For transform-style specifically, we want to consider the computed
+  // value rather than the used value.
+  if (style->HasTransformRelatedProperty() ||
+      style->TransformStyle3D() == ETransformStyle3D::kPreserve3d) {
+    if (!IsInline() || IsAtomicInlineLevel())
       return true;
   }
   // https://www.w3.org/TR/css-contain-1/#containment-layout
-  if (this->ShouldApplyPaintContainment(*style) ||
-      this->ShouldApplyLayoutContainment(*style))
+  if (IsEligibleForPaintOrLayoutContainment() &&
+      (ShouldApplyPaintContainment(*style) ||
+       ShouldApplyLayoutContainment(*style) ||
+       style->WillChangeProperties().Contains(CSSPropertyID::kContain)))
     return true;
+
   return false;
 }
 
 bool LayoutObject::ComputeIsAbsoluteContainer(
     const ComputedStyle* style) const {
+  NOT_DESTROYED();
   if (!style)
     return false;
   return style->CanContainAbsolutePositionObjects() ||
-         ComputeIsFixedContainer(style);
+         ComputeIsFixedContainer(style) ||
+         // crbug.com/1153042: If <fieldset> is an absolute container, its
+         // anonymous content box should be an absolute container.
+         (IsAnonymous() && Parent() && Parent()->IsLayoutNGFieldset() &&
+          Parent()->StyleRef().CanContainAbsolutePositionObjects());
 }
 
-FloatRect LayoutObject::AbsoluteBoundingBoxFloatRect(
+gfx::RectF LayoutObject::AbsoluteBoundingBoxRectF(
     MapCoordinatesFlags flags) const {
+  NOT_DESTROYED();
   DCHECK(!(flags & kIgnoreTransforms));
-  Vector<FloatQuad> quads;
+  Vector<gfx::QuadF> quads;
   AbsoluteQuads(quads, flags);
 
   wtf_size_t n = quads.size();
   if (n == 0)
-    return FloatRect();
+    return gfx::RectF();
 
-  FloatRect result = quads[0].BoundingBox();
+  gfx::RectF result = quads[0].BoundingBox();
   for (wtf_size_t i = 1; i < n; ++i)
-    result.Unite(quads[i].BoundingBox());
+    result.Union(quads[i].BoundingBox());
   return result;
 }
 
-IntRect LayoutObject::AbsoluteBoundingBoxRect(MapCoordinatesFlags flags) const {
+gfx::Rect LayoutObject::AbsoluteBoundingBoxRect(
+    MapCoordinatesFlags flags) const {
+  NOT_DESTROYED();
   DCHECK(!(flags & kIgnoreTransforms));
-  Vector<FloatQuad> quads;
+  Vector<gfx::QuadF> quads;
   AbsoluteQuads(quads, flags);
 
   wtf_size_t n = quads.size();
   if (!n)
-    return IntRect();
+    return gfx::Rect();
 
-  IntRect result = quads[0].EnclosingBoundingBox();
-  for (wtf_size_t i = 1; i < n; ++i)
-    result.Unite(quads[i].EnclosingBoundingBox());
-  return result;
+  gfx::RectF result;
+  for (auto& quad : quads)
+    result.Union(quad.BoundingBox());
+  return gfx::ToEnclosingRect(result);
 }
 
-PhysicalRect LayoutObject::AbsoluteBoundingBoxRectHandlingEmptyInline() const {
-  return PhysicalRect::EnclosingRect(AbsoluteBoundingBoxFloatRect());
+PhysicalRect LayoutObject::AbsoluteBoundingBoxRectHandlingEmptyInline(
+    MapCoordinatesFlags flags) const {
+  NOT_DESTROYED();
+  return PhysicalRect::EnclosingRect(AbsoluteBoundingBoxRectF(flags));
 }
 
 PhysicalRect LayoutObject::AbsoluteBoundingBoxRectForScrollIntoView() const {
-  PhysicalRect rect = AbsoluteBoundingBoxRectHandlingEmptyInline();
+  NOT_DESTROYED();
+  // Ignore sticky position offsets for the purposes of scrolling elements into
+  // view. See https://www.w3.org/TR/css-position-3/#stickypos-scroll for
+  // details
+
+  const MapCoordinatesFlags flag =
+      (RuntimeEnabledFeatures::CSSPositionStickyStaticScrollPositionEnabled())
+          ? kIgnoreStickyOffset
+          : 0;
+
+  PhysicalRect rect = AbsoluteBoundingBoxRectHandlingEmptyInline(flag);
   const auto& style = StyleRef();
   rect.ExpandEdges(LayoutUnit(style.ScrollMarginTop()),
                    LayoutUnit(style.ScrollMarginRight()),
@@ -1321,116 +1842,97 @@ PhysicalRect LayoutObject::AbsoluteBoundingBoxRectForScrollIntoView() const {
   return rect;
 }
 
-FloatRect LayoutObject::AbsoluteBoundingBoxRectForRange(
-    const EphemeralRange& range) {
-  if (range.IsNull() || !range.StartPosition().ComputeContainerNode())
-    return FloatRect();
-
-  range.GetDocument().UpdateStyleAndLayout();
-
-  return ComputeTextFloatRect(range);
-}
-
-void LayoutObject::AddAbsoluteRectForLayer(IntRect& result) {
+void LayoutObject::AddAbsoluteRectForLayer(gfx::Rect& result) {
+  NOT_DESTROYED();
   if (HasLayer())
-    result.Unite(AbsoluteBoundingBoxRect());
+    result.Union(AbsoluteBoundingBoxRect());
   for (LayoutObject* current = SlowFirstChild(); current;
        current = current->NextSibling())
     current->AddAbsoluteRectForLayer(result);
 }
 
-IntRect LayoutObject::AbsoluteBoundingBoxRectIncludingDescendants() const {
-  IntRect result = AbsoluteBoundingBoxRect();
+gfx::Rect LayoutObject::AbsoluteBoundingBoxRectIncludingDescendants() const {
+  NOT_DESTROYED();
+  gfx::Rect result = AbsoluteBoundingBoxRect();
   for (LayoutObject* current = SlowFirstChild(); current;
        current = current->NextSibling())
     current->AddAbsoluteRectForLayer(result);
   return result;
 }
 
-void LayoutObject::Paint(const PaintInfo&) const {}
-
-const LayoutBoxModelObject& LayoutObject::ContainerForPaintInvalidation()
-    const {
-  CHECK(IsRooted());
-
-  if (const LayoutBoxModelObject* paint_invalidation_container =
-          EnclosingCompositedContainer())
-    return *paint_invalidation_container;
-
-  // If the current frame is not composited, we send just return the main
-  // frame's LayoutView so that we generate invalidations on the window.
-  const LayoutView* layout_view = View();
-  while (const LayoutObject* owner_object =
-             layout_view->GetFrame()->OwnerLayoutObject())
-    layout_view = owner_object->View();
-
-  DCHECK(layout_view);
-  return *layout_view;
+void LayoutObject::Paint(const PaintInfo&) const {
+  NOT_DESTROYED();
 }
 
-bool LayoutObject::RecalcLayoutOverflow() {
+RecalcLayoutOverflowResult LayoutObject::RecalcLayoutOverflow() {
+  NOT_DESTROYED();
+  ClearSelfNeedsLayoutOverflowRecalc();
   if (!ChildNeedsLayoutOverflowRecalc())
-    return false;
+    return RecalcLayoutOverflowResult();
+
   ClearChildNeedsLayoutOverflowRecalc();
   bool children_layout_overflow_changed = false;
   for (LayoutObject* current = SlowFirstChild(); current;
        current = current->NextSibling()) {
-    if (current->RecalcLayoutOverflow())
-      children_layout_overflow_changed = true;
+    children_layout_overflow_changed |=
+        current->RecalcLayoutOverflow().layout_overflow_changed;
   }
-  return children_layout_overflow_changed;
+  return {children_layout_overflow_changed, /* rebuild_fragment_tree */ false};
 }
 
 void LayoutObject::RecalcVisualOverflow() {
+  NOT_DESTROYED();
   for (LayoutObject* current = SlowFirstChild(); current;
        current = current->NextSibling()) {
     if (current->HasLayer() &&
-        ToLayoutBoxModelObject(current)->HasSelfPaintingLayer())
+        To<LayoutBoxModelObject>(current)->HasSelfPaintingLayer())
       continue;
     current->RecalcVisualOverflow();
   }
 }
 
-const LayoutBoxModelObject* LayoutObject::EnclosingCompositedContainer() const {
-  LayoutBoxModelObject* container = nullptr;
-  // FIXME: CompositingState is not necessarily up to date for many callers of
-  // this function.
-  DisableCompositingQueryAsserts disabler;
-
-  if (PaintLayer* painting_layer = PaintingLayer()) {
-    if (PaintLayer* compositing_layer =
-            painting_layer
-                ->EnclosingLayerForPaintInvalidationCrossingFrameBoundaries())
-      container = &compositing_layer->GetLayoutObject();
-  }
-  return container;
+void LayoutObject::RecalcNormalFlowChildVisualOverflowIfNeeded() {
+  NOT_DESTROYED();
+  if (IsOutOfFlowPositioned() ||
+      (HasLayer() && To<LayoutBoxModelObject>(this)->HasSelfPaintingLayer()))
+    return;
+  RecalcVisualOverflow();
 }
 
+#if DCHECK_IS_ON()
+void LayoutObject::InvalidateVisualOverflow() {
+  if (auto* box = DynamicTo<LayoutBox>(this)) {
+    for (const NGPhysicalBoxFragment& fragment : box->PhysicalFragments())
+      fragment.GetMutableForPainting().InvalidateInkOverflow();
+  }
+  // For now, we can only check |LayoutBox| laid out by NG.
+}
+#endif
+
 bool LayoutObject::HasDistortingVisualEffects() const {
+  NOT_DESTROYED();
   // TODO(szager): Check occlusion information propagated from out-of-process
   // parent frame.
-  PropertyTreeState paint_properties = EnclosingLayer()
-                                           ->GetLayoutObject()
-                                           .FirstFragment()
-                                           .LocalBorderBoxProperties();
+
+  auto& first_fragment = EnclosingLayer()->GetLayoutObject().FirstFragment();
+  // This can happen for an iframe element which is outside the viewport and has
+  // therefore never been painted. In that case, we do the safe thing -- report
+  // it as having distorting visual effects.
+  if (!first_fragment.HasLocalBorderBoxProperties())
+    return true;
+  auto paint_properties = first_fragment.LocalBorderBoxProperties();
 
   // No filters, no blends, no opacity < 100%.
   for (const auto* effect = &paint_properties.Effect().Unalias(); effect;
-       effect = SafeUnalias(effect->Parent())) {
-    if (!effect->Filter().IsEmpty() || !effect->BackdropFilter().IsEmpty() ||
-        effect->GetColorFilter() != kColorFilterNone ||
-        effect->BlendMode() != SkBlendMode::kSrcOver ||
-        effect->Opacity() != 1.0) {
+       effect = effect->UnaliasedParent()) {
+    if (effect->HasRealEffects())
       return true;
-    }
   }
 
-  PropertyTreeState root_properties = GetDocument()
-                                          .GetFrame()
-                                          ->LocalFrameRoot()
-                                          .ContentLayoutObject()
-                                          ->FirstFragment()
-                                          .LocalBorderBoxProperties();
+  auto& local_frame_root = GetDocument().GetFrame()->LocalFrameRoot();
+  auto& root_fragment = local_frame_root.ContentLayoutObject()->FirstFragment();
+  CHECK(root_fragment.HasLocalBorderBoxProperties());
+  const auto& root_properties = root_fragment.LocalBorderBoxProperties();
 
   // The only allowed transforms are 2D translation and proportional up-scaling.
   const auto& translation_2d_or_matrix =
@@ -1445,6 +1947,7 @@ bool LayoutObject::HasDistortingVisualEffects() const {
 }
 
 bool LayoutObject::HasNonZeroEffectiveOpacity() const {
+  NOT_DESTROYED();
   const FragmentData& fragment =
       EnclosingLayer()->GetLayoutObject().FirstFragment();
 
@@ -1455,10 +1958,10 @@ bool LayoutObject::HasNonZeroEffectiveOpacity() const {
   if (!fragment.HasLocalBorderBoxProperties())
     return true;
 
-  PropertyTreeState paint_properties = fragment.LocalBorderBoxProperties();
+  const auto& paint_properties = fragment.LocalBorderBoxProperties();
 
   for (const auto* effect = &paint_properties.Effect().Unalias(); effect;
-       effect = SafeUnalias(effect->Parent())) {
+       effect = effect->UnaliasedParent()) {
     if (effect->Opacity() == 0.0)
       return false;
   }
@@ -1466,6 +1969,7 @@ bool LayoutObject::HasNonZeroEffectiveOpacity() const {
 }
 
 String LayoutObject::DecoratedName() const {
+  NOT_DESTROYED();
   StringBuilder name;
   name.Append(GetName());
 
@@ -1473,7 +1977,7 @@ String LayoutObject::DecoratedName() const {
     name.Append(" (anonymous)");
   // FIXME: Remove the special case for LayoutView here (requires rebaseline of
   // all tests).
-  if (IsOutOfFlowPositioned() && !IsLayoutView())
+  if (IsOutOfFlowPositioned() && !IsA<LayoutView>(this))
     name.Append(" (positioned)");
   if (IsRelPositioned())
     name.Append(" (relative positioned)");
@@ -1488,6 +1992,7 @@ String LayoutObject::DecoratedName() const {
 }
 
 String LayoutObject::DebugName() const {
+  NOT_DESTROYED();
   StringBuilder name;
   name.Append(DecoratedName());
 
@@ -1499,57 +2004,21 @@ String LayoutObject::DebugName() const {
 }
 
 DOMNodeId LayoutObject::OwnerNodeId() const {
+  NOT_DESTROYED();
   return GetNode() ? DOMNodeIds::IdForNode(GetNode()) : kInvalidDOMNodeId;
-}
-
-IntRect LayoutObject::FragmentsVisualRectBoundingBox() const {
-  if (!fragment_.NextFragment())
-    return fragment_.VisualRect();
-  IntRect visual_rect;
-  for (auto* fragment = &fragment_; fragment;
-       fragment = fragment->NextFragment())
-    visual_rect.Unite(fragment->VisualRect());
-  return visual_rect;
-}
-
-IntRect LayoutObject::VisualRect() const {
-  return FragmentsVisualRectBoundingBox();
-}
-
-bool LayoutObject::IsPaintInvalidationContainer() const {
-  return HasLayer() &&
-         ToLayoutBoxModelObject(this)->Layer()->IsPaintInvalidationContainer();
 }
 
 void LayoutObject::InvalidateDisplayItemClients(
     PaintInvalidationReason reason) const {
+  NOT_DESTROYED();
   // This default implementation invalidates only the object itself as a
   // DisplayItemClient.
+  DCHECK(!GetSelectionDisplayItemClient());
   ObjectPaintInvalidator(*this).InvalidateDisplayItemClient(*this, reason);
 }
 
-bool LayoutObject::CompositedScrollsWithRespectTo(
-    const LayoutBoxModelObject& paint_invalidation_container) const {
-  return paint_invalidation_container.UsesCompositedScrolling() &&
-         this != &paint_invalidation_container;
-}
-
-void LayoutObject::InvalidatePaintRectangle(const PhysicalRect& dirty_rect) {
-  DCHECK_NE(GetDocument().Lifecycle().GetState(), DocumentLifecycle::kInPaint);
-
-  if (dirty_rect.IsEmpty())
-    return;
-
-  fragment_.SetPartialInvalidationLocalRect(
-      UnionRect(dirty_rect, fragment_.PartialInvalidationLocalRect()));
-
-  // Not using the WithoutGeometryChange version because we need to map the
-  // partial invalidated rect to visual rect in backing or the containing
-  // transform node.
-  SetShouldCheckForPaintInvalidation();
-}
-
 PhysicalRect LayoutObject::AbsoluteSelectionRect() const {
+  NOT_DESTROYED();
   PhysicalRect selection_rect = LocalSelectionVisualRect();
   if (!selection_rect.IsEmpty())
     MapToVisualRectInAncestorSpace(View(), selection_rect);
@@ -1563,46 +2032,19 @@ PhysicalRect LayoutObject::AbsoluteSelectionRect() const {
 DISABLE_CFI_PERF
 void LayoutObject::InvalidatePaint(
     const PaintInvalidatorContext& context) const {
+  NOT_DESTROYED();
   ObjectPaintInvalidatorWithContext(*this, context).InvalidatePaint();
 }
 
-void LayoutObject::AdjustVisualRectForCompositedScrolling(
-    LayoutRect& rect,
-    const LayoutBoxModelObject& paint_invalidation_container) const {
-  if (CompositedScrollsWithRespectTo(paint_invalidation_container)) {
-    rect.Move(
-        -ToLayoutBox(paint_invalidation_container).ScrolledContentOffset());
-  }
-}
-
-LayoutRect LayoutObject::VisualRectIncludingCompositedScrolling(
-    const LayoutBoxModelObject& paint_invalidation_container) const {
-  LayoutRect rect(VisualRect());
-  AdjustVisualRectForCompositedScrolling(rect, paint_invalidation_container);
-  return rect;
-}
-
-void LayoutObject::ClearPreviousVisualRects() {
-  DCHECK(!RuntimeEnabledFeatures::CompositeAfterPaintEnabled());
-
-  for (auto* fragment = &fragment_; fragment;
-       fragment = fragment->NextFragment()) {
-    fragment->SetVisualRect(IntRect());
-    fragment->SetSelectionVisualRect(IntRect());
-  }
-
-  // After clearing ("invalidating") the visual rects, mark this object as
-  // needing to re-compute them.
-  SetShouldDoFullPaintInvalidation();
-}
-
 PhysicalRect LayoutObject::VisualRectInDocument(VisualRectFlags flags) const {
+  NOT_DESTROYED();
   PhysicalRect rect = LocalVisualRect();
   MapToVisualRectInAncestorSpace(View(), rect, flags);
   return rect;
 }
 
 PhysicalRect LayoutObject::LocalVisualRectIgnoringVisibility() const {
+  NOT_DESTROYED();
   NOTREACHED();
   return PhysicalRect();
 }
@@ -1612,6 +2054,7 @@ bool LayoutObject::MapToVisualRectInAncestorSpaceInternalFastPath(
     PhysicalRect& rect,
     VisualRectFlags visual_rect_flags,
     bool& intersects) const {
+  NOT_DESTROYED();
   intersects = true;
   if (!(visual_rect_flags & kUseGeometryMapper) || !ancestor ||
       !ancestor->FirstFragment().HasLocalBorderBoxProperties())
@@ -1620,13 +2063,12 @@ bool LayoutObject::MapToVisualRectInAncestorSpaceInternalFastPath(
   if (ancestor == this)
     return true;
 
-  const auto* property_container = this;
   AncestorSkipInfo skip_info(ancestor);
-  while (!property_container->FirstFragment().HasLocalBorderBoxProperties()) {
-    property_container = property_container->Container(&skip_info);
-    if (!property_container || skip_info.AncestorSkipped())
-      return false;
-  }
+  PropertyTreeState container_properties = PropertyTreeState::Uninitialized();
+  const LayoutObject* property_container =
+      GetPropertyContainer(&skip_info, &container_properties);
+  if (!property_container)
+    return false;
 
   // This works because it's not possible to have any intervening clips,
   // effects, transforms between |this| and |property_container|, and therefore
@@ -1635,14 +2077,10 @@ bool LayoutObject::MapToVisualRectInAncestorSpaceInternalFastPath(
   // or property_container->FirstFragment().ContentsProperties().
   rect.Move(FirstFragment().PaintOffset());
   if (property_container != ancestor) {
-    FloatClipRect clip_rect((FloatRect(rect)));
-    const auto& local_state =
-        property_container == this
-            ? FirstFragment().LocalBorderBoxProperties()
-            : property_container->FirstFragment().ContentsProperties();
+    FloatClipRect clip_rect((gfx::RectF(rect)));
     intersects = GeometryMapper::LocalToAncestorVisualRect(
-        local_state, ancestor->FirstFragment().ContentsProperties(), clip_rect,
-        kIgnorePlatformOverlayScrollbarSize,
+        container_properties, ancestor->FirstFragment().ContentsProperties(),
+        clip_rect, kIgnoreOverlayScrollbarSize,
         (visual_rect_flags & kEdgeInclusive) ? kInclusiveIntersect
                                              : kNonInclusiveIntersect);
     rect = PhysicalRect::EnclosingRect(clip_rect.Rect());
@@ -1656,13 +2094,14 @@ bool LayoutObject::MapToVisualRectInAncestorSpace(
     const LayoutBoxModelObject* ancestor,
     PhysicalRect& rect,
     VisualRectFlags visual_rect_flags) const {
+  NOT_DESTROYED();
   bool intersects = true;
   if (MapToVisualRectInAncestorSpaceInternalFastPath(
           ancestor, rect, visual_rect_flags, intersects))
     return intersects;
 
   TransformState transform_state(TransformState::kApplyTransformDirection,
-                                 FloatQuad(FloatRect(rect)));
+                                 gfx::QuadF(gfx::RectF(rect)));
   intersects = MapToVisualRectInAncestorSpaceInternal(ancestor, transform_state,
                                                       visual_rect_flags);
   transform_state.Flatten();
@@ -1675,6 +2114,7 @@ bool LayoutObject::MapToVisualRectInAncestorSpaceInternal(
     const LayoutBoxModelObject* ancestor,
     TransformState& transform_state,
     VisualRectFlags visual_rect_flags) const {
+  NOT_DESTROYED();
   // For any layout object that doesn't override this method (the main example
   // is LayoutText), the rect is assumed to be in the parent's coordinate space,
   // except for container flip.
@@ -1690,7 +2130,7 @@ bool LayoutObject::MapToVisualRectInAncestorSpaceInternal(
                      : TransformState::kFlattenTransform;
 
       if (parent != ancestor &&
-          !ToLayoutBox(parent)->MapContentsRectToBoxSpace(
+          !To<LayoutBox>(parent)->MapContentsRectToBoxSpace(
               transform_state, accumulation, *this, visual_rect_flags))
         return false;
     }
@@ -1700,8 +2140,31 @@ bool LayoutObject::MapToVisualRectInAncestorSpaceInternal(
   return true;
 }
 
+const LayoutObject* LayoutObject::GetPropertyContainer(
+    AncestorSkipInfo* skip_info,
+    PropertyTreeStateOrAlias* container_properties) const {
+  NOT_DESTROYED();
+  const LayoutObject* property_container = this;
+  while (!property_container->FirstFragment().HasLocalBorderBoxProperties()) {
+    property_container = property_container->Container(skip_info);
+    if (!property_container || (skip_info && skip_info->AncestorSkipped()) ||
+        property_container->FirstFragment().NextFragment())
+      return nullptr;
+  }
+  if (container_properties) {
+    if (property_container == this) {
+      *container_properties = FirstFragment().LocalBorderBoxProperties();
+    } else {
+      *container_properties =
+          property_container->FirstFragment().ContentsProperties();
+    }
+  }
+  return property_container;
+}
+
 HitTestResult LayoutObject::HitTestForOcclusion(
     const PhysicalRect& hit_rect) const {
+  NOT_DESTROYED();
   LocalFrame* frame = GetDocument().GetFrame();
   DCHECK(!frame->View()->NeedsLayout());
   HitTestRequest::HitTestRequestType hit_type =
@@ -1714,7 +2177,9 @@ HitTestResult LayoutObject::HitTestForOcclusion(
                                                           this, true);
 }
 
-void LayoutObject::DirtyLinesFromChangedChild(LayoutObject*, MarkingBehavior) {}
+void LayoutObject::DirtyLinesFromChangedChild(LayoutObject*, MarkingBehavior) {
+  NOT_DESTROYED();
+}
 
 std::ostream& operator<<(std::ostream& out, const LayoutObject& object) {
   String info;
@@ -1737,15 +2202,18 @@ std::ostream& operator<<(std::ostream& out, const LayoutObject* object) {
 #if DCHECK_IS_ON()
 
 void LayoutObject::ShowTreeForThis() const {
+  NOT_DESTROYED();
   if (GetNode())
-    ::showTree(GetNode());
+    ::ShowTree(GetNode());
 }
 
 void LayoutObject::ShowLayoutTreeForThis() const {
-  showLayoutTree(this, nullptr);
+  NOT_DESTROYED();
+  ShowLayoutTree(this, nullptr);
 }
 
 void LayoutObject::ShowLineTreeForThis() const {
+  NOT_DESTROYED();
   if (const LayoutBlock* cb = InclusiveContainingBlock()) {
     auto* child_block_flow = DynamicTo<LayoutBlockFlow>(cb);
     if (child_block_flow) {
@@ -1756,6 +2224,18 @@ void LayoutObject::ShowLineTreeForThis() const {
 }
 
 void LayoutObject::ShowLayoutObject() const {
+  NOT_DESTROYED();
+
+  if (getenv("RUNNING_UNDER_RR")) {
+    // Printing timestamps requires an IPC to get the local time, which
+    // does not work in an rr replay session. Just disable timestamp printing
+    // globally, since we don't need them. Affecting global state isn't a
+    // problem because invoking this from a rr session creates a temporary
+    // program environment that will be destroyed as soon as the invocation
+    // completes.
+    logging::SetLogItems(true, true, false, false);
+  }
+
   StringBuilder string_builder;
   DumpLayoutObject(string_builder, true, kShowTreeCharacterOffset);
   DLOG(INFO) << "\n" << string_builder.ToString().Utf8();
@@ -1764,14 +2244,15 @@ void LayoutObject::ShowLayoutObject() const {
 void LayoutObject::DumpLayoutObject(StringBuilder& string_builder,
                                     bool dump_address,
                                     unsigned show_tree_character_offset) const {
+  NOT_DESTROYED();
   string_builder.Append(DecoratedName());
 
   if (dump_address)
     string_builder.AppendFormat(" %p", this);
 
-  if (IsText() && ToLayoutText(this)->IsTextFragment()) {
-    string_builder.AppendFormat(" \"%s\" ",
-                                ToLayoutText(this)->GetText().Ascii().c_str());
+  if (IsText() && To<LayoutText>(this)->IsTextFragment()) {
+    string_builder.AppendFormat(
+        " \"%s\" ", To<LayoutText>(this)->GetText().Ascii().c_str());
   }
 
   if (VirtualContinuation())
@@ -1783,7 +2264,7 @@ void LayoutObject::DumpLayoutObject(StringBuilder& string_builder,
     string_builder.Append('\t');
     string_builder.Append(GetNode()->ToString());
   }
-  if (LayoutBlockedByDisplayLock(DisplayLockContext::kChildren))
+  if (ChildLayoutBlockedByDisplayLock())
     string_builder.Append(" (display-locked)");
 }
 
@@ -1793,6 +2274,7 @@ void LayoutObject::DumpLayoutTreeAndMark(StringBuilder& string_builder,
                                          const LayoutObject* marked_object2,
                                          const char* marked_label2,
                                          unsigned depth) const {
+  NOT_DESTROYED();
   StringBuilder object_info;
   if (marked_object1 == this && marked_label1)
     object_info.Append(marked_label1);
@@ -1804,7 +2286,7 @@ void LayoutObject::DumpLayoutTreeAndMark(StringBuilder& string_builder,
   DumpLayoutObject(object_info, true, kShowTreeCharacterOffset);
   string_builder.Append(object_info);
 
-  if (!LayoutBlockedByDisplayLock(DisplayLockContext::kChildren)) {
+  if (!ChildLayoutBlockedByDisplayLock()) {
     for (const LayoutObject* child = SlowFirstChild(); child;
          child = child->NextSibling()) {
       string_builder.Append('\n');
@@ -1818,6 +2300,7 @@ void LayoutObject::DumpLayoutTreeAndMark(StringBuilder& string_builder,
 #endif  // DCHECK_IS_ON()
 
 bool LayoutObject::IsSelected() const {
+  NOT_DESTROYED();
   // Keep this fast and small, used in very hot functions to skip computing
   // selection when this is not selected. This function may be inlined in
   // link-optimized builds, but keeping fast and small helps running perf
@@ -1825,13 +2308,60 @@ bool LayoutObject::IsSelected() const {
   return GetSelectionState() != SelectionState::kNone ||
          // TODO(kojii): Can't we set SelectionState() properly to
          // LayoutTextFragment too?
-         (IsText() && ToLayoutText(*this).IsTextFragment() &&
-          LayoutSelection::IsSelected(*this));
+         (IsA<LayoutTextFragment>(*this) && LayoutSelection::IsSelected(*this));
 }
 
 bool LayoutObject::IsSelectable() const {
-  return !IsInert() && !(StyleRef().UserSelect() == EUserSelect::kNone &&
-                         StyleRef().UserModify() == EUserModify::kReadOnly);
+  NOT_DESTROYED();
+  return StyleRef().IsSelectable();
+}
+
+const ComputedStyle& LayoutObject::SlowEffectiveStyle(
+    NGStyleVariant style_variant) const {
+  NOT_DESTROYED();
+  switch (style_variant) {
+    case NGStyleVariant::kStandard:
+      return StyleRef();
+    case NGStyleVariant::kFirstLine:
+      if (IsInline() && IsAtomicInlineLevel())
+        return StyleRef();
+      return FirstLineStyleRef();
+    case NGStyleVariant::kEllipsis:
+      // The ellipsis is styled according to the line style.
+      // https://www.w3.org/TR/css-overflow-3/#ellipsing-details
+      // Use first-line style if exists since most cases it is the first line.
+      DCHECK(IsInline());
+      if (LayoutObject* block = ContainingBlock())
+        return block->FirstLineStyleRef();
+      return FirstLineStyleRef();
+  }
+  NOTREACHED();
+  return StyleRef();
+}
+
+const ComputedStyle* LayoutObject::SlowStyleForContinuationOutline() const {
+  NOT_DESTROYED();
+  // Fail fast using bitfields is done in |StyleForContinuationOutline|.
+  DCHECK(IsAnonymous() && !IsInline());
+  const auto* block_flow = DynamicTo<LayoutBlockFlow>(this);
+  if (!block_flow)
+    return nullptr;
+
+  // Check ancestors of the continuation in case nested inline boxes; e.g.
+  // <span style="outline: auto">
+  //   <span>
+  //     <div>block</div>
+  //   </span>
+  // </span>
+  for (const LayoutObject* continuation = block_flow->Continuation();
+       UNLIKELY(continuation && continuation->IsLayoutInline());
+       continuation = continuation->Parent()) {
+    const ComputedStyle& style = continuation->StyleRef();
+    if (style.OutlineStyleIsAuto() &&
+        NGOutlineUtils::HasPaintedOutline(style, continuation->GetNode()))
+      return &style;
+  }
+  return nullptr;
 }
 
 // Called when an object that was floating or positioned becomes a normal flow
@@ -1844,7 +2374,7 @@ static inline void HandleDynamicFloatPositionChange(LayoutObject* object) {
   object->SetInline(object->StyleRef().IsDisplayInlineType());
   if (object->IsInline() != object->Parent()->ChildrenInline()) {
     if (!object->IsInline()) {
-      ToLayoutBoxModelObject(object->Parent())->ChildBecameNonInline(object);
+      To<LayoutBoxModelObject>(object->Parent())->ChildBecameNonInline(object);
     } else {
       // An anonymous block must be made to wrap this inline.
       LayoutBlock* block =
@@ -1859,6 +2389,7 @@ static inline void HandleDynamicFloatPositionChange(LayoutObject* object) {
 
 StyleDifference LayoutObject::AdjustStyleDifference(
     StyleDifference diff) const {
+  NOT_DESTROYED();
   if (diff.TransformChanged() && IsSVG()) {
     // Skip a full layout for transforms at the html/svg boundary which do not
     // affect sizes inside SVG.
@@ -1866,26 +2397,27 @@ StyleDifference LayoutObject::AdjustStyleDifference(
       diff.SetNeedsFullLayout();
   }
 
-  // TODO(wangxianzhu): We may avoid subtree paint invalidation on CSS clip
-  // change for CAP.
-  if (diff.CssClipChanged())
-    diff.SetNeedsPaintInvalidationSubtree();
-
   // Optimization: for decoration/color property changes, invalidation is only
   // needed if we have style or text affected by these properties.
-  if (diff.TextDecorationOrColorChanged() &&
-      !diff.NeedsFullPaintInvalidation()) {
-    if (StyleRef().HasBorderColorReferencingCurrentColor() ||
-        StyleRef().HasOutlineWithCurrentColor() ||
+  if (diff.TextDecorationOrColorChanged() && !diff.NeedsPaintInvalidation()) {
+    if (StyleRef().HasOutlineWithCurrentColor() ||
         StyleRef().HasBackgroundRelatedColorReferencingCurrentColor() ||
         // Skip any text nodes that do not contain text boxes. Whitespace cannot
         // be skipped or we will miss invalidating decorations (e.g.,
-        // underlines).
-        (IsText() && !IsBR() && ToLayoutText(this)->HasTextBoxes()) ||
-        (IsSVG() && StyleRef().SvgStyle().IsFillColorCurrentColor()) ||
-        (IsSVG() && StyleRef().SvgStyle().IsStrokeColorCurrentColor()) ||
-        IsListMarker() || IsDetailsMarker())
-      diff.SetNeedsPaintInvalidationObject();
+        // underlines). MathML elements are not skipped either as some of them
+        // do special painting (e.g. fraction bar).
+        (IsText() && !IsBR() && To<LayoutText>(this)->HasInlineFragments()) ||
+        (IsSVG() && StyleRef().IsFillColorCurrentColor()) ||
+        (IsSVG() && StyleRef().IsStrokeColorCurrentColor()) ||
+        IsListMarkerForNormalContent() || IsMathML())
+      diff.SetNeedsPaintInvalidation();
+  }
+
+  // TODO(1088373): Pixel_WebGLHighToLowPower fails without this. This isn't the
+  // right way to ensure GPU switching. Investigate and do it in the right way.
+  if (!diff.NeedsPaintInvalidation() && IsLayoutView() && Style() &&
+      !Style()->GetFont().IsFallbackValid()) {
+    diff.SetNeedsPaintInvalidation();
   }
 
   // The answer to layerTypeRequired() for plugins, iframes, and canvas can
@@ -1894,7 +2426,7 @@ StyleDifference LayoutObject::AdjustStyleDifference(
   // elements changes, we need to force a layout.
   if (!diff.NeedsFullLayout() && Style() && IsBoxModelObject()) {
     bool requires_layer =
-        ToLayoutBoxModelObject(this)->LayerTypeRequired() != kNoPaintLayer;
+        To<LayoutBoxModelObject>(this)->LayerTypeRequired() != kNoPaintLayer;
     if (HasLayer() != requires_layer)
       diff.SetNeedsFullLayout();
   }
@@ -1902,10 +2434,13 @@ StyleDifference LayoutObject::AdjustStyleDifference(
   return diff;
 }
 
-void LayoutObject::SetPseudoStyle(
-    scoped_refptr<const ComputedStyle> pseudo_style) {
+void LayoutObject::SetPseudoElementStyle(
+    scoped_refptr<const ComputedStyle> pseudo_style,
+    bool match_parent_size) {
+  NOT_DESTROYED();
   DCHECK(pseudo_style->StyleType() == kPseudoIdBefore ||
          pseudo_style->StyleType() == kPseudoIdAfter ||
+         pseudo_style->StyleType() == kPseudoIdMarker ||
          pseudo_style->StyleType() == kPseudoIdFirstLetter);
 
   // FIXME: We should consider just making all pseudo items use an inherited
@@ -1919,45 +2454,35 @@ void LayoutObject::SetPseudoStyle(
   // avoid getting an inline with positioning or an invalid display.
   //
   if (IsImage() || IsQuote()) {
-    scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+    scoped_refptr<ComputedStyle> style =
+        GetDocument().GetStyleResolver().CreateComputedStyle();
     style->InheritFrom(*pseudo_style);
+    if (match_parent_size) {
+      DCHECK(IsImage());
+      style->SetWidth(Length::Percent(100));
+      style->SetHeight(Length::Percent(100));
+    }
     SetStyle(std::move(style));
+    return;
+  }
+
+  if (IsText() && UNLIKELY(IsA<LayoutNGTextCombine>(Parent()))) {
+    // See http://crbug.com/1222640
+    scoped_refptr<ComputedStyle> combined_text_style =
+        GetDocument().GetStyleResolver().CreateComputedStyle();
+    combined_text_style->InheritFrom(*pseudo_style);
+    StyleAdjuster::AdjustStyleForCombinedText(*combined_text_style);
+    SetStyle(std::move(combined_text_style));
     return;
   }
 
   SetStyle(std::move(pseudo_style));
 }
 
-void LayoutObject::MarkContainerChainForOverflowRecalcIfNeeded() {
-  LayoutObject* object = this;
-  do {
-    // Cell and row need to propagate the flag to their containing section and
-    // row as their containing block is the table wrapper.
-    // This enables us to only recompute overflow the modified sections / rows.
-    object = object->IsTableCell() || object->IsTableRow()
-                 ? object->Parent()
-                 : object->Container();
-    if (object) {
-      object->SetChildNeedsLayoutOverflowRecalc();
-      object->MarkSelfPaintingLayerForVisualOverflowRecalc();
-    }
-
-  } while (object);
-}
-
-void LayoutObject::SetNeedsOverflowRecalc() {
-  bool needed_recalc = SelfNeedsLayoutOverflowRecalc();
-  SetSelfNeedsLayoutOverflowRecalc();
-  SetShouldCheckForPaintInvalidation();
-  MarkSelfPaintingLayerForVisualOverflowRecalc();
-
-  if (!needed_recalc)
-    MarkContainerChainForOverflowRecalcIfNeeded();
-}
-
 DISABLE_CFI_PERF
 void LayoutObject::SetStyle(scoped_refptr<const ComputedStyle> style,
                             ApplyStyleChanges apply_changes) {
+  NOT_DESTROYED();
   if (style_ == style)
     return;
 
@@ -1972,7 +2497,7 @@ void LayoutObject::SetStyle(scoped_refptr<const ComputedStyle> style,
   if (style_) {
     diff = style_->VisualInvalidationDiff(GetDocument(), *style);
     if (const auto* cached_inherited_first_line_style =
-            style_->GetCachedPseudoStyle(kPseudoIdFirstLineInherited)) {
+            style_->GetCachedPseudoElementStyle(kPseudoIdFirstLineInherited)) {
       // Merge the difference to the first line style because even if the new
       // style is the same as the old style, the new style may have some higher
       // priority properties overriding first line style.
@@ -1980,9 +2505,78 @@ void LayoutObject::SetStyle(scoped_refptr<const ComputedStyle> style,
       diff.Merge(cached_inherited_first_line_style->VisualInvalidationDiff(
           GetDocument(), *style));
     }
+
+    auto HighlightPseudoUpdateDiff = [this, style,
+                                      &diff](const PseudoId pseudo) {
+      DCHECK(pseudo == kPseudoIdTargetText ||
+             pseudo == kPseudoIdSpellingError ||
+             pseudo == kPseudoIdGrammarError);
+
+      if (style_->HasPseudoElementStyle(pseudo) ||
+          style->HasPseudoElementStyle(pseudo)) {
+        const ComputedStyle* pseudo_old_style = nullptr;
+        const ComputedStyle* pseudo_new_style = nullptr;
+
+        // TODO(rego): Refactor this code so we can call something like
+        // HighlightData()->PseudoStyle(pseudo) and avoid the switch (we could
+        // also avoid the switch in
+        // HighlightPaintingUtils::HighlightPseudoStyle().
+        switch (pseudo) {
+          case kPseudoIdTargetText:
+            pseudo_old_style = style_->HighlightData()
+                                   ? style_->HighlightData()->TargetText()
+                                   : nullptr;
+            pseudo_new_style = style->HighlightData()
+                                   ? style->HighlightData()->TargetText()
+                                   : nullptr;
+            break;
+          case kPseudoIdSpellingError:
+            pseudo_old_style = style_->HighlightData()
+                                   ? style_->HighlightData()->SpellingError()
+                                   : nullptr;
+            pseudo_new_style = style->HighlightData()
+                                   ? style->HighlightData()->SpellingError()
+                                   : nullptr;
+            break;
+          case kPseudoIdGrammarError:
+            pseudo_old_style = style_->HighlightData()
+                                   ? style_->HighlightData()->GrammarError()
+                                   : nullptr;
+            pseudo_new_style = style->HighlightData()
+                                   ? style->HighlightData()->GrammarError()
+                                   : nullptr;
+            break;
+          default:
+            NOTREACHED();
+        }
+
+        if (pseudo_old_style && pseudo_new_style) {
+          diff.Merge(pseudo_old_style->VisualInvalidationDiff(
+              GetDocument(), *pseudo_new_style));
+        } else {
+          diff.SetNeedsPaintInvalidation();
+        }
+      }
+    };
+
+    if (RuntimeEnabledFeatures::HighlightInheritanceEnabled()) {
+      // TODO(rego): We don't do anything regarding ::selection, as ::selection
+      // uses its own mechanism for this (see
+      // LayoutObject::InvalidateSelectedChildrenOnStyleChange()). Maybe in the
+      // future we could detect changes here for ::selection too.
+      HighlightPseudoUpdateDiff(kPseudoIdTargetText);
+      if (RuntimeEnabledFeatures::CSSSpellingGrammarErrorsEnabled()) {
+        HighlightPseudoUpdateDiff(kPseudoIdSpellingError);
+        HighlightPseudoUpdateDiff(kPseudoIdGrammarError);
+      }
+    }
   }
 
   diff = AdjustStyleDifference(diff);
+
+  // A change to the background color or status of BG color animation may
+  // require paint invalidation.
+  diff = AdjustForBackgroundColorPaint(style_, style, GetNode(), diff);
 
   StyleWillChange(diff, *style);
 
@@ -2014,7 +2608,7 @@ void LayoutObject::SetStyle(scoped_refptr<const ComputedStyle> style,
 
   if (!diff.NeedsFullLayout()) {
     if (updated_diff.NeedsFullLayout()) {
-      SetNeedsLayoutAndPrefWidthsRecalc(
+      SetNeedsLayoutAndIntrinsicWidthsRecalc(
           layout_invalidation_reason::kStyleChange);
     } else if (updated_diff.NeedsPositionedMovementLayout()) {
       SetNeedsPositionedMovementLayout();
@@ -2028,33 +2622,45 @@ void LayoutObject::SetStyle(scoped_refptr<const ComputedStyle> style,
       container->SetNeedsOverflowRecalc();
   }
 
-  if (diff.NeedsRecomputeOverflow() && !NeedsLayout()) {
-    // TODO(rhogan): Make inlines capable of recomputing overflow too.
-    if (IsLayoutBlock()) {
-      SetNeedsOverflowRecalc();
-    } else {
-      SetNeedsLayoutAndPrefWidthsRecalc(
+  if (diff.NeedsRecomputeVisualOverflow()) {
+    if (!IsInLayoutNGInlineFormattingContext() && !IsLayoutNGObject() &&
+        !IsLayoutBlock() && !NeedsLayout()) {
+      // TODO(crbug.com/1128199): This is still needed because
+      // RecalcVisualOverflow() does not actually compute the visual overflow
+      // for inline elements (legacy layout). However in LayoutNG
+      // RecalcInlineChildrenInkOverflow() is called and visual overflow is
+      // recomputed properly so we don't need this (see crbug.com/1043927).
+      SetNeedsLayoutAndIntrinsicWidthsRecalc(
           layout_invalidation_reason::kStyleChange);
+    } else {
+      if (IsInLayoutNGInlineFormattingContext() && !NeedsLayout()) {
+        if (auto* text = DynamicTo<LayoutText>(this))
+          text->InvalidateVisualOverflow();
+      }
+      PaintingLayer()->SetNeedsVisualOverflowRecalc();
+      SetShouldCheckForPaintInvalidation();
+    }
+#if DCHECK_IS_ON()
+    InvalidateVisualOverflow();
+#endif
+  }
+
+  if (diff.NeedsPaintInvalidation() || updated_diff.NeedsPaintInvalidation()) {
+    if (IsSVGRoot()) {
+      // LayoutSVGRoot::LocalVisualRect() depends on some styles.
+      SetShouldDoFullPaintInvalidation();
+    } else {
+      // We'll set needing geometry change later if the style change does cause
+      // possible layout change or visual overflow change.
+      SetShouldDoFullPaintInvalidationWithoutGeometryChange();
     }
   }
 
-  if (diff.NeedsPaintInvalidationSubtree() ||
-      updated_diff.NeedsPaintInvalidationSubtree()) {
-    SetSubtreeShouldDoFullPaintInvalidation();
-  } else if (diff.NeedsPaintInvalidationObject() ||
-             updated_diff.NeedsPaintInvalidationObject()) {
-    // TODO(wangxianzhu): For now LayoutSVGRoot::localVisualRect() depends on
-    // several styles. Refactor to avoid this special case.
-    if (IsSVGRoot())
-      SetShouldDoFullPaintInvalidation();
-    else
-      SetShouldDoFullPaintInvalidationWithoutGeometryChange();
+  if (diff.NeedsPaintInvalidation() && old_style &&
+      !old_style->ClipPathDataEquivalent(*style_)) {
+    SetNeedsPaintPropertyUpdate();
+    PaintingLayer()->SetNeedsCompositingInputsUpdate();
   }
-
-  if ((diff.NeedsPaintInvalidationObject() ||
-       diff.NeedsPaintInvalidationSubtree()) &&
-      old_style && !old_style->ClipPathDataEquivalent(*style_))
-    InvalidateClipPathCache();
 
   if (diff.NeedsVisualRectUpdate())
     SetShouldCheckForPaintInvalidation();
@@ -2063,64 +2669,26 @@ void LayoutObject::SetStyle(scoped_refptr<const ComputedStyle> style,
   // apply to them, hence the !isText() check. If property nodes are added or
   // removed as a result of these style changes, PaintPropertyTreeBuilder will
   // call SetNeedsRepaint to cause re-generation of PaintChunks.
+  // This is skipped if no layer is present because |PaintLayer::StyleDidChange|
+  // will handle this invalidation.
   if (!IsText() && !HasLayer() &&
       (diff.TransformChanged() || diff.OpacityChanged() ||
-       diff.ZIndexChanged() || diff.FilterChanged() ||
-       diff.BackdropFilterChanged() || diff.CssClipChanged() ||
-       diff.BlendModeChanged() || diff.MaskChanged())) {
+       diff.ZIndexChanged() || diff.FilterChanged() || diff.CssClipChanged() ||
+       diff.BlendModeChanged() || diff.MaskChanged() ||
+       diff.CompositingReasonsChanged())) {
     SetNeedsPaintPropertyUpdate();
   }
-}
 
-void LayoutObject::UpdateImageObservers(const ComputedStyle* old_style,
-                                        const ComputedStyle* new_style) {
-  DCHECK(old_style || new_style);
-  DCHECK(!IsText());
-
-  UpdateFillImages(old_style ? &old_style->BackgroundLayers() : nullptr,
-                   new_style ? &new_style->BackgroundLayers() : nullptr);
-  UpdateFillImages(old_style ? &old_style->MaskLayers() : nullptr,
-                   new_style ? &new_style->MaskLayers() : nullptr);
-
-  UpdateImage(old_style ? old_style->BorderImage().GetImage() : nullptr,
-              new_style ? new_style->BorderImage().GetImage() : nullptr);
-  UpdateImage(old_style ? old_style->MaskBoxImage().GetImage() : nullptr,
-              new_style ? new_style->MaskBoxImage().GetImage() : nullptr);
-
-  StyleImage* old_content_image =
-      old_style && old_style->GetContentData() &&
-              old_style->GetContentData()->IsImage()
-          ? To<ImageContentData>(old_style->GetContentData())->GetImage()
-          : nullptr;
-  StyleImage* new_content_image =
-      new_style && new_style->GetContentData() &&
-              new_style->GetContentData()->IsImage()
-          ? To<ImageContentData>(new_style->GetContentData())->GetImage()
-          : nullptr;
-  UpdateImage(old_content_image, new_content_image);
-
-  StyleImage* old_box_reflect_mask_image =
-      old_style && old_style->BoxReflect()
-          ? old_style->BoxReflect()->Mask().GetImage()
-          : nullptr;
-  StyleImage* new_box_reflect_mask_image =
-      new_style && new_style->BoxReflect()
-          ? new_style->BoxReflect()->Mask().GetImage()
-          : nullptr;
-  UpdateImage(old_box_reflect_mask_image, new_box_reflect_mask_image);
-
-  UpdateShapeImage(old_style ? old_style->ShapeOutside() : nullptr,
-                   new_style ? new_style->ShapeOutside() : nullptr);
-  UpdateCursorImages(old_style ? old_style->Cursors() : nullptr,
-                     new_style ? new_style->Cursors() : nullptr);
-
-  UpdateFirstLineImageObservers(new_style);
+  if (!IsText() && diff.CompositablePaintEffectChanged()) {
+    SetShouldDoFullPaintInvalidationWithoutGeometryChange();
+  }
 }
 
 void LayoutObject::UpdateFirstLineImageObservers(
     const ComputedStyle* new_style) {
+  NOT_DESTROYED();
   bool has_new_first_line_style =
-      new_style && new_style->HasPseudoStyle(kPseudoIdFirstLine) &&
+      new_style && new_style->HasPseudoElementStyle(kPseudoIdFirstLine) &&
       BehavesLikeBlockContainer();
   DCHECK(!has_new_first_line_style || new_style == Style());
 
@@ -2128,14 +2696,15 @@ void LayoutObject::UpdateFirstLineImageObservers(
       !has_new_first_line_style)
     return;
 
-  using FirstLineStyleMap =
-      HashMap<const LayoutObject*, scoped_refptr<const ComputedStyle>>;
-  DEFINE_STATIC_LOCAL(FirstLineStyleMap, first_line_style_map, ());
+  using FirstLineStyleMap = HeapHashMap<WeakMember<const LayoutObject>,
+                                        scoped_refptr<const ComputedStyle>>;
+  DEFINE_STATIC_LOCAL(Persistent<FirstLineStyleMap>, first_line_style_map,
+                      (MakeGarbageCollected<FirstLineStyleMap>()));
   DCHECK_EQ(bitfields_.RegisteredAsFirstLineImageObserver(),
-            first_line_style_map.Contains(this));
+            first_line_style_map->Contains(this));
   const auto* old_first_line_style =
       bitfields_.RegisteredAsFirstLineImageObserver()
-          ? first_line_style_map.at(this)
+          ? first_line_style_map->at(this)
           : nullptr;
 
   // UpdateFillImages() may indirectly call LayoutBlock::ImageChanged() which
@@ -2162,42 +2731,54 @@ void LayoutObject::UpdateFirstLineImageObservers(
           &FirstLineStyleWithoutFallback()->BackgroundLayers()));
       new_first_line_style = FirstLineStyleWithoutFallback();
       bitfields_.SetRegisteredAsFirstLineImageObserver(true);
-      first_line_style_map.Set(this, std::move(new_first_line_style));
+      first_line_style_map->Set(this, std::move(new_first_line_style));
     } else {
       bitfields_.SetRegisteredAsFirstLineImageObserver(false);
-      first_line_style_map.erase(this);
+      first_line_style_map->erase(this);
     }
     DCHECK_EQ(bitfields_.RegisteredAsFirstLineImageObserver(),
-              first_line_style_map.Contains(this));
+              first_line_style_map->Contains(this));
   }
 }
 
 void LayoutObject::StyleWillChange(StyleDifference diff,
                                    const ComputedStyle& new_style) {
+  NOT_DESTROYED();
   if (style_) {
     bool visibility_changed = style_->Visibility() != new_style.Visibility();
     // If our z-index changes value or our visibility changes,
     // we need to dirty our stacking context's z-order list.
-    if (visibility_changed || style_->ZIndex() != new_style.ZIndex() ||
-        style_->IsStackingContext() != new_style.IsStackingContext()) {
+    if (visibility_changed ||
+        style_->EffectiveZIndex() != new_style.EffectiveZIndex() ||
+        IsStackingContext(*style_) != IsStackingContext(new_style)) {
       GetDocument().SetAnnotatedRegionsDirty(true);
-      if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache()) {
-        if (GetNode())
-          cache->ChildrenChanged(GetNode()->parentNode());
-        else
-          cache->ChildrenChanged(Parent());
-      }
     }
 
-    if (diff.TextDecorationOrColorChanged() ||
-        style_->InsideLink() != new_style.InsideLink()) {
+    bool background_color_changed =
+        ResolveColor(GetCSSPropertyBackgroundColor()) !=
+        ResolveColor(new_style, GetCSSPropertyBackgroundColor());
+
+    if (diff.TextDecorationOrColorChanged() || background_color_changed ||
+        style_->GetFontDescription() != new_style.GetFontDescription() ||
+        style_->GetWritingDirection() != new_style.GetWritingDirection() ||
+        style_->InsideLink() != new_style.InsideLink() ||
+        style_->VerticalAlign() != new_style.VerticalAlign() ||
+        style_->GetTextAlign() != new_style.GetTextAlign() ||
+        style_->TextIndent() != new_style.TextIndent()) {
       if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
-        cache->TextChanged(this);
+        cache->StyleChanged(this);
     }
 
     if (diff.TransformChanged()) {
       if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
         cache->LocationChanged(this);
+    }
+
+    if (visibility_changed || style_->IsInert() != new_style.IsInert()) {
+      if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache()) {
+        cache->ChildrenChanged(Parent());
+        cache->ChildrenChanged(this);
+      }
     }
 
     // Keep layer hierarchy visibility bits up to date if visibility changes.
@@ -2206,22 +2787,26 @@ void LayoutObject::StyleWillChange(StyleDifference diff,
       // tree.
       if (PaintLayer* layer = EnclosingLayer())
         layer->DirtyVisibleContentStatus();
+      GetDocument().GetFrame()->GetInputMethodController().DidChangeVisibility(
+          *this);
     }
 
-    if (IsFloating() && (style_->Floating() != new_style.Floating())) {
+    if (IsFloating() &&
+        (style_->UnresolvedFloating() != new_style.UnresolvedFloating())) {
       // For changes in float styles, we need to conceivably remove ourselves
       // from the floating objects list.
-      ToLayoutBox(this)->RemoveFloatingOrPositionedChildFromBlockLists();
+      To<LayoutBox>(this)->RemoveFloatingOrPositionedChildFromBlockLists();
     } else if (IsOutOfFlowPositioned() &&
                (style_->GetPosition() != new_style.GetPosition())) {
       // For changes in positioning styles, we need to conceivably remove
       // ourselves from the positioned objects list.
-      ToLayoutBox(this)->RemoveFloatingOrPositionedChildFromBlockLists();
+      To<LayoutBox>(this)->RemoveFloatingOrPositionedChildFromBlockLists();
     }
 
     affects_parent_block_ =
         IsFloatingOrOutOfFlowPositioned() &&
-        (!new_style.IsFloating() && !new_style.HasOutOfFlowPosition()) &&
+        ((!new_style.IsFloating() || new_style.IsFlexOrGridItem()) &&
+         !new_style.HasOutOfFlowPosition()) &&
         Parent() &&
         (Parent()->IsLayoutBlockFlow() || Parent()->IsLayoutInline());
 
@@ -2245,21 +2830,18 @@ void LayoutObject::StyleWillChange(StyleDifference diff,
   // Elements may inherit touch action from parent frame, so we need to report
   // touchstart handler if the root layout object has non-auto effective touch
   // action.
-  TouchAction old_touch_action = TouchAction::kTouchActionAuto;
+  TouchAction old_touch_action = TouchAction::kAuto;
   bool is_document_element = GetNode() && IsDocumentElement();
   if (style_) {
-    old_touch_action = is_document_element ? style_->GetEffectiveTouchAction()
-                                           : style_->GetTouchAction();
+    old_touch_action = style_->GetEffectiveTouchAction();
   }
-  TouchAction new_touch_action = is_document_element
-                                     ? new_style.GetEffectiveTouchAction()
-                                     : new_style.GetTouchAction();
+  TouchAction new_touch_action = new_style.GetEffectiveTouchAction();
   if (GetNode() && !GetNode()->IsTextNode() &&
-      (old_touch_action == TouchAction::kTouchActionAuto) !=
-          (new_touch_action == TouchAction::kTouchActionAuto)) {
+      (old_touch_action == TouchAction::kAuto) !=
+          (new_touch_action == TouchAction::kAuto)) {
     EventHandlerRegistry& registry =
         GetDocument().GetFrame()->GetEventHandlerRegistry();
-    if (new_touch_action != TouchAction::kTouchActionAuto) {
+    if (new_touch_action != TouchAction::kAuto) {
       registry.DidAddEventHandler(*GetNode(),
                                   EventHandlerRegistry::kTouchAction);
     } else {
@@ -2268,15 +2850,11 @@ void LayoutObject::StyleWillChange(StyleDifference diff,
     }
     MarkEffectiveAllowedTouchActionChanged();
   }
-}
-
-void LayoutObject::ClearBaseComputedStyle() {
-  auto* element = DynamicTo<Element>(GetNode());
-  if (!element)
-    return;
-
-  if (ElementAnimations* animations = element->GetElementAnimations())
-    animations->ClearBaseComputedStyle();
+  if (is_document_element && style_ && style_->Opacity() == 0.0f &&
+      new_style.Opacity() != 0.0f) {
+    if (LocalFrameView* frame_view = GetFrameView())
+      frame_view->GetPaintTimingDetector().ReportIgnoredContent();
+  }
 }
 
 static bool AreNonIdenticalCursorListsEqual(const ComputedStyle* a,
@@ -2292,13 +2870,14 @@ static inline bool AreCursorsEqual(const ComputedStyle* a,
 }
 
 void LayoutObject::SetScrollAnchorDisablingStyleChangedOnAncestor() {
+  NOT_DESTROYED();
   // Walk up the parent chain and find the first scrolling block to disable
   // scroll anchoring on.
   LayoutObject* object = Parent();
   Element* viewport_defining_element = GetDocument().ViewportDefiningElement();
   while (object) {
     auto* block = DynamicTo<LayoutBlock>(object);
-    if (block && (block->HasOverflowClip() ||
+    if (block && (block->IsScrollContainer() ||
                   block->GetNode() == viewport_defining_element)) {
       block->SetScrollAnchorDisablingStyleChanged(true);
       return;
@@ -2307,14 +2886,105 @@ void LayoutObject::SetScrollAnchorDisablingStyleChangedOnAncestor() {
   }
 }
 
+static void ClearAncestorScrollAnchors(LayoutObject* layout_object) {
+  PaintLayer* layer = nullptr;
+  if (LayoutObject* parent = layout_object->Parent())
+    layer = parent->EnclosingLayer();
+
+  while (layer) {
+    if (PaintLayerScrollableArea* scrollable_area =
+            layer->GetScrollableArea()) {
+      ScrollAnchor* anchor = scrollable_area->GetScrollAnchor();
+      DCHECK(anchor);
+      anchor->Clear();
+    }
+    layer = layer->Parent();
+  }
+}
+
+bool LayoutObject::BelongsToElementChangingOverflowBehaviour() const {
+  auto* element = DynamicTo<Element>(GetNode());
+  if (!element)
+    return false;
+
+  return IsA<HTMLVideoElement>(element) || IsA<HTMLCanvasElement>(element) ||
+         IsA<HTMLImageElement>(element);
+}
+
 void LayoutObject::StyleDidChange(StyleDifference diff,
                                   const ComputedStyle* old_style) {
+  NOT_DESTROYED();
+  if (HasHiddenBackface()) {
+    if (Parent() && Parent()->StyleRef().UsedTransformStyle3D() ==
+                        ETransformStyle3D::kPreserve3d) {
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kHiddenBackfaceWithPossible3D);
+      UseCounter::Count(GetDocument(), WebFeature::kHiddenBackfaceWith3D);
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kHiddenBackfaceWithPreserve3D);
+    } else if (style_->HasTransform()) {
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kHiddenBackfaceWithPossible3D);
+      // For consistency with existing code usage, this uses
+      // Has3DTransformOperation rather than the slightly narrower
+      // HasNonTrivial3DTransformOperation (which used to exist, and was only
+      // web-exposed for compositing decisions on low-end devices).  However,
+      // given the discussion in
+      // https://github.com/w3c/csswg-drafts/issues/3305 it's possible we may
+      // want to tie backface-visibility behavior to something closer to the
+      // latter.
+      if (style_->Has3DTransformOperation()) {
+        UseCounter::Count(GetDocument(), WebFeature::kHiddenBackfaceWith3D);
+      }
+    }
+  }
+
+  if (ShouldApplyStrictContainment() && style_->IsContentVisibilityVisible()) {
+    if (ShouldApplyStyleContainment()) {
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kCSSContainAllWithoutContentVisibility);
+    }
+    UseCounter::Count(GetDocument(),
+                      WebFeature::kCSSContainStrictWithoutContentVisibility);
+  }
+
+  // See the discussion at
+  // https://github.com/w3c/csswg-drafts/issues/7144#issuecomment-1090933632
+  // for more information.
+  //
+  // For a replaced element that isn't SVG or a embedded content, such as iframe
+  // or object, we want to count the number of pages that have an explicit
+  // overflow: visible (that remains visible after style adjuster). Separately,
+  // we also want to count out of those cases how many have an object-fit none
+  // or cover or non-default object-position, all of which may cause overflow.
+  //
+  // Note that SVG already supports overflow: visible, meaning we won't be
+  // changing the behavior regardless of the counts. Likewise, embedded content
+  // will remain clipped regardless of the overflow: visible behvaior change.
+  // Note for this reason we exclude SVG and embedded content from the counts.
+  if (BelongsToElementChangingOverflowBehaviour()) {
+    if ((StyleRef().HasExplicitOverflowXVisible() &&
+         StyleRef().OverflowX() == EOverflow::kVisible) ||
+        (StyleRef().HasExplicitOverflowYVisible() &&
+         StyleRef().OverflowY() == EOverflow::kVisible)) {
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kExplicitOverflowVisibleOnReplacedElement);
+
+      Deprecation::CountDeprecation(
+          GetDocument().GetExecutionContext(),
+          WebFeature::kExplicitOverflowVisibleOnReplacedElement);
+      if (!StyleRef().ObjectPropertiesPreventReplacedOverflow()) {
+        UseCounter::Count(
+            GetDocument(),
+            WebFeature::
+                kExplicitOverflowVisibleOnReplacedElementWithObjectProp);
+      }
+    }
+  }
+
   // First assume the outline will be affected. It may be updated when we know
   // it's not affected.
-  bool has_outline = style_->HasOutline();
-  SetOutlineMayBeAffectedByDescendants(has_outline);
-  if (!has_outline)
-    SetPreviousOutlineMayBeAffectedByDescendants(false);
+  SetOutlineMayBeAffectedByDescendants(style_->HasOutline());
 
   if (affects_parent_block_)
     HandleDynamicFloatPositionChange(this);
@@ -2337,7 +3007,8 @@ void LayoutObject::StyleDidChange(StyleDifference diff,
       MarkContainerChainForLayout();
     }
 
-    SetNeedsLayoutAndPrefWidthsRecalc(layout_invalidation_reason::kStyleChange);
+    SetNeedsLayoutAndIntrinsicWidthsRecalc(
+        layout_invalidation_reason::kStyleChange);
   } else if (diff.NeedsPositionedMovementLayout()) {
     SetNeedsPositionedMovementLayout();
   }
@@ -2359,14 +3030,14 @@ void LayoutObject::StyleDidChange(StyleDifference diff,
     }
   }
 
-  if (diff.NeedsFullPaintInvalidation() && old_style) {
+  if (diff.NeedsPaintInvalidation() && old_style) {
     if (ResolveColor(*old_style, GetCSSPropertyBackgroundColor()) !=
             ResolveColor(GetCSSPropertyBackgroundColor()) ||
         old_style->BackgroundLayers() != StyleRef().BackgroundLayers())
       SetBackgroundNeedsFullPaintInvalidation();
   }
 
-  ApplyPseudoStyleChanges(old_style);
+  ApplyPseudoElementStyleChanges(old_style);
 
   if (old_style &&
       old_style->UsedTransformStyle3D() != StyleRef().UsedTransformStyle3D()) {
@@ -2374,20 +3045,42 @@ void LayoutObject::StyleDidChange(StyleDifference diff,
     AddSubtreePaintPropertyUpdateReason(
         SubtreePaintPropertyUpdateReason::kTransformStyleChanged);
   }
+
+  if (old_style && old_style->OverflowAnchor() != StyleRef().OverflowAnchor()) {
+    ClearAncestorScrollAnchors(this);
+  }
+
+  // Note: It's possible this will be moved to a particular later point within
+  // the "update the rendering" steps, and thus not belong here.
+  const auto* toggle_root = StyleRef().ToggleRoot();
+  if (toggle_root && (!old_style || !old_style->ToggleRoot() ||
+                      *toggle_root != *(old_style->ToggleRoot()))) {
+    // This element has toggle specifiers; these specifiers require that we
+    // create toggles.
+    Element* element = DynamicTo<Element>(GetNode());
+    DCHECK(element);
+    if (element) {
+      element->EnsureToggleMap().CreateToggles(toggle_root);
+    }
+  }
 }
 
-void LayoutObject::ApplyPseudoStyleChanges(const ComputedStyle* old_style) {
+void LayoutObject::ApplyPseudoElementStyleChanges(
+    const ComputedStyle* old_style) {
+  NOT_DESTROYED();
   ApplyFirstLineChanges(old_style);
 
-  if ((old_style && old_style->HasPseudoStyle(kPseudoIdSelection)) ||
-      StyleRef().HasPseudoStyle(kPseudoIdSelection))
+  if ((old_style && old_style->HasPseudoElementStyle(kPseudoIdSelection)) ||
+      StyleRef().HasPseudoElementStyle(kPseudoIdSelection))
     InvalidateSelectedChildrenOnStyleChange();
 }
 
 void LayoutObject::ApplyFirstLineChanges(const ComputedStyle* old_style) {
+  NOT_DESTROYED();
   bool has_old_first_line_style =
-      old_style && old_style->HasPseudoStyle(kPseudoIdFirstLine);
-  bool has_new_first_line_style = StyleRef().HasPseudoStyle(kPseudoIdFirstLine);
+      old_style && old_style->HasPseudoElementStyle(kPseudoIdFirstLine);
+  bool has_new_first_line_style =
+      StyleRef().HasPseudoElementStyle(kPseudoIdFirstLine);
   if (!has_old_first_line_style && !has_new_first_line_style)
     return;
 
@@ -2395,21 +3088,23 @@ void LayoutObject::ApplyFirstLineChanges(const ComputedStyle* old_style) {
   bool has_diff = false;
   if (Parent() && has_old_first_line_style && has_new_first_line_style) {
     if (const auto* old_first_line_style =
-            old_style->GetCachedPseudoStyle(kPseudoIdFirstLine)) {
+            old_style->GetCachedPseudoElementStyle(kPseudoIdFirstLine)) {
       if (const auto* new_first_line_style = FirstLineStyleWithoutFallback()) {
         diff = old_first_line_style->VisualInvalidationDiff(
             GetDocument(), *new_first_line_style);
+        diff = AdjustForBackgroundColorPaint(
+            old_first_line_style, new_first_line_style, GetNode(), diff);
         has_diff = true;
       }
     }
   }
   if (!has_diff) {
-    diff.SetNeedsPaintInvalidationObject();
+    diff.SetNeedsPaintInvalidation();
     diff.SetNeedsFullLayout();
   }
 
-  if (BehavesLikeBlockContainer() && (diff.NeedsFullPaintInvalidation() ||
-                                      diff.TextDecorationOrColorChanged())) {
+  if (BehavesLikeBlockContainer() &&
+      (diff.NeedsPaintInvalidation() || diff.TextDecorationOrColorChanged())) {
     if (auto* first_line_container =
             To<LayoutBlock>(this)->NearestInnerBlockWithFirstLine())
       first_line_container->SetShouldDoFullPaintInvalidationForFirstLine();
@@ -2418,78 +3113,13 @@ void LayoutObject::ApplyFirstLineChanges(const ComputedStyle* old_style) {
   if (diff.NeedsLayout()) {
     if (diff.NeedsFullLayout())
       SetNeedsCollectInlines();
-    SetNeedsLayoutAndPrefWidthsRecalc(layout_invalidation_reason::kStyleChange);
+    SetNeedsLayoutAndIntrinsicWidthsRecalc(
+        layout_invalidation_reason::kStyleChange);
   }
-}
-
-void LayoutObject::PropagateStyleToAnonymousChildren() {
-  // FIXME: We could save this call when the change only affected non-inherited
-  // properties.
-  for (LayoutObject* child = SlowFirstChild(); child;
-       child = child->NextSibling()) {
-    if (!child->IsAnonymous() || child->StyleRef().StyleType() != kPseudoIdNone)
-      continue;
-    if (child->AnonymousHasStylePropagationOverride())
-      continue;
-
-    scoped_refptr<ComputedStyle> new_style =
-        ComputedStyle::CreateAnonymousStyleWithDisplay(
-            StyleRef(), child->StyleRef().Display());
-
-    // Preserve the position style of anonymous block continuations as they can
-    // have relative position when they contain block descendants of relative
-    // positioned inlines.
-    auto* child_block_flow = DynamicTo<LayoutBlockFlow>(child);
-    if (child->IsInFlowPositioned() && child_block_flow &&
-        child_block_flow->IsAnonymousBlockContinuation())
-      new_style->SetPosition(child->StyleRef().GetPosition());
-
-    if (child->IsLayoutNGListMarker())
-      new_style->SetWhiteSpace(child->StyleRef().WhiteSpace());
-
-    UpdateAnonymousChildStyle(child, *new_style);
-
-    child->SetStyle(std::move(new_style));
-  }
-
-  if (StyleRef().StyleType() == kPseudoIdNone)
-    return;
-
-  // Propagate style from pseudo elements to generated content. We skip children
-  // with pseudo element StyleType() in the for-loop above and skip over
-  // descendants which are not generated content in this subtree traversal.
-  //
-  // TODO(futhark): It's possible we could propagate anonymous style from pseudo
-  // elements through anonymous table layout objects in the recursive
-  // implementation above, but it would require propagating the StyleType()
-  // somehow because there is code relying on generated content having a certain
-  // StyleType().
-  LayoutObject* child = NextInPreOrder(this);
-  while (child) {
-    if (!child->IsAnonymous()) {
-      // Don't propagate into non-anonymous descendants of pseudo elements. This
-      // can typically happen for ::first-letter inside ::before. The
-      // ::first-letter will propagate to its anonymous children separately.
-      child = child->NextInPreOrderAfterChildren(this);
-      continue;
-    }
-    if (child->IsText() || child->IsQuote() || child->IsImage())
-      child->SetPseudoStyle(Style());
-    child = child->NextInPreOrder(this);
-  }
-}
-
-void LayoutObject::SetStyleWithWritingModeOfParent(
-    scoped_refptr<ComputedStyle> style) {
-  const LayoutObject* parent = Parent();
-  if (parent) {
-    style->SetWritingMode(parent->StyleRef().GetWritingMode());
-    style->UpdateFontOrientation();
-  }
-  SetStyle(std::move(style));
 }
 
 void LayoutObject::AddAsImageObserver(StyleImage* image) {
+  NOT_DESTROYED();
   if (!image)
     return;
 #if DCHECK_IS_ON()
@@ -2499,6 +3129,7 @@ void LayoutObject::AddAsImageObserver(StyleImage* image) {
 }
 
 void LayoutObject::RemoveAsImageObserver(StyleImage* image) {
+  NOT_DESTROYED();
   if (!image)
     return;
 #if DCHECK_IS_ON()
@@ -2510,6 +3141,7 @@ void LayoutObject::RemoveAsImageObserver(StyleImage* image) {
 
 void LayoutObject::UpdateFillImages(const FillLayer* old_layers,
                                     const FillLayer* new_layers) {
+  NOT_DESTROYED();
   // Optimize the common case
   if (FillLayer::ImagesIdentical(old_layers, new_layers))
     return;
@@ -2527,6 +3159,7 @@ void LayoutObject::UpdateFillImages(const FillLayer* old_layers,
 
 void LayoutObject::UpdateCursorImages(const CursorList* old_cursors,
                                       const CursorList* new_cursors) {
+  NOT_DESTROYED();
   if (old_cursors && new_cursors && *old_cursors == *new_cursors)
     return;
 
@@ -2541,6 +3174,7 @@ void LayoutObject::UpdateCursorImages(const CursorList* old_cursors,
 }
 
 void LayoutObject::UpdateImage(StyleImage* old_image, StyleImage* new_image) {
+  NOT_DESTROYED();
   if (old_image != new_image) {
     // AddAsImageObserver first, to avoid removing all clients of an image.
     AddAsImageObserver(new_image);
@@ -2550,6 +3184,7 @@ void LayoutObject::UpdateImage(StyleImage* old_image, StyleImage* new_image) {
 
 void LayoutObject::UpdateShapeImage(const ShapeValue* old_shape_value,
                                     const ShapeValue* new_shape_value) {
+  NOT_DESTROYED();
   if (old_shape_value || new_shape_value) {
     UpdateImage(old_shape_value ? old_shape_value->GetImage() : nullptr,
                 new_shape_value ? new_shape_value->GetImage() : nullptr);
@@ -2558,6 +3193,7 @@ void LayoutObject::UpdateShapeImage(const ShapeValue* old_shape_value,
 
 void LayoutObject::CheckCounterChanges(const ComputedStyle* old_style,
                                        const ComputedStyle* new_style) {
+  NOT_DESTROYED();
   DCHECK(new_style);
   if (old_style) {
     if (old_style->CounterDirectivesEqual(*new_style))
@@ -2567,17 +3203,19 @@ void LayoutObject::CheckCounterChanges(const ComputedStyle* old_style,
       return;
   }
   LayoutCounter::LayoutObjectStyleChanged(*this, old_style, *new_style);
-  View()->SetNeedsCounterUpdate();
+  View()->SetNeedsMarkerOrCounterUpdate();
 }
 
 PhysicalRect LayoutObject::ViewRect() const {
+  NOT_DESTROYED();
   return View()->ViewRect();
 }
 
-FloatPoint LayoutObject::AncestorToLocalFloatPoint(
+gfx::PointF LayoutObject::AncestorToLocalPoint(
     const LayoutBoxModelObject* ancestor,
-    const FloatPoint& container_point,
+    const gfx::PointF& container_point,
     MapCoordinatesFlags mode) const {
+  NOT_DESTROYED();
   TransformState transform_state(
       TransformState::kUnapplyInverseTransformDirection, container_point);
   MapAncestorToLocal(ancestor, transform_state, mode);
@@ -2586,13 +3224,14 @@ FloatPoint LayoutObject::AncestorToLocalFloatPoint(
   return transform_state.LastPlanarPoint();
 }
 
-FloatQuad LayoutObject::AncestorToLocalQuad(
+gfx::QuadF LayoutObject::AncestorToLocalQuad(
     const LayoutBoxModelObject* ancestor,
-    const FloatQuad& quad,
+    const gfx::QuadF& quad,
     MapCoordinatesFlags mode) const {
+  NOT_DESTROYED();
   TransformState transform_state(
       TransformState::kUnapplyInverseTransformDirection,
-      quad.BoundingBox().Center(), quad);
+      quad.BoundingBox().CenterPoint(), quad);
   MapAncestorToLocal(ancestor, transform_state, mode);
   transform_state.Flatten();
   return transform_state.LastPlanarQuad();
@@ -2601,6 +3240,7 @@ FloatQuad LayoutObject::AncestorToLocalQuad(
 void LayoutObject::MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
                                       TransformState& transform_state,
                                       MapCoordinatesFlags mode) const {
+  NOT_DESTROYED();
   if (ancestor == this)
     return;
 
@@ -2611,10 +3251,12 @@ void LayoutObject::MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
 
   PhysicalOffset container_offset =
       OffsetFromContainer(container, mode & kIgnoreScrollOffset);
+
   // TODO(smcgruer): This is inefficient. Instead we should avoid including
   // offsetForInFlowPosition in offsetFromContainer when ignoring sticky.
   if (mode & kIgnoreStickyOffset && IsStickyPositioned()) {
-    container_offset -= ToLayoutBoxModelObject(this)->OffsetForInFlowPosition();
+    container_offset -=
+        To<LayoutBoxModelObject>(this)->OffsetForInFlowPosition();
   }
 
   if (IsLayoutFlowThread()) {
@@ -2629,10 +3271,15 @@ void LayoutObject::MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
   // Text objects just copy their parent's computed style, so we need to ignore
   // them.
   bool use_transforms = !(mode & kIgnoreTransforms);
-  bool preserve3d =
-      use_transforms &&
-      ((container->StyleRef().Preserves3D() && !container->IsText()) ||
-       (StyleRef().Preserves3D() && !IsText()));
+
+  const bool container_preserves_3d = container->StyleRef().Preserves3D();
+  // Just because container and this have preserve-3d doesn't mean all
+  // the DOM elements between them do.  (We know they don't have a
+  // transform, though, since otherwise they'd be the container.)
+  const bool path_preserves_3d = container == NearestAncestorForElement();
+  const bool preserve3d = use_transforms && container_preserves_3d &&
+                          !container->IsText() && path_preserves_3d;
+
   if (use_transforms && ShouldUseTransformFromContainer(container)) {
     TransformationMatrix t;
     GetTransformFromContainer(container, container_offset, t);
@@ -2652,29 +3299,16 @@ void LayoutObject::MapLocalToAncestor(const LayoutBoxModelObject* ancestor,
     transform_state.Move(-ancestor->OffsetFromAncestor(container),
                          preserve3d ? TransformState::kAccumulateTransform
                                     : TransformState::kFlattenTransform);
-    // If the ancestor is fixed, then the rect is already in its coordinates so
-    // doesn't need viewport-adjusting.
-    if (ancestor->StyleRef().GetPosition() != EPosition::kFixed &&
-        container->IsLayoutView() &&
-        StyleRef().GetPosition() == EPosition::kFixed) {
-      transform_state.Move(ToLayoutView(container)->OffsetForFixedPosition());
-    }
     return;
   }
 
   container->MapLocalToAncestor(ancestor, transform_state, mode);
 }
 
-const LayoutObject* LayoutObject::PushMappingToContainer(
-    const LayoutBoxModelObject* ancestor_to_stop_at,
-    LayoutGeometryMap& geometry_map) const {
-  NOTREACHED();
-  return nullptr;
-}
-
 void LayoutObject::MapAncestorToLocal(const LayoutBoxModelObject* ancestor,
                                       TransformState& transform_state,
                                       MapCoordinatesFlags mode) const {
+  NOT_DESTROYED();
   if (this == ancestor)
     return;
 
@@ -2688,8 +3322,15 @@ void LayoutObject::MapAncestorToLocal(const LayoutBoxModelObject* ancestor,
 
   PhysicalOffset container_offset = OffsetFromContainer(container);
   bool use_transforms = !(mode & kIgnoreTransforms);
-  bool preserve3d = use_transforms && (container->StyleRef().Preserves3D() ||
-                                       StyleRef().Preserves3D());
+
+  // Just because container and this have preserve-3d doesn't mean all
+  // the DOM elements between them do.  (We know they don't have a
+  // transform, though, since otherwise they'd be the container.)
+  if (container != NearestAncestorForElement()) {
+    transform_state.Move(PhysicalOffset(), TransformState::kFlattenTransform);
+  }
+
+  const bool preserve3d = use_transforms && StyleRef().Preserves3D();
   if (use_transforms && ShouldUseTransformFromContainer(container)) {
     TransformationMatrix t;
     GetTransformFromContainer(container, container_offset, t);
@@ -2709,66 +3350,74 @@ void LayoutObject::MapAncestorToLocal(const LayoutBoxModelObject* ancestor,
     transform_state.Move(
         visual_point -
         PhysicalOffsetToBeNoop(
-            ToLayoutFlowThread(this)->VisualPointToFlowThreadPoint(
+            To<LayoutFlowThread>(this)->VisualPointToFlowThreadPoint(
                 visual_point.ToLayoutPoint())));
   }
 
   if (skip_info.AncestorSkipped()) {
     container_offset = ancestor->OffsetFromAncestor(container);
     transform_state.Move(-container_offset);
-    // If the ancestor is fixed, then the rect is already in its coordinates so
-    // doesn't need viewport-adjusting.
-    if (ancestor->StyleRef().GetPosition() != EPosition::kFixed &&
-        container->IsLayoutView() &&
-        StyleRef().GetPosition() == EPosition::kFixed) {
-      transform_state.Move(ToLayoutView(container)->OffsetForFixedPosition());
-    }
   }
 }
 
 bool LayoutObject::ShouldUseTransformFromContainer(
     const LayoutObject* container_object) const {
+  NOT_DESTROYED();
   // hasTransform() indicates whether the object has transform, transform-style
   // or perspective. We just care about transform, so check the layer's
   // transform directly.
-  return (HasLayer() && ToLayoutBoxModelObject(this)->Layer()->Transform()) ||
+  return (HasLayer() && To<LayoutBoxModelObject>(this)->Layer()->Transform()) ||
          (container_object && container_object->StyleRef().HasPerspective());
 }
 
 void LayoutObject::GetTransformFromContainer(
     const LayoutObject* container_object,
     const PhysicalOffset& offset_in_container,
-    TransformationMatrix& transform) const {
+    TransformationMatrix& transform,
+    const PhysicalSize* size) const {
+  NOT_DESTROYED();
   transform.MakeIdentity();
   PaintLayer* layer =
-      HasLayer() ? ToLayoutBoxModelObject(this)->Layer() : nullptr;
+      HasLayer() ? To<LayoutBoxModelObject>(this)->Layer() : nullptr;
   if (layer && layer->Transform())
     transform.Multiply(layer->CurrentTransform());
 
   transform.PostTranslate(offset_in_container.left.ToFloat(),
                           offset_in_container.top.ToFloat());
 
-  if (container_object && container_object->HasLayer() &&
-      container_object->StyleRef().HasPerspective()) {
+  bool has_perspective = container_object && container_object->HasLayer() &&
+                         container_object->StyleRef().HasPerspective();
+  if (has_perspective && container_object != NearestAncestorForElement()) {
+    has_perspective = false;
+
+    if (StyleRef().Preserves3D() || transform.Creates3D()) {
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kDifferentPerspectiveCBOrParent);
+    }
+  }
+
+  if (has_perspective) {
     // Perspective on the container affects us, so we have to factor it in here.
     DCHECK(container_object->HasLayer());
-    FloatPoint perspective_origin =
-        ToLayoutBoxModelObject(container_object)->Layer()->PerspectiveOrigin();
+    gfx::PointF perspective_origin;
+    if (const auto* container_box = DynamicTo<LayoutBox>(container_object))
+      perspective_origin = container_box->PerspectiveOrigin(size);
 
     TransformationMatrix perspective_matrix;
     perspective_matrix.ApplyPerspective(
-        container_object->StyleRef().Perspective());
-    perspective_matrix.ApplyTransformOrigin(perspective_origin.X(),
-                                            perspective_origin.Y(), 0);
+        container_object->StyleRef().UsedPerspective());
+    perspective_matrix.ApplyTransformOrigin(perspective_origin.x(),
+                                            perspective_origin.y(), 0);
 
     transform = perspective_matrix * transform;
   }
 }
 
-FloatPoint LayoutObject::LocalToAncestorFloatPoint(
-    const FloatPoint& local_point,
+gfx::PointF LayoutObject::LocalToAncestorPoint(
+    const gfx::PointF& local_point,
     const LayoutBoxModelObject* ancestor,
     MapCoordinatesFlags mode) const {
+  NOT_DESTROYED();
   TransformState transform_state(TransformState::kApplyTransformDirection,
                                  local_point);
   MapLocalToAncestor(ancestor, transform_state, mode);
@@ -2777,16 +3426,28 @@ FloatPoint LayoutObject::LocalToAncestorFloatPoint(
   return transform_state.LastPlanarPoint();
 }
 
-FloatQuad LayoutObject::LocalToAncestorQuad(
-    const FloatQuad& local_quad,
+PhysicalRect LayoutObject::LocalToAncestorRect(
+    const PhysicalRect& rect,
     const LayoutBoxModelObject* ancestor,
     MapCoordinatesFlags mode) const {
+  NOT_DESTROYED();
+  return PhysicalRect::EnclosingRect(
+      LocalToAncestorQuad(gfx::QuadF(gfx::RectF(rect)), ancestor, mode)
+          .BoundingBox());
+}
+
+gfx::QuadF LayoutObject::LocalToAncestorQuad(
+    const gfx::QuadF& local_quad,
+    const LayoutBoxModelObject* ancestor,
+    MapCoordinatesFlags mode) const {
+  NOT_DESTROYED();
   // Track the point at the center of the quad's bounding box. As
   // MapLocalToAncestor() calls OffsetFromContainer(), it will use that point
   // as the reference point to decide which column's transform to apply in
   // multiple-column blocks.
   TransformState transform_state(TransformState::kApplyTransformDirection,
-                                 local_quad.BoundingBox().Center(), local_quad);
+                                 local_quad.BoundingBox().CenterPoint(),
+                                 local_quad);
   MapLocalToAncestor(ancestor, transform_state, mode);
   transform_state.Flatten();
 
@@ -2798,11 +3459,12 @@ void LayoutObject::LocalToAncestorRects(
     const LayoutBoxModelObject* ancestor,
     const PhysicalOffset& pre_offset,
     const PhysicalOffset& post_offset) const {
+  NOT_DESTROYED();
   for (wtf_size_t i = 0; i < rects.size(); ++i) {
     PhysicalRect& rect = rects[i];
     rect.Move(pre_offset);
-    FloatQuad container_quad =
-        LocalToAncestorQuad(FloatQuad(FloatRect(rect)), ancestor);
+    gfx::QuadF container_quad =
+        LocalToAncestorQuad(gfx::QuadF(gfx::RectF(rect)), ancestor);
     PhysicalRect container_rect =
         PhysicalRect::EnclosingRect(container_quad.BoundingBox());
     if (container_rect.IsEmpty()) {
@@ -2817,23 +3479,33 @@ void LayoutObject::LocalToAncestorRects(
 TransformationMatrix LayoutObject::LocalToAncestorTransform(
     const LayoutBoxModelObject* ancestor,
     MapCoordinatesFlags mode) const {
+  NOT_DESTROYED();
   DCHECK(!(mode & kIgnoreTransforms));
   TransformState transform_state(TransformState::kApplyTransformDirection);
   MapLocalToAncestor(ancestor, transform_state, mode);
   return transform_state.AccumulatedTransform();
 }
 
+bool LayoutObject::OffsetForContainerDependsOnPoint(
+    const LayoutObject* container) const {
+  return IsLayoutFlowThread() ||
+         (container->StyleRef().IsFlippedBlocksWritingMode() &&
+          container->IsBox());
+}
+
 PhysicalOffset LayoutObject::OffsetFromContainer(
     const LayoutObject* o,
     bool ignore_scroll_offset) const {
+  NOT_DESTROYED();
   return OffsetFromContainerInternal(o, ignore_scroll_offset);
 }
 
 PhysicalOffset LayoutObject::OffsetFromContainerInternal(
     const LayoutObject* o,
     bool ignore_scroll_offset) const {
+  NOT_DESTROYED();
   DCHECK_EQ(o, Container());
-  return o->HasOverflowClip()
+  return o->IsScrollContainer()
              ? OffsetFromScrollableContainer(o, ignore_scroll_offset)
              : PhysicalOffset();
 }
@@ -2841,10 +3513,15 @@ PhysicalOffset LayoutObject::OffsetFromContainerInternal(
 PhysicalOffset LayoutObject::OffsetFromScrollableContainer(
     const LayoutObject* container,
     bool ignore_scroll_offset) const {
-  DCHECK(container->HasOverflowClip());
-  const LayoutBox* box = ToLayoutBox(container);
+  NOT_DESTROYED();
+  DCHECK(container->IsScrollContainer());
+
+  if (IsFixedPositioned() && container->IsLayoutView())
+    return PhysicalOffset();
+
+  const auto* box = To<LayoutBox>(container);
   if (!ignore_scroll_offset)
-    return -PhysicalOffset(box->ScrolledContentOffset());
+    return -box->ScrolledContentOffset();
 
   // ScrollOrigin accounts for other writing modes whose content's origin is not
   // at the top-left.
@@ -2853,6 +3530,7 @@ PhysicalOffset LayoutObject::OffsetFromScrollableContainer(
 
 PhysicalOffset LayoutObject::OffsetFromAncestor(
     const LayoutObject* ancestor_container) const {
+  NOT_DESTROYED();
   if (ancestor_container == this)
     return PhysicalOffset();
 
@@ -2887,6 +3565,7 @@ LayoutRect LayoutObject::LocalCaretRect(
     const InlineBox*,
     int,
     LayoutUnit* extra_width_to_end_of_line) const {
+  NOT_DESTROYED();
   if (extra_width_to_end_of_line)
     *extra_width_to_end_of_line = LayoutUnit();
 
@@ -2894,84 +3573,27 @@ LayoutRect LayoutObject::LocalCaretRect(
 }
 
 bool LayoutObject::IsRooted() const {
+  NOT_DESTROYED();
   const LayoutObject* object = this;
   while (object->Parent() && !object->HasLayer())
     object = object->Parent();
   if (object->HasLayer())
-    return ToLayoutBoxModelObject(object)->Layer()->Root()->IsRootLayer();
+    return To<LayoutBoxModelObject>(object)->Layer()->Root()->IsRootLayer();
   return false;
 }
 
 RespectImageOrientationEnum LayoutObject::ShouldRespectImageOrientation(
     const LayoutObject* layout_object) {
-  if (!layout_object)
-    return kDoNotRespectImageOrientation;
-
-  // Respect the image's orientation if it's being used as a full-page image or
-  // it's an <img> and the setting to respect it everywhere is set or the <img>
-  // has image-orientation: from-image style. FIXME: crbug.com/498233
-  if (layout_object->GetDocument().IsImageDocument())
-    return kRespectImageOrientation;
-
-  if (!IsHTMLImageElement(layout_object->GetNode()))
-    return kDoNotRespectImageOrientation;
-
-  if (layout_object->GetDocument().GetSettings() &&
-      layout_object->GetDocument()
-          .GetSettings()
-          ->GetShouldRespectImageOrientation())
-    return kRespectImageOrientation;
-
-  if (layout_object->Style() &&
-      layout_object->StyleRef().RespectImageOrientation() ==
+  if (layout_object && layout_object->Style() &&
+      layout_object->StyleRef().RespectImageOrientation() !=
           kRespectImageOrientation)
-    return kRespectImageOrientation;
+    return kDoNotRespectImageOrientation;
 
-  return kDoNotRespectImageOrientation;
-}
-
-LayoutObject* LayoutObject::Container(AncestorSkipInfo* skip_info) const {
-  // TODO(mstensho): Get rid of this. Nobody should call this method with those
-  // flags already set.
-  if (skip_info)
-    skip_info->ResetOutput();
-
-  if (IsTextOrSVGChild())
-    return Parent();
-
-  EPosition pos = style_->GetPosition();
-  if (pos == EPosition::kFixed)
-    return ContainerForFixedPosition(skip_info);
-
-  if (pos == EPosition::kAbsolute) {
-    return ContainerForAbsolutePosition(skip_info);
-  }
-
-  if (IsColumnSpanAll()) {
-    LayoutObject* multicol_container = SpannerPlaceholder()->Container();
-    if (skip_info) {
-      // We jumped directly from the spanner to the multicol container. Need to
-      // check if we skipped |ancestor| or filter/reflection on the way.
-      for (LayoutObject* walker = Parent();
-           walker && walker != multicol_container; walker = walker->Parent())
-        skip_info->Update(*walker);
-    }
-    return multicol_container;
-  }
-
-  if (IsFloating() && !IsInLayoutNGInlineFormattingContext())
-    return ContainingBlock(skip_info);
-
-  return Parent();
-}
-
-inline LayoutObject* LayoutObject::ParentCrossingFrames() const {
-  if (IsLayoutView())
-    return GetFrame()->OwnerLayoutObject();
-  return Parent();
+  return kRespectImageOrientation;
 }
 
 inline void LayoutObject::ClearLayoutRootIfNeeded() const {
+  NOT_DESTROYED();
   if (LocalFrameView* view = GetFrameView()) {
     if (!DocumentBeingDestroyed())
       view->ClearLayoutSubtreeRoot(*this);
@@ -2979,6 +3601,7 @@ inline void LayoutObject::ClearLayoutRootIfNeeded() const {
 }
 
 void LayoutObject::WillBeDestroyed() {
+  NOT_DESTROYED();
   // Destroy any leftover anonymous children.
   LayoutObjectChildList* children = VirtualChildren();
   if (children)
@@ -2990,17 +3613,8 @@ void LayoutObject::WillBeDestroyed() {
       frame->GetPage()->GetAutoscrollController().StopAutoscrollIfNeeded(this);
   }
 
-  // For accessibility management, notify the parent of the imminent change to
-  // its child set.
-  // We do it now, before remove(), while the parent pointer is still available.
-  if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
-    cache->ChildrenChanged(Parent());
-
   Remove();
 
-  // The remove() call above may invoke axObjectCache()->childrenChanged() on
-  // the parent, which may require the AX layout object for this layoutObject.
-  // So we remove the AX layout object now, after the layoutObject is removed.
   if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
     cache->Remove(this);
 
@@ -3017,7 +3631,7 @@ void LayoutObject::WillBeDestroyed() {
   // m_style is null in cases of partial construction. Any handler we added
   // previously may have already been removed by the Document independently.
   if (GetNode() && !GetNode()->IsTextNode() && style_ &&
-      style_->GetTouchAction() != TouchAction::kTouchActionAuto) {
+      style_->GetTouchAction() != TouchAction::kAuto) {
     EventHandlerRegistry& registry =
         GetDocument().GetFrame()->GetEventHandlerRegistry();
     if (registry.EventHandlerTargets(EventHandlerRegistry::kTouchAction)
@@ -3041,14 +3655,20 @@ void LayoutObject::WillBeDestroyed() {
   SECURITY_DCHECK(as_image_observer_count_ == 0u);
 #endif
 
-  if (GetFrameView())
+  if (GetFrameView()) {
+    GetFrameView()->RemovePendingTransformUpdate(*this);
     SetIsBackgroundAttachmentFixedObject(false);
+  }
 }
 
 DISABLE_CFI_PERF
 void LayoutObject::InsertedIntoTree() {
+  NOT_DESTROYED();
   // FIXME: We should DCHECK(isRooted()) here but generated content makes some
   // out-of-order insertion.
+
+  bitfields_.SetMightTraversePhysicalFragments(
+      MightTraversePhysicalFragments(*this));
 
   // Keep our layer hierarchy updated. Optimize for the common case where we
   // don't have any children and don't have a layer attached to ourselves.
@@ -3071,7 +3691,7 @@ void LayoutObject::InsertedIntoTree() {
 
   // |FirstInlineFragment()| should be cleared. |LayoutObjectChildList| does
   // this, just check here for all new objects in the tree.
-  DCHECK_EQ(FirstInlineFragment(), nullptr);
+  DCHECK(!HasInlineFragments());
 
   if (Parent()->ChildrenInline())
     Parent()->DirtyLinesFromChangedChild(this);
@@ -3110,6 +3730,7 @@ static bool FindReferencingScrollAnchors(
 }
 
 void LayoutObject::WillBeRemovedFromTree() {
+  NOT_DESTROYED();
   // FIXME: We should DCHECK(isRooted()) but we have some out-of-order removals
   // which would need to be fixed first.
 
@@ -3146,15 +3767,19 @@ void LayoutObject::WillBeRemovedFromTree() {
     FindReferencingScrollAnchors(this, kClear);
   }
 
-  if (RuntimeEnabledFeatures::FirstContentfulPaintPlusPlusEnabled() ||
-      RuntimeEnabledFeatures::ElementTimingEnabled(&GetDocument())) {
-    if (LocalFrameView* frame_view = GetFrameView()) {
-      frame_view->GetPaintTimingDetector().LayoutObjectWillBeDestroyed(*this);
-    }
-  }
+  if (LocalFrameView* frame_view = GetFrameView())
+    frame_view->GetPaintTimingDetector().LayoutObjectWillBeDestroyed(*this);
 }
 
 void LayoutObject::SetNeedsPaintPropertyUpdate() {
+  NOT_DESTROYED();
+  SetNeedsPaintPropertyUpdatePreservingCachedRects();
+  InvalidateIntersectionObserverCachedRects();
+}
+
+void LayoutObject::SetNeedsPaintPropertyUpdatePreservingCachedRects() {
+  NOT_DESTROYED();
+  DCHECK(!GetDocument().InPostLifecycleSteps());
   if (bitfields_.NeedsPaintPropertyUpdate())
     return;
 
@@ -3166,22 +3791,30 @@ void LayoutObject::SetNeedsPaintPropertyUpdate() {
   GetFrameView()->SetIntersectionObservationState(LocalFrameView::kDesired);
 
   bitfields_.SetNeedsPaintPropertyUpdate(true);
-  for (auto* ancestor = ParentCrossingFrames();
+  if (Parent())
+    Parent()->SetDescendantNeedsPaintPropertyUpdate();
+}
+
+void LayoutObject::SetDescendantNeedsPaintPropertyUpdate() {
+  NOT_DESTROYED();
+  for (auto* ancestor = this;
        ancestor && !ancestor->DescendantNeedsPaintPropertyUpdate();
-       ancestor = ancestor->ParentCrossingFrames()) {
+       ancestor = ancestor->Parent()) {
     ancestor->bitfields_.SetDescendantNeedsPaintPropertyUpdate(true);
   }
 }
 
-void LayoutObject::SetAncestorsNeedPaintPropertyUpdateForMainThreadScrolling() {
-  LayoutObject* ancestor = ParentCrossingFrames();
+void LayoutObject::ForceAllAncestorsNeedPaintPropertyUpdate() {
+  NOT_DESTROYED();
+  LayoutObject* ancestor = Parent();
   while (ancestor) {
     ancestor->SetNeedsPaintPropertyUpdate();
-    ancestor = ancestor->ParentCrossingFrames();
+    ancestor = ancestor->Parent();
   }
 }
 
 void LayoutObject::MaybeClearIsScrollAnchorObject() {
+  NOT_DESTROYED();
   if (!bitfields_.IsScrollAnchorObject())
     return;
   bitfields_.SetIsScrollAnchorObject(
@@ -3189,6 +3822,7 @@ void LayoutObject::MaybeClearIsScrollAnchorObject() {
 }
 
 void LayoutObject::RemoveFromLayoutFlowThread() {
+  NOT_DESTROYED();
   if (!IsInsideFlowThread())
     return;
 
@@ -3212,14 +3846,15 @@ void LayoutObject::RemoveFromLayoutFlowThread() {
 
 void LayoutObject::RemoveFromLayoutFlowThreadRecursive(
     LayoutFlowThread* layout_flow_thread) {
+  NOT_DESTROYED();
   if (const LayoutObjectChildList* children = VirtualChildren()) {
     for (LayoutObject* child = children->FirstChild(); child;
          child = child->NextSibling()) {
       if (child->IsLayoutFlowThread())
         continue;  // Don't descend into inner fragmentation contexts.
-      child->RemoveFromLayoutFlowThreadRecursive(child->IsLayoutFlowThread()
-                                                     ? ToLayoutFlowThread(child)
-                                                     : layout_flow_thread);
+      child->RemoveFromLayoutFlowThreadRecursive(
+          child->IsLayoutFlowThread() ? To<LayoutFlowThread>(child)
+                                      : layout_flow_thread);
     }
   }
 
@@ -3229,7 +3864,9 @@ void LayoutObject::RemoveFromLayoutFlowThreadRecursive(
   CHECK(!SpannerPlaceholder());
 }
 
-void LayoutObject::DestroyAndCleanupAnonymousWrappers() {
+void LayoutObject::DestroyAndCleanupAnonymousWrappers(
+    bool performing_reattach) {
+  NOT_DESTROYED();
   // If the tree is destroyed, there is no need for a clean-up phase.
   if (DocumentBeingDestroyed()) {
     Destroy();
@@ -3237,10 +3874,10 @@ void LayoutObject::DestroyAndCleanupAnonymousWrappers() {
   }
 
   LayoutObject* destroy_root = this;
-  for (LayoutObject *destroy_root_parent = destroy_root->Parent();
-       destroy_root_parent && destroy_root_parent->IsAnonymous();
+  LayoutObject* destroy_root_parent = destroy_root->Parent();
+  for (; destroy_root_parent && destroy_root_parent->IsAnonymous();
        destroy_root = destroy_root_parent,
-                    destroy_root_parent = destroy_root_parent->Parent()) {
+       destroy_root_parent = destroy_root_parent->Parent()) {
     // Anonymous block continuations are tracked and destroyed elsewhere (see
     // the bottom of LayoutBlockFlow::RemoveChild)
     auto* destroy_root_parent_block =
@@ -3252,10 +3889,43 @@ void LayoutObject::DestroyAndCleanupAnonymousWrappers() {
     // are removed or not is irrelevant.
     if (destroy_root_parent->IsLayoutFlowThread())
       break;
+    // The anonymous fieldset contents wrapper should be kept.
+    if (destroy_root_parent->Parent() &&
+        destroy_root_parent->Parent()->IsLayoutNGFieldset())
+      break;
+    // RubyBase should be kept if RubyText exists
+    if (destroy_root_parent->IsRubyBase()) {
+      auto* ruby_run = DynamicTo<LayoutRubyRun>(destroy_root_parent->Parent());
+      if (ruby_run && ruby_run->HasRubyText())
+        break;
+    }
 
-    if (destroy_root->PreviousSibling() || destroy_root->NextSibling())
-      break;  // Need to keep the anonymous parent, since it won't become empty
-              // by the removal of this LayoutObject.
+    // We need to keep the anonymous parent, if it won't become empty by the
+    // removal of this LayoutObject.
+    if (destroy_root->PreviousSibling())
+      break;
+    if (const LayoutObject* sibling = destroy_root->NextSibling()) {
+      if (destroy_root->GetNode()) {
+        // When there are inline continuations, there may be multiple layout
+        // objects generated from the same node, and those are special. They
+        // will be removed as part of destroying |this|, in
+        // LayoutInline::WillBeDestroyed(). So if that's all we have left, we
+        // need to realize now that the anonymous containing block will become
+        // empty. So we have to destroy it.
+        while (sibling && sibling->GetNode() == destroy_root->GetNode())
+          sibling = sibling->NextSibling();
+      }
+      if (sibling)
+        break;
+      DCHECK(destroy_root->IsLayoutInline());
+      DCHECK(To<LayoutInline>(destroy_root)->Continuation());
+    }
+  }
+
+  if (!performing_reattach && destroy_root_parent) {
+    while (destroy_root_parent->IsAnonymous())
+      destroy_root_parent = destroy_root_parent->Parent();
+    GetDocument().GetStyleEngine().DetachedFromParent(destroy_root_parent);
   }
 
   destroy_root->Destroy();
@@ -3264,71 +3934,87 @@ void LayoutObject::DestroyAndCleanupAnonymousWrappers() {
 }
 
 void LayoutObject::Destroy() {
+  NOT_DESTROYED();
+  DCHECK(
+      g_allow_destroying_layout_object_in_finalizer ||
+      !ThreadState::IsSweepingOnOwningThread(*ThreadStateStorage::Current()));
+
+  // Mark as being destroyed to avoid trouble with merges in |RemoveChild()| and
+  // other house keepings.
+  bitfields_.SetBeingDestroyed(true);
   WillBeDestroyed();
-  delete this;
+#if DCHECK_IS_ON()
+  DCHECK(!has_ax_object_);
+  is_destroyed_ = true;
+#endif
 }
 
 PositionWithAffinity LayoutObject::PositionForPoint(
     const PhysicalOffset&) const {
-  return CreatePositionWithAffinity(CaretMinOffset());
+  NOT_DESTROYED();
+  // NG codepath requires |kPrePaintClean|.
+  // |SelectionModifier| calls this only in legacy codepath.
+  DCHECK(!IsLayoutNGObject() || GetDocument().Lifecycle().GetState() >=
+                                    DocumentLifecycle::kPrePaintClean);
+  return CreatePositionWithAffinity(0);
 }
 
-CompositingState LayoutObject::GetCompositingState() const {
-  return HasLayer()
-             ? ToLayoutBoxModelObject(this)->Layer()->GetCompositingState()
-             : kNotComposited;
+bool LayoutObject::CanHaveAdditionalCompositingReasons() const {
+  NOT_DESTROYED();
+  return false;
 }
 
 CompositingReasons LayoutObject::AdditionalCompositingReasons() const {
+  NOT_DESTROYED();
   return CompositingReason::kNone;
 }
 
 bool LayoutObject::HitTestAllPhases(HitTestResult& result,
                                     const HitTestLocation& hit_test_location,
-                                    const PhysicalOffset& accumulated_offset,
-                                    HitTestFilter hit_test_filter) {
-  bool inside = false;
-  if (hit_test_filter != kHitTestSelf) {
-    // First test the foreground layer (lines and inlines).
-    inside = NodeAtPoint(result, hit_test_location, accumulated_offset,
-                         kHitTestForeground);
-
-    // Test floats next.
-    if (!inside)
-      inside = NodeAtPoint(result, hit_test_location, accumulated_offset,
-                           kHitTestFloat);
-
-    // Finally test to see if the mouse is in the background (within a child
-    // block's background).
-    if (!inside)
-      inside = NodeAtPoint(result, hit_test_location, accumulated_offset,
-                           kHitTestChildBlockBackgrounds);
+                                    const PhysicalOffset& accumulated_offset) {
+  NOT_DESTROYED();
+  if (NodeAtPoint(result, hit_test_location, accumulated_offset,
+                  HitTestPhase::kForeground)) {
+    return true;
   }
-
-  // See if the mouse is inside us but not any of our descendants
-  if (hit_test_filter != kHitTestDescendants && !inside)
-    inside = NodeAtPoint(result, hit_test_location, accumulated_offset,
-                         kHitTestBlockBackground);
-
-  return inside;
+  if (NodeAtPoint(result, hit_test_location, accumulated_offset,
+                  HitTestPhase::kFloat)) {
+    return true;
+  }
+  if (NodeAtPoint(result, hit_test_location, accumulated_offset,
+                  HitTestPhase::kDescendantBlockBackgrounds)) {
+    return true;
+  }
+  if (NodeAtPoint(result, hit_test_location, accumulated_offset,
+                  HitTestPhase::kSelfBlockBackground)) {
+    return true;
+  }
+  return false;
 }
 
 Node* LayoutObject::NodeForHitTest() const {
-  Node* node = GetNode();
+  NOT_DESTROYED();
+  if (Node* node = GetNode())
+    return node;
 
   // If we hit the anonymous layoutObjects inside generated content we should
   // actually hit the generated content so walk up to the PseudoElement.
-  if (!node && Parent() && Parent()->IsBeforeOrAfterContent()) {
-    for (LayoutObject* layout_object = Parent(); layout_object && !node;
-         layout_object = layout_object->Parent())
-      node = layout_object->GetNode();
+  if (const LayoutObject* parent = Parent()) {
+    if (parent->IsBeforeOrAfterContent() || parent->IsMarkerContent() ||
+        parent->StyleRef().StyleType() == kPseudoIdFirstLetter) {
+      for (; parent; parent = parent->Parent()) {
+        if (Node* node = parent->GetNode())
+          return node;
+      }
+    }
   }
 
-  return node;
+  return nullptr;
 }
 
 void LayoutObject::UpdateHitTestResult(HitTestResult& result,
                                        const PhysicalOffset& point) const {
+  NOT_DESTROYED();
   if (result.InnerNode())
     return;
 
@@ -3339,18 +4025,20 @@ void LayoutObject::UpdateHitTestResult(HitTestResult& result,
 bool LayoutObject::NodeAtPoint(HitTestResult&,
                                const HitTestLocation&,
                                const PhysicalOffset&,
-                               HitTestAction) {
+                               HitTestPhase) {
+  NOT_DESTROYED();
   return false;
 }
 
 void LayoutObject::ScheduleRelayout() {
-  if (IsLayoutView()) {
-    LocalFrameView* view = ToLayoutView(this)->GetFrameView();
-    if (view)
+  NOT_DESTROYED();
+  if (auto* layout_view = DynamicTo<LayoutView>(this)) {
+    if (LocalFrameView* view = layout_view->GetFrameView())
       view->ScheduleRelayout();
   } else {
     if (IsRooted()) {
-      if (LayoutView* layout_view = View()) {
+      layout_view = View();
+      if (layout_view) {
         if (LocalFrameView* frame_view = layout_view->GetFrameView())
           frame_view->ScheduleRelayoutOfSubtree(this);
       }
@@ -3359,14 +4047,21 @@ void LayoutObject::ScheduleRelayout() {
 }
 
 void LayoutObject::ForceLayout() {
+  NOT_DESTROYED();
   SetSelfNeedsLayoutForAvailableSpace(true);
   UpdateLayout();
 }
 
 const ComputedStyle* LayoutObject::FirstLineStyleWithoutFallback() const {
+  NOT_DESTROYED();
   DCHECK(GetDocument().GetStyleEngine().UsesFirstLineRules());
 
-  if (IsBeforeOrAfterContent() || IsText()) {
+  // Normal markers don't use ::first-line styles in Chromium, so be consistent
+  // and return null for content markers. This may need to change depending on
+  // https://github.com/w3c/csswg-drafts/issues/4506
+  if (IsMarkerContent())
+    return nullptr;
+  if (IsText()) {
     if (!Parent())
       return nullptr;
     return Parent()->FirstLineStyleWithoutFallback();
@@ -3374,39 +4069,76 @@ const ComputedStyle* LayoutObject::FirstLineStyleWithoutFallback() const {
 
   if (BehavesLikeBlockContainer()) {
     if (const ComputedStyle* cached =
-            StyleRef().GetCachedPseudoStyle(kPseudoIdFirstLine))
-      return cached;
+            StyleRef().GetCachedPseudoElementStyle(kPseudoIdFirstLine)) {
+      // If the style is cached by getComputedStyle(element, "::first-line"), it
+      // is marked with IsEnsuredInDisplayNone(). In that case we might not have
+      // the correct ::first-line style for laying out the ::first-line. Ignore
+      // the cached ComputedStyle and overwrite it using
+      // ReplaceCachedPseudoElementStyle() below.
+      if (!cached->IsEnsuredInDisplayNone())
+        return cached;
+    }
 
-    if (const LayoutBlock* first_line_block =
-            To<LayoutBlock>(this)->EnclosingFirstLineStyleBlock()) {
-      if (first_line_block->Style() == Style())
-        return first_line_block->GetCachedPseudoStyle(kPseudoIdFirstLine);
+    if (Element* element = DynamicTo<Element>(GetNode())) {
+      if (element->ShadowPseudoId() ==
+          shadow_element_names::kPseudoInternalInputSuggested) {
+        // Disable ::first-line style for autofill previews. See
+        // crbug.com/1227170.
+        return nullptr;
+      }
+    }
 
-      // We can't use first_line_block->GetCachedPseudoStyle() because it's
-      // based on first_line_block's style. We need to get the uncached first
-      // line style based on this object's style and cache the result in it.
-      return StyleRef().AddCachedPseudoStyle(
-          first_line_block->GetUncachedPseudoStyle(
-              PseudoStyleRequest(kPseudoIdFirstLine), Style()));
+    for (const LayoutBlock* first_line_block = To<LayoutBlock>(this);
+         first_line_block;
+         first_line_block = first_line_block->FirstLineStyleParentBlock()) {
+      const ComputedStyle& style = first_line_block->StyleRef();
+      if (!style.HasPseudoElementStyle(kPseudoIdFirstLine))
+        continue;
+      if (first_line_block == this) {
+        if (const ComputedStyle* cached =
+                first_line_block->GetCachedPseudoElementStyle(
+                    kPseudoIdFirstLine)) {
+          return cached;
+        }
+        continue;
+      }
+
+      // We can't use first_line_block->GetCachedPseudoElementStyle() because
+      // it's based on first_line_block's style. We need to get the uncached
+      // first line style based on this object's style and cache the result in
+      // it.
+      if (scoped_refptr<ComputedStyle> first_line_style =
+              first_line_block->GetUncachedPseudoElementStyle(
+                  StyleRequest(kPseudoIdFirstLine, Style()))) {
+        return StyleRef().ReplaceCachedPseudoElementStyle(
+            std::move(first_line_style), kPseudoIdFirstLine, g_null_atom);
+      }
     }
   } else if (!IsAnonymous() && IsLayoutInline() &&
              !GetNode()->IsFirstLetterPseudoElement()) {
     if (const ComputedStyle* cached =
-            StyleRef().GetCachedPseudoStyle(kPseudoIdFirstLineInherited))
+            StyleRef().GetCachedPseudoElementStyle(kPseudoIdFirstLineInherited))
       return cached;
 
     if (const ComputedStyle* parent_first_line_style =
             Parent()->FirstLineStyleWithoutFallback()) {
       // A first-line style is in effect. Get uncached first line style based on
       // parent_first_line_style and cache the result in this object's style.
-      return StyleRef().AddCachedPseudoStyle(GetUncachedPseudoStyle(
-          kPseudoIdFirstLineInherited, parent_first_line_style));
+      if (scoped_refptr<ComputedStyle> first_line_style =
+              GetUncachedPseudoElementStyle(StyleRequest(
+                  kPseudoIdFirstLineInherited, parent_first_line_style))) {
+        return StyleRef().AddCachedPseudoElementStyle(
+            std::move(first_line_style), kPseudoIdFirstLineInherited,
+            g_null_atom);
+      }
     }
   }
   return nullptr;
 }
 
-const ComputedStyle* LayoutObject::GetCachedPseudoStyle(PseudoId pseudo) const {
+const ComputedStyle* LayoutObject::GetCachedPseudoElementStyle(
+    PseudoId pseudo) const {
+  NOT_DESTROYED();
   DCHECK_NE(pseudo, kPseudoIdBefore);
   DCHECK_NE(pseudo, kPseudoIdAfter);
   if (!GetNode())
@@ -3416,12 +4148,12 @@ const ComputedStyle* LayoutObject::GetCachedPseudoStyle(PseudoId pseudo) const {
   if (!element)
     return nullptr;
 
-  return element->CachedStyleForPseudoElement(PseudoStyleRequest(pseudo));
+  return element->CachedStyleForPseudoElement(pseudo);
 }
 
-scoped_refptr<ComputedStyle> LayoutObject::GetUncachedPseudoStyle(
-    const PseudoStyleRequest& request,
-    const ComputedStyle* parent_style) const {
+scoped_refptr<ComputedStyle> LayoutObject::GetUncachedPseudoElementStyle(
+    const StyleRequest& request) const {
+  NOT_DESTROYED();
   DCHECK_NE(request.pseudo_id, kPseudoIdBefore);
   DCHECK_NE(request.pseudo_id, kPseudoIdAfter);
   if (!GetNode())
@@ -3430,13 +4162,23 @@ scoped_refptr<ComputedStyle> LayoutObject::GetUncachedPseudoStyle(
   Element* element = Traversal<Element>::FirstAncestorOrSelf(*GetNode());
   if (!element)
     return nullptr;
-  if (element->IsPseudoElement())
+  if (element->IsPseudoElement() &&
+      request.pseudo_id != kPseudoIdFirstLineInherited)
     return nullptr;
 
-  return element->StyleForPseudoElement(request, parent_style);
+  return element->UncachedStyleForPseudoElement(request);
+}
+
+const ComputedStyle* LayoutObject::GetSelectionStyle() const {
+  if (RuntimeEnabledFeatures::HighlightInheritanceEnabled() &&
+      StyleRef().HighlightData()) {
+    return StyleRef().HighlightData()->Selection();
+  }
+  return GetCachedPseudoElementStyle(kPseudoIdSelection);
 }
 
 void LayoutObject::AddAnnotatedRegions(Vector<AnnotatedRegionValue>& regions) {
+  NOT_DESTROYED();
   // Convert the style regions to absolute coordinates.
   if (StyleRef().Visibility() != EVisibility::kVisible || !IsBox())
     return;
@@ -3444,7 +4186,7 @@ void LayoutObject::AddAnnotatedRegions(Vector<AnnotatedRegionValue>& regions) {
   if (StyleRef().DraggableRegionMode() == EDraggableRegionMode::kNone)
     return;
 
-  LayoutBox* box = ToLayoutBox(this);
+  auto* box = To<LayoutBox>(this);
   PhysicalRect local_bounds = box->PhysicalBorderBoxRect();
   PhysicalRect abs_bounds = LocalToAbsoluteRect(local_bounds);
 
@@ -3456,13 +4198,14 @@ void LayoutObject::AddAnnotatedRegions(Vector<AnnotatedRegionValue>& regions) {
 }
 
 bool LayoutObject::WillRenderImage() {
+  NOT_DESTROYED();
   // Without visibility we won't render (and therefore don't care about
   // animation).
   if (StyleRef().Visibility() != EVisibility::kVisible)
     return false;
 
   // We will not render a new image when ExecutionContext is paused
-  if (GetDocument().IsContextPaused())
+  if (GetDocument().GetExecutionContext()->IsContextPaused())
     return false;
 
   // Suspend animations when the page is not visible.
@@ -3474,34 +4217,32 @@ bool LayoutObject::WillRenderImage() {
   return GetDocument().View()->IsVisible();
 }
 
-bool LayoutObject::GetImageAnimationPolicy(ImageAnimationPolicy& policy) {
+bool LayoutObject::GetImageAnimationPolicy(
+    mojom::blink::ImageAnimationPolicy& policy) {
+  NOT_DESTROYED();
   if (!GetDocument().GetSettings())
     return false;
   policy = GetDocument().GetSettings()->GetImageAnimationPolicy();
   return true;
 }
 
-int LayoutObject::CaretMinOffset() const {
-  return 0;
+bool LayoutObject::IsInsideListMarker() const {
+  NOT_DESTROYED();
+  return (IsListMarkerForNormalContent() &&
+          To<LayoutListMarker>(this)->IsInside()) ||
+         IsInsideListMarkerForCustomContent();
 }
 
-int LayoutObject::CaretMaxOffset() const {
-  if (IsAtomicInlineLevel())
-    return GetNode() ? std::max(1U, GetNode()->CountChildren()) : 1;
-  if (IsHR())
-    return 1;
-  return 0;
-}
-
-bool LayoutObject::IsInert() const {
-  const LayoutObject* layout_object = this;
-  while (!layout_object->GetNode())
-    layout_object = layout_object->Parent();
-  return layout_object->GetNode()->IsInert();
+bool LayoutObject::IsOutsideListMarker() const {
+  NOT_DESTROYED();
+  return (IsListMarkerForNormalContent() &&
+          !To<LayoutListMarker>(this)->IsInside()) ||
+         IsOutsideListMarkerForCustomContent();
 }
 
 void LayoutObject::ImageChanged(ImageResourceContent* image,
                                 CanDeferInvalidation defer) {
+  NOT_DESTROYED();
   DCHECK(node_);
 
   // Image change notifications should not be received during paint because
@@ -3514,23 +4255,18 @@ void LayoutObject::ImageChanged(ImageResourceContent* image,
 }
 
 void LayoutObject::ImageNotifyFinished(ImageResourceContent* image) {
+  NOT_DESTROYED();
   if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
     cache->ImageLoaded(this);
 
-  if (RuntimeEnabledFeatures::ElementTimingEnabled(&GetDocument())) {
-    LocalDOMWindow* window = GetDocument().domWindow();
-    if (window) {
-      ImageElementTiming::From(*window).NotifyImageFinished(*this, image);
-    }
-  }
-  if (RuntimeEnabledFeatures::FirstContentfulPaintPlusPlusEnabled()) {
-    if (LocalFrameView* frame_view = GetFrameView()) {
-      frame_view->GetPaintTimingDetector().NotifyImageFinished(*this, image);
-    }
-  }
+  if (LocalDOMWindow* window = GetDocument().domWindow())
+    ImageElementTiming::From(*window).NotifyImageFinished(*this, image);
+  if (LocalFrameView* frame_view = GetFrameView())
+    frame_view->GetPaintTimingDetector().NotifyImageFinished(*this, image);
 }
 
 Element* LayoutObject::OffsetParent(const Element* base) const {
+  NOT_DESTROYED();
   if (IsDocumentElement() || IsBody())
     return nullptr;
 
@@ -3548,6 +4284,17 @@ Element* LayoutObject::OffsetParent(const Element* base) const {
     if (!node)
       continue;
 
+    // In the case where |base| is getting slotted into a shadow root, we
+    // shouldn't return anything inside the shadow root. The returned node must
+    // be in the same shadow root or document as |base|.
+    // https://github.com/w3c/csswg-drafts/issues/159
+    // TODO(crbug.com/920069): Remove the feature check here when the feature
+    // has gotten to stable without any issues.
+    if (RuntimeEnabledFeatures::OffsetParentNewSpecBehaviorEnabled() && base &&
+        !base->IsDescendantOrShadowDescendantOf(&node->TreeRoot())) {
+      continue;
+    }
+
     // TODO(kochi): If |base| or |node| is nested deep in shadow roots, this
     // loop may get expensive, as isUnclosedNodeOf() can take up to O(N+M) time
     // (N and M are depths).
@@ -3564,11 +4311,11 @@ Element* LayoutObject::OffsetParent(const Element* base) const {
     if (ancestor->CanContainAbsolutePositionObjects())
       break;
 
-    if (IsHTMLBodyElement(*node))
+    if (IsA<HTMLBodyElement>(*node))
       break;
 
     if (!IsPositioned() &&
-        (IsHTMLTableElement(*node) || IsHTMLTableCellElement(*node)))
+        (IsA<HTMLTableElement>(*node) || IsA<HTMLTableCellElement>(*node)))
       break;
 
     // Webkit specific extension where offsetParent stops at zoom level changes.
@@ -3580,45 +4327,28 @@ Element* LayoutObject::OffsetParent(const Element* base) const {
 }
 
 void LayoutObject::NotifyImageFullyRemoved(ImageResourceContent* image) {
-  if (RuntimeEnabledFeatures::ElementTimingEnabled(&GetDocument())) {
-    LocalDOMWindow* window = GetDocument().domWindow();
-    if (window) {
-      ImageElementTiming::From(*window).NotifyImageRemoved(this, image);
-    }
-  }
-  if (RuntimeEnabledFeatures::FirstContentfulPaintPlusPlusEnabled()) {
-    if (LocalFrameView* frame_view = GetFrameView()) {
-      frame_view->GetPaintTimingDetector().NotifyImageRemoved(*this, image);
-    }
-  }
+  NOT_DESTROYED();
+  if (LocalDOMWindow* window = GetDocument().domWindow())
+    ImageElementTiming::From(*window).NotifyImageRemoved(this, image);
+  if (LocalFrameView* frame_view = GetFrameView())
+    frame_view->GetPaintTimingDetector().NotifyImageRemoved(*this, image);
 }
 
 PositionWithAffinity LayoutObject::CreatePositionWithAffinity(
     int offset,
     TextAffinity affinity) const {
+  NOT_DESTROYED();
   // If this is a non-anonymous layoutObject in an editable area, then it's
   // simple.
-  if (Node* node = NonPseudoNode()) {
-    if (!HasEditableStyle(*node)) {
-      // If it can be found, we prefer a visually equivalent position that is
-      // editable.
-      // TODO(layout-dev): Once we fix callers of |CreatePositionWithAffinity()|
-      // we should use |Position| constructor. See http://crbug.com/827923
-      const Position position =
-          Position::CreateWithoutValidationDeprecated(*node, offset);
-      Position candidate =
-          MostForwardCaretPosition(position, kCanCrossEditingBoundary);
-      if (HasEditableStyle(*candidate.AnchorNode()))
-        return PositionWithAffinity(candidate, affinity);
-      candidate = MostBackwardCaretPosition(position, kCanCrossEditingBoundary);
-      if (HasEditableStyle(*candidate.AnchorNode()))
-        return PositionWithAffinity(candidate, affinity);
-    }
-    // FIXME: Eliminate legacy editing positions
-    return PositionWithAffinity(Position::EditingPositionOf(node, offset),
-                                affinity);
-  }
+  Node* const node = NonPseudoNode();
+  if (!node)
+    return FindPosition();
+  return AdjustForEditingBoundary(
+      PositionWithAffinity(Position(node, offset), affinity));
+}
 
+PositionWithAffinity LayoutObject::FindPosition() const {
+  NOT_DESTROYED();
   // We don't want to cross the boundary between editable and non-editable
   // regions of the document, but that is either impossible or at least
   // extremely unlikely in any normal case because we stop as soon as we
@@ -3656,25 +4386,48 @@ PositionWithAffinity LayoutObject::CreatePositionWithAffinity(
   return PositionWithAffinity();
 }
 
+PositionWithAffinity LayoutObject::FirstPositionInOrBeforeThis() const {
+  NOT_DESTROYED();
+  if (Node* node = NonPseudoNode())
+    return AdjustForEditingBoundary(FirstPositionInOrBeforeNode(*node));
+  return FindPosition();
+}
+
+PositionWithAffinity LayoutObject::LastPositionInOrAfterThis() const {
+  NOT_DESTROYED();
+  if (Node* node = NonPseudoNode())
+    return AdjustForEditingBoundary(LastPositionInOrAfterNode(*node));
+  return FindPosition();
+}
+
+PositionWithAffinity LayoutObject::PositionAfterThis() const {
+  NOT_DESTROYED();
+  if (Node* node = NonPseudoNode())
+    return AdjustForEditingBoundary(Position::AfterNode(*node));
+  return FindPosition();
+}
+
+PositionWithAffinity LayoutObject::PositionBeforeThis() const {
+  NOT_DESTROYED();
+  if (Node* node = NonPseudoNode())
+    return AdjustForEditingBoundary(Position::BeforeNode(*node));
+  return FindPosition();
+}
+
 PositionWithAffinity LayoutObject::CreatePositionWithAffinity(
     int offset) const {
+  NOT_DESTROYED();
   return CreatePositionWithAffinity(offset, TextAffinity::kDownstream);
 }
 
-PositionWithAffinity LayoutObject::CreatePositionWithAffinity(
-    const Position& position) const {
-  if (position.IsNotNull())
-    return PositionWithAffinity(position);
-
-  DCHECK(!GetNode());
-  return CreatePositionWithAffinity(0);
-}
-
-CursorDirective LayoutObject::GetCursor(const PhysicalOffset&, Cursor&) const {
+CursorDirective LayoutObject::GetCursor(const PhysicalOffset&,
+                                        ui::Cursor&) const {
+  NOT_DESTROYED();
   return kSetCursorBasedOnStyle;
 }
 
 bool LayoutObject::CanUpdateSelectionOnRootLineBoxes() const {
+  NOT_DESTROYED();
   if (NeedsLayout())
     return false;
 
@@ -3683,62 +4436,56 @@ bool LayoutObject::CanUpdateSelectionOnRootLineBoxes() const {
 }
 
 void LayoutObject::SetNeedsBoundariesUpdate() {
+  NOT_DESTROYED();
+  DCHECK(!GetDocument().InPostLifecycleSteps());
   if (IsSVGChild()) {
-    // The boundaries affect mask clip.
-    auto* resources = SVGResourcesCache::CachedResourcesForLayoutObject(*this);
-    if (resources && resources->Masker())
+    // The boundaries affect mask clip and clip path mask/clip.
+    if (StyleRef().MaskerResource() || StyleRef().HasClipPath())
       SetNeedsPaintPropertyUpdate();
-    if (resources && resources->Clipper())
-      InvalidateClipPathCache();
   }
   if (LayoutObject* layout_object = Parent())
     layout_object->SetNeedsBoundariesUpdate();
 }
 
-FloatRect LayoutObject::ObjectBoundingBox() const {
+gfx::RectF LayoutObject::ObjectBoundingBox() const {
+  NOT_DESTROYED();
   NOTREACHED();
-  return FloatRect();
+  return gfx::RectF();
 }
 
-FloatRect LayoutObject::StrokeBoundingBox() const {
+gfx::RectF LayoutObject::StrokeBoundingBox() const {
+  NOT_DESTROYED();
   NOTREACHED();
-  return FloatRect();
+  return gfx::RectF();
 }
 
-FloatRect LayoutObject::VisualRectInLocalSVGCoordinates() const {
+gfx::RectF LayoutObject::VisualRectInLocalSVGCoordinates() const {
+  NOT_DESTROYED();
   NOTREACHED();
-  return FloatRect();
+  return gfx::RectF();
 }
 
 AffineTransform LayoutObject::LocalSVGTransform() const {
+  NOT_DESTROYED();
   return AffineTransform();
 }
 
 bool LayoutObject::IsRelayoutBoundary() const {
+  NOT_DESTROYED();
   return ObjectIsRelayoutBoundary(this);
 }
 
-inline void LayoutObject::SetNeedsPaintOffsetAndVisualRectUpdate() {
-  DCHECK(ShouldCheckForPaintInvalidation());
-  bitfields_.SetNeedsPaintOffsetAndVisualRectUpdate(true);
-  for (auto* ancestor = ParentCrossingFrames();
-       ancestor && !ancestor->DescendantNeedsPaintOffsetAndVisualRectUpdate();
-       ancestor = ancestor->ParentCrossingFrames()) {
-    ancestor->bitfields_.SetDescendantNeedsPaintOffsetAndVisualRectUpdate(true);
-  }
-}
-
 void LayoutObject::SetShouldInvalidateSelection() {
-  if (!CanUpdateSelectionOnRootLineBoxes())
-    return;
+  NOT_DESTROYED();
   bitfields_.SetShouldInvalidateSelection(true);
   SetShouldCheckForPaintInvalidation();
 }
 
 void LayoutObject::SetShouldDoFullPaintInvalidation(
     PaintInvalidationReason reason) {
+  NOT_DESTROYED();
+  SetShouldCheckForPaintInvalidation();
   SetShouldDoFullPaintInvalidationWithoutGeometryChange(reason);
-  SetNeedsPaintOffsetAndVisualRectUpdate();
 }
 
 static PaintInvalidationReason DocumentLifecycleBasedPaintInvalidationReason(
@@ -3746,27 +4493,23 @@ static PaintInvalidationReason DocumentLifecycleBasedPaintInvalidationReason(
   switch (document_lifecycle.GetState()) {
     case DocumentLifecycle::kInStyleRecalc:
       return PaintInvalidationReason::kStyle;
-    case DocumentLifecycle::kInPreLayout:
     case DocumentLifecycle::kInPerformLayout:
     case DocumentLifecycle::kAfterPerformLayout:
       return PaintInvalidationReason::kGeometry;
-    case DocumentLifecycle::kInCompositingUpdate:
-      return PaintInvalidationReason::kCompositing;
     default:
       return PaintInvalidationReason::kFull;
   }
 }
 
-void LayoutObject::SetShouldDoFullPaintInvalidationWithoutGeometryChange(
-    PaintInvalidationReason reason) {
+void LayoutObject::
+    SetShouldDoFullPaintInvalidationWithoutGeometryChangeInternal(
+        PaintInvalidationReason reason) {
+  NOT_DESTROYED();
   // Only full invalidation reasons are allowed.
   DCHECK(IsFullPaintInvalidationReason(reason));
-  // This is before the early return to ensure visual update is always scheduled
-  // in case that this is called not during a document lifecycle update.
-  GetFrameView()->ScheduleVisualUpdateForPaintInvalidationIfNeeded();
-
   if (ShouldDoFullPaintInvalidation())
     return;
+
   SetShouldCheckForPaintInvalidationWithoutGeometryChange();
   if (reason == PaintInvalidationReason::kFull) {
     reason = DocumentLifecycleBasedPaintInvalidationReason(
@@ -3777,24 +4520,41 @@ void LayoutObject::SetShouldDoFullPaintInvalidationWithoutGeometryChange(
 }
 
 void LayoutObject::SetShouldCheckForPaintInvalidation() {
-  SetShouldCheckForPaintInvalidationWithoutGeometryChange();
-  SetNeedsPaintOffsetAndVisualRectUpdate();
+  NOT_DESTROYED();
+  if (ShouldCheckGeometryForPaintInvalidation()) {
+    DCHECK(ShouldCheckForPaintInvalidation());
+    return;
+  }
+  GetFrameView()->ScheduleVisualUpdateForPaintInvalidationIfNeeded();
+
+  bitfields_.SetShouldCheckForPaintInvalidation(true);
+  bitfields_.SetShouldCheckGeometryForPaintInvalidation(true);
+  for (LayoutObject* ancestor = Parent();
+       ancestor &&
+       !ancestor->DescendantShouldCheckGeometryForPaintInvalidation();
+       ancestor = ancestor->Parent()) {
+    ancestor->bitfields_.SetShouldCheckForPaintInvalidation(true);
+    ancestor->bitfields_.SetDescendantShouldCheckGeometryForPaintInvalidation(
+        true);
+  }
 }
 
 void LayoutObject::SetShouldCheckForPaintInvalidationWithoutGeometryChange() {
+  NOT_DESTROYED();
   if (ShouldCheckForPaintInvalidation())
     return;
   GetFrameView()->ScheduleVisualUpdateForPaintInvalidationIfNeeded();
 
   bitfields_.SetShouldCheckForPaintInvalidation(true);
-  for (LayoutObject* parent = ParentCrossingFrames();
-       parent && !parent->ShouldCheckForPaintInvalidation();
-       parent = parent->ParentCrossingFrames()) {
-    parent->bitfields_.SetShouldCheckForPaintInvalidation(true);
+  for (LayoutObject* ancestor = Parent();
+       ancestor && !ancestor->ShouldCheckForPaintInvalidation();
+       ancestor = ancestor->Parent()) {
+    ancestor->bitfields_.SetShouldCheckForPaintInvalidation(true);
   }
 }
 
 void LayoutObject::SetSubtreeShouldCheckForPaintInvalidation() {
+  NOT_DESTROYED();
   if (SubtreeShouldCheckForPaintInvalidation()) {
     DCHECK(ShouldCheckForPaintInvalidation());
     return;
@@ -3804,6 +4564,7 @@ void LayoutObject::SetSubtreeShouldCheckForPaintInvalidation() {
 }
 
 void LayoutObject::SetMayNeedPaintInvalidationAnimatedBackgroundImage() {
+  NOT_DESTROYED();
   if (MayNeedPaintInvalidationAnimatedBackgroundImage())
     return;
   bitfields_.SetMayNeedPaintInvalidationAnimatedBackgroundImage(true);
@@ -3811,6 +4572,7 @@ void LayoutObject::SetMayNeedPaintInvalidationAnimatedBackgroundImage() {
 }
 
 void LayoutObject::SetShouldDelayFullPaintInvalidation() {
+  NOT_DESTROYED();
   // Should have already set a full paint invalidation reason.
   DCHECK(IsFullPaintInvalidationReason(full_paint_invalidation_reason_));
 
@@ -3826,13 +4588,20 @@ void LayoutObject::SetShouldDelayFullPaintInvalidation() {
   }
 }
 
+void LayoutObject::ClearShouldDelayFullPaintInvalidation() {
+  // This will clear ShouldDelayFullPaintInvalidation() flag and enable previous
+  // BackgroundNeedsFullPaintInvalidaiton() if it's set.
+  SetShouldDoFullPaintInvalidationWithoutGeometryChangeInternal(
+      FullPaintInvalidationReason());
+}
+
 void LayoutObject::ClearPaintInvalidationFlags() {
+  NOT_DESTROYED();
 // PaintInvalidationStateIsDirty should be kept in sync with the
 // booleans that are cleared below.
 #if DCHECK_IS_ON()
   DCHECK(!ShouldCheckForPaintInvalidation() || PaintInvalidationStateIsDirty());
 #endif
-  fragment_.SetPartialInvalidationLocalRect(PhysicalRect());
   if (!ShouldDelayFullPaintInvalidation()) {
     full_paint_invalidation_reason_ = PaintInvalidationReason::kNone;
     bitfields_.SetBackgroundNeedsFullPaintInvalidation(false);
@@ -3841,36 +4610,71 @@ void LayoutObject::ClearPaintInvalidationFlags() {
   bitfields_.SetSubtreeShouldCheckForPaintInvalidation(false);
   bitfields_.SetSubtreeShouldDoFullPaintInvalidation(false);
   bitfields_.SetMayNeedPaintInvalidationAnimatedBackgroundImage(false);
-  bitfields_.SetNeedsPaintOffsetAndVisualRectUpdate(false);
-  bitfields_.SetDescendantNeedsPaintOffsetAndVisualRectUpdate(false);
+  bitfields_.SetShouldCheckGeometryForPaintInvalidation(false);
+  bitfields_.SetDescendantShouldCheckGeometryForPaintInvalidation(false);
   bitfields_.SetShouldInvalidateSelection(false);
 }
 
 #if DCHECK_IS_ON()
 bool LayoutObject::PaintInvalidationStateIsDirty() const {
+  NOT_DESTROYED();
   return BackgroundNeedsFullPaintInvalidation() ||
          ShouldCheckForPaintInvalidation() || ShouldInvalidateSelection() ||
-         NeedsPaintOffsetAndVisualRectUpdate() ||
-         DescendantNeedsPaintOffsetAndVisualRectUpdate() ||
+         ShouldCheckGeometryForPaintInvalidation() ||
+         DescendantShouldCheckGeometryForPaintInvalidation() ||
          ShouldDoFullPaintInvalidation() ||
          SubtreeShouldDoFullPaintInvalidation() ||
-         MayNeedPaintInvalidationAnimatedBackgroundImage() ||
-         !fragment_.PartialInvalidationLocalRect().IsEmpty();
+         MayNeedPaintInvalidationAnimatedBackgroundImage();
 }
 #endif
 
+void LayoutObject::EnsureIsReadyForPaintInvalidation() {
+  NOT_DESTROYED();
+  DCHECK(!NeedsLayout() || ChildLayoutBlockedByDisplayLock());
+
+  // Force full paint invalidation if the outline may be affected by descendants
+  // and this object is marked for checking paint invalidation for any reason.
+  if (bitfields_.OutlineMayBeAffectedByDescendants() ||
+      bitfields_.PreviousOutlineMayBeAffectedByDescendants()) {
+    SetShouldDoFullPaintInvalidationWithoutGeometryChange(
+        PaintInvalidationReason::kOutline);
+  }
+  bitfields_.SetPreviousOutlineMayBeAffectedByDescendants(
+      bitfields_.OutlineMayBeAffectedByDescendants());
+}
+
+void LayoutObject::ClearPaintFlags() {
+  NOT_DESTROYED();
+  DCHECK_EQ(GetDocument().Lifecycle().GetState(),
+            DocumentLifecycle::kInPrePaint);
+  ClearPaintInvalidationFlags();
+  bitfields_.SetNeedsPaintPropertyUpdate(false);
+  bitfields_.SetEffectiveAllowedTouchActionChanged(false);
+  bitfields_.SetBlockingWheelEventHandlerChanged(false);
+
+  if (!ChildPrePaintBlockedByDisplayLock()) {
+    bitfields_.SetDescendantNeedsPaintPropertyUpdate(false);
+    bitfields_.SetDescendantEffectiveAllowedTouchActionChanged(false);
+    bitfields_.SetDescendantBlockingWheelEventHandlerChanged(false);
+    bitfields_.ResetSubtreePaintPropertyUpdateReasons();
+  }
+}
+
 bool LayoutObject::IsAllowedToModifyLayoutTreeStructure(Document& document) {
-  return document.Lifecycle().StateAllowsLayoutTreeMutations();
+  return document.Lifecycle().StateAllowsLayoutTreeMutations() ||
+         document.GetStyleEngine().InContainerQueryStyleRecalc();
 }
 
 void LayoutObject::SetSubtreeShouldDoFullPaintInvalidation(
     PaintInvalidationReason reason) {
+  NOT_DESTROYED();
   SetShouldDoFullPaintInvalidation(reason);
   bitfields_.SetSubtreeShouldDoFullPaintInvalidation(true);
 }
 
 void LayoutObject::SetIsBackgroundAttachmentFixedObject(
     bool is_background_attachment_fixed_object) {
+  NOT_DESTROYED();
   DCHECK(GetFrameView());
   if (bitfields_.IsBackgroundAttachmentFixedObject() ==
       is_background_attachment_fixed_object)
@@ -3884,10 +4688,12 @@ void LayoutObject::SetIsBackgroundAttachmentFixedObject(
 }
 
 PhysicalRect LayoutObject::DebugRect() const {
+  NOT_DESTROYED();
   return PhysicalRect();
 }
 
 void LayoutObject::InvalidateSelectedChildrenOnStyleChange() {
+  NOT_DESTROYED();
   // LayoutSelection::Commit() propagates the state up the containing node
   // chain to
   // tell if a block contains selected nodes or not. If this layout object is
@@ -3914,29 +4720,57 @@ void LayoutObject::InvalidateSelectedChildrenOnStyleChange() {
 }
 
 void LayoutObject::MarkEffectiveAllowedTouchActionChanged() {
+  NOT_DESTROYED();
+  DCHECK(!GetDocument().InPostLifecycleSteps());
   bitfields_.SetEffectiveAllowedTouchActionChanged(true);
   // If we're locked, mark our descendants as needing this change. This is used
   // a signal to ensure we mark the element as needing effective allowed
   // touch action recalculation when the element becomes unlocked.
-  if (PrePaintBlockedByDisplayLock(DisplayLockContext::kChildren)) {
+  if (ChildPrePaintBlockedByDisplayLock()) {
     bitfields_.SetDescendantEffectiveAllowedTouchActionChanged(true);
     return;
   }
 
-  LayoutObject* obj = ParentCrossingFrames();
+  if (Parent())
+    Parent()->MarkDescendantEffectiveAllowedTouchActionChanged();
+}
+
+void LayoutObject::MarkDescendantEffectiveAllowedTouchActionChanged() {
+  DCHECK(!GetDocument().InPostLifecycleSteps());
+  LayoutObject* obj = this;
   while (obj && !obj->DescendantEffectiveAllowedTouchActionChanged()) {
     obj->bitfields_.SetDescendantEffectiveAllowedTouchActionChanged(true);
-    if (obj->PrePaintBlockedByDisplayLock(DisplayLockContext::kChildren))
+    if (obj->ChildPrePaintBlockedByDisplayLock())
       break;
 
-    obj = obj->ParentCrossingFrames();
+    obj = obj->Parent();
   }
 }
 
-void LayoutObject::InvalidateIfControlStateChanged(ControlState control_state) {
-  if (LayoutTheme::GetTheme().ControlStateChanged(GetNode(), StyleRef(),
-                                                  control_state)) {
-    SetSubtreeShouldDoFullPaintInvalidation();
+void LayoutObject::MarkBlockingWheelEventHandlerChanged() {
+  DCHECK(!GetDocument().InPostLifecycleSteps());
+  bitfields_.SetBlockingWheelEventHandlerChanged(true);
+  // If we're locked, mark our descendants as needing this change. This is used
+  // as a signal to ensure we mark the element as needing wheel event handler
+  // recalculation when the element becomes unlocked.
+  if (ChildPrePaintBlockedByDisplayLock()) {
+    bitfields_.SetDescendantBlockingWheelEventHandlerChanged(true);
+    return;
+  }
+
+  if (Parent())
+    Parent()->MarkDescendantBlockingWheelEventHandlerChanged();
+}
+
+void LayoutObject::MarkDescendantBlockingWheelEventHandlerChanged() {
+  DCHECK(!GetDocument().InPostLifecycleSteps());
+  LayoutObject* obj = this;
+  while (obj && !obj->DescendantBlockingWheelEventHandlerChanged()) {
+    obj->bitfields_.SetDescendantBlockingWheelEventHandlerChanged(true);
+    if (obj->ChildPrePaintBlockedByDisplayLock())
+      break;
+
+    obj = obj->Parent();
   }
 }
 
@@ -3973,10 +4807,9 @@ const LayoutObject* AssociatedLayoutObjectOf(const Node& node,
   DCHECK_GE(offset_in_node, 0);
   LayoutObject* layout_object = node.GetLayoutObject();
   if (!node.IsTextNode() || !layout_object ||
-      !ToLayoutText(layout_object)->IsTextFragment())
+      !To<LayoutText>(layout_object)->IsTextFragment())
     return layout_object;
-  LayoutTextFragment* layout_text_fragment =
-      ToLayoutTextFragment(layout_object);
+  auto* layout_text_fragment = To<LayoutTextFragment>(layout_object);
   if (!layout_text_fragment->IsRemainingTextLayoutObject()) {
     DCHECK_LE(
         static_cast<unsigned>(offset_in_node),
@@ -3995,49 +4828,70 @@ const LayoutObject* AssociatedLayoutObjectOf(const Node& node,
 }
 
 bool LayoutObject::CanBeSelectionLeaf() const {
+  NOT_DESTROYED();
   if (SlowFirstChild() || StyleRef().Visibility() != EVisibility::kVisible ||
-      DisplayLockUtilities::NearestLockedExclusiveAncestor(*GetNode())) {
+      DisplayLockUtilities::LockedAncestorPreventingPaint(*this)) {
     return false;
   }
   return CanBeSelectionLeafInternal();
 }
 
-void LayoutObject::InvalidateClipPathCache() {
-  SetNeedsPaintPropertyUpdate();
-  for (auto* fragment = &fragment_; fragment;
-       fragment = fragment->NextFragment())
-    fragment->InvalidateClipPathCache();
-}
+Vector<PhysicalRect> LayoutObject::CollectOutlineRectsAndAdvance(
+    NGOutlineType outline_type,
+    FragmentDataIterator& iterator) const {
+  NOT_DESTROYED();
+  Vector<PhysicalRect> outline_rects;
+  PhysicalOffset paint_offset = iterator.GetFragmentData()->PaintOffset();
 
-IntRect LayoutObject::AdjustVisualRectForInlineBox(
-    const IntRect& visual_rect) const {
-  // For simplicity, we use the layout object's visual rect as the visual rect
-  // of contained inline boxes, mapped to the correct transform space of the
-  // inline boxes.
-  if (const auto* properties = FirstFragment().PaintProperties()) {
-    if (const auto* scroll_translation = properties->ScrollTranslation()) {
-      // This mapping happens for inline box whose LayoutObject is a LayoutBlock
-      // whose VisualRect is not in the same transform space as the inline box.
-      // For now this happens for EllipsisBox only.
-      auto float_visual_rect = FloatRect(visual_rect);
-      float_visual_rect.Move(-scroll_translation->Translation2D());
-      return EnclosingIntRect(float_visual_rect);
+  if (iterator.Cursor()) {
+    wtf_size_t fragment_index = iterator.Cursor()->ContainerFragmentIndex();
+    do {
+      const NGFragmentItem* item = iterator.Cursor()->Current().Item();
+      if (!item)
+        continue;
+      if (const NGPhysicalBoxFragment* box_fragment = item->BoxFragment()) {
+        box_fragment->AddSelfOutlineRects(
+            paint_offset + item->OffsetInContainerFragment(), outline_type,
+            &outline_rects, nullptr);
+      } else {
+        PhysicalRect rect;
+        rect = item->RectInContainerFragment();
+        rect.Move(paint_offset);
+        outline_rects.push_back(rect);
+      }
+      // Keep going as long as we're within the same container fragment. If
+      // we're block-fragmented, there will be multiple container fragments,
+      // each with their own FragmentData object.
+    } while (iterator.Advance() &&
+             iterator.Cursor()->ContainerFragmentIndex() == fragment_index);
+  } else {
+    if (const NGPhysicalBoxFragment* box_fragment =
+            iterator.GetPhysicalBoxFragment()) {
+      box_fragment->AddSelfOutlineRects(paint_offset, outline_type,
+                                        &outline_rects, nullptr);
+    } else {
+      outline_rects = OutlineRects(nullptr, paint_offset, outline_type);
     }
+    iterator.Advance();
   }
-  return visual_rect;
+
+  return outline_rects;
 }
 
 Vector<PhysicalRect> LayoutObject::OutlineRects(
+    OutlineInfo* info,
     const PhysicalOffset& additional_offset,
     NGOutlineType outline_type) const {
+  NOT_DESTROYED();
   Vector<PhysicalRect> outline_rects;
-  AddOutlineRects(outline_rects, additional_offset, outline_type);
+  AddOutlineRects(outline_rects, info, additional_offset, outline_type);
   return outline_rects;
 }
 
 void LayoutObject::SetModifiedStyleOutsideStyleRecalc(
     scoped_refptr<const ComputedStyle> style,
     ApplyStyleChanges apply_changes) {
+  NOT_DESTROYED();
   SetStyle(style, apply_changes);
   if (IsAnonymous() || !GetNode() || !GetNode()->IsElementNode())
     return;
@@ -4048,6 +4902,7 @@ LayoutUnit LayoutObject::FlipForWritingModeInternal(
     LayoutUnit position,
     LayoutUnit width,
     const LayoutBox* box_for_flipping) const {
+  NOT_DESTROYED();
   DCHECK(!IsBox());
   DCHECK(HasFlippedBlocksWritingMode());
   DCHECK(!box_for_flipping || box_for_flipping == ContainingBlock());
@@ -4058,38 +4913,128 @@ LayoutUnit LayoutObject::FlipForWritingModeInternal(
       ->FlipForWritingMode(position, width);
 }
 
-void LayoutObject::MarkSelfPaintingLayerForVisualOverflowRecalc() {
+bool LayoutObject::SelfPaintingLayerNeedsVisualOverflowRecalc() const {
+  NOT_DESTROYED();
   if (HasLayer()) {
-    auto* box_model_object = ToLayoutBoxModelObject(this);
+    auto* box_model_object = To<LayoutBoxModelObject>(this);
+    if (box_model_object->HasSelfPaintingLayer())
+      return box_model_object->Layer()->NeedsVisualOverflowRecalc();
+  }
+  return false;
+}
+
+void LayoutObject::MarkSelfPaintingLayerForVisualOverflowRecalc() {
+  NOT_DESTROYED();
+  DCHECK(!GetDocument().InPostLifecycleSteps());
+  if (HasLayer()) {
+    auto* box_model_object = To<LayoutBoxModelObject>(this);
     if (box_model_object->HasSelfPaintingLayer())
       box_model_object->Layer()->SetNeedsVisualOverflowRecalc();
   }
+#if DCHECK_IS_ON()
+  InvalidateVisualOverflow();
+#endif
+}
+
+bool LayoutObject::IsShapingDeferred() const {
+  if (const auto* block_flow = DynamicTo<LayoutBlockFlow>(this)) {
+    return block_flow->HasNGInlineNodeData() &&
+           block_flow->GetNGInlineNodeData()->IsShapingDeferred();
+  }
+  return false;
+}
+
+bool LayoutObject::ForceLegacyLayoutForChildren() const {
+  NOT_DESTROYED();
+  if (bitfields_.ForceLegacyLayout())
+    return true;
+
+  // For container queries, we may end up marking an element for forcing legacy
+  // layout without re-attaching the container itself because we are performing
+  // layout for the container when this is detected. Descendants should still
+  // have legacy forced.
+  //
+  // We skip over anonymous ancestors to do the check because anonymous children
+  // may need to be kept in sync with its parent (For instance LayoutFlowThread
+  // for multicol), in which case the ForceLegacyLayout flag matches the
+  // size container LayoutObject flag and not the element flag.
+  const LayoutObject* non_anonymous =
+      IsAnonymous() ? NonAnonymousAncestor() : this;
+  if (!non_anonymous)
+    return false;
+  if (Element* element = DynamicTo<Element>(non_anonymous->GetNode()))
+    return element->ShouldForceLegacyLayout();
+  return false;
+}
+
+bool IsMenuList(const LayoutObject* object) {
+  if (!object)
+    return false;
+  auto* select = DynamicTo<HTMLSelectElement>(object->GetNode());
+  return select && select->UsesMenuList();
+}
+
+bool IsListBox(const LayoutObject* object) {
+  if (!object)
+    return false;
+  auto* select = DynamicTo<HTMLSelectElement>(object->GetNode());
+  return select && !select->UsesMenuList();
 }
 
 }  // namespace blink
 
 #if DCHECK_IS_ON()
 
-void showTree(const blink::LayoutObject* object) {
+void ShowTree(const blink::LayoutObject* object) {
+  if (getenv("RUNNING_UNDER_RR")) {
+    // Printing timestamps requires an IPC to get the local time, which
+    // does not work in an rr replay session. Just disable timestamp printing
+    // globally, since we don't need them. Affecting global state isn't a
+    // problem because invoking this from a rr session creates a temporary
+    // program environment that will be destroyed as soon as the invocation
+    // completes.
+    logging::SetLogItems(true, true, false, false);
+  }
+
   if (object)
     object->ShowTreeForThis();
   else
     DLOG(INFO) << "Cannot showTree. Root is (nil)";
 }
 
-void showLineTree(const blink::LayoutObject* object) {
+void ShowLineTree(const blink::LayoutObject* object) {
+  if (getenv("RUNNING_UNDER_RR")) {
+    // Printing timestamps requires an IPC to get the local time, which
+    // does not work in an rr replay session. Just disable timestamp printing
+    // globally, since we don't need them. Affecting global state isn't a
+    // problem because invoking this from a rr session creates a temporary
+    // program environment that will be destroyed as soon as the invocation
+    // completes.
+    logging::SetLogItems(true, true, false, false);
+  }
+
   if (object)
     object->ShowLineTreeForThis();
   else
     DLOG(INFO) << "Cannot showLineTree. Root is (nil)";
 }
 
-void showLayoutTree(const blink::LayoutObject* object1) {
-  showLayoutTree(object1, nullptr);
+void ShowLayoutTree(const blink::LayoutObject* object1) {
+  ShowLayoutTree(object1, nullptr);
 }
 
-void showLayoutTree(const blink::LayoutObject* object1,
+void ShowLayoutTree(const blink::LayoutObject* object1,
                     const blink::LayoutObject* object2) {
+  if (getenv("RUNNING_UNDER_RR")) {
+    // Printing timestamps requires an IPC to get the local time, which
+    // does not work in an rr replay session. Just disable timestamp printing
+    // globally, since we don't need them. Affecting global state isn't a
+    // problem because invoking this from a rr session creates a temporary
+    // program environment that will be destroyed as soon as the invocation
+    // completes.
+    logging::SetLogItems(true, true, false, false);
+  }
+
   if (object1) {
     const blink::LayoutObject* root = object1;
     while (root->Parent())

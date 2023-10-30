@@ -20,23 +20,25 @@
 
 #include "third_party/blink/renderer/core/html/html_meter_element.h"
 
+#include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
+#include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "ui/base/ui_base_features.h"
 
 namespace blink {
 
-using namespace html_names;
-
 HTMLMeterElement::HTMLMeterElement(Document& document)
-    : HTMLElement(kMeterTag, document) {
+    : HTMLElement(html_names::kMeterTag, document) {
   UseCounter::Count(document, WebFeature::kMeterElement);
   EnsureUserAgentShadowRoot();
 }
@@ -45,7 +47,7 @@ HTMLMeterElement::~HTMLMeterElement() = default;
 
 LayoutObject* HTMLMeterElement::CreateLayoutObject(const ComputedStyle& style,
                                                    LegacyLayout legacy) {
-  switch (style.Appearance()) {
+  switch (style.EffectiveAppearance()) {
     case kMeterPart:
       UseCounter::Count(GetDocument(),
                         WebFeature::kMeterElementWithMeterAppearance);
@@ -63,64 +65,67 @@ LayoutObject* HTMLMeterElement::CreateLayoutObject(const ComputedStyle& style,
 void HTMLMeterElement::ParseAttribute(
     const AttributeModificationParams& params) {
   const QualifiedName& name = params.name;
-  if (name == kValueAttr || name == kMinAttr || name == kMaxAttr ||
-      name == kLowAttr || name == kHighAttr || name == kOptimumAttr)
+  if (name == html_names::kValueAttr || name == html_names::kMinAttr ||
+      name == html_names::kMaxAttr || name == html_names::kLowAttr ||
+      name == html_names::kHighAttr || name == html_names::kOptimumAttr)
     DidElementStateChange();
   else
     HTMLElement::ParseAttribute(params);
 }
 
 double HTMLMeterElement::value() const {
-  double value = GetFloatingPointAttribute(kValueAttr, 0);
+  double value = GetFloatingPointAttribute(html_names::kValueAttr, 0);
   return std::min(std::max(value, min()), max());
 }
 
 void HTMLMeterElement::setValue(double value) {
-  SetFloatingPointAttribute(kValueAttr, value);
+  SetFloatingPointAttribute(html_names::kValueAttr, value);
 }
 
 double HTMLMeterElement::min() const {
-  return GetFloatingPointAttribute(kMinAttr, 0);
+  return GetFloatingPointAttribute(html_names::kMinAttr, 0);
 }
 
 void HTMLMeterElement::setMin(double min) {
-  SetFloatingPointAttribute(kMinAttr, min);
+  SetFloatingPointAttribute(html_names::kMinAttr, min);
 }
 
 double HTMLMeterElement::max() const {
-  return std::max(GetFloatingPointAttribute(kMaxAttr, std::max(1.0, min())),
-                  min());
+  return std::max(
+      GetFloatingPointAttribute(html_names::kMaxAttr, std::max(1.0, min())),
+      min());
 }
 
 void HTMLMeterElement::setMax(double max) {
-  SetFloatingPointAttribute(kMaxAttr, max);
+  SetFloatingPointAttribute(html_names::kMaxAttr, max);
 }
 
 double HTMLMeterElement::low() const {
-  double low = GetFloatingPointAttribute(kLowAttr, min());
+  double low = GetFloatingPointAttribute(html_names::kLowAttr, min());
   return std::min(std::max(low, min()), max());
 }
 
 void HTMLMeterElement::setLow(double low) {
-  SetFloatingPointAttribute(kLowAttr, low);
+  SetFloatingPointAttribute(html_names::kLowAttr, low);
 }
 
 double HTMLMeterElement::high() const {
-  double high = GetFloatingPointAttribute(kHighAttr, max());
+  double high = GetFloatingPointAttribute(html_names::kHighAttr, max());
   return std::min(std::max(high, low()), max());
 }
 
 void HTMLMeterElement::setHigh(double high) {
-  SetFloatingPointAttribute(kHighAttr, high);
+  SetFloatingPointAttribute(html_names::kHighAttr, high);
 }
 
 double HTMLMeterElement::optimum() const {
-  double optimum = GetFloatingPointAttribute(kOptimumAttr, (max() + min()) / 2);
+  double optimum =
+      GetFloatingPointAttribute(html_names::kOptimumAttr, (max() + min()) / 2);
   return std::min(std::max(optimum, min()), max());
 }
 
 void HTMLMeterElement::setOptimum(double optimum) {
-  SetFloatingPointAttribute(kOptimumAttr, optimum);
+  SetFloatingPointAttribute(html_names::kOptimumAttr, optimum);
 }
 
 HTMLMeterElement::GaugeRegion HTMLMeterElement::GetGaugeRegion() const {
@@ -173,7 +178,7 @@ void HTMLMeterElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
   DCHECK(!value_);
 
   auto* inner = MakeGarbageCollected<HTMLDivElement>(GetDocument());
-  inner->SetShadowPseudoId(AtomicString("-webkit-meter-inner-element"));
+  inner->SetShadowPseudoId(shadow_element_names::kPseudoMeterInnerElement);
   root.AppendChild(inner);
 
   auto* bar = MakeGarbageCollected<HTMLDivElement>(GetDocument());
@@ -186,8 +191,7 @@ void HTMLMeterElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
   inner->AppendChild(bar);
 
   auto* fallback = MakeGarbageCollected<HTMLDivElement>(GetDocument());
-  fallback->AppendChild(
-      HTMLSlotElement::CreateUserAgentDefaultSlot(GetDocument()));
+  fallback->AppendChild(MakeGarbageCollected<HTMLSlotElement>(GetDocument()));
   fallback->SetShadowPseudoId(AtomicString("-internal-fallback"));
   root.AppendChild(fallback);
 }
@@ -216,11 +220,17 @@ void HTMLMeterElement::UpdateValueAppearance(double percentage) {
 }
 
 bool HTMLMeterElement::CanContainRangeEndPoint() const {
-  GetDocument().UpdateStyleAndLayoutTreeForNode(this);
-  return GetComputedStyle() && !GetComputedStyle()->HasAppearance();
+  if (DisplayLockUtilities::LockedAncestorPreventingPaint(*this)) {
+    // If this element is DisplayLocked, then we can't access GetComputedStyle.
+    // Even with GetComputedStyle's scoped unlock, this function may be called
+    // during selection modification which prevents lifecycle updates that the
+    // unlock would incur.
+    return false;
+  }
+  return GetComputedStyle() && !GetComputedStyle()->HasEffectiveAppearance();
 }
 
-void HTMLMeterElement::Trace(Visitor* visitor) {
+void HTMLMeterElement::Trace(Visitor* visitor) const {
   visitor->Trace(value_);
   HTMLElement::Trace(visitor);
 }

@@ -7,31 +7,24 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
-namespace {
-
-using resource_coordinator::mojom::InterventionPolicy;
-using resource_coordinator::mojom::PolicyControlledIntervention;
-
-}  // namespace
-
 // static
 std::unique_ptr<DocumentResourceCoordinator>
 DocumentResourceCoordinator::MaybeCreate(
-    service_manager::InterfaceProvider* interface_provider) {
+    const BrowserInterfaceBrokerProxy& interface_broker) {
   if (!RuntimeEnabledFeatures::PerformanceManagerInstrumentationEnabled())
     return nullptr;
 
-  return base::WrapUnique(new DocumentResourceCoordinator(interface_provider));
+  return base::WrapUnique(new DocumentResourceCoordinator(interface_broker));
 }
 
 DocumentResourceCoordinator::DocumentResourceCoordinator(
-    service_manager::InterfaceProvider* interface_provider) {
-  interface_provider->GetInterface(mojo::MakeRequest(&service_));
+    const BrowserInterfaceBrokerProxy& interface_broker) {
+  interface_broker.GetInterface(service_.BindNewPipeAndPassReceiver());
   DCHECK(service_);
 }
 
@@ -42,7 +35,7 @@ void DocumentResourceCoordinator::SetNetworkAlmostIdle() {
 }
 
 void DocumentResourceCoordinator::SetLifecycleState(
-    resource_coordinator::mojom::LifecycleState state) {
+    performance_manager::mojom::LifecycleState state) {
   service_->SetLifecycleState(state);
 }
 
@@ -51,18 +44,32 @@ void DocumentResourceCoordinator::SetHasNonEmptyBeforeUnload(
   service_->SetHasNonEmptyBeforeUnload(has_nonempty_beforeunload);
 }
 
-void DocumentResourceCoordinator::SetInterventionPolicy(
-    PolicyControlledIntervention intervention,
-    InterventionPolicy policy) {
-  service_->SetInterventionPolicy(intervention, policy);
-}
-
-void DocumentResourceCoordinator::SetIsAdFrame() {
-  service_->SetIsAdFrame();
+void DocumentResourceCoordinator::SetIsAdFrame(bool is_ad_frame) {
+  service_->SetIsAdFrame(is_ad_frame);
 }
 
 void DocumentResourceCoordinator::OnNonPersistentNotificationCreated() {
   service_->OnNonPersistentNotificationCreated();
+}
+
+void DocumentResourceCoordinator::SetHadFormInteraction() {
+  // Only send this signal for the first interaction as it doesn't get cleared
+  // for the lifetime of the frame and it's inefficient to send this message
+  // for every keystroke.
+  if (!had_form_interaction_)
+    service_->SetHadFormInteraction();
+  had_form_interaction_ = true;
+}
+
+void DocumentResourceCoordinator::OnFirstContentfulPaint(
+    base::TimeDelta time_since_navigation_start) {
+  service_->OnFirstContentfulPaint(time_since_navigation_start);
+}
+
+void DocumentResourceCoordinator::OnWebMemoryMeasurementRequested(
+    WebMemoryMeasurementMode mode,
+    OnWebMemoryMeasurementRequestedCallback callback) {
+  service_->OnWebMemoryMeasurementRequested(mode, std::move(callback));
 }
 
 }  // namespace blink

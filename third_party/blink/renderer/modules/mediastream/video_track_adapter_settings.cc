@@ -2,16 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/public/web/modules/mediastream/video_track_adapter_settings.h"
+#include "third_party/blink/renderer/modules/mediastream/video_track_adapter_settings.h"
 
 #include <limits>
 #include <memory>
 #include <utility>
 
+#include "base/check_op.h"
+
 namespace blink {
 
 VideoTrackAdapterSettings::VideoTrackAdapterSettings()
-    : VideoTrackAdapterSettings(base::nullopt,
+    : VideoTrackAdapterSettings(absl::nullopt,
                                 0.0,
                                 std::numeric_limits<double>::max(),
                                 0.0) {}
@@ -22,7 +24,7 @@ VideoTrackAdapterSettings::VideoTrackAdapterSettings(
     : VideoTrackAdapterSettings(target_size, 0.0, HUGE_VAL, max_frame_rate) {}
 
 VideoTrackAdapterSettings::VideoTrackAdapterSettings(
-    base::Optional<gfx::Size> target_size,
+    absl::optional<gfx::Size> target_size,
     double min_aspect_ratio,
     double max_aspect_ratio,
     double max_frame_rate)

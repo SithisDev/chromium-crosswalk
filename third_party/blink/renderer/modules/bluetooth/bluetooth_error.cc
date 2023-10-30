@@ -4,8 +4,10 @@
 
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth_error.h"
 
+#include "third_party/blink/public/mojom/bluetooth/web_bluetooth.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/bindings/exception_code.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -18,7 +20,7 @@ const char kGATTServerNotConnectedBase[] =
 }  // namespace
 
 // static
-DOMException* BluetoothError::CreateNotConnectedException(
+String BluetoothError::CreateNotConnectedExceptionMessage(
     BluetoothOperation operation) {
   const char* operation_string = nullptr;
   switch (operation) {
@@ -35,10 +37,15 @@ DOMException* BluetoothError::CreateNotConnectedException(
       operation_string = "perform GATT operations";
       break;
   }
+  return String::Format(kGATTServerNotConnectedBase, operation_string);
+}
 
+// static
+DOMException* BluetoothError::CreateNotConnectedException(
+    BluetoothOperation operation) {
   return MakeGarbageCollected<DOMException>(
       DOMExceptionCode::kNetworkError,
-      String::Format(kGATTServerNotConnectedBase, operation_string));
+      CreateNotConnectedExceptionMessage(operation));
 }
 
 // static
@@ -79,6 +86,10 @@ DOMException* BluetoothError::CreateDOMException(
 #define MAP_ERROR(enumeration, name, message)         \
   case mojom::blink::WebBluetoothResult::enumeration: \
     return MakeGarbageCollected<DOMException>(name, message);
+
+      // AbortErrors:
+      MAP_ERROR(WATCH_ADVERTISEMENTS_ABORTED, DOMExceptionCode::kAbortError,
+                "The Bluetooth operation was cancelled.");
 
       // InvalidModificationErrors:
       MAP_ERROR(GATT_INVALID_ATTRIBUTE_LENGTH,
@@ -189,13 +200,13 @@ DOMException* BluetoothError::CreateDOMException(
                 "Origin is not allowed to access the service. Tip: Add the "
                 "service UUID to 'optionalServices' in requestDevice() "
                 "options. https://goo.gl/HxfxSQ");
-      MAP_ERROR(REQUEST_DEVICE_WITH_BLOCKLISTED_UUID,
+      MAP_ERROR(REQUEST_DEVICE_WITH_BLOCKLISTED_UUID_OR_MANUFACTURER_DATA,
                 DOMExceptionCode::kSecurityError,
                 "requestDevice() called with a filter containing a blocklisted "
-                "UUID. https://goo.gl/4NeimX");
-      MAP_ERROR(REQUEST_DEVICE_FROM_CROSS_ORIGIN_IFRAME,
-                DOMExceptionCode::kSecurityError,
-                "requestDevice() called from cross-origin iframe.");
+                "UUID or manufacturer data. https://goo.gl/4NeimX");
+      MAP_ERROR(PERMISSIONS_POLICY_VIOLATION, DOMExceptionCode::kSecurityError,
+                "Access to the feature \"bluetooth\" is disallowed by "
+                "permissions policy.");
 
       // NotAllowedErrors:
       MAP_ERROR(SCANNING_BLOCKED, DOMExceptionCode::kNotAllowedError,

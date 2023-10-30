@@ -31,15 +31,16 @@
 
 #include <memory>
 
-#include "base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_void_callback.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_binding_for_modules.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_sql_transaction_callback.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_sql_transaction_error_callback.h"
+#include "third_party/blink/renderer/core/probe/async_task_context.h"
 #include "third_party/blink/renderer/modules/webdatabase/sql_statement.h"
 #include "third_party/blink/renderer/modules/webdatabase/sql_transaction_state_machine.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -55,11 +56,10 @@ class SQLTransaction final : public ScriptWrappable,
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  class OnProcessCallback
-      : public GarbageCollectedFinalized<OnProcessCallback> {
+  class OnProcessCallback : public GarbageCollected<OnProcessCallback> {
    public:
     virtual ~OnProcessCallback() = default;
-    virtual void Trace(blink::Visitor*) {}
+    virtual void Trace(Visitor*) const {}
     virtual bool OnProcess(SQLTransaction*) = 0;
 
    protected:
@@ -76,18 +76,17 @@ class SQLTransaction final : public ScriptWrappable,
     explicit OnProcessV8Impl(V8SQLTransactionCallback* callback)
         : callback_(callback) {}
 
-    void Trace(blink::Visitor*) override;
+    void Trace(Visitor*) const override;
     bool OnProcess(SQLTransaction*) override;
 
    private:
     Member<V8SQLTransactionCallback> callback_;
   };
 
-  class OnSuccessCallback
-      : public GarbageCollectedFinalized<OnSuccessCallback> {
+  class OnSuccessCallback : public GarbageCollected<OnSuccessCallback> {
    public:
     virtual ~OnSuccessCallback() = default;
-    virtual void Trace(blink::Visitor*) {}
+    virtual void Trace(Visitor*) const {}
     virtual void OnSuccess() = 0;
 
    protected:
@@ -103,17 +102,17 @@ class SQLTransaction final : public ScriptWrappable,
 
     explicit OnSuccessV8Impl(V8VoidCallback* callback) : callback_(callback) {}
 
-    void Trace(blink::Visitor*) override;
+    void Trace(Visitor*) const override;
     void OnSuccess() override;
 
    private:
     Member<V8VoidCallback> callback_;
   };
 
-  class OnErrorCallback : public GarbageCollectedFinalized<OnErrorCallback> {
+  class OnErrorCallback : public GarbageCollected<OnErrorCallback> {
    public:
     virtual ~OnErrorCallback() = default;
-    virtual void Trace(blink::Visitor*) {}
+    virtual void Trace(Visitor*) const {}
     virtual bool OnError(SQLError*) = 0;
 
    protected:
@@ -129,7 +128,7 @@ class SQLTransaction final : public ScriptWrappable,
     explicit OnErrorV8Impl(V8SQLTransactionErrorCallback* callback)
         : callback_(callback) {}
 
-    void Trace(blink::Visitor*) override;
+    void Trace(Visitor*) const override;
     bool OnError(SQLError*) override;
 
    private:
@@ -148,7 +147,7 @@ class SQLTransaction final : public ScriptWrappable,
                  OnErrorCallback*,
                  bool read_only);
   ~SQLTransaction() override;
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   void PerformPendingCallback();
 
@@ -160,7 +159,7 @@ class SQLTransaction final : public ScriptWrappable,
   void executeSql(ScriptState*, const String& sql_statement, ExceptionState&);
   void executeSql(ScriptState*,
                   const String& sql_statement,
-                  const base::Optional<Vector<ScriptValue>>& arguments,
+                  const absl::optional<HeapVector<ScriptValue>>& arguments,
                   V8SQLStatementCallback*,
                   V8SQLStatementErrorCallback*,
                   ExceptionState&);
@@ -203,6 +202,7 @@ class SQLTransaction final : public ScriptWrappable,
 
   bool execute_sql_allowed_;
   std::unique_ptr<SQLErrorData> transaction_error_;
+  probe::AsyncTaskContext async_task_context_;
 
   bool read_only_;
 };

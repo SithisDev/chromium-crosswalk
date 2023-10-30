@@ -26,29 +26,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_DELAY_NODE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_DELAY_NODE_H_
 
-#include "third_party/blink/renderer/modules/webaudio/audio_basic_processor_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_param.h"
 
 namespace blink {
 
-class AudioParamHandler;
 class BaseAudioContext;
 class DelayOptions;
 class ExceptionState;
-
-class DelayHandler : public AudioBasicProcessorHandler {
- public:
-  static scoped_refptr<DelayHandler> Create(AudioNode&,
-                                            float sample_rate,
-                                            AudioParamHandler& delay_time,
-                                            double max_delay_time);
-
- private:
-  DelayHandler(AudioNode&,
-               float sample_rate,
-               AudioParamHandler& delay_time,
-               double max_delay_time);
-};
 
 class DelayNode final : public AudioNode {
   DEFINE_WRAPPERTYPEINFO();
@@ -64,8 +49,13 @@ class DelayNode final : public AudioNode {
 
   DelayNode(BaseAudioContext&, double max_delay_time);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
+
   AudioParam* delayTime();
+
+  // InspectorHelperMixin
+  void ReportDidCreate() final;
+  void ReportWillBeDestroyed() final;
 
  private:
   Member<AudioParam> delay_time_;

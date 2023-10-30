@@ -7,29 +7,27 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
+class ExceptionState;
 class ServiceWorkerRegistration;
 
 class NavigationPreloadManager final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static NavigationPreloadManager* Create(
-      ServiceWorkerRegistration* registration) {
-    return MakeGarbageCollected<NavigationPreloadManager>(registration);
-  }
-
   explicit NavigationPreloadManager(ServiceWorkerRegistration*);
 
   ScriptPromise enable(ScriptState*);
   ScriptPromise disable(ScriptState*);
-  ScriptPromise setHeaderValue(ScriptState*, const String& value);
+  ScriptPromise setHeaderValue(ScriptState*,
+                               const String& value,
+                               ExceptionState& exception_state);
   ScriptPromise getState(ScriptState*);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   ScriptPromise SetEnabled(bool enable, ScriptState*);

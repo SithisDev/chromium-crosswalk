@@ -4,16 +4,19 @@
 
 #include "third_party/blink/renderer/core/geometry/dom_matrix_read_only.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_matrix_2d_init.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_matrix_init.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_point_init.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_string_unrestricteddoublesequence.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css/resolver/transform_builder.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/geometry/dom_matrix.h"
-#include "third_party/blink/renderer/core/geometry/dom_matrix_init.h"
 #include "third_party/blink/renderer/core/geometry/dom_point.h"
-#include "third_party/blink/renderer/core/geometry/dom_point_init.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 
@@ -107,31 +110,36 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::Create(
 
 DOMMatrixReadOnly* DOMMatrixReadOnly::Create(
     ExecutionContext* execution_context,
-    StringOrUnrestrictedDoubleSequence& init,
+    const V8UnionStringOrUnrestrictedDoubleSequence* init,
     ExceptionState& exception_state) {
-  if (init.IsString()) {
-    if (!execution_context->IsDocument()) {
-      exception_state.ThrowTypeError(
-          "DOMMatrix can't be constructed with strings on workers.");
-      return nullptr;
-    }
+  DCHECK(init);
 
-    DOMMatrixReadOnly* matrix =
-        MakeGarbageCollected<DOMMatrixReadOnly>(TransformationMatrix());
-    matrix->SetMatrixValueFromString(execution_context, init.GetAsString(),
-                                     exception_state);
-    return matrix;
-  }
+  switch (init->GetContentType()) {
+    case V8UnionStringOrUnrestrictedDoubleSequence::ContentType::kString: {
+      if (!execution_context->IsWindow()) {
+        exception_state.ThrowTypeError(
+            "DOMMatrix can't be constructed with strings on workers.");
+        return nullptr;
+      }
 
-  if (init.IsUnrestrictedDoubleSequence()) {
-    const Vector<double>& sequence = init.GetAsUnrestrictedDoubleSequence();
-    if (sequence.size() != 6 && sequence.size() != 16) {
-      exception_state.ThrowTypeError(
-          "The sequence must contain 6 elements for a 2D matrix or 16 elements "
-          "for a 3D matrix.");
-      return nullptr;
+      DOMMatrixReadOnly* matrix =
+          MakeGarbageCollected<DOMMatrixReadOnly>(TransformationMatrix());
+      matrix->SetMatrixValueFromString(execution_context, init->GetAsString(),
+                                       exception_state);
+      return matrix;
     }
-    return MakeGarbageCollected<DOMMatrixReadOnly>(sequence, sequence.size());
+    case V8UnionStringOrUnrestrictedDoubleSequence::ContentType::
+        kUnrestrictedDoubleSequence: {
+      const Vector<double>& sequence = init->GetAsUnrestrictedDoubleSequence();
+      if (sequence.size() != 6 && sequence.size() != 16) {
+        exception_state.ThrowTypeError(
+            "The sequence must contain 6 elements for a 2D matrix or 16 "
+            "elements "
+            "for a 3D matrix.");
+        return nullptr;
+      }
+      return MakeGarbageCollected<DOMMatrixReadOnly>(sequence, sequence.size());
+    }
   }
 
   NOTREACHED();
@@ -146,29 +154,27 @@ DOMMatrixReadOnly* DOMMatrixReadOnly::CreateForSerialization(double sequence[],
 DOMMatrixReadOnly* DOMMatrixReadOnly::fromFloat32Array(
     NotShared<DOMFloat32Array> float32_array,
     ExceptionState& exception_state) {
-  if (float32_array.View()->length() != 6 &&
-      float32_array.View()->length() != 16) {
+  if (float32_array->length() != 6 && float32_array->length() != 16) {
     exception_state.ThrowTypeError(
         "The sequence must contain 6 elements for a 2D matrix or 16 elements a "
         "for 3D matrix.");
     return nullptr;
   }
   return MakeGarbageCollected<DOMMatrixReadOnly>(
-      float32_array.View()->Data(), float32_array.View()->length());
+      float32_array->Data(), static_cast<int>(float32_array->length()));
 }
 
 DOMMatrixReadOnly* DOMMatrixReadOnly::fromFloat64Array(
     NotShared<DOMFloat64Array> float64_array,
     ExceptionState& exception_state) {
-  if (float64_array.View()->length() != 6 &&
-      float64_array.View()->length() != 16) {
+  if (float64_array->length() != 6 && float64_array->length() != 16) {
     exception_state.ThrowTypeError(
         "The sequence must contain 6 elements for a 2D matrix or 16 elements "
         "for a 3D matrix.");
     return nullptr;
   }
   return MakeGarbageCollected<DOMMatrixReadOnly>(
-      float64_array.View()->Data(), float64_array.View()->length());
+      float64_array->Data(), static_cast<int>(float64_array->length()));
 }
 
 DOMMatrixReadOnly* DOMMatrixReadOnly::fromMatrix2D(
@@ -211,7 +217,7 @@ bool DOMMatrixReadOnly::is2D() const {
 }
 
 bool DOMMatrixReadOnly::isIdentity() const {
-  return matrix_->IsIdentity();
+  return matrix_.IsIdentity();
 }
 
 DOMMatrix* DOMMatrixReadOnly::multiply(DOMMatrixInit* other,
@@ -280,19 +286,19 @@ DOMMatrix* DOMMatrixReadOnly::skewY(double sy) {
 
 DOMMatrix* DOMMatrixReadOnly::flipX() {
   DOMMatrix* flip_x = DOMMatrix::Create(this);
-  flip_x->setM11(-this->m11());
-  flip_x->setM12(-this->m12());
-  flip_x->setM13(-this->m13());
-  flip_x->setM14(-this->m14());
+  flip_x->setM11(-m11());
+  flip_x->setM12(-m12());
+  flip_x->setM13(-m13());
+  flip_x->setM14(-m14());
   return flip_x;
 }
 
 DOMMatrix* DOMMatrixReadOnly::flipY() {
   DOMMatrix* flip_y = DOMMatrix::Create(this);
-  flip_y->setM21(-this->m21());
-  flip_y->setM22(-this->m22());
-  flip_y->setM23(-this->m23());
-  flip_y->setM24(-this->m24());
+  flip_y->setM21(-m21());
+  flip_y->setM22(-m22());
+  flip_y->setM23(-m23());
+  flip_y->setM24(-m24());
   return flip_y;
 }
 
@@ -319,32 +325,18 @@ DOMPoint* DOMMatrixReadOnly::transformPoint(const DOMPointInit* point) {
 }
 
 DOMMatrixReadOnly::DOMMatrixReadOnly(const TransformationMatrix& matrix,
-                                     bool is2d) {
-  matrix_ = std::make_unique<TransformationMatrix>(matrix);
-  is2d_ = is2d;
-}
+                                     bool is2d)
+    : matrix_(matrix), is2d_(is2d) {}
 
 NotShared<DOMFloat32Array> DOMMatrixReadOnly::toFloat32Array() const {
-  float array[] = {
-      static_cast<float>(matrix_->M11()), static_cast<float>(matrix_->M12()),
-      static_cast<float>(matrix_->M13()), static_cast<float>(matrix_->M14()),
-      static_cast<float>(matrix_->M21()), static_cast<float>(matrix_->M22()),
-      static_cast<float>(matrix_->M23()), static_cast<float>(matrix_->M24()),
-      static_cast<float>(matrix_->M31()), static_cast<float>(matrix_->M32()),
-      static_cast<float>(matrix_->M33()), static_cast<float>(matrix_->M34()),
-      static_cast<float>(matrix_->M41()), static_cast<float>(matrix_->M42()),
-      static_cast<float>(matrix_->M43()), static_cast<float>(matrix_->M44())};
-
+  float array[16];
+  matrix_.GetColMajorF(array);
   return NotShared<DOMFloat32Array>(DOMFloat32Array::Create(array, 16));
 }
 
 NotShared<DOMFloat64Array> DOMMatrixReadOnly::toFloat64Array() const {
-  double array[] = {
-      matrix_->M11(), matrix_->M12(), matrix_->M13(), matrix_->M14(),
-      matrix_->M21(), matrix_->M22(), matrix_->M23(), matrix_->M24(),
-      matrix_->M31(), matrix_->M32(), matrix_->M33(), matrix_->M34(),
-      matrix_->M41(), matrix_->M42(), matrix_->M43(), matrix_->M44()};
-
+  double array[16];
+  matrix_.GetColMajor(array);
   return NotShared<DOMFloat64Array>(DOMFloat64Array::Create(array, 16));
 }
 
@@ -483,7 +475,7 @@ void DOMMatrixReadOnly::SetMatrixValueFromString(
 
   if (auto* identifier_value = DynamicTo<CSSIdentifierValue>(value)) {
     DCHECK(identifier_value->GetValueID() == CSSValueID::kNone);
-    matrix_->MakeIdentity();
+    matrix_.MakeIdentity();
     is2d_ = true;
     return;
   }
@@ -494,20 +486,18 @@ void DOMMatrixReadOnly::SetMatrixValueFromString(
     return;
   }
 
-  const ComputedStyle& initial_style = ComputedStyle::InitialStyle();
   TransformOperations operations = TransformBuilder::CreateTransformOperations(
-      *value,
-      CSSToLengthConversionData(&initial_style, &initial_style, nullptr, 1.0f));
+      *value, CSSToLengthConversionData());
 
-  if (operations.DependsOnBoxSize()) {
+  if (operations.BoxSizeDependencies()) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kSyntaxError,
         "Lengths must be absolute, not depend on the box size");
     return;
   }
 
-  matrix_->MakeIdentity();
-  operations.Apply(FloatSize(0, 0), *matrix_);
+  matrix_.MakeIdentity();
+  operations.Apply(gfx::SizeF(0, 0), matrix_);
 
   is2d_ = !operations.Has3DOperation();
 

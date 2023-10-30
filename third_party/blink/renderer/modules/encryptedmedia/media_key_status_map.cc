@@ -4,21 +4,21 @@
 
 #include "third_party/blink/renderer/modules/encryptedmedia/media_key_status_map.h"
 
-#include "third_party/blink/public/platform/web_data.h"
-#include "third_party/blink/renderer/bindings/core/v8/array_buffer_or_array_buffer_view.h"
-#include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
-#include "third_party/blink/renderer/core/typed_arrays/dom_array_piece.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
-#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-
 #include <algorithm>
 #include <limits>
+
+#include "third_party/blink/public/platform/web_data.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview.h"
+#include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
+#include "third_party/blink/renderer/core/typed_arrays/dom_array_piece.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 // Represents the key ID and associated status.
 class MediaKeyStatusMap::MapEntry final
-    : public GarbageCollectedFinalized<MediaKeyStatusMap::MapEntry> {
+    : public GarbageCollected<MediaKeyStatusMap::MapEntry> {
  public:
   MapEntry(WebData key_id, const String& status)
       : key_id_(DOMArrayBuffer::Create(scoped_refptr<SharedBuffer>(key_id))),
@@ -56,7 +56,7 @@ class MediaKeyStatusMap::MapEntry final
     return a->KeyId()->ByteLength() < b->KeyId()->ByteLength();
   }
 
-  virtual void Trace(blink::Visitor* visitor) { visitor->Trace(key_id_); }
+  virtual void Trace(Visitor* visitor) const { visitor->Trace(key_id_); }
 
  private:
   const Member<DOMArrayBuffer> key_id_;
@@ -65,13 +65,15 @@ class MediaKeyStatusMap::MapEntry final
 
 // Represents an Iterator that loops through the set of MapEntrys.
 class MapIterationSource final
-    : public PairIterable<ArrayBufferOrArrayBufferView,
-                          String>::IterationSource {
+    : public PairIterable<Member<V8BufferSource>,
+                          V8BufferSource,
+                          String,
+                          IDLString>::IterationSource {
  public:
   MapIterationSource(MediaKeyStatusMap* map) : map_(map), current_(0) {}
 
   bool Next(ScriptState* script_state,
-            ArrayBufferOrArrayBufferView& key,
+            Member<V8BufferSource>& key,
             String& value,
             ExceptionState&) override {
     // This simply advances an index and returns the next value if any,
@@ -80,15 +82,15 @@ class MapIterationSource final
       return false;
 
     const auto& entry = map_->at(current_++);
-    key.SetArrayBuffer(entry.KeyId());
+    key = MakeGarbageCollected<V8BufferSource>(entry.KeyId());
     value = entry.Status();
     return true;
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(map_);
-    PairIterable<ArrayBufferOrArrayBufferView, String>::IterationSource::Trace(
-        visitor);
+    PairIterable<Member<V8BufferSource>, V8BufferSource, String,
+                 IDLString>::IterationSource::Trace(visitor);
   }
 
  private:
@@ -129,25 +131,31 @@ uint32_t MediaKeyStatusMap::IndexOf(const DOMArrayPiece& key) const {
   return std::numeric_limits<uint32_t>::max();
 }
 
-bool MediaKeyStatusMap::has(const ArrayBufferOrArrayBufferView& key_id) {
+bool MediaKeyStatusMap::has(
+    const V8BufferSource* key_id
+) {
   uint32_t index = IndexOf(key_id);
   return index < entries_.size();
 }
 
 ScriptValue MediaKeyStatusMap::get(ScriptState* script_state,
-                                   const ArrayBufferOrArrayBufferView& key_id) {
+                                   const V8BufferSource* key_id
+) {
   uint32_t index = IndexOf(key_id);
-  if (index >= entries_.size())
-    return ScriptValue(script_state, v8::Undefined(script_state->GetIsolate()));
+  if (index >= entries_.size()) {
+    return ScriptValue(script_state->GetIsolate(),
+                       v8::Undefined(script_state->GetIsolate()));
+  }
   return ScriptValue::From(script_state, at(index).Status());
 }
 
-PairIterable<ArrayBufferOrArrayBufferView, String>::IterationSource*
-MediaKeyStatusMap::StartIteration(ScriptState*, ExceptionState&) {
+MediaKeyStatusMap::IterationSource* MediaKeyStatusMap::StartIteration(
+    ScriptState*,
+    ExceptionState&) {
   return MakeGarbageCollected<MapIterationSource>(this);
 }
 
-void MediaKeyStatusMap::Trace(blink::Visitor* visitor) {
+void MediaKeyStatusMap::Trace(Visitor* visitor) const {
   visitor->Trace(entries_);
   ScriptWrappable::Trace(visitor);
 }

@@ -5,14 +5,17 @@
 #include "third_party/blink/public/common/mime_util/mime_util.h"
 
 #include <stddef.h>
+#include <unordered_set>
 
 #include "base/lazy_instance.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "media/media_buildflags.h"
 #include "net/base/mime_util.h"
+#include "third_party/blink/public/common/buildflags.h"
+#include "third_party/blink/public/common/features.h"
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 // iOS doesn't use and must not depend on //media
 #include "media/base/mime_util.h"
 #endif
@@ -23,18 +26,23 @@ namespace {
 
 // From WebKit's WebCore/platform/MIMETypeRegistry.cpp:
 
-const char* const kSupportedImageTypes[] = {"image/jpeg",
-                                            "image/pjpeg",
-                                            "image/jpg",
-                                            "image/webp",
-                                            "image/png",
-                                            "image/apng",
-                                            "image/gif",
-                                            "image/bmp",
-                                            "image/vnd.microsoft.icon",  // ico
-                                            "image/x-icon",              // ico
-                                            "image/x-xbitmap",           // xbm
-                                            "image/x-png"};
+const char* const kSupportedImageTypes[] = {
+    "image/jpeg",
+    "image/pjpeg",
+    "image/jpg",
+    "image/webp",
+    "image/png",
+    "image/apng",
+    "image/gif",
+    "image/bmp",
+    "image/vnd.microsoft.icon",  // ico
+    "image/x-icon",              // ico
+    "image/x-xbitmap",           // xbm
+    "image/x-png",
+#if BUILDFLAG(ENABLE_AV1_DECODER)
+    "image/avif",
+#endif
+};
 
 //  Support every script type mentioned in the spec, as it notes that "User
 //  agents must recognize all JavaScript MIME types." See
@@ -79,8 +87,12 @@ static const char* const kUnsupportedTextTypes[] = {
     "text/csv",
     "text/tab-separated-values",
     "text/tsv",
-    "text/ofx",                         // http://crbug.com/162238
-    "text/vnd.sun.j2me.app-descriptor"  // http://crbug.com/176450
+    "text/ofx",                          // https://crbug.com/162238
+    "text/vnd.sun.j2me.app-descriptor",  // https://crbug.com/176450
+    "text/x-ms-iqy",                     // https://crbug.com/1054863
+    "text/x-ms-odc",                     // https://crbug.com/1054863
+    "text/x-ms-rqy",                     // https://crbug.com/1054863
+    "text/x-ms-contact"                  // https://crbug.com/1054863
 };
 
 // Note:
@@ -102,10 +114,14 @@ static const char* const kSupportedNonImageTypes[] = {
 // Singleton utility class for mime types
 class MimeUtil {
  public:
+  MimeUtil(const MimeUtil&) = delete;
+  MimeUtil& operator=(const MimeUtil&) = delete;
+
   bool IsSupportedImageMimeType(const std::string& mime_type) const;
   bool IsSupportedNonImageMimeType(const std::string& mime_type) const;
   bool IsUnsupportedTextMimeType(const std::string& mime_type) const;
   bool IsSupportedJavascriptMimeType(const std::string& mime_type) const;
+  bool IsJSONMimeType(const std::string&) const;
 
   bool IsSupportedMimeType(const std::string& mime_type) const;
 
@@ -120,20 +136,24 @@ class MimeUtil {
   MimeTypes non_image_types_;
   MimeTypes unsupported_text_types_;
   MimeTypes javascript_types_;
-
-  DISALLOW_COPY_AND_ASSIGN(MimeUtil);
 };
 
 MimeUtil::MimeUtil() {
-  for (size_t i = 0; i < base::size(kSupportedNonImageTypes); ++i)
-    non_image_types_.insert(kSupportedNonImageTypes[i]);
-  for (size_t i = 0; i < base::size(kSupportedImageTypes); ++i)
-    image_types_.insert(kSupportedImageTypes[i]);
-  for (size_t i = 0; i < base::size(kUnsupportedTextTypes); ++i)
-    unsupported_text_types_.insert(kUnsupportedTextTypes[i]);
-  for (size_t i = 0; i < base::size(kSupportedJavascriptTypes); ++i) {
-    javascript_types_.insert(kSupportedJavascriptTypes[i]);
-    non_image_types_.insert(kSupportedJavascriptTypes[i]);
+  for (const char* type : kSupportedNonImageTypes)
+    non_image_types_.insert(type);
+  for (const char* type : kSupportedImageTypes)
+    image_types_.insert(type);
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+  // TODO(firsching): Add "image/jxl" to the kSupportedImageTypes array when the
+  // JXL feature is shipped.
+  if (base::FeatureList::IsEnabled(features::kJXL))
+    image_types_.insert("image/jxl");
+#endif
+  for (const char* type : kUnsupportedTextTypes)
+    unsupported_text_types_.insert(type);
+  for (const char* type : kSupportedJavascriptTypes) {
+    javascript_types_.insert(type);
+    non_image_types_.insert(type);
   }
 }
 
@@ -144,7 +164,7 @@ bool MimeUtil::IsSupportedImageMimeType(const std::string& mime_type) const {
 bool MimeUtil::IsSupportedNonImageMimeType(const std::string& mime_type) const {
   return non_image_types_.find(base::ToLowerASCII(mime_type)) !=
              non_image_types_.end() ||
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
          media::IsSupportedMediaMimeType(mime_type) ||
 #endif
          (base::StartsWith(mime_type, "text/",
@@ -163,6 +183,14 @@ bool MimeUtil::IsUnsupportedTextMimeType(const std::string& mime_type) const {
 bool MimeUtil::IsSupportedJavascriptMimeType(
     const std::string& mime_type) const {
   return javascript_types_.find(mime_type) != javascript_types_.end();
+}
+
+// TODO(sasebree): Allow non-application `*/*+json` MIME types.
+// https://mimesniff.spec.whatwg.org/#json-mime-type
+bool MimeUtil::IsJSONMimeType(const std::string& mime_type) const {
+  return net::MatchesMimeType("application/json", mime_type) ||
+         net::MatchesMimeType("text/json", mime_type) ||
+         net::MatchesMimeType("application/*+json", mime_type);
 }
 
 bool MimeUtil::IsSupportedMimeType(const std::string& mime_type) const {
@@ -192,6 +220,10 @@ bool IsUnsupportedTextMimeType(const std::string& mime_type) {
 
 bool IsSupportedJavascriptMimeType(const std::string& mime_type) {
   return g_mime_util.Get().IsSupportedJavascriptMimeType(mime_type);
+}
+
+bool IsJSONMimeType(const std::string& mime_type) {
+  return g_mime_util.Get().IsJSONMimeType(mime_type);
 }
 
 bool IsSupportedMimeType(const std::string& mime_type) {

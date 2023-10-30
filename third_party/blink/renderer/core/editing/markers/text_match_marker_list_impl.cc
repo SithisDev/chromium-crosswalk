@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/editing/markers/text_match_marker_list_impl.h"
 
+#include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
@@ -12,6 +13,7 @@
 #include "third_party/blink/renderer/core/editing/visible_units.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 
 namespace blink {
 
@@ -24,7 +26,7 @@ bool TextMatchMarkerListImpl::IsEmpty() const {
 }
 
 void TextMatchMarkerListImpl::Add(DocumentMarker* marker) {
-  DCHECK_EQ(DocumentMarker::kTextMatch, marker->GetType());
+  DCHECK_EQ(marker->GetType(), MarkerType());
   SortedDocumentMarkerListEditor::AddMarkerWithoutMergingOverlapping(&markers_,
                                                                      marker);
 }
@@ -71,26 +73,44 @@ bool TextMatchMarkerListImpl::ShiftMarkers(const String&,
       &markers_, offset, old_length, new_length);
 }
 
-void TextMatchMarkerListImpl::Trace(Visitor* visitor) {
+void TextMatchMarkerListImpl::Trace(Visitor* visitor) const {
   visitor->Trace(markers_);
   DocumentMarkerList::Trace(visitor);
 }
 
 static void UpdateMarkerLayoutRect(const Node& node, TextMatchMarker& marker) {
-  const Position start_position(node, marker.StartOffset());
-  const Position end_position(node, marker.EndOffset());
-  EphemeralRange range(start_position, end_position);
-
   DCHECK(node.GetDocument().GetFrame());
   LocalFrameView* frame_view = node.GetDocument().GetFrame()->View();
 
   DCHECK(frame_view);
+
+  // If we have a locked ancestor, then the only reliable place to have a marker
+  // is at the locked root rect, since the elements under a locked root might
+  // not have up-to-date layout information.
+  if (auto* locked_root =
+          DisplayLockUtilities::HighestLockedInclusiveAncestor(node)) {
+    if (auto* locked_root_layout_object = locked_root->GetLayoutObject()) {
+      marker.SetRect(frame_view->FrameToDocument(
+          PhysicalRect(locked_root_layout_object->AbsoluteBoundingBoxRect())));
+    } else {
+      // If the locked root doesn't have a layout object, then we don't have the
+      // information needed to place the tickmark. Set the marker rect to an
+      // empty rect.
+      marker.SetRect(PhysicalRect());
+    }
+    return;
+  }
+
+  const Position start_position(node, marker.StartOffset());
+  const Position end_position(node, marker.EndOffset());
+  EphemeralRange range(start_position, end_position);
+
   marker.SetRect(
       frame_view->FrameToDocument(PhysicalRect(ComputeTextRect(range))));
 }
 
-Vector<IntRect> TextMatchMarkerListImpl::LayoutRects(const Node& node) const {
-  Vector<IntRect> result;
+Vector<gfx::Rect> TextMatchMarkerListImpl::LayoutRects(const Node& node) const {
+  Vector<gfx::Rect> result;
 
   for (DocumentMarker* marker : markers_) {
     auto* const text_match_marker = To<TextMatchMarker>(marker);
@@ -98,7 +118,7 @@ Vector<IntRect> TextMatchMarkerListImpl::LayoutRects(const Node& node) const {
       UpdateMarkerLayoutRect(node, *text_match_marker);
     if (!text_match_marker->IsRendered())
       continue;
-    result.push_back(PixelSnappedIntRect(text_match_marker->GetRect()));
+    result.push_back(ToPixelSnappedRect(text_match_marker->GetRect()));
   }
 
   return result;

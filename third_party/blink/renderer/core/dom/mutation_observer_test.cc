@@ -5,11 +5,12 @@
 #include "third_party/blink/renderer/core/dom/mutation_observer.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/core/dom/mutation_observer_init.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_mutation_observer_init.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer_registration.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 
 namespace blink {
 
@@ -19,11 +20,13 @@ class EmptyMutationCallback : public MutationObserver::Delegate {
  public:
   explicit EmptyMutationCallback(Document& document) : document_(document) {}
 
-  ExecutionContext* GetExecutionContext() const override { return document_; }
+  ExecutionContext* GetExecutionContext() const override {
+    return document_->GetExecutionContext();
+  }
 
   void Deliver(const MutationRecordVector&, MutationObserver&) override {}
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(document_);
     MutationObserver::Delegate::Trace(visitor);
   }
@@ -35,11 +38,11 @@ class EmptyMutationCallback : public MutationObserver::Delegate {
 }  // namespace
 
 TEST(MutationObserverTest, DisconnectCrash) {
-  Persistent<Document> document = MakeGarbageCollected<HTMLDocument>();
+  Persistent<Document> document = HTMLDocument::CreateForTest();
   auto* root =
       To<HTMLElement>(document->CreateRawElement(html_names::kHTMLTag));
   document->AppendChild(root);
-  root->SetInnerHTMLFromString("<head><title>\n</title></head><body></body>");
+  root->setInnerHTML("<head><title>\n</title></head><body></body>");
   Node* head = root->firstChild()->firstChild();
   DCHECK(head);
   Persistent<MutationObserver> observer = MutationObserver::Create(
@@ -54,7 +57,7 @@ TEST(MutationObserverTest, DisconnectCrash) {
   // The following GC will collect |head|, but won't collect a
   // MutationObserverRegistration for |head|.
   ThreadState::Current()->CollectAllGarbageForTesting(
-      BlinkGC::kNoHeapPointersOnStack);
+      ThreadState::StackState::kNoHeapPointers);
   observer->disconnect();
   // The test passes if disconnect() didn't crash.  crbug.com/657613.
 }

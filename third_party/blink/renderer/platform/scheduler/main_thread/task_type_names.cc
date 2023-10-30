@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/platform/scheduler/main_thread/task_type_names.h"
 
-#include "base/logging.h"
+#include "base/notreached.h"
 
 namespace blink {
 namespace scheduler {
@@ -21,10 +21,12 @@ const char* TaskTypeNames::TaskTypeToString(TaskType task_type) {
       return "UserInteraction";
     case TaskType::kNetworking:
       return "Networking";
-    case TaskType::kNetworkingWithURLLoaderAnnotation:
-      return "NetworkingWithURLLoaderAnnotation";
+    case TaskType::kNetworkingUnfreezable:
+      return "NetworkingUnfreezable";
     case TaskType::kNetworkingControl:
       return "NetworkingControl";
+    case TaskType::kLowPriorityScriptExecution:
+      return "LowPriorityScriptExecution";
     case TaskType::kHistoryTraversal:
       return "HistoryTraversal";
     case TaskType::kEmbed:
@@ -35,8 +37,12 @@ const char* TaskTypeNames::TaskTypeToString(TaskType task_type) {
       return "CanvasBlobSerialization";
     case TaskType::kMicrotask:
       return "Microtask";
-    case TaskType::kJavascriptTimer:
-      return "JavascriptTimer";
+    case TaskType::kJavascriptTimerImmediate:
+      return "JavascriptTimerImmediate";
+    case TaskType::kJavascriptTimerDelayedLowNesting:
+      return "JavascriptTimerDelayedLowNesting";
+    case TaskType::kJavascriptTimerDelayedHighNesting:
+      return "JavascriptTimerDelayedHighNesting";
     case TaskType::kRemoteEvent:
       return "RemoteEvent";
     case TaskType::kWebSocket:
@@ -85,8 +91,6 @@ const char* TaskTypeNames::TaskTypeToString(TaskType task_type) {
       return "InternalMedia";
     case TaskType::kInternalMediaRealTime:
       return "InternalMediaRealTime";
-    case TaskType::kInternalIPC:
-      return "InternalIPC";
     case TaskType::kInternalUserInteraction:
       return "InternalUserInteraction";
     case TaskType::kInternalInspector:
@@ -101,14 +105,12 @@ const char* TaskTypeNames::TaskTypeToString(TaskType task_type) {
       return "MainThreadTaskQueueInput";
     case TaskType::kMainThreadTaskQueueIdle:
       return "MainThreadTaskQueueIdle";
-    case TaskType::kMainThreadTaskQueueIPC:
-      return "MainThreadTaskQueueIPC";
     case TaskType::kMainThreadTaskQueueControl:
       return "MainThreadTaskQueueControl";
-    case TaskType::kMainThreadTaskQueueCleanup:
-      return "MainThreadTaskQueueCleanup";
     case TaskType::kMainThreadTaskQueueMemoryPurge:
       return "MainThreadTaskQueueMemoryPurge";
+    case TaskType::kMainThreadTaskQueueNonWaking:
+      return "MainThreadTaskQueueNonWaking";
     case TaskType::kInternalIntersectionObserver:
       return "InternalIntersectionObserver";
     case TaskType::kCompositorThreadTaskQueueDefault:
@@ -129,12 +131,30 @@ const char* TaskTypeNames::TaskTypeToString(TaskType task_type) {
       return "InternalContentCapture";
     case TaskType::kInternalNavigationAssociated:
       return "InternalNavigationAssociated";
-    case TaskType::kInternalFreezableIPC:
-      return "InternalFreezableIPC";
+    case TaskType::kInternalNavigationAssociatedUnfreezable:
+      return "InternalNavigationAssociatedUnfreezable";
+    case TaskType::kInternalNavigationCancellation:
+      return "InternalNavigationCancellation";
     case TaskType::kInternalContinueScriptLoading:
       return "InternalContinueScriptLoading";
-    case TaskType::kCount:
-      return "Count";
+    case TaskType::kWebSchedulingPostedTask:
+      return "WebSchedulingPostedTask";
+    case TaskType::kInternalFrameLifecycleControl:
+      return "InternalFrameLifecycleControl";
+    case TaskType::kInternalFindInPage:
+      return "InternalFindInPage";
+    case TaskType::kInternalHighPriorityLocalFrame:
+      return "InternalHighPriorityLocalFrame";
+    case TaskType::kInternalInputBlocking:
+      return "InternalInputBlocking";
+    case TaskType::kMainThreadTaskQueueIPCTracking:
+      return "MainThreadTaskQueueIPCTracking";
+    case TaskType::kWakeLock:
+      return "WakeLock";
+    case TaskType::kWebGPU:
+      return "WebGPU";
+    case TaskType::kInternalPostMessageForwarding:
+      return "InternalPostMessageForwarding";
   }
   // FrameSchedulerImpl should not call this for invalid TaskTypes.
   NOTREACHED();

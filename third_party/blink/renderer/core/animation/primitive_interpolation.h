@@ -10,11 +10,11 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/core/animation/typed_interpolation_value.h"
-#include "third_party/blink/renderer/platform/animation/animation_utilities.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/geometry/blend.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -25,6 +25,8 @@ class PrimitiveInterpolation {
   USING_FAST_MALLOC(PrimitiveInterpolation);
 
  public:
+  PrimitiveInterpolation(const PrimitiveInterpolation&) = delete;
+  PrimitiveInterpolation& operator=(const PrimitiveInterpolation&) = delete;
   virtual ~PrimitiveInterpolation() = default;
 
   virtual void InterpolateValue(
@@ -37,7 +39,6 @@ class PrimitiveInterpolation {
 
  protected:
   PrimitiveInterpolation() = default;
-  DISALLOW_COPY_AND_ASSIGN(PrimitiveInterpolation);
 };
 
 // Represents a pair of keyframes that are compatible for "smooth" interpolation
@@ -48,7 +49,7 @@ class PairwisePrimitiveInterpolation : public PrimitiveInterpolation {
       const InterpolationType& type,
       std::unique_ptr<InterpolableValue> start,
       std::unique_ptr<InterpolableValue> end,
-      scoped_refptr<NonInterpolableValue> non_interpolable_value)
+      scoped_refptr<const NonInterpolableValue> non_interpolable_value)
       : type_(type),
         start_(std::move(start)),
         end_(std::move(end)),
@@ -73,6 +74,7 @@ class PairwisePrimitiveInterpolation : public PrimitiveInterpolation {
     DCHECK(result);
     DCHECK_EQ(&result->GetType(), &type_);
     DCHECK_EQ(result->GetNonInterpolableValue(), non_interpolable_value_.get());
+    start_->AssertCanInterpolateWith(*end_);
     start_->Interpolate(*end_, fraction,
                         *result->MutableValue().interpolable_value);
   }
@@ -86,7 +88,7 @@ class PairwisePrimitiveInterpolation : public PrimitiveInterpolation {
   const InterpolationType& type_;
   std::unique_ptr<InterpolableValue> start_;
   std::unique_ptr<InterpolableValue> end_;
-  scoped_refptr<NonInterpolableValue> non_interpolable_value_;
+  scoped_refptr<const NonInterpolableValue> non_interpolable_value_;
 };
 
 // Represents a pair of incompatible keyframes that fall back to 50% flip

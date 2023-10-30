@@ -7,7 +7,8 @@
 
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -21,14 +22,14 @@ class V8StateCallback;
 // |AnimationWorkletGlobalScope::registerAnimator| to validate the provided
 // Javascript class before completing the registration.
 class MODULES_EXPORT AnimatorDefinition final
-    : public GarbageCollectedFinalized<AnimatorDefinition>,
+    : public GarbageCollected<AnimatorDefinition>,
       public NameClient {
  public:
   explicit AnimatorDefinition(V8AnimatorConstructor* constructor,
                               V8AnimateCallback* animate,
                               V8StateCallback* state);
-  ~AnimatorDefinition();
-  virtual void Trace(blink::Visitor* visitor);
+  ~AnimatorDefinition() override = default;
+  virtual void Trace(Visitor* visitor) const;
   const char* NameInHeapSnapshot() const override {
     return "AnimatorDefinition";
   }

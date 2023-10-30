@@ -34,6 +34,7 @@ LoadableTextTrack::LoadableTextTrack(HTMLTrackElement* track)
     : TextTrack(SubtitlesKeyword(),
                 g_empty_atom,
                 g_empty_atom,
+                *track,
                 g_empty_atom,
                 kTrackElement),
       track_element_(track) {
@@ -46,9 +47,9 @@ bool LoadableTextTrack::IsDefault() const {
   return track_element_->FastHasAttribute(html_names::kDefaultAttr);
 }
 
-void LoadableTextTrack::setMode(const AtomicString& mode) {
+void LoadableTextTrack::setMode(const V8TextTrackMode& mode) {
   TextTrack::setMode(mode);
-  if (track_element_->getReadyState() == HTMLTrackElement::kNone)
+  if (track_element_->getReadyState() == HTMLTrackElement::ReadyState::kNone)
     track_element_->ScheduleLoad();
 }
 
@@ -63,7 +64,7 @@ wtf_size_t LoadableTextTrack::TrackElementIndex() const {
   return index;
 }
 
-void LoadableTextTrack::Trace(Visitor* visitor) {
+void LoadableTextTrack::Trace(Visitor* visitor) const {
   visitor->Trace(track_element_);
   TextTrack::Trace(visitor);
 }

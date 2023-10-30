@@ -17,17 +17,15 @@ namespace blink {
 struct PLATFORM_EXPORT SchedulingPolicy {
   using Feature = scheduler::WebSchedulerTrackedFeature;
 
-  // Sticky features can't be unregistered and remain active for the rest
-  // of the lifetime of the page.
-  static bool IsFeatureSticky(Feature feature);
-
   // List of opt-outs which form a policy.
   struct DisableAggressiveThrottling {};
-  struct RecordMetricsForBackForwardCache {};
+  struct DisableBackForwardCache {};
+  struct DisableAlignWakeUps {};
 
   struct ValidPolicies {
     ValidPolicies(DisableAggressiveThrottling);
-    ValidPolicies(RecordMetricsForBackForwardCache);
+    ValidPolicies(DisableBackForwardCache);
+    ValidPolicies(DisableAlignWakeUps);
   };
 
   template <class... ArgTypes,
@@ -36,16 +34,20 @@ struct PLATFORM_EXPORT SchedulingPolicy {
                                                     ArgTypes...>::value>>
   constexpr SchedulingPolicy(ArgTypes... args)
       : disable_aggressive_throttling(
-            base::trait_helpers::HasTrait<DisableAggressiveThrottling>(
-                args...)),
+            base::trait_helpers::HasTrait<DisableAggressiveThrottling,
+                                          ArgTypes...>()),
         disable_back_forward_cache(
-            base::trait_helpers::HasTrait<RecordMetricsForBackForwardCache>(
-                args...)) {}
+            base::trait_helpers::HasTrait<DisableBackForwardCache,
+                                          ArgTypes...>()),
+        disable_align_wake_ups(
+            base::trait_helpers::HasTrait<DisableAlignWakeUps, ArgTypes...>()) {
+  }
 
   SchedulingPolicy() {}
 
   bool disable_aggressive_throttling = false;
   bool disable_back_forward_cache = false;
+  bool disable_align_wake_ups = false;
 };
 
 }  // namespace blink

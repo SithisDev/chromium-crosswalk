@@ -4,11 +4,11 @@
 
 #include "third_party/blink/renderer/core/editing/commands/editing_state.h"
 
+#include "third_party/blink/renderer/platform/wtf/assertions.h"
+
 namespace blink {
 
 EditingState::EditingState() = default;
-
-EditingState::~EditingState() = default;
 
 void EditingState::Abort() {
   DCHECK(!is_aborted_);

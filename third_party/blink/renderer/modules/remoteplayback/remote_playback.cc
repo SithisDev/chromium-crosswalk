@@ -7,22 +7,29 @@
 #include <memory>
 #include <utility>
 
+#include "base/numerics/safe_conversions.h"
+#include "base/strings/strcat.h"
+#include "third_party/blink/public/platform/modules/remoteplayback/remote_playback_source.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_remote_playback_availability_callback.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/html/media/remote_playback_observer.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/probe/async_task_context.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability_state.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_controller.h"
 #include "third_party/blink/renderer/modules/remoteplayback/availability_callback_wrapper.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/modules/remoteplayback/remote_playback_metrics.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/memory_pressure_listener.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/base64.h"
@@ -37,21 +44,25 @@ const AtomicString& RemotePlaybackStateToString(
   DEFINE_STATIC_LOCAL(const AtomicString, connected_value, ("connected"));
   DEFINE_STATIC_LOCAL(const AtomicString, disconnected_value, ("disconnected"));
 
-  if (state == mojom::blink::PresentationConnectionState::CONNECTING)
-    return connecting_value;
-  if (state == mojom::blink::PresentationConnectionState::CONNECTED)
-    return connected_value;
-  if (state == mojom::blink::PresentationConnectionState::CLOSED)
-    return disconnected_value;
-
-  NOTREACHED();
-  return disconnected_value;
+  switch (state) {
+    case mojom::blink::PresentationConnectionState::CONNECTING:
+      return connecting_value;
+    case mojom::blink::PresentationConnectionState::CONNECTED:
+      return connected_value;
+    case mojom::blink::PresentationConnectionState::CLOSED:
+    case mojom::blink::PresentationConnectionState::TERMINATED:
+      return disconnected_value;
+    default:
+      NOTREACHED();
+      return disconnected_value;
+  }
 }
 
-void RunRemotePlaybackTask(ExecutionContext* context,
-                           base::OnceClosure task,
-                           std::unique_ptr<int> task_id) {
-  probe::AsyncTask async_task(context, task_id.get());
+void RunRemotePlaybackTask(
+    ExecutionContext* context,
+    base::OnceClosure task,
+    std::unique_ptr<probe::AsyncTaskContext> task_context) {
+  probe::AsyncTask async_task(context, task_context.get());
   std::move(task).Run();
 }
 
@@ -64,9 +75,12 @@ KURL GetAvailabilityUrl(const WebURL& source, bool is_source_supported) {
   // encoded string representation of the source URL.
   std::string source_string = source.GetString().Utf8();
   String encoded_source = WTF::Base64URLEncode(
-      source_string.data(), SafeCast<unsigned>(source_string.length()));
+      source_string.data(),
+      base::checked_cast<unsigned>(source_string.length()));
 
-  return KURL("remote-playback://" + encoded_source);
+  return KURL(
+      base::StrCat({kRemotePlaybackPresentationUrlScheme, "://"}).c_str() +
+      encoded_source);
 }
 
 bool IsBackgroundAvailabilityMonitoringDisabled() {
@@ -87,43 +101,42 @@ RemotePlayback& RemotePlayback::From(HTMLMediaElement& element) {
 }
 
 RemotePlayback::RemotePlayback(HTMLMediaElement& element)
-    : ContextLifecycleObserver(element.GetExecutionContext()),
+    : ExecutionContextLifecycleObserver(element.GetExecutionContext()),
       RemotePlaybackController(element),
       state_(mojom::blink::PresentationConnectionState::CLOSED),
       availability_(mojom::ScreenAvailability::UNKNOWN),
       media_element_(&element),
       is_listening_(false),
-      presentation_connection_binding_(this) {}
+      presentation_connection_receiver_(this, element.GetExecutionContext()),
+      target_presentation_connection_(element.GetExecutionContext()) {}
 
 const AtomicString& RemotePlayback::InterfaceName() const {
   return event_target_names::kRemotePlayback;
 }
 
 ExecutionContext* RemotePlayback::GetExecutionContext() const {
-  return &media_element_->GetDocument();
+  return ExecutionContextLifecycleObserver::GetExecutionContext();
 }
 
 ScriptPromise RemotePlayback::watchAvailability(
     ScriptState* script_state,
-    V8RemotePlaybackAvailabilityCallback* callback) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
-
+    V8RemotePlaybackAvailabilityCallback* callback,
+    ExceptionState& exception_state) {
   if (media_element_->FastHasAttribute(
           html_names::kDisableremoteplaybackAttr)) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
-        "disableRemotePlayback attribute is present."));
-    return promise;
+        "disableRemotePlayback attribute is present.");
+    return ScriptPromise();
   }
 
   int id = WatchAvailabilityInternal(
       MakeGarbageCollected<AvailabilityCallbackWrapper>(callback));
   if (id == kWatchAvailabilityNotSupported) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
-        "Availability monitoring is not supported on this device."));
-    return promise;
+        "Availability monitoring is not supported on this device.");
+    return ScriptPromise();
   }
 
   // TODO(avayvod): Currently the availability is tracked for each media element
@@ -132,103 +145,115 @@ ScriptPromise RemotePlayback::watchAvailability(
   // controls. If there are no default controls, we should also start tracking
   // availability on demand meaning the Promise returned by watchAvailability()
   // will be resolved asynchronously.
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
   resolver->Resolve(id);
   return promise;
 }
 
-ScriptPromise RemotePlayback::cancelWatchAvailability(ScriptState* script_state,
-                                                      int id) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
-
+ScriptPromise RemotePlayback::cancelWatchAvailability(
+    ScriptState* script_state,
+    int id,
+    ExceptionState& exception_state) {
   if (media_element_->FastHasAttribute(
           html_names::kDisableremoteplaybackAttr)) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
-        "disableRemotePlayback attribute is present."));
-    return promise;
+        "disableRemotePlayback attribute is present.");
+    return ScriptPromise();
   }
 
   if (!CancelWatchAvailabilityInternal(id)) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kNotFoundError,
-        "A callback with the given id is not found."));
-    return promise;
+        "A callback with the given id is not found.");
+    return ScriptPromise();
   }
 
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
   resolver->Resolve();
   return promise;
 }
 
 ScriptPromise RemotePlayback::cancelWatchAvailability(
-    ScriptState* script_state) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
-
+    ScriptState* script_state,
+    ExceptionState& exception_state) {
   if (media_element_->FastHasAttribute(
           html_names::kDisableremoteplaybackAttr)) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
-        "disableRemotePlayback attribute is present."));
-    return promise;
+        "disableRemotePlayback attribute is present.");
+    return ScriptPromise();
   }
 
   availability_callbacks_.clear();
   StopListeningForAvailability();
 
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
   resolver->Resolve();
   return promise;
 }
 
-ScriptPromise RemotePlayback::prompt(ScriptState* script_state) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
-
+ScriptPromise RemotePlayback::prompt(ScriptState* script_state,
+                                     ExceptionState& exception_state) {
   if (media_element_->FastHasAttribute(
           html_names::kDisableremoteplaybackAttr)) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
-        "disableRemotePlayback attribute is present."));
-    return promise;
+        "disableRemotePlayback attribute is present.");
+    return ScriptPromise();
   }
 
   if (prompt_promise_resolver_) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kOperationError,
-        "A prompt is already being shown for this media element."));
-    return promise;
+        "A prompt is already being shown for this media element.");
+    return ScriptPromise();
   }
 
-  if (!LocalFrame::HasTransientUserActivation(media_element_->GetFrame())) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+  if (!media_element_->DomWindow()) {
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidAccessError,
-        "RemotePlayback::prompt() requires user gesture."));
-    return promise;
+        "RemotePlayback::prompt() does not work in a detached window.");
+    return ScriptPromise();
+  }
+
+  if (!LocalFrame::HasTransientUserActivation(
+          media_element_->DomWindow()->GetFrame())) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidAccessError,
+        "RemotePlayback::prompt() requires user gesture.");
+    return ScriptPromise();
   }
 
   if (!RuntimeEnabledFeatures::RemotePlaybackBackendEnabled()) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
-        "The RemotePlayback API is disabled on this platform."));
-    return promise;
+        "The RemotePlayback API is disabled on this platform.");
+    return ScriptPromise();
   }
 
   if (availability_ == mojom::ScreenAvailability::UNAVAILABLE) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
-        DOMExceptionCode::kNotFoundError, "No remote playback devices found."));
-    return promise;
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotFoundError,
+                                      "No remote playback devices found.");
+    return ScriptPromise();
   }
 
   if (availability_ == mojom::ScreenAvailability::SOURCE_NOT_SUPPORTED) {
-    resolver->Reject(MakeGarbageCollected<DOMException>(
+    exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,
-        "The currentSrc is not compatible with remote playback"));
-    return promise;
+        "The currentSrc is not compatible with remote playback");
+    return ScriptPromise();
   }
 
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
   prompt_promise_resolver_ = resolver;
   PromptInternal();
-
+  RemotePlaybackMetrics::RecordRemotePlaybackLocation(
+      RemotePlaybackInitiationLocation::kRemovePlaybackAPI);
   return promise;
 }
 
@@ -241,11 +266,10 @@ bool RemotePlayback::HasPendingActivity() const {
          prompt_promise_resolver_;
 }
 
-void RemotePlayback::ContextDestroyed(ExecutionContext*) {
-  CleanupConnections();
-}
-
 void RemotePlayback::PromptInternal() {
+  if (!GetExecutionContext())
+    return;
+
   PresentationController* controller =
       PresentationController::FromContext(GetExecutionContext());
   if (controller && !availability_urls_.IsEmpty()) {
@@ -260,15 +284,16 @@ void RemotePlayback::PromptInternal() {
     // task id.
     base::OnceClosure task =
         WTF::Bind(&RemotePlayback::PromptCancelled, WrapPersistent(this));
-    std::unique_ptr<int> task_id = std::make_unique<int>(0);
-    probe::AsyncTaskScheduled(GetExecutionContext(), "promptCancelled",
-                              task_id.get());
+
+    std::unique_ptr<probe::AsyncTaskContext> task_context =
+        std::make_unique<probe::AsyncTaskContext>();
+    task_context->Schedule(GetExecutionContext(), "promptCancelled");
     GetExecutionContext()
         ->GetTaskRunner(TaskType::kMediaElementEvent)
-        ->PostTask(FROM_HERE, WTF::Bind(RunRemotePlaybackTask,
-                                        WrapPersistent(GetExecutionContext()),
-                                        WTF::Passed(std::move(task)),
-                                        WTF::Passed(std::move(task_id))));
+        ->PostTask(FROM_HERE,
+                   WTF::Bind(RunRemotePlaybackTask,
+                             WrapPersistent(GetExecutionContext()),
+                             std::move(task), std::move(task_context)));
   }
 }
 
@@ -278,6 +303,9 @@ int RemotePlayback::WatchAvailabilityInternal(
       IsBackgroundAvailabilityMonitoringDisabled()) {
     return kWatchAvailabilityNotSupported;
   }
+
+  if (!GetExecutionContext())
+    return kWatchAvailabilityNotSupported;
 
   int id;
   do {
@@ -290,15 +318,15 @@ int RemotePlayback::WatchAvailabilityInternal(
   // We can remove the wrapper if InspectorInstrumentation returns a task id.
   base::OnceClosure task = WTF::Bind(&RemotePlayback::NotifyInitialAvailability,
                                      WrapPersistent(this), id);
-  std::unique_ptr<int> task_id = std::make_unique<int>(0);
-  probe::AsyncTaskScheduled(GetExecutionContext(), "watchAvailabilityCallback",
-                            task_id.get());
+  std::unique_ptr<probe::AsyncTaskContext> task_context =
+      std::make_unique<probe::AsyncTaskContext>();
+  task_context->Schedule(GetExecutionContext(), "watchAvailabilityCallback");
   GetExecutionContext()
       ->GetTaskRunner(TaskType::kMediaElementEvent)
-      ->PostTask(FROM_HERE, WTF::Bind(RunRemotePlaybackTask,
-                                      WrapPersistent(GetExecutionContext()),
-                                      WTF::Passed(std::move(task)),
-                                      WTF::Passed(std::move(task_id))));
+      ->PostTask(FROM_HERE,
+                 WTF::Bind(RunRemotePlaybackTask,
+                           WrapPersistent(GetExecutionContext()),
+                           std::move(task), std::move(task_context)));
 
   MaybeStartListeningForAvailability();
   return id;
@@ -328,14 +356,21 @@ void RemotePlayback::NotifyInitialAvailability(int callback_id) {
 
 void RemotePlayback::StateChanged(
     mojom::blink::PresentationConnectionState state) {
-  if (prompt_promise_resolver_) {
+  if (prompt_promise_resolver_ &&
+      IsInParallelAlgorithmRunnable(
+          prompt_promise_resolver_->GetExecutionContext(),
+          prompt_promise_resolver_->GetScriptState())) {
     // Changing state to "disconnected" from "disconnected" or "connecting"
     // means that establishing connection with remote playback device failed.
     // Changing state to anything else means the state change intended by
     // prompt() succeeded.
+    ScriptState::Scope script_state_scope(
+        prompt_promise_resolver_->GetScriptState());
+
     if (state_ != mojom::blink::PresentationConnectionState::CONNECTED &&
         state == mojom::blink::PresentationConnectionState::CLOSED) {
-      prompt_promise_resolver_->Reject(MakeGarbageCollected<DOMException>(
+      prompt_promise_resolver_->Reject(V8ThrowDOMException::CreateOrDie(
+          prompt_promise_resolver_->GetScriptState()->GetIsolate(),
           DOMExceptionCode::kAbortError,
           "Failed to connect to the remote device."));
     } else {
@@ -345,8 +380,8 @@ void RemotePlayback::StateChanged(
               state == mojom::blink::PresentationConnectionState::CLOSED));
       prompt_promise_resolver_->Resolve();
     }
-    prompt_promise_resolver_ = nullptr;
   }
+  prompt_promise_resolver_ = nullptr;
 
   if (state_ == state)
     return;
@@ -354,19 +389,22 @@ void RemotePlayback::StateChanged(
   state_ = state;
   if (state_ == mojom::blink::PresentationConnectionState::CONNECTING) {
     DispatchEvent(*Event::Create(event_type_names::kConnecting));
-    if (media_element_->IsHTMLVideoElement()) {
+    if (auto* video_element =
+            DynamicTo<HTMLVideoElement>(media_element_.Get())) {
       // TODO(xjz): Pass the remote device name.
-      ToHTMLVideoElement(media_element_.Get())
-          ->MediaRemotingStarted(WebString());
+
+      video_element->MediaRemotingStarted(WebString());
     }
     media_element_->FlingingStarted();
   } else if (state_ == mojom::blink::PresentationConnectionState::CONNECTED) {
     DispatchEvent(*Event::Create(event_type_names::kConnect));
-  } else if (state_ == mojom::blink::PresentationConnectionState::CLOSED) {
+  } else if (state_ == mojom::blink::PresentationConnectionState::CLOSED ||
+             state_ == mojom::blink::PresentationConnectionState::TERMINATED) {
     DispatchEvent(*Event::Create(event_type_names::kDisconnect));
-    if (media_element_->IsHTMLVideoElement()) {
-      ToHTMLVideoElement(media_element_.Get())
-          ->MediaRemotingStopped(WebLocalizedString::kMediaRemotingStopNoText);
+    if (auto* video_element =
+            DynamicTo<HTMLVideoElement>(media_element_.Get())) {
+      video_element->MediaRemotingStopped(
+          WebMediaPlayerClient::kMediaRemotingStopNoText);
     }
     CleanupConnections();
     presentation_id_ = "";
@@ -379,10 +417,19 @@ void RemotePlayback::StateChanged(
 }
 
 void RemotePlayback::PromptCancelled() {
-  if (!prompt_promise_resolver_)
+  if (!prompt_promise_resolver_ ||
+      !IsInParallelAlgorithmRunnable(
+          prompt_promise_resolver_->GetExecutionContext(),
+          prompt_promise_resolver_->GetScriptState())) {
+    prompt_promise_resolver_ = nullptr;
     return;
+  }
 
-  prompt_promise_resolver_->Reject(MakeGarbageCollected<DOMException>(
+  ScriptState::Scope script_state_scope(
+      prompt_promise_resolver_->GetScriptState());
+
+  prompt_promise_resolver_->Reject(V8ThrowDOMException::CreateOrDie(
+      prompt_promise_resolver_->GetScriptState()->GetIsolate(),
       DOMExceptionCode::kNotAllowedError, "The prompt was dismissed."));
   prompt_promise_resolver_ = nullptr;
 }
@@ -448,7 +495,8 @@ bool RemotePlayback::RemotePlaybackAvailable() const {
 
 void RemotePlayback::RemotePlaybackDisabled() {
   if (prompt_promise_resolver_) {
-    prompt_promise_resolver_->Reject(MakeGarbageCollected<DOMException>(
+    prompt_promise_resolver_->Reject(V8ThrowDOMException::CreateOrDie(
+        prompt_promise_resolver_->GetScriptState()->GetIsolate(),
         DOMExceptionCode::kInvalidStateError,
         "disableRemotePlayback attribute is present."));
     prompt_promise_resolver_ = nullptr;
@@ -457,8 +505,10 @@ void RemotePlayback::RemotePlaybackDisabled() {
   availability_callbacks_.clear();
   StopListeningForAvailability();
 
-  if (state_ == mojom::blink::PresentationConnectionState::CLOSED)
+  if (state_ == mojom::blink::PresentationConnectionState::CLOSED ||
+      state_ == mojom::blink::PresentationConnectionState::TERMINATED) {
     return;
+  }
 
   auto* controller = PresentationController::FromContext(GetExecutionContext());
   if (controller) {
@@ -469,7 +519,7 @@ void RemotePlayback::RemotePlaybackDisabled() {
 
 void RemotePlayback::CleanupConnections() {
   target_presentation_connection_.reset();
-  presentation_connection_binding_.Close();
+  presentation_connection_receiver_.reset();
 }
 
 void RemotePlayback::AvailabilityChanged(
@@ -487,7 +537,12 @@ void RemotePlayback::AvailabilityChanged(
   if (new_availability == old_availability)
     return;
 
-  for (auto& callback : availability_callbacks_.Values())
+  // Copy the callbacks to a temporary vector to prevent iterator invalidations,
+  // in case the JS callbacks invoke watchAvailability().
+  HeapVector<Member<AvailabilityCallbackWrapper>> callbacks;
+  CopyValuesToVector(availability_callbacks_, callbacks);
+
+  for (auto& callback : callbacks)
     callback->Run(this, new_availability);
 }
 
@@ -504,19 +559,29 @@ void RemotePlayback::OnConnectionSuccess(
 
   StateChanged(mojom::blink::PresentationConnectionState::CONNECTING);
 
-  DCHECK(!presentation_connection_binding_.is_bound());
+  DCHECK(!presentation_connection_receiver_.is_bound());
   auto* presentation_controller =
       PresentationController::FromContext(GetExecutionContext());
   if (!presentation_controller)
     return;
 
-  // Note: Messages on |connection_request| are ignored.
-  target_presentation_connection_.Bind(std::move(result->connection_ptr));
-  presentation_connection_binding_.Bind(std::move(result->connection_request));
+  // Note: Messages on |connection_receiver| are ignored.
+  target_presentation_connection_.Bind(
+      std::move(result->connection_remote),
+      GetExecutionContext()->GetTaskRunner(TaskType::kMediaElementEvent));
+  presentation_connection_receiver_.Bind(
+      std::move(result->connection_receiver),
+      GetExecutionContext()->GetTaskRunner(TaskType::kMediaElementEvent));
+  RemotePlaybackMetrics::RecordRemotePlaybackStartSessionResult(
+      GetExecutionContext(), true);
 }
 
 void RemotePlayback::OnConnectionError(
     const mojom::blink::PresentationError& error) {
+  // This is called when:
+  // (1) A request to start a presentation failed.
+  // (2) A PresentationRequest is cancelled. i.e. the user closed the device
+  // selection or the route controller dialog.
   presentation_id_ = "";
   presentation_url_ = KURL();
   if (error.error_type ==
@@ -526,6 +591,8 @@ void RemotePlayback::OnConnectionError(
   }
 
   StateChanged(mojom::blink::PresentationConnectionState::CLOSED);
+  RemotePlaybackMetrics::RecordRemotePlaybackStartSessionResult(
+      GetExecutionContext(), false);
 }
 
 void RemotePlayback::HandlePresentationResponse(
@@ -586,13 +653,15 @@ void RemotePlayback::MaybeStartListeningForAvailability() {
   is_listening_ = true;
 }
 
-void RemotePlayback::Trace(blink::Visitor* visitor) {
+void RemotePlayback::Trace(Visitor* visitor) const {
   visitor->Trace(availability_callbacks_);
   visitor->Trace(prompt_promise_resolver_);
   visitor->Trace(media_element_);
+  visitor->Trace(presentation_connection_receiver_);
+  visitor->Trace(target_presentation_connection_);
   visitor->Trace(observers_);
   EventTargetWithInlineData::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextLifecycleObserver::Trace(visitor);
   RemotePlaybackController::Trace(visitor);
 }
 

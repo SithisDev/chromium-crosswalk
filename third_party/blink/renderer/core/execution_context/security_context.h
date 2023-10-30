@@ -27,53 +27,68 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EXECUTION_CONTEXT_SECURITY_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EXECUTION_CONTEXT_SECURITY_CONTEXT_H_
 
-#include "base/macros.h"
+#include <memory>
+
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
-#include "third_party/blink/public/platform/web_insecure_request_policy.h"
+#include "services/network/public/mojom/web_sandbox_flags.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/permissions_policy/document_policy_feature.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/frame/sandbox_flags.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
-
-#include <memory>
+#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 
 namespace blink {
 
-class ContentSecurityPolicy;
-class FeaturePolicy;
+class DocumentPolicy;
+class ExecutionContext;
+class PermissionsPolicy;
+class PolicyValue;
 class SecurityOrigin;
-struct ParsedFeaturePolicyDeclaration;
+struct ParsedPermissionsPolicyDeclaration;
 
-using ParsedFeaturePolicy = std::vector<ParsedFeaturePolicyDeclaration>;
+using ParsedPermissionsPolicy = std::vector<ParsedPermissionsPolicyDeclaration>;
+
+enum class SecureContextMode { kInsecureContext, kSecureContext };
+
+// Explanation as to why |SecureContextMode| was set as it was set.
+enum class SecureContextModeExplanation {
+  kSecure,
+  kSecureLocalhost,
+  kInsecureScheme,
+  kInsecureAncestor,
+};
 
 // Whether to report policy violations when checking whether a feature is
 // enabled.
 enum class ReportOptions { kReportOnFailure, kDoNotReport };
-enum class FeatureEnabledState { kDisabled, kReportOnly, kEnabled };
 
-namespace mojom {
-enum class FeaturePolicyDisposition : int32_t;
-enum class FeaturePolicyFeature : int32_t;
-enum class IPAddressSpace : int32_t;
-}
-
-// Defines the security properties (such as the security origin, content
-// security policy, and other restrictions) of an environment in which
-// script execution or other activity may occur.
+// Defines the security properties (such as the security origin, and other
+// restrictions) of an environment in which script execution or other activity
+// may occur.
 //
 // Mostly 1:1 with ExecutionContext, except that while remote (i.e.,
 // out-of-process) environments do not have an ExecutionContext in the local
 // process (as execution cannot occur locally), they do have a SecurityContext
 // to allow those properties to be queried.
-class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
+class CORE_EXPORT SecurityContext {
+  DISALLOW_NEW();
+
  public:
-  void Trace(blink::Visitor*) override;
+  explicit SecurityContext(ExecutionContext*);
+  SecurityContext(const SecurityContext&) = delete;
+  SecurityContext& operator=(const SecurityContext&) = delete;
+  virtual ~SecurityContext();
+
+  void Trace(Visitor*) const;
 
   using InsecureNavigationsSet = HashSet<unsigned, WTF::AlreadyHashed>;
-  static WebVector<unsigned> SerializeInsecureNavigationSet(
+  static WTF::Vector<unsigned> SerializeInsecureNavigationSet(
       const InsecureNavigationsSet&);
 
   const SecurityOrigin* GetSecurityOrigin() const {
@@ -81,28 +96,21 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   }
   SecurityOrigin* GetMutableSecurityOrigin() { return security_origin_.get(); }
 
-  ContentSecurityPolicy* GetContentSecurityPolicy() const {
-    return content_security_policy_.Get();
+  // Explicitly override the security origin for this security context with
+  // safety CHECKs.
+  void SetSecurityOrigin(scoped_refptr<SecurityOrigin>);
+
+  // Like SetSecurityOrigin(), but no security CHECKs.
+  void SetSecurityOriginForTesting(scoped_refptr<SecurityOrigin>);
+
+  network::mojom::blink::WebSandboxFlags GetSandboxFlags() const {
+    return sandbox_flags_;
   }
-
-  // Explicitly override the security origin for this security context.
-  // Note: It is dangerous to change the security origin of a script context
-  //       that already contains content.
-  virtual void SetSecurityOrigin(scoped_refptr<SecurityOrigin>);
-
-  WebSandboxFlags GetSandboxFlags() const { return sandbox_flags_; }
-  bool IsSandboxed(WebSandboxFlags mask) const;
-
-  void SetAddressSpace(mojom::IPAddressSpace space) { address_space_ = space; }
-  mojom::IPAddressSpace AddressSpace() const { return address_space_; }
-  String addressSpaceForBindings() const;
-
-  void SetRequireTrustedTypes();
-  void SetRequireTrustedTypesForTesting();  // Skips sanity checks.
-  bool TrustedTypesRequiredByPolicy() const;
+  bool IsSandboxed(network::mojom::blink::WebSandboxFlags mask) const;
+  void SetSandboxFlags(network::mojom::blink::WebSandboxFlags flags);
 
   // https://w3c.github.io/webappsec-upgrade-insecure-requests/#upgrade-insecure-navigations-set
-  void SetInsecureNavigationsSet(const WebVector<unsigned>& set) {
+  void SetInsecureNavigationsSet(const Vector<unsigned>& set) {
     insecure_navigations_to_upgrade_.clear();
     for (unsigned hash : set)
       insecure_navigations_to_upgrade_.insert(hash);
@@ -118,74 +126,71 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   }
 
   // https://w3c.github.io/webappsec-upgrade-insecure-requests/#insecure-requests-policy
-  void SetInsecureRequestPolicy(WebInsecureRequestPolicy policy) {
+  void SetInsecureRequestPolicy(mojom::blink::InsecureRequestPolicy policy) {
     insecure_request_policy_ = policy;
   }
-  WebInsecureRequestPolicy GetInsecureRequestPolicy() const {
+  mojom::blink::InsecureRequestPolicy GetInsecureRequestPolicy() const {
     return insecure_request_policy_;
   }
 
-  void SetMixedAutoupgradeOptOut(bool opt_out) {
-    mixed_autoupgrade_opt_out_ = opt_out;
+  const PermissionsPolicy* GetPermissionsPolicy() const {
+    return permissions_policy_.get();
   }
-  bool GetMixedAutoUpgradeOptOut() const { return mixed_autoupgrade_opt_out_; }
+  const PermissionsPolicy* GetReportOnlyPermissionsPolicy() const {
+    return report_only_permissions_policy_.get();
+  }
+  void SetPermissionsPolicy(std::unique_ptr<PermissionsPolicy>);
+  void SetReportOnlyPermissionsPolicy(std::unique_ptr<PermissionsPolicy>);
 
-  const FeaturePolicy* GetFeaturePolicy() const {
-    return feature_policy_.get();
+  const DocumentPolicy* GetDocumentPolicy() const {
+    return document_policy_.get();
   }
-  void SetFeaturePolicy(std::unique_ptr<FeaturePolicy> feature_policy);
-  void AddReportOnlyFeaturePolicy(
-      const ParsedFeaturePolicy& parsed_report_only_header,
-      const ParsedFeaturePolicy& container_policy,
-      const FeaturePolicy* parent_feature_policy);
+  void SetDocumentPolicy(std::unique_ptr<DocumentPolicy> policy);
+
+  const DocumentPolicy* GetReportOnlyDocumentPolicy() const {
+    return report_only_document_policy_.get();
+  }
+  void SetReportOnlyDocumentPolicy(std::unique_ptr<DocumentPolicy> policy);
 
   // Tests whether the policy-controlled feature is enabled in this frame.
-  // Optionally sends a report to any registered reporting observers or
-  // Report-To endpoints, via ReportFeaturePolicyViolation(), if the feature is
-  // disabled. The optional ConsoleMessage will be sent to the console if
-  // present, or else a default message will be used instead.
-  bool IsFeatureEnabled(
-      mojom::FeaturePolicyFeature,
-      ReportOptions report_on_failure = ReportOptions::kDoNotReport,
-      const String& message = g_empty_string) const;
-  bool IsFeatureEnabled(
-      mojom::FeaturePolicyFeature,
-      PolicyValue threshold_value,
-      ReportOptions report_on_failure = ReportOptions::kDoNotReport,
-      const String& message = g_empty_string) const;
-  FeatureEnabledState GetFeatureEnabledState(mojom::FeaturePolicyFeature) const;
-  FeatureEnabledState GetFeatureEnabledState(mojom::FeaturePolicyFeature,
-                                             PolicyValue threshold_value) const;
-  virtual void CountPotentialFeaturePolicyViolation(
-      mojom::FeaturePolicyFeature) const {}
-  virtual void ReportFeaturePolicyViolation(
-      mojom::FeaturePolicyFeature,
-      mojom::FeaturePolicyDisposition,
-      const String& message = g_empty_string) const {}
+  // Use ExecutionContext::IsFeatureEnabled if a failure should be reported.
+  // |should_report| is an extra return value that indicates whether
+  // the potential violation should be reported.
+  bool IsFeatureEnabled(mojom::blink::PermissionsPolicyFeature,
+                        bool* should_report = nullptr) const;
+
+  bool IsFeatureEnabled(mojom::blink::DocumentPolicyFeature) const;
+  struct FeatureStatus {
+    bool enabled;       /* Whether the feature is enabled. */
+    bool should_report; /* Whether a report should be sent. */
+  };
+  FeatureStatus IsFeatureEnabled(mojom::blink::DocumentPolicyFeature,
+                                 PolicyValue threshold_value) const;
+
+  SecureContextMode GetSecureContextMode() const {
+    return secure_context_mode_;
+  }
+
+  SecureContextModeExplanation GetSecureContextModeExplanation() const {
+    return secure_context_explanation_;
+  }
 
  protected:
-  SecurityContext();
-  SecurityContext(scoped_refptr<SecurityOrigin> origin,
-                  WebSandboxFlags sandbox_flags,
-                  std::unique_ptr<FeaturePolicy> feature_policy);
-  virtual ~SecurityContext();
-
-  void SetContentSecurityPolicy(ContentSecurityPolicy*);
-
-  WebSandboxFlags sandbox_flags_;
+  network::mojom::blink::WebSandboxFlags sandbox_flags_;
   scoped_refptr<SecurityOrigin> security_origin_;
-  std::unique_ptr<FeaturePolicy> feature_policy_;
-  std::unique_ptr<FeaturePolicy> report_only_feature_policy_;
+  std::unique_ptr<PermissionsPolicy> permissions_policy_;
+  std::unique_ptr<PermissionsPolicy> report_only_permissions_policy_;
+  std::unique_ptr<DocumentPolicy> document_policy_;
+  std::unique_ptr<DocumentPolicy> report_only_document_policy_;
 
  private:
-  Member<ContentSecurityPolicy> content_security_policy_;
-
-  mojom::IPAddressSpace address_space_;
-  WebInsecureRequestPolicy insecure_request_policy_;
-  bool mixed_autoupgrade_opt_out_;
+  // execution_context_ will be nullptr if this is a RemoteSecurityContext.
+  Member<ExecutionContext> execution_context_;
+  mojom::blink::InsecureRequestPolicy insecure_request_policy_;
   InsecureNavigationsSet insecure_navigations_to_upgrade_;
-  bool require_safe_types_;
-  DISALLOW_COPY_AND_ASSIGN(SecurityContext);
+  SecureContextMode secure_context_mode_ = SecureContextMode::kInsecureContext;
+  SecureContextModeExplanation secure_context_explanation_ =
+      SecureContextModeExplanation::kInsecureScheme;
 };
 
 }  // namespace blink

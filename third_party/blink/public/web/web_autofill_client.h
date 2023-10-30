@@ -34,9 +34,11 @@
 namespace blink {
 
 class WebFormControlElement;
+class WebFormElement;
 class WebInputElement;
 class WebKeyboardEvent;
 class WebNode;
+class WebString;
 
 class WebAutofillClient {
  public:
@@ -61,15 +63,27 @@ class WebAutofillClient {
 
   virtual void DidAssociateFormControlsDynamically() {}
   virtual void AjaxSucceeded() {}
+  // Called when |element| is in autofilled state and the value has been changed
+  // by JavaScript. |old_value| contains the value before being changed.
+  virtual void JavaScriptChangedAutofilledValue(
+      const WebFormControlElement& element,
+      const WebString& old_value) {}
 
   virtual void DidCompleteFocusChangeInFrame() {}
   virtual void DidReceiveLeftMouseDownOrGestureTapInNode(const WebNode&) {}
 
-  // Asks the client to show the touch to fill UI for the given control element.
-  // Returns whether the touch to fill UI was actually shown.
-  virtual bool TryToShowTouchToFill(const WebFormControlElement&) {
+  // Asks the client whether to suppess the keyboard for the given control
+  // element.
+  virtual bool ShouldSuppressKeyboard(const WebFormControlElement&) {
     return false;
   }
+
+  // Called when the given form element is reset.
+  virtual void FormElementReset(const WebFormElement&) {}
+
+  // Called when the empty value is set for the given input element, which is
+  // or has been a password field.
+  virtual void PasswordFieldReset(const WebInputElement& element) {}
 
  protected:
   virtual ~WebAutofillClient() = default;
@@ -77,4 +91,4 @@ class WebAutofillClient {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_AUTOFILL_CLIENT_H_

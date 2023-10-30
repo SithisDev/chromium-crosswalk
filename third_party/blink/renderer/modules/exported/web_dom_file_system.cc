@@ -30,15 +30,18 @@
 
 #include "third_party/blink/public/web/web_dom_file_system.h"
 
+#include "third_party/blink/public/mojom/filesystem/file_system.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_directory_entry.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_dom_file_system.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_entry.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_file_entry.h"
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/modules/filesystem/directory_entry.h"
 #include "third_party/blink/renderer/modules/filesystem/dom_file_system.h"
 #include "third_party/blink/renderer/modules/filesystem/file_entry.h"
+#include "third_party/blink/renderer/platform/bindings/to_v8.h"
 #include "third_party/blink/renderer/platform/bindings/wrapper_type_info.h"
 #include "v8/include/v8.h"
 
@@ -69,7 +72,7 @@ WebDOMFileSystem WebDOMFileSystem::Create(WebLocalFrame* frame,
   DCHECK(frame);
   DCHECK(To<WebLocalFrameImpl>(frame)->GetFrame());
   auto* dom_file_system = MakeGarbageCollected<DOMFileSystem>(
-      To<WebLocalFrameImpl>(frame)->GetFrame()->GetDocument(), name,
+      To<WebLocalFrameImpl>(frame)->GetFrame()->DomWindow(), name,
       static_cast<mojom::blink::FileSystemType>(type), root_url);
   if (serializable_type == kSerializableTypeSerializable)
     dom_file_system->MakeClonable();
@@ -116,7 +119,8 @@ v8::Local<v8::Value> WebDOMFileSystem::ToV8Value(
     v8::Isolate* isolate) {
   // We no longer use |creationContext| because it's often misused and points
   // to a context faked by user script.
-  DCHECK(creation_context->CreationContext() == isolate->GetCurrentContext());
+  DCHECK(creation_context->GetCreationContextChecked() ==
+         isolate->GetCurrentContext());
   if (!private_.Get())
     return v8::Local<v8::Value>();
   return ToV8(private_.Get(), isolate->GetCurrentContext()->Global(), isolate);
@@ -129,7 +133,8 @@ v8::Local<v8::Value> WebDOMFileSystem::CreateV8Entry(
     v8::Isolate* isolate) {
   // We no longer use |creationContext| because it's often misused and points
   // to a context faked by user script.
-  DCHECK(creation_context->CreationContext() == isolate->GetCurrentContext());
+  DCHECK(creation_context->GetCreationContextChecked() ==
+         isolate->GetCurrentContext());
   if (!private_.Get())
     return v8::Local<v8::Value>();
   if (entry_type == kEntryTypeDirectory) {

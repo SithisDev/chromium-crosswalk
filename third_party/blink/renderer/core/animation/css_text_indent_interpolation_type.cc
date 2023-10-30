@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "third_party/blink/renderer/core/animation/length_interpolation_functions.h"
+#include "third_party/blink/renderer/core/animation/interpolable_length.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
@@ -17,104 +17,63 @@
 
 namespace blink {
 
-namespace {
-
-struct IndentMode {
-  IndentMode(const TextIndentLine line, const TextIndentType type)
-      : line(line), type(type) {}
-  explicit IndentMode(const ComputedStyle& style)
-      : line(style.GetTextIndentLine()), type(style.GetTextIndentType()) {}
-
-  bool operator==(const IndentMode& other) const {
-    return line == other.line && type == other.type;
-  }
-  bool operator!=(const IndentMode& other) const { return !(*this == other); }
-
-  const TextIndentLine line;
-  const TextIndentType type;
-};
-
-}  // namespace
-
 class CSSTextIndentNonInterpolableValue : public NonInterpolableValue {
  public:
   static scoped_refptr<CSSTextIndentNonInterpolableValue> Create(
-      scoped_refptr<NonInterpolableValue> length_non_interpolable_value,
-      const IndentMode& mode) {
+      scoped_refptr<const NonInterpolableValue> length_non_interpolable_value) {
     return base::AdoptRef(new CSSTextIndentNonInterpolableValue(
-        std::move(length_non_interpolable_value), mode));
+        std::move(length_non_interpolable_value)));
   }
 
   const NonInterpolableValue* LengthNonInterpolableValue() const {
     return length_non_interpolable_value_.get();
   }
-  scoped_refptr<NonInterpolableValue>& LengthNonInterpolableValue() {
-    return length_non_interpolable_value_;
-  }
-  const IndentMode& Mode() const { return mode_; }
 
   DECLARE_NON_INTERPOLABLE_VALUE_TYPE();
 
  private:
-  CSSTextIndentNonInterpolableValue(
-      scoped_refptr<NonInterpolableValue> length_non_interpolable_value,
-      const IndentMode& mode)
+  explicit CSSTextIndentNonInterpolableValue(
+      scoped_refptr<const NonInterpolableValue> length_non_interpolable_value)
       : length_non_interpolable_value_(
-            std::move(length_non_interpolable_value)),
-        mode_(mode) {}
+            std::move(length_non_interpolable_value)) {}
 
-  scoped_refptr<NonInterpolableValue> length_non_interpolable_value_;
-  const IndentMode mode_;
+  scoped_refptr<const NonInterpolableValue> length_non_interpolable_value_;
 };
 
 DEFINE_NON_INTERPOLABLE_VALUE_TYPE(CSSTextIndentNonInterpolableValue);
-DEFINE_NON_INTERPOLABLE_VALUE_TYPE_CASTS(CSSTextIndentNonInterpolableValue);
+template <>
+struct DowncastTraits<CSSTextIndentNonInterpolableValue> {
+  static bool AllowFrom(const NonInterpolableValue* value) {
+    return value && AllowFrom(*value);
+  }
+  static bool AllowFrom(const NonInterpolableValue& value) {
+    return value.GetType() == CSSTextIndentNonInterpolableValue::static_type_;
+  }
+};
 
 namespace {
-
-class UnderlyingIndentModeChecker
-    : public CSSInterpolationType::CSSConversionChecker {
- public:
-  explicit UnderlyingIndentModeChecker(const IndentMode& mode) : mode_(mode) {}
-
-  bool IsValid(const StyleResolverState&,
-               const InterpolationValue& underlying) const final {
-    return mode_ == ToCSSTextIndentNonInterpolableValue(
-                        *underlying.non_interpolable_value)
-                        .Mode();
-  }
-
- private:
-  const IndentMode mode_;
-};
 
 class InheritedIndentChecker
     : public CSSInterpolationType::CSSConversionChecker {
  public:
-  InheritedIndentChecker(const Length& length, const IndentMode& mode)
-      : length_(length), mode_(mode) {}
+  explicit InheritedIndentChecker(const Length& length) : length_(length) {}
 
   bool IsValid(const StyleResolverState& state,
                const InterpolationValue&) const final {
-    return length_ == state.ParentStyle()->TextIndent() &&
-           mode_ == IndentMode(*state.ParentStyle());
+    return length_ == state.ParentStyle()->TextIndent();
   }
 
  private:
   const Length length_;
-  const IndentMode mode_;
 };
 
-InterpolationValue CreateValue(const Length& length,
-                               const IndentMode& mode,
-                               double zoom) {
-  InterpolationValue converted_length =
-      LengthInterpolationFunctions::MaybeConvertLength(length, zoom);
+InterpolationValue CreateValue(const Length& length, double zoom) {
+  InterpolationValue converted_length(
+      InterpolableLength::MaybeConvertLength(length, zoom));
   DCHECK(converted_length);
-  return InterpolationValue(
-      std::move(converted_length.interpolable_value),
-      CSSTextIndentNonInterpolableValue::Create(
-          std::move(converted_length.non_interpolable_value), mode));
+  return InterpolationValue(std::move(converted_length.interpolable_value),
+                            CSSTextIndentNonInterpolableValue::Create(std::move(
+                                converted_length.non_interpolable_value)));
 }
 
 }  // namespace
@@ -122,31 +81,22 @@ InterpolationValue CreateValue(const Length& length,
 InterpolationValue CSSTextIndentInterpolationType::MaybeConvertNeutral(
     const InterpolationValue& underlying,
     ConversionCheckers& conversion_checkers) const {
-  IndentMode mode =
-      ToCSSTextIndentNonInterpolableValue(*underlying.non_interpolable_value)
-          .Mode();
-  conversion_checkers.push_back(
-      std::make_unique<UnderlyingIndentModeChecker>(mode));
-  return CreateValue(Length::Fixed(0), mode, 1);
+  return CreateValue(Length::Fixed(0), 1);
 }
 
 InterpolationValue CSSTextIndentInterpolationType::MaybeConvertInitial(
     const StyleResolverState&,
     ConversionCheckers&) const {
-  IndentMode mode(ComputedStyleInitialValues::InitialTextIndentLine(),
-                  ComputedStyleInitialValues::InitialTextIndentType());
-  return CreateValue(ComputedStyleInitialValues::InitialTextIndent(), mode, 1);
+  return CreateValue(ComputedStyleInitialValues::InitialTextIndent(), 1);
 }
 
 InterpolationValue CSSTextIndentInterpolationType::MaybeConvertInherit(
     const StyleResolverState& state,
     ConversionCheckers& conversion_checkers) const {
   const ComputedStyle& parent_style = *state.ParentStyle();
-  IndentMode mode(parent_style);
-  conversion_checkers.push_back(std::make_unique<InheritedIndentChecker>(
-      parent_style.TextIndent(), mode));
-  return CreateValue(parent_style.TextIndent(), mode,
-                     parent_style.EffectiveZoom());
+  conversion_checkers.push_back(
+      std::make_unique<InheritedIndentChecker>(parent_style.TextIndent()));
+  return CreateValue(parent_style.TextIndent(), parent_style.EffectiveZoom());
 }
 
 InterpolationValue CSSTextIndentInterpolationType::MaybeConvertValue(
@@ -154,57 +104,31 @@ InterpolationValue CSSTextIndentInterpolationType::MaybeConvertValue(
     const StyleResolverState*,
     ConversionCheckers&) const {
   InterpolationValue length = nullptr;
-  TextIndentLine line = ComputedStyleInitialValues::InitialTextIndentLine();
-  TextIndentType type = ComputedStyleInitialValues::InitialTextIndentType();
 
   for (const auto& item : To<CSSValueList>(value)) {
-    auto* identifier_value = DynamicTo<CSSIdentifierValue>(item.Get());
-    if (identifier_value &&
-        identifier_value->GetValueID() == CSSValueID::kEachLine)
-      line = TextIndentLine::kEachLine;
-    else if (identifier_value &&
-             identifier_value->GetValueID() == CSSValueID::kHanging)
-      type = TextIndentType::kHanging;
-    else
-      length = LengthInterpolationFunctions::MaybeConvertCSSValue(*item);
+    length =
+        InterpolationValue(InterpolableLength::MaybeConvertCSSValue(*item));
   }
   DCHECK(length);
 
-  return InterpolationValue(
-      std::move(length.interpolable_value),
-      CSSTextIndentNonInterpolableValue::Create(
-          std::move(length.non_interpolable_value), IndentMode(line, type)));
+  return InterpolationValue(std::move(length.interpolable_value),
+                            CSSTextIndentNonInterpolableValue::Create(
+                                std::move(length.non_interpolable_value)));
 }
 
 InterpolationValue
 CSSTextIndentInterpolationType::MaybeConvertStandardPropertyUnderlyingValue(
     const ComputedStyle& style) const {
-  return CreateValue(style.TextIndent(), IndentMode(style),
-                     style.EffectiveZoom());
+  return CreateValue(style.TextIndent(), style.EffectiveZoom());
 }
 
 PairwiseInterpolationValue CSSTextIndentInterpolationType::MaybeMergeSingles(
     InterpolationValue&& start,
     InterpolationValue&& end) const {
-  CSSTextIndentNonInterpolableValue& start_non_interpolable_value =
-      ToCSSTextIndentNonInterpolableValue(*start.non_interpolable_value);
-  CSSTextIndentNonInterpolableValue& end_non_interpolable_value =
-      ToCSSTextIndentNonInterpolableValue(*end.non_interpolable_value);
-
-  if (start_non_interpolable_value.Mode() != end_non_interpolable_value.Mode())
-    return nullptr;
-
-  PairwiseInterpolationValue result =
-      LengthInterpolationFunctions::MergeSingles(
-          InterpolationValue(
-              std::move(start.interpolable_value),
-              start_non_interpolable_value.LengthNonInterpolableValue()),
-          InterpolationValue(
-              std::move(end.interpolable_value),
-              end_non_interpolable_value.LengthNonInterpolableValue()));
+  PairwiseInterpolationValue result = InterpolableLength::MergeSingles(
+      std::move(start.interpolable_value), std::move(end.interpolable_value));
   result.non_interpolable_value = CSSTextIndentNonInterpolableValue::Create(
-      std::move(result.non_interpolable_value),
-      start_non_interpolable_value.Mode());
+      std::move(result.non_interpolable_value));
   return result;
 }
 
@@ -213,44 +137,18 @@ void CSSTextIndentInterpolationType::Composite(
     double underlying_fraction,
     const InterpolationValue& value,
     double interpolation_fraction) const {
-  const IndentMode& underlying_mode =
-      ToCSSTextIndentNonInterpolableValue(
-          *underlying_value_owner.Value().non_interpolable_value)
-          .Mode();
-  const CSSTextIndentNonInterpolableValue& non_interpolable_value =
-      ToCSSTextIndentNonInterpolableValue(*value.non_interpolable_value);
-  const IndentMode& mode = non_interpolable_value.Mode();
-
-  if (underlying_mode != mode) {
-    underlying_value_owner.Set(*this, value);
-    return;
-  }
-
-  LengthInterpolationFunctions::Composite(
-      underlying_value_owner.MutableValue().interpolable_value,
-      ToCSSTextIndentNonInterpolableValue(
-          *underlying_value_owner.MutableValue().non_interpolable_value)
-          .LengthNonInterpolableValue(),
-      underlying_fraction, *value.interpolable_value,
-      non_interpolable_value.LengthNonInterpolableValue());
+  underlying_value_owner.MutableInterpolableValue().ScaleAndAdd(
+      underlying_fraction, *value.interpolable_value);
 }
 
 void CSSTextIndentInterpolationType::ApplyStandardPropertyValue(
     const InterpolableValue& interpolable_value,
     const NonInterpolableValue* non_interpolable_value,
     StyleResolverState& state) const {
-  const CSSTextIndentNonInterpolableValue&
-      css_text_indent_non_interpolable_value =
-          ToCSSTextIndentNonInterpolableValue(*non_interpolable_value);
   ComputedStyle& style = *state.Style();
-  style.SetTextIndent(LengthInterpolationFunctions::CreateLength(
-      interpolable_value,
-      css_text_indent_non_interpolable_value.LengthNonInterpolableValue(),
-      state.CssToLengthConversionData(), kValueRangeAll));
-
-  const IndentMode& mode = css_text_indent_non_interpolable_value.Mode();
-  style.SetTextIndentLine(mode.line);
-  style.SetTextIndentType(mode.type);
+  style.SetTextIndent(To<InterpolableLength>(interpolable_value)
+                          .CreateLength(state.CssToLengthConversionData(),
+                                        Length::ValueRange::kAll));
 }
 
 }  // namespace blink

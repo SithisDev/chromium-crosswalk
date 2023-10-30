@@ -29,9 +29,8 @@
 
 #include "base/compiler_specific.h"
 #include "build/build_config.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 #include "third_party/blink/renderer/platform/audio/mac/vector_math_mac.h"
 #elif defined(CPU_ARM_NEON)
 #include "third_party/blink/renderer/platform/audio/cpu/arm/vector_math_neon.h"
@@ -43,12 +42,10 @@
 #include "third_party/blink/renderer/platform/audio/vector_math_scalar.h"
 #endif
 
-namespace blink {
-
-namespace vector_math {
+namespace blink::vector_math {
 
 namespace {
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 namespace impl = mac;
 #elif defined(CPU_ARM_NEON)
 namespace impl = neon;
@@ -70,7 +67,7 @@ void PrepareFilterForConv(const float* filter_p,
   // vectors are not implemented by all implementations.
   DCHECK_EQ(-1, filter_stride);
   DCHECK(prepared_filter);
-#if defined(ARCH_CPU_X86_FAMILY) && !defined(OS_MACOSX)
+#if defined(ARCH_CPU_X86_FAMILY) && !BUILDFLAG(IS_MAC)
   x86::PrepareFilterForConv(filter_p, filter_stride, filter_size,
                             prepared_filter);
 #endif
@@ -106,6 +103,17 @@ void Vadd(const float* source1p,
              dest_stride, frames_to_process);
 }
 
+void Vsub(const float* source1p,
+          int source_stride1,
+          const float* source2p,
+          int source_stride2,
+          float* dest_p,
+          int dest_stride,
+          uint32_t frames_to_process) {
+  impl::Vsub(source1p, source_stride1, source2p, source_stride2, dest_p,
+             dest_stride, frames_to_process);
+}
+
 void Vclip(const float* source_p,
            int source_stride,
            const float* low_threshold_p,
@@ -117,10 +125,35 @@ void Vclip(const float* source_p,
   float high_threshold = *high_threshold_p;
 
 #if DCHECK_IS_ON()
-  // Do the same DCHECKs that |clampTo| would do so that optimization paths do
+  // Do the same DCHECKs that |ClampTo| would do so that optimization paths do
   // not have to do them.
-  for (size_t i = 0u; i < frames_to_process; ++i)
+  for (size_t i = 0u; i < frames_to_process; ++i) {
     DCHECK(!std::isnan(source_p[i]));
+  }
+  // This also ensures that thresholds are not NaNs.
+  DCHECK_LE(low_threshold, high_threshold);
+#endif
+
+  impl::Vclip(source_p, source_stride, &low_threshold, &high_threshold, dest_p,
+              dest_stride, frames_to_process);
+}
+
+void Vclip(const float* source_p,
+           int source_stride,
+           float low_threshold_p,
+           float high_threshold_p,
+           float* dest_p,
+           int dest_stride,
+           uint32_t frames_to_process) {
+  float low_threshold = low_threshold_p;
+  float high_threshold = high_threshold_p;
+
+#if DCHECK_IS_ON()
+  // Do the same DCHECKs that |ClampTo| would do so that optimization paths do
+  // not have to do them.
+  for (size_t i = 0u; i < frames_to_process; ++i) {
+    DCHECK(!std::isnan(source_p[i]));
+  }
   // This also ensures that thresholds are not NaNs.
   DCHECK_LE(low_threshold, high_threshold);
 #endif
@@ -164,6 +197,18 @@ void Vsma(const float* source_p,
              frames_to_process);
 }
 
+void Vsma(const float* source_p,
+          int source_stride,
+          float scale,
+          float* dest_p,
+          int dest_stride,
+          uint32_t frames_to_process) {
+  const float k = scale;
+
+  impl::Vsma(source_p, source_stride, &k, dest_p, dest_stride,
+             frames_to_process);
+}
+
 void Vsmul(const float* source_p,
            int source_stride,
            const float* scale,
@@ -173,6 +218,42 @@ void Vsmul(const float* source_p,
   const float k = *scale;
 
   impl::Vsmul(source_p, source_stride, &k, dest_p, dest_stride,
+              frames_to_process);
+}
+
+void Vsmul(const float* source_p,
+           int source_stride,
+           float scale,
+           float* dest_p,
+           int dest_stride,
+           uint32_t frames_to_process) {
+  const float k = scale;
+
+  impl::Vsmul(source_p, source_stride, &k, dest_p, dest_stride,
+              frames_to_process);
+}
+
+void Vsadd(const float* source_p,
+           int source_stride,
+           const float* addend,
+           float* dest_p,
+           int dest_stride,
+           uint32_t frames_to_process) {
+  const float k = *addend;
+
+  impl::Vsadd(source_p, source_stride, &k, dest_p, dest_stride,
+              frames_to_process);
+}
+
+void Vsadd(const float* source_p,
+           int source_stride,
+           float addend,
+           float* dest_p,
+           int dest_stride,
+           uint32_t frames_to_process) {
+  const float k = addend;
+
+  impl::Vsadd(source_p, source_stride, &k, dest_p, dest_stride,
               frames_to_process);
 }
 
@@ -199,6 +280,4 @@ void Zvmul(const float* real1p,
               frames_to_process);
 }
 
-}  // namespace vector_math
-
-}  // namespace blink
+}  // namespace blink::vector_math

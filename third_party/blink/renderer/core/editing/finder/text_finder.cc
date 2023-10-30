@@ -30,16 +30,19 @@
 
 #include "third_party/blink/renderer/core/editing/finder/text_finder.h"
 
-#include "third_party/blink/public/platform/web_float_rect.h"
-#include "third_party/blink/public/platform/web_scroll_into_view_params.h"
+#include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache_base.h"
+#include "third_party/blink/renderer/core/display_lock/display_lock_document_state.h"
 #include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
+#include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/finder/find_in_page_coordinates.h"
@@ -50,52 +53,142 @@
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/visible_selection.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/find_in_page.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
-#include "third_party/blink/renderer/core/invisible_dom/invisible_dom.h"
+#include "third_party/blink/renderer/core/html/html_details_element.h"
+#include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
+#include "third_party/blink/renderer/core/layout/layout_shift_tracker.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/text_autosizer.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/scroll/scroll_into_view_util.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
 TextFinder::FindMatch::FindMatch(Range* range, int ordinal)
     : range_(range), ordinal_(ordinal) {}
 
-void TextFinder::FindMatch::Trace(Visitor* visitor) {
+void TextFinder::FindMatch::Trace(Visitor* visitor) const {
   visitor->Trace(range_);
 }
 
-static void ScrollToVisible(Range* match) {
-  const Node& first_node = *match->FirstNode();
-  if (RuntimeEnabledFeatures::InvisibleDOMEnabled() ||
-      RuntimeEnabledFeatures::DisplayLockingEnabled()) {
-    const EphemeralRangeInFlatTree range(match);
-    if (InvisibleDOM::ActivateRangeIfNeeded(range) ||
-        DisplayLockUtilities::ActivateFindInPageMatchRangeIfNeeded(range))
-      first_node.GetDocument().UpdateStyleAndLayout();
+static void AutoExpandSearchableHiddenElementsUpFrameTree(Range* range) {
+  const Node& first_node = *range->FirstNode();
+  bool needs_layout_shift_allowance = false;
+
+  // If the target text is in a content-visibility:auto subtree, then activate
+  // it so we can scroll to it.
+  if (DisplayLockUtilities::ActivateFindInPageMatchRangeIfNeeded(
+          EphemeralRangeInFlatTree(range))) {
+    needs_layout_shift_allowance = true;
   }
+
+  // If the active match is hidden inside a <details> element, then we should
+  // expand it so find-in-page can scroll to it.
+  if (RuntimeEnabledFeatures::AutoExpandDetailsElementEnabled() &&
+      HTMLDetailsElement::ExpandDetailsAncestors(first_node)) {
+    needs_layout_shift_allowance = true;
+    UseCounter::Count(first_node.GetDocument(),
+                      WebFeature::kAutoExpandedDetailsForFindInPage);
+  }
+
+  // If the active match is hidden inside a hidden=until-found element, then we
+  // should reveal it so find-in-page can scroll to it.
+  if (RuntimeEnabledFeatures::BeforeMatchEventEnabled(
+          first_node.GetExecutionContext()) &&
+      DisplayLockUtilities::RevealHiddenUntilFoundAncestors(first_node)) {
+    needs_layout_shift_allowance = true;
+    UseCounter::Count(first_node.GetDocument(),
+                      WebFeature::kBeforematchRevealedHiddenMatchable);
+    first_node.GetDocument()
+        .MarkHasFindInPageBeforematchExpandedHiddenMatchable();
+  }
+
+  if (needs_layout_shift_allowance) {
+    first_node.GetDocument()
+        .GetFrame()
+        ->View()
+        ->GetLayoutShiftTracker()
+        .NotifyFindInPageInput();
+  }
+
+  // Also reveal expandables up the frame tree.
+  for (Frame *frame = first_node.GetDocument().GetFrame(),
+             *parent = frame->Parent();
+       frame && parent; frame = parent, parent = parent->Parent()) {
+    LocalFrame* local_parent = DynamicTo<LocalFrame>(parent);
+    LocalFrame* local_frame = DynamicTo<LocalFrame>(frame);
+
+    if (local_frame && local_parent) {
+      // TODO(crbug.com/1250847): Consider replacing the usage of
+      // DeprecatedLocalOwner with a virtual function on FrameOwner when
+      // implementing this for RemoteFrames.
+      HTMLFrameOwnerElement* frame_element =
+          local_frame->DeprecatedLocalOwner();
+      DCHECK(frame_element);
+      bool frame_needs_style_and_layout = false;
+      frame_needs_style_and_layout |=
+          RuntimeEnabledFeatures::AutoExpandDetailsElementEnabled() &&
+          HTMLDetailsElement::ExpandDetailsAncestors(*frame_element);
+      frame_needs_style_and_layout |=
+          RuntimeEnabledFeatures::BeforeMatchEventEnabled(
+              frame_element->GetExecutionContext()) &&
+          DisplayLockUtilities::RevealHiddenUntilFoundAncestors(*frame_element);
+      if (frame_needs_style_and_layout) {
+        frame_element->GetDocument().UpdateStyleAndLayoutForNode(
+            frame_element, DocumentUpdateReason::kFindInPage);
+        needs_layout_shift_allowance = true;
+      }
+    } else {
+      // TODO(crbug.com/1250847): Implement an IPC signal to expand in parent
+      // RemoteFrames.
+    }
+  }
+}
+
+static void ScrollToVisible(Range* match) {
+  const EphemeralRangeInFlatTree range(match);
+  const Node& first_node = *match->FirstNode();
+
+  // We don't always have a LayoutObject for the node we're trying to scroll to
+  // after the async step: crbug.com/1129341
+  if (!first_node.GetLayoutObject())
+    return;
+
   Settings* settings = first_node.GetDocument().GetSettings();
   bool smooth_find_enabled =
       settings ? settings->GetSmoothScrollForFindEnabled() : false;
-  ScrollBehavior scroll_behavior =
-      smooth_find_enabled ? kScrollBehaviorSmooth : kScrollBehaviorAuto;
-  first_node.GetLayoutObject()->ScrollRectToVisible(
-      PhysicalRect(match->BoundingBox()),
-      WebScrollIntoViewParams(
-          ScrollAlignment::kAlignCenterIfNeeded,
-          ScrollAlignment::kAlignCenterIfNeeded, kUserScroll,
+  mojom::blink::ScrollBehavior scroll_behavior =
+      smooth_find_enabled ? mojom::blink::ScrollBehavior::kSmooth
+                          : mojom::blink::ScrollBehavior::kAuto;
+  scroll_into_view_util::ScrollRectToVisible(
+      *first_node.GetLayoutObject(), PhysicalRect(match->BoundingBox()),
+      ScrollAlignment::CreateScrollIntoViewParams(
+          ScrollAlignment::CenterIfNeeded(), ScrollAlignment::CenterIfNeeded(),
+          mojom::blink::ScrollType::kUser,
           true /* make_visible_in_visual_viewport */, scroll_behavior,
           true /* is_for_scroll_sequence */));
   first_node.GetDocument().SetSequentialFocusNavigationStartingPoint(
       const_cast<Node*>(&first_node));
+}
+
+void TextFinder::InitNewSession(const mojom::blink::FindOptions& options) {
+  should_locate_active_rect_ = false;
+  CancelPendingScopingEffort();
+  if (!options.find_match) {
+    // This gets called in FindInternal if a match is found, but FindInternal
+    // doesn't run when find_match is false, so we need to do it here in case
+    // there is a match (to get the scoping effort to look for it).
+    find_task_controller_->ResetLastFindRequestCompletedWithNoMatches();
+  }
 }
 
 bool TextFinder::Find(int identifier,
@@ -103,7 +196,28 @@ bool TextFinder::Find(int identifier,
                       const mojom::blink::FindOptions& options,
                       bool wrap_within_frame,
                       bool* active_now) {
-  if (!options.find_next) {
+  return FindInternal(identifier, search_text, options, wrap_within_frame,
+                      active_now);
+}
+
+bool TextFinder::FindInternal(int identifier,
+                              const WebString& search_text,
+                              const mojom::blink::FindOptions& options,
+                              bool wrap_within_frame,
+                              bool* active_now,
+                              Range* first_match,
+                              bool wrapped_around) {
+  // Searching text without forcing DisplayLocks is likely to hit bad layout
+  // state, so force them here and update style and layout in order to get good
+  // layout state.
+  auto forced_activatable_locks = GetFrame()
+                                      ->GetDocument()
+                                      ->GetDisplayLockDocumentState()
+                                      .GetScopedForceActivatableLocks();
+  GetFrame()->GetDocument()->UpdateStyleAndLayout(
+      DocumentUpdateReason::kFindInPage);
+
+  if (options.new_session) {
     // This find-in-page is redone due to the frame finishing loading.
     // If we can, just reuse the old active match;
     if (options.force && active_match_) {
@@ -137,35 +251,63 @@ bool TextFinder::Find(int identifier,
       (options.forward ? 0 : kBackwards) |
       (options.match_case ? 0 : kCaseInsensitive) |
       (wrap_within_frame ? kWrapAround : 0) |
-      (options.find_next ? 0 : kStartInSelection);
+      (options.new_session ? kStartInSelection : 0);
   active_match_ = Editor::FindRangeOfString(
       *OwnerFrame().GetFrame()->GetDocument(), search_text,
-      EphemeralRangeInFlatTree(active_match_.Get()), find_options);
+      EphemeralRangeInFlatTree(active_match_.Get()), find_options,
+      &wrapped_around);
 
   if (!active_match_) {
-    if (current_active_match_frame_ && !options.find_next)
+    if (current_active_match_frame_ && options.new_session)
       should_locate_active_rect_ = true;
-    // If we're finding next the next active match might not be in the current
+    // In an existing session the next active match might not be in
     // frame.  In this case we don't want to clear the matches cache.
-    if (!options.find_next)
+    if (options.new_session)
       ClearFindMatchesCache();
 
     InvalidatePaintForTickmarks();
     return false;
   }
-  ScrollToVisible(active_match_);
 
-  // If the user is browsing a page with autosizing, adjust the zoom to the
-  // column where the next hit has been found. Doing this when autosizing is
-  // not set will result in a zoom reset on small devices.
-  if (OwnerFrame()
-          .GetFrame()
-          ->GetDocument()
-          ->GetTextAutosizer()
-          ->PageNeedsAutosizing()) {
-    OwnerFrame().LocalRoot()->FrameWidget()->ZoomToFindInPageRect(
-        OwnerFrame().GetFrameView()->ConvertToRootFrame(
-            ComputeTextRect(EphemeralRange(active_match_.Get()))));
+  // We don't want to search past the same position twice, so if the new match
+  // is past the original one and we have wrapped around, then stop now.
+  if (first_match && wrapped_around) {
+    if (options.forward) {
+      // If the start of the new match has gone past the start of the original
+      // match, then stop.
+      if (ComparePositions(first_match->StartPosition(),
+                           active_match_->StartPosition()) <= 0) {
+        return false;
+      }
+    } else {
+      // If the end of the new match has gone before the end of the original
+      // match, then stop.
+      if (ComparePositions(active_match_->EndPosition(),
+                           first_match->EndPosition()) <= 0) {
+        return false;
+      }
+    }
+  }
+
+  std::unique_ptr<AsyncScrollContext> scroll_context =
+      std::make_unique<AsyncScrollContext>();
+  scroll_context->identifier = identifier;
+  scroll_context->search_text = search_text;
+  scroll_context->options = options;
+  // Set new_session to false to make sure that subsequent searches are
+  // incremental instead of repeatedly finding the same match.
+  scroll_context->options.new_session = false;
+  scroll_context->wrap_within_frame = wrap_within_frame;
+  scroll_context->range = active_match_.Get();
+  scroll_context->first_match = first_match ? first_match : active_match_.Get();
+  scroll_context->wrapped_around = wrapped_around;
+  if (options.run_synchronously_for_testing) {
+    Scroll(std::move(scroll_context));
+  } else {
+    scroll_task_.Reset(WTF::Bind(&TextFinder::Scroll, WrapWeakPersistent(this),
+                                 std::move(scroll_context)));
+    GetFrame()->GetDocument()->EnqueueAnimationFrameTask(
+        scroll_task_.callback());
   }
 
   bool was_active_frame = current_active_match_frame_;
@@ -181,7 +323,7 @@ bool TextFinder::Find(int identifier,
   // Set this frame as focused.
   OwnerFrame().ViewImpl()->SetFocusedFrame(&OwnerFrame());
 
-  if (!options.find_next || active_selection || !is_active) {
+  if (options.new_session || active_selection || !is_active) {
     // This is either an initial Find operation, a Find-next from a new
     // start point due to a selection, or new matches were found during
     // Find-next due to DOM alteration (that couldn't be set as active), so
@@ -205,7 +347,7 @@ bool TextFinder::Find(int identifier,
       else if (active_match_index_ < 0)
         active_match_index_ = find_task_controller_->CurrentMatchCount() - 1;
     }
-    WebRect selection_rect = OwnerFrame().GetFrameView()->ConvertToRootFrame(
+    gfx::Rect selection_rect = OwnerFrame().GetFrameView()->ConvertToRootFrame(
         active_match_->BoundingBox());
     ReportFindInPageSelection(selection_rect, active_match_index_ + 1,
                               identifier);
@@ -242,14 +384,15 @@ void TextFinder::SetFindEndstateFocusAndSelection() {
 
   // Need to clean out style and layout state before querying
   // Element::isFocusable().
-  GetFrame()->GetDocument()->UpdateStyleAndLayout();
+  GetFrame()->GetDocument()->UpdateStyleAndLayout(
+      DocumentUpdateReason::kFindInPage);
 
   // Try to find the first focusable node up the chain, which will, for
   // example, focus links if we have found text within the link.
   Node* node = active_match->FirstNode();
   if (node && node->IsInShadowTree()) {
     if (Node* host = node->OwnerShadowHost()) {
-      if (IsHTMLInputElement(*host) || IsHTMLTextAreaElement(*host))
+      if (IsA<HTMLInputElement>(*host) || IsA<HTMLTextAreaElement>(*host))
         node = host;
     }
   }
@@ -268,7 +411,7 @@ void TextFinder::SetFindEndstateFocusAndSelection() {
                 .Build());
         GetFrame()->GetDocument()->SetFocusedElement(
             element, FocusParams(SelectionBehaviorOnFocus::kNone,
-                                 kWebFocusTypeNone, nullptr));
+                                 mojom::blink::FocusType::kNone, nullptr));
         return;
       }
     }
@@ -284,7 +427,7 @@ void TextFinder::SetFindEndstateFocusAndSelection() {
     if (element->IsFocusable()) {
       GetFrame()->GetDocument()->SetFocusedElement(
           element, FocusParams(SelectionBehaviorOnFocus::kNone,
-                               kWebFocusTypeNone, nullptr));
+                               mojom::blink::FocusType::kNone, nullptr));
       return;
     }
   }
@@ -322,6 +465,14 @@ void TextFinder::StopFindingAndClearSelection() {
 
   // Let the frame know that we don't want tickmarks anymore.
   InvalidatePaintForTickmarks();
+
+  ReportFindInPageTerminationToAccessibility();
+}
+
+void TextFinder::ReportFindInPageTerminationToAccessibility() {
+  GetFrame()
+      ->GetLocalFrameHostRemote()
+      .HandleAccessibilityFindInPageTermination();
 }
 
 void TextFinder::ReportFindInPageResultToAccessibility(int identifier) {
@@ -337,12 +488,14 @@ void TextFinder::ReportFindInPageResultToAccessibility(int identifier) {
   Node* end_node = active_match_->endContainer();
   ax_object_cache->HandleTextMarkerDataAdded(start_node, end_node);
 
-  if (OwnerFrame().Client()) {
-    OwnerFrame().Client()->HandleAccessibilityFindInPageResult(
-        identifier, active_match_index_ + 1, blink::WebNode(start_node),
-        active_match_->startOffset(), blink::WebNode(end_node),
-        active_match_->endOffset());
-  }
+  int32_t start_id = ax_object_cache->GetAXID(start_node);
+  int32_t end_id = ax_object_cache->GetAXID(end_node);
+
+  auto params = mojom::blink::FindInPageResultAXParams::New(
+      identifier, active_match_index_ + 1, start_id,
+      active_match_->startOffset(), end_id, active_match_->endOffset());
+  GetFrame()->GetLocalFrameHostRemote().HandleAccessibilityFindInPageResult(
+      std::move(params));
 }
 
 void TextFinder::StartScopingStringMatches(
@@ -395,8 +548,8 @@ void TextFinder::DidFindMatch(int identifier,
   // as the active rect.
   bool found_active_match = false;
   if (should_locate_active_rect_) {
-    IntRect result_bounds = result_range->BoundingBox();
-    IntRect active_selection_rect =
+    gfx::Rect result_bounds = result_range->BoundingBox();
+    gfx::Rect active_selection_rect =
         active_match_.Get() ? active_match_->BoundingBox() : result_bounds;
 
     // If the Find function found a match it will have stored where the
@@ -418,10 +571,17 @@ void TextFinder::DidFindMatch(int identifier,
           active_match_index_ + 1, identifier);
     }
   }
-  OwnerFrame().GetFrame()->GetDocument()->Markers().AddTextMatchMarker(
-      EphemeralRange(result_range),
-      found_active_match ? TextMatchMarker::MatchStatus::kActive
-                         : TextMatchMarker::MatchStatus::kInactive);
+  DocumentMarkerController& marker_controller =
+      OwnerFrame().GetFrame()->GetDocument()->Markers();
+  EphemeralRange ephemeral_result_range(result_range);
+  // Scroll() may have added a match marker to this range already.
+  if (!marker_controller.FirstMarkerIntersectingEphemeralRange(
+          ephemeral_result_range, DocumentMarker::MarkerTypes::TextMatch())) {
+    marker_controller.AddTextMatchMarker(
+        EphemeralRange(result_range),
+        found_active_match ? TextMatchMarker::MatchStatus::kActive
+                           : TextMatchMarker::MatchStatus::kInactive);
+  }
 
   find_matches_cache_.push_back(FindMatch(result_range, current_total_matches));
 }
@@ -442,11 +602,14 @@ void TextFinder::UpdateMatches(int identifier,
 }
 
 void TextFinder::FinishCurrentScopingEffort(int identifier) {
+  scoping_in_progress_ = false;
+  if (!OwnerFrame().GetFrame())
+    return;
+
   if (!total_match_count_)
     OwnerFrame().GetFrame()->Selection().Clear();
 
   FlushCurrentScopingEffort(identifier);
-  scoping_in_progress_ = false;
   // This frame is done, so show any scrollbar tickmarks we haven't drawn yet.
   InvalidatePaintForTickmarks();
 }
@@ -465,10 +628,10 @@ void TextFinder::IncreaseMatchCount(int identifier, int count) {
 
   // Update the UI with the latest findings.
   OwnerFrame().GetFindInPage()->ReportFindInPageMatchCount(
-      identifier, total_match_count_, !frame_scoping_ || !total_match_count_);
+      identifier, total_match_count_, !frame_scoping_);
 }
 
-void TextFinder::ReportFindInPageSelection(const WebRect& selection_rect,
+void TextFinder::ReportFindInPageSelection(const gfx::Rect& selection_rect,
                                            int active_match_ordinal,
                                            int identifier) {
   // Update the UI with the latest selection rect.
@@ -496,8 +659,23 @@ void TextFinder::ClearFindMatchesCache() {
   find_match_rects_are_valid_ = false;
 }
 
+void TextFinder::InvalidateFindMatchRects() {
+  // Increase version number is required to trigger FindMatchRects update when
+  // next find.
+  if (!find_matches_cache_.IsEmpty())
+    ++find_match_markers_version_;
+
+  // For subframes, we need to recalculate the FindMatchRects when the
+  // document size of mainframe changed even if the document size of current
+  // frame has not changed because Find-in-page coordinates are represented as
+  // normalized fractions of the main frame document. So we need to force the
+  // FindMatchRects to be updated instead of changing according to the current
+  // document size.
+  find_match_rects_are_valid_ = false;
+}
+
 void TextFinder::UpdateFindMatchRects() {
-  IntSize current_document_size = OwnerFrame().DocumentSize();
+  gfx::Size current_document_size = OwnerFrame().DocumentSize();
   if (document_size_for_current_find_match_rects_ != current_document_size) {
     document_size_for_current_find_match_rects_ = current_document_size;
     find_match_rects_are_valid_ = false;
@@ -507,7 +685,7 @@ void TextFinder::UpdateFindMatchRects() {
   for (FindMatch& match : find_matches_cache_) {
     if (!match.range_->BoundaryPointsValid() ||
         !match.range_->startContainer()->isConnected())
-      match.rect_ = FloatRect();
+      match.rect_ = gfx::RectF();
     else if (!find_match_rects_are_valid_)
       match.rect_ = FindInPageRectFromRange(EphemeralRange(match.range_.Get()));
 
@@ -531,17 +709,18 @@ void TextFinder::UpdateFindMatchRects() {
   find_match_rects_are_valid_ = true;
 }
 
-WebFloatRect TextFinder::ActiveFindMatchRect() {
+#if BUILDFLAG(IS_ANDROID)
+gfx::RectF TextFinder::ActiveFindMatchRect() {
   if (!current_active_match_frame_ || !active_match_)
-    return WebFloatRect();
+    return gfx::RectF();
 
-  return WebFloatRect(FindInPageRectFromRange(EphemeralRange(ActiveMatch())));
+  return FindInPageRectFromRange(EphemeralRange(ActiveMatch()));
 }
 
-Vector<WebFloatRect> TextFinder::FindMatchRects() {
+Vector<gfx::RectF> TextFinder::FindMatchRects() {
   UpdateFindMatchRects();
 
-  Vector<WebFloatRect> match_rects;
+  Vector<gfx::RectF> match_rects;
   match_rects.ReserveCapacity(match_rects.size() + find_matches_cache_.size());
   for (const FindMatch& match : find_matches_cache_) {
     DCHECK(!match.rect_.IsEmpty());
@@ -551,8 +730,8 @@ Vector<WebFloatRect> TextFinder::FindMatchRects() {
   return match_rects;
 }
 
-int TextFinder::SelectNearestFindMatch(const WebFloatPoint& point,
-                                       WebRect* selection_rect) {
+int TextFinder::SelectNearestFindMatch(const gfx::PointF& point,
+                                       gfx::Rect* selection_rect) {
   int index = NearestFindMatch(point, nullptr);
   if (index != -1)
     return SelectFindMatch(static_cast<unsigned>(index), selection_rect);
@@ -560,7 +739,7 @@ int TextFinder::SelectNearestFindMatch(const WebFloatPoint& point,
   return -1;
 }
 
-int TextFinder::NearestFindMatch(const FloatPoint& point,
+int TextFinder::NearestFindMatch(const gfx::PointF& point,
                                  float* distance_squared) {
   UpdateFindMatchRects();
 
@@ -568,10 +747,8 @@ int TextFinder::NearestFindMatch(const FloatPoint& point,
   float nearest_distance_squared = FLT_MAX;
   for (wtf_size_t i = 0; i < find_matches_cache_.size(); ++i) {
     DCHECK(!find_matches_cache_[i].rect_.IsEmpty());
-    FloatSize offset = point - find_matches_cache_[i].rect_.Center();
-    float width = offset.Width();
-    float height = offset.Height();
-    float current_distance_squared = width * width + height * height;
+    gfx::Vector2dF offset = point - find_matches_cache_[i].rect_.CenterPoint();
+    float current_distance_squared = offset.LengthSquared();
     if (current_distance_squared < nearest_distance_squared) {
       nearest = i;
       nearest_distance_squared = current_distance_squared;
@@ -584,7 +761,7 @@ int TextFinder::NearestFindMatch(const FloatPoint& point,
   return nearest;
 }
 
-int TextFinder::SelectFindMatch(unsigned index, WebRect* selection_rect) {
+int TextFinder::SelectFindMatch(unsigned index, gfx::Rect* selection_rect) {
   SECURITY_DCHECK(index < find_matches_cache_.size());
 
   Range* range = find_matches_cache_[index].range_;
@@ -613,18 +790,20 @@ int TextFinder::SelectFindMatch(unsigned index, WebRect* selection_rect) {
     OwnerFrame().GetFrame()->GetDocument()->ClearFocusedElement();
   }
 
-  IntRect active_match_rect;
-  IntRect active_match_bounding_box =
+  gfx::Rect active_match_rect;
+  gfx::Rect active_match_bounding_box =
       ComputeTextRect(EphemeralRange(active_match_.Get()));
 
   if (!active_match_bounding_box.IsEmpty()) {
     if (active_match_->FirstNode() &&
         active_match_->FirstNode()->GetLayoutObject()) {
-      active_match_->FirstNode()->GetLayoutObject()->ScrollRectToVisible(
+      scroll_into_view_util::ScrollRectToVisible(
+          *active_match_->FirstNode()->GetLayoutObject(),
           PhysicalRect(active_match_bounding_box),
-          WebScrollIntoViewParams(ScrollAlignment::kAlignCenterIfNeeded,
-                                  ScrollAlignment::kAlignCenterIfNeeded,
-                                  kUserScroll));
+          ScrollAlignment::CreateScrollIntoViewParams(
+              ScrollAlignment::CenterIfNeeded(),
+              ScrollAlignment::CenterIfNeeded(),
+              mojom::blink::ScrollType::kUser));
 
       // Absolute coordinates are scroll-variant so the bounding box will change
       // if the page is scrolled by ScrollRectToVisible above. Recompute the
@@ -641,7 +820,7 @@ int TextFinder::SelectFindMatch(unsigned index, WebRect* selection_rect) {
     // Zoom to the active match.
     active_match_rect = OwnerFrame().GetFrameView()->ConvertToRootFrame(
         active_match_bounding_box);
-    OwnerFrame().LocalRoot()->FrameWidget()->ZoomToFindInPageRect(
+    OwnerFrame().LocalRoot()->FrameWidgetImpl()->ZoomToFindInPageRect(
         active_match_rect);
   }
 
@@ -650,6 +829,7 @@ int TextFinder::SelectFindMatch(unsigned index, WebRect* selection_rect) {
 
   return active_match_index_ + 1;
 }
+#endif  // BUILDFLAG(IS_ANDROID)
 
 TextFinder::TextFinder(WebLocalFrameImpl& owner_frame)
     : owner_frame_(&owner_frame),
@@ -666,16 +846,14 @@ TextFinder::TextFinder(WebLocalFrameImpl& owner_frame)
       scoping_in_progress_(false),
       find_match_rects_are_valid_(false) {}
 
-TextFinder::~TextFinder() = default;
-
 bool TextFinder::SetMarkerActive(Range* range, bool active) {
   if (!range || range->collapsed())
     return false;
-  return OwnerFrame()
-      .GetFrame()
-      ->GetDocument()
-      ->Markers()
-      .SetTextMatchMarkersActive(EphemeralRange(range), active);
+  Document* document = OwnerFrame().GetFrame()->GetDocument();
+  document->SetFindInPageActiveMatchNode(active ? range->startContainer()
+                                                : nullptr);
+  return document->Markers().SetTextMatchMarkersActive(EphemeralRange(range),
+                                                       active);
 }
 
 void TextFinder::UnmarkAllTextMatches() {
@@ -714,11 +892,93 @@ void TextFinder::InvalidatePaintForTickmarks() {
   OwnerFrame().GetFrame()->ContentLayoutObject()->InvalidatePaintForTickmarks();
 }
 
-void TextFinder::Trace(Visitor* visitor) {
+void TextFinder::Trace(Visitor* visitor) const {
   visitor->Trace(owner_frame_);
   visitor->Trace(find_task_controller_);
   visitor->Trace(active_match_);
   visitor->Trace(find_matches_cache_);
+}
+
+void TextFinder::Scroll(std::unique_ptr<AsyncScrollContext> context) {
+  // AutoExpandSearchableHiddenElementsUpFrameTree assumes that the range has
+  // nodes in it.
+  if (!context->range->collapsed() && context->range->IsConnected()) {
+    AutoExpandSearchableHiddenElementsUpFrameTree(context->range);
+  }
+
+  // AutoExpandSearchableHiddenElementsUpFrameTree, as well as any other
+  // animation frame tasks which ran before this one, may have dirtied
+  // style/layout which needs to be up to date in order to scroll.
+  GetFrame()->GetDocument()->UpdateStyleAndLayoutForRange(
+      context->range, DocumentUpdateReason::kFindInPage);
+
+  // During the async step or AutoExpandSearchableHiddenElementsUpFrameTree, the
+  // match may have been removed from the dom, gotten DisplayLocked, etc.
+  if (context->range->collapsed() || !context->range->IsConnected() ||
+      DisplayLockUtilities::LockedAncestorPreventingPaint(
+          *context->range->FirstNode())) {
+    // If the range we were going to scroll to was removed, then we should
+    // continue to search for the next match.
+    // We don't need to worry about the case where another Find has already been
+    // initiated, because if it was, then the task to run this would have been
+    // canceled.
+    active_match_ = context->range;
+
+    FindInternal(context->identifier, context->search_text, context->options,
+                 context->wrap_within_frame, /*active_now=*/nullptr,
+                 context->first_match, context->wrapped_around);
+    return;
+  }
+
+  ScrollToVisible(context->range);
+
+  // If the user is browsing a page with autosizing, adjust the zoom to the
+  // column where the next hit has been found. Doing this when autosizing is
+  // not set will result in a zoom reset on small devices.
+  if (GetFrame()->GetDocument()->GetTextAutosizer()->PageNeedsAutosizing()) {
+    OwnerFrame().LocalRoot()->FrameWidgetImpl()->ZoomToFindInPageRect(
+        OwnerFrame().GetFrameView()->ConvertToRootFrame(
+            ComputeTextRect(EphemeralRange(context->range))));
+  }
+
+  // DidFindMatch will race against this to add a text match marker to this
+  // range. In the case where the match is hidden and the beforematch event (or
+  // anything else) reveals the range in between DidFindMatch and this function,
+  // we need to add the marker again or else it won't show up at all.
+  EphemeralRange ephemeral_range(context->range);
+  DocumentMarkerController& marker_controller =
+      OwnerFrame().GetFrame()->GetDocument()->Markers();
+  if (!context->options.run_synchronously_for_testing &&
+      !marker_controller.FirstMarkerIntersectingEphemeralRange(
+          ephemeral_range, DocumentMarker::MarkerTypes::TextMatch())) {
+    marker_controller.AddTextMatchMarker(ephemeral_range,
+                                         TextMatchMarker::MatchStatus::kActive);
+    SetMarkerActive(context->range, true);
+  }
+}
+
+void TextFinder::IncreaseMarkerVersion() {
+  ++find_match_markers_version_;
+
+  // This is called when the size of the content changes. Normally, the check
+  // for the document size changed at the beginning of UpdateFindMatchRects()
+  // would be responsible for invalidating the cached matches as well.
+  // However, a subframe might not change size but its match rects may still be
+  // affected because Find-in-page coordinates are represented as normalized
+  // fractions of the main frame document, so invalidate the cached matches of
+  // subframes as well.
+  for (Frame* frame = GetFrame()->Tree().TraverseNext(GetFrame()); frame;
+       frame = frame->Tree().TraverseNext(GetFrame())) {
+    // TODO(https://crbug.com/1147796) In OOPIFs mode, the text finder
+    // corresponding to the remote frame also needs to be notified, the
+    // match rects are invalid and need to be recalculated.
+    auto* web_local_frame_impl =
+        WebLocalFrameImpl::FromFrame(DynamicTo<LocalFrame>(frame));
+    if (web_local_frame_impl && web_local_frame_impl->GetTextFinder() &&
+        web_local_frame_impl->GetTextFinder()->TotalMatchCount() > 0) {
+      web_local_frame_impl->GetTextFinder()->InvalidateFindMatchRects();
+    }
+  }
 }
 
 }  // namespace blink

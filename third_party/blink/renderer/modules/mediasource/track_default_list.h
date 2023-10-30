@@ -7,7 +7,8 @@
 
 #include "third_party/blink/renderer/modules/mediasource/track_default.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -21,16 +22,16 @@ class TrackDefaultList final : public ScriptWrappable {
   static TrackDefaultList* Create(const HeapVector<Member<TrackDefault>>&,
                                   ExceptionState&);
 
-  TrackDefaultList();
+  TrackDefaultList() = default;
   explicit TrackDefaultList(const HeapVector<Member<TrackDefault>>&);
 
   unsigned length() const { return track_defaults_.size(); }
   TrackDefault* item(unsigned) const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
-  const HeapVector<Member<TrackDefault>> track_defaults_;
+  const HeapVector<Member<TrackDefault>> track_defaults_{};
 };
 
 }  // namespace blink

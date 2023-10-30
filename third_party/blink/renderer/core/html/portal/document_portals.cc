@@ -4,7 +4,10 @@
 
 #include "third_party/blink/renderer/core/html/portal/document_portals.h"
 
-#include "third_party/blink/renderer/core/html/portal/html_portal_element.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/html/portal/portal_contents.h"
+#include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 namespace blink {
 
@@ -12,7 +15,12 @@ namespace blink {
 const char DocumentPortals::kSupplementName[] = "DocumentPortals";
 
 // static
-DocumentPortals& DocumentPortals::From(Document& document) {
+DocumentPortals* DocumentPortals::Get(Document& document) {
+  return Supplement<Document>::From<DocumentPortals>(document);
+}
+
+// static
+DocumentPortals& DocumentPortals::GetOrCreate(Document& document) {
   DocumentPortals* supplement =
       Supplement<Document>::From<DocumentPortals>(document);
   if (!supplement) {
@@ -25,35 +33,31 @@ DocumentPortals& DocumentPortals::From(Document& document) {
 DocumentPortals::DocumentPortals(Document& document)
     : Supplement<Document>(document) {}
 
-void DocumentPortals::OnPortalInserted(HTMLPortalElement* portal) {
+void DocumentPortals::RegisterPortalContents(PortalContents* portal) {
   portals_.push_back(portal);
+  auto* frame = GetSupplementable()->GetFrame();
+  if (!frame)
+    return;
+  if (auto* page = frame->GetPage())
+    page->IncrementSubframeCount();
 }
 
-void DocumentPortals::OnPortalRemoved(HTMLPortalElement* portal) {
-  portals_.EraseAt(portals_.Find(portal));
-}
-
-HTMLPortalElement* DocumentPortals::GetPortal(
-    const base::UnguessableToken& token) const {
-  for (HTMLPortalElement* portal : portals_) {
-    if (portal->GetToken() == token)
-      return portal;
+void DocumentPortals::DeregisterPortalContents(PortalContents* portal) {
+  wtf_size_t index = portals_.Find(portal);
+  if (index != WTF::kNotFound) {
+    portals_.EraseAt(index);
+    auto* frame = GetSupplementable()->GetFrame();
+    if (!frame)
+      return;
+    if (auto* page = frame->GetPage())
+      page->DecrementSubframeCount();
   }
-
-  return nullptr;
 }
 
-bool DocumentPortals::IsPortalInDocumentActivating() const {
-  for (HTMLPortalElement* portal : portals_) {
-    if (portal->IsActivating())
-      return true;
-  }
-  return false;
-}
-
-void DocumentPortals::Trace(Visitor* visitor) {
+void DocumentPortals::Trace(Visitor* visitor) const {
   Supplement<Document>::Trace(visitor);
   visitor->Trace(portals_);
+  visitor->Trace(activating_portal_);
 }
 
 }  // namespace blink

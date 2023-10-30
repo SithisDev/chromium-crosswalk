@@ -25,9 +25,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_TRANSFORMS_ROTATE_TRANSFORM_OPERATION_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TRANSFORMS_ROTATE_TRANSFORM_OPERATION_H_
 
-#include "third_party/blink/renderer/platform/geometry/float_point_3d.h"
 #include "third_party/blink/renderer/platform/transforms/rotation.h"
 #include "third_party/blink/renderer/platform/transforms/transform_operation.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
+#include "ui/gfx/geometry/vector3d_f.h"
 
 namespace blink {
 
@@ -35,7 +36,7 @@ class PLATFORM_EXPORT RotateTransformOperation : public TransformOperation {
  public:
   static scoped_refptr<RotateTransformOperation> Create(double angle,
                                                         OperationType type) {
-    return Create(Rotation(FloatPoint3D(0, 0, 1), angle), type);
+    return Create(Rotation(gfx::Vector3dF(0, 0, 1), angle), type);
   }
 
   static scoped_refptr<RotateTransformOperation> Create(double x,
@@ -43,7 +44,7 @@ class PLATFORM_EXPORT RotateTransformOperation : public TransformOperation {
                                                         double z,
                                                         double angle,
                                                         OperationType type) {
-    return Create(Rotation(FloatPoint3D(x, y, z), angle), type);
+    return Create(Rotation(gfx::Vector3dF(x, y, z), angle), type);
   }
 
   static scoped_refptr<RotateTransformOperation> Create(
@@ -53,29 +54,27 @@ class PLATFORM_EXPORT RotateTransformOperation : public TransformOperation {
     return base::AdoptRef(new RotateTransformOperation(rotation, type));
   }
 
-  bool operator==(const RotateTransformOperation& other) const {
-    return *this == static_cast<const TransformOperation&>(other);
-  }
-
-  double X() const { return rotation_.axis.X(); }
-  double Y() const { return rotation_.axis.Y(); }
-  double Z() const { return rotation_.axis.Z(); }
+  double X() const { return rotation_.axis.x(); }
+  double Y() const { return rotation_.axis.y(); }
+  double Z() const { return rotation_.axis.z(); }
   double Angle() const { return rotation_.angle; }
-  const FloatPoint3D& Axis() const { return rotation_.axis; }
+  const gfx::Vector3dF& Axis() const { return rotation_.axis; }
 
   static bool GetCommonAxis(const RotateTransformOperation*,
                             const RotateTransformOperation*,
-                            FloatPoint3D& result_axis,
+                            gfx::Vector3dF& result_axis,
                             double& result_angle_a,
                             double& result_angle_b);
 
-  bool CanBlendWith(const TransformOperation& other) const override;
   OperationType GetType() const override { return type_; }
-  OperationType PrimitiveType() const final { return kRotate3D; }
+  OperationType PrimitiveType() const override { return kRotate3D; }
 
   void Apply(TransformationMatrix& transform,
-             const FloatSize& /*borderBoxSize*/) const override {
-    transform.Rotate3d(rotation_);
+             const gfx::SizeF& /*borderBoxSize*/) const override {
+    if (type_ == kRotate)
+      transform.Rotate(Angle());
+    else
+      transform.Rotate3d(rotation_);
   }
 
   static bool IsMatchingOperationType(OperationType type) {
@@ -84,8 +83,14 @@ class PLATFORM_EXPORT RotateTransformOperation : public TransformOperation {
   }
 
  protected:
-  bool operator==(const TransformOperation&) const override;
+  bool IsEqualAssumingSameType(const TransformOperation&) const override;
 
+  bool HasNonTrivial3DComponent() const override {
+    return Angle() && (X() || Y());
+  }
+
+  scoped_refptr<TransformOperation> Accumulate(
+      const TransformOperation& other) override;
   scoped_refptr<TransformOperation> Blend(
       const TransformOperation* from,
       double progress,
@@ -101,7 +106,13 @@ class PLATFORM_EXPORT RotateTransformOperation : public TransformOperation {
   const OperationType type_;
 };
 
-DEFINE_TRANSFORM_TYPE_CASTS(RotateTransformOperation);
+template <>
+struct DowncastTraits<RotateTransformOperation> {
+  static bool AllowFrom(const TransformOperation& transform) {
+    return RotateTransformOperation::IsMatchingOperationType(
+        transform.GetType());
+  }
+};
 
 class PLATFORM_EXPORT RotateAroundOriginTransformOperation final
     : public RotateTransformOperation {
@@ -112,18 +123,20 @@ class PLATFORM_EXPORT RotateAroundOriginTransformOperation final
         new RotateAroundOriginTransformOperation(angle, origin_x, origin_y));
   }
 
-  void Apply(TransformationMatrix&, const FloatSize&) const override;
+  void Apply(TransformationMatrix&, const gfx::SizeF&) const override;
 
   static bool IsMatchingOperationType(OperationType type) {
     return type == kRotateAroundOrigin;
   }
+  OperationType PrimitiveType() const override { return kRotateAroundOrigin; }
+
+ protected:
+  bool IsEqualAssumingSameType(const TransformOperation&) const override;
 
  private:
   RotateAroundOriginTransformOperation(double angle,
                                        double origin_x,
                                        double origin_y);
-
-  bool operator==(const TransformOperation&) const override;
 
   scoped_refptr<TransformOperation> Blend(
       const TransformOperation* from,
@@ -135,7 +148,13 @@ class PLATFORM_EXPORT RotateAroundOriginTransformOperation final
   double origin_y_;
 };
 
-DEFINE_TRANSFORM_TYPE_CASTS(RotateAroundOriginTransformOperation);
+template <>
+struct DowncastTraits<RotateAroundOriginTransformOperation> {
+  static bool AllowFrom(const TransformOperation& transform) {
+    return RotateAroundOriginTransformOperation::IsMatchingOperationType(
+        transform.GetType());
+  }
+};
 
 }  // namespace blink
 

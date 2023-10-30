@@ -4,11 +4,23 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_prescient_networking.h"
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/loader/no_state_prefetch_client.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 
 namespace blink {
+
+class MockNoStatePrefetchClient : public NoStatePrefetchClient {
+ public:
+  explicit MockNoStatePrefetchClient(Page& page)
+      : NoStatePrefetchClient(page, nullptr) {}
+
+ private:
+  bool IsPrefetchOnly() override { return true; }
+};
 
 class MockPrescientNetworking : public WebPrescientNetworking {
  public:
@@ -17,28 +29,10 @@ class MockPrescientNetworking : public WebPrescientNetworking {
 
  private:
   void PrefetchDNS(const WebString&) override { did_dns_prefetch_ = true; }
-
-  void Preconnect(const WebURL&, const bool) override {
-    did_preconnect_ = true;
-  }
+  void Preconnect(const WebURL&, bool) override { did_preconnect_ = true; }
 
   bool did_dns_prefetch_ = false;
   bool did_preconnect_ = false;
-};
-
-class TestingPlatformSupportWithMockPrescientNetworking
-    : public TestingPlatformSupport {
- public:
-  MockPrescientNetworking& GetMockPrescientNetworking() {
-    return mock_prescient_networking_;
-  }
-
- private:
-  WebPrescientNetworking* PrescientNetworking() override {
-    return &mock_prescient_networking_;
-  }
-
-  MockPrescientNetworking mock_prescient_networking_;
 };
 
 // HTMLPreloadScannerDocumentTest tests if network hints are
@@ -54,15 +48,19 @@ class HTMLPreloadScannerDocumentTest : public SimTest {
   void SetUp() override {
     SimTest::SetUp();
 
+    LocalFrame* frame = GetDocument().GetFrame();
+    frame->SetPrescientNetworkingForTesting(
+        std::make_unique<MockPrescientNetworking>());
+    mock_network_hints_ =
+        static_cast<MockPrescientNetworking*>(frame->PrescientNetworking());
+
     constexpr const char kTestUrl[] = "https://example.com/test.html";
     main_resource_ = std::make_unique<SimRequest>(kTestUrl, "text/html");
     LoadURL(kTestUrl);
   }
 
  protected:
-  ScopedTestingPlatformSupport<
-      TestingPlatformSupportWithMockPrescientNetworking>
-      platform_;
+  MockPrescientNetworking* mock_network_hints_ = nullptr;
   std::unique_ptr<SimRequest> main_resource_;
 };
 
@@ -74,8 +72,8 @@ TEST_F(HTMLPreloadScannerDocumentTest, DOMParser) {
       'text/html');
   </script>)");
 
-  EXPECT_FALSE(platform_->GetMockPrescientNetworking().DidDnsPrefetch());
-  EXPECT_FALSE(platform_->GetMockPrescientNetworking().DidPreconnect());
+  EXPECT_FALSE(mock_network_hints_->DidDnsPrefetch());
+  EXPECT_FALSE(mock_network_hints_->DidPreconnect());
 }
 
 TEST_F(HTMLPreloadScannerDocumentTest, DetachedDocumentInnerHTML) {
@@ -85,8 +83,8 @@ TEST_F(HTMLPreloadScannerDocumentTest, DetachedDocumentInnerHTML) {
         '<link rel="preconnect" href="https://target.example.com/"/>';
   </script>)");
 
-  EXPECT_FALSE(platform_->GetMockPrescientNetworking().DidDnsPrefetch());
-  EXPECT_FALSE(platform_->GetMockPrescientNetworking().DidPreconnect());
+  EXPECT_FALSE(mock_network_hints_->DidDnsPrefetch());
+  EXPECT_FALSE(mock_network_hints_->DidPreconnect());
 }
 
 TEST_F(HTMLPreloadScannerDocumentTest, XHRResponseDocument) {
@@ -98,8 +96,36 @@ TEST_F(HTMLPreloadScannerDocumentTest, XHRResponseDocument) {
     xhr.send();
   </script>)");
 
-  EXPECT_FALSE(platform_->GetMockPrescientNetworking().DidDnsPrefetch());
-  EXPECT_FALSE(platform_->GetMockPrescientNetworking().DidPreconnect());
+  EXPECT_FALSE(mock_network_hints_->DidDnsPrefetch());
+  EXPECT_FALSE(mock_network_hints_->DidPreconnect());
+}
+
+TEST_F(HTMLPreloadScannerDocumentTest,
+       SetsClientHintsPreferencesOnFrameDelegateCH) {
+  // Create a prefetch only document since that will ensure only the preload
+  // scanner runs.
+  ProvideNoStatePrefetchClientTo(
+      *GetDocument().GetPage(), MakeGarbageCollected<MockNoStatePrefetchClient>(
+                                    *GetDocument().GetPage()));
+  EXPECT_TRUE(GetDocument().IsPrefetchOnly());
+  main_resource_->Complete(
+      R"(<meta http-equiv="Delegate-CH" content="sec-ch-dpr">)");
+  EXPECT_TRUE(GetDocument().GetFrame()->GetClientHintsPreferences().ShouldSend(
+      network::mojom::WebClientHintsType::kDpr));
+}
+
+TEST_F(HTMLPreloadScannerDocumentTest,
+       SetsClientHintsPreferencesOnFrameAcceptCH) {
+  // Create a prefetch only document since that will ensure only the preload
+  // scanner runs.
+  ProvideNoStatePrefetchClientTo(
+      *GetDocument().GetPage(), MakeGarbageCollected<MockNoStatePrefetchClient>(
+                                    *GetDocument().GetPage()));
+  EXPECT_TRUE(GetDocument().IsPrefetchOnly());
+  main_resource_->Complete(
+      R"(<meta http-equiv="Accept-CH" content="sec-ch-dpr">)");
+  EXPECT_TRUE(GetDocument().GetFrame()->GetClientHintsPreferences().ShouldSend(
+      network::mojom::WebClientHintsType::kDpr));
 }
 
 }  // namespace blink

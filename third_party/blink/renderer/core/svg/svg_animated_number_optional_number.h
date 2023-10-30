@@ -33,7 +33,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_animated_number.h"
 #include "third_party/blink/renderer/core/svg/svg_number_optional_number.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -44,10 +44,8 @@ namespace blink {
 // are used.
 // For example, see SVGFEDropShadowElement::stdDeviation{X,Y}()
 class SVGAnimatedNumberOptionalNumber
-    : public GarbageCollectedFinalized<SVGAnimatedNumberOptionalNumber>,
+    : public GarbageCollected<SVGAnimatedNumberOptionalNumber>,
       public SVGAnimatedPropertyCommon<SVGNumberOptionalNumber> {
-  USING_GARBAGE_COLLECTED_MIXIN(SVGAnimatedNumberOptionalNumber);
-
  public:
   SVGAnimatedNumberOptionalNumber(SVGElement* context_element,
                                   const QualifiedName& attribute_name,
@@ -60,7 +58,7 @@ class SVGAnimatedNumberOptionalNumber
   SVGAnimatedNumber* FirstNumber() { return first_number_.Get(); }
   SVGAnimatedNumber* SecondNumber() { return second_number_.Get(); }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   Member<SVGAnimatedNumber> first_number_;

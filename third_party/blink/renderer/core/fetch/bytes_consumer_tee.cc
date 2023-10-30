@@ -5,36 +5,35 @@
 #include "third_party/blink/renderer/core/fetch/bytes_consumer_tee.h"
 
 #include <string.h>
+
 #include <algorithm>
+
 #include "base/memory/scoped_refptr.h"
+#include "base/numerics/safe_conversions.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/blob_bytes_consumer.h"
 #include "third_party/blink/renderer/core/fetch/form_data_bytes_consumer.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_deque.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
 namespace {
 
-class NoopClient final : public GarbageCollectedFinalized<NoopClient>,
+class NoopClient final : public GarbageCollected<NoopClient>,
                          public BytesConsumer::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(NoopClient);
-
  public:
   void OnStateChange() override {}
   String DebugName() const override { return "NoopClient"; }
 };
 
-class TeeHelper final : public GarbageCollectedFinalized<TeeHelper>,
+class TeeHelper final : public GarbageCollected<TeeHelper>,
                         public BytesConsumer::Client {
-  USING_GARBAGE_COLLECTED_MIXIN(TeeHelper);
-
  public:
   TeeHelper(ExecutionContext* execution_context, BytesConsumer* consumer)
       : src_(consumer),
@@ -66,8 +65,8 @@ class TeeHelper final : public GarbageCollectedFinalized<TeeHelper>,
       }
       Chunk* chunk = nullptr;
       if (result == Result::kOk) {
-        chunk = MakeGarbageCollected<Chunk>(buffer,
-                                            SafeCast<wtf_size_t>(available));
+        chunk = MakeGarbageCollected<Chunk>(
+            buffer, base::checked_cast<wtf_size_t>(available));
         result = src_->EndRead(available);
       }
       switch (result) {
@@ -113,7 +112,7 @@ class TeeHelper final : public GarbageCollectedFinalized<TeeHelper>,
   BytesConsumer* Destination1() const { return destination1_; }
   BytesConsumer* Destination2() const { return destination2_; }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(src_);
     visitor->Trace(destination1_);
     visitor->Trace(destination2_);
@@ -122,7 +121,7 @@ class TeeHelper final : public GarbageCollectedFinalized<TeeHelper>,
 
  private:
   using Result = BytesConsumer::Result;
-  class Chunk final : public GarbageCollectedFinalized<Chunk> {
+  class Chunk final : public GarbageCollected<Chunk> {
    public:
     Chunk(const char* data, wtf_size_t size) {
       buffer_.ReserveInitialCapacity(size);
@@ -138,7 +137,7 @@ class TeeHelper final : public GarbageCollectedFinalized<TeeHelper>,
     const char* data() const { return buffer_.data(); }
     wtf_size_t size() const { return buffer_.size(); }
 
-    void Trace(blink::Visitor* visitor) {}
+    void Trace(Visitor* visitor) const {}
 
    private:
     Vector<char> buffer_;
@@ -268,7 +267,7 @@ class TeeHelper final : public GarbageCollectedFinalized<TeeHelper>,
 
     bool IsCancelled() const { return is_cancelled_; }
 
-    void Trace(blink::Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(execution_context_);
       visitor->Trace(tee_);
       visitor->Trace(client_);

@@ -27,6 +27,7 @@
 
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_rare_data.h"
+#include "third_party/blink/renderer/core/html/custom/element_internals.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
@@ -42,7 +43,7 @@ RadioNodeList::RadioNodeList(ContainerNode& owner_node,
     : LiveNodeList(owner_node,
                    type,
                    kInvalidateForFormControls,
-                   IsHTMLFormElement(owner_node)
+                   IsA<HTMLFormElement>(owner_node)
                        ? NodeListSearchRoot::kTreeScope
                        : NodeListSearchRoot::kOwnerNode),
       name_(name) {
@@ -52,13 +53,13 @@ RadioNodeList::RadioNodeList(ContainerNode& owner_node,
 RadioNodeList::~RadioNodeList() = default;
 
 static inline HTMLInputElement* ToRadioButtonInputElement(Element& element) {
-  if (!IsHTMLInputElement(element))
+  auto* input_element = DynamicTo<HTMLInputElement>(&element);
+  if (!input_element)
     return nullptr;
-  HTMLInputElement& input_element = ToHTMLInputElement(element);
-  if (input_element.type() != input_type_names::kRadio ||
-      input_element.value().IsEmpty())
+  if (input_element->type() != input_type_names::kRadio ||
+      input_element->Value().IsEmpty())
     return nullptr;
-  return &input_element;
+  return input_element;
 }
 
 String RadioNodeList::value() const {
@@ -67,9 +68,9 @@ String RadioNodeList::value() const {
   unsigned length = this->length();
   for (unsigned i = 0; i < length; ++i) {
     const HTMLInputElement* input_element = ToRadioButtonInputElement(*item(i));
-    if (!input_element || !input_element->checked())
+    if (!input_element || !input_element->Checked())
       continue;
-    return input_element->value();
+    return input_element->Value();
   }
   return String();
 }
@@ -80,9 +81,9 @@ void RadioNodeList::setValue(const String& value) {
   unsigned length = this->length();
   for (unsigned i = 0; i < length; ++i) {
     HTMLInputElement* input_element = ToRadioButtonInputElement(*item(i));
-    if (!input_element || input_element->value() != value)
+    if (!input_element || input_element->Value() != value)
       continue;
-    input_element->setChecked(true);
+    input_element->SetChecked(true);
     return;
   }
 }
@@ -92,39 +93,38 @@ bool RadioNodeList::MatchesByIdOrName(const Element& test_element) const {
          test_element.GetNameAttribute() == name_;
 }
 
-bool RadioNodeList::CheckElementMatchesRadioNodeListFilter(
-    const Element& test_element) const {
-  DCHECK(!ShouldOnlyMatchImgElements());
-  DCHECK(IsHTMLObjectElement(test_element) ||
-         test_element.IsFormControlElement());
-  if (IsHTMLFormElement(ownerNode())) {
-    auto* form_element = To<HTMLElement>(test_element).formOwner();
-    if (!form_element || form_element != ownerNode())
-      return false;
-  }
-
-  return MatchesByIdOrName(test_element);
-}
-
 bool RadioNodeList::ElementMatches(const Element& element) const {
   if (ShouldOnlyMatchImgElements()) {
-    if (!IsHTMLImageElement(element))
+    auto* html_image_element = DynamicTo<HTMLImageElement>(element);
+    if (!html_image_element)
       return false;
 
-    if (ToHTMLImageElement(element).formOwner() != ownerNode())
+    if (html_image_element->formOwner() != ownerNode())
       return false;
 
     return MatchesByIdOrName(element);
   }
-
-  if (!IsHTMLObjectElement(element) && !element.IsFormControlElement())
+  auto* html_element = DynamicTo<HTMLElement>(element);
+  bool is_form_associated =
+      html_element && html_element->IsFormAssociatedCustomElement();
+  if (!IsA<HTMLObjectElement>(element) && !element.IsFormControlElement() &&
+      !is_form_associated) {
     return false;
+  }
 
-  if (IsHTMLInputElement(element) &&
-      ToHTMLInputElement(element).type() == input_type_names::kImage)
+  auto* html_input_element = DynamicTo<HTMLInputElement>(&element);
+  if (html_input_element &&
+      html_input_element->type() == input_type_names::kImage) {
     return false;
+  }
 
-  return CheckElementMatchesRadioNodeListFilter(element);
+  if (IsA<HTMLFormElement>(ownerNode())) {
+    auto* form_element = html_element->formOwner();
+    if (!form_element || form_element != ownerNode())
+      return false;
+  }
+
+  return MatchesByIdOrName(element);
 }
 
 }  // namespace blink

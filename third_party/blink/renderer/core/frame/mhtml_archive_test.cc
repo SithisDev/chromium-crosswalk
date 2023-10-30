@@ -28,21 +28,24 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "base/test/metrics/histogram_tester.h"
-#include "build/build_config.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/mhtml/mhtml_archive.h"
+
+#include "base/test/metrics/histogram_tester.h"
+#include "base/time/time.h"
+#include "build/build_config.h"
+#include "services/network/public/cpp/is_potentially_trustworthy.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/loader/mhtml_load_result.mojom-blink.h"
 #include "third_party/blink/renderer/platform/mhtml/mhtml_parser.h"
 #include "third_party/blink/renderer/platform/mhtml/serialized_resource.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/text/date_components.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 using blink::mojom::MHTMLLoadResult;
 using blink::url_test_helpers::ToKURL;
@@ -362,7 +365,7 @@ TEST_F(MHTMLArchiveTest, MHTMLFromScheme) {
   CheckLoadResult(ToKURL("http://www.example.com"), data.get(),
                   MHTMLLoadResult::kSuccess);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   CheckLoadResult(ToKURL("content://foo"), data.get(),
                   MHTMLLoadResult::kSuccess);
 #else
@@ -373,7 +376,8 @@ TEST_F(MHTMLArchiveTest, MHTMLFromScheme) {
   CheckLoadResult(ToKURL("fooscheme://bar"), data.get(),
                   MHTMLLoadResult::kUrlSchemeNotAllowed);
 
-  SchemeRegistry::RegisterURLSchemeAsLocal("fooscheme");
+  url::ScopedSchemeRegistryForTests scoped_registry;
+  url::AddLocalScheme("fooscheme");
   CheckLoadResult(ToKURL("fooscheme://bar"), data.get(),
                   MHTMLLoadResult::kSuccess);
 }

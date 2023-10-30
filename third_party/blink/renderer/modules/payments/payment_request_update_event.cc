@@ -62,15 +62,18 @@ void PaymentRequestUpdateEvent::updateWith(ScriptState* script_state,
   stopImmediatePropagation();
   wait_for_update_ = true;
 
-  promise.Then(UpdatePaymentDetailsFunction::CreateFunction(
-                   script_state, request_,
-                   UpdatePaymentDetailsFunction::ResolveType::kFulfill),
-               UpdatePaymentDetailsFunction::CreateFunction(
-                   script_state, request_,
-                   UpdatePaymentDetailsFunction::ResolveType::kReject));
+  promise.Then(
+      MakeGarbageCollected<ScriptFunction>(
+          script_state,
+          MakeGarbageCollected<UpdatePaymentDetailsFunction>(
+              request_, UpdatePaymentDetailsFunction::ResolveType::kFulfill)),
+      MakeGarbageCollected<ScriptFunction>(
+          script_state,
+          MakeGarbageCollected<UpdatePaymentDetailsFunction>(
+              request_, UpdatePaymentDetailsFunction::ResolveType::kReject)));
 }
 
-void PaymentRequestUpdateEvent::Trace(blink::Visitor* visitor) {
+void PaymentRequestUpdateEvent::Trace(Visitor* visitor) const {
   visitor->Trace(request_);
   Event::Trace(visitor);
 }

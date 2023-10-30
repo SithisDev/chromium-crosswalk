@@ -9,12 +9,14 @@
 #include <memory>
 #include <string>
 #include "third_party/blink/renderer/core/editing/forward.h"
+#include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
 
 class FrameSelection;
+class HTMLElement;
 
 class EditingTestBase : public PageTestBase {
   USING_FAST_MALLOC(EditingTestBase);
@@ -28,10 +30,6 @@ class EditingTestBase : public PageTestBase {
  protected:
   EditingTestBase();
   ~EditingTestBase() override;
-
-  // Insert STYLE element with |style_rules|, no need to have "<style>", into
-  // HEAD.
-  void InsertStyleElement(const std::string& style_rules);
 
   // Returns |Position| for specified |caret_text|, which is HTML markup with
   // caret marker "|".

@@ -6,7 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_PUBLIC_WORKER_POOL_H_
 
 #include "base/location.h"
-#include "base/sequenced_task_runner.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -15,9 +16,9 @@ namespace blink {
 
 namespace worker_pool {
 
-// These are a thin wrapper around base::ThreadPoolInstance to ensure that all
-// callers use CrossThreadBindOnce instead of base::Bind to ensure that
-// all non-thread-safe objects are copied properly.
+// These are a thin wrapper around base::ThreadPool to ensure that all callers
+// use CrossThreadBindOnce instead of base::Bind to ensure that all
+// non-thread-safe objects are copied properly.
 //
 // All tasks that do not care about which thread they are running on
 // (e.g. compressing/uncompressing tasks) use this API.
@@ -27,12 +28,12 @@ namespace worker_pool {
 // (e.g. FrameScheduler for main thread tasks).
 PLATFORM_EXPORT void PostTask(const base::Location&, CrossThreadOnceClosure);
 
-PLATFORM_EXPORT void PostTaskWithTraits(const base::Location&,
-                                        const base::TaskTraits&,
-                                        CrossThreadOnceClosure);
+PLATFORM_EXPORT void PostTask(const base::Location&,
+                              const base::TaskTraits&,
+                              CrossThreadOnceClosure);
 
-// TODO(altimin): Expose CreateSequencedTaskRunnerWithTraits when the
-// need arises.
+PLATFORM_EXPORT scoped_refptr<base::SequencedTaskRunner>
+CreateSequencedTaskRunner(const base::TaskTraits& traits);
 
 }  // namespace worker_pool
 

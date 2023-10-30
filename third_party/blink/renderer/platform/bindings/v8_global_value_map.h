@@ -48,7 +48,8 @@ class V8GlobalValueMapTraits {
     return old_value;
   }
   static v8::PersistentContainerValue Get(const Impl* impl, KeyType key) {
-    return impl->at(key);
+    auto it = impl->find(key);
+    return it != impl->end() ? it->value : 0;
   }
 
   static v8::PersistentContainerValue Remove(Impl* impl, KeyType key) {
@@ -98,17 +99,16 @@ class V8GlobalValueMapTraits {
  * A map for safely storing persistent V8 values, based on
  * v8::GlobalValueMap.
  */
-template <typename KeyType,
-          typename ValueType,
-          v8::PersistentContainerCallbackType type>
-class V8GlobalValueMap : public v8::GlobalValueMap<
-                             KeyType,
-                             ValueType,
-                             V8GlobalValueMapTraits<KeyType, ValueType, type>> {
+template <typename KeyType, typename ValueType>
+class V8GlobalValueMap
+    : public v8::GlobalValueMap<
+          KeyType,
+          ValueType,
+          V8GlobalValueMapTraits<KeyType, ValueType, v8::kNotWeak>> {
   DISALLOW_NEW();
 
  public:
-  typedef V8GlobalValueMapTraits<KeyType, ValueType, type> Traits;
+  typedef V8GlobalValueMapTraits<KeyType, ValueType, v8::kNotWeak> Traits;
   explicit V8GlobalValueMap(v8::Isolate* isolate)
       : v8::GlobalValueMap<KeyType, ValueType, Traits>(isolate) {}
   V8GlobalValueMap(v8::Isolate* isolate, const char* label)

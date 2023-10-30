@@ -8,19 +8,22 @@
 #include <memory>
 
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
+#include "third_party/blink/public/common/privacy_budget/identifiable_token.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_blob_callback.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_image_encode_options.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/html/canvas/image_encode_options.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/image-encoders/image_encoder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace blink {
 
@@ -34,7 +37,7 @@ constexpr const char* kRGBA8ImagePixelFormatName = "uint8";
 constexpr const char* kRGBA16ImagePixelFormatName = "uint16";
 
 class CORE_EXPORT CanvasAsyncBlobCreator
-    : public GarbageCollectedFinalized<CanvasAsyncBlobCreator> {
+    : public GarbageCollected<CanvasAsyncBlobCreator> {
  public:
   // This enum is used to back an UMA histogram, and should therefore be treated
   // as append-only. Idle tasks are not implemented for some image types.
@@ -50,8 +53,7 @@ class CORE_EXPORT CanvasAsyncBlobCreator
   enum ToBlobFunctionType {
     kHTMLCanvasToBlobCallback,
     kHTMLCanvasConvertToBlobPromise,
-    kOffscreenCanvasConvertToBlobPromise,
-    kNumberOfToBlobFunctionTypes
+    kOffscreenCanvasConvertToBlobPromise
   };
 
   void ScheduleAsyncBlobCreation(const double& quality);
@@ -61,6 +63,7 @@ class CORE_EXPORT CanvasAsyncBlobCreator
                          ToBlobFunctionType function_type,
                          base::TimeTicks start_time,
                          ExecutionContext*,
+                         const IdentifiableToken& input_digest,
                          ScriptPromiseResolver*);
   CanvasAsyncBlobCreator(scoped_refptr<StaticBitmapImage>,
                          const ImageEncodeOptions*,
@@ -68,6 +71,7 @@ class CORE_EXPORT CanvasAsyncBlobCreator
                          V8BlobCallback*,
                          base::TimeTicks start_time,
                          ExecutionContext*,
+                         const IdentifiableToken& input_digest,
                          ScriptPromiseResolver* = nullptr);
   virtual ~CanvasAsyncBlobCreator();
 
@@ -75,7 +79,7 @@ class CORE_EXPORT CanvasAsyncBlobCreator
   virtual void SignalTaskSwitchInStartTimeoutEventForTesting() {}
   virtual void SignalTaskSwitchInCompleteTimeoutEventForTesting() {}
 
-  virtual void Trace(Visitor*);
+  virtual void Trace(Visitor*) const;
 
   static sk_sp<SkColorSpace> BlobColorSpaceToSkColorSpace(
       String blob_color_space);
@@ -126,6 +130,7 @@ class CORE_EXPORT CanvasAsyncBlobCreator
   base::TimeTicks start_time_;
   base::TimeTicks schedule_idle_task_start_time_;
   bool static_bitmap_image_loaded_;
+  IdentifiableToken input_digest_;
 
   // Used when CanvasAsyncBlobCreator runs on main thread only
   scoped_refptr<base::SingleThreadTaskRunner> parent_frame_task_runner_;
@@ -148,6 +153,8 @@ class CORE_EXPORT CanvasAsyncBlobCreator
 
   void IdleTaskStartTimeoutEvent(double quality);
   void IdleTaskCompleteTimeoutEvent();
+
+  void RecordIdentifiabilityMetric();
 };
 
 }  // namespace blink

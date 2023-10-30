@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/parsing_utilities.h"
@@ -36,11 +37,8 @@
 
 namespace blink {
 
-using namespace cssvalue;
-using namespace html_names;
-
 HTMLFontElement::HTMLFontElement(Document& document)
-    : HTMLElement(kFontTag, document) {}
+    : HTMLElement(html_names::kFontTag, document) {}
 
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/rendering.html#fonts-and-colors
 template <typename CharacterType>
@@ -87,13 +85,14 @@ static bool ParseFontSize(const CharacterType* characters,
 
   // Step 8
   int value = CharactersToInt(digits_start, position - digits_start,
-                              WTF::NumberParsingOptions::kNone, nullptr);
+                              WTF::NumberParsingOptions(), nullptr);
 
   // Step 9
-  if (mode == kRelativePlus)
-    value += 3;
-  else if (mode == kRelativeMinus)
-    value = 3 - value;
+  if (mode == kRelativePlus) {
+    value = base::CheckAdd(value, 3).ValueOrDefault(value);
+  } else if (mode == kRelativeMinus) {
+    value = base::CheckSub(3, value).ValueOrDefault(value);
+  }
 
   // Step 10
   if (value > 7)
@@ -160,7 +159,7 @@ bool HTMLFontElement::CssValueFromFontSizeNumber(const String& s,
       size = CSSValueID::kXxLarge;
       break;
     case 7:
-      size = CSSValueID::kWebkitXxxLarge;
+      size = CSSValueID::kXxxLarge;
       break;
     default:
       NOTREACHED();
@@ -169,7 +168,8 @@ bool HTMLFontElement::CssValueFromFontSizeNumber(const String& s,
 }
 
 bool HTMLFontElement::IsPresentationAttribute(const QualifiedName& name) const {
-  if (name == kSizeAttr || name == kColorAttr || name == kFaceAttr)
+  if (name == html_names::kSizeAttr || name == html_names::kColorAttr ||
+      name == html_names::kFaceAttr)
     return true;
   return HTMLElement::IsPresentationAttribute(name);
 }
@@ -178,19 +178,19 @@ void HTMLFontElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == kSizeAttr) {
+  if (name == html_names::kSizeAttr) {
     CSSValueID size = CSSValueID::kInvalid;
     if (CssValueFromFontSizeNumber(value, size)) {
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyID::kFontSize,
                                               size);
     }
-  } else if (name == kColorAttr) {
+  } else if (name == html_names::kColorAttr) {
     AddHTMLColorToStyle(style, CSSPropertyID::kColor, value);
-  } else if (name == kFaceAttr && !value.IsEmpty()) {
+  } else if (name == html_names::kFaceAttr && !value.IsEmpty()) {
     if (const CSSValueList* font_face_value = CreateFontFaceValueWithPool(
-            value, GetDocument().GetSecureContextMode())) {
-      style->SetProperty(
-          CSSPropertyValue(GetCSSPropertyFontFamily(), *font_face_value));
+            value, GetExecutionContext()->GetSecureContextMode())) {
+      style->SetProperty(CSSPropertyValue(
+          CSSPropertyName(CSSPropertyID::kFontFamily), *font_face_value));
     }
   } else {
     HTMLElement::CollectStyleForPresentationAttribute(name, value, style);

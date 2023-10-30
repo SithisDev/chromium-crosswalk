@@ -33,6 +33,7 @@
 
 #include "base/synchronization/atomic_flag.h"
 #include "third_party/blink/public/platform/web_crypto.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 
@@ -49,8 +50,7 @@ class CryptoResultCancel : public ThreadSafeRefCounted<CryptoResultCancel> {
 };
 
 // Receives notification of completion of the crypto operation.
-class PLATFORM_EXPORT CryptoResult
-    : public GarbageCollectedFinalized<CryptoResult> {
+class PLATFORM_EXPORT CryptoResult : public GarbageCollected<CryptoResult> {
  public:
   virtual ~CryptoResult() = default;
 
@@ -62,7 +62,7 @@ class PLATFORM_EXPORT CryptoResult
   virtual void CompleteWithKeyPair(const WebCryptoKey& public_key,
                                    const WebCryptoKey& private_key) = 0;
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 };
 
 }  // namespace blink

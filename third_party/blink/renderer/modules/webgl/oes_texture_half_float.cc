@@ -25,6 +25,8 @@
 
 #include "third_party/blink/renderer/modules/webgl/oes_texture_half_float.h"
 
+#include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
+
 namespace blink {
 
 OESTextureHalfFloat::OESTextureHalfFloat(WebGLRenderingContextBase* context)
@@ -37,11 +39,6 @@ OESTextureHalfFloat::OESTextureHalfFloat(WebGLRenderingContextBase* context)
 
 WebGLExtensionName OESTextureHalfFloat::GetName() const {
   return kOESTextureHalfFloatName;
-}
-
-OESTextureHalfFloat* OESTextureHalfFloat::Create(
-    WebGLRenderingContextBase* context) {
-  return MakeGarbageCollected<OESTextureHalfFloat>(context);
 }
 
 bool OESTextureHalfFloat::Supported(WebGLRenderingContextBase* context) {

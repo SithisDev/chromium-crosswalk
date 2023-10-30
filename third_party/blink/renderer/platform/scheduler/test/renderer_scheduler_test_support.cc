@@ -6,14 +6,14 @@
 
 #include <memory>
 
-#include "base/single_thread_task_runner.h"
 #include "base/task/sequence_manager/test/sequence_manager_for_test.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "third_party/blink/public/platform/scheduler/test/web_mock_thread_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/public/dummy_schedulers.h"
-#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
@@ -25,22 +25,10 @@ namespace {
 class SimpleMockMainThreadScheduler : public WebMockThreadScheduler {
  public:
   SimpleMockMainThreadScheduler()
-      : simple_thread_scheduler_(CreateDummyWebThreadScheduler()) {}
-  ~SimpleMockMainThreadScheduler() override {}
+      : simple_thread_scheduler_(CreateDummyWebMainThreadScheduler()) {}
+  ~SimpleMockMainThreadScheduler() override = default;
 
-  scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override {
-    return base::ThreadTaskRunnerHandle::Get();
-  }
-
-  scoped_refptr<base::SingleThreadTaskRunner> InputTaskRunner() override {
-    return base::ThreadTaskRunnerHandle::Get();
-  }
-
-  scoped_refptr<base::SingleThreadTaskRunner> CleanupTaskRunner() override {
-    return base::ThreadTaskRunnerHandle::Get();
-  }
-
-  std::unique_ptr<Thread> CreateMainThread() override {
+  std::unique_ptr<MainThread> CreateMainThread() override {
     return simple_thread_scheduler_->CreateMainThread();
   }
 
@@ -51,7 +39,7 @@ class SimpleMockMainThreadScheduler : public WebMockThreadScheduler {
 }  // namespace
 
 std::unique_ptr<WebThreadScheduler> CreateWebMainThreadSchedulerForTests() {
-  return CreateDummyWebThreadScheduler();
+  return CreateDummyWebMainThreadScheduler();
 }
 
 std::unique_ptr<WebMockThreadScheduler>

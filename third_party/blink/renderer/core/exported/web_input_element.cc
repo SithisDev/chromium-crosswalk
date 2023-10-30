@@ -30,6 +30,7 @@
 
 #include "third_party/blink/public/web/web_input_element.h"
 
+#include "build/build_config.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_element_collection.h"
 #include "third_party/blink/public/web/web_option_element.h"
@@ -59,6 +60,10 @@ bool WebInputElement::IsEmailField() const {
 
 bool WebInputElement::IsPasswordField() const {
   return ConstUnwrap<HTMLInputElement>()->type() == input_type_names::kPassword;
+}
+
+void WebInputElement::SetHasBeenPasswordField() {
+  Unwrap<HTMLInputElement>()->SetHasBeenPasswordField();
 }
 
 bool WebInputElement::IsPasswordFieldForAutofill() const {
@@ -103,15 +108,18 @@ bool WebInputElement::IsValidValue(const WebString& value) const {
   return ConstUnwrap<HTMLInputElement>()->IsValidValue(value);
 }
 
-void WebInputElement::SetChecked(bool now_checked, bool send_events) {
-  Unwrap<HTMLInputElement>()->setChecked(
-      now_checked, send_events
-                       ? TextFieldEventBehavior::kDispatchInputAndChangeEvent
-                       : TextFieldEventBehavior::kDispatchNoEvent);
+void WebInputElement::SetChecked(bool now_checked,
+                                 bool send_events,
+                                 WebAutofillState autofill_state) {
+  Unwrap<HTMLInputElement>()->SetChecked(
+      now_checked,
+      send_events ? TextFieldEventBehavior::kDispatchInputAndChangeEvent
+                  : TextFieldEventBehavior::kDispatchNoEvent,
+      autofill_state);
 }
 
 bool WebInputElement::IsChecked() const {
-  return ConstUnwrap<HTMLInputElement>()->checked();
+  return ConstUnwrap<HTMLInputElement>()->Checked();
 }
 
 bool WebInputElement::IsMultiple() const {
@@ -140,11 +148,21 @@ bool WebInputElement::ShouldRevealPassword() const {
   return ConstUnwrap<HTMLInputElement>()->ShouldRevealPassword();
 }
 
+#if BUILDFLAG(IS_ANDROID)
+bool WebInputElement::IsLastInputElementInForm() {
+  return Unwrap<HTMLInputElement>()->IsLastInputElementInForm();
+}
+
+void WebInputElement::DispatchSimulatedEnter() {
+  Unwrap<HTMLInputElement>()->DispatchSimulatedEnter();
+}
+#endif
+
 WebInputElement::WebInputElement(HTMLInputElement* elem)
     : WebFormControlElement(elem) {}
 
 DEFINE_WEB_NODE_TYPE_CASTS(WebInputElement,
-                           IsHTMLInputElement(ConstUnwrap<Node>()))
+                           IsA<HTMLInputElement>(ConstUnwrap<Node>()))
 
 WebInputElement& WebInputElement::operator=(HTMLInputElement* elem) {
   private_ = elem;
@@ -152,13 +170,7 @@ WebInputElement& WebInputElement::operator=(HTMLInputElement* elem) {
 }
 
 WebInputElement::operator HTMLInputElement*() const {
-  return ToHTMLInputElement(private_.Get());
+  return blink::To<HTMLInputElement>(private_.Get());
 }
 
-WebInputElement* ToWebInputElement(WebElement* web_element) {
-  if (!IsHTMLInputElement(*web_element->Unwrap<Element>()))
-    return nullptr;
-
-  return static_cast<WebInputElement*>(web_element);
-}
 }  // namespace blink

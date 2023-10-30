@@ -11,6 +11,9 @@
 #include "third_party/blink/renderer/modules/canvas/canvas2d/canvas_rendering_context_2d.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/shapedetection/shape_detector.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 
 namespace blink {
 
@@ -24,19 +27,18 @@ class MODULES_EXPORT FaceDetector final : public ShapeDetector {
   static FaceDetector* Create(ExecutionContext*, const FaceDetectorOptions*);
 
   FaceDetector(ExecutionContext*, const FaceDetectorOptions*);
-
-  void Trace(blink::Visitor*) override;
-
- private:
   ~FaceDetector() override = default;
 
-  ScriptPromise DoDetect(ScriptPromiseResolver*, SkBitmap) override;
+  void Trace(Visitor*) const override;
+
+ private:
+  ScriptPromise DoDetect(ScriptState*, SkBitmap, ExceptionState&) override;
   void OnDetectFaces(
       ScriptPromiseResolver*,
       Vector<shape_detection::mojom::blink::FaceDetectionResultPtr>);
   void OnFaceServiceConnectionError();
 
-  shape_detection::mojom::blink::FaceDetectionPtr face_service_;
+  HeapMojoRemote<shape_detection::mojom::blink::FaceDetection> face_service_;
 
   HeapHashSet<Member<ScriptPromiseResolver>> face_service_requests_;
 };

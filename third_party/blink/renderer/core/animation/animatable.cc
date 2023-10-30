@@ -4,7 +4,12 @@
 
 #include "third_party/blink/renderer/core/animation/animatable.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_get_animations_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_keyframe_animation_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_keyframeanimationoptions_unrestricteddouble.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_keyframeeffectoptions_unrestricteddouble.h"
 #include "third_party/blink/renderer/core/animation/animation.h"
+#include "third_party/blink/renderer/core/animation/document_animations.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/animation/effect_input.h"
 #include "third_party/blink/renderer/core/animation/effect_model.h"
@@ -14,19 +19,19 @@
 #include "third_party/blink/renderer/core/animation/timing_input.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/feature_policy/layout_animations_policy.h"
+#include "third_party/blink/renderer/core/permissions_policy/layout_animations_policy.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 namespace {
 
 // A helper method which is used to trigger a violation report for cases where
 // the |element.animate| API is used to animate a CSS property which is blocked
-// by the feature policy 'layout-animations'.
-void ReportFeaturePolicyViolationsIfNecessary(
-    const Document& document,
+// by the permissions policy 'layout-animations'.
+void ReportPermissionsPolicyViolationsIfNecessary(
+    ExecutionContext& context,
     const KeyframeEffectModelBase& effect) {
   for (const auto& property_handle : effect.Properties()) {
     if (!property_handle.IsCSSProperty())
@@ -34,79 +39,137 @@ void ReportFeaturePolicyViolationsIfNecessary(
     const auto& css_property = property_handle.GetCSSProperty();
     if (LayoutAnimationsPolicy::AffectedCSSProperties().Contains(
             &css_property)) {
-      LayoutAnimationsPolicy::ReportViolation(css_property, document);
+      LayoutAnimationsPolicy::ReportViolation(css_property, context);
     }
   }
 }
 
+V8UnionKeyframeEffectOptionsOrUnrestrictedDouble* CoerceEffectOptions(
+    const V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble* options) {
+  switch (options->GetContentType()) {
+    case V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble::ContentType::
+        kKeyframeAnimationOptions:
+      return MakeGarbageCollected<
+          V8UnionKeyframeEffectOptionsOrUnrestrictedDouble>(
+          options->GetAsKeyframeAnimationOptions());
+    case V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble::ContentType::
+        kUnrestrictedDouble:
+      return MakeGarbageCollected<
+          V8UnionKeyframeEffectOptionsOrUnrestrictedDouble>(
+          options->GetAsUnrestrictedDouble());
+  }
+  NOTREACHED();
+  return nullptr;
+}
+
 }  // namespace
 
+// https://w3.org/TR/web-animations-1/#dom-animatable-animate
 Animation* Animatable::animate(
     ScriptState* script_state,
     const ScriptValue& keyframes,
-    UnrestrictedDoubleOrKeyframeAnimationOptions options,
+    const V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble* options,
     ExceptionState& exception_state) {
-  EffectModel::CompositeOperation composite = EffectModel::kCompositeReplace;
-  if (options.IsKeyframeAnimationOptions()) {
-    composite = EffectModel::StringToCompositeOperation(
-                    options.GetAsKeyframeAnimationOptions()->composite())
-                    .value();
+  if (!script_state->ContextIsValid())
+    return nullptr;
+  Element* element = GetAnimationTarget();
+  if (!element->GetExecutionContext())
+    return nullptr;
+  KeyframeEffect* effect =
+      KeyframeEffect::Create(script_state, element, keyframes,
+                             CoerceEffectOptions(options), exception_state);
+  if (exception_state.HadException())
+    return nullptr;
+
+  // Creation of the keyframe effect parses JavaScript, which could result
+  // in destruction of the execution context. Recheck that it is still valid.
+  if (!element->GetExecutionContext())
+    return nullptr;
+
+  ReportPermissionsPolicyViolationsIfNecessary(*element->GetExecutionContext(),
+                                               *effect->Model());
+  if (!options->IsKeyframeAnimationOptions())
+    return element->GetDocument().Timeline().Play(effect, exception_state);
+
+  Animation* animation;
+  const KeyframeAnimationOptions* options_dict =
+      options->GetAsKeyframeAnimationOptions();
+  if (!options_dict->hasTimeline()) {
+    animation = element->GetDocument().Timeline().Play(effect, exception_state);
+  } else if (AnimationTimeline* timeline = options_dict->timeline()) {
+    animation = timeline->Play(effect, exception_state);
+  } else {
+    animation = Animation::Create(element->GetExecutionContext(), effect,
+                                  nullptr, exception_state);
   }
 
-  Element* element = GetAnimationTarget();
-  KeyframeEffectModelBase* effect = EffectInput::Convert(
-      element, keyframes, composite, script_state, exception_state);
-  if (exception_state.HadException())
+  if (!animation)
     return nullptr;
 
-  Timing timing =
-      TimingInput::Convert(options, &element->GetDocument(), exception_state);
-  if (exception_state.HadException())
-    return nullptr;
-
-  Animation* animation = animateInternal(*element, effect, timing);
-  if (options.IsKeyframeAnimationOptions())
-    animation->setId(options.GetAsKeyframeAnimationOptions()->id());
+  animation->setId(options_dict->id());
   return animation;
 }
 
+// https://w3.org/TR/web-animations-1/#dom-animatable-animate
 Animation* Animatable::animate(ScriptState* script_state,
                                const ScriptValue& keyframes,
                                ExceptionState& exception_state) {
+  if (!script_state->ContextIsValid())
+    return nullptr;
   Element* element = GetAnimationTarget();
-  KeyframeEffectModelBase* effect =
-      EffectInput::Convert(element, keyframes, EffectModel::kCompositeReplace,
-                           script_state, exception_state);
+  if (!element->GetExecutionContext())
+    return nullptr;
+  KeyframeEffect* effect =
+      KeyframeEffect::Create(script_state, element, keyframes, exception_state);
   if (exception_state.HadException())
     return nullptr;
-  return animateInternal(*element, effect, Timing());
+
+  // Creation of the keyframe effect parses JavaScript, which could result
+  // in destruction of the execution context. Recheck that it is still valid.
+  if (!element->GetExecutionContext())
+    return nullptr;
+
+  ReportPermissionsPolicyViolationsIfNecessary(*element->GetExecutionContext(),
+                                               *effect->Model());
+  return element->GetDocument().Timeline().Play(effect, exception_state);
 }
 
-HeapVector<Member<Animation>> Animatable::getAnimations() {
+// https://w3.org/TR/web-animations-1/#dom-animatable-getanimations
+HeapVector<Member<Animation>> Animatable::getAnimations(
+    GetAnimationsOptions* options) {
+  bool use_subtree = options && options->subtree();
+  return GetAnimationsInternal(
+      GetAnimationsOptionsResolved{.use_subtree = use_subtree});
+}
+
+HeapVector<Member<Animation>> Animatable::GetAnimationsInternal(
+    GetAnimationsOptionsResolved options) {
   Element* element = GetAnimationTarget();
-  element->GetDocument().UpdateStyleAndLayoutTreeForNode(element);
+  if (options.use_subtree)
+    element->GetDocument().UpdateStyleAndLayoutTreeForSubtree(element);
+  else
+    element->GetDocument().UpdateStyleAndLayoutTreeForNode(element);
 
   HeapVector<Member<Animation>> animations;
-  if (!element->HasAnimations())
+  if (!options.use_subtree && !element->HasAnimations())
     return animations;
 
   for (const auto& animation :
-       element->GetDocument().Timeline().getAnimations()) {
+       element->GetDocument().GetDocumentAnimations().getAnimations(
+           element->GetTreeScope())) {
     DCHECK(animation->effect());
-    if (ToKeyframeEffect(animation->effect())->target() == element &&
-        (animation->effect()->IsCurrent() || animation->effect()->IsInEffect()))
+    // TODO(gtsteel) make this use the idl properties
+    Element* target = To<KeyframeEffect>(animation->effect())->EffectTarget();
+    if (element == target ||
+        (options.use_subtree && element->contains(target))) {
+      // DocumentAnimations::getAnimations should only give us animations that
+      // are either current or in effect.
+      DCHECK(animation->effect()->IsCurrent() ||
+             animation->effect()->IsInEffect());
       animations.push_back(animation);
+    }
   }
   return animations;
-}
-
-Animation* Animatable::animateInternal(Element& element,
-                                       KeyframeEffectModelBase* effect,
-                                       const Timing& timing) {
-  ReportFeaturePolicyViolationsIfNecessary(element.GetDocument(), *effect);
-  auto* keyframe_effect =
-      MakeGarbageCollected<KeyframeEffect>(&element, effect, timing);
-  return element.GetDocument().Timeline().Play(keyframe_effect);
 }
 
 }  // namespace blink

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_SCALE_INTERPOLATION_TYPE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_SCALE_INTERPOLATION_TYPE_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/animation/css_interpolation_type.h"
 
 namespace blink {
@@ -36,7 +37,11 @@ class CSSScaleInterpolationType : public CSSInterpolationType {
   InterpolationValue MaybeConvertValue(const CSSValue&,
                                        const StyleResolverState*,
                                        ConversionCheckers&) const final;
-  void AdditiveKeyframeHook(InterpolationValue&) const final;
+  InterpolationValue PreInterpolationCompositeIfNeeded(
+      InterpolationValue value,
+      const InterpolationValue& underlying,
+      EffectModel::CompositeOperation,
+      ConversionCheckers&) const final;
 
   PairwiseInterpolationValue MaybeMergeSingles(
       InterpolationValue&&,

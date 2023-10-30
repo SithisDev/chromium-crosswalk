@@ -48,7 +48,6 @@ namespace blink {
   V(MediaKeys)                     \
   V(Node)                          \
   V(Resource)                      \
-  V(ScriptPromise)                 \
   V(ContextLifecycleStateObserver) \
   V(V8PerContextData)              \
   V(WorkerGlobalScope)             \
@@ -56,7 +55,8 @@ namespace blink {
   V(RTCPeerConnection)             \
   V(ResourceFetcher)               \
   V(AdSubframe)                    \
-  V(DetachedScriptState)
+  V(DetachedScriptState)           \
+  V(ArrayBufferContents)
 
 // Atomic counters of the number of instances of objects that exist.
 //
@@ -81,7 +81,7 @@ class InstanceCounters {
     // should be avoided for the sake of performance. See crbug.com/641019
     if (type == kNodeCounter) {
       DCHECK(IsMainThread());
-      ++counters_[kNodeCounter];
+      ++node_counter_;
     } else {
       counters_[type].fetch_add(1, std::memory_order_relaxed);
     }
@@ -90,7 +90,7 @@ class InstanceCounters {
   static inline void DecrementCounter(CounterType type) {
     if (type == kNodeCounter) {
       DCHECK(IsMainThread());
-      --counters_[kNodeCounter];
+      --node_counter_;
     } else {
       counters_[type].fetch_sub(1, std::memory_order_relaxed);
     }
@@ -105,4 +105,4 @@ class InstanceCounters {
 
 }  // namespace blink
 
-#endif  // !defined(InstanceCounters_h)
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_INSTRUMENTATION_INSTANCE_COUNTERS_H_

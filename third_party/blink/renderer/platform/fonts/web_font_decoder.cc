@@ -30,24 +30,29 @@
 
 #include "third_party/blink/renderer/platform/fonts/web_font_decoder.h"
 
+#include <hb.h>
+#include <stdarg.h>
+
+#include "base/numerics/safe_conversions.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/web_font_typeface_factory.h"
-#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
-#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
-#include "third_party/ots/include/ots-memory-stream.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/ots/src/include/ots-memory-stream.h"
 #include "third_party/skia/include/core/SkStream.h"
-
-#include <hb.h>
-#include <stdarg.h>
 
 namespace blink {
 
 namespace {
+
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+const size_t kMaxDecompressedSizeMb = 30;
+#else
+const size_t kMaxDecompressedSizeMb = 128;
+#endif
 
 class BlinkOTSContext final : public ots::OTSContext {
   DISALLOW_NEW();
@@ -144,38 +149,6 @@ ots::TableAction BlinkOTSContext::GetTableAction(uint32_t tag) {
   }
 }
 
-void RecordDecodeSpeedHistogram(const char* data,
-                                size_t length,
-                                double decode_time,
-                                size_t decoded_size) {
-  if (decode_time <= 0)
-    return;
-
-  double kb_per_second = decoded_size / (1000 * decode_time);
-  if (length >= 4) {
-    if (data[0] == 'w' && data[1] == 'O' && data[2] == 'F' && data[3] == 'F') {
-      DEFINE_THREAD_SAFE_STATIC_LOCAL(
-          CustomCountHistogram, woff_histogram,
-          ("WebFont.DecodeSpeed.WOFF", 1000, 300000, 50));
-      woff_histogram.Count(kb_per_second);
-      return;
-    }
-
-    if (data[0] == 'w' && data[1] == 'O' && data[2] == 'F' && data[3] == '2') {
-      DEFINE_THREAD_SAFE_STATIC_LOCAL(
-          CustomCountHistogram, woff2_histogram,
-          ("WebFont.DecodeSpeed.WOFF2", 1000, 300000, 50));
-      woff2_histogram.Count(kb_per_second);
-      return;
-    }
-  }
-
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(
-      CustomCountHistogram, sfnt_histogram,
-      ("WebFont.DecodeSpeed.SFNT", 1000, 300000, 50));
-  sfnt_histogram.Count(kb_per_second);
-}
-
 }  // namespace
 
 sk_sp<SkTypeface> WebFontDecoder::Decode(SharedBuffer* buffer) {
@@ -185,24 +158,25 @@ sk_sp<SkTypeface> WebFontDecoder::Decode(SharedBuffer* buffer) {
   }
 
   // This is the largest web font size which we'll try to transcode.
-  // TODO(bashi): 30MB seems low. Update the limit if necessary.
-  static const size_t kMaxWebFontSize = 30 * 1024 * 1024;  // 30 MB
-  if (buffer->size() > kMaxWebFontSize) {
-    SetErrorString("Web font size more than 30MB");
+  static const size_t kMaxDecompressedSize =
+      kMaxDecompressedSizeMb * 1024 * 1024;
+  if (buffer->size() > kMaxDecompressedSize) {
+    String error_message =
+        String::Format("Web font size more than %zuMB", kMaxDecompressedSizeMb);
+    SetErrorString(error_message.Utf8().c_str());
     return nullptr;
   }
 
   // Most web fonts are compressed, so the result can be much larger than
   // the original.
-  ots::ExpandingMemoryStream output(buffer->size(), kMaxWebFontSize);
-  base::ElapsedTimer timer;
+  ots::ExpandingMemoryStream output(buffer->size(), kMaxDecompressedSize);
   BlinkOTSContext ots_context;
   SharedBuffer::DeprecatedFlatData flattened_buffer(buffer);
-  const char* data = flattened_buffer.Data();
 
   TRACE_EVENT_BEGIN0("blink", "DecodeFont");
-  bool ok = ots_context.Process(&output, reinterpret_cast<const uint8_t*>(data),
-                                buffer->size());
+  bool ok = ots_context.Process(
+      &output, reinterpret_cast<const uint8_t*>(flattened_buffer.Data()),
+      buffer->size());
   TRACE_EVENT_END0("blink", "DecodeFont");
 
   if (!ok) {
@@ -210,10 +184,7 @@ sk_sp<SkTypeface> WebFontDecoder::Decode(SharedBuffer* buffer) {
     return nullptr;
   }
 
-  const size_t decoded_length = SafeCast<size_t>(output.Tell());
-  RecordDecodeSpeedHistogram(data, buffer->size(), timer.Elapsed().InSecondsF(),
-                             decoded_length);
-
+  const size_t decoded_length = base::checked_cast<size_t>(output.Tell());
   sk_sp<SkData> sk_data = SkData::MakeWithCopy(output.get(), decoded_length);
 
   sk_sp<SkTypeface> new_typeface;

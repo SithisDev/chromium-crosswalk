@@ -5,14 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CUSTOM_CUSTOM_ELEMENT_DEFINITION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CUSTOM_CUSTOM_ELEMENT_DEFINITION_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/dom/create_element_flags.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_descriptor.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
@@ -22,7 +22,6 @@ namespace blink {
 class Document;
 class Element;
 class ExceptionState;
-class FileOrUSVStringOrFormData;
 class HTMLElement;
 class HTMLFormElement;
 class QualifiedName;
@@ -33,16 +32,18 @@ enum class FormAssociationFlag {
 };
 
 class CORE_EXPORT CustomElementDefinition
-    : public GarbageCollectedFinalized<CustomElementDefinition>,
+    : public GarbageCollected<CustomElementDefinition>,
       public NameClient {
  public:
   // Each definition has an ID that is unique within the
   // CustomElementRegistry that created it.
   using Id = uint32_t;
 
-  virtual ~CustomElementDefinition();
+  CustomElementDefinition(const CustomElementDefinition&) = delete;
+  CustomElementDefinition& operator=(const CustomElementDefinition&) = delete;
+  ~CustomElementDefinition() override;
 
-  virtual void Trace(Visitor*);
+  virtual void Trace(Visitor*) const;
   const char* NameInHeapSnapshot() const override {
     return "CustomElementDefinition";
   }
@@ -93,13 +94,11 @@ class CORE_EXPORT CustomElementDefinition
                                          HTMLFormElement* nullable_form) = 0;
   virtual void RunFormResetCallback(Element& element) = 0;
   virtual void RunFormDisabledCallback(Element& element, bool is_disabled) = 0;
-  virtual void RunFormStateRestoreCallback(
-      Element& element,
-      const FileOrUSVStringOrFormData& value,
-      const String& mode) = 0;
+  virtual void RunFormStateRestoreCallback(Element& element,
+                                           const V8ControlValue* value,
+                                           const String& mode) = 0;
 
-  void EnqueueUpgradeReaction(Element&,
-                              bool upgrade_invisible_elements = false);
+  void EnqueueUpgradeReaction(Element&);
   void EnqueueConnectedCallback(Element&);
   void EnqueueDisconnectedCallback(Element&);
   void EnqueueAdoptedCallback(Element&,
@@ -128,15 +127,16 @@ class CORE_EXPORT CustomElementDefinition
 
   class CORE_EXPORT ConstructionStackScope final {
     STACK_ALLOCATED();
-    DISALLOW_COPY_AND_ASSIGN(ConstructionStackScope);
 
    public:
     ConstructionStackScope(CustomElementDefinition&, Element&);
+    ConstructionStackScope(const ConstructionStackScope&) = delete;
+    ConstructionStackScope& operator=(const ConstructionStackScope&) = delete;
     ~ConstructionStackScope();
 
    private:
     ConstructionStack& construction_stack_;
-    Member<Element> element_;
+    Element* element_;
     size_t depth_;
   };
 
@@ -170,8 +170,6 @@ class CORE_EXPORT CustomElementDefinition
   HeapVector<Member<CSSStyleSheet>> default_style_sheets_;
 
   void EnqueueAttributeChangedCallbackForAllAttributes(Element&);
-
-  DISALLOW_COPY_AND_ASSIGN(CustomElementDefinition);
 };
 
 }  // namespace blink

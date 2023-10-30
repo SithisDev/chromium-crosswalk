@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_text_track_list_element.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
 #include "third_party/blink/renderer/core/dom/text.h"
@@ -17,7 +18,7 @@
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_toggle_closed_captions_button_element.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_text_track_manager.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 
 namespace blink {
@@ -57,7 +58,7 @@ MediaControlTextTrackListElement::MediaControlTextTrackListElement(
   setAttribute(html_names::kRoleAttr, "menu");
   setAttribute(html_names::kAriaLabelAttr,
                WTF::AtomicString(GetLocale().QueryString(
-                   WebLocalizedString::kOverflowMenuCaptionsSubmenuTitle)));
+                   IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS_SUBMENU_TITLE)));
   SetShadowPseudoId(AtomicString("-internal-media-controls-text-track-list"));
 }
 
@@ -122,14 +123,14 @@ Element* MediaControlTextTrackListElement::CreateTextTrackListItem(
   track_item_input->SetIntegralAttribute(TrackIndexAttrName(), track_index);
   if (!MediaElement().TextTracksVisible()) {
     if (!track) {
-      track_item_input->setChecked(true);
+      track_item_input->SetChecked(true);
       track_item->setAttribute(html_names::kAriaCheckedAttr, "true");
     }
   } else {
     // If there are multiple text tracks set to showing, they must all have
     // checkmarks displayed.
-    if (track && track->mode() == TextTrack::ShowingKeyword()) {
-      track_item_input->setChecked(true);
+    if (track && track->mode() == TextTrackMode::kShowing) {
+      track_item_input->SetChecked(true);
       track_item->setAttribute(html_names::kAriaCheckedAttr, "true");
     } else {
       track_item->setAttribute(html_names::kAriaCheckedAttr, "false");
@@ -160,7 +161,12 @@ Element* MediaControlTextTrackListElement::CreateTextTrackListItem(
     if (track->kind() == track->CaptionsKeyword()) {
       track_kind_marker->SetShadowPseudoId(AtomicString(
           "-internal-media-controls-text-track-list-kind-captions"));
+    } else if (track->kind() == track->DescriptionsKeyword()) {
+      track_kind_marker->SetShadowPseudoId(AtomicString(
+          "-internal-media-controls-text-track-list-kind-descriptions"));
     } else {
+      // Aside from Captions and Descriptions, Subtitles is the only other
+      // supported keyword.
       DCHECK_EQ(track->kind(), track->SubtitlesKeyword());
       track_kind_marker->SetShadowPseudoId(AtomicString(
           "-internal-media-controls-text-track-list-kind-subtitles"));
@@ -177,12 +183,12 @@ Element* MediaControlTextTrackListElement::CreateTextTrackHeaderItem() {
   header_item->ParserAppendChild(
       Text::Create(GetDocument(),
                    GetLocale().QueryString(
-                       WebLocalizedString::kOverflowMenuCaptionsSubmenuTitle)));
+                       IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS_SUBMENU_TITLE)));
   header_item->setAttribute(html_names::kRoleAttr, "button");
   header_item->setAttribute(
       html_names::kAriaLabelAttr,
       AtomicString(GetLocale().QueryString(
-          WebLocalizedString::kAXMediaHideClosedCaptionsMenuButton)));
+          IDS_AX_MEDIA_HIDE_CLOSED_CAPTIONS_MENU_BUTTON)));
   header_item->setTabIndex(0);
   return header_item;
 }

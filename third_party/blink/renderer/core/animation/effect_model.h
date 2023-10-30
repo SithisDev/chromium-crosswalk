@@ -31,12 +31,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_EFFECT_MODEL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_EFFECT_MODEL_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/animation/animation_time_delta.h"
 #include "third_party/blink/renderer/core/animation/property_handle.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -45,15 +45,16 @@ class Interpolation;
 // Time independent representation of an Animation's content.
 // Can be sampled for the active pairs of Keyframes (represented by
 // Interpolations) at a given time fraction.
-class CORE_EXPORT EffectModel : public GarbageCollectedFinalized<EffectModel> {
+class CORE_EXPORT EffectModel : public GarbageCollected<EffectModel> {
  public:
   enum CompositeOperation {
     kCompositeReplace,
     kCompositeAdd,
+    kCompositeAccumulate,
   };
-  static base::Optional<CompositeOperation> StringToCompositeOperation(
+  static absl::optional<CompositeOperation> StringToCompositeOperation(
       const String&);
-  static String CompositeOperationToString(base::Optional<CompositeOperation>);
+  static String CompositeOperationToString(absl::optional<CompositeOperation>);
 
   EffectModel() = default;
   virtual ~EffectModel() = default;
@@ -67,7 +68,7 @@ class CORE_EXPORT EffectModel : public GarbageCollectedFinalized<EffectModel> {
   virtual bool IsTransformRelatedEffect() const { return false; }
   virtual bool IsKeyframeEffectModel() const { return false; }
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 };
 
 }  // namespace blink

@@ -27,7 +27,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EVENTS_TOUCH_EVENT_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EVENTS_TOUCH_EVENT_CONTEXT_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -36,8 +37,6 @@ class TouchList;
 
 class TouchEventContext : public GarbageCollected<TouchEventContext> {
  public:
-  static TouchEventContext* Create();
-
   TouchEventContext();
 
   void HandleLocalEvents(Event&) const;
@@ -45,7 +44,7 @@ class TouchEventContext : public GarbageCollected<TouchEventContext> {
   TouchList& TargetTouches() { return *target_touches_; }
   TouchList& ChangedTouches() { return *changed_touches_; }
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   Member<TouchList> touches_;

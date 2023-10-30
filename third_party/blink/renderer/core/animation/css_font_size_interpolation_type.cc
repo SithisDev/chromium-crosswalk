@@ -8,8 +8,9 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "third_party/blink/renderer/core/animation/length_interpolation_functions.h"
+#include "third_party/blink/renderer/core/animation/interpolable_length.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
+#include "third_party/blink/renderer/core/css/css_pending_system_font_value.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver_state.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
@@ -50,8 +51,7 @@ class InheritedFontSizeChecker
 };
 
 InterpolationValue ConvertFontSize(float size) {
-  return InterpolationValue(
-      LengthInterpolationFunctions::CreateInterpolablePixels(size));
+  return InterpolationValue(InterpolableLength::CreatePixels(size));
 }
 
 InterpolationValue MaybeConvertKeyword(
@@ -85,8 +85,7 @@ InterpolationValue MaybeConvertKeyword(
 InterpolationValue CSSFontSizeInterpolationType::MaybeConvertNeutral(
     const InterpolationValue&,
     ConversionCheckers&) const {
-  return InterpolationValue(
-      LengthInterpolationFunctions::CreateNeutralInterpolableValue());
+  return InterpolationValue(InterpolableLength::CreateNeutral());
 }
 
 InterpolationValue CSSFontSizeInterpolationType::MaybeConvertInitial(
@@ -110,19 +109,22 @@ InterpolationValue CSSFontSizeInterpolationType::MaybeConvertValue(
     const CSSValue& value,
     const StyleResolverState* state,
     ConversionCheckers& conversion_checkers) const {
+  DCHECK(state);
+
   std::unique_ptr<InterpolableValue> result =
-      LengthInterpolationFunctions::MaybeConvertCSSValue(value)
-          .interpolable_value;
+      InterpolableLength::MaybeConvertCSSValue(value);
   if (result)
     return InterpolationValue(std::move(result));
 
-  auto* identifier_value = DynamicTo<CSSIdentifierValue>(value);
-  if (!identifier_value)
-    return nullptr;
+  if (auto* identifier_value = DynamicTo<CSSIdentifierValue>(value)) {
+    return MaybeConvertKeyword(identifier_value->GetValueID(), *state,
+                               conversion_checkers);
+  }
 
-  DCHECK(state);
-  return MaybeConvertKeyword(identifier_value->GetValueID(), *state,
-                             conversion_checkers);
+  if (auto* system_font = DynamicTo<cssvalue::CSSPendingSystemFontValue>(value))
+    return ConvertFontSize(system_font->ResolveFontSize(&state->GetDocument()));
+
+  return nullptr;
 }
 
 InterpolationValue
@@ -136,9 +138,9 @@ void CSSFontSizeInterpolationType::ApplyStandardPropertyValue(
     const NonInterpolableValue*,
     StyleResolverState& state) const {
   const FontDescription& parent_font = state.ParentFontDescription();
-  Length font_size_length = LengthInterpolationFunctions::CreateLength(
-      interpolable_value, nullptr, state.FontSizeConversionData(),
-      kValueRangeNonNegative);
+  Length font_size_length = To<InterpolableLength>(interpolable_value)
+                                .CreateLength(state.FontSizeConversionData(),
+                                              Length::ValueRange::kNonNegative);
   float font_size =
       FloatValueForLength(font_size_length, parent_font.GetSize().value);
   state.GetFontBuilder().SetSize(FontDescription::Size(

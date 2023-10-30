@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/html/forms/number_input_type.h"
 
 #include <limits>
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
 #include "third_party/blink/renderer/core/events/before_text_inserted_event.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
@@ -47,9 +48,6 @@
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
-
-using blink::WebLocalizedString;
-using namespace html_names;
 
 static const int kNumberDefaultStep = 1;
 static const int kNumberDefaultStepBase = 0;
@@ -114,19 +112,19 @@ void NumberInputType::SetValue(const String& sanitized_value,
 }
 
 double NumberInputType::ValueAsDouble() const {
-  return ParseToDoubleForNumberType(GetElement().value());
+  return ParseToDoubleForNumberType(GetElement().Value());
 }
 
 void NumberInputType::SetValueAsDouble(double new_value,
                                        TextFieldEventBehavior event_behavior,
                                        ExceptionState& exception_state) const {
-  GetElement().setValue(SerializeForNumberType(new_value), event_behavior);
+  GetElement().SetValue(SerializeForNumberType(new_value), event_behavior);
 }
 
 void NumberInputType::SetValueAsDecimal(const Decimal& new_value,
                                         TextFieldEventBehavior event_behavior,
                                         ExceptionState& exception_state) const {
-  GetElement().setValue(SerializeForNumberType(new_value), event_behavior);
+  GetElement().SetValue(SerializeForNumberType(new_value), event_behavior);
 }
 
 bool NumberInputType::TypeMismatchFor(const String& value) const {
@@ -134,7 +132,7 @@ bool NumberInputType::TypeMismatchFor(const String& value) const {
 }
 
 bool NumberInputType::TypeMismatch() const {
-  DCHECK(!TypeMismatchFor(GetElement().value()));
+  DCHECK(!TypeMismatchFor(GetElement().Value()));
   return false;
 }
 
@@ -153,17 +151,18 @@ bool NumberInputType::SizeShouldIncludeDecoration(int default_size,
                                                   int& preferred_size) const {
   preferred_size = default_size;
 
-  const String step_string = GetElement().FastGetAttribute(kStepAttr);
-  if (DeprecatedEqualIgnoringCase(step_string, "any"))
+  const String step_string =
+      GetElement().FastGetAttribute(html_names::kStepAttr);
+  if (EqualIgnoringASCIICase(step_string, "any"))
     return false;
 
-  const Decimal minimum =
-      ParseToDecimalForNumberType(GetElement().FastGetAttribute(kMinAttr));
+  const Decimal minimum = ParseToDecimalForNumberType(
+      GetElement().FastGetAttribute(html_names::kMinAttr));
   if (!minimum.IsFinite())
     return false;
 
-  const Decimal maximum =
-      ParseToDecimalForNumberType(GetElement().FastGetAttribute(kMaxAttr));
+  const Decimal maximum = ParseToDecimalForNumberType(
+      GetElement().FastGetAttribute(html_names::kMaxAttr));
   if (!maximum.IsFinite())
     return false;
 
@@ -180,8 +179,8 @@ bool NumberInputType::SizeShouldIncludeDecoration(int default_size,
   return true;
 }
 
-bool NumberInputType::IsSteppable() const {
-  return true;
+static bool IsE(UChar ch) {
+  return ch == 'e' || ch == 'E';
 }
 
 void NumberInputType::HandleKeydownEvent(KeyboardEvent& event) {
@@ -193,8 +192,82 @@ void NumberInputType::HandleKeydownEvent(KeyboardEvent& event) {
 
 void NumberInputType::HandleBeforeTextInsertedEvent(
     BeforeTextInsertedEvent& event) {
-  event.SetText(GetLocale().StripInvalidNumberCharacters(event.GetText(),
-                                                         "0123456789.Ee-+"));
+  Locale& locale = GetLocale();
+
+  // If the cleaned up text doesn't match input text, don't insert partial input
+  // since it could be an incorrect paste.
+  String updated_event_text =
+      locale.StripInvalidNumberCharacters(event.GetText(), "0123456789.Ee-+");
+
+  // Check if locale supports more cleanup rules
+  if (!locale.UsesSingleCharNumberFiltering()) {
+    event.SetText(updated_event_text);
+    return;
+  }
+
+  // Get left and right of cursor
+  String original_value = GetElement().InnerEditorValue();
+  String left_half = original_value.Substring(0, GetElement().selectionStart());
+  String right_half = original_value.Substring(GetElement().selectionEnd());
+
+  // Process 1 char at a time
+  unsigned len = updated_event_text.length();
+  StringBuilder final_event_text;
+  for (unsigned i = 0; i < len; ++i) {
+    UChar c = updated_event_text[i];
+
+    // For a decimal point input:
+    // - Reject if the editing value already contains another decimal point
+    // - Reject if the editing value contains 'e' and the caret is placed
+    // after the 'e'.
+    // - Reject if the editing value contains '+' or '-' and the caret is
+    // placed before it unless it's after an e
+    if (locale.IsDecimalSeparator(c)) {
+      if (locale.HasDecimalSeparator(left_half) ||
+          locale.HasDecimalSeparator(right_half) ||
+          left_half.Find(IsE) != kNotFound ||
+          locale.HasSignNotAfterE(right_half))
+        continue;
+    }
+    // For 'e' input:
+    // - Reject if the editing value already contains another 'e'
+    // - Reject if the editing value contains a decimal point, and the caret
+    // is placed before it
+    else if (IsE(c)) {
+      if (left_half.Find(IsE) != kNotFound ||
+          right_half.Find(IsE) != kNotFound ||
+          locale.HasDecimalSeparator(right_half))
+        continue;
+    }
+    // For '-' or '+' input:
+    // - Reject if the editing value already contains two signs
+    // - Reject if the editing value contains 'e' and the caret is placed
+    // neither at the beginning of the value nor just after 'e'
+    else if (locale.IsSignPrefix(c)) {
+      String both_halves = left_half + right_half;
+      if (locale.HasTwoSignChars(both_halves) ||
+          (both_halves.Find(IsE) != kNotFound &&
+           !(left_half == "" || IsE(left_half[left_half.length() - 1]))))
+        continue;
+    }
+    // For a digit input:
+    // - Reject if the first letter of the editing value is a sign and the
+    // caret is placed just before it
+    // - Reject if the editing value contains 'e' + a sign, and the caret is
+    // placed between them.
+    else if (locale.IsDigit(c)) {
+      if ((left_half.IsEmpty() && !right_half.IsEmpty() &&
+           locale.IsSignPrefix(right_half[0])) ||
+          (!left_half.IsEmpty() && IsE(left_half[left_half.length() - 1]) &&
+           !right_half.IsEmpty() && locale.IsSignPrefix(right_half[0])))
+        continue;
+    }
+
+    // Add character
+    left_half = left_half + c;
+    final_event_text.Append(c);
+  }
+  event.SetText(final_event_text.ToString());
 }
 
 Decimal NumberInputType::ParseToNumber(const String& src,
@@ -208,10 +281,6 @@ String NumberInputType::Serialize(const Decimal& value) const {
   return SerializeForNumberType(value);
 }
 
-static bool IsE(UChar ch) {
-  return ch == 'e' || ch == 'E';
-}
-
 String NumberInputType::LocalizeValue(const String& proposed_value) const {
   if (proposed_value.IsEmpty())
     return proposed_value;
@@ -222,7 +291,7 @@ String NumberInputType::LocalizeValue(const String& proposed_value) const {
 }
 
 String NumberInputType::VisibleValue() const {
-  return LocalizeValue(GetElement().value());
+  return LocalizeValue(GetElement().Value());
 }
 
 String NumberInputType::ConvertFromVisibleValue(
@@ -247,10 +316,7 @@ void NumberInputType::WarnIfValueIsInvalid(const String& value) const {
   if (value.IsEmpty() || !GetElement().SanitizeValue(value).IsEmpty())
     return;
   AddWarningToConsole(
-      "The specified value %s is not a valid number. The value must match to "
-      "the following regular expression: "
-      "-?(\\d+|\\d+\\.\\d+|\\.\\d+)([eE][-+]?\\d+)?",
-      value);
+      "The specified value %s cannot be parsed, or is out of range.", value);
 }
 
 bool NumberInputType::HasBadInput() const {
@@ -261,17 +327,21 @@ bool NumberInputType::HasBadInput() const {
 }
 
 String NumberInputType::BadInputText() const {
-  return GetLocale().QueryString(
-      WebLocalizedString::kValidationBadInputForNumber);
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_BAD_INPUT_NUMBER);
+}
+
+String NumberInputType::ValueNotEqualText(const Decimal& value) const {
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_VALUE_NOT_EQUAL,
+                                 LocalizeValue(Serialize(value)));
 }
 
 String NumberInputType::RangeOverflowText(const Decimal& maximum) const {
-  return GetLocale().QueryString(WebLocalizedString::kValidationRangeOverflow,
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_RANGE_OVERFLOW,
                                  LocalizeValue(Serialize(maximum)));
 }
 
 String NumberInputType::RangeUnderflowText(const Decimal& minimum) const {
-  return GetLocale().QueryString(WebLocalizedString::kValidationRangeUnderflow,
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_RANGE_UNDERFLOW,
                                  LocalizeValue(Serialize(minimum)));
 }
 
@@ -285,7 +355,7 @@ void NumberInputType::MinOrMaxAttributeChanged() {
   if (GetElement().GetLayoutObject()) {
     GetElement()
         .GetLayoutObject()
-        ->SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
+        ->SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
             layout_invalidation_reason::kAttributeChanged);
   }
 }
@@ -296,7 +366,7 @@ void NumberInputType::StepAttributeChanged() {
   if (GetElement().GetLayoutObject()) {
     GetElement()
         .GetLayoutObject()
-        ->SetNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(
+        ->SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
             layout_invalidation_reason::kAttributeChanged);
   }
 }

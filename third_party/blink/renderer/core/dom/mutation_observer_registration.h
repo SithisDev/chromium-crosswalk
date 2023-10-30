@@ -34,7 +34,8 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
@@ -44,20 +45,14 @@ namespace blink {
 class QualifiedName;
 
 class CORE_EXPORT MutationObserverRegistration final
-    : public GarbageCollectedFinalized<MutationObserverRegistration>,
+    : public GarbageCollected<MutationObserverRegistration>,
       public NameClient {
  public:
-  static MutationObserverRegistration* Create(
-      MutationObserver&,
-      Node*,
-      MutationObserverOptions,
-      const HashSet<AtomicString>& attribute_filter);
-
   MutationObserverRegistration(MutationObserver&,
                                Node*,
                                MutationObserverOptions,
                                const HashSet<AtomicString>& attribute_filter);
-  ~MutationObserverRegistration();
+  ~MutationObserverRegistration() override;
 
   void ResetObservation(MutationObserverOptions,
                         const HashSet<AtomicString>& attribute_filter);
@@ -87,7 +82,7 @@ class CORE_EXPORT MutationObserverRegistration final
 
   void Dispose();
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
   const char* NameInHeapSnapshot() const override {
     return "MutationObserverRegistration";
   }

@@ -26,44 +26,33 @@
 
 #include "third_party/blink/renderer/core/html/forms/text_control_inner_elements.h"
 
+#include "third_party/blink/public/common/input/web_pointer_properties.h"
 #include "third_party/blink/renderer/core/css/resolver/style_adjuster.h"
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/core/layout/layout_text_control_single_line.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 
 namespace blink {
-
-using namespace html_names;
-
-TextControlInnerContainer::TextControlInnerContainer(Document& document)
-    : HTMLDivElement(document) {
-  setAttribute(kIdAttr, shadow_element_names::TextFieldContainer());
-}
-
-LayoutObject* TextControlInnerContainer::CreateLayoutObject(
-    const ComputedStyle&,
-    LegacyLayout) {
-  return new LayoutTextControlInnerContainer(this);
-}
-
-// ---------------------------
 
 EditingViewPortElement::EditingViewPortElement(Document& document)
     : HTMLDivElement(document) {
   SetHasCustomStyleCallbacks();
-  setAttribute(kIdAttr, shadow_element_names::EditingViewPort());
+  setAttribute(html_names::kIdAttr, shadow_element_names::kIdEditingViewPort);
 }
 
-scoped_refptr<ComputedStyle>
-EditingViewPortElement::CustomStyleForLayoutObject() {
+scoped_refptr<ComputedStyle> EditingViewPortElement::CustomStyleForLayoutObject(
+    const StyleRecalcContext&) {
   // FXIME: Move these styles to html.css.
 
-  scoped_refptr<ComputedStyle> style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> style =
+      GetDocument().GetStyleResolver().CreateComputedStyle();
   style->InheritFrom(OwnerShadowHost()->ComputedStyleRef());
 
   style->SetFlexGrow(1);
@@ -101,6 +90,17 @@ void TextControlInnerEditorElement::DefaultEventHandler(Event& event) {
     if (shadow_ancestor)
       shadow_ancestor->DefaultEventHandler(event);
   }
+
+  if (event.type() == event_type_names::kScroll) {
+    // The scroller for a text control is inside of a shadow tree but the
+    // scroll event won't bubble past the shadow root and authors cannot add
+    // an event listener to it. Fire the scroll event at the shadow host so
+    // that the page can hear about the scroll.
+    Element* shadow_ancestor = OwnerShadowHost();
+    if (shadow_ancestor)
+      shadow_ancestor->DispatchEvent(event);
+  }
+
   if (!event.DefaultHandled())
     HTMLDivElement::DefaultEventHandler(event);
 }
@@ -114,14 +114,23 @@ void TextControlInnerEditorElement::SetVisibility(bool is_visible) {
   }
 }
 
+void TextControlInnerEditorElement::FocusChanged() {
+  // When the focus changes for the host element, we may need to recalc style
+  // for text-overflow. See TextControlElement::ValueForTextOverflow().
+  SetNeedsStyleRecalc(kLocalStyleChange, StyleChangeReasonForTracing::Create(
+                                             style_change_reason::kControl));
+}
+
 LayoutObject* TextControlInnerEditorElement::CreateLayoutObject(
-    const ComputedStyle&,
-    LegacyLayout) {
-  return new LayoutTextControlInnerEditor(this);
+    const ComputedStyle& style,
+    LegacyLayout legacy) {
+  return LayoutObjectFactory::CreateTextControlInnerEditor(*this, style,
+                                                           legacy);
 }
 
 scoped_refptr<ComputedStyle>
-TextControlInnerEditorElement::CustomStyleForLayoutObject() {
+TextControlInnerEditorElement::CustomStyleForLayoutObject(
+    const StyleRecalcContext&) {
   scoped_refptr<ComputedStyle> inner_editor_style = CreateInnerEditorStyle();
   // Using StyleAdjuster::adjustComputedStyle updates unwanted style. We'd like
   // to apply only editing-related and alignment-related.
@@ -136,11 +145,15 @@ TextControlInnerEditorElement::CreateInnerEditorStyle() const {
   Element* host = OwnerShadowHost();
   DCHECK(host);
   const ComputedStyle& start_style = host->ComputedStyleRef();
-  scoped_refptr<ComputedStyle> text_block_style = ComputedStyle::Create();
+  scoped_refptr<ComputedStyle> text_block_style =
+      GetDocument().GetStyleResolver().CreateComputedStyle();
   text_block_style->InheritFrom(start_style);
   // The inner block, if present, always has its direction set to LTR,
   // so we need to inherit the direction and unicode-bidi style from the
   // element.
+  // TODO(https://crbug.com/1101564): The custom inheritance done here means we
+  // need to mark for style recalc inside style recalc. See the workaround in
+  // LayoutTextControl::StyleDidChange.
   text_block_style->SetDirection(start_style.Direction());
   text_block_style->SetUnicodeBidi(start_style.GetUnicodeBidi());
   text_block_style->SetUserSelect(EUserSelect::kText);
@@ -149,8 +162,10 @@ TextControlInnerEditorElement::CreateInnerEditorStyle() const {
           ? EUserModify::kReadOnly
           : EUserModify::kReadWritePlaintextOnly);
   text_block_style->SetDisplay(EDisplay::kBlock);
+  text_block_style->SetHasLineIfEmpty(true);
+  text_block_style->SetShouldIgnoreOverflowPropertyForInlineBlockBaseline();
 
-  if (!IsHTMLTextAreaElement(host)) {
+  if (!IsA<HTMLTextAreaElement>(host)) {
     text_block_style->SetWhiteSpace(EWhiteSpace::kPre);
     text_block_style->SetOverflowWrap(EOverflowWrap::kNormal);
     text_block_style->SetTextOverflow(
@@ -178,17 +193,23 @@ TextControlInnerEditorElement::CreateInnerEditorStyle() const {
           ComputedStyleInitialValues::InitialLineHeight());
     }
 
-    if (ToHTMLInputElement(host)->ShouldRevealPassword())
+    if (To<HTMLInputElement>(host)->ShouldRevealPassword())
       text_block_style->SetTextSecurity(ETextSecurity::kNone);
 
     text_block_style->SetOverflowX(EOverflow::kScroll);
     // overflow-y:visible doesn't work because overflow-x:scroll makes a layer.
     text_block_style->SetOverflowY(EOverflow::kScroll);
-    scoped_refptr<ComputedStyle> no_scrollbar_style = ComputedStyle::Create();
+    scoped_refptr<ComputedStyle> no_scrollbar_style =
+        GetDocument().GetStyleResolver().CreateComputedStyle();
     no_scrollbar_style->SetStyleType(kPseudoIdScrollbar);
     no_scrollbar_style->SetDisplay(EDisplay::kNone);
-    text_block_style->AddCachedPseudoStyle(no_scrollbar_style);
-    text_block_style->SetHasPseudoStyle(kPseudoIdScrollbar);
+    text_block_style->AddCachedPseudoElementStyle(
+        no_scrollbar_style, kPseudoIdScrollbar, g_null_atom);
+    text_block_style->SetHasPseudoElementStyle(kPseudoIdScrollbar);
+
+    text_block_style->SetDisplay(EDisplay::kFlowRoot);
+    if (parentNode()->IsShadowRoot())
+      text_block_style->SetAlignSelfBlockCenter(true);
   }
 
   return text_block_style;
@@ -200,20 +221,21 @@ SearchFieldCancelButtonElement::SearchFieldCancelButtonElement(
     Document& document)
     : HTMLDivElement(document) {
   SetShadowPseudoId(AtomicString("-webkit-search-cancel-button"));
-  setAttribute(kIdAttr, shadow_element_names::SearchClearButton());
+  setAttribute(html_names::kIdAttr, shadow_element_names::kIdSearchClearButton);
 }
 
 void SearchFieldCancelButtonElement::DefaultEventHandler(Event& event) {
   // If the element is visible, on mouseup, clear the value, and set selection
-  HTMLInputElement* input(ToHTMLInputElement(OwnerShadowHost()));
+  auto* mouse_event = DynamicTo<MouseEvent>(event);
+  auto* input = To<HTMLInputElement>(OwnerShadowHost());
   if (!input || input->IsDisabledOrReadOnly()) {
     if (!event.DefaultHandled())
       HTMLDivElement::DefaultEventHandler(event);
     return;
   }
 
-  if (event.type() == event_type_names::kClick && event.IsMouseEvent() &&
-      ToMouseEvent(event).button() ==
+  if (event.type() == event_type_names::kClick && mouse_event &&
+      mouse_event->button() ==
           static_cast<int16_t>(WebPointerProperties::Button::kLeft)) {
     input->SetValueForUser("");
     input->SetAutofillState(WebAutofillState::kNotFilled);
@@ -226,11 +248,49 @@ void SearchFieldCancelButtonElement::DefaultEventHandler(Event& event) {
 }
 
 bool SearchFieldCancelButtonElement::WillRespondToMouseClickEvents() {
-  const HTMLInputElement* input = ToHTMLInputElement(OwnerShadowHost());
+  auto* input = To<HTMLInputElement>(OwnerShadowHost());
   if (input && !input->IsDisabledOrReadOnly())
     return true;
 
   return HTMLDivElement::WillRespondToMouseClickEvents();
 }
 
+// ----------------------------
+
+PasswordRevealButtonElement::PasswordRevealButtonElement(Document& document)
+    : HTMLDivElement(document) {
+  SetShadowPseudoId(AtomicString("-internal-reveal"));
+  setAttribute(html_names::kIdAttr,
+               shadow_element_names::kIdPasswordRevealButton);
+}
+
+void PasswordRevealButtonElement::DefaultEventHandler(Event& event) {
+  auto* input = To<HTMLInputElement>(OwnerShadowHost());
+  if (!input || input->IsDisabledOrReadOnly()) {
+    if (!event.DefaultHandled())
+      HTMLDivElement::DefaultEventHandler(event);
+    return;
+  }
+
+  // Toggle the should-reveal-password state when clicked.
+  if (event.type() == event_type_names::kClick && IsA<MouseEvent>(event)) {
+    bool shouldRevealPassword = !input->ShouldRevealPassword();
+
+    input->SetShouldRevealPassword(shouldRevealPassword);
+    input->UpdateView();
+
+    event.SetDefaultHandled();
+  }
+
+  if (!event.DefaultHandled())
+    HTMLDivElement::DefaultEventHandler(event);
+}
+
+bool PasswordRevealButtonElement::WillRespondToMouseClickEvents() {
+  auto* input = To<HTMLInputElement>(OwnerShadowHost());
+  if (input && !input->IsDisabledOrReadOnly())
+    return true;
+
+  return HTMLDivElement::WillRespondToMouseClickEvents();
+}
 }  // namespace blink

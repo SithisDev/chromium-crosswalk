@@ -30,27 +30,16 @@
 
 #include "third_party/blink/renderer/modules/webmidi/midi_input.h"
 
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "base/numerics/safe_conversions.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_access.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_message_event.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
-#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
 
 using midi::mojom::PortState;
-
-MIDIInput* MIDIInput::Create(MIDIAccess* access,
-                             const String& id,
-                             const String& manufacturer,
-                             const String& name,
-                             const String& version,
-                             PortState state) {
-  DCHECK(access);
-  return MakeGarbageCollected<MIDIInput>(access, id, manufacturer, name,
-                                         version, state);
-}
 
 MIDIInput::MIDIInput(MIDIAccess* access,
                      const String& id,
@@ -58,7 +47,13 @@ MIDIInput::MIDIInput(MIDIAccess* access,
                      const String& name,
                      const String& version,
                      PortState state)
-    : MIDIPort(access, id, manufacturer, name, kTypeInput, version, state) {}
+    : MIDIPort(access,
+               id,
+               manufacturer,
+               name,
+               MIDIPortType::kInput,
+               version,
+               state) {}
 
 EventListener* MIDIInput::onmidimessage() {
   return GetAttributeEventListener(event_type_names::kMidimessage);
@@ -91,7 +86,7 @@ void MIDIInput::DidReceiveMIDIData(unsigned port_index,
   if (!length)
     return;
 
-  if (GetConnection() != kConnectionStateOpen)
+  if (GetConnection() != MIDIPortConnectionState::kOpen)
     return;
 
   // Drop sysex message here when the client does not request it. Note that this
@@ -101,14 +96,13 @@ void MIDIInput::DidReceiveMIDIData(unsigned port_index,
   if (data[0] == 0xf0 && !midiAccess()->sysexEnabled())
     return;
   DOMUint8Array* array =
-      DOMUint8Array::Create(data, SafeCast<unsigned>(length));
-  DispatchEvent(*MIDIMessageEvent::Create(time_stamp, array));
+      DOMUint8Array::Create(data, base::checked_cast<unsigned>(length));
+  DispatchEvent(*MakeGarbageCollected<MIDIMessageEvent>(time_stamp, array));
 
-  UseCounter::Count(*To<Document>(GetExecutionContext()),
-                    WebFeature::kMIDIMessageEvent);
+  UseCounter::Count(GetExecutionContext(), WebFeature::kMIDIMessageEvent);
 }
 
-void MIDIInput::Trace(blink::Visitor* visitor) {
+void MIDIInput::Trace(Visitor* visitor) const {
   MIDIPort::Trace(visitor);
 }
 

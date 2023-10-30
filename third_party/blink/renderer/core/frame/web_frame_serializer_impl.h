@@ -37,7 +37,6 @@
 #include "third_party/blink/public/web/web_frame_serializer_client.h"
 #include "third_party/blink/renderer/platform/text/web_entities.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -81,7 +80,7 @@ class WebFrameSerializerImpl {
 
  private:
   // Specified frame which need to be serialized;
-  Member<WebLocalFrameImpl> specified_web_local_frame_impl_;
+  WebLocalFrameImpl* specified_web_local_frame_impl_;
   // Pointer of WebFrameSerializerClient
   WebFrameSerializerClient* client_;
   // Pointer of WebFrameSerializer::LinkRewritingDelegate
@@ -103,12 +102,12 @@ class WebFrameSerializerImpl {
 
     const KURL& url;
     const WTF::TextEncoding& text_encoding;
-    Member<Document> document;
+    Document* document;
     bool is_html_document;  // document.isHTMLDocument()
     bool have_seen_doc_type;
     bool have_added_charset_declaration;
     // This meta element need to be skipped when serializing DOM.
-    Member<const Element> skip_meta_element;
+    const Element* skip_meta_element;
     bool have_added_xml_processing_directive;
     // Flag indicates whether we have added additional contents before end tag.
     // This flag will be re-assigned in each call of function
@@ -173,4 +172,4 @@ class WebFrameSerializerImpl {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_WEB_FRAME_SERIALIZER_IMPL_H_

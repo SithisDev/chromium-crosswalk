@@ -5,38 +5,47 @@
 #include "third_party/blink/renderer/core/html/portal/html_portal_element.h"
 
 #include <utility>
-#include "services/service_manager/public/cpp/interface_provider.h"
-#include "third_party/blink/public/mojom/referrer.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
+#include "third_party/blink/public/mojom/loader/referrer.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/js_event_handler_for_content_attribute.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/post_message_helper.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_portal_activate_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_window_post_message_options.h"
+#include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/events/message_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/remote_frame.h"
-#include "third_party/blink/renderer/core/frame/window_post_message_options.h"
+#include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_unknown_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html/portal/document_portals.h"
-#include "third_party/blink/renderer/core/html/portal/portal_activate_options.h"
+#include "third_party/blink/renderer/core/html/portal/portal_activation_delegate.h"
+#include "third_party/blink/renderer/core/html/portal/portal_contents.h"
 #include "third_party/blink/renderer/core/html/portal/portal_post_message_helper.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
-#include "third_party/blink/renderer/core/inspector/thread_debugger.h"
 #include "third_party/blink/renderer/core/layout/layout_iframe.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/bindings/thread_debugger.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/scheduling_policy.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
@@ -46,60 +55,195 @@ namespace blink {
 
 HTMLPortalElement::HTMLPortalElement(
     Document& document,
-    const base::UnguessableToken& portal_token,
-    mojo::AssociatedRemote<mojom::blink::Portal> remote_portal,
+    const PortalToken* portal_token,
+    mojo::PendingAssociatedRemote<mojom::blink::Portal> remote_portal,
     mojo::PendingAssociatedReceiver<mojom::blink::PortalClient>
         portal_client_receiver)
     : HTMLFrameOwnerElement(html_names::kPortalTag, document),
-      portal_token_(portal_token),
-      remote_portal_(std::move(remote_portal)),
-      portal_client_receiver_(this, std::move(portal_client_receiver)) {
-  if (remote_portal_) {
-    // If the portal element hosts a predecessor from activation, it can be
-    // activated before being inserted into the DOM, and we need to keep track
-    // of it from creation.
-    DocumentPortals::From(GetDocument()).OnPortalInserted(this);
+      feature_handle_for_scheduler_(
+          document.GetExecutionContext()
+              ? document.GetExecutionContext()->GetScheduler()->RegisterFeature(
+                    SchedulingPolicy::Feature::kPortal,
+                    {SchedulingPolicy::DisableBackForwardCache()})
+              : FrameOrWorkerScheduler::SchedulingAffectingFeatureHandle()) {
+  if (remote_portal) {
+    // For adoption we must have a populated Portal with contents, which is
+    // created post-prerendering.
+    DCHECK(!GetDocument().IsPrerendering());
+    DCHECK(portal_token);
+    was_just_adopted_ = true;
+    DCHECK(CanHaveGuestContents())
+        << "<portal> element was created with an existing contents but is not "
+           "permitted to have one";
+    portal_ = MakeGarbageCollected<PortalContents>(
+        *this, *portal_token, std::move(remote_portal),
+        std::move(portal_client_receiver));
   }
+  UseCounter::Count(document, WebFeature::kHTMLPortalElement);
 }
 
-HTMLPortalElement::~HTMLPortalElement() {}
+HTMLPortalElement::~HTMLPortalElement() = default;
 
-void HTMLPortalElement::Trace(Visitor* visitor) {
+void HTMLPortalElement::Trace(Visitor* visitor) const {
   HTMLFrameOwnerElement::Trace(visitor);
-  visitor->Trace(portal_frame_);
+  visitor->Trace(portal_);
 }
 
 void HTMLPortalElement::ConsumePortal() {
-  if (portal_token_) {
-    DocumentPortals::From(GetDocument()).OnPortalRemoved(this);
-    portal_token_ = base::UnguessableToken();
+  if (portal_)
+    portal_->Destroy();
+
+  DCHECK(!portal_);
+}
+
+void HTMLPortalElement::ExpireAdoptionLifetime() {
+  was_just_adopted_ = false;
+
+  // After dispatching the portalactivate event, we check to see if we need to
+  // cleanup the portal hosting the predecessor. If the portal was created,
+  // but wasn't inserted or activated, we destroy it.
+  if (!CanHaveGuestContents())
+    ConsumePortal();
+}
+
+void HTMLPortalElement::PortalContentsWillBeDestroyed(PortalContents* portal) {
+  DCHECK_EQ(portal_, portal);
+  portal_ = nullptr;
+}
+
+String HTMLPortalElement::PreActivateChecksCommon() {
+  if (!portal_)
+    return "The HTMLPortalElement is not associated with a portal context.";
+
+  if (DocumentPortals::GetOrCreate(GetDocument())
+          .IsPortalInDocumentActivating())
+    return "Another portal in this document is activating.";
+
+  if (GetDocument().GetPage()->InsidePortal())
+    return "Cannot activate a portal that is inside another portal.";
+
+  if (GetDocument().BeforeUnloadStarted()) {
+    return "Cannot activate portal while document is in beforeunload or has "
+           "started unloading.";
   }
-  remote_portal_.reset();
-  portal_client_receiver_.reset();
+
+  return String();
+}
+
+void HTMLPortalElement::ActivateDefault() {
+  ExecutionContext* context = GetExecutionContext();
+  if (!CheckPortalsEnabledOrWarn() || !context)
+    return;
+
+  String pre_activate_error = PreActivateChecksCommon();
+  if (pre_activate_error) {
+    context->AddConsoleMessage(mojom::blink::ConsoleMessageSource::kRendering,
+                               mojom::blink::ConsoleMessageLevel::kWarning,
+                               pre_activate_error);
+    return;
+  }
+
+  // Quickly encode undefined without actually invoking script.
+  BlinkTransferableMessage data;
+  data.message = SerializedScriptValue::UndefinedValue();
+  data.message->UnregisterMemoryAllocatedWithCurrentScriptContext();
+  data.sender_origin =
+      GetExecutionContext()->GetSecurityOrigin()->IsolatedCopy();
+  if (ThreadDebugger* debugger =
+          ThreadDebugger::From(V8PerIsolateData::MainThreadIsolate())) {
+    data.sender_stack_trace_id =
+        debugger->StoreCurrentStackTrace("activate (implicit)");
+  }
+
+  PortalContents* portal = std::exchange(portal_, nullptr);
+  portal->Activate(std::move(data),
+                   PortalActivationDelegate::ForConsole(context));
+}
+
+bool HTMLPortalElement::CheckWithinFrameLimitOrWarn() const {
+  if (IsCurrentlyWithinFrameLimit())
+    return true;
+
+  Document& document = GetDocument();
+  document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+      mojom::blink::ConsoleMessageSource::kRendering,
+      mojom::blink::ConsoleMessageLevel::kWarning,
+      "An operation was prevented due to too many frames and portals present "
+      "on the page."));
+  return false;
+}
+
+bool HTMLPortalElement::CheckPortalsEnabledOrWarn() const {
+  ExecutionContext* context = GetExecutionContext();
+  if (RuntimeEnabledFeatures::PortalsEnabled(context))
+    return true;
+
+  context->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+      mojom::blink::ConsoleMessageSource::kRendering,
+      mojom::blink::ConsoleMessageLevel::kWarning,
+      "An operation was prevented because a <portal> was moved to a document "
+      "where it is not enabled. See "
+      "https://www.chromium.org/blink/origin-trials/portals."));
+  return false;
+}
+
+bool HTMLPortalElement::CheckPortalsEnabledOrThrow(
+    ExceptionState& exception_state) const {
+  if (RuntimeEnabledFeatures::PortalsEnabled(GetExecutionContext()))
+    return true;
+
+  exception_state.ThrowDOMException(
+      DOMExceptionCode::kNotSupportedError,
+      "An operation was prevented because a <portal> was moved to a document "
+      "where it is not enabled. See "
+      "https://www.chromium.org/blink/origin-trials/portals.");
+  return false;
+}
+
+// https://wicg.github.io/portals/#htmlportalelement-may-have-a-guest-browsing-context
+HTMLPortalElement::GuestContentsEligibility
+HTMLPortalElement::GetGuestContentsEligibility() const {
+  // Non-HTML documents aren't eligible at all.
+  if (!IsA<HTMLDocument>(GetDocument()))
+    return GuestContentsEligibility::kIneligible;
+
+  LocalFrame* frame = GetDocument().GetFrame();
+  const bool is_connected = frame && isConnected();
+  if (!is_connected && !was_just_adopted_)
+    return GuestContentsEligibility::kIneligible;
+
+  const bool is_top_level =
+      frame && frame->IsMainFrame() && !frame->IsInFencedFrameTree();
+  if (!is_top_level)
+    return GuestContentsEligibility::kNotTopLevel;
+
+  // TODO(crbug.com/1051639): We need to find a long term solution to when/how
+  // portals should work in sandboxed documents.
+  if (frame->DomWindow()->GetSandboxFlags() !=
+      network::mojom::blink::WebSandboxFlags::kNone) {
+    return GuestContentsEligibility::kSandboxed;
+  }
+
+  if (!GetDocument().Url().ProtocolIsInHTTPFamily())
+    return GuestContentsEligibility::kNotHTTPFamily;
+
+  return GuestContentsEligibility::kEligible;
 }
 
 void HTMLPortalElement::Navigate() {
-  KURL url = GetNonEmptyURLAttribute(html_names::kSrcAttr);
-  if (!remote_portal_ || url.IsEmpty())
+  if (!CheckPortalsEnabledOrWarn())
     return;
 
-  if (!url.ProtocolIsInHTTPFamily()) {
-    GetDocument().AddConsoleMessage(ConsoleMessage::Create(
-        mojom::ConsoleMessageSource::kRendering,
-        mojom::ConsoleMessageLevel::kWarning,
-        "Portals only allow navigation to protocols in the HTTP family."));
+  if (!CheckWithinFrameLimitOrWarn())
     return;
-  }
 
-  auto referrer_policy_to_use = ReferrerPolicyAttribute();
-  if (referrer_policy_to_use == network::mojom::ReferrerPolicy::kDefault)
-    referrer_policy_to_use = GetDocument().GetReferrerPolicy();
-  Referrer referrer = SecurityPolicy::GenerateReferrer(
-      referrer_policy_to_use, url, GetDocument().OutgoingReferrer());
-  auto mojo_referrer = mojom::blink::Referrer::New(
-      KURL(NullURL(), referrer.referrer), referrer.referrer_policy);
+  auto url = GetNonEmptyURLAttribute(html_names::kSrcAttr);
 
-  remote_portal_->Navigate(url, std::move(mojo_referrer));
+  if (url.PotentiallyDanglingMarkup())
+    return;
+
+  if (portal_)
+    portal_->Navigate(url, ReferrerPolicyAttribute());
 }
 
 namespace {
@@ -137,6 +281,8 @@ BlinkTransferableMessage ActivateDataAsMessage(
   if (exception_state.HadException())
     return {};
 
+  msg.sender_origin = execution_context->GetSecurityOrigin()->IsolatedCopy();
+
   // msg.user_activation is left out; we will probably handle user activation
   // explicitly for activate data.
   // TODO(crbug.com/936184): Answer this for good.
@@ -158,102 +304,46 @@ BlinkTransferableMessage ActivateDataAsMessage(
 }  // namespace
 
 ScriptPromise HTMLPortalElement::activate(ScriptState* script_state,
-                                          PortalActivateOptions* options) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
+                                          PortalActivateOptions* options,
+                                          ExceptionState& exception_state) {
+  if (!CheckPortalsEnabledOrThrow(exception_state))
+    return ScriptPromise();
 
-  ExceptionState exception_state(script_state->GetIsolate(),
-                                 ExceptionState::kExecutionContext,
-                                 "HTMLPortalElement", "activate");
-
-  if (!remote_portal_) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidStateError,
-        "The HTMLPortalElement is not associated with a portal context.");
-    resolver->Reject(exception_state);
-    return promise;
-  }
-  if (is_activating_) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidStateError,
-        "activate() has already been called on this HTMLPortalElement.");
-    resolver->Reject(exception_state);
-    return promise;
-  }
-  if (DocumentPortals::From(GetDocument()).IsPortalInDocumentActivating()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidStateError,
-        "activate() has already been called on another "
-        "HTMLPortalElement in this document.");
-    resolver->Reject(exception_state);
-    return promise;
-  }
-  if (GetDocument().GetPage()->InsidePortal()) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidStateError,
-        "Cannot activate a portal that is inside another portal.");
-    resolver->Reject(exception_state);
-    return promise;
+  String pre_activate_error = PreActivateChecksCommon();
+  if (pre_activate_error) {
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                      pre_activate_error);
+    return ScriptPromise();
   }
 
   BlinkTransferableMessage data =
       ActivateDataAsMessage(script_state, options, exception_state);
-  if (exception_state.HadException()) {
-    resolver->Reject(exception_state);
-    return promise;
-  }
+  if (exception_state.HadException())
+    return ScriptPromise();
 
-  // The HTMLPortalElement is bound as a persistent so that it won't get
-  // garbage collected while there is a pending callback.
-  // We also pass the ownership of the PortalPtr, which guarantees that the
-  // PortalPtr stays alive until the callback is called.
-  is_activating_ = true;
-  auto* raw_remote_portal = remote_portal_.get();
-  raw_remote_portal->Activate(
-      std::move(data),
-      WTF::Bind(
-          [](HTMLPortalElement* portal,
-             mojo::AssociatedRemote<mojom::blink::Portal>,
-             ScriptPromiseResolver* resolver, bool was_adopted) {
-            if (was_adopted)
-              portal->GetDocument().GetPage()->SetInsidePortal(true);
-            resolver->Resolve();
-            portal->is_activating_ = false;
-            portal->ConsumePortal();
-          },
-          WrapPersistent(this), std::move(remote_portal_),
-          WrapPersistent(resolver)));
+  PortalContents* portal = std::exchange(portal_, nullptr);
+  ScriptPromiseResolver* resolver =
+      MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
+  portal->Activate(std::move(data),
+                   PortalActivationDelegate::ForPromise(
+                       resolver, exception_state.GetContext()));
   return promise;
 }
 
 void HTMLPortalElement::postMessage(ScriptState* script_state,
                                     const ScriptValue& message,
-                                    const String& target_origin,
-                                    const Vector<ScriptValue>& transfer,
+                                    const PostMessageOptions* options,
                                     ExceptionState& exception_state) {
-  WindowPostMessageOptions* options = WindowPostMessageOptions::Create();
-  options->setTargetOrigin(target_origin);
-  if (!transfer.IsEmpty())
-    options->setTransfer(transfer);
-  postMessage(script_state, message, options, exception_state);
-}
+  if (!CheckPortalsEnabledOrThrow(exception_state) || !GetExecutionContext())
+    return;
 
-void HTMLPortalElement::postMessage(ScriptState* script_state,
-                                    const ScriptValue& message,
-                                    const WindowPostMessageOptions* options,
-                                    ExceptionState& exception_state) {
-  if (!remote_portal_ || is_activating_) {
+  if (!portal_) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kInvalidStateError,
         "The HTMLPortalElement is not associated with a portal context");
     return;
   }
-
-  scoped_refptr<const SecurityOrigin> target_origin =
-      PostMessageHelper::GetTargetOrigin(options, GetDocument(),
-                                         exception_state);
-  if (exception_state.HadException())
-    return;
 
   BlinkTransferableMessage transferable_message =
       PortalPostMessageHelper::CreateMessage(script_state, message, options,
@@ -261,8 +351,7 @@ void HTMLPortalElement::postMessage(ScriptState* script_state,
   if (exception_state.HadException())
     return;
 
-  remote_portal_->PostMessageToGuest(std::move(transferable_message),
-                                     target_origin);
+  portal_->PostMessageToGuest(std::move(transferable_message));
 }
 
 EventListener* HTMLPortalElement::onmessage() {
@@ -281,72 +370,46 @@ void HTMLPortalElement::setOnmessageerror(EventListener* listener) {
   SetAttributeEventListener(event_type_names::kMessageerror, listener);
 }
 
-void HTMLPortalElement::ForwardMessageFromGuest(
-    BlinkTransferableMessage message,
-    const scoped_refptr<const SecurityOrigin>& source_origin,
-    const scoped_refptr<const SecurityOrigin>& target_origin) {
-  if (!remote_portal_)
-    return;
-
-  PortalPostMessageHelper::CreateAndDispatchMessageEvent(
-      this, std::move(message), source_origin, target_origin);
+const PortalToken& HTMLPortalElement::GetToken() const {
+  DCHECK(portal_ && portal_->IsValid());
+  return portal_->GetToken().value();
 }
 
-void HTMLPortalElement::DispatchLoadEvent() {
-  if (!remote_portal_)
-    return;
-
-  DispatchLoad();
-  GetDocument().CheckCompleted();
-}
-
-HTMLPortalElement::InsertionNotificationRequest HTMLPortalElement::InsertedInto(
+Node::InsertionNotificationRequest HTMLPortalElement::InsertedInto(
     ContainerNode& node) {
   auto result = HTMLFrameOwnerElement::InsertedInto(node);
 
-  if (!node.IsInDocumentTree() || !GetDocument().IsHTMLDocument() ||
-      !GetDocument().GetFrame())
-    return result;
-
-  // We don't support embedding portals in nested browsing contexts.
-  if (!GetDocument().GetFrame()->IsMainFrame()) {
-    GetDocument().AddConsoleMessage(ConsoleMessage::Create(
-        mojom::ConsoleMessageSource::kRendering,
-        mojom::ConsoleMessageLevel::kWarning,
-        "Cannot use <portal> in a nested browsing context."));
-    return result;
-  }
-
-  if (remote_portal_) {
-    // The interface is already bound if the HTMLPortalElement is adopting the
-    // predecessor.
-    portal_frame_ = GetDocument().GetFrame()->Client()->AdoptPortal(this);
-    remote_portal_.set_disconnect_handler(
-        WTF::Bind(&HTMLPortalElement::ConsumePortal, WrapWeakPersistent(this)));
+  if (portal_) {
+    DCHECK(!GetDocument().IsPrerendering());
+    if (IsPortalCreationOrAdoptionAllowed(&node)) {
+      // The interface is already bound if the HTMLPortalElement is adopting the
+      // predecessor.
+      GetDocument().GetFrame()->Client()->AdoptPortal(this);
+      probe::PortalRemoteFrameCreated(&GetDocument(), this);
+    }
   } else {
-    mojo::PendingAssociatedRemote<mojom::blink::PortalClient> client;
-    portal_client_receiver_.Bind(client.InitWithNewEndpointAndPassReceiver());
-    std::tie(portal_frame_, portal_token_) =
-        GetDocument().GetFrame()->Client()->CreatePortal(
-            this, remote_portal_.BindNewEndpointAndPassReceiver(),
-            std::move(client));
-    remote_portal_.set_disconnect_handler(
-        WTF::Bind(&HTMLPortalElement::ConsumePortal, WrapWeakPersistent(this)));
-    DocumentPortals::From(GetDocument()).OnPortalInserted(this);
-    Navigate();
+    CreatePortalAndNavigate(&node);
   }
-
   return result;
 }
 
 void HTMLPortalElement::RemovedFrom(ContainerNode& node) {
+  DCHECK(!portal_) << "This element should have previously dissociated in "
+                      "DisconnectContentFrame";
   HTMLFrameOwnerElement::RemovedFrom(node);
+}
 
-  Document& document = GetDocument();
-
-  if (node.IsInDocumentTree() && document.IsHTMLDocument()) {
-    ConsumePortal();
+void HTMLPortalElement::DefaultEventHandler(Event& event) {
+  // Clicking (or equivalent operations via keyboard and other input modalities)
+  // a portal element causes it to activate unless prevented.
+  if (event.type() == event_type_names::kDOMActivate) {
+    ActivateDefault();
+    event.SetDefaultHandled();
   }
+
+  if (HandleKeyboardActivation(event))
+    return;
+  HTMLFrameOwnerElement::DefaultEventHandler(event);
 }
 
 bool HTMLPortalElement::IsURLAttribute(const Attribute& attribute) const {
@@ -384,7 +447,8 @@ void HTMLPortalElement::ParseAttribute(
     if (params.name == attribute.name) {
       SetAttributeEventListener(
           attribute.event_name,
-          CreateAttributeEventListener(this, attribute.name, params.new_value));
+          JSEventHandlerForContentAttribute::Create(
+              GetExecutionContext(), attribute.name, params.new_value));
       return;
     }
   }
@@ -392,7 +456,11 @@ void HTMLPortalElement::ParseAttribute(
 
 LayoutObject* HTMLPortalElement::CreateLayoutObject(const ComputedStyle& style,
                                                     LegacyLayout) {
-  return new LayoutIFrame(this);
+  return MakeGarbageCollected<LayoutIFrame>(this);
+}
+
+bool HTMLPortalElement::SupportsFocus() const {
+  return true;
 }
 
 void HTMLPortalElement::DisconnectContentFrame() {
@@ -409,6 +477,95 @@ void HTMLPortalElement::AttachLayoutTree(AttachContext& context) {
 
 network::mojom::ReferrerPolicy HTMLPortalElement::ReferrerPolicyAttribute() {
   return referrer_policy_;
+}
+
+bool HTMLPortalElement::IsPortalCreationOrAdoptionAllowed(
+    const ContainerNode* node) {
+  if (!node) {
+    return false;
+  }
+  // When adopting a predecessor, it is possible to insert a portal that's
+  // eligible to have a guest contents to a node that's not connected. In this
+  // case, do not create the portal frame yet.
+  if (!node->isConnected()) {
+    return false;
+  }
+  if (!CheckPortalsEnabledOrWarn()) {
+    return false;
+  }
+  if (!CheckWithinFrameLimitOrWarn()) {
+    return false;
+  }
+  if (!SubframeLoadingDisabler::CanLoadFrame(*this)) {
+    return false;
+  }
+  switch (GetGuestContentsEligibility()) {
+    case GuestContentsEligibility::kIneligible:
+      return false;
+
+    case GuestContentsEligibility::kNotTopLevel:
+      GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+          mojom::blink::ConsoleMessageSource::kRendering,
+          mojom::blink::ConsoleMessageLevel::kWarning,
+          "Cannot use <portal> in a nested browsing context."));
+      return false;
+
+    case GuestContentsEligibility::kSandboxed:
+      GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+          mojom::blink::ConsoleMessageSource::kRendering,
+          mojom::blink::ConsoleMessageLevel::kWarning,
+          "Cannot use <portal> in a sandboxed browsing context."));
+      return false;
+
+    case GuestContentsEligibility::kNotHTTPFamily:
+      GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
+          mojom::blink::ConsoleMessageSource::kRendering,
+          mojom::blink::ConsoleMessageLevel::kWarning,
+          "<portal> use is restricted to the HTTP family."));
+      return false;
+
+    case GuestContentsEligibility::kEligible:
+      break;
+  };
+
+  return true;
+}
+
+void HTMLPortalElement::CreatePortalAndNavigate(const ContainerNode* node) {
+  if (GetDocument().IsPrerendering()) {
+    GetDocument().AddPostPrerenderingActivationStep(
+        WTF::Bind(&HTMLPortalElement::CreatePortalAndNavigate,
+                  WrapWeakPersistent(this), WrapWeakPersistent(node)));
+    return;
+  }
+
+  if (!IsPortalCreationOrAdoptionAllowed(node)) {
+    return;
+  }
+
+  mojo::PendingAssociatedRemote<mojom::blink::Portal> portal;
+  mojo::PendingAssociatedReceiver<mojom::blink::Portal> portal_receiver =
+      portal.InitWithNewEndpointAndPassReceiver();
+
+  mojo::PendingAssociatedRemote<mojom::blink::PortalClient> client;
+  mojo::PendingAssociatedReceiver<mojom::blink::PortalClient> client_receiver =
+      client.InitWithNewEndpointAndPassReceiver();
+
+  RemoteFrame* portal_frame;
+  PortalToken portal_token;
+
+  std::tie(portal_frame, portal_token) =
+      GetDocument().GetFrame()->Client()->CreatePortal(
+          this, std::move(portal_receiver), std::move(client));
+  DCHECK(portal_frame);
+
+  DCHECK(!portal_);
+  portal_ = MakeGarbageCollected<PortalContents>(
+      *this, portal_token, std::move(portal), std::move(client_receiver));
+
+  Navigate();
+
+  probe::PortalRemoteFrameCreated(&GetDocument(), this);
 }
 
 }  // namespace blink

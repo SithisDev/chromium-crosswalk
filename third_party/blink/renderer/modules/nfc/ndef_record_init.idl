@@ -3,13 +3,13 @@
 // found in the LICENSE file.
 
 // https://w3c.github.io/web-nfc/#dom-ndefrecordinit
-
-enum NDEFRecordType { "empty", "text", "url", "json", "opaque" };
-
-typedef (DOMString or unrestricted double or ArrayBuffer or Dictionary) NDEFRecordData;
-
 dictionary NDEFRecordInit {
-    NDEFRecordType recordType;
+    required USVString recordType;
     USVString mediaType;
-    NDEFRecordData data;
+    USVString id;
+
+    USVString encoding;
+    USVString lang;
+
+    any data;  // DOMString or BufferSource or NDEFMessageInit
 };

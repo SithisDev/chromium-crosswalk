@@ -14,7 +14,6 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
-#include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
@@ -30,8 +29,7 @@ class TextControlElementTest : public testing::Test {
   HTMLInputElement& Input() const { return *input_; }
 
   void UpdateAllLifecyclePhases() {
-    GetDocument().View()->UpdateAllLifecyclePhases(
-        DocumentLifecycle::LifecycleUpdateReason::kTest);
+    GetDocument().View()->UpdateAllLifecyclePhasesForTest();
   }
 
  private:
@@ -43,18 +41,16 @@ class TextControlElementTest : public testing::Test {
 };
 
 void TextControlElementTest::SetUp() {
-  Page::PageClients page_clients;
-  FillWithEmptyClients(page_clients);
   dummy_page_holder_ =
-      std::make_unique<DummyPageHolder>(IntSize(800, 600), &page_clients);
+      std::make_unique<DummyPageHolder>(gfx::Size(800, 600), nullptr);
 
   document_ = &dummy_page_holder_->GetDocument();
-  document_->documentElement()->SetInnerHTMLFromString(
+  document_->documentElement()->setInnerHTML(
       "<body><textarea id=textarea></textarea><input id=input /></body>");
   UpdateAllLifecyclePhases();
   text_control_ = ToTextControl(document_->getElementById("textarea"));
-  text_control_->focus();
-  input_ = ToHTMLInputElement(document_->getElementById("input"));
+  text_control_->Focus();
+  input_ = To<HTMLInputElement>(document_->getElementById("input"));
 }
 
 TEST_F(TextControlElementTest, SetSelectionRange) {
@@ -71,8 +67,8 @@ TEST_F(TextControlElementTest, SetSelectionRange) {
 }
 
 TEST_F(TextControlElementTest, SetSelectionRangeDoesNotCauseLayout) {
-  Input().focus();
-  Input().setValue("Hello, input form.");
+  Input().Focus();
+  Input().SetValue("Hello, input form.");
   Input().SetSelectionRange(1, 1);
 
   // Force layout if document().updateStyleAndLayoutIgnorePendingStylesheets()
@@ -85,7 +81,7 @@ TEST_F(TextControlElementTest, SetSelectionRangeDoesNotCauseLayout) {
 }
 
 TEST_F(TextControlElementTest, IndexForPosition) {
-  Input().setValue("Hello");
+  Input().SetValue("Hello");
   HTMLElement* inner_editor = Input().InnerEditorElement();
   EXPECT_EQ(5u, TextControlElement::IndexForPosition(
                     inner_editor,
@@ -97,12 +93,12 @@ TEST_F(TextControlElementTest, ReadOnlyAttributeChangeEditability) {
   Input().setAttribute(html_names::kReadonlyAttr, "");
   UpdateAllLifecyclePhases();
   EXPECT_EQ(EUserModify::kReadOnly,
-            Input().InnerEditorElement()->GetComputedStyle()->UserModify());
+            Input().InnerEditorElement()->GetComputedStyle()->UsedUserModify());
 
   Input().removeAttribute(html_names::kReadonlyAttr);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(EUserModify::kReadWritePlaintextOnly,
-            Input().InnerEditorElement()->GetComputedStyle()->UserModify());
+            Input().InnerEditorElement()->GetComputedStyle()->UsedUserModify());
 }
 
 TEST_F(TextControlElementTest, DisabledAttributeChangeEditability) {
@@ -110,12 +106,12 @@ TEST_F(TextControlElementTest, DisabledAttributeChangeEditability) {
   Input().setAttribute(html_names::kDisabledAttr, "");
   UpdateAllLifecyclePhases();
   EXPECT_EQ(EUserModify::kReadOnly,
-            Input().InnerEditorElement()->GetComputedStyle()->UserModify());
+            Input().InnerEditorElement()->GetComputedStyle()->UsedUserModify());
 
   Input().removeAttribute(html_names::kDisabledAttr);
   UpdateAllLifecyclePhases();
   EXPECT_EQ(EUserModify::kReadWritePlaintextOnly,
-            Input().InnerEditorElement()->GetComputedStyle()->UserModify());
+            Input().InnerEditorElement()->GetComputedStyle()->UsedUserModify());
 }
 
 }  // namespace blink

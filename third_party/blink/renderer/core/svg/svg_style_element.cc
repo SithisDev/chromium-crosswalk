@@ -24,6 +24,7 @@
 
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/media_type_names.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -138,7 +139,7 @@ void SVGStyleElement::DispatchPendingEvent() {
   DispatchEvent(*Event::Create(event_type_names::kError));
 }
 
-void SVGStyleElement::Trace(blink::Visitor* visitor) {
+void SVGStyleElement::Trace(Visitor* visitor) const {
   StyleElement::Trace(visitor);
   SVGElement::Trace(visitor);
 }

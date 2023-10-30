@@ -7,12 +7,12 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 class CORE_EXPORT CompositorKeyframeValue
-    : public GarbageCollectedFinalized<CompositorKeyframeValue> {
+    : public GarbageCollected<CompositorKeyframeValue> {
  public:
   virtual ~CompositorKeyframeValue() = default;
 
@@ -23,7 +23,7 @@ class CORE_EXPORT CompositorKeyframeValue
   bool IsTransform() const { return GetType() == Type::kTransform; }
   bool IsColor() const { return GetType() == Type::kColor; }
 
-  virtual void Trace(Visitor*) {}
+  virtual void Trace(Visitor*) const {}
 
   enum class Type {
     kDouble,
@@ -34,11 +34,6 @@ class CORE_EXPORT CompositorKeyframeValue
 
   virtual Type GetType() const = 0;
 };
-
-#define DEFINE_COMPOSITOR_KEYFRAME_VALUE_TYPE_CASTS(thisType, predicate) \
-  DEFINE_TYPE_CASTS(thisType, CompositorKeyframeValue, value,            \
-                    value->predicate, value.predicate)
-
 }  // namespace blink
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_COMPOSITOR_KEYFRAME_VALUE_H_

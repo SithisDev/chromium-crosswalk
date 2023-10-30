@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/dom/document_statistics_collector.h"
 
+#include "base/trace_event/trace_event.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_distillability.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
@@ -20,8 +21,6 @@
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 
 namespace blink {
-
-using namespace html_names;
 
 namespace {
 
@@ -120,19 +119,20 @@ void CollectFeatures(Element& root,
   for (Element& element : ElementTraversal::ChildrenOf(root)) {
     bool is_list_item = false;
     features.element_count++;
-    if (element.HasTagName(kATag)) {
+    if (element.HasTagName(html_names::kATag)) {
       features.anchor_count++;
-    } else if (element.HasTagName(kFormTag)) {
+    } else if (element.HasTagName(html_names::kFormTag)) {
       features.form_count++;
-    } else if (element.HasTagName(kInputTag)) {
-      const HTMLInputElement& input = ToHTMLInputElement(element);
+    } else if (element.HasTagName(html_names::kInputTag)) {
+      const auto& input = To<HTMLInputElement>(element);
       if (input.type() == input_type_names::kText) {
         features.text_input_count++;
       } else if (input.type() == input_type_names::kPassword) {
         features.password_input_count++;
       }
-    } else if (element.HasTagName(kPTag) || element.HasTagName(kPreTag)) {
-      if (element.HasTagName(kPTag)) {
+    } else if (element.HasTagName(html_names::kPTag) ||
+               element.HasTagName(html_names::kPreTag)) {
+      if (element.HasTagName(html_names::kPTag)) {
         features.p_count++;
       } else {
         features.pre_count++;
@@ -152,7 +152,7 @@ void CollectFeatures(Element& root,
         features.moz_score_all_linear = std::min(features.moz_score_all_linear,
                                                  kMozScoreAllLinearSaturation);
       }
-    } else if (element.HasTagName(kLiTag)) {
+    } else if (element.HasTagName(html_names::kLiTag)) {
       is_list_item = true;
     }
     CollectFeatures(element, features, under_list_item || is_list_item);
@@ -164,13 +164,13 @@ bool HasOpenGraphArticle(const Element& head) {
   DEFINE_STATIC_LOCAL(AtomicString, property_attr, ("property"));
   for (const Element* child = ElementTraversal::FirstChild(head); child;
        child = ElementTraversal::NextSibling(*child)) {
-    if (!IsHTMLMetaElement(*child))
+    auto* meta = DynamicTo<HTMLMetaElement>(child);
+    if (!meta)
       continue;
-    const HTMLMetaElement& meta = ToHTMLMetaElement(*child);
 
-    if (meta.GetName() == og_type ||
-        meta.getAttribute(property_attr) == og_type) {
-      if (DeprecatedEqualIgnoringCase(meta.Content(), "article")) {
+    if (meta->GetName() == og_type ||
+        meta->getAttribute(property_attr) == og_type) {
+      if (EqualIgnoringASCIICase(meta->Content(), "article")) {
         return true;
       }
     }
@@ -192,7 +192,7 @@ WebDistillabilityFeatures DocumentStatisticsCollector::CollectStatistics(
 
   WebDistillabilityFeatures features = WebDistillabilityFeatures();
 
-  if (!document.GetFrame() || !document.GetFrame()->IsMainFrame())
+  if (!document.GetFrame() || !document.GetFrame()->IsOutermostMainFrame())
     return features;
 
   DCHECK(document.HasFinishedParsing());

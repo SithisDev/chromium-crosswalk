@@ -31,9 +31,11 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_view.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "v8/include/v8-profiler.h"
@@ -97,8 +99,7 @@ class ListenerLeakTest : public testing::Test {
         WebString::FromUTF8(base_url), blink::test::CoreTestDataPath(),
         WebString::FromUTF8(file_name));
     web_view_helper.InitializeAndLoad(base_url + file_name);
-    V8GCController::CollectAllGarbageForTesting(
-        isolate(), v8::EmbedderHeapTracer::EmbedderStackState::kEmpty);
+    ThreadState::Current()->CollectAllGarbageForTesting();
   }
 
   v8::Isolate* isolate() const {
@@ -106,9 +107,7 @@ class ListenerLeakTest : public testing::Test {
   }
 
   void TearDown() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
 
  protected:

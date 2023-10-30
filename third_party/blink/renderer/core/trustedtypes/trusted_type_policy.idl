@@ -4,15 +4,13 @@
 
 // https://github.com/wicg/trusted-types
 
-typedef (DOMString or TrustedHTML or TrustedScript or TrustedScriptURL or TrustedURL) TrustedString;
+typedef (TrustedHTML or TrustedScript or TrustedScriptURL) TrustedType;
 
 [
-    Exposed=Window,
-    RuntimeEnabled=TrustedDOMTypes
+    Exposed=(Window, Worker)
 ] interface TrustedTypePolicy {
-    [Unforgeable] readonly attribute DOMString name;
-    [CallWith=ScriptState, RaisesException, Unforgeable] TrustedHTML createHTML(DOMString input);
-    [CallWith=ScriptState, RaisesException, Unforgeable] TrustedScript createScript(DOMString input);
-    [CallWith=ScriptState, RaisesException, Unforgeable] TrustedScriptURL createScriptURL(DOMString input);
-    [CallWith=ScriptState, RaisesException, Unforgeable] TrustedURL createURL(DOMString input);
+    readonly attribute DOMString name;
+    [CallWith=ScriptState, RaisesException] TrustedHTML createHTML(DOMString input, any... args);
+    [CallWith=ScriptState, RaisesException] TrustedScript createScript(DOMString input, any... args);
+    [CallWith=ScriptState, RaisesException] TrustedScriptURL createScriptURL(DOMString input, any... args);
 };

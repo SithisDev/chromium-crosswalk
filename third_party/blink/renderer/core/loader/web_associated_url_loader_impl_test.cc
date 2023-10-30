@@ -28,20 +28,18 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "third_party/blink/public/web/web_associated_url_loader.h"
-
 #include <memory>
 
-#include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_url_response.h"
+#include "third_party/blink/public/web/web_associated_url_loader.h"
 #include "third_party/blink/public/web/web_associated_url_loader_client.h"
 #include "third_party/blink/public/web/web_associated_url_loader_options.h"
 #include "third_party/blink/public/web/web_frame.h"
@@ -66,11 +64,17 @@ class WebAssociatedURLLoaderTest : public testing::Test,
         did_send_data_(false),
         did_receive_response_(false),
         did_receive_data_(false),
-        did_receive_cached_metadata_(false),
         did_finish_loading_(false),
         did_fail_(false) {
     // Reuse one of the test files from WebFrameTest.
     frame_file_path_ = test::CoreTestDataPath("iframes_test.html");
+  }
+
+  void RegisterMockedURLLoadWithCustomResponse(const WebURL& full_url,
+                                               WebURLResponse response,
+                                               const WebString& file_path) {
+    url_test_helpers::RegisterMockedURLLoadWithCustomResponse(
+        full_url, file_path, response);
   }
 
   KURL RegisterMockedUrl(const std::string& url_root,
@@ -78,7 +82,7 @@ class WebAssociatedURLLoaderTest : public testing::Test,
     WebURLResponse response;
     response.SetMimeType("text/html");
     KURL url = ToKURL(url_root + filename.Utf8());
-    Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
+    RegisterMockedURLLoadWithCustomResponse(
         url, response, test::CoreTestDataPath(filename.Utf8().c_str()));
     return url;
   }
@@ -93,29 +97,25 @@ class WebAssociatedURLLoaderTest : public testing::Test,
         "visible_iframe.html",
         "zero_sized_iframe.html",
     };
-    for (size_t i = 0; i < base::size(iframe_support_files); ++i) {
+    for (size_t i = 0; i < std::size(iframe_support_files); ++i) {
       RegisterMockedUrl(url_root, iframe_support_files[i]);
     }
 
     frame_test_helpers::LoadFrame(MainFrame(), url.GetString().Utf8().c_str());
 
-    Platform::Current()->GetURLLoaderMockFactory()->UnregisterURL(url);
+    url_test_helpers::RegisterMockedURLUnregister(url);
   }
 
   void TearDown() override {
-    Platform::Current()
-        ->GetURLLoaderMockFactory()
-        ->UnregisterAllURLsAndClearMemoryCache();
+    url_test_helpers::UnregisterAllURLsAndClearMemoryCache();
   }
 
-  void ServeRequests() {
-    Platform::Current()->GetURLLoaderMockFactory()->ServeAsynchronousRequests();
-  }
+  void ServeRequests() { url_test_helpers::ServeAsynchronousRequests(); }
 
   std::unique_ptr<WebAssociatedURLLoader> CreateAssociatedURLLoader(
       const WebAssociatedURLLoaderOptions options =
           WebAssociatedURLLoaderOptions()) {
-    return base::WrapUnique(MainFrame()->CreateAssociatedURLLoader(options));
+    return MainFrame()->CreateAssociatedURLLoader(options);
   }
 
   // WebAssociatedURLLoaderClient implementation.
@@ -155,10 +155,6 @@ class WebAssociatedURLLoaderTest : public testing::Test,
     EXPECT_GT(data_length, 0);
   }
 
-  void DidReceiveCachedMetadata(const char* data, int data_length) override {
-    did_receive_cached_metadata_ = true;
-  }
-
   void DidFinishLoading() override { did_finish_loading_ = true; }
 
   void DidFail(const WebURLError& error) override { did_fail_ = true; }
@@ -182,8 +178,8 @@ class WebAssociatedURLLoaderTest : public testing::Test,
     request.SetMode(network::mojom::RequestMode::kSameOrigin);
     request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
     if (EqualIgnoringASCIICase(WebString::FromUTF8(header_field), "referer")) {
-      request.SetHttpReferrer(WebString::FromUTF8(header_value),
-                              network::mojom::ReferrerPolicy::kDefault);
+      request.SetReferrerString(WebString::FromUTF8(header_value));
+      request.SetReferrerPolicy(network::mojom::ReferrerPolicy::kDefault);
     } else {
       request.SetHttpHeaderField(WebString::FromUTF8(header_field),
                                  WebString::FromUTF8(header_value));
@@ -231,8 +227,8 @@ class WebAssociatedURLLoaderTest : public testing::Test,
                                             header_name_string);
     }
     expected_response_.AddHttpHeaderField(header_name_string, "foo");
-    Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-        url, expected_response_, frame_file_path_);
+    RegisterMockedURLLoadWithCustomResponse(url, expected_response_,
+                                            frame_file_path_);
 
     WebAssociatedURLLoaderOptions options;
     expected_loader_ = CreateAssociatedURLLoader(options);
@@ -264,7 +260,6 @@ class WebAssociatedURLLoaderTest : public testing::Test,
   bool did_receive_response_;
   bool did_download_data_;
   bool did_receive_data_;
-  bool did_receive_cached_metadata_;
   bool did_finish_loading_;
   bool did_fail_;
 };
@@ -279,8 +274,8 @@ TEST_F(WebAssociatedURLLoaderTest, SameOriginSuccess) {
   expected_response_ = WebURLResponse();
   expected_response_.SetMimeType("text/html");
   expected_response_.SetHttpStatusCode(200);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(url, expected_response_,
+                                          frame_file_path_);
 
   expected_loader_ = CreateAssociatedURLLoader();
   EXPECT_TRUE(expected_loader_);
@@ -308,14 +303,14 @@ TEST_F(WebAssociatedURLLoaderTest, CrossOriginSuccess) {
   WebURLRequest request(url);
   // No-CORS requests (CrossOriginRequestPolicyAllow) aren't allowed for the
   // default context. So we set the context as Script here.
-  request.SetRequestContext(mojom::RequestContextType::SCRIPT);
+  request.SetRequestContext(mojom::blink::RequestContextType::SCRIPT);
   request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
 
   expected_response_ = WebURLResponse();
   expected_response_.SetMimeType("text/html");
   expected_response_.SetHttpStatusCode(200);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(url, expected_response_,
+                                          frame_file_path_);
 
   WebAssociatedURLLoaderOptions options;
   expected_loader_ = CreateAssociatedURLLoader(options);
@@ -325,93 +320,6 @@ TEST_F(WebAssociatedURLLoaderTest, CrossOriginSuccess) {
   EXPECT_TRUE(did_receive_response_);
   EXPECT_TRUE(did_receive_data_);
   EXPECT_TRUE(did_finish_loading_);
-}
-
-// Test a successful cross-origin load using CORS.
-TEST_F(WebAssociatedURLLoaderTest, CrossOriginWithAccessControlSuccess) {
-  // This is cross-origin since the frame was loaded from www.test.com.
-  KURL url =
-      ToKURL("http://www.other.com/CrossOriginWithAccessControlSuccess.html");
-  WebURLRequest request(url);
-  request.SetMode(network::mojom::RequestMode::kCors);
-  request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
-
-  expected_response_ = WebURLResponse();
-  expected_response_.SetMimeType("text/html");
-  expected_response_.SetHttpStatusCode(200);
-  expected_response_.AddHttpHeaderField("access-control-allow-origin", "*");
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_response_, frame_file_path_);
-
-  WebAssociatedURLLoaderOptions options;
-  expected_loader_ = CreateAssociatedURLLoader(options);
-  EXPECT_TRUE(expected_loader_);
-  expected_loader_->LoadAsynchronously(request, this);
-  ServeRequests();
-  EXPECT_TRUE(did_receive_response_);
-  EXPECT_TRUE(did_receive_data_);
-  EXPECT_TRUE(did_finish_loading_);
-}
-
-// Test an unsuccessful cross-origin load using CORS.
-TEST_F(WebAssociatedURLLoaderTest, CrossOriginWithAccessControlFailure) {
-  // This is cross-origin since the frame was loaded from www.test.com.
-  KURL url =
-      ToKURL("http://www.other.com/CrossOriginWithAccessControlFailure.html");
-  // Send credentials. This will cause the CORS checks to fail, because
-  // credentials can't be sent to a server which returns the header
-  // "access-control-allow-origin" with "*" as its value.
-  WebURLRequest request(url);
-  request.SetMode(network::mojom::RequestMode::kCors);
-
-  expected_response_ = WebURLResponse();
-  expected_response_.SetMimeType("text/html");
-  expected_response_.SetHttpStatusCode(200);
-  expected_response_.AddHttpHeaderField("access-control-allow-origin", "*");
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_response_, frame_file_path_);
-
-  WebAssociatedURLLoaderOptions options;
-  expected_loader_ = CreateAssociatedURLLoader(options);
-  EXPECT_TRUE(expected_loader_);
-  expected_loader_->LoadAsynchronously(request, this);
-
-  // Failure should not be reported synchronously.
-  EXPECT_FALSE(did_fail_);
-  // The loader needs to receive the response, before doing the CORS check.
-  ServeRequests();
-  EXPECT_TRUE(did_fail_);
-  EXPECT_FALSE(did_receive_response_);
-}
-
-// Test an unsuccessful cross-origin load using CORS.
-TEST_F(WebAssociatedURLLoaderTest,
-       CrossOriginWithAccessControlFailureBadStatusCode) {
-  // This is cross-origin since the frame was loaded from www.test.com.
-  KURL url =
-      ToKURL("http://www.other.com/CrossOriginWithAccessControlFailure.html");
-  WebURLRequest request(url);
-  request.SetMode(network::mojom::RequestMode::kCors);
-  request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
-
-  expected_response_ = WebURLResponse();
-  expected_response_.SetMimeType("text/html");
-  expected_response_.SetHttpStatusCode(0);
-  expected_response_.AddHttpHeaderField("access-control-allow-origin", "*");
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_response_, frame_file_path_);
-
-  WebAssociatedURLLoaderOptions options;
-  expected_loader_ = CreateAssociatedURLLoader(options);
-  EXPECT_TRUE(expected_loader_);
-  expected_loader_->LoadAsynchronously(request, this);
-
-  // Failure should not be reported synchronously.
-  EXPECT_FALSE(did_fail_);
-  // The loader needs to receive the response, before doing the CORS check.
-  ServeRequests();
-  EXPECT_TRUE(did_fail_);
-  EXPECT_FALSE(did_receive_response_);
 }
 
 // Test a same-origin URL redirect and load.
@@ -428,16 +336,16 @@ TEST_F(WebAssociatedURLLoaderTest, RedirectSuccess) {
   expected_redirect_response_.SetMimeType("text/html");
   expected_redirect_response_.SetHttpStatusCode(301);
   expected_redirect_response_.SetHttpHeaderField("Location", redirect);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_redirect_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(url, expected_redirect_response_,
+                                          frame_file_path_);
 
   expected_new_url_ = WebURL(redirect_url);
 
   expected_response_ = WebURLResponse();
   expected_response_.SetMimeType("text/html");
   expected_response_.SetHttpStatusCode(200);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      redirect_url, expected_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(redirect_url, expected_response_,
+                                          frame_file_path_);
 
   expected_loader_ = CreateAssociatedURLLoader();
   EXPECT_TRUE(expected_loader_);
@@ -464,16 +372,16 @@ TEST_F(WebAssociatedURLLoaderTest, RedirectCrossOriginFailure) {
   expected_redirect_response_.SetMimeType("text/html");
   expected_redirect_response_.SetHttpStatusCode(301);
   expected_redirect_response_.SetHttpHeaderField("Location", redirect);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_redirect_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(url, expected_redirect_response_,
+                                          frame_file_path_);
 
   expected_new_url_ = WebURL(redirect_url);
 
   expected_response_ = WebURLResponse();
   expected_response_.SetMimeType("text/html");
   expected_response_.SetHttpStatusCode(200);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      redirect_url, expected_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(redirect_url, expected_response_,
+                                          frame_file_path_);
 
   expected_loader_ = CreateAssociatedURLLoader();
   EXPECT_TRUE(expected_loader_);
@@ -484,48 +392,6 @@ TEST_F(WebAssociatedURLLoaderTest, RedirectCrossOriginFailure) {
   EXPECT_FALSE(did_receive_response_);
   EXPECT_FALSE(did_receive_data_);
   EXPECT_FALSE(did_finish_loading_);
-}
-
-// Test that a cross origin redirect response without CORS headers fails.
-TEST_F(WebAssociatedURLLoaderTest,
-       RedirectCrossOriginWithAccessControlFailure) {
-  KURL url = ToKURL(
-      "http://www.test.com/RedirectCrossOriginWithAccessControlFailure.html");
-  char redirect[] =
-      "http://www.other.com/"
-      "RedirectCrossOriginWithAccessControlFailure.html";  // Cross-origin
-  KURL redirect_url = ToKURL(redirect);
-
-  WebURLRequest request(url);
-  request.SetMode(network::mojom::RequestMode::kCors);
-  request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
-
-  expected_redirect_response_ = WebURLResponse();
-  expected_redirect_response_.SetMimeType("text/html");
-  expected_redirect_response_.SetHttpStatusCode(301);
-  expected_redirect_response_.SetHttpHeaderField("Location", redirect);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_redirect_response_, frame_file_path_);
-
-  expected_new_url_ = WebURL(redirect_url);
-
-  expected_response_ = WebURLResponse();
-  expected_response_.SetMimeType("text/html");
-  expected_response_.SetHttpStatusCode(200);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      redirect_url, expected_response_, frame_file_path_);
-
-  WebAssociatedURLLoaderOptions options;
-  expected_loader_ = CreateAssociatedURLLoader(options);
-  EXPECT_TRUE(expected_loader_);
-  expected_loader_->LoadAsynchronously(request, this);
-
-  ServeRequests();
-  // We should get a notification about access control check failure.
-  EXPECT_TRUE(will_follow_redirect_);
-  EXPECT_FALSE(did_receive_response_);
-  EXPECT_FALSE(did_receive_data_);
-  EXPECT_TRUE(did_fail_);
 }
 
 // Test that a cross origin redirect response with CORS headers that allow the
@@ -553,8 +419,8 @@ TEST_F(WebAssociatedURLLoaderTest,
   expected_redirect_response_.SetHttpHeaderField("Location", redirect);
   expected_redirect_response_.AddHttpHeaderField("access-control-allow-origin",
                                                  "*");
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_redirect_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(url, expected_redirect_response_,
+                                          frame_file_path_);
 
   expected_new_url_ = WebURL(redirect_url);
 
@@ -562,8 +428,8 @@ TEST_F(WebAssociatedURLLoaderTest,
   expected_response_.SetMimeType("text/html");
   expected_response_.SetHttpStatusCode(200);
   expected_response_.AddHttpHeaderField("access-control-allow-origin", "*");
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      redirect_url, expected_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(redirect_url, expected_response_,
+                                          frame_file_path_);
 
   WebAssociatedURLLoaderOptions options;
   expected_loader_ = CreateAssociatedURLLoader(options);
@@ -589,7 +455,7 @@ TEST_F(WebAssociatedURLLoaderTest, UntrustedCheckMethods) {
 }
 
 // This test is flaky on Windows and Android. See <http://crbug.com/471645>.
-#if defined(OS_WIN) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ANDROID)
 #define MAYBE_UntrustedCheckHeaders DISABLED_UntrustedCheckHeaders
 #else
 #define MAYBE_UntrustedCheckHeaders UntrustedCheckHeaders
@@ -614,6 +480,7 @@ TEST_F(WebAssociatedURLLoaderTest, MAYBE_UntrustedCheckHeaders) {
   CheckHeaderFails("keep-alive");
   CheckHeaderFails("origin");
   CheckHeaderFails("referer", "http://example.com/");
+  CheckHeaderFails("referer", "");  // no-referrer.
   CheckHeaderFails("te");
   CheckHeaderFails("trailer");
   CheckHeaderFails("transfer-encoding");
@@ -670,8 +537,8 @@ TEST_F(WebAssociatedURLLoaderTest, CrossOriginHeaderAllowResponseHeaders) {
   expected_response_.SetHttpStatusCode(200);
   expected_response_.AddHttpHeaderField("Access-Control-Allow-Origin", "*");
   expected_response_.AddHttpHeaderField(header_name_string, "foo");
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(url, expected_response_,
+                                          frame_file_path_);
 
   WebAssociatedURLLoaderOptions options;
   // This turns off response safelisting.
@@ -691,15 +558,15 @@ TEST_F(WebAssociatedURLLoaderTest, AccessCheckForLocalURL) {
   KURL url = ToKURL("file://test.pdf");
 
   WebURLRequest request(url);
-  request.SetRequestContext(mojom::RequestContextType::PLUGIN);
+  request.SetRequestContext(mojom::blink::RequestContextType::PLUGIN);
   request.SetMode(network::mojom::RequestMode::kNoCors);
   request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
 
   expected_response_ = WebURLResponse();
   expected_response_.SetMimeType("text/plain");
   expected_response_.SetHttpStatusCode(200);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(url, expected_response_,
+                                          frame_file_path_);
 
   WebAssociatedURLLoaderOptions options;
   expected_loader_ = CreateAssociatedURLLoader(options);
@@ -718,15 +585,15 @@ TEST_F(WebAssociatedURLLoaderTest, BypassAccessCheckForLocalURL) {
   KURL url = ToKURL("file://test.pdf");
 
   WebURLRequest request(url);
-  request.SetRequestContext(mojom::RequestContextType::PLUGIN);
+  request.SetRequestContext(mojom::blink::RequestContextType::PLUGIN);
   request.SetMode(network::mojom::RequestMode::kNoCors);
   request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
 
   expected_response_ = WebURLResponse();
   expected_response_.SetMimeType("text/plain");
   expected_response_.SetHttpStatusCode(200);
-  Platform::Current()->GetURLLoaderMockFactory()->RegisterURL(
-      url, expected_response_, frame_file_path_);
+  RegisterMockedURLLoadWithCustomResponse(url, expected_response_,
+                                          frame_file_path_);
 
   WebAssociatedURLLoaderOptions options;
   options.grant_universal_access = true;

@@ -5,10 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_DISPLAY_CUTOUT_CLIENT_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_DISPLAY_CUTOUT_CLIENT_IMPL_H_
 
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "third_party/blink/public/mojom/page/display_cutout.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
@@ -17,27 +18,28 @@ class LocalFrame;
 
 // Mojo interface to set CSS environment variables for display cutout.
 class CORE_EXPORT DisplayCutoutClientImpl final
-    : public GarbageCollectedFinalized<DisplayCutoutClientImpl>,
+    : public GarbageCollected<DisplayCutoutClientImpl>,
       public mojom::blink::DisplayCutoutClient {
  public:
-  static void BindMojoRequest(
+  static void BindMojoReceiver(
       LocalFrame*,
-      mojom::blink::DisplayCutoutClientAssociatedRequest);
+      mojo::PendingAssociatedReceiver<mojom::blink::DisplayCutoutClient>);
 
-  DisplayCutoutClientImpl(LocalFrame*,
-                          mojom::blink::DisplayCutoutClientAssociatedRequest);
+  DisplayCutoutClientImpl(
+      LocalFrame*,
+      mojo::PendingAssociatedReceiver<mojom::blink::DisplayCutoutClient>);
+  DisplayCutoutClientImpl(const DisplayCutoutClientImpl&) = delete;
+  DisplayCutoutClientImpl& operator=(const DisplayCutoutClientImpl&) = delete;
 
   // Notify the renderer that the safe areas have changed.
   void SetSafeArea(mojom::blink::DisplayCutoutSafeAreaPtr safe_area) override;
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   Member<LocalFrame> frame_;
 
-  mojo::AssociatedBinding<mojom::blink::DisplayCutoutClient> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayCutoutClientImpl);
+  mojo::AssociatedReceiver<mojom::blink::DisplayCutoutClient> receiver_;
 };
 
 }  // namespace blink

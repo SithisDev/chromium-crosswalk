@@ -33,33 +33,30 @@
 #include <memory>
 #include <utility>
 
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_blob_property_bag.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview_blob_usvstring.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fetch/blob_bytes_consumer.h"
 #include "third_party/blink/renderer/core/fetch/body_stream_buffer.h"
-#include "third_party/blink/renderer/core/fileapi/blob_property_bag.h"
 #include "third_party/blink/renderer/core/fileapi/file_reader_loader.h"
 #include "third_party/blink/renderer/core/fileapi/file_reader_loader_client.h"
-#include "third_party/blink/renderer/core/streams/readable_stream_operations.h"
-#include "third_party/blink/renderer/core/streams/readable_stream_wrapper.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/url/dom_url.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/blob/blob_registry.h"
 #include "third_party/blink/renderer/platform/blob/blob_url.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
-class BlobURLRegistry final : public URLRegistry {
+// TODO(https://crbug.com/989876): This is not used any more, refactor
+// PublicURLManager to deprecate this.
+class NullURLRegistry final : public URLRegistry {
  public:
-  // SecurityOrigin is passed together with KURL so that the registry can
-  // save it for entries from whose KURL the origin is not recoverable by
-  // using BlobURL::getOrigin().
-  void RegisterURL(SecurityOrigin*, const KURL&, URLRegistrable*) override;
-  void UnregisterURL(const KURL&) override;
-
-  static URLRegistry& Registry();
+  void RegisterURL(SecurityOrigin*, const KURL&, URLRegistrable*) override {}
+  void UnregisterURL(const KURL&) override {}
 };
 
 // Helper class to asynchronously read from a Blob using a FileReaderLoader.
@@ -111,44 +108,21 @@ class BlobFileReaderClient : public blink::FileReaderLoaderClient {
   const FileReaderLoader::ReadType read_type_;
 };
 
-void BlobURLRegistry::RegisterURL(SecurityOrigin* origin,
-                                  const KURL& public_url,
-                                  URLRegistrable* registrable_object) {
-  DCHECK_EQ(&registrable_object->Registry(), this);
-  Blob* blob = static_cast<Blob*>(registrable_object);
-  BlobRegistry::RegisterPublicBlobURL(origin, public_url,
-                                      blob->GetBlobDataHandle());
-}
-
-void BlobURLRegistry::UnregisterURL(const KURL& public_url) {
-  BlobRegistry::RevokePublicBlobURL(public_url);
-}
-
-URLRegistry& BlobURLRegistry::Registry() {
-  // This is called on multiple threads.
-  // (This code assumes it is safe to register or unregister URLs on
-  // BlobURLRegistry (that is implemented by the embedder) on
-  // multiple threads.)
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(BlobURLRegistry, instance, ());
-  return instance;
-}
-
 Blob::Blob(scoped_refptr<BlobDataHandle> data_handle)
     : blob_data_handle_(std::move(data_handle)) {}
 
 Blob::~Blob() = default;
 
 // static
-Blob* Blob::Create(
-    ExecutionContext* context,
-    const HeapVector<ArrayBufferOrArrayBufferViewOrBlobOrUSVString>& blob_parts,
-    const BlobPropertyBag* options) {
+Blob* Blob::Create(ExecutionContext* context,
+                   const HeapVector<Member<V8BlobPart>>& blob_parts,
+                   const BlobPropertyBag* options) {
   DCHECK(options->hasType());
-
   DCHECK(options->hasEndings());
   bool normalize_line_endings_to_native = (options->endings() == "native");
   if (normalize_line_endings_to_native)
     UseCounter::Count(context, WebFeature::kFileAPINativeLineEndings);
+  UseCounter::Count(context, WebFeature::kCreateObjectBlob);
 
   auto blob_data = std::make_unique<BlobData>();
   blob_data->SetContentType(NormalizeType(options->type()));
@@ -176,26 +150,32 @@ Blob* Blob::Create(const unsigned char* data,
 }
 
 // static
-void Blob::PopulateBlobData(
-    BlobData* blob_data,
-    const HeapVector<ArrayBufferOrArrayBufferViewOrBlobOrUSVString>& parts,
-    bool normalize_line_endings_to_native) {
+void Blob::PopulateBlobData(BlobData* blob_data,
+                            const HeapVector<Member<V8BlobPart>>& parts,
+                            bool normalize_line_endings_to_native) {
   for (const auto& item : parts) {
-    if (item.IsArrayBuffer()) {
-      DOMArrayBuffer* array_buffer = item.GetAsArrayBuffer();
-      blob_data->AppendBytes(array_buffer->Data(), array_buffer->ByteLength());
-    } else if (item.IsArrayBufferView()) {
-      DOMArrayBufferView* array_buffer_view =
-          item.GetAsArrayBufferView().View();
-      blob_data->AppendBytes(array_buffer_view->BaseAddress(),
-                             array_buffer_view->byteLength());
-    } else if (item.IsBlob()) {
-      item.GetAsBlob()->AppendTo(*blob_data);
-    } else if (item.IsUSVString()) {
-      blob_data->AppendText(item.GetAsUSVString(),
-                            normalize_line_endings_to_native);
-    } else {
-      NOTREACHED();
+    switch (item->GetContentType()) {
+      case V8BlobPart::ContentType::kArrayBuffer: {
+        DOMArrayBuffer* array_buffer = item->GetAsArrayBuffer();
+        blob_data->AppendBytes(array_buffer->Data(),
+                               array_buffer->ByteLength());
+        break;
+      }
+      case V8BlobPart::ContentType::kArrayBufferView: {
+        auto&& array_buffer_view = item->GetAsArrayBufferView();
+        blob_data->AppendBytes(array_buffer_view->BaseAddress(),
+                               array_buffer_view->byteLength());
+        break;
+      }
+      case V8BlobPart::ContentType::kBlob: {
+        item->GetAsBlob()->AppendTo(*blob_data);
+        break;
+      }
+      case V8BlobPart::ContentType::kUSVString: {
+        blob_data->AppendText(item->GetAsUSVString(),
+                              normalize_line_endings_to_native);
+        break;
+      }
     }
   }
 }
@@ -236,37 +216,31 @@ Blob* Blob::slice(int64_t start,
   auto blob_data = std::make_unique<BlobData>();
   blob_data->SetContentType(NormalizeType(content_type));
   blob_data->AppendBlob(blob_data_handle_, start, length);
-  return Blob::Create(BlobDataHandle::Create(std::move(blob_data), length));
+  return MakeGarbageCollected<Blob>(
+      BlobDataHandle::Create(std::move(blob_data), length));
 }
 
 ReadableStream* Blob::stream(ScriptState* script_state) const {
-  BodyStreamBuffer* body_buffer = MakeGarbageCollected<BodyStreamBuffer>(
+  BodyStreamBuffer* body_buffer = BodyStreamBuffer::Create(
       script_state,
       MakeGarbageCollected<BlobBytesConsumer>(
           ExecutionContext::From(script_state), blob_data_handle_),
-      nullptr);
+      /*signal=*/nullptr, /*cached_metadata_handler=*/nullptr);
 
   return body_buffer->Stream();
 }
 
-blink::ScriptPromise Blob::text(ScriptState* script_state) {
-  auto read_type = FileReaderLoader::kReadAsText;
-  return ReadBlobInternal(script_state, read_type);
-}
-
-blink::ScriptPromise Blob::arrayBuffer(ScriptState* script_state) {
-  auto read_type = FileReaderLoader::kReadAsArrayBuffer;
-  return ReadBlobInternal(script_state, read_type);
-}
-
-blink::ScriptPromise Blob::ReadBlobInternal(
+// Helper called by Blob::text() and arrayBuffer(). The operations only differ
+// by 1 line, depending on the read_type.
+static ScriptPromise ReadBlobHelper(
+    const scoped_refptr<BlobDataHandle>& blob_data_handle,
     ScriptState* script_state,
     FileReaderLoader::ReadType read_type) {
   ScriptPromiseResolver* resolver =
       MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   auto promise = resolver->Promise();
 
-  new BlobFileReaderClient(blob_data_handle_,
+  new BlobFileReaderClient(blob_data_handle,
                            ExecutionContext::From(script_state)
                                ->GetTaskRunner(TaskType::kFileReading),
                            read_type, resolver);
@@ -274,16 +248,35 @@ blink::ScriptPromise Blob::ReadBlobInternal(
   return promise;
 }
 
+blink::ScriptPromise Blob::text(ScriptState* script_state) {
+  auto read_type = FileReaderLoader::kReadAsText;
+  return ReadBlobHelper(blob_data_handle_, script_state, read_type);
+}
+
+blink::ScriptPromise Blob::arrayBuffer(ScriptState* script_state) {
+  auto read_type = FileReaderLoader::kReadAsArrayBuffer;
+  return ReadBlobHelper(blob_data_handle_, script_state, read_type);
+}
+
 void Blob::AppendTo(BlobData& blob_data) const {
   blob_data.AppendBlob(blob_data_handle_, 0, blob_data_handle_->size());
 }
 
 URLRegistry& Blob::Registry() const {
-  return BlobURLRegistry::Registry();
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(NullURLRegistry, instance, ());
+  return instance;
 }
 
-mojom::blink::BlobPtr Blob::AsMojoBlob() {
-  return blob_data_handle_->CloneBlobPtr();
+bool Blob::IsMojoBlob() {
+  return true;
+}
+
+void Blob::CloneMojoBlob(mojo::PendingReceiver<mojom::blink::Blob> receiver) {
+  blob_data_handle_->CloneBlobRemote(std::move(receiver));
+}
+
+mojo::PendingRemote<mojom::blink::Blob> Blob::AsMojoBlob() {
+  return blob_data_handle_->CloneBlobRemote();
 }
 
 // static

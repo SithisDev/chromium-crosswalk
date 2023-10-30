@@ -4,10 +4,11 @@
 
 #include "third_party/blink/renderer/core/events/input_event.h"
 
-#include "base/stl_util.h"
-#include "third_party/blink/public/platform/web_editing_command_type.h"
+#include "base/cxx17_backports.h"
+#include "third_party/blink/renderer/core/clipboard/data_transfer.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 #include "third_party/blink/renderer/core/dom/range.h"
+#include "third_party/blink/renderer/core/editing/commands/editing_command_type.h"
 
 namespace blink {
 
@@ -60,7 +61,7 @@ const struct {
 };
 
 static_assert(
-    base::size(kInputTypeStringNameMap) ==
+    std::size(kInputTypeStringNameMap) ==
         static_cast<size_t>(InputEvent::InputType::kNumberOfInputTypes),
     "must handle all InputEvent::InputType");
 
@@ -181,7 +182,7 @@ bool InputEvent::IsInputEvent() const {
   return true;
 }
 
-void InputEvent::Trace(blink::Visitor* visitor) {
+void InputEvent::Trace(Visitor* visitor) const {
   UIEvent::Trace(visitor);
   visitor->Trace(data_transfer_);
   visitor->Trace(ranges_);

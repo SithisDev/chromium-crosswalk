@@ -5,17 +5,18 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_MEMORY_PRESSURE_LISTENER_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_MEMORY_PRESSURE_LISTENER_H_
 
+#include "base/memory/memory_pressure_listener.h"
 #include "third_party/blink/public/platform/web_common.h"
-#include "third_party/blink/public/platform/web_memory_pressure_level.h"
 
 namespace blink {
 
-class WebMemoryPressureListener {
+class BLINK_PLATFORM_EXPORT WebMemoryPressureListener {
  public:
   // Called when a memory pressure notification is received.
-  BLINK_PLATFORM_EXPORT static void OnMemoryPressure(WebMemoryPressureLevel);
+  static void OnMemoryPressure(
+      base::MemoryPressureListener::MemoryPressureLevel);
 
-  BLINK_PLATFORM_EXPORT static void OnPurgeMemory();
+  static void OnPurgeMemory();
 };
 
 }  // namespace blink

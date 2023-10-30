@@ -29,6 +29,7 @@
 
 #include "third_party/blink/renderer/core/editing/commands/editing_commands_utilities.h"
 
+#include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/commands/selection_for_undo_step.h"
@@ -38,6 +39,7 @@
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/visible_position.h"
 #include "third_party/blink/renderer/core/editing/visible_selection.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/web_feature_forward.h"
 #include "third_party/blink/renderer/core/html/html_body_element.h"
@@ -45,7 +47,7 @@
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
@@ -77,10 +79,6 @@ Node* HighestNodeToRemoveInPruning(Node* node, const Node* exclude_node) {
     previous_node = node;
   }
   return nullptr;
-}
-
-Element* EnclosingTableCell(const Position& p) {
-  return To<Element>(EnclosingNodeOfType(p, IsTableCell));
 }
 
 bool IsTableStructureNode(const Node* node) {
@@ -143,7 +141,7 @@ bool AreIdenticalElements(const Node& first, const Node& second) {
   if (!first_element->HasEquivalentAttributes(*second_element))
     return false;
 
-  return HasEditableStyle(*first_element) && HasEditableStyle(*second_element);
+  return IsEditable(*first_element) && IsEditable(*second_element);
 }
 
 // FIXME: need to dump this
@@ -158,11 +156,10 @@ static bool IsSpecialHTMLElement(const Node& n) {
   if (!layout_object)
     return false;
 
-  if (layout_object->Style()->Display() == EDisplay::kTable ||
-      layout_object->Style()->Display() == EDisplay::kInlineTable)
+  if (layout_object->Style()->IsDisplayTableBox())
     return true;
 
-  if (layout_object->Style()->IsFloating())
+  if (layout_object->IsFloating())
     return true;
 
   return false;
@@ -249,7 +246,7 @@ bool LineBreakExistsAtPosition(const Position& position) {
   if (position.IsNull())
     return false;
 
-  if (IsHTMLBRElement(*position.AnchorNode()) &&
+  if (IsA<HTMLBRElement>(*position.AnchorNode()) &&
       position.AtFirstEditingPositionForNode())
     return true;
 
@@ -310,7 +307,7 @@ Position LeadingCollapsibleWhitespacePosition(const Position& position,
   if (position.IsNull())
     return Position();
 
-  if (IsHTMLBRElement(*MostBackwardCaretPosition(position).AnchorNode()))
+  if (IsA<HTMLBRElement>(*MostBackwardCaretPosition(position).AnchorNode()))
     return Position();
 
   const Position& prev = PreviousCharacterPosition(position, affinity);
@@ -366,7 +363,7 @@ HTMLElement* EnclosingList(const Node* node) {
   ContainerNode* root = HighestEditableRoot(FirstPositionInOrBeforeNode(*node));
 
   for (Node& runner : NodeTraversal::AncestorsOf(*node)) {
-    if (IsHTMLUListElement(runner) || IsHTMLOListElement(runner))
+    if (IsA<HTMLUListElement>(runner) || IsA<HTMLOListElement>(runner))
       return To<HTMLElement>(&runner);
     if (runner == root)
       return nullptr;
@@ -387,9 +384,9 @@ Node* EnclosingListChild(const Node* node) {
   // instead of node->parentNode()
   for (Node* n = const_cast<Node*>(node); n && n->parentNode();
        n = n->parentNode()) {
-    if (IsHTMLLIElement(*n) ||
-        (IsHTMLListElement(n->parentNode()) && n != root))
+    if ((IsListItemTag(n) || IsListElementTag(n->parentNode())) && n != root) {
       return n;
+    }
     if (n == root || IsTableCell(n))
       return nullptr;
   }
@@ -429,8 +426,8 @@ bool CanMergeLists(const Element& first_list, const Element& second_list) {
   return first_list.HasTagName(
              second_list
                  .TagQName())  // make sure the list types match (ol vs. ul)
-         && HasEditableStyle(first_list) &&
-         HasEditableStyle(second_list)  // both lists are editable
+         && IsEditable(first_list) &&
+         IsEditable(second_list)  // both lists are editable
          &&
          RootEditableElement(first_list) ==
              RootEditableElement(second_list)  // don't cross editing boundaries
@@ -502,7 +499,7 @@ VisibleSelection SelectionForParagraphIteration(
 
 const String& NonBreakingSpaceString() {
   DEFINE_STATIC_LOCAL(String, non_breaking_space_string,
-                      (&kNoBreakSpaceCharacter, 1));
+                      (&kNoBreakSpaceCharacter, 1u));
   return non_breaking_space_string;
 }
 
@@ -510,30 +507,30 @@ const String& NonBreakingSpaceString() {
 // which assumes a document has a valid HTML structure. We should make the
 // editing code more robust, and should remove this hack. crbug.com/580941.
 void TidyUpHTMLStructure(Document& document) {
-  // hasEditableStyle() needs up-to-date ComputedStyle.
+  // IsEditable() needs up-to-date ComputedStyle.
   document.UpdateStyleAndLayoutTree();
   const bool needs_valid_structure =
-      HasEditableStyle(document) ||
-      (document.documentElement() &&
-       HasEditableStyle(*document.documentElement()));
+      IsEditable(document) ||
+      (document.documentElement() && IsEditable(*document.documentElement()));
   if (!needs_valid_structure)
     return;
 
   Element* const current_root = document.documentElement();
-  if (current_root && IsHTMLHtmlElement(current_root))
+  if (current_root && IsA<HTMLHtmlElement>(current_root))
     return;
   Element* const existing_head =
-      current_root && IsHTMLHeadElement(current_root) ? current_root : nullptr;
+      current_root && IsA<HTMLHeadElement>(current_root) ? current_root
+                                                         : nullptr;
   Element* const existing_body =
-      current_root && (IsHTMLBodyElement(current_root) ||
-                       IsHTMLFrameSetElement(current_root))
+      current_root && (IsA<HTMLBodyElement>(current_root) ||
+                       IsA<HTMLFrameSetElement>(current_root))
           ? current_root
           : nullptr;
   // We ensure only "the root is <html>."
   // documentElement as rootEditableElement is problematic.  So we move
   // non-<html> root elements under <body>, and the <body> works as
   // rootEditableElement.
-  document.AddConsoleMessage(ConsoleMessage::Create(
+  document.AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
       mojom::ConsoleMessageSource::kJavaScript,
       mojom::ConsoleMessageLevel::kWarning,
       "document.execCommand() doesn't work with an invalid HTML structure. It "
@@ -584,11 +581,11 @@ InputEvent::InputType DeletionInputTypeFromTextGranularity(
 void DispatchEditableContentChangedEvents(Element* start_root,
                                           Element* end_root) {
   if (start_root) {
-    start_root->DispatchEvent(
+    start_root->DefaultEventHandler(
         *Event::Create(event_type_names::kWebkitEditableContentChanged));
   }
   if (end_root && end_root != start_root) {
-    end_root->DispatchEvent(
+    end_root->DefaultEventHandler(
         *Event::Create(event_type_names::kWebkitEditableContentChanged));
   }
 }
@@ -658,7 +655,8 @@ void ChangeSelectionAfterCommand(LocalFrame* frame,
   if (!selection_did_not_change_dom_position)
     return;
   frame->Client()->DidChangeSelection(
-      frame->Selection().GetSelectionInDOMTree().Type() != kRangeSelection);
+      !frame->Selection().GetSelectionInDOMTree().IsRange(),
+      blink::SyncCondition::kNotForced);
 }
 
 InputEvent::EventIsComposing IsComposingFromCommand(

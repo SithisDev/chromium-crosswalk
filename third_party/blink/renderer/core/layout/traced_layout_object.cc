@@ -39,8 +39,8 @@ void DumpToTracedValue(const LayoutObject& object,
   // FIXME: When the fixmes in LayoutTreeAsText::writeLayoutObject() are
   // fixed, deduplicate it with this.
   if (trace_geometry) {
-    traced_value->SetDouble("absX", object.AbsoluteBoundingBoxRect().X());
-    traced_value->SetDouble("absY", object.AbsoluteBoundingBoxRect().Y());
+    traced_value->SetDouble("absX", object.AbsoluteBoundingBoxRect().x());
+    traced_value->SetDouble("absY", object.AbsoluteBoundingBoxRect().y());
     PhysicalRect rect = object.DebugRect();
     traced_value->SetDouble("relX", rect.X());
     traced_value->SetDouble("relY", rect.Y());
@@ -71,7 +71,8 @@ void DumpToTracedValue(const LayoutObject& object,
     // Table layout might be dirty if traceGeometry is false.
     // See https://crbug.com/664271 .
     if (trace_geometry) {
-      const LayoutTableCell& c = ToLayoutTableCell(object);
+      const LayoutNGTableCellInterface& c =
+          ToInterface<LayoutNGTableCellInterface>(object);
       traced_value->SetDouble("row", c.RowIndex());
       traced_value->SetDouble("col", c.AbsoluteColumnIndex());
       if (c.ResolvedRowSpan() != 1)

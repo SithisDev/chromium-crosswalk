@@ -4,8 +4,7 @@
 
 #include "third_party/blink/renderer/modules/sensor/ambient_light_sensor.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 
 using device::mojom::blink::SensorType;
 
@@ -34,15 +33,12 @@ AmbientLightSensor::AmbientLightSensor(ExecutionContext* execution_context,
              options,
              exception_state,
              SensorType::AMBIENT_LIGHT,
-             {mojom::FeaturePolicyFeature::kAmbientLightSensor}) {}
+             {mojom::blink::PermissionsPolicyFeature::kAmbientLightSensor}) {}
 
-double AmbientLightSensor::illuminance(bool& is_null) const {
-  INIT_IS_NULL_AND_RETURN(is_null, 0.0);
-  return GetReading().als.value;
-}
-
-void AmbientLightSensor::Trace(blink::Visitor* visitor) {
-  Sensor::Trace(visitor);
+absl::optional<double> AmbientLightSensor::illuminance() const {
+  if (hasReading())
+    return GetReading().als.value;
+  return absl::nullopt;
 }
 
 }  // namespace blink

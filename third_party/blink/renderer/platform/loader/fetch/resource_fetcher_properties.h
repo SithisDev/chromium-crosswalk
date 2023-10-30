@@ -6,9 +6,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_RESOURCE_FETCHER_PROPERTIES_H_
 
 #include "third_party/blink/public/mojom/service_worker/controller_service_worker_mode.mojom-blink.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/public/platform/web_url_loader.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/loader/fetch/loader_freeze_mode.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_status.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 
@@ -33,20 +38,20 @@ class FetchClientSettingsObject;
 // FetchClientSettingsObject when the property is clearly defined in the spec.
 // Otherwise, put it to this class.
 class PLATFORM_EXPORT ResourceFetcherProperties
-    : public GarbageCollectedFinalized<ResourceFetcherProperties> {
+    : public GarbageCollected<ResourceFetcherProperties> {
  public:
   using ControllerServiceWorkerMode = mojom::ControllerServiceWorkerMode;
 
   ResourceFetcherProperties() = default;
   virtual ~ResourceFetcherProperties() = default;
-  virtual void Trace(Visitor*) {}
+  virtual void Trace(Visitor*) const {}
 
   // Returns the client settings object bound to this global context.
   virtual const FetchClientSettingsObject& GetFetchClientSettingsObject()
       const = 0;
 
-  // Returns whether this global context is a top-level frame.
-  virtual bool IsMainFrame() const = 0;
+  // Returns whether this global context is the outermost main frame.
+  virtual bool IsOutermostMainFrame() const = 0;
 
   // Returns whether a controller service worker exists and if it has a fetch
   // handler.
@@ -62,6 +67,9 @@ class PLATFORM_EXPORT ResourceFetcherProperties
   // defer making a new request.
   // https://html.spec.whatwg.org/C/webappapis.html#pause
   virtual bool IsPaused() const = 0;
+
+  // Returns the freezing mode set to this context.
+  virtual LoaderFreezeMode FreezeMode() const = 0;
 
   // Returns whether this global context is detached. Note that in some cases
   // the loading pipeline continues working after detached (e.g., for fetch()
@@ -82,6 +90,12 @@ class PLATFORM_EXPORT ResourceFetcherProperties
   // Returns the scheduling status of the associated frame. Returns |kNone|
   // if there is no such a frame.
   virtual scheduler::FrameStatus GetFrameStatus() const = 0;
+
+  // The physical URL of Web Bundle from which this global context is loaded.
+  // Used as an additional identifier for MemoryCache.
+  virtual const KURL& WebBundlePhysicalUrl() const = 0;
+
+  virtual int GetOutstandingThrottledLimit() const = 0;
 };
 
 // A delegating ResourceFetcherProperties subclass which can be retained
@@ -96,7 +110,7 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
 
   void Detach();
 
-  void Trace(Visitor* visitor) override;
+  void Trace(Visitor* visitor) const override;
 
   // ResourceFetcherProperties implementation
   // Add a test in resource_fetcher_test.cc when you change behaviors.
@@ -105,8 +119,9 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
     return properties_ ? properties_->GetFetchClientSettingsObject()
                        : *fetch_client_settings_object_;
   }
-  bool IsMainFrame() const override {
-    return properties_ ? properties_->IsMainFrame() : is_main_frame_;
+  bool IsOutermostMainFrame() const override {
+    return properties_ ? properties_->IsOutermostMainFrame()
+                       : is_outermost_main_frame_;
   }
   ControllerServiceWorkerMode GetControllerServiceWorkerMode() const override {
     return properties_ ? properties_->GetControllerServiceWorkerMode()
@@ -120,6 +135,9 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
   }
   bool IsPaused() const override {
     return properties_ ? properties_->IsPaused() : paused_;
+  }
+  LoaderFreezeMode FreezeMode() const override {
+    return properties_ ? properties_->FreezeMode() : freeze_mode_;
   }
   bool IsDetached() const override {
     return properties_ ? properties_->IsDetached() : true;
@@ -140,6 +158,15 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
     return properties_ ? properties_->GetFrameStatus()
                        : scheduler::FrameStatus::kNone;
   }
+  const KURL& WebBundlePhysicalUrl() const override {
+    return properties_ ? properties_->WebBundlePhysicalUrl()
+                       : web_bundle_physical_url_;
+  }
+
+  int GetOutstandingThrottledLimit() const override {
+    return properties_ ? properties_->GetOutstandingThrottledLimit()
+                       : outstanding_throttled_limit_;
+  }
 
  private:
   // |properties_| is null if and only if detached.
@@ -147,10 +174,13 @@ class PLATFORM_EXPORT DetachableResourceFetcherProperties final
 
   // The following members are used when detached.
   Member<const FetchClientSettingsObject> fetch_client_settings_object_;
-  bool is_main_frame_ = false;
+  bool is_outermost_main_frame_ = false;
   bool paused_ = false;
+  LoaderFreezeMode freeze_mode_;
   bool load_complete_ = false;
   bool is_subframe_deprioritization_enabled_ = false;
+  KURL web_bundle_physical_url_;
+  int outstanding_throttled_limit_ = 0;
 };
 
 }  // namespace blink

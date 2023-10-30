@@ -53,15 +53,13 @@ void CSSPaintImageGeneratorImpl::NotifyGeneratorReady() {
 
 scoped_refptr<Image> CSSPaintImageGeneratorImpl::Paint(
     const ImageResourceObserver& observer,
-    const FloatSize& container_size,
-    const CSSStyleValueVector* data,
-    float device_scale_factor) {
-  return paint_worklet_->Paint(name_, observer, container_size, data,
-                               device_scale_factor);
+    const gfx::SizeF& container_size,
+    const CSSStyleValueVector* data) {
+  return paint_worklet_->Paint(name_, observer, container_size, data);
 }
 
 bool CSSPaintImageGeneratorImpl::HasDocumentDefinition() const {
-  return paint_worklet_->GetDocumentDefinitionMap().at(name_);
+  return paint_worklet_->GetDocumentDefinitionMap().Contains(name_);
 }
 
 bool CSSPaintImageGeneratorImpl::GetValidDocumentDefinition(
@@ -121,9 +119,9 @@ bool CSSPaintImageGeneratorImpl::HasAlpha() const {
   return definition->alpha();
 }
 
-const Vector<CSSSyntaxDescriptor>&
+const Vector<CSSSyntaxDefinition>&
 CSSPaintImageGeneratorImpl::InputArgumentTypes() const {
-  DEFINE_STATIC_LOCAL(Vector<CSSSyntaxDescriptor>, empty_vector, ());
+  DEFINE_STATIC_LOCAL(Vector<CSSSyntaxDefinition>, empty_vector, ());
   DocumentPaintDefinition* definition;
   if (!GetValidDocumentDefinition(definition))
     return empty_vector;
@@ -138,7 +136,7 @@ int CSSPaintImageGeneratorImpl::WorkletId() const {
   return paint_worklet_->WorkletId();
 }
 
-void CSSPaintImageGeneratorImpl::Trace(blink::Visitor* visitor) {
+void CSSPaintImageGeneratorImpl::Trace(Visitor* visitor) const {
   visitor->Trace(observer_);
   visitor->Trace(paint_worklet_);
   CSSPaintImageGenerator::Trace(visitor);

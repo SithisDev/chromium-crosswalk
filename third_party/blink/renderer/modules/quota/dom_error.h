@@ -30,7 +30,7 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -50,7 +50,7 @@ class MODULES_EXPORT DOMError : public ScriptWrappable {
         DOMException::GetErrorName(exception_code),
         DOMException::GetErrorMessage(exception_code));
   }
-  static DOMError* Create(mojom::QuotaStatusCode status_code);
+  static DOMError* Create(mojom::blink::QuotaStatusCode status_code);
 
   explicit DOMError(const String& name);
   DOMError(const String& name, const String& message);

@@ -5,16 +5,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_FETCH_BACKGROUND_FETCH_ICON_LOADER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_FETCH_BACKGROUND_FETCH_ICON_LOADER_H_
 
+#include "third_party/blink/renderer/bindings/modules/v8/v8_image_resource.h"
 #include "third_party/blink/renderer/core/loader/threaded_icon_loader.h"
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_type_converters.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 
 namespace blink {
 
 class BackgroundFetchBridge;
 
 class MODULES_EXPORT BackgroundFetchIconLoader final
-    : public GarbageCollectedFinalized<BackgroundFetchIconLoader> {
+    : public GarbageCollected<BackgroundFetchIconLoader> {
  public:
   // The bitmap may be empty if the request failed or the image data could not
   // be decoded. The int64_t returned is the scale of the ideal to chosen icon,
@@ -35,7 +37,7 @@ class MODULES_EXPORT BackgroundFetchIconLoader final
   // be run.
   void Stop();
 
-  void Trace(Visitor* visitor);
+  void Trace(Visitor* visitor) const;
 
  private:
   friend class BackgroundFetchIconLoaderTest;
@@ -44,7 +46,7 @@ class MODULES_EXPORT BackgroundFetchIconLoader final
   void DidGetIconDisplaySizeIfSoLoadIcon(
       ExecutionContext* execution_context,
       IconCallback callback,
-      const WebSize& icon_display_size_pixels);
+      const gfx::Size& icon_display_size_pixels);
 
   void DidGetIcon(SkBitmap icon, double resize_scale);
 

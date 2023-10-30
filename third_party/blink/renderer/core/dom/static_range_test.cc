@@ -16,8 +16,7 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -33,7 +32,7 @@ class StaticRangeTest : public testing::Test {
 };
 
 void StaticRangeTest::SetUp() {
-  document_ = MakeGarbageCollected<HTMLDocument>();
+  document_ = HTMLDocument::CreateForTest();
   auto* html = MakeGarbageCollected<HTMLHtmlElement>(*document_);
   html->AppendChild(MakeGarbageCollected<HTMLBodyElement>(*document_));
   document_->AppendChild(html);
@@ -45,7 +44,7 @@ HTMLDocument& StaticRangeTest::GetDocument() const {
 
 TEST_F(StaticRangeTest, SplitTextNodeRangeWithinText) {
   V8TestingScope scope;
-  GetDocument().body()->SetInnerHTMLFromString("1234");
+  GetDocument().body()->setInnerHTML("1234");
   auto* old_text = To<Text>(GetDocument().body()->firstChild());
 
   auto* static_range04 = MakeGarbageCollected<StaticRange>(
@@ -116,7 +115,7 @@ TEST_F(StaticRangeTest, SplitTextNodeRangeWithinText) {
 
 TEST_F(StaticRangeTest, SplitTextNodeRangeOutsideText) {
   V8TestingScope scope;
-  GetDocument().body()->SetInnerHTMLFromString(
+  GetDocument().body()->setInnerHTML(
       "<span id=\"outer\">0<span id=\"inner-left\">1</span>SPLITME<span "
       "id=\"inner-right\">2</span>3</span>");
 
@@ -231,7 +230,7 @@ TEST_F(StaticRangeTest, SplitTextNodeRangeOutsideText) {
 
 TEST_F(StaticRangeTest, InvalidToRange) {
   V8TestingScope scope;
-  GetDocument().body()->SetInnerHTMLFromString("1234");
+  GetDocument().body()->setInnerHTML("1234");
   auto* old_text = To<Text>(GetDocument().body()->firstChild());
 
   auto* static_range04 = MakeGarbageCollected<StaticRange>(

@@ -5,10 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_COMMON_MEDIASTREAM_MEDIA_STREAM_MOJOM_TRAITS_H_
 #define THIRD_PARTY_BLINK_PUBLIC_COMMON_MEDIASTREAM_MEDIA_STREAM_MOJOM_TRAITS_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/mediastream/media_stream_controls.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
-#include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-forward.h"
 
 namespace mojo {
 
@@ -29,12 +30,12 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::MediaStreamDeviceDataView,
     return device.video_facing;
   }
 
-  static const base::Optional<std::string>& group_id(
+  static const absl::optional<std::string>& group_id(
       const blink::MediaStreamDevice& device) {
     return device.group_id;
   }
 
-  static const base::Optional<std::string>& matched_output_device_id(
+  static const absl::optional<std::string>& matched_output_device_id(
       const blink::MediaStreamDevice& device) {
     return device.matched_output_device_id;
   }
@@ -48,12 +49,13 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::MediaStreamDeviceDataView,
     return device.input;
   }
 
-  static int session_id(const blink::MediaStreamDevice& device) {
-    return device.session_id;
+  static const absl::optional<base::UnguessableToken>& session_id(
+      const blink::MediaStreamDevice& device) {
+    return device.serializable_session_id();
   }
 
-  static const base::Optional<media::mojom::DisplayMediaInformationPtr>&
-  display_media_info(const blink::MediaStreamDevice& device) {
+  static const media::mojom::DisplayMediaInformationPtr& display_media_info(
+      const blink::MediaStreamDevice& device) {
     return device.display_media_info;
   }
 
@@ -100,6 +102,34 @@ struct BLINK_COMMON_EXPORT
 
   static bool disable_local_echo(const blink::StreamControls& controls) {
     return controls.disable_local_echo;
+  }
+
+  static bool exclude_system_audio(const blink::StreamControls& controls) {
+    return controls.exclude_system_audio;
+  }
+
+  static bool exclude_self_browser_surface(
+      const blink::StreamControls& controls) {
+    return controls.exclude_self_browser_surface;
+  }
+
+  static bool request_pan_tilt_zoom_permission(
+      const blink::StreamControls& controls) {
+    return controls.request_pan_tilt_zoom_permission;
+  }
+
+  static bool request_all_screens(const blink::StreamControls& controls) {
+    return controls.request_all_screens;
+  }
+
+  static blink::mojom::PreferredDisplaySurface preferred_display_surface(
+      const blink::StreamControls& controls) {
+    return controls.preferred_display_surface;
+  }
+
+  static bool dynamic_surface_switching_requested(
+      const blink::StreamControls& controls) {
+    return controls.dynamic_surface_switching_requested;
   }
 
   static bool Read(blink::mojom::StreamControlsDataView input,

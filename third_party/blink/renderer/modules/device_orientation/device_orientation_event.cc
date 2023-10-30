@@ -25,8 +25,12 @@
 
 #include "third_party/blink/renderer/modules/device_orientation/device_orientation_event.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_device_orientation_event_init.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/modules/device_orientation/device_orientation_controller.h"
 #include "third_party/blink/renderer/modules/device_orientation/device_orientation_data.h"
-#include "third_party/blink/renderer/modules/device_orientation/device_orientation_event_init.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
 
 namespace blink {
 
@@ -47,39 +51,49 @@ DeviceOrientationEvent::DeviceOrientationEvent(
     : Event(event_type, Bubbles::kNo, Cancelable::kNo),
       orientation_(orientation) {}
 
-double DeviceOrientationEvent::alpha(bool& is_null) const {
+absl::optional<double> DeviceOrientationEvent::alpha() const {
   if (orientation_->CanProvideAlpha())
     return orientation_->Alpha();
-
-  is_null = true;
-  return 0;
+  return absl::nullopt;
 }
 
-double DeviceOrientationEvent::beta(bool& is_null) const {
+absl::optional<double> DeviceOrientationEvent::beta() const {
   if (orientation_->CanProvideBeta())
     return orientation_->Beta();
-
-  is_null = true;
-  return 0;
+  return absl::nullopt;
 }
 
-double DeviceOrientationEvent::gamma(bool& is_null) const {
+absl::optional<double> DeviceOrientationEvent::gamma() const {
   if (orientation_->CanProvideGamma())
     return orientation_->Gamma();
-
-  is_null = true;
-  return 0;
+  return absl::nullopt;
 }
 
 bool DeviceOrientationEvent::absolute() const {
   return orientation_->Absolute();
 }
 
+// static
+ScriptPromise DeviceOrientationEvent::requestPermission(
+    ScriptState* script_state) {
+  if (!script_state->ContextIsValid())
+    return ScriptPromise();
+
+  auto* window = To<LocalDOMWindow>(ExecutionContext::From(script_state));
+  if (!window) {
+    NOTREACHED();
+    return ScriptPromise();
+  }
+
+  return DeviceOrientationController::From(*window).RequestPermission(
+      script_state);
+}
+
 const AtomicString& DeviceOrientationEvent::InterfaceName() const {
   return event_interface_names::kDeviceOrientationEvent;
 }
 
-void DeviceOrientationEvent::Trace(blink::Visitor* visitor) {
+void DeviceOrientationEvent::Trace(Visitor* visitor) const {
   visitor->Trace(orientation_);
   Event::Trace(visitor);
 }

@@ -4,30 +4,50 @@
 
 #include "third_party/blink/renderer/modules/xr/xr_bounded_reference_space.h"
 
+#include <memory>
+
 #include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "third_party/blink/renderer/modules/xr/xr_reference_space_event.h"
 #include "third_party/blink/renderer/modules/xr/xr_rigid_transform.h"
 #include "third_party/blink/renderer/modules/xr/xr_session.h"
 #include "third_party/blink/renderer/modules/xr/xr_utils.h"
+#include "ui/gfx/geometry/point3_f.h"
 
 namespace blink {
+namespace {
+
+// Bounds must be a valid polygon (at least 3 vertices).
+constexpr wtf_size_t kMinimumNumberOfBoundVertices = 3;
+
+float RoundCm(float val) {
+  // Float round will only round to the nearest whole number. In order to get
+  // two decimal points of precision, we need to move the decimal out then
+  // back.
+  return std::round(val * 100) / 100;
+}
+
+Member<DOMPointReadOnly> RoundedDOMPoint(const gfx::Point3F& val) {
+  return DOMPointReadOnly::Create(RoundCm(val.x()), RoundCm(val.y()),
+                                  RoundCm(val.z()), 1.0);
+}
+}  // anonymous namespace
 
 XRBoundedReferenceSpace::XRBoundedReferenceSpace(XRSession* session)
-    : XRReferenceSpace(session, Type::kTypeBoundedFloor) {}
+    : XRReferenceSpace(
+          session,
+          device::mojom::blink::XRReferenceSpaceType::kBoundedFloor) {}
 
 XRBoundedReferenceSpace::XRBoundedReferenceSpace(
     XRSession* session,
     XRRigidTransform* origin_offset)
-    : XRReferenceSpace(session, origin_offset, Type::kTypeBoundedFloor) {}
+    : XRReferenceSpace(
+          session,
+          origin_offset,
+          device::mojom::blink::XRReferenceSpaceType::kBoundedFloor) {}
 
 XRBoundedReferenceSpace::~XRBoundedReferenceSpace() = default;
 
-// No default pose for bounded reference spaces.
-std::unique_ptr<TransformationMatrix> XRBoundedReferenceSpace::DefaultPose() {
-  return nullptr;
-}
-
-void XRBoundedReferenceSpace::EnsureUpdated() {
+void XRBoundedReferenceSpace::EnsureUpdated() const {
   // Check first to see if the stage parameters have updated since the last
   // call. We only need to update the transform and bounds if it has.
   if (stage_parameters_id_ == session()->StageParametersId())
@@ -35,93 +55,75 @@ void XRBoundedReferenceSpace::EnsureUpdated() {
 
   stage_parameters_id_ = session()->StageParametersId();
 
-  const device::mojom::blink::VRDisplayInfoPtr& display_info =
-      session()->GetVRDisplayInfo();
+  const device::mojom::blink::VRStageParametersPtr& stage_parameters =
+      session()->GetStageParameters();
 
-  if (display_info && display_info->stage_parameters) {
-    // Use the transform given by xrDisplayInfo's stage_parameters if available.
-    floor_level_transform_ = std::make_unique<TransformationMatrix>(
-        display_info->stage_parameters->standing_transform.matrix());
+  if (stage_parameters) {
+    // Use the transform given by stage_parameters if available.
+    mojo_from_bounded_native_ = std::make_unique<TransformationMatrix>(
+        stage_parameters->mojo_from_floor);
 
     // In order to ensure that the bounds continue to line up with the user's
-    // physical environment we need to transform by the inverse of the
-    // originOffset.
-    TransformationMatrix bounds_transform = InverseOriginOffsetMatrix();
+    // physical environment we need to transform them from native to offset.
+    // Bounds are provided in our native coordinate space.
+    // TODO(https://crbug.com/1008466): move originOffset to separate class? If
+    // yes, that class would need to apply a transform in the boundsGeometry
+    // accessor.
+    TransformationMatrix offset_from_native = OffsetFromNativeMatrix();
 
-    if (display_info->stage_parameters->bounds) {
-      bounds_geometry_.clear();
-
-      for (const auto& bound : *(display_info->stage_parameters->bounds)) {
-        FloatPoint3D p =
-            bounds_transform.MapPoint(FloatPoint3D(bound.x, 0.0, bound.z));
-        bounds_geometry_.push_back(
-            DOMPointReadOnly::Create(p.X(), p.Y(), p.Z(), 1.0));
+    // We may not have bounds if we've lost tracking after being created.
+    // Whether we have them or not, we need to clear the existing bounds.
+    offset_bounds_geometry_.clear();
+    if (stage_parameters->bounds &&
+        stage_parameters->bounds->size() >= kMinimumNumberOfBoundVertices) {
+      for (const auto& bound : *(stage_parameters->bounds)) {
+        gfx::Point3F p = offset_from_native.MapPoint(
+            gfx::Point3F(bound.x(), 0.0, bound.z()));
+        offset_bounds_geometry_.push_back(RoundedDOMPoint(p));
       }
-    } else {
-      double hx = display_info->stage_parameters->size_x * 0.5;
-      double hz = display_info->stage_parameters->size_z * 0.5;
-      FloatPoint3D a = bounds_transform.MapPoint(FloatPoint3D(hx, 0.0, -hz));
-      FloatPoint3D b = bounds_transform.MapPoint(FloatPoint3D(hx, 0.0, hz));
-      FloatPoint3D c = bounds_transform.MapPoint(FloatPoint3D(-hx, 0.0, hz));
-      FloatPoint3D d = bounds_transform.MapPoint(FloatPoint3D(-hx, 0.0, -hz));
-
-      bounds_geometry_.clear();
-      bounds_geometry_.push_back(
-          DOMPointReadOnly::Create(a.X(), a.Y(), a.Z(), 1.0));
-      bounds_geometry_.push_back(
-          DOMPointReadOnly::Create(b.X(), b.Y(), b.Z(), 1.0));
-      bounds_geometry_.push_back(
-          DOMPointReadOnly::Create(c.X(), c.Y(), c.Z(), 1.0));
-      bounds_geometry_.push_back(
-          DOMPointReadOnly::Create(d.X(), d.Y(), d.Z(), 1.0));
     }
   } else {
     // If stage parameters aren't available set the transform to null, which
     // will subsequently cause this reference space to return null poses.
-    floor_level_transform_.reset();
-    bounds_geometry_.clear();
+    mojo_from_bounded_native_.reset();
+    offset_bounds_geometry_.clear();
   }
 
-  OnReset();
+  // DispatchEvent inherited from core/dom/events/event_target.h isn't const.
+  XRBoundedReferenceSpace* mutable_this =
+      const_cast<XRBoundedReferenceSpace*>(this);
+  mutable_this->DispatchEvent(
+      *XRReferenceSpaceEvent::Create(event_type_names::kReset, mutable_this));
 }
 
-// Transforms a given pose from a "base" reference space used by the XR
-// service to the bounded (floor level) reference space. Ideally in the future
-// this reference space can be used without additional transforms, with
-// the various XR backends returning poses already in the right space.
-std::unique_ptr<TransformationMatrix>
-XRBoundedReferenceSpace::TransformBasePose(
-    const TransformationMatrix& base_pose) {
+absl::optional<TransformationMatrix> XRBoundedReferenceSpace::MojoFromNative()
+    const {
   EnsureUpdated();
 
-  // If the reference space has a transform apply it to the base pose and return
-  // that, otherwise return null.
-  if (floor_level_transform_) {
-    std::unique_ptr<TransformationMatrix> pose(
-        std::make_unique<TransformationMatrix>(*floor_level_transform_));
-    pose->Multiply(base_pose);
-    return pose;
-  }
+  if (!mojo_from_bounded_native_)
+    return absl::nullopt;
 
-  return nullptr;
+  return *mojo_from_bounded_native_;
 }
 
 HeapVector<Member<DOMPointReadOnly>> XRBoundedReferenceSpace::boundsGeometry() {
   EnsureUpdated();
-  return bounds_geometry_;
+  return offset_bounds_geometry_;
 }
 
-void XRBoundedReferenceSpace::Trace(blink::Visitor* visitor) {
-  visitor->Trace(bounds_geometry_);
+void XRBoundedReferenceSpace::Trace(Visitor* visitor) const {
+  visitor->Trace(offset_bounds_geometry_);
   XRReferenceSpace::Trace(visitor);
 }
 
 void XRBoundedReferenceSpace::OnReset() {
-  DispatchEvent(*XRReferenceSpaceEvent::Create(event_type_names::kReset, this));
+  // Anything that would cause an external source to try to tell us that we've
+  // been reset should have also updated the stage_parameters, and thus caused
+  // us to reset via that mechanism instead.
 }
 
 XRBoundedReferenceSpace* XRBoundedReferenceSpace::cloneWithOriginOffset(
-    XRRigidTransform* origin_offset) {
+    XRRigidTransform* origin_offset) const {
   return MakeGarbageCollected<XRBoundedReferenceSpace>(this->session(),
                                                        origin_offset);
 }

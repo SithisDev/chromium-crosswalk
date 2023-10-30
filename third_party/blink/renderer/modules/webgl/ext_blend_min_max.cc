@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/modules/webgl/ext_blend_min_max.h"
 
+#include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
+
 namespace blink {
 
 EXTBlendMinMax::EXTBlendMinMax(WebGLRenderingContextBase* context)
@@ -13,10 +15,6 @@ EXTBlendMinMax::EXTBlendMinMax(WebGLRenderingContextBase* context)
 
 WebGLExtensionName EXTBlendMinMax::GetName() const {
   return kEXTBlendMinMaxName;
-}
-
-EXTBlendMinMax* EXTBlendMinMax::Create(WebGLRenderingContextBase* context) {
-  return MakeGarbageCollected<EXTBlendMinMax>(context);
 }
 
 bool EXTBlendMinMax::Supported(WebGLRenderingContextBase* context) {

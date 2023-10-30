@@ -54,12 +54,12 @@ void JSEventListener::InvokeInternal(EventTarget&,
               : V8EventListener::IgnorePause::kDontIgnore)) {
     return;
   }
-  v8::Maybe<void> maybe_result = event_listener_->InvokeWithoutRunnabilityCheck(
-      event.currentTarget(), &event);
-  ALLOW_UNUSED_LOCAL(maybe_result);
+  [[maybe_unused]] v8::Maybe<void> maybe_result =
+      event_listener_->InvokeWithoutRunnabilityCheck(event.currentTarget(),
+                                                     &event);
 }
 
-void JSEventListener::Trace(blink::Visitor* visitor) {
+void JSEventListener::Trace(Visitor* visitor) const {
   visitor->Trace(event_listener_);
   JSBasedEventListener::Trace(visitor);
 }

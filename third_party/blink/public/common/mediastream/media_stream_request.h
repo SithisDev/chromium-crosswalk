@@ -11,22 +11,24 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_forward.h"
+#include "base/unguessable_token.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/video_facing.h"
 #include "media/capture/video/video_capture_device_descriptor.h"
-#include "media/mojo/interfaces/display_media_information.mojom.h"
+#include "media/mojo/mojom/display_media_information.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/common_export.h"
+#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-forward.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 
 namespace blink {
-
 
 // Types of media stream requests that can be made to the media controller.
 enum MediaStreamRequestType {
   MEDIA_DEVICE_ACCESS = 0,
   MEDIA_DEVICE_UPDATE,
   MEDIA_GENERATE_STREAM,
+  MEDIA_GET_OPEN_DEVICE,
   MEDIA_OPEN_DEVICE_PEPPER_ONLY  // Only used in requests made by Pepper.
 };
 
@@ -47,35 +49,44 @@ BLINK_COMMON_EXPORT bool IsDeviceMediaType(mojom::MediaStreamType type);
 // TODO(xians): Change the structs to classes.
 // Represents one device in a request for media stream(s).
 struct BLINK_COMMON_EXPORT MediaStreamDevice {
-  static const int kNoId;
-
   MediaStreamDevice();
-
   MediaStreamDevice(mojom::MediaStreamType type,
                     const std::string& id,
                     const std::string& name);
-
   MediaStreamDevice(
       mojom::MediaStreamType type,
       const std::string& id,
       const std::string& name,
+      const media::VideoCaptureControlSupport& control_support,
       media::VideoFacingMode facing,
-      const base::Optional<std::string>& group_id = base::nullopt);
-
+      const absl::optional<std::string>& group_id = absl::nullopt);
   MediaStreamDevice(mojom::MediaStreamType type,
                     const std::string& id,
                     const std::string& name,
                     int sample_rate,
-                    int channel_layout,
+                    const media::ChannelLayoutConfig& channel_layout_config,
                     int frames_per_buffer);
-
   MediaStreamDevice(const MediaStreamDevice& other);
-
   ~MediaStreamDevice();
 
   MediaStreamDevice& operator=(const MediaStreamDevice& other);
 
   bool IsSameDevice(const MediaStreamDevice& other_device) const;
+
+  base::UnguessableToken session_id() const {
+    return session_id_ ? *session_id_ : base::UnguessableToken();
+  }
+
+  const absl::optional<base::UnguessableToken>& serializable_session_id()
+      const {
+    return session_id_;
+  }
+
+  void set_session_id(const base::UnguessableToken& session_id) {
+    session_id_ = session_id.is_empty()
+                      ? absl::optional<base::UnguessableToken>()
+                      : session_id;
+  }
 
   // The device's type.
   mojom::MediaStreamType type;
@@ -83,15 +94,18 @@ struct BLINK_COMMON_EXPORT MediaStreamDevice {
   // The device's unique ID.
   std::string id;
 
+  // The control support for video capture device.
+  media::VideoCaptureControlSupport video_control_support;
+
   // The facing mode for video capture device.
   media::VideoFacingMode video_facing;
 
   // The device's group ID.
-  base::Optional<std::string> group_id;
+  absl::optional<std::string> group_id;
 
   // The device id of a matched output device if any (otherwise empty).
   // Only applicable to audio devices.
-  base::Optional<std::string> matched_output_device_id;
+  absl::optional<std::string> matched_output_device_id;
 
   // The device's "friendly" name. Not guaranteed to be unique.
   std::string name;
@@ -101,14 +115,25 @@ struct BLINK_COMMON_EXPORT MediaStreamDevice {
   media::AudioParameters input =
       media::AudioParameters::UnavailableDeviceParams();
 
-  // Id for this capture session. Unique for all sessions of the same type.
-  int session_id = kNoId;
+  // This field is only non-null for display media devices.
+  media::mojom::DisplayMediaInformationPtr display_media_info;
 
-  // This field is optional and available only for display media devices.
-  base::Optional<media::mojom::DisplayMediaInformationPtr> display_media_info;
+ private:
+  // Id for this capture session. Unique for all sessions of the same type.
+  absl::optional<base::UnguessableToken> session_id_;  // = kNoId;
 };
 
 using MediaStreamDevices = std::vector<MediaStreamDevice>;
+
+// TODO(crbug.com/1313021): Remove this function and use
+// blink::mojom::StreamDevicesSet directly everywhere.
+// Takes a mojom::StreamDevicesSet and returns all contained MediaStreamDevices.
+BLINK_COMMON_EXPORT MediaStreamDevices
+ToMediaStreamDevicesList(const mojom::StreamDevicesSet& stream_devices_set);
+
+BLINK_COMMON_EXPORT size_t CountDevices(const mojom::StreamDevices& devices);
+BLINK_COMMON_EXPORT bool IsMediaStreamDeviceTransferrable(
+    const MediaStreamDevice& device);
 
 }  // namespace blink
 

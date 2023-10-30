@@ -5,13 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_META_ELEMENT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_META_ELEMENT_H_
 
+#include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/web/web_element.h"
 
 namespace blink {
 
 class HTMLMetaElement;
 
-class WebMetaElement final : public WebElement {
+class BLINK_EXPORT WebMetaElement final : public WebElement {
  public:
   WebMetaElement() : WebElement() {}
   WebMetaElement(const WebMetaElement& element) = default;
@@ -22,7 +23,7 @@ class WebMetaElement final : public WebElement {
   }
   void Assign(const WebMetaElement& element) { WebElement::Assign(element); }
 
-  BLINK_EXPORT WebString ComputeEncoding() const;
+  WebString ComputeEncoding() const;
 
 #if INSIDE_BLINK
   WebMetaElement(HTMLMetaElement*);
@@ -35,4 +36,4 @@ DECLARE_WEB_NODE_TYPE_CASTS(WebMetaElement);
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_META_ELEMENT_H_

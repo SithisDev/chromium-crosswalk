@@ -39,7 +39,8 @@ class PLATFORM_EXPORT FETile final : public FilterEffect {
     return kFilterEffectTypeTile;
   }
 
-  FloatRect MapInputs(const FloatRect&) const final;
+  gfx::RectF MapInputs(const gfx::RectF&) const final;
+  gfx::RectF GetSourceRect() const;
 
   sk_sp<PaintFilter> CreateImageFilter() override;
 };

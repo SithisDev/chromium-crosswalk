@@ -33,7 +33,7 @@
 
 #include "third_party/blink/renderer/modules/filesystem/entry.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -65,14 +65,8 @@ class MODULES_EXPORT DirectoryEntry final : public Entry {
   void removeRecursively(V8VoidCallback* success_callback = nullptr,
                          V8ErrorCallback* = nullptr) const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 };
-
-DEFINE_TYPE_CASTS(DirectoryEntry,
-                  Entry,
-                  entry,
-                  entry->isDirectory(),
-                  entry.isDirectory());
 
 }  // namespace blink
 

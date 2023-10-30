@@ -7,6 +7,7 @@
 #include "third_party/blink/renderer/core/animation/css_interpolation_environment.h"
 #include "third_party/blink/renderer/core/animation/string_keyframe.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder.h"
+#include "third_party/blink/renderer/core/css/scoped_css_value.h"
 
 namespace blink {
 
@@ -23,19 +24,17 @@ InterpolationValue CSSDefaultInterpolationType::MaybeConvertSingle(
     const InterpolationEnvironment& environment,
     const InterpolationValue&,
     ConversionCheckers&) const {
-  const CSSValue* css_value = ToCSSPropertySpecificKeyframe(keyframe).Value();
+  const CSSValue* css_value = To<CSSPropertySpecificKeyframe>(keyframe).Value();
 
   if (!css_value) {
     DCHECK(keyframe.IsNeutral());
     return nullptr;
   }
 
-  if (RuntimeEnabledFeatures::CSSCascadeEnabled()) {
-    css_value = ToCSSInterpolationEnvironment(environment)
-                    .Resolve(GetProperty(), css_value);
-    if (!css_value)
-      return nullptr;
-  }
+  css_value = To<CSSInterpolationEnvironment>(environment)
+                  .Resolve(GetProperty(), css_value);
+  if (!css_value)
+    return nullptr;
 
   return InterpolationValue(std::make_unique<InterpolableList>(0),
                             CSSDefaultNonInterpolableValue::Create(css_value));
@@ -45,11 +44,14 @@ void CSSDefaultInterpolationType::Apply(
     const InterpolableValue&,
     const NonInterpolableValue* non_interpolable_value,
     InterpolationEnvironment& environment) const {
-  DCHECK(ToCSSDefaultNonInterpolableValue(non_interpolable_value)->CssValue());
+  DCHECK(
+      To<CSSDefaultNonInterpolableValue>(non_interpolable_value)->CssValue());
   StyleBuilder::ApplyProperty(
       GetProperty().GetCSSPropertyName(),
-      ToCSSInterpolationEnvironment(environment).GetState(),
-      *ToCSSDefaultNonInterpolableValue(non_interpolable_value)->CssValue());
+      To<CSSInterpolationEnvironment>(environment).GetState(),
+      ScopedCSSValue(*To<CSSDefaultNonInterpolableValue>(non_interpolable_value)
+                          ->CssValue(),
+                     nullptr));
 }
 
 }  // namespace blink

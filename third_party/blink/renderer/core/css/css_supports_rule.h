@@ -45,14 +45,20 @@ class CSSSupportsRule final : public CSSConditionRule {
 
   String cssText() const override;
 
+  void SetConditionText(const ExecutionContext*, String);
+
+  bool ConditionIsSupported() const {
+    return To<StyleRuleSupports>(group_rule_.Get())->ConditionIsSupported();
+  }
+
  private:
-  CSSRule::Type type() const override { return kSupportsRule; }
+  CSSRule::Type GetType() const override { return kSupportsRule; }
 };
 
 template <>
 struct DowncastTraits<CSSSupportsRule> {
   static bool AllowFrom(const CSSRule& rule) {
-    return rule.type() == CSSRule::kSupportsRule;
+    return rule.GetType() == CSSRule::kSupportsRule;
   }
 };
 

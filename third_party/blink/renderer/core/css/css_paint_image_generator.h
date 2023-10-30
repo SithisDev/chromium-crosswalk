@@ -8,12 +8,12 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/cssom/css_style_value.h"
-#include "third_party/blink/renderer/platform/geometry/float_size.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "ui/gfx/geometry/size_f.h"
 
 namespace blink {
 
-class CSSSyntaxDescriptor;
+class CSSSyntaxDefinition;
 class Document;
 class Image;
 class ImageResourceObserver;
@@ -21,18 +21,18 @@ class ImageResourceObserver;
 // Produces a PaintGeneratedImage from a CSS Paint API callback.
 // https://drafts.css-houdini.org/css-paint-api/
 class CORE_EXPORT CSSPaintImageGenerator
-    : public GarbageCollectedFinalized<CSSPaintImageGenerator> {
+    : public GarbageCollected<CSSPaintImageGenerator> {
  public:
   // This observer is used if the paint worklet doesn't have a javascript
   // class registered with the correct name yet.
   // paintImageGeneratorReady is called when the javascript class is
   // registered and ready to use.
-  class Observer : public GarbageCollectedFinalized<Observer> {
+  class Observer : public GarbageCollected<Observer> {
    public:
     virtual ~Observer() = default;
 
     virtual void PaintImageGeneratorReady() = 0;
-    virtual void Trace(blink::Visitor* visitor) {}
+    virtual void Trace(Visitor* visitor) const {}
   };
 
   static CSSPaintImageGenerator* Create(const String& name,
@@ -51,18 +51,17 @@ class CORE_EXPORT CSSPaintImageGenerator
   // representing an invalid image if an error occurred.
   // The |container_size| is the container size with subpixel snapping.
   virtual scoped_refptr<Image> Paint(const ImageResourceObserver&,
-                                     const FloatSize& container_size,
-                                     const CSSStyleValueVector*,
-                                     float device_scale_factor) = 0;
+                                     const gfx::SizeF& container_size,
+                                     const CSSStyleValueVector*) = 0;
 
   virtual const Vector<CSSPropertyID>& NativeInvalidationProperties() const = 0;
   virtual const Vector<AtomicString>& CustomInvalidationProperties() const = 0;
   virtual bool HasAlpha() const = 0;
-  virtual const Vector<CSSSyntaxDescriptor>& InputArgumentTypes() const = 0;
+  virtual const Vector<CSSSyntaxDefinition>& InputArgumentTypes() const = 0;
   virtual bool IsImageGeneratorReady() const = 0;
   virtual int WorkletId() const = 0;
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 };
 
 }  // namespace blink

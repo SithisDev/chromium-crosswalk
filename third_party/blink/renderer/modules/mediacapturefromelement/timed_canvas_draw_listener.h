@@ -7,9 +7,10 @@
 
 #include <memory>
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "third_party/blink/renderer/modules/mediacapturefromelement/canvas_capture_handler.h"
 #include "third_party/blink/renderer/modules/mediacapturefromelement/on_request_canvas_draw_listener.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
@@ -26,16 +27,16 @@ class TimedCanvasDrawListener final : public OnRequestCanvasDrawListener {
   static TimedCanvasDrawListener* Create(std::unique_ptr<CanvasCaptureHandler>,
                                          double frame_rate,
                                          ExecutionContext*);
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   // Implementation of TimerFiredFunction.
   void RequestFrameTimerFired(TimerBase*);
 
   base::TimeDelta frame_interval_;
-  TaskRunnerTimer<TimedCanvasDrawListener> request_frame_timer_;
+  HeapTaskRunnerTimer<TimedCanvasDrawListener> request_frame_timer_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIACAPTUREFROMELEMENT_TIMED_CANVAS_DRAW_LISTENER_H_

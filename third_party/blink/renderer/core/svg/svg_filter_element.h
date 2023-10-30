@@ -25,24 +25,23 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/svg/svg_animated_enumeration.h"
-#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_unit_types.h"
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
-class SVGFilterPrimitiveStandardAttributes;
 class LocalSVGResource;
+class SVGAnimatedLength;
+class SVGFilterPrimitiveStandardAttributes;
 
 class CORE_EXPORT SVGFilterElement final : public SVGElement,
                                            public SVGURIReference {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SVGFilterElement);
 
  public:
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   explicit SVGFilterElement(Document&);
   ~SVGFilterElement() override;
@@ -68,12 +67,8 @@ class CORE_EXPORT SVGFilterElement final : public SVGElement,
   // Get the associated SVGResource object, if any.
   LocalSVGResource* AssociatedResource() const;
 
-  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override {
-    return SVGURIReference::GetCheckedAttributeTypes();
-  }
-
  private:
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
   void ChildrenChanged(const ChildrenChange&) override;
 
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;

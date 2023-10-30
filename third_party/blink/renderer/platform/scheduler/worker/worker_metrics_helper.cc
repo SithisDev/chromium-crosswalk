@@ -9,7 +9,7 @@
 namespace blink {
 namespace scheduler {
 
-WorkerMetricsHelper::WorkerMetricsHelper(WebThreadType thread_type,
+WorkerMetricsHelper::WorkerMetricsHelper(ThreadType thread_type,
                                          bool has_cpu_timing_for_each_task)
     : MetricsHelper(thread_type, has_cpu_timing_for_each_task),
       dedicated_worker_per_task_type_duration_reporter_(
@@ -29,17 +29,16 @@ void WorkerMetricsHelper::SetParentFrameType(FrameOriginType frame_type) {
 }
 
 void WorkerMetricsHelper::RecordTaskMetrics(
-    NonMainThreadTaskQueue* queue,
     const base::sequence_manager::Task& task,
     const base::sequence_manager::TaskQueue::TaskTiming& task_timing) {
-  if (ShouldDiscardTask(queue, task, task_timing))
+  if (ShouldDiscardTask(task, task_timing))
     return;
 
-  MetricsHelper::RecordCommonTaskMetrics(queue, task, task_timing);
+  MetricsHelper::RecordCommonTaskMetrics(task, task_timing);
 
   bool backgrounded = internal::ProcessState::Get()->is_process_backgrounded;
 
-  if (thread_type_ == WebThreadType::kDedicatedWorkerThread) {
+  if (thread_type_ == ThreadType::kDedicatedWorkerThread) {
     TaskType task_type = static_cast<TaskType>(task.task_type);
     dedicated_worker_per_task_type_duration_reporter_.RecordTask(
         task_type, task_timing.wall_duration());

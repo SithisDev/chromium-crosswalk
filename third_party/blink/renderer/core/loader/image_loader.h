@@ -25,26 +25,28 @@
 
 #include <memory>
 #include "base/memory/weak_ptr.h"
+#include "services/network/public/mojom/referrer_policy.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/loader/resource/image_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_observer.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
 
-class IncrementLoadEventDelayCount;
+class ContainerNode;
+class DOMWrapperWorld;
 class Element;
-class LayoutImageResource;
 class ExceptionState;
+class IncrementLoadEventDelayCount;
+class LayoutImageResource;
 class ScriptState;
 
-class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
+class CORE_EXPORT ImageLoader : public GarbageCollected<ImageLoader>,
                                 public ImageResourceObserver {
   USING_PRE_FINALIZER(ImageLoader, Dispose);
 
@@ -52,7 +54,7 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
   explicit ImageLoader(Element*);
   ~ImageLoader() override;
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const override;
 
   enum UpdateFromElementBehavior {
     // This should be the update behavior when the element is attached to a
@@ -72,14 +74,11 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
     kUpdateForcedReload
   };
 
-  enum BypassMainWorldBehavior {
-    kBypassMainWorldCSP,
-    kDoNotBypassMainWorldCSP
-  };
-
-  void UpdateFromElement(UpdateFromElementBehavior = kUpdateNormal,
-                         network::mojom::ReferrerPolicy =
-                             network::mojom::ReferrerPolicy::kDefault);
+  // force_blocking ensures that the image will block the load event.
+  void UpdateFromElement(
+      UpdateFromElementBehavior = kUpdateNormal,
+      network::mojom::ReferrerPolicy = network::mojom::ReferrerPolicy::kDefault,
+      bool force_blocking = false);
 
   void ElementDidMoveToNewDocument();
 
@@ -108,19 +107,27 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
   void SetImageForTest(ImageResourceContent*);
 
   // Image document loading:
-  // When |loading_image_document_| is true:
-  //   Loading via ImageDocument.
-  //   |image_resource_for_image_document_| points to a ImageResource that is
-  //   not associated with a ResourceLoader.
-  //   The corresponding ImageDocument is responsible for supplying the response
-  //   and data to |image_resource_for_image_document_| and thus
-  //   |image_content_|.
+  //
+  // Loading via ImageDocument:
+  //   ImageDocumentParser creates an ImageResource.
+  //   The associated ImageResourceContent is provided to
+  //   SetImageDocumentContent and set as
+  //   |image_content_for_image_document_|. This ImageResourceContent is not
+  //   associated with a ResourceLoader.
+  //   When loading is initiated (through the HTMLImageElement that is the
+  //   owner of the ImageLoader), |image_content_for_image_document_| is picked
+  //   as the ImageResourceContent to use and is then reset to null. Thus
+  //   |image_content_for_image_document_| should only be set (and used) when
+  //   HTMLImageElement::StartLoadingImageDocument() is in the caller chain to
+  //   UpdateFromElement().
+  //   The corresponding ImageDocument is responsible for supplying the
+  //   response and data via the ImageResourceContent it provided (which is now
+  //   set as |image_content_|).
   // Otherwise:
   //   Normal loading via ResourceFetcher/ResourceLoader.
-  //   |image_resource_for_image_document_| is null.
-  void SetLoadingImageDocument() { loading_image_document_ = true; }
-  ImageResource* ImageResourceForImageDocument() const {
-    return image_resource_for_image_document_;
+  //   |image_content_for_image_document_| is null.
+  void SetImageDocumentContent(ImageResourceContent* image_content) {
+    image_content_for_image_document_ = image_content;
   }
 
   bool HasPendingActivity() const { return HasPendingEvent() || pending_task_; }
@@ -129,11 +136,13 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
 
   bool HadError() const { return !failed_load_url_.IsEmpty(); }
 
-  bool GetImageAnimationPolicy(ImageAnimationPolicy&) final;
+  bool GetImageAnimationPolicy(mojom::blink::ImageAnimationPolicy&) final;
 
   ScriptPromise Decode(ScriptState*, ExceptionState&);
 
-  void LoadDeferredImage(network::mojom::ReferrerPolicy);
+  // force_blocking ensures that the image will block the load event.
+  void LoadDeferredImage(network::mojom::ReferrerPolicy,
+                         bool force_blocking = false);
 
  protected:
   void ImageChanged(ImageResourceContent*, CanDeferInvalidation) override;
@@ -151,22 +160,21 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
   enum class LazyImageLoadState {
     kNone,      // LazyImages not active.
     kDeferred,  // Full image load not started, and image load event will not be
-                // fired. If image dimensions is present, document load event
-                // will be unblocked. Otherwise placeholder fetch will start,
-                // and once its done document load event is unblocked.
-    kFullImage  // Full image is loading/loaded, due to element coming near the
-                // viewport or if a placeholder load actually fetched the full
-                // image. image_complete_ can differentiate if the fetch is
-                // complete or not. After the fetch, image load event is fired.
+                // fired. Image will not block the document's load event.
+    kFullImage,  // Full image is loading/loaded, due to element coming near the
+                 // viewport. image_complete_ can be used to differentiate if
+                 // the fetch is complete or not. After the fetch, image load
+                 // event is fired.
   };
 
   // Called from the task or from updateFromElement to initiate the load.
+  // force_blocking ensures that the image will block the load event.
   void DoUpdateFromElement(
-      BypassMainWorldBehavior,
+      scoped_refptr<const DOMWrapperWorld> world,
       UpdateFromElementBehavior,
-      const KURL&,
       network::mojom::ReferrerPolicy = network::mojom::ReferrerPolicy::kDefault,
-      UpdateType = UpdateType::kAsync);
+      UpdateType = UpdateType::kAsync,
+      bool force_blocking = false);
 
   virtual void DispatchLoadEvent() = 0;
   virtual void NoImageResourceToLoad() {}
@@ -182,15 +190,13 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
   // Note: SetImage.*() are not a simple setter.
   // Check the implementation to see what they do.
   // TODO(hiroshige): Cleanup these methods.
-  void SetImageForImageDocument(ImageResource*);
   void SetImageWithoutConsideringPendingLoadEvent(ImageResourceContent*);
   void UpdateImageState(ImageResourceContent*);
 
   void ClearFailedLoadURL();
   void DispatchErrorEvent();
   void CrossSiteOrCSPViolationOccurred(AtomicString);
-  void EnqueueImageLoadingMicroTask(const KURL&,
-                                    UpdateFromElementBehavior,
+  void EnqueueImageLoadingMicroTask(UpdateFromElementBehavior,
                                     network::mojom::ReferrerPolicy);
 
   KURL ImageSourceToKURL(AtomicString) const;
@@ -212,7 +218,7 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
 
   Member<Element> element_;
   Member<ImageResourceContent> image_content_;
-  Member<ImageResource> image_resource_for_image_document_;
+  Member<ImageResourceContent> image_content_for_image_document_;
 
   String last_base_element_url_;
   network::mojom::ReferrerPolicy last_referrer_policy_ =
@@ -243,9 +249,13 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
   TaskHandle pending_error_event_;
 
   bool image_complete_ : 1;
-  bool loading_image_document_ : 1;
   bool suppress_error_events_ : 1;
-  bool was_fully_deferred_ : 1;  // Used by LazyImageLoad.
+  // Tracks whether or not an image whose load was deferred was explicitly lazy
+  // (i.e., had developer-supplied `loading=lazy`). This matters because images
+  // that were not explicitly lazy but were deferred via automatic lazy image
+  // loading should continue to block the window load event, whereas explicitly
+  // lazy images should never block the window load event.
+  bool was_deferred_explicitly_ : 1;
 
   LazyImageLoadState lazy_image_load_state_;
 
@@ -274,7 +284,7 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
     DecodeRequest(ImageLoader*, ScriptPromiseResolver*);
     ~DecodeRequest() = default;
 
-    void Trace(blink::Visitor*);
+    void Trace(Visitor*) const;
 
     uint64_t request_id() const { return request_id_; }
     State state() const { return state_; }
@@ -301,4 +311,4 @@ class CORE_EXPORT ImageLoader : public GarbageCollectedFinalized<ImageLoader>,
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_IMAGE_LOADER_H_

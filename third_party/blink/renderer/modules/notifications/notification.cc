@@ -35,32 +35,32 @@
 
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
-#include "third_party/blink/public/platform/modules/notifications/web_notification_constants.h"
+#include "third_party/blink/public/common/notifications/notification_constants.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value_factory.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_notification_action.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_notification_options.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/scoped_window_focus_allowed_indicator.h"
-#include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/performance_monitor.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/modules/notifications/notification_action.h"
 #include "third_party/blink/renderer/modules/notifications/notification_data.h"
 #include "third_party/blink/renderer/modules/notifications/notification_manager.h"
-#include "third_party/blink/renderer/modules/notifications/notification_options.h"
 #include "third_party/blink/renderer/modules/notifications/notification_resources_loader.h"
 #include "third_party/blink/renderer/modules/notifications/timestamp_trigger.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/document_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
@@ -99,19 +99,19 @@ Notification* Notification::Create(ExecutionContext* context,
     return nullptr;
   }
 
-  auto* document = DynamicTo<Document>(context);
+  auto* window = DynamicTo<LocalDOMWindow>(context);
   if (context->IsSecureContext()) {
     UseCounter::Count(context, WebFeature::kNotificationSecureOrigin);
-    if (document) {
-      document->CountUseOnlyInCrossOriginIframe(
+    if (window) {
+      window->CountUseOnlyInCrossOriginIframe(
           WebFeature::kNotificationAPISecureOriginIframe);
     }
   } else {
     Deprecation::CountDeprecation(context,
                                   WebFeature::kNotificationInsecureOrigin);
-    if (document) {
+    if (window) {
       Deprecation::CountDeprecationCrossOriginIframe(
-          *document, WebFeature::kNotificationAPIInsecureOriginIframe);
+          window, WebFeature::kNotificationAPIInsecureOriginIframe);
     }
   }
 
@@ -139,9 +139,9 @@ Notification* Notification::Create(ExecutionContext* context,
 
   notification->SchedulePrepareShow();
 
-  if (document) {
+  if (window) {
     if (auto* document_resource_coordinator =
-            document->GetResourceCoordinator()) {
+            window->document()->GetResourceCoordinator()) {
       document_resource_coordinator->OnNonPersistentNotificationCreated();
     }
   }
@@ -163,13 +163,14 @@ Notification* Notification::Create(ExecutionContext* context,
 Notification::Notification(ExecutionContext* context,
                            Type type,
                            mojom::blink::NotificationDataPtr data)
-    : ContextLifecycleObserver(context),
+    : ExecutionContextLifecycleObserver(context),
       type_(type),
       state_(State::kLoading),
       data_(std::move(data)),
       prepare_show_timer_(context->GetTaskRunner(TaskType::kMiscPlatformAPI),
                           this,
-                          &Notification::PrepareShow) {
+                          &Notification::PrepareShow),
+      listener_receiver_(this, context) {
   if (data_->show_trigger_timestamp.has_value()) {
     show_trigger_ = TimestampTrigger::Create(static_cast<DOMTimeStamp>(
         data_->show_trigger_timestamp.value().ToJsTime()));
@@ -248,11 +249,11 @@ void Notification::OnShow() {
 
 void Notification::OnClick(OnClickCallback completed_closure) {
   ExecutionContext* context = GetExecutionContext();
-  Document* document = DynamicTo<Document>(context);
-  std::unique_ptr<UserGestureIndicator> gesture_indicator;
-  if (document && document->GetFrame()) {
-    gesture_indicator = LocalFrame::NotifyUserActivation(
-        document->GetFrame(), UserGestureToken::kNewGesture);
+  auto* window = DynamicTo<LocalDOMWindow>(context);
+  if (window && window->GetFrame()) {
+    LocalFrame::NotifyUserActivation(
+        window->GetFrame(),
+        mojom::blink::UserActivationNotificationType::kInteraction);
   }
   ScopedWindowFocusAllowedIndicator window_focus_allowed(GetExecutionContext());
   DispatchEvent(*Event::Create(event_type_names::kClick));
@@ -316,8 +317,8 @@ String Notification::badge() const {
   return data_->badge.GetString();
 }
 
-NavigatorVibration::VibrationPattern Notification::vibrate() const {
-  NavigatorVibration::VibrationPattern pattern;
+VibrationController::VibrationPattern Notification::vibrate() const {
+  VibrationController::VibrationPattern pattern;
   if (data_->vibration_pattern.has_value()) {
     pattern.AppendRange(data_->vibration_pattern->begin(),
                         data_->vibration_pattern->end());
@@ -353,7 +354,7 @@ ScriptValue Notification::data(ScriptState* script_state) {
   scoped_refptr<SerializedScriptValue> serialized_value =
       SerializedScriptValue::Create(data, length);
 
-  return ScriptValue(script_state,
+  return ScriptValue(script_state->GetIsolate(),
                      serialized_value->Deserialize(script_state->GetIsolate()));
 }
 
@@ -388,8 +389,10 @@ Vector<v8::Local<v8::Value>> Notification::actions(
     // Both the Action dictionaries themselves and the sequence they'll be
     // returned in are expected to the frozen. This cannot be done with
     // WebIDL.
-    result[i] =
-        FreezeV8Object(ToV8(action, script_state), script_state->GetIsolate());
+    result[i] = FreezeV8Object(
+        ToV8Traits<NotificationAction>::ToV8(script_state, action)
+            .ToLocalChecked(),
+        script_state->GetIsolate());
   }
 
   return result;
@@ -415,6 +418,15 @@ String Notification::permission(ExecutionContext* context) {
   if (!context->IsSecureContext())
     return PermissionString(mojom::blink::PermissionStatus::DENIED);
 
+  // If the current global object's browsing context is a prerendering browsing
+  // context, then return "default".
+  // https://wicg.github.io/nav-speculation/prerendering.html#patch-notifications
+  if (auto* window = DynamicTo<LocalDOMWindow>(context)) {
+    if (Document* document = window->document(); document->IsPrerendering()) {
+      return PermissionString(mojom::blink::PermissionStatus::ASK);
+    }
+  }
+
   mojom::blink::PermissionStatus status =
       NotificationManager::From(context)->GetPermissionStatus();
 
@@ -424,9 +436,9 @@ String Notification::permission(ExecutionContext* context) {
   // TODO(crbug.com/758603): Move this check to the browser process when the
   // NotificationService connection becomes frame-bound.
   if (status == mojom::blink::PermissionStatus::ASK) {
-    auto* document = DynamicTo<Document>(context);
-    LocalFrame* frame = document ? document->GetFrame() : nullptr;
-    if (!frame || frame->IsCrossOriginSubframe())
+    auto* window = DynamicTo<LocalDOMWindow>(context);
+    LocalFrame* frame = window ? window->GetFrame() : nullptr;
+    if (!frame || frame->IsCrossOriginToOutermostMainFrame())
       status = mojom::blink::PermissionStatus::DENIED;
   }
 
@@ -436,16 +448,26 @@ String Notification::permission(ExecutionContext* context) {
 ScriptPromise Notification::requestPermission(
     ScriptState* script_state,
     V8NotificationPermissionCallback* deprecated_callback) {
+  if (!script_state->ContextIsValid())
+    return ScriptPromise();
+
   ExecutionContext* context = ExecutionContext::From(script_state);
-  Document* doc = DynamicTo<Document>(context);
 
   probe::BreakableLocation(context, "Notification.requestPermission");
-  if (!LocalFrame::HasTransientUserActivation(doc ? doc->GetFrame()
-                                                  : nullptr)) {
-    PerformanceMonitor::ReportGenericViolation(
-        context, PerformanceMonitor::kDiscouragedAPIUse,
-        "Only request notification permission in response to a user gesture.",
-        base::TimeDelta(), nullptr);
+  if (auto* window = DynamicTo<LocalDOMWindow>(context)) {
+    if (!LocalFrame::HasTransientUserActivation(window->GetFrame())) {
+      PerformanceMonitor::ReportGenericViolation(
+          context, PerformanceMonitor::kDiscouragedAPIUse,
+          "Only request notification permission in response to a user gesture.",
+          base::TimeDelta(), nullptr);
+    }
+
+    // Sites cannot request notification permission from cross-origin iframes,
+    // but they can use notifications if permission had already been granted.
+    if (window->GetFrame()->IsCrossOriginToOutermostMainFrame()) {
+      Deprecation::CountDeprecation(
+          context, WebFeature::kNotificationPermissionRequestedIframe);
+    }
   }
 
   // Sites cannot request notification permission from insecure contexts.
@@ -454,22 +476,12 @@ ScriptPromise Notification::requestPermission(
         context, WebFeature::kNotificationPermissionRequestedInsecureOrigin);
   }
 
-  // Sites cannot request notification permission from cross-origin iframes,
-  // but they can use notifications if permission had already been granted.
-  if (auto* document = DynamicTo<Document>(context)) {
-    LocalFrame* frame = document->GetFrame();
-    if (!frame || frame->IsCrossOriginSubframe()) {
-      Deprecation::CountDeprecation(
-          context, WebFeature::kNotificationPermissionRequestedIframe);
-    }
-  }
-
   return NotificationManager::From(context)->RequestPermission(
       script_state, deprecated_callback);
 }
 
 uint32_t Notification::maxActions() {
-  return kWebNotificationMaxActions;
+  return kNotificationMaxActions;
 }
 
 DispatchEventResult Notification::DispatchEventInternal(Event& event) {
@@ -481,9 +493,7 @@ const AtomicString& Notification::InterfaceName() const {
   return event_target_names::kNotification;
 }
 
-void Notification::ContextDestroyed(ExecutionContext* context) {
-  listener_receiver_.reset();
-
+void Notification::ContextDestroyed() {
   state_ = State::kClosed;
 
   if (prepare_show_timer_.IsActive())
@@ -502,11 +512,13 @@ bool Notification::HasPendingActivity() const {
   return false;
 }
 
-void Notification::Trace(blink::Visitor* visitor) {
+void Notification::Trace(Visitor* visitor) const {
   visitor->Trace(show_trigger_);
+  visitor->Trace(prepare_show_timer_);
   visitor->Trace(loader_);
+  visitor->Trace(listener_receiver_);
   EventTargetWithInlineData::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
 }  // namespace blink

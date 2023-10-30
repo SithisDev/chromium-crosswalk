@@ -6,8 +6,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SERVICE_WORKER_SERVICE_WORKER_SCRIPT_CACHED_METADATA_HANDLER_H_
 
 #include <stdint.h>
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/loader/fetch/cached_metadata_handler.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/loader/fetch/url_loader/cached_metadata_handler.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -19,27 +20,20 @@ class ServiceWorkerGlobalScope;
 class ServiceWorkerScriptCachedMetadataHandler
     : public SingleCachedMetadataHandler {
  public:
-  static ServiceWorkerScriptCachedMetadataHandler* Create(
-      ServiceWorkerGlobalScope* global_scope,
-      const KURL& script_url,
-      std::unique_ptr<Vector<uint8_t>> meta_data) {
-    return MakeGarbageCollected<ServiceWorkerScriptCachedMetadataHandler>(
-        global_scope, script_url, std::move(meta_data));
-  }
-
   ServiceWorkerScriptCachedMetadataHandler(
       ServiceWorkerGlobalScope*,
       const KURL& script_url,
       std::unique_ptr<Vector<uint8_t>> meta_data);
   ~ServiceWorkerScriptCachedMetadataHandler() override;
-  void Trace(blink::Visitor*) override;
-  void SetCachedMetadata(uint32_t data_type_id,
+  void Trace(Visitor*) const override;
+  void SetCachedMetadata(CodeCacheHost*,
+                         uint32_t data_type_id,
                          const uint8_t*,
-                         size_t,
-                         CacheType) override;
-  void ClearCachedMetadata(CacheType) override;
+                         size_t) override;
+  void ClearCachedMetadata(CodeCacheHost*, ClearCacheType) override;
   scoped_refptr<CachedMetadata> GetCachedMetadata(
-      uint32_t data_type_id) const override;
+      uint32_t data_type_id,
+      GetCachedMetadataBehavior behavior = kCrashIfUnchecked) const override;
   String Encoding() const override;
   bool IsServedFromCacheStorage() const override;
   void OnMemoryDump(WebProcessMemoryDump* pmd,

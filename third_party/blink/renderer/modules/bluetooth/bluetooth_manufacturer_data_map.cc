@@ -10,7 +10,10 @@
 namespace blink {
 
 class BluetoothManufacturerDataMapIterationSource final
-    : public PairIterable<uint16_t, Member<DOMDataView>>::IterationSource {
+    : public PairIterable<uint16_t,
+                          IDLUnsignedShort,
+                          Member<DOMDataView>,
+                          DOMDataView>::IterationSource {
  public:
   explicit BluetoothManufacturerDataMapIterationSource(
       const BluetoothManufacturerDataMap& map)
@@ -29,10 +32,10 @@ class BluetoothManufacturerDataMapIterationSource final
     return true;
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(map_);
-    PairIterable<uint16_t, Member<DOMDataView>>::IterationSource::Trace(
-        visitor);
+    PairIterable<uint16_t, IDLUnsignedShort, Member<DOMDataView>,
+                 DOMDataView>::IterationSource::Trace(visitor);
   }
 
  private:
@@ -47,8 +50,10 @@ BluetoothManufacturerDataMap::BluetoothManufacturerDataMap(
 
 BluetoothManufacturerDataMap::~BluetoothManufacturerDataMap() {}
 
-PairIterable<uint16_t, Member<DOMDataView>>::IterationSource*
-BluetoothManufacturerDataMap::StartIteration(ScriptState*, ExceptionState&) {
+PairIterable<uint16_t, IDLUnsignedShort, Member<DOMDataView>, DOMDataView>::
+    IterationSource*
+    BluetoothManufacturerDataMap::StartIteration(ScriptState*,
+                                                 ExceptionState&) {
   return MakeGarbageCollected<BluetoothManufacturerDataMapIterationSource>(
       *this);
 }

@@ -29,14 +29,14 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/check_op.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-shared.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -59,8 +59,8 @@ class MODULES_EXPORT IDBKey {
     return base::WrapUnique(new IDBKey());
   }
 
-  static std::unique_ptr<IDBKey> CreateNull() {
-    return base::WrapUnique(new IDBKey(mojom::IDBKeyType::Null));
+  static std::unique_ptr<IDBKey> CreateNone() {
+    return base::WrapUnique(new IDBKey(mojom::IDBKeyType::None));
   }
 
   static std::unique_ptr<IDBKey> CreateNumber(double number) {
@@ -89,6 +89,10 @@ class MODULES_EXPORT IDBKey {
   }
 
   static std::unique_ptr<IDBKey> Clone(const IDBKey* rkey);
+
+  // Disallow copy and assign.
+  IDBKey(const IDBKey&) = delete;
+  IDBKey& operator=(const IDBKey&) = delete;
 
   ~IDBKey();
 
@@ -138,10 +142,8 @@ class MODULES_EXPORT IDBKey {
       std::unique_ptr<IDBKey> array_key);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(IDBKey);
-
   IDBKey();
-  IDBKey(mojom::IDBKeyType type);
+  explicit IDBKey(mojom::IDBKeyType type);
   IDBKey(mojom::IDBKeyType type, double number);
   explicit IDBKey(const String& value);
   explicit IDBKey(scoped_refptr<SharedBuffer> value);

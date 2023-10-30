@@ -7,16 +7,14 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/page/scrolling/root_scroller_controller.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace blink {
 
 class LocalFrameView;
 class Node;
 class Page;
-class GraphicsLayer;
-class PaintLayer;
 class RootFrameViewport;
 class ScrollStateCallback;
 class ScrollableArea;
@@ -33,11 +31,7 @@ class CORE_EXPORT TopDocumentRootScrollerController
  public:
   explicit TopDocumentRootScrollerController(Page&);
 
-  void Trace(blink::Visitor*);
-
-  // This class needs to be informed of changes to compositing so that it can
-  // update the compositor when the effective root scroller changes.
-  void DidUpdateCompositing(const LocalFrameView&);
+  void Trace(Visitor*) const;
 
   // PaintLayerScrollableAreas need to notify this class when they're being
   // disposed so that we can remove them as the root scroller.
@@ -55,14 +49,6 @@ class CORE_EXPORT TopDocumentRootScrollerController
   // apply scroll. crbug.com/623079.
   bool IsViewportScrollCallback(const ScrollStateCallback*) const;
 
-  // Returns the GraphicsLayer for the global root scroller.
-  GraphicsLayer* RootScrollerLayer() const;
-
-  // Returns the GraphicsLayer for the global root scroll container.
-  GraphicsLayer* RootContainerLayer() const;
-
-  PaintLayer* RootScrollerPaintLayer() const;
-
   // Returns the Node that's the global root scroller.  See README.md for the
   // difference between this and the root scroller types in
   // RootScrollerController.
@@ -78,7 +64,12 @@ class CORE_EXPORT TopDocumentRootScrollerController
 
   // Returns the size we should use for the root scroller, accounting for
   // browser controls adjustment and using the root LocalFrameView.
-  IntSize RootScrollerVisibleArea() const;
+  gfx::Size RootScrollerVisibleArea() const;
+
+  // Called when a document is shutdown to releases the global_root_scroller_
+  // and viewport_apply_scroll_ members, without any side effects (i.e. doesn't
+  // call DidChangeGlobalRootScroller).
+  void Reset();
 
  private:
   // Calculates the Node that should be the global root scroller. On a simple
@@ -113,4 +104,4 @@ class CORE_EXPORT TopDocumentRootScrollerController
 
 }  // namespace blink
 
-#endif  // RootScrollerController_h
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SCROLLING_TOP_DOCUMENT_ROOT_SCROLLER_CONTROLLER_H_

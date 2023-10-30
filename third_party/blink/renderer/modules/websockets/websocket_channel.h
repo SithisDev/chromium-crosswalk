@@ -32,11 +32,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBSOCKETS_WEBSOCKET_CHANNEL_H_
 
 #include <memory>
-#include "base/macros.h"
+#include "base/callback_forward.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -46,9 +46,16 @@ class DOMArrayBuffer;
 class KURL;
 
 class MODULES_EXPORT WebSocketChannel
-    : public GarbageCollectedFinalized<WebSocketChannel> {
+    : public GarbageCollected<WebSocketChannel> {
  public:
+  enum class SendResult { kSentSynchronously, kCallbackWillBeCalled };
+
   WebSocketChannel() = default;
+
+  WebSocketChannel(const WebSocketChannel&) = delete;
+  WebSocketChannel& operator=(const WebSocketChannel&) = delete;
+
+  virtual ~WebSocketChannel() = default;
 
   enum CloseEventCode {
     kCloseEventCodeNotSpecified = -1,
@@ -70,10 +77,15 @@ class MODULES_EXPORT WebSocketChannel
   };
 
   virtual bool Connect(const KURL&, const String& protocol) = 0;
-  virtual void Send(const std::string&) = 0;
-  virtual void Send(const DOMArrayBuffer&,
-                    unsigned byte_offset,
-                    unsigned byte_length) = 0;
+  virtual SendResult Send(const std::string&,
+                          base::OnceClosure completion_callback) = 0;
+  virtual SendResult Send(const DOMArrayBuffer&,
+                          size_t byte_offset,
+                          size_t byte_length,
+                          base::OnceClosure completion_callback) = 0;
+
+  // Blobs are always sent asynchronously. No callers currently need completion
+  // callbacks for Blobs, so they are not implemented.
   virtual void Send(scoped_refptr<BlobDataHandle>) = 0;
 
   // Do not call |Send| after calling this method.
@@ -93,12 +105,20 @@ class MODULES_EXPORT WebSocketChannel
   // Do not call any methods after calling this method.
   virtual void Disconnect() = 0;  // Will suppress didClose().
 
-  virtual ~WebSocketChannel() = default;
+  // Cancel the WebSocket handshake. Does nothing if the connection is already
+  // established. Do not call any other methods after this one.
+  virtual void CancelHandshake() = 0;
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  // Clients can call ApplyBackpressure() to indicate that they want to stop
+  // receiving new messages. WebSocketChannelClient::DidReceive*Message() may
+  // still be called after this, until existing flow control quota is used up.
+  virtual void ApplyBackpressure() = 0;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebSocketChannel);
+  // Clients should call RemoveBackpressure() after calling ApplyBackpressure()
+  // to indicate that they are ready to receive new messages.
+  virtual void RemoveBackpressure() = 0;
+
+  virtual void Trace(Visitor* visitor) const {}
 };
 
 }  // namespace blink

@@ -33,7 +33,7 @@
 
 #include "third_party/blink/renderer/modules/quota/deprecated_storage_quota.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -65,10 +65,11 @@ class DeprecatedStorageInfo final : public ScriptWrappable {
                     V8StorageQuotaCallback* = nullptr,
                     V8StorageErrorCallback* = nullptr);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
-  DeprecatedStorageQuota* GetStorageQuota(int storage_type);
+  DeprecatedStorageQuota* GetStorageQuota(int storage_type,
+                                          ExecutionContext* execution_context);
 
   mutable Member<DeprecatedStorageQuota> temporary_storage_;
   mutable Member<DeprecatedStorageQuota> persistent_storage_;

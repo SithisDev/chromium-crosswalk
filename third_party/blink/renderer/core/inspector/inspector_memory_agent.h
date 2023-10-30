@@ -31,10 +31,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_MEMORY_AGENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_MEMORY_AGENT_H_
 
-#include "base/macros.h"
+#include "base/sampling_heap_profiler/poisson_allocation_sampler.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/inspector/inspector_base_agent.h"
-#include "third_party/blink/renderer/core/inspector/protocol/Memory.h"
+#include "third_party/blink/renderer/core/inspector/protocol/memory.h"
 
 namespace blink {
 
@@ -43,13 +43,11 @@ class InspectedFrames;
 class CORE_EXPORT InspectorMemoryAgent final
     : public InspectorBaseAgent<protocol::Memory::Metainfo> {
  public:
-  static InspectorMemoryAgent* Create(InspectedFrames* frames) {
-    return MakeGarbageCollected<InspectorMemoryAgent>(frames);
-  }
-
   explicit InspectorMemoryAgent(InspectedFrames*);
+  InspectorMemoryAgent(const InspectorMemoryAgent&) = delete;
+  InspectorMemoryAgent& operator=(const InspectorMemoryAgent&) = delete;
   ~InspectorMemoryAgent() override;
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   void Restore() override;
 
@@ -79,7 +77,12 @@ class CORE_EXPORT InspectorMemoryAgent final
   HashMap<void*, String> symbols_cache_;
 
   InspectorAgentState::Integer sampling_profile_interval_;
-  DISALLOW_COPY_AND_ASSIGN(InspectorMemoryAgent);
+
+  // Allows web tests to suppress randomness while testing the sampling.
+  // The sampler will behave deterministically while an instance of this exists.
+  std::unique_ptr<
+      base::PoissonAllocationSampler::ScopedSuppressRandomnessForTesting>
+      randomness_suppressor_;
 };
 
 }  // namespace blink

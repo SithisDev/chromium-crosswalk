@@ -4,19 +4,18 @@
 
 #include "third_party/blink/renderer/core/frame/device_single_window_event_controller.h"
 
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "base/ranges/algorithm.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 
 DeviceSingleWindowEventController::DeviceSingleWindowEventController(
-    Document& document)
-    : PlatformEventController(&document),
-      needs_checking_null_events_(true),
-      document_(document) {
-  document.domWindow()->RegisterEventListenerObserver(this);
+    LocalDOMWindow& window)
+    : PlatformEventController(window), needs_checking_null_events_(true) {
+  window.RegisterEventListenerObserver(this);
 }
 
 DeviceSingleWindowEventController::~DeviceSingleWindowEventController() =
@@ -27,11 +26,10 @@ void DeviceSingleWindowEventController::DidUpdateData() {
 }
 
 void DeviceSingleWindowEventController::DispatchDeviceEvent(Event* event) {
-  if (!GetDocument().domWindow() || GetDocument().IsContextPaused() ||
-      GetDocument().IsContextDestroyed())
+  if (GetWindow().IsContextPaused() || GetWindow().IsContextDestroyed())
     return;
 
-  GetDocument().domWindow()->DispatchEvent(*event);
+  GetWindow().DispatchEvent(*event);
 
   if (needs_checking_null_events_) {
     if (IsNullEvent(event))
@@ -70,39 +68,17 @@ void DeviceSingleWindowEventController::DidRemoveAllEventListeners(
   has_event_listener_ = false;
 }
 
-bool DeviceSingleWindowEventController::IsSameSecurityOriginAsMainFrame()
-    const {
-  if (!GetDocument().GetFrame() || !GetDocument().GetPage())
-    return false;
-
-  if (GetDocument().GetFrame()->IsMainFrame())
-    return true;
-
-  const SecurityOrigin* main_security_origin = GetDocument()
-                                                   .GetPage()
-                                                   ->MainFrame()
-                                                   ->GetSecurityContext()
-                                                   ->GetSecurityOrigin();
-
-  if (main_security_origin &&
-      GetDocument().GetSecurityOrigin()->CanAccess(main_security_origin))
-    return true;
-
-  return false;
-}
-
 bool DeviceSingleWindowEventController::CheckPolicyFeatures(
-    const Vector<mojom::FeaturePolicyFeature>& features) const {
-  const Document& document = GetDocument();
-  return std::all_of(features.begin(), features.end(),
-                     [&document](mojom::FeaturePolicyFeature feature) {
-                       return document.IsFeatureEnabled(
-                           feature, ReportOptions::kReportOnFailure);
-                     });
+    const Vector<mojom::blink::PermissionsPolicyFeature>& features) const {
+  LocalDOMWindow& window = GetWindow();
+  return base::ranges::all_of(
+      features, [&window](mojom::blink::PermissionsPolicyFeature feature) {
+        return window.IsFeatureEnabled(feature,
+                                       ReportOptions::kReportOnFailure);
+      });
 }
 
-void DeviceSingleWindowEventController::Trace(blink::Visitor* visitor) {
-  visitor->Trace(document_);
+void DeviceSingleWindowEventController::Trace(Visitor* visitor) const {
   PlatformEventController::Trace(visitor);
 }
 

@@ -7,7 +7,8 @@
 // https://wicg.github.io/webhid/index.html#enumeration
 
 [
-    Exposed(Window WebHID),
+    Exposed(ServiceWorker WebHIDOnServiceWorkers,
+            Window WebHID),
     SecureContext
 ] interface HID : EventTarget {
     attribute EventHandler onconnect;
@@ -16,12 +17,14 @@
     // Retrieves information about all available HID subsystem devices.
     [
         CallWith=ScriptState,
+        RaisesException,
         MeasureAs=HidGetDevices
     ] Promise<sequence<HIDDevice>> getDevices();
 
     // Requests permission from the user to use a device.
     [
         CallWith=ScriptState,
+        RaisesException,
         MeasureAs=HidRequestDevice
     ] Promise<sequence<HIDDevice>> requestDevice(
         HIDDeviceRequestOptions options);

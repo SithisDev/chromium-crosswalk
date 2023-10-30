@@ -8,11 +8,10 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
-#include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/script/script_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/script/script.h"
-#include "third_party/blink/renderer/platform/loader/fetch/client_hints_preferences.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cross_origin_attribute_value.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/integrity_metadata.h"
@@ -31,16 +30,37 @@ class CORE_EXPORT PreloadRequest {
   USING_FAST_MALLOC(PreloadRequest);
 
  public:
+  class CORE_EXPORT ExclusionInfo : public RefCounted<ExclusionInfo> {
+    USING_FAST_MALLOC(ExclusionInfo);
+
+   public:
+    ExclusionInfo(const KURL& document_url,
+                  HashSet<KURL> scopes,
+                  HashSet<KURL> resources);
+    virtual ~ExclusionInfo();
+
+    // Disallow copy and assign.
+    ExclusionInfo(const ExclusionInfo&) = delete;
+    ExclusionInfo& operator=(const ExclusionInfo&) = delete;
+
+    const KURL& document_url() const { return document_url_; }
+    const HashSet<KURL>& scopes() const { return scopes_; }
+    const HashSet<KURL>& resources() const { return resources_; }
+
+    bool ShouldExclude(const KURL& base_url, const String& resource_url) const;
+
+   private:
+    const KURL document_url_;
+    const HashSet<KURL> scopes_;
+    const HashSet<KURL> resources_;
+  };
+
   enum RequestType {
     kRequestTypePreload,
     kRequestTypePreconnect,
     kRequestTypeLinkRelPreload
   };
 
-  enum ReferrerSource { kDocumentIsReferrer, kBaseUrlIsReferrer };
-
-  // TODO(csharrison): Move the implementation to the cpp file when core/html
-  // gets its own testing source set in html/BUILD.gn.
   static std::unique_ptr<PreloadRequest> CreateIfNeeded(
       const String& initiator_name,
       const TextPosition& initiator_position,
@@ -48,26 +68,11 @@ class CORE_EXPORT PreloadRequest {
       const KURL& base_url,
       ResourceType resource_type,
       const network::mojom::ReferrerPolicy referrer_policy,
-      ReferrerSource referrer_source,
       ResourceFetcher::IsImageSet is_image_set,
+      const ExclusionInfo* exclusion_info,
       const FetchParameters::ResourceWidth& resource_width =
           FetchParameters::ResourceWidth(),
-      const ClientHintsPreferences& client_hints_preferences =
-          ClientHintsPreferences(),
-      RequestType request_type = kRequestTypePreload) {
-    // Never preload data URLs. We also disallow relative ref URLs which become
-    // data URLs if the document's URL is a data URL. We don't want to create
-    // extra resource requests with data URLs to avoid copy / initialization
-    // overhead, which can be significant for large URLs.
-    if (resource_url.IsEmpty() || resource_url.StartsWith("#") ||
-        ProtocolIs(resource_url, "data")) {
-      return nullptr;
-    }
-    return base::WrapUnique(new PreloadRequest(
-        initiator_name, initiator_position, resource_url, base_url,
-        resource_type, resource_width, client_hints_preferences, request_type,
-        referrer_policy, referrer_source, is_image_set));
-  }
+      RequestType request_type = kRequestTypePreload);
 
   Resource* Start(Document*);
 
@@ -80,10 +85,13 @@ class CORE_EXPORT PreloadRequest {
   }
   CrossOriginAttributeValue CrossOrigin() const { return cross_origin_; }
 
-  void SetImportance(mojom::FetchImportanceMode importance) {
-    importance_ = importance;
+  void SetFetchPriorityHint(
+      mojom::blink::FetchPriorityHint fetch_priority_hint) {
+    fetch_priority_hint_ = fetch_priority_hint;
   }
-  mojom::FetchImportanceMode Importance() const { return importance_; }
+  mojom::blink::FetchPriorityHint FetchPriorityHint() const {
+    return fetch_priority_hint_;
+  }
 
   void SetNonce(const String& nonce) { nonce_ = nonce; }
   const String& Nonce() const { return nonce_; }
@@ -96,17 +104,11 @@ class CORE_EXPORT PreloadRequest {
   }
   const KURL& BaseURL() const { return base_url_; }
   bool IsPreconnect() const { return request_type_ == kRequestTypePreconnect; }
-  bool IsLinkRelPreload() const {
-    return request_type_ == kRequestTypeLinkRelPreload;
-  }
-  const ClientHintsPreferences& Preferences() const {
-    return client_hints_preferences_;
-  }
   network::mojom::ReferrerPolicy GetReferrerPolicy() const {
     return referrer_policy_;
   }
 
-  void SetScriptType(mojom::ScriptType script_type) {
+  void SetScriptType(mojom::blink::ScriptType script_type) {
     script_type_ = script_type;
   }
 
@@ -128,11 +130,17 @@ class CORE_EXPORT PreloadRequest {
     return is_image_set_ == ResourceFetcher::kImageIsImageSet;
   }
 
-  void SetIsLazyLoadImageEnabled(bool is_enabled) {
-    is_lazy_load_image_enabled_ = is_enabled;
+  void SetRenderBlockingBehavior(
+      RenderBlockingBehavior render_blocking_behavior) {
+    render_blocking_behavior_ = render_blocking_behavior;
   }
-  bool IsLazyLoadImageEnabledForTesting() {
-    return is_lazy_load_image_enabled_;
+
+  bool IsAttributionReportingEligibleImgOrScript() const {
+    return is_attribution_reporting_eligible_img_or_script_;
+  }
+
+  void SetAttributionReportingEligibleImgOrScript(bool eligible) {
+    is_attribution_reporting_eligible_img_or_script_ = eligible;
   }
 
  private:
@@ -142,55 +150,48 @@ class CORE_EXPORT PreloadRequest {
                  const KURL& base_url,
                  ResourceType resource_type,
                  const FetchParameters::ResourceWidth& resource_width,
-                 const ClientHintsPreferences& client_hints_preferences,
                  RequestType request_type,
                  const network::mojom::ReferrerPolicy referrer_policy,
-                 ReferrerSource referrer_source,
                  ResourceFetcher::IsImageSet is_image_set)
       : initiator_name_(initiator_name),
         initiator_position_(initiator_position),
         resource_url_(resource_url),
         base_url_(base_url),
         resource_type_(resource_type),
-        script_type_(mojom::ScriptType::kClassic),
-        cross_origin_(kCrossOriginAttributeNotSet),
-        importance_(mojom::FetchImportanceMode::kImportanceAuto),
-        defer_(FetchParameters::kNoDefer),
         resource_width_(resource_width),
-        client_hints_preferences_(client_hints_preferences),
         request_type_(request_type),
         referrer_policy_(referrer_policy),
-        referrer_source_(referrer_source),
-        from_insertion_scanner_(false),
-        is_image_set_(is_image_set),
-        is_lazy_load_image_enabled_(false) {}
+        is_image_set_(is_image_set) {}
 
   KURL CompleteURL(Document*);
 
-  String initiator_name_;
-  TextPosition initiator_position_;
-  String resource_url_;
-  KURL base_url_;
+  const String initiator_name_;
+  const TextPosition initiator_position_;
+  const String resource_url_;
+  const KURL base_url_;
   String charset_;
-  ResourceType resource_type_;
-  mojom::ScriptType script_type_;
-  CrossOriginAttributeValue cross_origin_;
-  mojom::FetchImportanceMode importance_;
+  const ResourceType resource_type_;
+  mojom::blink::ScriptType script_type_ = mojom::blink::ScriptType::kClassic;
+  CrossOriginAttributeValue cross_origin_ = kCrossOriginAttributeNotSet;
+  mojom::blink::FetchPriorityHint fetch_priority_hint_ =
+      mojom::blink::FetchPriorityHint::kAuto;
   String nonce_;
-  FetchParameters::DeferOption defer_;
-  FetchParameters::ResourceWidth resource_width_;
-  ClientHintsPreferences client_hints_preferences_;
-  RequestType request_type_;
-  network::mojom::ReferrerPolicy referrer_policy_;
-  ReferrerSource referrer_source_;
+  FetchParameters::DeferOption defer_ = FetchParameters::kNoDefer;
+  const FetchParameters::ResourceWidth resource_width_;
+  const RequestType request_type_;
+  const network::mojom::ReferrerPolicy referrer_policy_;
   IntegrityMetadataSet integrity_metadata_;
-  bool from_insertion_scanner_;
-  ResourceFetcher::IsImageSet is_image_set_;
-  bool is_lazy_load_image_enabled_;
+  RenderBlockingBehavior render_blocking_behavior_ =
+      RenderBlockingBehavior::kUnset;
+  bool from_insertion_scanner_ = false;
+  const ResourceFetcher::IsImageSet is_image_set_;
+  bool is_lazy_load_image_enabled_ = false;
+  base::TimeTicks creation_time_ = base::TimeTicks::Now();
+  bool is_attribution_reporting_eligible_img_or_script_ = false;
 };
 
 typedef Vector<std::unique_ptr<PreloadRequest>> PreloadRequestStream;
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_PARSER_PRELOAD_REQUEST_H_

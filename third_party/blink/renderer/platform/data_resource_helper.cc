@@ -5,34 +5,28 @@
 #include "third_party/blink/renderer/platform/data_resource_helper.h"
 
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_data.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
-#include "ui/base/resource/resource_bundle.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
-String GetDataResourceAsASCIIString(const char* resource) {
-  StringBuilder builder;
-  const WebData& resource_data = Platform::Current()->GetDataResource(resource);
-  builder.ReserveCapacity(resource_data.size());
-  resource_data.ForEachSegment([&builder](const char* segment,
-                                          size_t segment_size,
-                                          size_t segment_offset) {
-    builder.Append(segment, segment_size);
-    return true;
-  });
-
-  String data_string = builder.ToString();
-  DCHECK(!data_string.IsEmpty());
-  DCHECK(data_string.ContainsOnlyASCIIOrEmpty());
-  return data_string;
+String UncompressResourceAsString(int resource_id) {
+  std::string data = Platform::Current()->GetDataResourceString(resource_id);
+  return String::FromUTF8(data);
 }
 
-String UncompressResourceAsString(int resource_id) {
-  ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-  std::string uncompressed = bundle.DecompressDataResourceScaled(
-      resource_id, bundle.GetMaxScaleFactor());
-  return String::FromUTF8(uncompressed.data());
+String UncompressResourceAsASCIIString(int resource_id) {
+  std::string data = Platform::Current()->GetDataResourceString(resource_id);
+  String result(data.data(), data.size());
+  DCHECK(result.ContainsOnlyASCIIOrEmpty());
+  return result;
+}
+
+Vector<char> UncompressResourceAsBinary(int resource_id) {
+  std::string data = Platform::Current()->GetDataResourceString(resource_id);
+  Vector<char> result;
+  result.Append(data.data(), static_cast<wtf_size_t>(data.size()));
+  return result;
 }
 
 }  // namespace blink

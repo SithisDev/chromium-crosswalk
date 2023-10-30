@@ -5,10 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_COMPUTED_STYLE_PROPERTY_MAP_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_COMPUTED_STYLE_PROPERTY_MAP_H_
 
-#include "base/macros.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_computed_style_declaration.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
 #include "third_party/blink/renderer/core/css/cssom/style_property_map_read_only_main_thread.h"
+#include "third_party/blink/renderer/core/css/parser/css_selector_parser.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 
 namespace blink {
@@ -25,16 +26,14 @@ namespace blink {
 class CORE_EXPORT ComputedStylePropertyMap
     : public StylePropertyMapReadOnlyMainThread {
  public:
-  static ComputedStylePropertyMap* Create(Node* node) {
-    return MakeGarbageCollected<ComputedStylePropertyMap>(node);
-  }
-
   ComputedStylePropertyMap(Node* node, const String& pseudo_element = String())
-      : StylePropertyMapReadOnlyMainThread(),
-        pseudo_id_(CSSSelector::ParsePseudoId(pseudo_element)),
+      : pseudo_id_(
+            CSSSelectorParser<>::ParsePseudoElement(pseudo_element, node)),
         node_(node) {}
+  ComputedStylePropertyMap(const ComputedStylePropertyMap&) = delete;
+  ComputedStylePropertyMap& operator=(const ComputedStylePropertyMap&) = delete;
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(node_);
     StylePropertyMapReadOnlyMainThread::Trace(visitor);
   }
@@ -49,7 +48,7 @@ class CORE_EXPORT ComputedStylePropertyMap
 
  protected:
   const CSSValue* GetProperty(CSSPropertyID) const override;
-  const CSSValue* GetCustomProperty(AtomicString) const override;
+  const CSSValue* GetCustomProperty(const AtomicString&) const override;
   void ForEachProperty(const IterationCallback&) override;
 
   String SerializationForShorthand(const CSSProperty&) const final;
@@ -63,9 +62,8 @@ class CORE_EXPORT ComputedStylePropertyMap
 
   Node* StyledNode() const;
   const ComputedStyle* UpdateStyle() const;
-  DISALLOW_COPY_AND_ASSIGN(ComputedStylePropertyMap);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSSOM_COMPUTED_STYLE_PROPERTY_MAP_H_

@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://github.com/domenic/unhandled-rejections-browser-spec
+// https://html.spec.whatwg.org/C/#promiserejectionevent
 
 [
-    Constructor(DOMString type, PromiseRejectionEventInit eventInitDict),
-    ConstructorCallWith=ScriptState,
     Exposed=(Window,Worker)
 ] interface PromiseRejectionEvent : Event {
+    [CallWith=ScriptState] constructor(DOMString type, PromiseRejectionEventInit eventInitDict);
     [Custom=Getter] readonly attribute Promise<any> promise;
     [CallWith=ScriptState] readonly attribute any reason;
 };

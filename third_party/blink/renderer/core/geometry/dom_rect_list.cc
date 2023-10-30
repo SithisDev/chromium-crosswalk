@@ -30,10 +30,10 @@ namespace blink {
 
 DOMRectList::DOMRectList() = default;
 
-DOMRectList::DOMRectList(const Vector<FloatQuad>& quads) {
+DOMRectList::DOMRectList(const Vector<gfx::QuadF>& quads) {
   list_.ReserveInitialCapacity(quads.size());
   for (const auto& quad : quads)
-    list_.push_back(DOMRect::FromFloatRect(quad.BoundingBox()));
+    list_.push_back(DOMRect::FromRectF(quad.BoundingBox()));
 }
 
 unsigned DOMRectList::length() const {
@@ -47,7 +47,7 @@ DOMRect* DOMRectList::item(unsigned index) {
   return list_[index].Get();
 }
 
-void DOMRectList::Trace(blink::Visitor* visitor) {
+void DOMRectList::Trace(Visitor* visitor) const {
   visitor->Trace(list_);
   ScriptWrappable::Trace(visitor);
 }

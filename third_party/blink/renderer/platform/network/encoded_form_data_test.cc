@@ -4,25 +4,22 @@
 
 #include <utility>
 
-#include "base/sequenced_task_runner.h"
-#include "base/test/scoped_task_environment.h"
-#include "mojo/public/cpp/base/file_mojom_traits.h"
-#include "mojo/public/cpp/base/file_path_mojom_traits.h"
-#include "mojo/public/cpp/base/time_mojom_traits.h"
-#include "mojo/public/cpp/bindings/array_traits_wtf_vector.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/test/task_environment.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/string_traits_wtf.h"
 #include "mojo/public/cpp/test_support/test_utils.h"
-#include "services/network/public/mojom/url_loader.mojom-blink.h"
-#include "third_party/blink/public/mojom/blob/blob.mojom-blink.h"
-#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
-#include "third_party/blink/renderer/platform/network/encoded_form_data.h"
-#include "third_party/blink/renderer/platform/network/encoded_form_data_element_mojom_traits.h"
-#include "third_party/blink/renderer/platform/network/encoded_form_data_mojom_traits.h"
-#include "third_party/blink/renderer/platform/network/wrapped_data_pipe_getter.h"
-
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
+#include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/platform/blob/blob_data.h"
+#include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 
 namespace blink {
+
+using mojom::blink::BlobRegistry;
 
 namespace {
 
@@ -48,16 +45,18 @@ class EncodedFormDataTest : public testing::Test {
   }
 };
 
-class EncodedFormDataMojomTraitsTest : public testing::Test {
- protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-};
-
 TEST_F(EncodedFormDataTest, DeepCopy) {
   scoped_refptr<EncodedFormData> original(EncodedFormData::Create());
   original->AppendData("Foo", 3);
-  original->AppendFileRange("example.txt", 12345, 56789, 9999.0);
-  original->AppendBlob("originalUUID", nullptr);
+  original->AppendFileRange("example.txt", 12345, 56789,
+                            base::Time::FromDoubleT(9999.0));
+
+  mojo::PendingRemote<mojom::blink::Blob> remote;
+  mojo::PendingReceiver<mojom::blink::Blob> receiver =
+      remote.InitWithNewPipeAndPassReceiver();
+  original->AppendBlob(
+      "originalUUID", BlobDataHandle::Create("uuid", "" /* type */,
+                                             0u /* size */, std::move(remote)));
 
   Vector<char> boundary_vector;
   boundary_vector.Append("----boundaryForTest", 19);
@@ -67,8 +66,6 @@ TEST_F(EncodedFormDataTest, DeepCopy) {
 
   scoped_refptr<EncodedFormData> copy = original->DeepCopy();
 
-  // Check that contents are copied (compare the copy with expected values).
-  const Vector<FormDataElement>& original_elements = original->Elements();
   const Vector<FormDataElement>& copy_elements = copy->Elements();
   ASSERT_EQ(3ul, copy_elements.size());
 
@@ -82,7 +79,8 @@ TEST_F(EncodedFormDataTest, DeepCopy) {
   EXPECT_EQ(String("example.txt"), copy_elements[1].filename_);
   EXPECT_EQ(12345ll, copy_elements[1].file_start_);
   EXPECT_EQ(56789ll, copy_elements[1].file_length_);
-  EXPECT_EQ(9999.0, copy_elements[1].expected_file_modification_time_);
+  EXPECT_EQ(9999.0,
+            copy_elements[1].expected_file_modification_time_->ToDoubleT());
 
   EXPECT_EQ(FormDataElement::kEncodedBlob, copy_elements[2].type_);
   EXPECT_EQ(String("originalUUID"), copy_elements[2].blob_uuid_);
@@ -97,84 +95,10 @@ TEST_F(EncodedFormDataTest, DeepCopy) {
   // Check pointers are different, i.e. deep-copied.
   ASSERT_NE(original.get(), copy.get());
 
-  for (wtf_size_t i = 0; i < 3; ++i) {
-    if (copy_elements[i].filename_.Impl()) {
-      EXPECT_NE(original_elements[i].filename_.Impl(),
-                copy_elements[i].filename_.Impl());
-      EXPECT_TRUE(copy_elements[i].filename_.Impl()->HasOneRef());
-    }
-
-    if (copy_elements[i].blob_uuid_.Impl()) {
-      EXPECT_NE(original_elements[i].blob_uuid_.Impl(),
-                copy_elements[i].blob_uuid_.Impl());
-      EXPECT_TRUE(copy_elements[i].blob_uuid_.Impl()->HasOneRef());
-    }
-
-    // m_optionalBlobDataHandle is not checked, because BlobDataHandle is
-    // ThreadSafeRefCounted.
-  }
-}
-
-TEST_F(EncodedFormDataMojomTraitsTest, Roundtrips_FormDataElement) {
-  FormDataElement original1;
-  original1.type_ = blink::FormDataElement::kData;
-  original1.data_ = {'a', 'b', 'c', 'd'};
-  FormDataElement copied1;
-  EXPECT_TRUE(mojo::test::SerializeAndDeserialize<
-              blink::mojom::blink::FetchAPIDataElement>(&original1, &copied1));
-  EXPECT_EQ(original1.type_, copied1.type_);
-  EXPECT_EQ(original1.data_, copied1.data_);
-
-  FormDataElement original2;
-  original2.type_ = blink::FormDataElement::kEncodedFile;
-  original2.file_start_ = 0;
-  original2.file_length_ = 4;
-  original2.filename_ = "file.name";
-  original2.expected_file_modification_time_ = base::Time::Now().ToDoubleT();
-  FormDataElement copied2;
-  EXPECT_TRUE(mojo::test::SerializeAndDeserialize<
-              blink::mojom::blink::FetchAPIDataElement>(&original2, &copied2));
-  EXPECT_EQ(original2.type_, copied2.type_);
-  EXPECT_EQ(original2.file_start_, copied2.file_start_);
-  EXPECT_EQ(original2.file_length_, copied2.file_length_);
-  EXPECT_EQ(original2.filename_, copied2.filename_);
-  EXPECT_EQ(original2.expected_file_modification_time_,
-            copied2.expected_file_modification_time_);
-
-  FormDataElement original3;
-  original3.type_ = blink::FormDataElement::kEncodedBlob;
-  original3.blob_uuid_ = "uuid-test";
-  mojo::MessagePipe pipe;
-  original3.optional_blob_data_handle_ = BlobDataHandle::Create(
-      original3.blob_uuid_, "type-test", 100,
-      mojom::blink::BlobPtrInfo(std::move(pipe.handle0), 0));
-  FormDataElement copied3;
-  EXPECT_TRUE(mojo::test::SerializeAndDeserialize<
-              blink::mojom::blink::FetchAPIDataElement>(&original3, &copied3));
-  EXPECT_EQ(copied3.type_, blink::FormDataElement::kDataPipe);
-
-  FormDataElement original4;
-  original4.type_ = blink::FormDataElement::kDataPipe;
-  network::mojom::blink::DataPipeGetterPtr data_pipe_getter;
-  auto request = mojo::MakeRequest(&data_pipe_getter);
-  original4.data_pipe_getter_ =
-      base::MakeRefCounted<blink::WrappedDataPipeGetter>(
-          std::move(data_pipe_getter));
-  FormDataElement copied4;
-  EXPECT_TRUE(mojo::test::SerializeAndDeserialize<
-              blink::mojom::blink::FetchAPIDataElement>(&original4, &copied4));
-  EXPECT_TRUE(copied4.data_pipe_getter_);
-}
-
-TEST_F(EncodedFormDataMojomTraitsTest, Roundtrips_EncodedFormData) {
-  scoped_refptr<EncodedFormData> original1 = EncodedFormData::Create();
-  original1->SetIdentifier(1);
-  original1->SetContainsPasswordData(true);
-  scoped_refptr<EncodedFormData> copied1 = EncodedFormData::Create();
-  EXPECT_TRUE(mojo::test::SerializeAndDeserialize<
-              blink::mojom::blink::FetchAPIRequestBody>(&original1, &copied1));
-  EXPECT_EQ(original1->Identifier(), copied1->Identifier());
-  EXPECT_EQ(original1->ContainsPasswordData(), copied1->ContainsPasswordData());
+  // m_optionalBlobDataHandle is not checked, because BlobDataHandle is
+  // ThreadSafeRefCounted.
+  // filename_ and blob_uuid_ are now thread safe, so they don't need a
+  // deep copy.
 }
 
 }  // namespace

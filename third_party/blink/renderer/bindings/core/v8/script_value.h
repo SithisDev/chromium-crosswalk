@@ -33,9 +33,10 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits.h"
+#include "third_party/blink/renderer/bindings/core/v8/world_safe_v8_reference.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/bindings/shared_persistent.h"
+#include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "v8/include/v8.h"
@@ -69,56 +70,36 @@ class CORE_EXPORT ScriptValue final {
 
   ScriptValue() = default;
 
-  ScriptValue(ScriptState* script_state, v8::Local<v8::Value> value)
-      : script_state_(script_state),
-        value_(value.IsEmpty() ? nullptr
-                               : SharedPersistent<v8::Value>::Create(
-                                     value,
-                                     script_state->GetIsolate())) {
-    DCHECK(IsEmpty() || script_state_);
+  ScriptValue(v8::Isolate* isolate, v8::Local<v8::Value> value)
+      : isolate_(isolate), value_(isolate, value) {
+    DCHECK(isolate_);
   }
 
   template <typename T>
-  ScriptValue(ScriptState* script_state, v8::MaybeLocal<T> value)
-      : script_state_(script_state),
-        value_(value.IsEmpty() ? nullptr
-                               : SharedPersistent<v8::Value>::Create(
-                                     value.ToLocalChecked(),
-                                     script_state->GetIsolate())) {
-    DCHECK(IsEmpty() || script_state_);
+  ScriptValue(v8::Isolate* isolate, v8::MaybeLocal<T> value)
+      : isolate_(isolate),
+        value_(isolate,
+               value.IsEmpty() ? v8::Local<T>() : value.ToLocalChecked()) {
+    DCHECK(isolate_);
   }
 
-  ScriptValue(const ScriptValue& value)
-      : script_state_(value.script_state_), value_(value.value_) {
-    DCHECK(IsEmpty() || script_state_);
-  }
+  ScriptValue(const ScriptValue& value) = default;
 
-  ScriptState* GetScriptState() const { return script_state_; }
-
+  // TODO(riakf): Use this GetIsolate() only when doing DCHECK inside
+  // ScriptValue.
   v8::Isolate* GetIsolate() const {
-    return script_state_ ? script_state_->GetIsolate()
-                         : v8::Isolate::GetCurrent();
+    DCHECK(isolate_);
+    return isolate_;
   }
 
-  v8::Local<v8::Context> GetContext() const {
-    DCHECK(script_state_);
-    return script_state_->GetContext();
-  }
-
-  ScriptValue& operator=(const ScriptValue& value) {
-    if (this != &value) {
-      script_state_ = value.script_state_;
-      value_ = value.value_;
-    }
-    return *this;
-  }
+  ScriptValue& operator=(const ScriptValue& value) = default;
 
   bool operator==(const ScriptValue& value) const {
     if (IsEmpty())
       return value.IsEmpty();
     if (value.IsEmpty())
       return false;
-    return *value_ == *value.value_;
+    return value_ == value.value_;
   }
 
   bool operator!=(const ScriptValue& value) const { return !operator==(value); }
@@ -155,9 +136,12 @@ class CORE_EXPORT ScriptValue final {
     return !value.IsEmpty() && value->IsObject();
   }
 
-  bool IsEmpty() const { return !value_.get() || value_->IsEmpty(); }
+  bool IsEmpty() const { return value_.IsEmpty(); }
 
-  void Clear() { value_ = nullptr; }
+  void Clear() {
+    isolate_ = nullptr;
+    value_.Reset();
+  }
 
   v8::Local<v8::Value> V8Value() const;
   // Returns v8Value() if a given ScriptState is the same as the
@@ -167,25 +151,25 @@ class CORE_EXPORT ScriptValue final {
 
   bool ToString(String&) const;
 
-  static ScriptValue CreateNull(ScriptState*);
+  static ScriptValue CreateNull(v8::Isolate*);
+
+  void Trace(Visitor* visitor) const { visitor->Trace(value_); }
 
  private:
-  // TODO(peria): Move ScriptValue to Oilpan heap.
-  GC_PLUGIN_IGNORE("813731")
-  Persistent<ScriptState> script_state_;
-  scoped_refptr<SharedPersistent<v8::Value>> value_;
-};
-
-template <>
-struct NativeValueTraits<ScriptValue>
-    : public NativeValueTraitsBase<ScriptValue> {
-  static inline ScriptValue NativeValue(v8::Isolate* isolate,
-                                        v8::Local<v8::Value> value,
-                                        ExceptionState& exception_state) {
-    return ScriptValue(ScriptState::Current(isolate), value);
-  }
+  v8::Isolate* isolate_ = nullptr;
+  WorldSafeV8Reference<v8::Value> value_;
 };
 
 }  // namespace blink
+
+namespace WTF {
+
+// VectorTraits for ScriptValue depend entirely on
+// WorldSafeV8Reference<v8::Value>.
+template <>
+struct VectorTraits<blink::ScriptValue>
+    : VectorTraits<blink::WorldSafeV8Reference<v8::Value>> {};
+
+}  // namespace WTF
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SCRIPT_VALUE_H_

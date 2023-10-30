@@ -15,7 +15,7 @@ namespace blink {
 namespace {
 constexpr int kTableSize = 16;
 using Seq = Vector<char>;
-using Backtrack = std::pair<size_t, size_t>;
+using Backtrack = std::pair<wtf_size_t, wtf_size_t>;
 }
 
 class HTMLSlotElementTest : public testing::Test {
@@ -33,8 +33,8 @@ Vector<char> HTMLSlotElementTest::LongestCommonSubsequence(const Seq& seq1,
   HTMLSlotElement::FillLongestCommonSubsequenceDynamicProgrammingTable(
       seq1, seq2, lcs_table_, backtrack_table_);
   Seq lcs;
-  size_t r = seq1.size();
-  size_t c = seq2.size();
+  wtf_size_t r = seq1.size();
+  wtf_size_t c = seq2.size();
   while (r > 0 && c > 0) {
     Backtrack backtrack = backtrack_table_[r][c];
     if (backtrack == std::make_pair(r - 1, c - 1)) {
@@ -131,19 +131,23 @@ TEST_F(HTMLSlotElementTest, TableSizeLimit) {
   EXPECT_EQ(lcs, LongestCommonSubsequence(seq1, seq2));
 }
 
-class HTMLSlotElementReattachTest : public testing::Test {
+class HTMLSlotElementInDocumentTest : public testing::Test {
  protected:
   void SetUp() final {
-    dummy_page_holder_ = std::make_unique<DummyPageHolder>(IntSize(800, 600));
+    dummy_page_holder_ = std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
   }
   Document& GetDocument() { return dummy_page_holder_->GetDocument(); }
+  const HeapVector<Member<Node>>& GetFlatTreeChildren(HTMLSlotElement& slot) {
+    slot.RecalcFlatTreeChildren();
+    return slot.flat_tree_children_;
+  }
 
  private:
   std::unique_ptr<DummyPageHolder> dummy_page_holder_;
 };
 
-TEST_F(HTMLSlotElementReattachTest, RecalcAssignedNodeStyleForReattach) {
-  GetDocument().body()->SetInnerHTMLFromString(R"HTML(
+TEST_F(HTMLSlotElementInDocumentTest, RecalcAssignedNodeStyleForReattach) {
+  GetDocument().body()->setInnerHTML(R"HTML(
     <div id='host'><span id='span'></span></div>
   )HTML");
 
@@ -153,20 +157,35 @@ TEST_F(HTMLSlotElementReattachTest, RecalcAssignedNodeStyleForReattach) {
   ShadowRoot& shadow_root =
       host.AttachShadowRootInternal(ShadowRootType::kOpen);
 
-  shadow_root.SetInnerHTMLFromString(
-      R"HTML(<span><slot /></span>)HTML");
+  shadow_root.setInnerHTML(R"HTML(<span><slot /></span>)HTML");
 
   auto* shadow_span = To<Element>(shadow_root.firstChild());
-  GetDocument().View()->UpdateAllLifecyclePhases(
-      DocumentLifecycle::LifecycleUpdateReason::kTest);
+  GetDocument().View()->UpdateAllLifecyclePhasesForTest();
 
   shadow_span->setAttribute(html_names::kStyleAttr, "display:block");
 
   GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
-  GetDocument().GetStyleEngine().RecalcStyle({});
+  GetDocument().GetStyleEngine().RecalcStyle();
 
   EXPECT_TRUE(shadow_span->GetComputedStyle());
   EXPECT_TRUE(span.GetComputedStyle());
+}
+
+TEST_F(HTMLSlotElementInDocumentTest, SlotableFallback) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <div id='host'></div>
+  )HTML");
+
+  Element& host = *GetDocument().getElementById("host");
+  ShadowRoot& shadow_root =
+      host.AttachShadowRootInternal(ShadowRootType::kOpen);
+
+  shadow_root.setInnerHTML(R"HTML(<slot><span></span><!-- -->text</slot>)HTML");
+
+  auto* slot = To<HTMLSlotElement>(shadow_root.firstChild());
+
+  EXPECT_TRUE(slot->AssignedNodes().IsEmpty());
+  EXPECT_EQ(2u, GetFlatTreeChildren(*slot).size());
 }
 
 }  // namespace blink

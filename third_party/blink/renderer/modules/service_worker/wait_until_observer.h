@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SERVICE_WORKER_WAIT_UNTIL_OBSERVER_H_
 
 #include "base/callback.h"
-#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -20,10 +20,8 @@ class ScriptValue;
 
 // Created for each ExtendableEvent instance.
 class MODULES_EXPORT WaitUntilObserver final
-    : public GarbageCollectedFinalized<WaitUntilObserver>,
-      public ContextClient {
-  USING_GARBAGE_COLLECTED_MIXIN(WaitUntilObserver);
-
+    : public GarbageCollected<WaitUntilObserver>,
+      public ExecutionContextClient {
  public:
   using PromiseSettledCallback =
       base::RepeatingCallback<void(const ScriptValue&)>;
@@ -36,6 +34,7 @@ class MODULES_EXPORT WaitUntilObserver final
     kFetch,
     kInstall,
     kMessage,
+    kMessageerror,
     kNotificationClick,
     kNotificationClose,
     kPaymentRequest,
@@ -49,8 +48,6 @@ class MODULES_EXPORT WaitUntilObserver final
     kBackgroundFetchSuccess,
     kContentDelete,
   };
-
-  static WaitUntilObserver* Create(ExecutionContext*, EventType, int event_id);
 
   WaitUntilObserver(ExecutionContext*, EventType, int event_id);
 
@@ -92,7 +89,7 @@ class MODULES_EXPORT WaitUntilObserver final
   // TODO(falken): Can this just use Event::IsBeingDispatched?
   bool IsDispatchingEvent() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   friend class InternalsServiceWorker;
@@ -130,7 +127,7 @@ class MODULES_EXPORT WaitUntilObserver final
   int pending_promises_ = 0;
   EventDispatchState event_dispatch_state_ = EventDispatchState::kInitial;
   bool has_rejected_promise_ = false;
-  TaskRunnerTimer<WaitUntilObserver> consume_window_interaction_timer_;
+  HeapTaskRunnerTimer<WaitUntilObserver> consume_window_interaction_timer_;
 };
 
 }  // namespace blink

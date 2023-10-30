@@ -31,26 +31,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_DOCUMENT_TIMELINE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_DOCUMENT_TIMELINE_H_
 
-#include <memory>
 #include "base/memory/scoped_refptr.h"
+#include "base/time/time.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/core/animation/animation_effect.h"
 #include "third_party/blink/renderer/core/animation/animation_timeline.h"
-#include "third_party/blink/renderer/core/animation/effect_model.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/platform/animation/compositor_animation_timeline.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
-class Animation;
-class AnimationEffect;
-class Document;
 class DocumentTimelineOptions;
 
 // DocumentTimeline is constructed and owned by Document, and tied to its
@@ -59,92 +49,71 @@ class CORE_EXPORT DocumentTimeline : public AnimationTimeline {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  class PlatformTiming : public GarbageCollectedFinalized<PlatformTiming> {
+  class PlatformTiming : public GarbageCollected<PlatformTiming> {
    public:
     // Calls DocumentTimeline's wake() method after duration seconds.
-    virtual void WakeAfter(double duration) = 0;
-    virtual void ServiceOnNextFrame() = 0;
+    virtual void WakeAfter(base::TimeDelta duration) = 0;
     virtual ~PlatformTiming() = default;
-    virtual void Trace(blink::Visitor* visitor) {}
+    virtual void Trace(Visitor* visitor) const {}
   };
-
-  static DocumentTimeline* Create(
-      Document*,
-      base::TimeDelta origin_time = base::TimeDelta(),
-      PlatformTiming* = nullptr);
 
   // Web Animations API IDL constructor
   static DocumentTimeline* Create(ExecutionContext*,
                                   const DocumentTimelineOptions*);
 
-  DocumentTimeline(Document*, base::TimeDelta origin_time, PlatformTiming*);
+  DocumentTimeline(Document*,
+                   base::TimeDelta origin_time = base::TimeDelta(),
+                   PlatformTiming* = nullptr);
   ~DocumentTimeline() override = default;
 
   bool IsDocumentTimeline() const final { return true; }
 
-  void ServiceAnimations(TimingUpdateReason);
-  void ScheduleNextService();
-
-  Animation* Play(AnimationEffect*);
-  HeapVector<Member<Animation>> getAnimations();
-
-  void AnimationAttached(Animation*) override;
-  // animations_ is a map of weak members so there is no need to explicitly
-  // clean it up.
-  void AnimationDetached(Animation*) override {}
+  void ScheduleNextService() override;
 
   bool IsActive() const override;
+  absl::optional<base::TimeDelta> InitialStartTimeForAnimations() override;
   bool HasPendingUpdates() const {
     return !animations_needing_update_.IsEmpty();
   }
-  wtf_size_t PendingAnimationsCount() const {
-    return animations_needing_update_.size();
-  }
-  base::TimeTicks ZeroTime();
-  double currentTime(bool& is_null) override;
-  double currentTime();
-  double CurrentTimeInternal(bool& is_null);
-  double CurrentTimeInternal();
-  double EffectiveTime();
-  void PauseAnimationsForTesting(double);
 
-  void SetAllCompositorPending(bool source_changed = false);
-  void SetOutdatedAnimation(Animation*);
-  void ClearOutdatedAnimation(Animation*);
-  bool HasOutdatedAnimation() const { return outdated_animation_count_ > 0; }
-  bool NeedsAnimationTimingUpdate();
+  // The zero time of DocumentTimeline is computed by adding a separate
+  // |origin_time_| from DocumentTimelineOptions.
+  // https://w3.org/TR/web-animations-1/#origin-time
+  // TODO(crbug.com/1162960) Convert DocumentTimeline::zero_time_ from
+  // base::TimeTicks to AnimationTimeDelta
+  base::TimeTicks CalculateZeroTime();
+  AnimationTimeDelta ZeroTime() override {
+    return AnimationTimeDelta(CalculateZeroTime().since_origin());
+  }
+
+  void PauseAnimationsForTesting(AnimationTimeDelta);
+
   void InvalidateKeyframeEffects(const TreeScope&);
 
   void SetPlaybackRate(double);
   double PlaybackRate() const;
 
-  CompositorAnimationTimeline* CompositorTimeline() const {
-    return compositor_timeline_.get();
-  }
-
-  Document* GetDocument() override { return document_.Get(); }
-  void Wake();
   void ResetForTesting();
   void SetTimingForTesting(PlatformTiming* timing);
-  bool HasAnimations() { return !animations_.IsEmpty(); }
 
-  void Trace(blink::Visitor*) override;
+  cc::AnimationTimeline* EnsureCompositorTimeline() override;
+
+  void Trace(Visitor*) const override;
+
+ protected:
+  PhaseAndTime CurrentPhaseAndTime() override;
 
  private:
-  Member<Document> document_;
   // Origin time for the timeline relative to the time origin of the document.
   // Provided when the timeline is constructed. See
-  // https://drafts.csswg.org/web-animations/#dom-documenttimelineoptions-origintime.
+  // https://w3.org/TR/web-animations-1/#dom-documenttimelineoptions-origintime.
   base::TimeDelta origin_time_;
   // The origin time. This is computed by adding |origin_time_| to the time
   // origin of the document.
+  // TODO(crbug.com/1162960) Convert DocumentTimeline::zero_time_ from
+  // base::TimeTicks to AnimationTimeDelta
   base::TimeTicks zero_time_;
   bool zero_time_initialized_;
-  unsigned outdated_animation_count_;
-  // Animations which will be updated on the next frame
-  // i.e. current, in effect, or had timing changed
-  HeapHashSet<Member<Animation>> animations_needing_update_;
-  HeapHashSet<WeakMember<Animation>> animations_;
 
   double playback_rate_;
 
@@ -152,13 +121,10 @@ class CORE_EXPORT DocumentTimeline : public AnimationTimeline {
   static const double kMinimumDelay;
 
   Member<PlatformTiming> timing_;
-  double last_current_time_internal_;
-
-  std::unique_ptr<CompositorAnimationTimeline> compositor_timeline_;
 
   class DocumentTimelineTiming final : public PlatformTiming {
    public:
-    DocumentTimelineTiming(DocumentTimeline* timeline)
+    explicit DocumentTimelineTiming(DocumentTimeline* timeline)
         : timeline_(timeline),
           timer_(timeline->GetDocument()->GetTaskRunner(
                      TaskType::kInternalDefault),
@@ -167,27 +133,27 @@ class CORE_EXPORT DocumentTimeline : public AnimationTimeline {
       DCHECK(timeline_);
     }
 
-    void WakeAfter(double duration) override;
-    void ServiceOnNextFrame() override;
+    void WakeAfter(base::TimeDelta duration) override;
 
-    void TimerFired(TimerBase*) { timeline_->Wake(); }
+    void TimerFired(TimerBase*) { timeline_->ScheduleServiceOnNextFrame(); }
 
-    void Trace(blink::Visitor*) override;
+    void Trace(Visitor*) const override;
 
    private:
     Member<DocumentTimeline> timeline_;
-    TaskRunnerTimer<DocumentTimelineTiming> timer_;
+    HeapTaskRunnerTimer<DocumentTimelineTiming> timer_;
   };
 
   friend class AnimationDocumentTimelineTest;
 };
 
-DEFINE_TYPE_CASTS(DocumentTimeline,
-                  AnimationTimeline,
-                  timeline,
-                  timeline->IsDocumentTimeline(),
-                  timeline.IsDocumentTimeline());
+template <>
+struct DowncastTraits<DocumentTimeline> {
+  static bool AllowFrom(const AnimationTimeline& timeline) {
+    return timeline.IsDocumentTimeline();
+  }
+};
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_DOCUMENT_TIMELINE_H_

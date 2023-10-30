@@ -5,7 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_ID_MAPPINGS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_ID_MAPPINGS_H_
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/css/css_value_id_mappings_generated.h"
+#include "third_party/blink/renderer/core/style/computed_style_constants.h"
 
 namespace blink {
 
@@ -168,6 +170,8 @@ inline EDisplay CssValueIDToPlatformEnum(CSSValueID v) {
     return EDisplay::kFlex;
   if (v == CSSValueID::kWebkitInlineFlex)
     return EDisplay::kInlineFlex;
+  if (v == CSSValueID::kMath)
+    return EDisplay::kMath;
 
   NOTREACHED();
   return EDisplay::kInline;
@@ -228,11 +232,39 @@ inline CSSValueID PlatformEnumToCSSValueID(EDisplay v) {
     return CSSValueID::kInlineGrid;
   if (v == EDisplay::kContents)
     return CSSValueID::kContents;
+  if (v == EDisplay::kMath)
+    return CSSValueID::kMath;
 
   NOTREACHED();
   return CSSValueID::kInline;
 }
 
+template <>
+inline PageOrientation CssValueIDToPlatformEnum(CSSValueID v) {
+  if (v == CSSValueID::kUpright)
+    return PageOrientation::kUpright;
+  if (v == CSSValueID::kRotateLeft)
+    return PageOrientation::kRotateLeft;
+  if (v == CSSValueID::kRotateRight)
+    return PageOrientation::kRotateRight;
+
+  NOTREACHED();
+  return PageOrientation::kUpright;
+}
+
+template <>
+inline ScrollbarGutter CssValueIDToPlatformEnum(CSSValueID v) {
+  if (v == CSSValueID::kAuto)
+    return kScrollbarGutterAuto;
+  if (v == CSSValueID::kStable)
+    return kScrollbarGutterStable;
+  if (v == CSSValueID::kBothEdges)
+    return kScrollbarGutterBothEdges;
+
+  NOTREACHED();
+  return kScrollbarGutterAuto;
+}
+
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VALUE_ID_MAPPINGS_H_

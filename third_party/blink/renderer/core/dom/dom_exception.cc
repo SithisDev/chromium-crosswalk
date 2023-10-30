@@ -28,13 +28,14 @@
 
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 
+#include "base/notreached.h"
 
 namespace blink {
 
 namespace {
 
 // Name, decription, and legacy code name and value of DOMExceptions.
-// https://heycam.github.io/webidl/#idl-DOMException-error-names
+// https://webidl.spec.whatwg.org/#idl-DOMException-error-names
 const struct DOMExceptionEntry {
   DOMExceptionCode code;
   const char* name;
@@ -140,6 +141,18 @@ const struct DOMExceptionEntry {
     // https://github.com/WICG/BackgroundSync/issues/124
     {DOMExceptionCode::kPermissionDeniedError, "PermissionDeniedError",
      "User or security policy denied the request."},
+
+    // Serial API - https://wicg.github.io/serial
+    {DOMExceptionCode::kBreakError, "BreakError",
+     "A break condition has been detected."},
+    {DOMExceptionCode::kBufferOverrunError, "BufferOverrunError",
+     "A buffer overrun has been detected."},
+    {DOMExceptionCode::kFramingError, "FramingError",
+     "A framing error has been detected."},
+    {DOMExceptionCode::kParityError, "ParityError",
+     "A parity error has been detected."},
+    {DOMExceptionCode::kWebTransportError, "WebTransportError",
+     "The WebTransport operation failed."},
 };
 
 uint16_t ToLegacyErrorCode(DOMExceptionCode exception_code) {

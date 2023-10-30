@@ -3,19 +3,11 @@
 // found in the LICENSE file.
 
 // https://wicg.github.io/scroll-animations/#scrolltimeline-interface
-
 [
-    Constructor(optional ScrollTimelineOptions options),
-    ConstructorCallWith=Document,
-    MeasureAs=ScrollTimelineConstructor,
-    RaisesException=Constructor,
     RuntimeEnabled=ScrollTimeline,
     Exposed=Window
 ] interface ScrollTimeline : AnimationTimeline {
-    readonly attribute Element? scrollSource;
+    [CallWith=Document, RaisesException, MeasureAs=ScrollTimelineConstructor] constructor(optional ScrollTimelineOptions options = {});
+    readonly attribute Element? source;
     readonly attribute ScrollDirection orientation;
-    readonly attribute DOMString startScrollOffset;
-    readonly attribute DOMString endScrollOffset;
-    readonly attribute (double or ScrollTimelineAutoKeyword) timeRange;
-    readonly attribute FillMode fill;
 };

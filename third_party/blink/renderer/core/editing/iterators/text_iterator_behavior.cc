@@ -17,12 +17,6 @@ TextIteratorBehavior TextIteratorBehavior::Builder::Build() {
 }
 
 TextIteratorBehavior::Builder&
-TextIteratorBehavior::Builder::SetCollapseTrailingSpace(bool value) {
-  behavior_.values_.bits.collapse_trailing_space = value;
-  return *this;
-}
-
-TextIteratorBehavior::Builder&
 TextIteratorBehavior::Builder::SetDoesNotBreakAtReplacedElement(bool value) {
   behavior_.values_.bits.does_not_break_at_replaced_element = value;
   return *this;
@@ -83,12 +77,6 @@ TextIteratorBehavior::Builder::SetExcludeAutofilledValue(bool value) {
   return *this;
 }
 
-TextIteratorBehavior::Builder& TextIteratorBehavior::Builder::SetForInnerText(
-    bool value) {
-  behavior_.values_.bits.for_inner_text = value;
-  return *this;
-}
-
 TextIteratorBehavior::Builder&
 TextIteratorBehavior::Builder::SetForSelectionToString(bool value) {
   behavior_.values_.bits.for_selection_to_string = value;
@@ -130,6 +118,20 @@ TextIteratorBehavior::Builder::SetSuppressesExtraNewlineEmission(bool value) {
   behavior_.values_.bits.suppresses_newline_emission = value;
   return *this;
 }
+
+TextIteratorBehavior::Builder&
+TextIteratorBehavior::Builder::SetIgnoresDisplayLock(bool value) {
+  behavior_.values_.bits.ignores_display_lock = value;
+  return *this;
+}
+
+TextIteratorBehavior::Builder&
+TextIteratorBehavior::Builder::SetEmitsPunctuationForReplacedElements(
+    bool value) {
+  behavior_.values_.bits.emits_punctuation_for_replaced_elements = value;
+  return *this;
+}
+
 // -
 TextIteratorBehavior::TextIteratorBehavior(const TextIteratorBehavior& other) =
     default;
@@ -137,8 +139,6 @@ TextIteratorBehavior::TextIteratorBehavior(const TextIteratorBehavior& other) =
 TextIteratorBehavior::TextIteratorBehavior() {
   values_.all = 0;
 }
-
-TextIteratorBehavior::~TextIteratorBehavior() = default;
 
 bool TextIteratorBehavior::operator==(const TextIteratorBehavior& other) const {
   return values_.all == other.values_.all;

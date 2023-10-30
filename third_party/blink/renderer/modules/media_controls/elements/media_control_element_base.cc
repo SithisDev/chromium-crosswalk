@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_element_base.h"
 
+#include "third_party/blink/renderer/core/css/css_property_names.h"
+#include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
 
@@ -22,6 +24,9 @@ bool MediaControlElementBase::IsWanted() const {
 }
 
 void MediaControlElementBase::SetDoesFit(bool fits) {
+  if (does_fit_ == fits)
+    return;
+
   does_fit_ = fits;
   UpdateShownState();
 }
@@ -60,7 +65,7 @@ HTMLMediaElement& MediaControlElementBase::MediaElement() const {
   return GetMediaControls().MediaElement();
 }
 
-void MediaControlElementBase::Trace(blink::Visitor* visitor) {
+void MediaControlElementBase::Trace(Visitor* visitor) const {
   visitor->Trace(media_controls_);
   visitor->Trace(element_);
 }

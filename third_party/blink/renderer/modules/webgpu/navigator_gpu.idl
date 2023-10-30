@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://github.com/gpuweb/gpuweb/blob/master/design/sketch.webidl
+// https://gpuweb.github.io/gpuweb/
 
 [
     Exposed=Window,
-    ImplementedAs=NavigatorGPU
+    ImplementedAs=GPU
 ] partial interface Navigator {
-    [SameObject, RuntimeEnabled=WebGPU, CallWith=ScriptState] readonly attribute GPU gpu;
+    [SameObject, SecureContext, RuntimeEnabled=WebGPU] readonly attribute GPU gpu;
 };

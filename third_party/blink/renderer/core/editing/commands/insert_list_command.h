@@ -26,11 +26,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_INSERT_LIST_COMMAND_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_INSERT_LIST_COMMAND_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/commands/composite_edit_command.h"
 
 namespace blink {
 
 class HTMLElement;
+class HTMLLIElement;
 class HTMLUListElement;
 
 class CORE_EXPORT InsertListCommand final : public CompositeEditCommand {
@@ -41,7 +43,7 @@ class CORE_EXPORT InsertListCommand final : public CompositeEditCommand {
 
   bool PreservesTypingStyle() const override { return true; }
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void DoApply(EditingState*) override;

@@ -25,16 +25,34 @@
 
 #include "third_party/blink/renderer/platform/graphics/decoding_image_generator.h"
 
-#include <utility>
 #include <memory>
+#include <utility>
 
 #include "third_party/blink/renderer/platform/graphics/image_frame_generator.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
 #include "third_party/blink/renderer/platform/image-decoders/segment_reader.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkData.h"
+#include "third_party/skia/include/core/SkImageInfo.h"
+
+namespace {
+class ScopedSegmentReaderDataLocker {
+  STACK_ALLOCATED();
+
+ public:
+  explicit ScopedSegmentReaderDataLocker(blink::SegmentReader* segment_reader)
+      : segment_reader_(segment_reader) {
+    segment_reader_->LockData();
+  }
+  ~ScopedSegmentReaderDataLocker() { segment_reader_->UnlockData(); }
+
+ private:
+  blink::SegmentReader* const segment_reader_;
+};
+}  // namespace
 
 namespace blink {
 
@@ -53,24 +71,26 @@ DecodingImageGenerator::CreateAsSkImageGenerator(sk_sp<SkData> data) {
   if (!decoder || !decoder->IsSizeAvailable())
     return nullptr;
 
-  const IntSize size = decoder->Size();
+  const gfx::Size size = decoder->Size();
   const SkImageInfo info =
-      SkImageInfo::MakeN32(size.Width(), size.Height(), kPremul_SkAlphaType,
+      SkImageInfo::MakeN32(size.width(), size.height(), kPremul_SkAlphaType,
                            decoder->ColorSpaceForSkImages());
 
   scoped_refptr<ImageFrameGenerator> frame = ImageFrameGenerator::Create(
-      SkISize::Make(size.Width(), size.Height()), false,
+      SkISize::Make(size.width(), size.height()), false,
       decoder->GetColorBehavior(), decoder->GetSupportedDecodeSizes());
   if (!frame)
     return nullptr;
 
   WebVector<FrameMetadata> frames;
   frames.emplace_back(FrameMetadata());
+  cc::ImageHeaderMetadata image_metadata =
+      decoder->MakeMetadataForDecodeAcceleration();
+  image_metadata.all_data_received_prior_to_decode = true;
   sk_sp<DecodingImageGenerator> generator = DecodingImageGenerator::Create(
       std::move(frame), info, std::move(segment_reader), std::move(frames),
       PaintImage::GetNextContentId(), true /* all_data_received */,
-      true /* is_eligible_for_accelerated_decoding */,
-      false /* can_yuv_decode */);
+      false /* can_yuv_decode */, image_metadata);
   return std::make_unique<SkiaPaintImageGenerator>(
       std::move(generator), PaintImage::kDefaultFrameIndex,
       PaintImage::kDefaultGeneratorClientId);
@@ -84,12 +104,11 @@ sk_sp<DecodingImageGenerator> DecodingImageGenerator::Create(
     WebVector<FrameMetadata> frames,
     PaintImage::ContentId content_id,
     bool all_data_received,
-    bool is_eligible_for_accelerated_decoding,
-    bool can_yuv_decode) {
+    bool can_yuv_decode,
+    const cc::ImageHeaderMetadata& image_metadata) {
   return sk_sp<DecodingImageGenerator>(new DecodingImageGenerator(
       std::move(frame_generator), info, std::move(data), std::move(frames),
-      content_id, all_data_received, is_eligible_for_accelerated_decoding,
-      can_yuv_decode));
+      content_id, all_data_received, can_yuv_decode, image_metadata));
 }
 
 DecodingImageGenerator::DecodingImageGenerator(
@@ -99,22 +118,17 @@ DecodingImageGenerator::DecodingImageGenerator(
     WebVector<FrameMetadata> frames,
     PaintImage::ContentId complete_frame_content_id,
     bool all_data_received,
-    bool is_eligible_for_accelerated_decoding,
-    bool can_yuv_decode)
+    bool can_yuv_decode,
+    const cc::ImageHeaderMetadata& image_metadata)
     : PaintImageGenerator(info, frames.ReleaseVector()),
       frame_generator_(std::move(frame_generator)),
       data_(std::move(data)),
       all_data_received_(all_data_received),
-      is_eligible_for_accelerated_decoding_(
-          is_eligible_for_accelerated_decoding),
       can_yuv_decode_(can_yuv_decode),
-      complete_frame_content_id_(complete_frame_content_id) {}
+      complete_frame_content_id_(complete_frame_content_id),
+      image_metadata_(image_metadata) {}
 
 DecodingImageGenerator::~DecodingImageGenerator() = default;
-
-bool DecodingImageGenerator::IsEligibleForAcceleratedDecoding() const {
-  return is_eligible_for_accelerated_decoding_;
-}
 
 sk_sp<SkData> DecodingImageGenerator::GetEncodedData() const {
   TRACE_EVENT0("blink", "DecodingImageGenerator::refEncodedData");
@@ -181,9 +195,11 @@ bool DecodingImageGenerator::GetPixels(const SkImageInfo& dst_info,
   {
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
                  "Decode LazyPixelRef", "LazyPixelRef", lazy_pixel_ref);
+
+    ScopedSegmentReaderDataLocker lock_data(data_.get());
     decoded = frame_generator_->DecodeAndScale(
-        data_.get(), all_data_received_, frame_index, decode_info, memory,
-        adjusted_row_bytes, alpha_option, client_id);
+        data_.get(), all_data_received_, static_cast<wtf_size_t>(frame_index),
+        decode_info, memory, adjusted_row_bytes, alpha_option, client_id);
   }
 
   if (decoded && needs_color_xform) {
@@ -195,79 +211,84 @@ bool DecodingImageGenerator::GetPixels(const SkImageInfo& dst_info,
 
   // Convert the color type to the requested one if necessary
   if (decoded && target_info.colorType() != dst_info.colorType()) {
-    auto canvas = SkCanvas::MakeRasterDirect(dst_info, pixels, row_bytes);
-    DCHECK(canvas);
-    SkPaint paint;
-    if (dst_info.colorType() == kARGB_4444_SkColorType ||
-        dst_info.colorType() == kRGB_565_SkColorType) {
+    // Convert the color type by readPixels if dithering is not necessary
+    // (readPixels is potentially cheaper than a full-blown drawBitmap).
+    if (SkColorTypeBytesPerPixel(target_info.colorType()) <=
+        SkColorTypeBytesPerPixel(dst_info.colorType())) {
+      decoded = SkPixmap{target_info, memory, adjusted_row_bytes}.readPixels(
+          SkPixmap{dst_info, pixels, row_bytes});
+      DCHECK(decoded);
+    } else {  // Do dithering by drawBitmap() if dithering is necessary
+      auto canvas = SkCanvas::MakeRasterDirect(dst_info, pixels, row_bytes);
+      DCHECK(canvas);
+
+      SkPaint paint;
       paint.setDither(true);
+      paint.setBlendMode(SkBlendMode::kSrc);
+
+      SkBitmap bitmap;
+      decoded = bitmap.installPixels(target_info, memory, adjusted_row_bytes);
+      DCHECK(decoded);
+
+      canvas->drawImage(bitmap.asImage(), 0, 0, SkSamplingOptions(), &paint);
     }
-    paint.setBlendMode(SkBlendMode::kSrc);
-    SkBitmap bitmap;
-    decoded = bitmap.installPixels(target_info, memory, adjusted_row_bytes);
-    DCHECK(decoded);
-    canvas->drawBitmap(bitmap, 0, 0, &paint);
   }
   return decoded;
 }
 
-bool DecodingImageGenerator::QueryYUVA8(
-    SkYUVASizeInfo* size_info,
-    SkYUVAIndex indices[SkYUVAIndex::kIndexCount],
-    SkYUVColorSpace* color_space) const {
+bool DecodingImageGenerator::QueryYUVA(
+    const SkYUVAPixmapInfo::SupportedDataTypes& supported_data_types,
+    SkYUVAPixmapInfo* yuva_pixmap_info) const {
   if (!can_yuv_decode_)
     return false;
 
-  TRACE_EVENT0("blink", "DecodingImageGenerator::queryYUVA8");
-
-  // TODO(crbug.com/915707): Set the colorspace based on image type.
-  // Can pass |color_space| to GetYUVComponentSizes and query a method
-  // in ImageDecoder (to be added) to get the proper value.
-  if (color_space)
-    *color_space = kJPEG_SkYUVColorSpace;
-
-  // Indicate that we have three separate planes
-  indices[SkYUVAIndex::kY_Index] = {0, SkColorChannel::kR};
-  indices[SkYUVAIndex::kU_Index] = {1, SkColorChannel::kR};
-  indices[SkYUVAIndex::kV_Index] = {2, SkColorChannel::kR};
-  indices[SkYUVAIndex::kA_Index] = {-1, SkColorChannel::kR};
+  TRACE_EVENT0("blink", "DecodingImageGenerator::QueryYUVAInfo");
 
   DCHECK(all_data_received_);
-  return frame_generator_->GetYUVComponentSizes(data_.get(), size_info);
+
+  ScopedSegmentReaderDataLocker lock_data(data_.get());
+  return frame_generator_->GetYUVAInfo(data_.get(), supported_data_types,
+                                       yuva_pixmap_info);
 }
 
-bool DecodingImageGenerator::GetYUVA8Planes(const SkYUVASizeInfo& size_info,
-                                            const SkYUVAIndex indices[4],
-                                            void* planes[3],
-                                            size_t frame_index,
-                                            uint32_t lazy_pixel_ref) {
+bool DecodingImageGenerator::GetYUVAPlanes(
+    const SkYUVAPixmaps& pixmaps,
+    size_t frame_index,
+    uint32_t lazy_pixel_ref,
+    PaintImage::GeneratorClientId client_id) {
   // TODO(crbug.com/943519): YUV decoding does not currently support incremental
   // decoding. See comment in image_frame_generator.h.
   DCHECK(can_yuv_decode_);
   DCHECK(all_data_received_);
 
-  TRACE_EVENT0("blink", "DecodingImageGenerator::getYUVA8Planes");
+  TRACE_EVENT0("blink", "DecodingImageGenerator::GetYUVAPlanes");
   TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
                "Decode LazyPixelRef", "LazyPixelRef", lazy_pixel_ref);
 
-  // Verify sizes and indices
+  SkISize plane_sizes[3];
+  wtf_size_t plane_row_bytes[3];
+  void* plane_addrs[3];
+
+  // Verify sizes and extract DecodeToYUV parameters
   for (int i = 0; i < 3; ++i) {
-    if (size_info.fSizes[i].isEmpty() || !size_info.fWidthBytes[i]) {
+    const SkPixmap& plane = pixmaps.plane(i);
+    if (plane.dimensions().isEmpty() || !plane.rowBytes())
       return false;
-    }
+    if (plane.colorType() != pixmaps.plane(0).colorType())
+      return false;
+    plane_sizes[i] = plane.dimensions();
+    plane_row_bytes[i] = base::checked_cast<wtf_size_t>(plane.rowBytes());
+    plane_addrs[i] = plane.writable_addr();
   }
-  if (!size_info.fSizes[3].isEmpty() || size_info.fWidthBytes[3]) {
-    return false;
-  }
-  int numPlanes;
-  if (!SkYUVAIndex::AreValidIndices(indices, &numPlanes) || numPlanes != 3) {
+  if (!pixmaps.plane(3).dimensions().isEmpty()) {
     return false;
   }
 
-  bool decoded =
-      frame_generator_->DecodeToYUV(data_.get(), frame_index, size_info.fSizes,
-                                    planes, size_info.fWidthBytes);
-  return decoded;
+  ScopedSegmentReaderDataLocker lock_data(data_.get());
+  return frame_generator_->DecodeToYUV(
+      data_.get(), static_cast<wtf_size_t>(frame_index),
+      pixmaps.plane(0).colorType(), plane_sizes, plane_addrs, plane_row_bytes,
+      client_id);
 }
 
 SkISize DecodingImageGenerator::GetSupportedDecodeSize(
@@ -285,6 +306,11 @@ PaintImage::ContentId DecodingImageGenerator::GetContentIdForFrame(
     return complete_frame_content_id_;
 
   return PaintImageGenerator::GetContentIdForFrame(frame_index);
+}
+
+const cc::ImageHeaderMetadata*
+DecodingImageGenerator::GetMetadataForDecodeAcceleration() const {
+  return &image_metadata_;
 }
 
 }  // namespace blink

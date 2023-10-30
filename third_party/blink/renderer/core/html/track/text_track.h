@@ -27,48 +27,49 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_TRACK_TEXT_TRACK_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_TRACK_TEXT_TRACK_H_
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_text_track_mode.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/html/track/track_base.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 class CueTimeline;
 class ExceptionState;
+class ExecutionContext;
 class HTMLMediaElement;
+class HTMLElement;
 class TextTrack;
 class TextTrackCue;
 class TextTrackCueList;
 class TextTrackList;
 
+using TextTrackMode = V8TextTrackMode::Enum;
+
 class CORE_EXPORT TextTrack : public EventTargetWithInlineData,
                               public TrackBase {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(TextTrack);
 
  public:
-  static TextTrack* Create(const AtomicString& kind,
-                           const AtomicString& label,
-                           const AtomicString& language) {
-    return MakeGarbageCollected<TextTrack>(kind, label, language, g_empty_atom,
-                                           kAddTrack);
-  }
-
   enum TextTrackType { kTrackElement, kAddTrack, kInBand };
 
   TextTrack(const AtomicString& kind,
             const AtomicString& label,
             const AtomicString& language,
-            const AtomicString& id,
-            TextTrackType);
+            HTMLElement& source_element,
+            const AtomicString& id = g_empty_atom,
+            TextTrackType = kAddTrack);
   ~TextTrack() override;
 
   virtual void SetTrackList(TextTrackList*);
   TextTrackList* TrackList() { return track_list_; }
 
   bool IsVisualKind() const;
+  bool IsSpokenKind() const;
 
   static const AtomicString& SubtitlesKeyword();
   static const AtomicString& CaptionsKeyword();
@@ -77,17 +78,14 @@ class CORE_EXPORT TextTrack : public EventTargetWithInlineData,
   static const AtomicString& MetadataKeyword();
   static bool IsValidKindKeyword(const String&);
 
-  static const AtomicString& DisabledKeyword();
-  static const AtomicString& HiddenKeyword();
-  static const AtomicString& ShowingKeyword();
-
   void SetKind(const AtomicString& kind) { kind_ = kind; }
   void SetLabel(const AtomicString& label) { label_ = label; }
   void SetLanguage(const AtomicString& language) { language_ = language; }
   void SetId(const String& id) { id_ = id; }
 
-  AtomicString mode() const { return mode_; }
-  virtual void setMode(const AtomicString&);
+  V8TextTrackMode mode() const { return V8TextTrackMode(mode_); }
+  virtual void setMode(const V8TextTrackMode&);
+  void SetModeEnum(TextTrackMode mode);
 
   enum ReadinessState {
     kNotLoaded = 0,
@@ -113,6 +111,7 @@ class CORE_EXPORT TextTrack : public EventTargetWithInlineData,
   DEFINE_ATTRIBUTE_EVENT_LISTENER(cuechange, kCuechange)
 
   TextTrackType TrackType() const { return track_type_; }
+  const AtomicString& Language() const { return language_; }
 
   int TrackIndex();
   void InvalidateTrackIndex();
@@ -126,13 +125,19 @@ class CORE_EXPORT TextTrack : public EventTargetWithInlineData,
 
   virtual bool IsDefault() const { return false; }
 
-  void RemoveAllCues();
+  void Reset();
 
   // EventTarget methods
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
+
+  const HeapVector<Member<CSSStyleSheet>>& GetCSSStyleSheets() const {
+    return style_sheets_;
+  }
+
+  void SetCSSStyleSheets(HeapVector<Member<CSSStyleSheet>>);
 
  protected:
   void AddListOfCues(HeapVector<Member<TextTrackCue>>&);
@@ -143,9 +148,11 @@ class CORE_EXPORT TextTrack : public EventTargetWithInlineData,
   TextTrackCueList* EnsureTextTrackCueList();
   Member<TextTrackCueList> cues_;
   Member<TextTrackCueList> active_cues_;
+  HeapVector<Member<CSSStyleSheet>> style_sheets_;
 
   Member<TextTrackList> track_list_;
-  AtomicString mode_;
+  Member<HTMLElement> source_element_;
+  TextTrackMode mode_ = TextTrackMode::kDisabled;
   TextTrackType track_type_;
   ReadinessState readiness_state_;
   int track_index_;
@@ -153,7 +160,12 @@ class CORE_EXPORT TextTrack : public EventTargetWithInlineData,
   bool has_been_configured_;
 };
 
-DEFINE_TRACK_TYPE_CASTS(TextTrack, WebMediaPlayer::kTextTrack);
+template <>
+struct DowncastTraits<TextTrack> {
+  static bool AllowFrom(const TrackBase& track) {
+    return track.GetType() == WebMediaPlayer::kTextTrack;
+  }
+};
 
 }  // namespace blink
 

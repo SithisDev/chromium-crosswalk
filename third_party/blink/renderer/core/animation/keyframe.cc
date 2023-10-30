@@ -7,7 +7,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
 #include "third_party/blink/renderer/core/animation/effect_model.h"
 #include "third_party/blink/renderer/core/animation/invalidatable_interpolation.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -16,7 +16,7 @@ Keyframe::PropertySpecificKeyframe::PropertySpecificKeyframe(
     scoped_refptr<TimingFunction> easing,
     EffectModel::CompositeOperation composite)
     : offset_(offset), easing_(std::move(easing)), composite_(composite) {
-  DCHECK(!IsNull(offset));
+  DCHECK(std::isfinite(offset));
   if (!easing_)
     easing_ = LinearTimingFunction::Shared();
 }
@@ -30,8 +30,8 @@ Interpolation* Keyframe::PropertySpecificKeyframe::CreateInterpolation(
       const_cast<PropertySpecificKeyframe*>(&end));
 }
 
-void Keyframe::AddKeyframePropertiesToV8Object(
-    V8ObjectBuilder& object_builder) const {
+void Keyframe::AddKeyframePropertiesToV8Object(V8ObjectBuilder& object_builder,
+                                               Element* element) const {
   if (offset_) {
     object_builder.Add("offset", offset_.value());
   } else {

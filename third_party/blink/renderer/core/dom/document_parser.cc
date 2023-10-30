@@ -29,7 +29,6 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_parser_client.h"
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 
@@ -42,7 +41,7 @@ DocumentParser::DocumentParser(Document* document)
 
 DocumentParser::~DocumentParser() = default;
 
-void DocumentParser::Trace(Visitor* visitor) {
+void DocumentParser::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
   visitor->Trace(clients_);
 }
@@ -79,10 +78,6 @@ void DocumentParser::Detach() {
   state_ = kDetachedState;
   document_ = nullptr;
 }
-
-void DocumentParser::PauseScheduledTasks() {}
-
-void DocumentParser::UnpauseScheduledTasks() {}
 
 void DocumentParser::AddClient(DocumentParserClient* client) {
   clients_.insert(client);

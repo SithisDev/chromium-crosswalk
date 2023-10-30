@@ -25,7 +25,11 @@
 
 #include "third_party/blink/renderer/core/html/forms/external_date_time_chooser.h"
 
-#include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
+#include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_chooser_client.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
@@ -33,44 +37,39 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
-#include "ui/base/ime/mojo/ime_types.mojom-blink.h"
+#include "ui/base/ime/mojom/ime_types.mojom-blink.h"
 
 namespace blink {
 
-static ui::mojom::TextInputType ToTextInputType(const AtomicString& source) {
+static ui::TextInputType ToTextInputType(const AtomicString& source) {
   if (source == input_type_names::kDate)
-    return ui::mojom::TextInputType::DATE;
+    return ui::TextInputType::TEXT_INPUT_TYPE_DATE;
   if (source == input_type_names::kDatetime)
-    return ui::mojom::TextInputType::TIME;
+    return ui::TextInputType::TEXT_INPUT_TYPE_TIME;
   if (source == input_type_names::kDatetimeLocal)
-    return ui::mojom::TextInputType::DATE_TIME_LOCAL;
+    return ui::TextInputType::TEXT_INPUT_TYPE_DATE_TIME_LOCAL;
   if (source == input_type_names::kMonth)
-    return ui::mojom::TextInputType::MONTH;
+    return ui::TextInputType::TEXT_INPUT_TYPE_MONTH;
   if (source == input_type_names::kTime)
-    return ui::mojom::TextInputType::TIME;
+    return ui::TextInputType::TEXT_INPUT_TYPE_TIME;
   if (source == input_type_names::kWeek)
-    return ui::mojom::TextInputType::WEEK;
-  return ui::mojom::TextInputType::NONE;
+    return ui::TextInputType::TEXT_INPUT_TYPE_WEEK;
+  return ui::TextInputType::TEXT_INPUT_TYPE_NONE;
 }
 
 ExternalDateTimeChooser::~ExternalDateTimeChooser() = default;
 
-void ExternalDateTimeChooser::Trace(Visitor* visitor) {
+void ExternalDateTimeChooser::Trace(Visitor* visitor) const {
+  visitor->Trace(date_time_chooser_);
   visitor->Trace(client_);
   DateTimeChooser::Trace(visitor);
 }
 
 ExternalDateTimeChooser::ExternalDateTimeChooser(DateTimeChooserClient* client)
-    : client_(client) {
+    : date_time_chooser_(client->OwnerElement().GetExecutionContext()),
+      client_(client) {
   DCHECK(!RuntimeEnabledFeatures::InputMultipleFieldsUIEnabled());
   DCHECK(client);
-}
-
-ExternalDateTimeChooser* ExternalDateTimeChooser::Create(
-    DateTimeChooserClient* client) {
-  ExternalDateTimeChooser* chooser =
-      MakeGarbageCollected<ExternalDateTimeChooser>(client);
-  return chooser;
 }
 
 void ExternalDateTimeChooser::OpenDateTimeChooser(
@@ -88,7 +87,7 @@ void ExternalDateTimeChooser::OpenDateTimeChooser(
 
   auto response_callback = WTF::Bind(&ExternalDateTimeChooser::ResponseHandler,
                                      WrapPersistent(this));
-  GetDateTimeChooser(frame)->OpenDateTimeDialog(
+  GetDateTimeChooser(frame).OpenDateTimeDialog(
       std::move(date_time_dialog_value), std::move(response_callback));
 }
 
@@ -105,17 +104,35 @@ bool ExternalDateTimeChooser::IsShowingDateTimeChooserUI() const {
   return client_;
 }
 
-mojom::blink::DateTimeChooser* ExternalDateTimeChooser::GetDateTimeChooser(
+mojom::blink::DateTimeChooser& ExternalDateTimeChooser::GetDateTimeChooser(
     LocalFrame* frame) {
-  if (!date_time_chooser_)
-    frame->GetInterfaceProvider().GetInterface(&date_time_chooser_);
-  return date_time_chooser_.get();
+  if (!date_time_chooser_.is_bound()) {
+    frame->GetBrowserInterfaceBroker().GetInterface(
+        date_time_chooser_.BindNewPipeAndPassReceiver(
+            // Per the spec, this is a user interaction.
+            // https://html.spec.whatwg.org/multipage/input.html#common-input-element-events
+            frame->GetTaskRunner(TaskType::kUserInteraction)));
+  }
+
+  DCHECK(date_time_chooser_.is_bound());
+  return *date_time_chooser_.get();
 }
 
 void ExternalDateTimeChooser::DidChooseValue(double value) {
+  // Cache the owner element first, because DidChooseValue might run
+  // JavaScript code and destroy |client|.
+  Element* element = client_ ? &client_->OwnerElement() : nullptr;
   if (client_)
     client_->DidChooseValue(value);
-  // didChooseValue might run JavaScript code, and endChooser() might be
+
+  // Post an accessibility event on the owner element to indicate the
+  // value changed.
+  if (element) {
+    if (AXObjectCache* cache = element->GetDocument().ExistingAXObjectCache())
+      cache->HandleValueChanged(element);
+  }
+
+  // DidChooseValue might run JavaScript code, and endChooser() might be
   // called. However DateTimeChooserCompletionImpl still has one reference to
   // this object.
   if (client_)
@@ -129,6 +146,10 @@ void ExternalDateTimeChooser::DidCancelChooser() {
 
 void ExternalDateTimeChooser::EndChooser() {
   DCHECK(client_);
+  if (date_time_chooser_.is_bound()) {
+    date_time_chooser_->CloseDateTimeDialog();
+    date_time_chooser_.reset();
+  }
   DateTimeChooserClient* client = client_;
   client_ = nullptr;
   client->DidEndChooser();

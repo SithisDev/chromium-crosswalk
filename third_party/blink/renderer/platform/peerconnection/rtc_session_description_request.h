@@ -31,7 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_PEERCONNECTION_RTC_SESSION_DESCRIPTION_REQUEST_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_PEERCONNECTION_RTC_SESSION_DESCRIPTION_REQUEST_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace webrtc {
@@ -39,17 +39,17 @@ class RTCError;
 }
 
 namespace blink {
-class WebRTCSessionDescription;
+class RTCSessionDescriptionPlatform;
 
 class RTCSessionDescriptionRequest
-    : public GarbageCollectedFinalized<RTCSessionDescriptionRequest> {
+    : public GarbageCollected<RTCSessionDescriptionRequest> {
  public:
   virtual ~RTCSessionDescriptionRequest() = default;
 
-  virtual void RequestSucceeded(const WebRTCSessionDescription&) = 0;
+  virtual void RequestSucceeded(RTCSessionDescriptionPlatform*) = 0;
   virtual void RequestFailed(const webrtc::RTCError&) = 0;
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 
  protected:
   RTCSessionDescriptionRequest() = default;

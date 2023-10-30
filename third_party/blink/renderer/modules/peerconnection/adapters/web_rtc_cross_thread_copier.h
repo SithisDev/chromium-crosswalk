@@ -9,11 +9,12 @@
 // types to be passed across threads using their copy constructors.
 
 #include <set>
+#include <vector>
 
 #include "third_party/blink/public/platform/web_vector.h"
-#include "third_party/blink/renderer/modules/peerconnection/adapters/p2p_quic_transport.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/webrtc/api/rtc_error.h"
 #include "third_party/webrtc/api/scoped_refptr.h"
 
 namespace cricket {
@@ -28,22 +29,21 @@ class SocketAddress;
 
 namespace webrtc {
 class DtlsTransportInformation;
+class MediaStreamInterface;
+class RtpReceiverInterface;
 class SctpTransportInformation;
+class VideoTrackInterface;
+struct DataBuffer;
 }
 
 namespace blink {
 
-struct P2PQuicTransportConfig;
+class MockWebRtcVideoTrack;
+class MediaStreamVideoTrack;
 
 }
 
 namespace WTF {
-
-template <>
-struct CrossThreadCopier<std::string>
-    : public CrossThreadCopierPassThrough<std::string> {
-  STATIC_ONLY(CrossThreadCopier);
-};
 
 template <>
 struct CrossThreadCopier<cricket::IceParameters>
@@ -84,12 +84,6 @@ struct CrossThreadCopier<std::pair<cricket::Candidate, cricket::Candidate>>
 };
 
 template <>
-struct CrossThreadCopier<blink::P2PQuicTransportConfig>
-    : public CrossThreadCopierPassThrough<blink::P2PQuicTransportConfig> {
-  STATIC_ONLY(CrossThreadCopier);
-};
-
-template <>
 struct CrossThreadCopier<webrtc::DtlsTransportInformation>
     : public CrossThreadCopierPassThrough<webrtc::DtlsTransportInformation> {
   STATIC_ONLY(CrossThreadCopier);
@@ -102,27 +96,52 @@ struct CrossThreadCopier<webrtc::SctpTransportInformation>
 };
 
 template <>
-struct CrossThreadCopier<blink::P2PQuicTransport::StartConfig>
-    : public CrossThreadCopierPassThrough<
-          blink::P2PQuicTransport::StartConfig> {
+struct CrossThreadCopier<webrtc::RTCError>
+    : public CrossThreadCopierPassThrough<webrtc::RTCError> {
   STATIC_ONLY(CrossThreadCopier);
-  using Type = blink::P2PQuicTransport::StartConfig;
-  static blink::P2PQuicTransport::StartConfig Copy(
-      blink::P2PQuicTransport::StartConfig config) {
-    // This is in fact a move.
-    return config;
+  using Type = webrtc::RTCError;
+  static webrtc::RTCError Copy(webrtc::RTCError error) {
+    return error;  // This is in fact a move.
   }
 };
 
 template <>
-struct CrossThreadCopier<blink::P2PQuicTransportStats>
-    : public CrossThreadCopierPassThrough<blink::P2PQuicTransportStats> {
+struct CrossThreadCopier<rtc::scoped_refptr<webrtc::RtpReceiverInterface>>
+    : public CrossThreadCopierPassThrough<
+          rtc::scoped_refptr<webrtc::RtpReceiverInterface>> {
   STATIC_ONLY(CrossThreadCopier);
 };
 
 template <>
-struct CrossThreadCopier<blink::P2PQuicNegotiatedParams>
-    : public CrossThreadCopierPassThrough<blink::P2PQuicNegotiatedParams> {
+struct CrossThreadCopier<
+    std::vector<rtc::scoped_refptr<webrtc::MediaStreamInterface>>>
+    : public CrossThreadCopierPassThrough<
+          std::vector<rtc::scoped_refptr<webrtc::MediaStreamInterface>>> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<blink::MockWebRtcVideoTrack>
+    : public CrossThreadCopierPassThrough<blink::MockWebRtcVideoTrack> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<blink::MediaStreamVideoTrack>
+    : public CrossThreadCopierPassThrough<blink::MediaStreamVideoTrack> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<rtc::scoped_refptr<webrtc::VideoTrackInterface>>
+    : public CrossThreadCopierPassThrough<
+          rtc::scoped_refptr<webrtc::VideoTrackInterface>> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<webrtc::DataBuffer>
+    : public CrossThreadCopierPassThrough<webrtc::DataBuffer> {
   STATIC_ONLY(CrossThreadCopier);
 };
 

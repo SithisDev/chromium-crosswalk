@@ -23,7 +23,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_OBJECT_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_OBJECT_ELEMENT_H_
 
-#include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/forms/form_associated.h"
 #include "third_party/blink/renderer/core/html/forms/listed_element.h"
@@ -41,12 +40,11 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
                                             public ListedElement,
                                             public FormAssociated {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(HTMLObjectElement);
 
  public:
   HTMLObjectElement(Document&, const CreateElementFlags);
-  ~HTMLObjectElement() override;
-  void Trace(Visitor*) override;
+  ~HTMLObjectElement() override = default;
+  void Trace(Visitor*) const override;
 
   // Returns attributes that should be checked against Trusted Types
   const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
@@ -59,13 +57,10 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
 
   bool HasFallbackContent() const override;
   bool UseFallbackContent() const override;
-  bool CanRenderFallbackContent() const override { return true; }
-  void RenderFallbackContent(Frame*) override;
 
   bool IsFormControlElement() const override { return false; }
 
   bool IsEnumeratable() const override { return true; }
-  bool IsInteractiveContent() const override;
 
   bool ChildrenCanHaveStyle() const override { return UseFallbackContent(); }
 
@@ -88,6 +83,22 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
 
   FormAssociated* ToFormAssociatedOrNull() override { return this; }
   void AssociateWith(HTMLFormElement*) override;
+
+  // Returns true if this object started to load something, and finished
+  // the loading regardless of success or failure.
+  bool DidFinishLoading() const;
+
+  enum class ErrorEventPolicy {
+    kDoNotDispatch,
+    kDispatch,
+  };
+  void RenderFallbackContent(ErrorEventPolicy should_dispatch_error_event);
+
+  static bool IsClassOf(const FrameOwner& owner);
+
+  // TODO(crbug.com/1286950) Remove this once a decision is made on deprecation
+  // of the <param> URL functionality.
+  void UseCountParamUrlUsageIfNeeded(bool is_pdf) const;
 
  private:
   void ParseAttribute(const AttributeModificationParams&) override;
@@ -128,11 +139,17 @@ class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement,
     return NamedItemType::kNameOrId;
   }
 
+  int DefaultTabIndex() const override;
+
   String class_id_;
   bool use_fallback_content_ : 1;
+
+  // TODO(crbug.com/1286950) Remove this once a decision is made on deprecation
+  // of the <param> URL functionality.
+  bool should_use_count_param_url_ : 1;
 };
 
-// Like ToHTMLObjectElement() but accepts a ListedElement as input
+// Like To<HTMLObjectElement>() but accepts a ListedElement as input
 // instead of a Node.
 const HTMLObjectElement* ToHTMLObjectElementFromListedElement(
     const ListedElement*);

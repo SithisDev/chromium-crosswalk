@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/loader/resource/multipart_image_resource_parser.h"
 
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
@@ -184,7 +185,7 @@ wtf_size_t MultipartImageResourceParser::FindBoundary(const Vector<char>& data,
   return boundary_position;
 }
 
-void MultipartImageResourceParser::Trace(blink::Visitor* visitor) {
+void MultipartImageResourceParser::Trace(Visitor* visitor) const {
   visitor->Trace(client_);
 }
 

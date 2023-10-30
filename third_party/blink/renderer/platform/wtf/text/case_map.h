@@ -6,7 +6,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_CASE_MAP_H_
 
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_export.h"
 
 namespace WTF {
@@ -43,18 +42,33 @@ class WTF_EXPORT CaseMap {
   // Construct from a locale string. The given locale is normalized.
   explicit CaseMap(const AtomicString& locale) : CaseMap(Locale(locale)) {}
 
-  String ToLower(const String& source) const;
-  String ToUpper(const String& source) const;
+  String ToLower(const String& source,
+                 TextOffsetMap* offset_map = nullptr) const;
+  String ToUpper(const String& source,
+                 TextOffsetMap* offset_map = nullptr) const;
 
-  scoped_refptr<StringImpl> ToLower(StringImpl* source) const;
-  scoped_refptr<StringImpl> ToUpper(StringImpl* source) const;
-
-  String ToLower(const String& source, TextOffsetMap* offset_map) const;
-  String ToUpper(const String& source, TextOffsetMap* offset_map) const;
-
-  UChar32 ToUpper(UChar32 c) const;
+  // Fast code path for simple cases, only for root locale.
+  // TODO(crbug.com/627682): This should move to private, once
+  // |DeprecatedLower()| is deprecated.
+  static scoped_refptr<StringImpl> FastToLowerInvariant(StringImpl* source);
 
  private:
+  scoped_refptr<StringImpl> ToLower(StringImpl* source,
+                                    TextOffsetMap* offset_map = nullptr) const;
+  scoped_refptr<StringImpl> ToUpper(StringImpl* source,
+                                    TextOffsetMap* offset_map = nullptr) const;
+
+  // Fast code path for simple cases for root locale. When the fast code path is
+  // not possible, fallback to full Unicode casing using the root locale.
+  static scoped_refptr<StringImpl> ToLowerInvariant(StringImpl* source,
+                                                    TextOffsetMap* offset_map);
+  static scoped_refptr<StringImpl> ToUpperInvariant(StringImpl* source,
+                                                    TextOffsetMap* offset_map);
+
+  // Try the fast code path. Returns |nullptr| when the string cannot use the
+  // fast code path. The caller is responsible to fallback to full algorithm.
+  static scoped_refptr<StringImpl> TryFastToLowerInvariant(StringImpl* source);
+
   const char* case_map_locale_;
 };
 

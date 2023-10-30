@@ -29,7 +29,8 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -40,12 +41,16 @@ class CORE_EXPORT MessageChannel final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
+  static MessageChannel* Create(ExecutionContext* execution_context) {
+    return MakeGarbageCollected<MessageChannel>(execution_context);
+  }
+
   explicit MessageChannel(ExecutionContext*);
 
   MessagePort* port1() const { return port1_; }
   MessagePort* port2() const { return port2_; }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   Member<MessagePort> port1_;

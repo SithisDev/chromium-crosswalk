@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_SET_CHARACTER_DATA_COMMAND_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_COMMANDS_SET_CHARACTER_DATA_COMMAND_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/commands/edit_command.h"
 
 namespace blink {
@@ -16,7 +17,7 @@ class CORE_EXPORT SetCharacterDataCommand final : public SimpleEditCommand {
                           unsigned count,
                           const String& text);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   // EditCommand implementation

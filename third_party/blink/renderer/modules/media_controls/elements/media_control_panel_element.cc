@@ -62,7 +62,7 @@ void MediaControlPanelElement::MakeTransparent() {
   // Make sure we are listening for the 'transitionend' event.
   EnsureTransitionEventListener();
 
-  setAttribute("class", kTransparentClassName);
+  setAttribute("class", AtomicString(kTransparentClassName));
 
   opaque_ = false;
 }
@@ -72,7 +72,7 @@ void MediaControlPanelElement::RemovedFrom(ContainerNode& insertion_point) {
   DetachTransitionEventListener();
 }
 
-void MediaControlPanelElement::Trace(blink::Visitor* visitor) {
+void MediaControlPanelElement::Trace(Visitor* visitor) const {
   MediaControlDivElement::Trace(visitor);
   visitor->Trace(event_listener_);
 }

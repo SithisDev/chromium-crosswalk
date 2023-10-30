@@ -25,28 +25,15 @@
 
 #include "third_party/blink/renderer/modules/webaudio/wave_shaper_node.h"
 
-#include <memory>
-
+#include "third_party/blink/renderer/bindings/modules/v8/v8_wave_shaper_options.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
-#include "third_party/blink/renderer/modules/webaudio/wave_shaper_options.h"
+#include "third_party/blink/renderer/modules/webaudio/wave_shaper_handler.h"
+#include "third_party/blink/renderer/modules/webaudio/wave_shaper_processor.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
-
-WaveShaperHandler::WaveShaperHandler(AudioNode& node, float sample_rate)
-    : AudioBasicProcessorHandler(
-          kNodeTypeWaveShaper,
-          node,
-          sample_rate,
-          std::make_unique<WaveShaperProcessor>(sample_rate, 1)) {
-  Initialize();
-}
-
-scoped_refptr<WaveShaperHandler> WaveShaperHandler::Create(AudioNode& node,
-                                                           float sample_rate) {
-  return base::AdoptRef(new WaveShaperHandler(node, sample_rate));
-}
 
 WaveShaperNode::WaveShaperNode(BaseAudioContext& context) : AudioNode(context) {
   SetHandler(WaveShaperHandler::Create(*this, context.sampleRate()));
@@ -64,13 +51,15 @@ WaveShaperNode* WaveShaperNode::Create(BaseAudioContext* context,
                                        ExceptionState& exception_state) {
   WaveShaperNode* node = Create(*context, exception_state);
 
-  if (!node)
+  if (!node) {
     return nullptr;
+  }
 
   node->HandleChannelOptions(options, exception_state);
 
-  if (options->hasCurve())
+  if (options->hasCurve()) {
     node->setCurve(options->curve(), exception_state);
+  }
 
   node->setOversample(options->oversample());
 
@@ -82,16 +71,26 @@ WaveShaperProcessor* WaveShaperNode::GetWaveShaperProcessor() const {
 }
 
 void WaveShaperNode::SetCurveImpl(const float* curve_data,
-                                  unsigned curve_length,
+                                  size_t curve_length,
                                   ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (curve_data && curve_length < 2) {
-    exception_state.ThrowDOMException(
-        DOMExceptionCode::kInvalidAccessError,
-        ExceptionMessages::IndexExceedsMinimumBound<unsigned>("curve length",
-                                                              curve_length, 2));
-    return;
+  unsigned length = static_cast<unsigned>(curve_length);
+
+  if (curve_data) {
+    if (!base::CheckedNumeric<unsigned>(curve_length).AssignIfValid(&length)) {
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kNotSupportedError,
+          "The curve length exceeds the maximum supported length");
+      return;
+    }
+    if (length < 2) {
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kInvalidAccessError,
+          ExceptionMessages::IndexExceedsMinimumBound<unsigned>("curve length",
+                                                                length, 2));
+      return;
+    }
   }
 
   // This is to synchronize with the changes made in
@@ -99,17 +98,18 @@ void WaveShaperNode::SetCurveImpl(const float* curve_data,
   // Initialize() and Uninitialize(), changing the number of kernels.
   BaseAudioContext::GraphAutoLocker context_locker(context());
 
-  GetWaveShaperProcessor()->SetCurve(curve_data, curve_length);
+  GetWaveShaperProcessor()->SetCurve(curve_data, length);
 }
 
 void WaveShaperNode::setCurve(NotShared<DOMFloat32Array> curve,
                               ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (curve)
-    SetCurveImpl(curve.View()->Data(), curve.View()->length(), exception_state);
-  else
+  if (curve) {
+    SetCurveImpl(curve->Data(), curve->length(), exception_state);
+  } else {
     SetCurveImpl(nullptr, 0, exception_state);
+  }
 }
 
 void WaveShaperNode::setCurve(const Vector<float>& curve,
@@ -121,16 +121,16 @@ void WaveShaperNode::setCurve(const Vector<float>& curve,
 
 NotShared<DOMFloat32Array> WaveShaperNode::curve() {
   Vector<float>* curve = GetWaveShaperProcessor()->Curve();
-  if (!curve)
+  if (!curve) {
     return NotShared<DOMFloat32Array>(nullptr);
+  }
 
   unsigned size = curve->size();
-  scoped_refptr<WTF::Float32Array> new_curve = WTF::Float32Array::Create(size);
 
-  memcpy(new_curve->Data(), curve->data(), sizeof(float) * size);
+  NotShared<DOMFloat32Array> result(DOMFloat32Array::Create(size));
+  memcpy(result->Data(), curve->data(), sizeof(float) * size);
 
-  return NotShared<DOMFloat32Array>(
-      DOMFloat32Array::Create(std::move(new_curve)));
+  return result;
 }
 
 void WaveShaperNode::setOversample(const String& type) {
@@ -167,6 +167,14 @@ String WaveShaperNode::oversample() const {
       NOTREACHED();
       return "none";
   }
+}
+
+void WaveShaperNode::ReportDidCreate() {
+  GraphTracer().DidCreateAudioNode(this);
+}
+
+void WaveShaperNode::ReportWillBeDestroyed() {
+  GraphTracer().WillDestroyAudioNode(this);
 }
 
 }  // namespace blink

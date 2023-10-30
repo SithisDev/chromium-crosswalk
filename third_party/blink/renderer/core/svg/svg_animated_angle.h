@@ -34,14 +34,13 @@
 #include "third_party/blink/renderer/core/svg/svg_angle_tear_off.h"
 #include "third_party/blink/renderer/core/svg/svg_animated_enumeration.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 class SVGAnimatedAngle final : public ScriptWrappable,
                                public SVGAnimatedProperty<SVGAngle> {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SVGAnimatedAngle);
 
  public:
   explicit SVGAnimatedAngle(SVGElement* context_element);
@@ -58,7 +57,7 @@ class SVGAnimatedAngle final : public ScriptWrappable,
   void SetAnimatedValue(SVGPropertyBase*) override;
   void AnimationEnded() override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   Member<SVGAnimatedEnumeration<SVGMarkerOrientType>> orient_type_;

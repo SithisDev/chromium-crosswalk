@@ -29,15 +29,24 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "third_party/blink/renderer/platform/fonts/font_cache.h"
+#include <freetype/freetype.h>
+#include <ft2build.h>
+#include <unicode/uscript.h>
+#include <windows.h>  // For GetACP()
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "base/debug/alias.h"
-#include "base/stl_util.h"
+#include "base/feature_list.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/trace_event/trace_event.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/web_font_prewarmer.h"
 #include "third_party/blink/renderer/platform/fonts/bitmap_glyphs_block_list.h"
+#include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/fonts/font_face_creation_params.h"
 #include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
@@ -45,14 +54,14 @@
 #include "third_party/blink/renderer/platform/fonts/win/font_fallback_win.h"
 #include "third_party/blink/renderer/platform/language.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 #include "third_party/skia/include/core/SkFontMgr.h"
 #include "third_party/skia/include/core/SkStream.h"
 #include "third_party/skia/include/ports/SkTypeface_win.h"
 
-#include <ft2build.h>
-#include <freetype/freetype.h>
-
 namespace blink {
+
+WebFontPrewarmer* FontCache::prewarmer_ = nullptr;
 
 HashMap<String, sk_sp<SkTypeface>, CaseFoldingHash>*
     FontCache::sideloaded_fonts_ = nullptr;
@@ -71,7 +80,7 @@ int32_t EnsureMinimumFontHeightIfNeeded(int32_t font_height) {
   // Adjustment for codepage 936 to make the fonts more legible in Simplified
   // Chinese.  Please refer to LayoutThemeFontProviderWin.cpp for more
   // information.
-  return (font_height < 12.0f) && (GetACP() == 936) ? 12.0f : font_height;
+  return ((font_height < 12.0f) && (GetACP() == 936)) ? 12.0f : font_height;
 }
 
 // Test-only code for matching sideloaded fonts by postscript name. This
@@ -99,7 +108,7 @@ sk_sp<SkTypeface> FindUniqueFontNameFromSideloadedFonts(
     FT_Open_Args open_args = {
         FT_OPEN_MEMORY,
         reinterpret_cast<const FT_Byte*>(typeface_stream->getMemoryBase()),
-        typeface_stream->getLength()};
+        static_cast<FT_Long>(typeface_stream->getLength())};
     CHECK_EQ(FT_Err_Ok, FT_Open_Face(library, &open_args, 0, &font_face));
     font_family_name = FT_Get_Postscript_Name(font_face);
     FT_Done_Face(font_face);
@@ -113,7 +122,69 @@ sk_sp<SkTypeface> FindUniqueFontNameFromSideloadedFonts(
   return return_typeface;
 }
 
+static const char kChineseSimplified[] = "zh-Hant";
+
+// For Windows out-of-process fallback calls, there is a limiation: only one
+// passed locale is taken into account when requesting a fallback font from the
+// DWrite API via Skia API. If we request fallback for a Han ideograph without a
+// disambiguating locale, results from DWrite are unpredictable and caching such
+// a font under the ambiguous locale leads to returning wrong fonts for
+// subsequent requests in font_fallback_win, hence prioritize a
+// Han-disambiguating locale for CJK characters.
+const LayoutLocale* FallbackLocaleForCharacter(
+    const FontDescription& font_description,
+    const FontFallbackPriority& fallback_priority,
+    const UChar32 codepoint) {
+  if (fallback_priority == FontFallbackPriority::kEmojiEmoji)
+    return LayoutLocale::Get(kColorEmojiLocale);
+
+  UErrorCode error_code = U_ZERO_ERROR;
+  const UScriptCode char_script = uscript_getScript(codepoint, &error_code);
+  if (U_SUCCESS(error_code) && char_script == USCRIPT_HAN) {
+    // If we were unable to disambiguate the requested Han ideograph from the
+    // content locale, the Accept-Language headers or system locale, assume it's
+    // simplified Chinese. It's important to pass a CJK locale to the fallback
+    // call in order to avoid priming the browser side cache incorrectly with an
+    // ambiguous locale for Han fallback requests.
+    const LayoutLocale* han_locale =
+        LayoutLocale::LocaleForHan(font_description.Locale());
+    return han_locale ? han_locale : LayoutLocale::Get(kChineseSimplified);
+  }
+
+  return font_description.Locale() ? font_description.Locale()
+                                   : &LayoutLocale::GetDefault();
+}
+
 }  // namespace
+
+// static
+void FontCache::PrewarmFamily(const AtomicString& family_name) {
+  DCHECK(IsMainThread());
+
+  if (!prewarmer_)
+    return;
+
+  // Platform is initialized before |FeatureList| that we may have a prewarmer
+  // even when the feature is not enabled.
+  // TODO(crbug.com/1256946): Review if there is a better timing to set the
+  // prewarmer.
+  static bool is_initialized = false;
+  if (!is_initialized) {
+    is_initialized = true;
+    if (!base::FeatureList::IsEnabled(kAsyncFontAccess)) {
+      prewarmer_ = nullptr;
+      return;
+    }
+  }
+  DCHECK(base::FeatureList::IsEnabled(kAsyncFontAccess));
+
+  static HashSet<AtomicString> prewarmed_families;
+  const auto result = prewarmed_families.insert(family_name);
+  if (!result.is_new_entry)
+    return;
+
+  prewarmer_->PrewarmFamily(family_name);
+}
 
 // static
 void FontCache::AddSideloadedFontForTesting(sk_sp<SkTypeface> typeface) {
@@ -125,30 +196,213 @@ void FontCache::AddSideloadedFontForTesting(sk_sp<SkTypeface> typeface) {
   sideloaded_fonts_->Set(name_wtf, std::move(typeface));
 }
 
+//static
+void FontCache::SetSystemFontFamily(const AtomicString&) {
+  // TODO(https://crbug.com/808221) Use this instead of
+  // SetMenuFontMetrics for the system font family.
+  NOTREACHED();
+}
+
 // static
 const AtomicString& FontCache::SystemFontFamily() {
   return MenuFontFamily();
 }
 
 // static
-void FontCache::SetMenuFontMetrics(const wchar_t* family_name,
+void FontCache::SetMenuFontMetrics(const AtomicString& family_name,
                                    int32_t font_height) {
   menu_font_family_name_ = new AtomicString(family_name);
   menu_font_height_ = EnsureMinimumFontHeightIfNeeded(font_height);
 }
 
 // static
-void FontCache::SetSmallCaptionFontMetrics(const wchar_t* family_name,
+void FontCache::SetSmallCaptionFontMetrics(const AtomicString& family_name,
                                            int32_t font_height) {
   small_caption_font_family_name_ = new AtomicString(family_name);
   small_caption_font_height_ = EnsureMinimumFontHeightIfNeeded(font_height);
 }
 
 // static
-void FontCache::SetStatusFontMetrics(const wchar_t* family_name,
+void FontCache::SetStatusFontMetrics(const AtomicString& family_name,
                                      int32_t font_height) {
   status_font_family_name_ = new AtomicString(family_name);
   status_font_height_ = EnsureMinimumFontHeightIfNeeded(font_height);
+}
+
+void FontCache::EnsureServiceConnected() {
+  if (service_)
+    return;
+  Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
+      service_.BindNewPipeAndPassReceiver());
+}
+
+// TODO(https://crbug.com/976737): This function is deprecated and only intended
+// to run in parallel with the API based OOP font fallback calls to compare the
+// results and track them in UMA for a while until we decide to remove this
+// completely.
+scoped_refptr<SimpleFontData>
+FontCache::GetFallbackFamilyNameFromHardcodedChoices(
+    const FontDescription& font_description,
+    UChar32 codepoint,
+    FontFallbackPriority fallback_priority) {
+  UScriptCode script;
+  const UChar* legacy_fallback_family = GetFallbackFamily(
+      codepoint, font_description.GenericFamily(), font_description.Locale(),
+      &script, fallback_priority, font_manager_.get());
+
+  if (legacy_fallback_family) {
+    FontFaceCreationParams create_by_family(legacy_fallback_family);
+    FontPlatformData* data =
+        GetFontPlatformData(font_description, create_by_family);
+    if (data && data->FontContainsCharacter(codepoint)) {
+      return FontDataFromFontPlatformData(data, kDoNotRetain);
+    }
+  }
+
+  // If instantiating the returned fallback family was not successful, probe for
+  // a set of potential fonts with wide coverage.
+
+  // Last resort font list : PanUnicode. CJK fonts have a pretty
+  // large repertoire. Eventually, we need to scan all the fonts
+  // on the system to have a Firefox-like coverage.
+  // Make sure that all of them are lowercased.
+  const static UChar* const kCjkFonts[] = {
+      u"arial unicode ms", u"ms pgothic", u"simsun", u"gulim", u"pmingliu",
+      u"wenquanyi zen hei",  // Partial CJK Ext. A coverage but more widely
+                             // known to Chinese users.
+      u"ar pl shanheisun uni", u"ar pl zenkai uni",
+      u"han nom a",  // Complete CJK Ext. A coverage.
+      u"code2000"    // Complete CJK Ext. A coverage.
+      // CJK Ext. B fonts are not listed here because it's of no use
+      // with our current non-BMP character handling because we use
+      // Uniscribe for it and that code path does not go through here.
+  };
+
+  const static UChar* const kCommonFonts[] = {
+      u"tahoma", u"arial unicode ms", u"lucida sans unicode",
+      u"microsoft sans serif", u"palatino linotype",
+      // Six fonts below (and code2000 at the end) are not from MS, but
+      // once installed, cover a very wide range of characters.
+      u"dejavu serif", u"dejavu sasns", u"freeserif", u"freesans", u"gentium",
+      u"gentiumalt", u"ms pgothic", u"simsun", u"gulim", u"pmingliu",
+      u"code2000"};
+
+  const UChar* const* pan_uni_fonts = nullptr;
+  int num_fonts = 0;
+  if (script == USCRIPT_HAN) {
+    pan_uni_fonts = kCjkFonts;
+    num_fonts = std::size(kCjkFonts);
+  } else {
+    pan_uni_fonts = kCommonFonts;
+    num_fonts = std::size(kCommonFonts);
+  }
+  // Font returned from getFallbackFamily may not cover |character|
+  // because it's based on script to font mapping. This problem is
+  // critical enough for non-Latin scripts (especially Han) to
+  // warrant an additional (real coverage) check with fontCotainsCharacter.
+  for (int i = 0; i < num_fonts; ++i) {
+    legacy_fallback_family = pan_uni_fonts[i];
+    FontFaceCreationParams create_by_family(legacy_fallback_family);
+    FontPlatformData* data =
+        GetFontPlatformData(font_description, create_by_family);
+    if (data && data->FontContainsCharacter(codepoint))
+      return FontDataFromFontPlatformData(data, kDoNotRetain);
+  }
+  return nullptr;
+}
+
+scoped_refptr<SimpleFontData> FontCache::GetDWriteFallbackFamily(
+    const FontDescription& font_description,
+    UChar32 codepoint,
+    FontFallbackPriority fallback_priority) {
+  const LayoutLocale* fallback_locale = FallbackLocaleForCharacter(
+      font_description, fallback_priority, codepoint);
+  DCHECK(fallback_locale);
+
+  // On Pre Windows 8.1 (where use_skia_font_fallback_ is false) we cannot call
+  // the Skia version, as there is no IDWriteFontFallback (which is
+  // proxyable). If no IDWriteFontFallback API exists in the DWrite Skia
+  // SkTypeface implemnetation it will proceed to call the layoutFallback method
+  // of SkTypeface DWrite implementation. This method we must not call in the
+  // renderer as it causes stability issues due to reaching a path that will try
+  // to load the system font collection in-process and thus load DLLs that are
+  // blocked in the renderer, see comment in dwrite_font_proxy_init_impl_win.cc
+  // InitializeDWriteFontProxy(). Hence, for Windows pre 8.1 we add a
+  // DWriteFontProxy code path to retrieve a family name as string for a
+  // character + language tag and call matchFamilyStyleCharacter on the browser
+  // side, where we can do that.
+  if (!use_skia_font_fallback_) {
+    String fallback_family;
+    SkFontStyle fallback_style;
+
+    if (UNLIKELY(!fallback_params_cache_)) {
+      fallback_params_cache_ = std::make_unique<FallbackFamilyStyleCache>();
+    }
+
+    fallback_params_cache_->Get(
+        font_description.GenericFamily(), fallback_locale->LocaleForSkFontMgr(),
+        fallback_priority, codepoint, &fallback_family, &fallback_style);
+    bool result_from_cache = !fallback_family.IsNull();
+
+    if (!result_from_cache) {
+      EnsureServiceConnected();
+
+      // After Mojo IPC, on the browser side, this ultimately reaches
+      // Skia's matchFamilyStyleCharacter for Windows, which does not implement
+      // traversing the language tag stack but only processes the most important
+      // one, so we use FallbackLocaleForCharacter() to determine what locale to
+      // choose to achieve the best possible result.
+
+      if (!GetOutOfProcessFallbackFamily(
+              codepoint, font_description.GenericFamily(),
+              fallback_locale->LocaleForSkFontMgr(), fallback_priority,
+              service_, &fallback_family, &fallback_style))
+        return nullptr;
+
+      if (fallback_family.IsEmpty())
+        return nullptr;
+    }
+
+    FontFaceCreationParams create_by_family((AtomicString(fallback_family)));
+    FontDescription fallback_updated_font_description(font_description);
+    fallback_updated_font_description.UpdateFromSkiaFontStyle(fallback_style);
+    FontPlatformData* data = GetFontPlatformData(
+        fallback_updated_font_description, create_by_family);
+    if (!data || !data->FontContainsCharacter(codepoint))
+      return nullptr;
+
+    if (!result_from_cache) {
+      fallback_params_cache_->Put(font_description.GenericFamily(),
+                                  fallback_locale->LocaleForSkFontMgr(),
+                                  fallback_priority, data->Typeface());
+    }
+    return FontDataFromFontPlatformData(data, kDoNotRetain);
+  } else {
+    std::string family_name = font_description.Family().FamilyName().Utf8();
+
+    Bcp47Vector locales;
+    locales.push_back(fallback_locale->LocaleForSkFontMgr());
+    SkTypeface* typeface = font_manager_->matchFamilyStyleCharacter(
+        family_name.c_str(), font_description.SkiaFontStyle(), locales.data(),
+        locales.size(), codepoint);
+
+    if (!typeface)
+      return nullptr;
+
+    SkString skia_family;
+    typeface->getFamilyName(&skia_family);
+    FontDescription fallback_updated_font_description(font_description);
+    fallback_updated_font_description.UpdateFromSkiaFontStyle(
+        typeface->fontStyle());
+    FontFaceCreationParams create_by_family(ToAtomicString(skia_family));
+    FontPlatformData* data = GetFontPlatformData(
+        fallback_updated_font_description, create_by_family);
+    if (!data || !data->FontContainsCharacter(codepoint))
+      return nullptr;
+    return FontDataFromFontPlatformData(data, kDoNotRetain);
+  }
+  NOTREACHED();
+  return nullptr;
 }
 
 // Given the desired base font, this will create a SimpleFontData for a specific
@@ -170,94 +424,19 @@ scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
       return font_data;
   }
 
-  UScriptCode script;
-  const UChar* family = GetFallbackFamily(
-      character, font_description.GenericFamily(), font_description.Locale(),
-      &script, fallback_priority, font_manager_.get());
-  if (family) {
-    FontFaceCreationParams create_by_family(family);
-    FontPlatformData* data =
-        GetFontPlatformData(font_description, create_by_family);
-    if (data && data->FontContainsCharacter(character))
-      return FontDataFromFontPlatformData(data, kDoNotRetain);
+  scoped_refptr<SimpleFontData> hardcoded_list_fallback_font =
+      GetFallbackFamilyNameFromHardcodedChoices(font_description, character,
+                                                fallback_priority);
+
+  // Fall through to running the API based fallback on Windows 8.1 and above
+  // where API fallback was previously available.
+  if (RuntimeEnabledFeatures::LegacyWindowsDWriteFontFallbackEnabled() ||
+      (!hardcoded_list_fallback_font && use_skia_font_fallback_)) {
+    return GetDWriteFallbackFamily(font_description, character,
+                                   fallback_priority);
   }
 
-  if (use_skia_font_fallback_) {
-    std::string family_name = font_description.Family().Family().Utf8();
-    Bcp47Vector locales =
-        GetBcp47LocaleForRequest(font_description, fallback_priority);
-    SkTypeface* typeface = font_manager_->matchFamilyStyleCharacter(
-        family_name.c_str(), font_description.SkiaFontStyle(), locales.data(),
-        locales.size(), character);
-    if (typeface) {
-      SkString skia_family;
-      typeface->getFamilyName(&skia_family);
-      FontFaceCreationParams create_by_family(ToAtomicString(skia_family));
-      FontPlatformData* data =
-          GetFontPlatformData(font_description, create_by_family);
-      if (data && data->FontContainsCharacter(character))
-        return FontDataFromFontPlatformData(data, kDoNotRetain);
-    }
-  }
-
-  // In production, these 3 font managers must match.
-  // They don't match in unit tests or in single process mode.
-  // Capture them in minidump for crbug.com/409784
-  SkFontMgr* font_mgr = font_manager_.get();
-  SkFontMgr* static_font_mgr = static_font_manager_;
-  SkFontMgr* skia_default_font_mgr = SkFontMgr::RefDefault().get();
-  base::debug::Alias(&font_mgr);
-  base::debug::Alias(&static_font_mgr);
-  base::debug::Alias(&skia_default_font_mgr);
-
-  // Last resort font list : PanUnicode. CJK fonts have a pretty
-  // large repertoire. Eventually, we need to scan all the fonts
-  // on the system to have a Firefox-like coverage.
-  // Make sure that all of them are lowercased.
-  const static wchar_t* const kCjkFonts[] = {
-      L"arial unicode ms", L"ms pgothic", L"simsun", L"gulim", L"pmingliu",
-      L"wenquanyi zen hei",  // Partial CJK Ext. A coverage but more widely
-                             // known to Chinese users.
-      L"ar pl shanheisun uni", L"ar pl zenkai uni",
-      L"han nom a",  // Complete CJK Ext. A coverage.
-      L"code2000"    // Complete CJK Ext. A coverage.
-      // CJK Ext. B fonts are not listed here because it's of no use
-      // with our current non-BMP character handling because we use
-      // Uniscribe for it and that code path does not go through here.
-  };
-
-  const static wchar_t* const kCommonFonts[] = {
-      L"tahoma", L"arial unicode ms", L"lucida sans unicode",
-      L"microsoft sans serif", L"palatino linotype",
-      // Six fonts below (and code2000 at the end) are not from MS, but
-      // once installed, cover a very wide range of characters.
-      L"dejavu serif", L"dejavu sasns", L"freeserif", L"freesans", L"gentium",
-      L"gentiumalt", L"ms pgothic", L"simsun", L"gulim", L"pmingliu",
-      L"code2000"};
-
-  const wchar_t* const* pan_uni_fonts = nullptr;
-  int num_fonts = 0;
-  if (script == USCRIPT_HAN) {
-    pan_uni_fonts = kCjkFonts;
-    num_fonts = base::size(kCjkFonts);
-  } else {
-    pan_uni_fonts = kCommonFonts;
-    num_fonts = base::size(kCommonFonts);
-  }
-  // Font returned from getFallbackFamily may not cover |character|
-  // because it's based on script to font mapping. This problem is
-  // critical enough for non-Latin scripts (especially Han) to
-  // warrant an additional (real coverage) check with fontCotainsCharacter.
-  for (int i = 0; i < num_fonts; ++i) {
-    family = pan_uni_fonts[i];
-    FontFaceCreationParams create_by_family(family);
-    FontPlatformData* data =
-        GetFontPlatformData(font_description, create_by_family);
-    if (data && data->FontContainsCharacter(character))
-      return FontDataFromFontPlatformData(data, kDoNotRetain);
-  }
-
-  return nullptr;
+  return hardcoded_list_fallback_font;
 }
 
 static inline bool DeprecatedEqualIgnoringCase(const AtomicString& a,
@@ -299,26 +478,26 @@ static bool TypefacesHasWeightSuffix(const AtomicString& family,
                                      AtomicString& adjusted_name,
                                      FontSelectionValue& variant_weight) {
   struct FamilyWeightSuffix {
-    const wchar_t* suffix;
-    size_t length;
+    const UChar* suffix;
+    wtf_size_t length;
     FontSelectionValue weight;
   };
   // Mapping from suffix to weight from the DirectWrite documentation.
   // http://msdn.microsoft.com/en-us/library/windows/desktop/dd368082.aspx
   const static FamilyWeightSuffix kVariantForSuffix[] = {
-      {L" thin", 5, FontSelectionValue(100)},
-      {L" extralight", 11, FontSelectionValue(200)},
-      {L" ultralight", 11, FontSelectionValue(200)},
-      {L" light", 6, FontSelectionValue(300)},
-      {L" regular", 8, FontSelectionValue(400)},
-      {L" medium", 7, FontSelectionValue(500)},
-      {L" demibold", 9, FontSelectionValue(600)},
-      {L" semibold", 9, FontSelectionValue(600)},
-      {L" extrabold", 10, FontSelectionValue(800)},
-      {L" ultrabold", 10, FontSelectionValue(800)},
-      {L" black", 6, FontSelectionValue(900)},
-      {L" heavy", 6, FontSelectionValue(900)}};
-  size_t num_variants = base::size(kVariantForSuffix);
+      {u" thin", 5, FontSelectionValue(100)},
+      {u" extralight", 11, FontSelectionValue(200)},
+      {u" ultralight", 11, FontSelectionValue(200)},
+      {u" light", 6, FontSelectionValue(300)},
+      {u" regular", 8, FontSelectionValue(400)},
+      {u" medium", 7, FontSelectionValue(500)},
+      {u" demibold", 9, FontSelectionValue(600)},
+      {u" semibold", 9, FontSelectionValue(600)},
+      {u" extrabold", 10, FontSelectionValue(800)},
+      {u" ultrabold", 10, FontSelectionValue(800)},
+      {u" black", 6, FontSelectionValue(900)},
+      {u" heavy", 6, FontSelectionValue(900)}};
+  size_t num_variants = std::size(kVariantForSuffix);
   for (size_t i = 0; i < num_variants; i++) {
     const FamilyWeightSuffix& entry = kVariantForSuffix[i];
     if (family.EndsWith(entry.suffix, kTextCaseUnicodeInsensitive)) {
@@ -337,8 +516,8 @@ static bool TypefacesHasStretchSuffix(const AtomicString& family,
                                       AtomicString& adjusted_name,
                                       FontSelectionValue& variant_stretch) {
   struct FamilyStretchSuffix {
-    const wchar_t* suffix;
-    size_t length;
+    const UChar* suffix;
+    wtf_size_t length;
     FontSelectionValue stretch;
   };
   // Mapping from suffix to stretch value from the DirectWrite documentation.
@@ -346,16 +525,16 @@ static bool TypefacesHasStretchSuffix(const AtomicString& family,
   // Also includes Narrow as a synonym for Condensed to to support Arial
   // Narrow and other fonts following the same naming scheme.
   const static FamilyStretchSuffix kVariantForSuffix[] = {
-      {L" ultracondensed", 15, UltraCondensedWidthValue()},
-      {L" extracondensed", 15, ExtraCondensedWidthValue()},
-      {L" condensed", 10, CondensedWidthValue()},
-      {L" narrow", 7, CondensedWidthValue()},
-      {L" semicondensed", 14, SemiCondensedWidthValue()},
-      {L" semiexpanded", 13, SemiExpandedWidthValue()},
-      {L" expanded", 9, ExpandedWidthValue()},
-      {L" extraexpanded", 14, ExtraExpandedWidthValue()},
-      {L" ultraexpanded", 14, UltraExpandedWidthValue()}};
-  size_t num_variants = base::size(kVariantForSuffix);
+      {u" ultracondensed", 15, UltraCondensedWidthValue()},
+      {u" extracondensed", 15, ExtraCondensedWidthValue()},
+      {u" condensed", 10, CondensedWidthValue()},
+      {u" narrow", 7, CondensedWidthValue()},
+      {u" semicondensed", 14, SemiCondensedWidthValue()},
+      {u" semiexpanded", 13, SemiExpandedWidthValue()},
+      {u" expanded", 9, ExpandedWidthValue()},
+      {u" extraexpanded", 14, ExtraExpandedWidthValue()},
+      {u" ultraexpanded", 14, UltraExpandedWidthValue()}};
+  size_t num_variants = std::size(kVariantForSuffix);
   for (size_t i = 0; i < num_variants; i++) {
     const FamilyStretchSuffix& entry = kVariantForSuffix[i];
     if (family.EndsWith(entry.suffix, kTextCaseUnicodeInsensitive)) {
@@ -454,14 +633,20 @@ std::unique_ptr<FontPlatformData> FontCache::CreateFontPlatformData(
     }
   }
 
-  std::unique_ptr<FontPlatformData> result = std::make_unique<FontPlatformData>(
-      typeface, name.data(), font_size,
+  bool synthetic_bold_requested =
       (font_description.Weight() >= BoldThreshold() && !typeface->isBold()) ||
-          font_description.IsSyntheticBold(),
+      font_description.IsSyntheticBold();
+
+  bool synthetic_italic_requested =
       ((font_description.Style() == ItalicSlopeValue()) &&
        !typeface->isItalic()) ||
-          font_description.IsSyntheticItalic(),
-      font_description.Orientation());
+      font_description.IsSyntheticItalic();
+
+  std::unique_ptr<FontPlatformData> result = std::make_unique<FontPlatformData>(
+      typeface, name.data(), font_size,
+      synthetic_bold_requested && font_description.SyntheticBoldAllowed(),
+      synthetic_italic_requested && font_description.SyntheticItalicAllowed(),
+      font_description.TextRendering(), font_description.Orientation());
 
   result->SetAvoidEmbeddedBitmaps(
       BitmapGlyphsBlockList::ShouldAvoidEmbeddedBitmapsForTypeface(*typeface));

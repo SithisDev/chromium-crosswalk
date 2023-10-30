@@ -31,6 +31,8 @@
 
 #include "third_party/blink/renderer/core/html/forms/checkbox_input_type.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
@@ -48,13 +50,16 @@ const AtomicString& CheckboxInputType::FormControlType() const {
   return input_type_names::kCheckbox;
 }
 
+ControlPart CheckboxInputType::AutoAppearance() const {
+  return kCheckboxPart;
+}
+
 bool CheckboxInputType::ValueMissing(const String&) const {
-  return GetElement().IsRequired() && !GetElement().checked();
+  return GetElement().IsRequired() && !GetElement().Checked();
 }
 
 String CheckboxInputType::ValueMissingText() const {
-  return GetLocale().QueryString(
-      WebLocalizedString::kValidationValueMissingForCheckbox);
+  return GetLocale().QueryString(IDS_FORM_VALIDATION_VALUE_MISSING_CHECKBOX);
 }
 
 void CheckboxInputType::HandleKeyupEvent(KeyboardEvent& event) {
@@ -74,13 +79,13 @@ ClickHandlingState* CheckboxInputType::WillDispatchClick() {
 
   ClickHandlingState* state = MakeGarbageCollected<ClickHandlingState>();
 
-  state->checked = GetElement().checked();
+  state->checked = GetElement().Checked();
   state->indeterminate = GetElement().indeterminate();
 
   if (state->indeterminate)
     GetElement().setIndeterminate(false);
 
-  GetElement().setChecked(!state->checked,
+  GetElement().SetChecked(!state->checked,
                           TextFieldEventBehavior::kDispatchChangeEvent);
   is_in_click_handler_ = true;
   return state;
@@ -90,7 +95,7 @@ void CheckboxInputType::DidDispatchClick(Event& event,
                                          const ClickHandlingState& state) {
   if (event.defaultPrevented() || event.DefaultHandled()) {
     GetElement().setIndeterminate(state.indeterminate);
-    GetElement().setChecked(state.checked);
+    GetElement().SetChecked(state.checked);
   } else {
     GetElement().DispatchInputAndChangeEventIfNeeded();
   }

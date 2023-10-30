@@ -16,67 +16,50 @@ class CORE_EXPORT LayoutNGListItem final : public LayoutNGBlockFlow {
  public:
   explicit LayoutNGListItem(Element*);
 
-  ListItemOrdinal& Ordinal() { return ordinal_; }
+  ListItemOrdinal& Ordinal() {
+    NOT_DESTROYED();
+    return ordinal_;
+  }
 
   int Value() const;
-  String MarkerTextWithSuffix() const;
-  String MarkerTextWithoutSuffix() const;
 
-  // Marker text with suffix, e.g. "1. ", for use in accessibility.
-  static String TextAlternative(const LayoutObject& marker);
-
-  LayoutObject* Marker() const { return marker_; }
-  bool IsMarkerImage() const {
-    return StyleRef().ListStyleImage() &&
-           !StyleRef().ListStyleImage()->ErrorOccurred();
+  LayoutObject* Marker() const {
+    NOT_DESTROYED();
+    Element* list_item = To<Element>(GetNode());
+    return list_item->PseudoElementLayoutObject(kPseudoIdMarker);
   }
 
-  void UpdateMarkerTextIfNeeded() {
-    if (marker_ && !is_marker_text_updated_ && !IsMarkerImage())
-      UpdateMarkerText();
-  }
-  void UpdateMarkerContentIfNeeded();
+  void UpdateMarkerTextIfNeeded();
+  void UpdateCounterStyle();
 
   void OrdinalValueChanged();
   void WillCollectInlines() override;
 
-  LayoutObject* SymbolMarkerLayoutText() const;
   static const LayoutObject* FindSymbolMarkerLayoutText(const LayoutObject*);
 
-  // Find the LayoutNGListItem from a marker.
-  static LayoutNGListItem* FromMarker(const LayoutObject& marker);
-
-  const char* GetName() const override { return "LayoutNGListItem"; }
+  const char* GetName() const override {
+    NOT_DESTROYED();
+    return "LayoutNGListItem";
+  }
 
  private:
   bool IsOfType(LayoutObjectType) const override;
 
-  void WillBeDestroyed() override;
   void InsertedIntoTree() override;
   void WillBeRemovedFromTree() override;
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   void SubtreeDidChange() final;
-
-  bool IsInside() const;
-
-  enum MarkerTextFormat { kWithSuffix, kWithoutSuffix };
-  enum MarkerType { kStatic, kOrdinalValue, kSymbolValue };
-  MarkerType MarkerText(StringBuilder*, MarkerTextFormat) const;
-  void UpdateMarkerText();
-  void UpdateMarkerText(LayoutText*);
-  void UpdateMarker();
-  void DestroyMarker();
-
-  void ListStyleTypeChanged();
+  void WillBeDestroyed() override;
 
   ListItemOrdinal ordinal_;
-  LayoutObject* marker_ = nullptr;
-
-  unsigned marker_type_ : 2;  // MarkerType
-  unsigned is_marker_text_updated_ : 1;
 };
 
-DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutNGListItem, IsLayoutNGListItem());
+template <>
+struct DowncastTraits<LayoutNGListItem> {
+  static bool AllowFrom(const LayoutObject& object) {
+    return object.IsLayoutNGListItem();
+  }
+};
 
 }  // namespace blink
 

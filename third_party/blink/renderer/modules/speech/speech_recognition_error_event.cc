@@ -25,8 +25,8 @@
 
 #include "third_party/blink/renderer/modules/speech/speech_recognition_error_event.h"
 
+#include "third_party/blink/public/mojom/speech/speech_recognition_error_code.mojom-blink.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 

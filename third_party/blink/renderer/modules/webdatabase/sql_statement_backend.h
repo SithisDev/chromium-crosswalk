@@ -30,7 +30,8 @@
 
 #include <memory>
 #include "third_party/blink/renderer/modules/webdatabase/sqlite/sql_value.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -42,15 +43,14 @@ class SQLErrorData;
 class SQLResultSet;
 class SQLStatement;
 
-class SQLStatementBackend final
-    : public GarbageCollectedFinalized<SQLStatementBackend> {
+class SQLStatementBackend final : public GarbageCollected<SQLStatementBackend> {
  public:
   SQLStatementBackend(SQLStatement*,
                       const String& statement,
                       const Vector<SQLValue>& arguments,
                       int permissions);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
   bool Execute(Database*);
   bool LastExecutionFailedDueToQuota() const;

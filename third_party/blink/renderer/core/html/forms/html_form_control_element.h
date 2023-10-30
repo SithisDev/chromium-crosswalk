@@ -25,6 +25,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_HTML_FORM_CONTROL_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_HTML_FORM_CONTROL_ELEMENT_H_
 
+#include "third_party/blink/public/common/metrics/form_element_pii_type.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_autofill_state.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -43,14 +44,12 @@ class HTMLFormElement;
 class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
                                            public ListedElement,
                                            public FormAssociated {
-  USING_GARBAGE_COLLECTED_MIXIN(HTMLFormControlElement);
-
  public:
   ~HTMLFormControlElement() override;
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
-  void formAction(USVStringOrTrustedURL&) const;
-  void setFormAction(const USVStringOrTrustedURL&, ExceptionState&);
+  String formAction() const;
+  void setFormAction(const AtomicString&);
   String formEnctype() const;
   void setFormEnctype(const AtomicString&);
   String formMethod() const;
@@ -58,8 +57,6 @@ class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
   bool FormNoValidate() const;
 
   void Reset();
-
-  void DispatchChangeEvent();
 
   HTMLFormElement* formOwner() const final;
 
@@ -91,12 +88,42 @@ class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
   virtual bool IsActivatedSubmit() const { return false; }
   virtual void SetActivatedSubmit(bool) {}
 
+  struct PopupTargetElement final {
+   public:
+    DISALLOW_NEW();
+    WeakMember<Element> element;
+    PopupTriggerAction action;
+    QualifiedName attribute_name;
+    void Trace(Visitor* visitor) const { visitor->Trace(element); }
+  };
+
+  enum class PopupTriggerSupport {
+    kNone,
+    kSupported,
+  };
+
+  // Retrieves the element pointed to by 'popuptoggletarget', 'popupshowtarget',
+  // and/or 'popuphidetarget' content attributes, if any, and only if this form
+  // control element supports popup triggering.
+  PopupTargetElement popupTargetElement() const;
+  virtual PopupTriggerSupport SupportsPopupTriggering() const {
+    return PopupTriggerSupport::kNone;
+  }
+
+  void DefaultEventHandler(Event&) override;
+
+  // Getter and setter for the PII type of the element derived from the autofill
+  // field semantic prediction.
+  virtual FormElementPiiType GetFormElementPiiType() const {
+    return FormElementPiiType::kUnknown;
+  }
+  virtual void SetFormElementPiiType(FormElementPiiType form_element_pii_type) {
+  }
+
   bool willValidate() const override;
 
   bool IsReadOnly() const;
   bool IsDisabledOrReadOnly() const;
-
-  bool IsAutofocusable() const;
 
   bool MayTriggerVirtualKeyboard() const override;
 
@@ -104,12 +131,22 @@ class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
   bool IsAutofilled() const {
     return autofill_state_ != WebAutofillState::kNotFilled;
   }
+  bool HighlightAutofilled() const {
+    return autofill_state_ == WebAutofillState::kAutofilled &&
+           !PreventHighlightingOfAutofilledFields();
+  }
   void SetAutofillState(WebAutofillState = WebAutofillState::kAutofilled);
+  void SetPreventHighlightingOfAutofilledFields(bool prevent_highlighting);
+  bool PreventHighlightingOfAutofilledFields() const {
+    return prevent_highlighting_of_autofilled_fields_;
+  }
 
   // The autofill section to which this element belongs (e.g. billing address,
   // shipping address, .. .)
   WebString AutofillSection() const { return autofill_section_; }
   void SetAutofillSection(const WebString&);
+
+  bool IsAutocompleteEmailUrlOrPassword() const;
 
   const AtomicString& autocapitalize() const final;
 
@@ -126,7 +163,7 @@ class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
   bool BlocksFormSubmission() const { return blocks_form_submission_; }
   void SetBlocksFormSubmission(bool value) { blocks_form_submission_ = value; }
 
-  unsigned UniqueRendererFormControlId() const {
+  uint64_t UniqueRendererFormControlId() const {
     return unique_renderer_form_control_id_;
   }
 
@@ -139,7 +176,6 @@ class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
   void ParseAttribute(const AttributeModificationParams&) override;
   virtual void RequiredAttributeChanged();
   void DisabledAttributeChanged() override;
-  void AttachLayoutTree(AttachContext&) override;
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
   void WillChangeForm() override;
@@ -148,46 +184,44 @@ class CORE_EXPORT HTMLFormControlElement : public HTMLElement,
 
   bool SupportsFocus() const override;
   bool IsKeyboardFocusable() const override;
-  bool ShouldHaveFocusAppearance() const final;
-
-  void DidRecalcStyle(const StyleRecalcChange) override;
+  bool ShouldHaveFocusAppearance() const override;
 
   virtual void ResetImpl() {}
-  virtual bool SupportsAutofocus() const;
 
  private:
   bool IsFormControlElement() const final { return true; }
   bool AlwaysCreateUserAgentShadowRoot() const override { return true; }
 
-  int tabIndex() const override;
-
   bool IsValidElement() override;
   bool MatchesValidityPseudoClasses() const override;
 
-  unsigned unique_renderer_form_control_id_;
+  uint64_t unique_renderer_form_control_id_;
 
   WebString autofill_section_;
   enum WebAutofillState autofill_state_;
+  bool prevent_highlighting_of_autofilled_fields_ : 1;
 
   bool blocks_form_submission_ : 1;
 };
 
-inline bool IsHTMLFormControlElement(const Element& element) {
-  return element.IsFormControlElement();
+template <>
+inline bool IsElementOfType<const HTMLFormControlElement>(const Node& node) {
+  return IsA<HTMLFormControlElement>(node);
 }
-
-DEFINE_HTMLELEMENT_TYPE_CASTS_WITH_FUNCTION(HTMLFormControlElement);
-
 template <>
 struct DowncastTraits<HTMLFormControlElement> {
   static bool AllowFrom(const Node& node) {
-    auto* element = DynamicTo<Element>(node);
-    return element && element->IsFormControlElement();
+    auto* html_element = DynamicTo<HTMLElement>(node);
+    return html_element && AllowFrom(*html_element);
   }
   static bool AllowFrom(const ListedElement& control) {
     return control.IsFormControlElement();
   }
+  static bool AllowFrom(const HTMLElement& html_element) {
+    return html_element.IsFormControlElement();
+  }
 };
+
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_HTML_FORM_CONTROL_ELEMENT_H_

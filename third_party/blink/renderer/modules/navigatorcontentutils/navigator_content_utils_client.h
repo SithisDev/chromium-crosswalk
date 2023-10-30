@@ -6,30 +6,29 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_NAVIGATORCONTENTUTILS_NAVIGATOR_CONTENT_UTILS_CLIENT_H_
 
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 class KURL;
-class WebLocalFrameImpl;
+class LocalFrame;
 
 class MODULES_EXPORT NavigatorContentUtilsClient
-    : public GarbageCollectedFinalized<NavigatorContentUtilsClient> {
+    : public GarbageCollected<NavigatorContentUtilsClient> {
  public:
-  explicit NavigatorContentUtilsClient(WebLocalFrameImpl*);
+  explicit NavigatorContentUtilsClient(LocalFrame*);
   virtual ~NavigatorContentUtilsClient() = default;
 
-  virtual void RegisterProtocolHandler(const String& scheme,
-                                       const KURL&,
-                                       const String& title);
+  virtual void RegisterProtocolHandler(const String& scheme, const KURL&);
 
   virtual void UnregisterProtocolHandler(const String& scheme, const KURL&);
 
-  virtual void Trace(blink::Visitor*);
+  virtual void Trace(Visitor*) const;
 
  private:
-  Member<WebLocalFrameImpl> web_frame_;
+  Member<LocalFrame> frame_;
 };
 
 }  // namespace blink

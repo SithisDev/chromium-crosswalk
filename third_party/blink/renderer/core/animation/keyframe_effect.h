@@ -31,11 +31,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_KEYFRAME_EFFECT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_KEYFRAME_EFFECT_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/core/animation/animation_effect.h"
 #include "third_party/blink/renderer/core/animation/compositor_animations.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect_model.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "ui/gfx/geometry/size_f.h"
 
 namespace blink {
 
@@ -44,10 +46,10 @@ class ExceptionState;
 class KeyframeEffectModelBase;
 class PaintArtifactCompositor;
 class SampledEffect;
-class UnrestrictedDoubleOrKeyframeEffectOptions;
+class V8UnionKeyframeEffectOptionsOrUnrestrictedDouble;
 
 // Represents the effect of an Animation on an Element's properties.
-// https://drafts.csswg.org/web-animations/#keyframe-effect
+// https://w3.org/TR/web-animations-1/#keyframe-effects
 class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -56,11 +58,11 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
 
   // Web Animations API Bindings constructors.
   static KeyframeEffect* Create(
-      ScriptState*,
-      Element*,
-      const ScriptValue&,
-      const UnrestrictedDoubleOrKeyframeEffectOptions&,
-      ExceptionState&);
+      ScriptState* script_state,
+      Element* element,
+      const ScriptValue& keyframes,
+      const V8UnionKeyframeEffectOptionsOrUnrestrictedDouble* options,
+      ExceptionState& exception_state);
   static KeyframeEffect* Create(ScriptState*,
                                 Element*,
                                 const ScriptValue&,
@@ -77,18 +79,27 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
   bool IsKeyframeEffect() const override { return true; }
 
   // IDL implementation.
-  Element* target() const { return target_; }
+
+  // Returns the target element. If the animation targets a pseudo-element,
+  // this returns the originating element.
+  Element* target() const { return target_element_; }
   void setTarget(Element*);
+  const String& pseudoElement() const;
+  void setPseudoElement(String, ExceptionState&);
   String composite() const;
   void setComposite(String);
-  Vector<ScriptValue> getKeyframes(ScriptState*);
+  HeapVector<ScriptValue> getKeyframes(ScriptState*);
   void setKeyframes(ScriptState*,
                     const ScriptValue& keyframes,
                     ExceptionState&);
 
+  // Returns blink's representation of the effect target.
+  // This can be a blink::PseudoElement which should not be web-exposed.
+  Element* EffectTarget() const { return effect_target_; }
   void SetKeyframes(StringKeyframeVector keyframes);
 
-  bool Affects(const PropertyHandle&) const;
+  bool Affects(const PropertyHandle&) const override;
+  bool HasRevert() const;
   const KeyframeEffectModelBase* Model() const { return model_.Get(); }
   KeyframeEffectModelBase* Model() { return model_.Get(); }
   void SetModel(KeyframeEffectModelBase* model) {
@@ -101,18 +112,19 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
 
   CompositorAnimations::FailureReasons CheckCanStartAnimationOnCompositor(
       const PaintArtifactCompositor*,
-      double animation_playback_rate) const;
+      double animation_playback_rate,
+      PropertyHandleSet* unsupported_properties = nullptr) const;
   // Must only be called once.
   void StartAnimationOnCompositor(int group,
-                                  base::Optional<double> start_time,
-                                  double time_offset,
+                                  absl::optional<double> start_time,
+                                  base::TimeDelta time_offset,
                                   double animation_playback_rate,
                                   CompositorAnimation* = nullptr);
   bool HasActiveAnimationsOnCompositor() const;
   bool HasActiveAnimationsOnCompositor(const PropertyHandle&) const;
   bool CancelAnimationOnCompositor(CompositorAnimation*);
   void CancelIncompatibleAnimationsOnCompositor();
-  void PauseAnimationForTestingOnCompositor(double pause_time);
+  void PauseAnimationForTestingOnCompositor(base::TimeDelta pause_time);
 
   void AttachCompositedLayers();
 
@@ -121,9 +133,20 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
   bool HasAnimation() const;
   bool HasPlayingAnimation() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
-  bool AnimationsPreserveAxisAlignment() const;
+  bool UpdateBoxSizeAndCheckTransformAxisAlignment(const gfx::SizeF& box_size);
+  bool IsIdentityOrTranslation() const;
+
+  ActiveInterpolationsMap InterpolationsForCommitStyles();
+
+  // Explicitly setting the keyframes via KeyfrfameEffect.setFrames or
+  // Animation.effect block subseuqent changes via CSS keyframe rules.
+  bool GetIgnoreCSSKeyframes() { return ignore_css_keyframes_; }
+  void SetIgnoreCSSKeyframes() { ignore_css_keyframes_ = true; }
+
+  void SetLogicalPropertyResolutionContext(TextDirection text_direction,
+                                           WritingMode writing_mode);
 
  private:
   EffectModel::CompositeOperation CompositeInternal() const;
@@ -135,29 +158,39 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
   void Detach() override;
   void AttachTarget(Animation*);
   void DetachTarget(Animation*);
-  double CalculateTimeToEffectChange(
+  void RefreshTarget();
+  void CountAnimatedProperties() const;
+  AnimationTimeDelta IntrinsicIterationDuration() const override;
+  AnimationTimeDelta CalculateTimeToEffectChange(
       bool forwards,
-      double inherited_time,
-      double time_to_next_iteration) const override;
+      absl::optional<AnimationTimeDelta> inherited_time,
+      AnimationTimeDelta time_to_next_iteration) const override;
+  absl::optional<AnimationTimeDelta> TimelineDuration() const override;
   bool HasIncompatibleStyle() const;
-  bool HasMultipleTransformProperties() const;
+  bool AffectsImportantProperty() const;
+  void RestartRunningAnimationOnCompositor();
 
-  bool AnimationsPreserveAxisAlignment(const PropertyHandle&) const;
-
-  Member<Element> target_;
+  Member<Element> effect_target_;
+  Member<Element> target_element_;
+  String target_pseudo_;
   Member<KeyframeEffectModelBase> model_;
   Member<SampledEffect> sampled_effect_;
 
   Priority priority_;
 
   Vector<int> compositor_keyframe_model_ids_;
+
+  bool ignore_css_keyframes_;
+
+  absl::optional<gfx::SizeF> effect_target_size_;
 };
 
-DEFINE_TYPE_CASTS(KeyframeEffect,
-                  AnimationEffect,
-                  animationNode,
-                  animationNode->IsKeyframeEffect(),
-                  animationNode.IsKeyframeEffect());
+template <>
+struct DowncastTraits<KeyframeEffect> {
+  static bool AllowFrom(const AnimationEffect& animationNode) {
+    return animationNode.IsKeyframeEffect();
+  }
+};
 
 }  // namespace blink
 

@@ -1,6 +1,6 @@
 <!---
   The live version of this document can be viewed at:
-  https://chromium.googlesource.com/chromium/src/+/master/third_party/blink/renderer/core/paint/README.md
+  https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/core/paint/README.md
 -->
 
 # renderer/core/paint
@@ -109,14 +109,11 @@ are treated in different ways during painting:
 *   Compositing container chain: same as paint chain, but for compositing
     container.
 
-*   Paint invalidation container: the nearest object on the compositing
-    container chain which is composited. CompositeAfterPaint doesn't have this
-    concept.
-
 *   Visual rect: the bounding box of all pixels that will be painted by a
-    [display item client](../../platform/graphics/paint/README.md#display-items).
+    for a [display item](../../platform/graphics/paint/README.md#display-items)
     It's in the space of the containing transform property node (see [Building
-    paint property trees](#building-paint-property-trees)).
+    paint property trees](#building-paint-property-trees)). It's calculated
+    during paint for each display item.
 
 *   Isolation nodes/boundary: In certain situations, it is possible to put in
     place a barrier that isolates a subtree from being affected by its
@@ -124,6 +121,12 @@ are treated in different ways during painting:
     in the property trees as isolation nodes that serve as roots for any
     descendant property nodes. Currently, the `contain: paint` css property
     establishes an isolation boundary.
+
+*   Local property tree state: the `PropertyTreeState` associated with each
+    fragment. All fragments have a well-defined local property tree state.
+    This is often cached in the `LocalBorderBoxProperties`
+    struct that belongs to `FragmentData`. Some `FragmentData` objects don't
+    have a `LocalBorderBoxProperties`, but that is merely a memory optimization.
 
 ## Overview
 
@@ -134,12 +137,6 @@ layout (the `LayoutObject` tree) to the inputs of the compositor
 
 This process is done in the following document lifecycle phases:
 
-*   Compositing update (`kInCompositingUpdate`, `kCompositingInputsClean`)
-    *    Decides layerization (GraphicsLayers).
-    *    This is only needed for the
-         [current compositing algorithm](#Current-compositing-algorithm-CompositeBeforePaint_)
-         and will go away with
-         [CompositeAfterPaint](#New-compositing-algorithm-CompositeAfterPaint_).
 *   [PrePaint](#PrePaint) (`kInPrePaint`)
     *    [Paint invalidation](#Paint-invalidation) which invalidates display
          items which need to be painted.
@@ -149,174 +146,16 @@ This process is done in the following document lifecycle phases:
     *    Groups the display list into paint chunks which share the same
          property tree state.
     *    Commits the results to the compositor.
-        *    [CompositeAfterPaint](##New-compositing-algorithm-CompositeAfterPaint_)
-             will decide layerization at this point.
+        *    Decides which cc::Layers to create based on paint chunks.
         *    Passes the paint chunks to the compositor in a cc::Layer list.
         *    Converts the blink property tree nodes into cc property tree nodes.
-
-
-Compositing decisions are currently made before paint (see
-[Current compositing algorithm](#Current-compositing-algorithm-CompositeBeforePaint_))
-but there is an in-progress refactoring to make compositing decisions after
-paint (see
-[CompositeAfterPaint](##New-compositing-algorithm-CompositeAfterPaint_)). The
-most recent step towards CompositeAfterPaint was a project called
-[BlinkGenPropertyTrees](https://docs.google.com/document/d/17GKr2uIH2O5GthdTyvJpv1qZjoHYoLgrzvCkbCHoID4/view)
-which uses the compositing decisions from the current compositor
-(PaintLayerCompositor, which produces GraphicsLayers) with the new
-CompositeAfterPaint compositor (PaintArtifactCompositor). This is done by a step
-at the end of paint which collects all painted GraphicsLayers (and their
-associated cc::Layers) as a list of
-[ForeignLayerDisplayItem](../../platform/graphics/paint/foreign_layer_display_item.h)s.
-Foreign layers are typically used for cc::Layers managed outside blink (e.g.,
-video layers, plugin layers) and are treated as opaque composited content by
-the PaintArtifactCompositor. This approach of using foreign layers starts using
-much of the new PaintArtifactCompositor logic (e.g., converting blink property
-trees to cc property trees) without changing how compositing decisions are made.
 
 [Debugging blink objects](https://docs.google.com/document/d/1vgQY11pxRQUDAufxSsc2xKyQCKGPftZ5wZnjY2El4w8/view)
 has information about dumping the paint and compositing datastructures for
 debugging.
 
 
-### Current compositing algorithm (CompositeBeforePaint)
-
-The current compositing system chooses which `LayoutObject`s paint into their
-own composited backing texture. This is called "having a compositing trigger".
-These textures correspond to GraphicsLayers. There are also additional
-`GraphicsLayer`s which represent property tree-related effects.
-
-All elements which do not have a compositing trigger paint into the texture
-of the nearest `LayoutObject`with a compositing trigger on its
-*compositing container chain* (except for squashed layers; see below). For
-historical, practical and implementation detail reasons, only `LayoutObject`s
-with `PaintLayer`s can have a compositing trigger. See
-[crbug.com/370604](https://crbug.com/370604) for a bug tracking this limitation,
-which is often referred to as the **fundamental compositing bug**.
-
-The various compositing triggers are listed in
-[compositing_reasons.h](../../platform/graphics/compositing_reasons.h) and fall
-in to several categories:
-
-1. Direct reasons due to CSS style (see `CompositingReason::kComboAllDirectStyleDeterminedReasons`)
-2. Direct reasons due to other conditions (see `CompositingReason::kComboAllDirectNonStyleDeterminedReasons`)
-3. Composited scrolling-dependent reasons (see `CompositingReason::kComboAllCompositedScrollingDeterminedReasons`)
-4. Composited descendant-dependent reasons (see `CompositingReason::kComboCompositedDescendants`)
-5. Overlap-dependent reasons (See `CompositingReasons::kComboSquashableReasons`)
-
-The triggers have no effect unless `PaintLayerCompositor::CanBeComposited`
-returns true.
-
-Category (1) always triggers compositing of a `LayoutObject` based on its own
-style. Category (2) triggers based on the `LayoutObject`'s style, its DOM
-ancestors, and whether it is a certain kind of frame root. Category (3)
-triggers based on whether composited scrolling applies to the `LayoutObject`,
-or the `LayoutObject` moves relative to a composited scroller (position: fixed
-or position: sticky). Category (4) triggers if there are any stacking
-descendants of the `LayoutObject` that end up composited. Category 5 triggers
-if the `LayoutObject` paints after and overlaps (or may overlap) another
-composited layer.
-
-Note that composited scrolling is special. Several ways it is special:
-
- * Composited descendants do _not_ necessarily cause composited scrolling of an
-ancestor.
- * The presence of LCD text prevents composited scrolling in the
-absence of other overriding triggers.
- * Local frame roots always use
-composited scrolling if they have overflow.
- * Non-local frame roots use
-composited scrolling if they have overflow and any composited descendants.
- * Composited scrolling is indicated by a bit on PaintLayerScrollableArea, not
- a direct compositing reason. This bit is then transformed into a compositing
- reason from category (3) during the CompositingRequirementsUpdater
-
-Note that overlap triggers have two special behaviors:
-
- * Any `LayoutObject`
-which may overlap a `LayoutObject` that uses composited scrolling or a
-transform animation, paints after it, and scrolls with respect to it, receives
-an overlap trigger. In some cases this trigger is too aggressive.
- * Inline CSS
-transform is treated as if it was a transform animation. (This is a heuristic
-to speed up the compositing step but leads to more composited layers.)
-
-The sequence of work during the `DocumentLifecycle` to compute these triggers
-is as follows:
-
- * `kInStyleRecalc`: compute (1) and most of (4) by calling
-`CompositingReasonFinder::PotentialCompositingReasonsFromStyle` and caching
-the result on `PaintLayer`, accessible via
-`PaintLayer::PotentialCompositingReasonsFromStyle`. Dirty bits in
-`StyleDifference` determine whether this has to be re-computed on a particular
-lifecycle update.
- * `kInCompositingUpdate`: compute (2) `CompositingInputsUpdater`. Also
- set the composited scrolling bit on `PaintLayerScrollableArea` if applicable.
- * `kCompositingInputsClean`: compute (3), the rest of (4), and (5), in
-`CompositingRequirementsUpdater`
-
-
-The flow of data from the LayoutObject tree to the cc::Layer list and cc
-property trees is described below:
-
-```
-from layout
-  |
-  v
-+------------------------------+
-| LayoutObject/PaintLayer tree |-----------+
-+------------------------------+           |
-  |                                        |
-  | PaintLayerCompositor::UpdateIfNeeded() |
-  |   CompositingInputsUpdater::Update()   |
-  |   CompositingLayerAssigner::Assign()   |
-  |   GraphicsLayerUpdater::Update()       | PrePaintTreeWalk::Walk()
-  |   GraphicsLayerTreeBuilder::Rebuild()  |   PaintPropertyTreeBuider::UpdatePropertiesForSelf()
-  v                                        |
-+--------------------+                   +------------------+
-| GraphicsLayer tree |<------------------|  Property trees  |
-+--------------------+                   +------------------+
-      |                                    |              |
-      |<-----------------------------------+              |
-      | LocalFrameView::PaintTree()                       |
-      |   LocalFrameView::PaintGraphicsLayerRecursively() |
-      |     GraphicsLayer::Paint()                        |
-      |       CompositedLayerMapping::PaintContents()     |
-      |         PaintLayerPainter::PaintLayerContents()   |
-      |           ObjectPainter::Paint()                  |
-      v                                                   |
-    +---------------------------------+                   |
-    | DisplayItemList/PaintChunk list |                   |
-    +---------------------------------+                   |
-      |                                                   |
-      |<--------------------------------------------------+
-      | PaintChunksToCcLayer::Convert()                   |
-      v                                                   |
-+----------------+                                        |
-| Foreign layers |                                        |
-+----------------+                                        |
-  |                                                       |
-  |    LocalFrameView::PushPaintArtifactToCompositor()    |
-  |         PaintArtifactCompositor::Update()             |
-  +--------------------+       +--------------------------+
-                       |       |
-                       v       v
-        +----------------+  +-----------------------+
-        | cc::Layer list |  |   cc property trees   |
-        +----------------+  +-----------------------+
-                |              |
-  +-------------+--------------+
-  | to compositor
-  v
-```
-[Debugging blink objects](https://docs.google.com/document/d/1vgQY11pxRQUDAufxSsc2xKyQCKGPftZ5wZnjY2El4w8/view)
-has information about dumping these paint and compositing datastructures for
-debugging.
-
-### New compositing algorithm (CompositeAfterPaint)
-
-This is a new mode under development. In this mode, layerization decisions are
-made after paint.
+### Compositing algorithm
 
 The process starts with pre-paint to generate property trees. During paint,
 each generated display item will be associated with a property tree state.
@@ -374,22 +213,6 @@ from layout
 has information about dumping these paint and compositing datastructures for
 debugging.
 
-### Comparison of the current and new compositing algorithms
-
-The
-[current compositing design](#Current-compositing-algorithm-CompositeBeforePaint_)
-is an incremental step towards the new
-[CompositeAfterPaint](##New-compositing-algorithm-CompositeAfterPaint_) design
-and was launched as [BlinkGenPropertyTrees](https://docs.google.com/document/d/17GKr2uIH2O5GthdTyvJpv1qZjoHYoLgrzvCkbCHoID4/view). The design before
-BlinkGenPropertyTrees is not described in this document.
-
-
-|                                 | Current (CompositeBeforePaint)               | New (CompositeAfterPaint) |
-|---------------------------------|:---------------------------------------------|:--------------------------|
-| REF::CompositeAfterPaintEnabled | False                                        | True                      |
-| Layerization                    | PaintLayerCompositor, CompositedLayerMapping | PaintArtifactCompositor   |
-| PaintController                 | One per GraphicsLayer                        | One per LocalFrameView    |
-
 ## PrePaint
 [`PrePaintTreeWalk`](pre_paint_tree_walk.h)
 
@@ -417,24 +240,8 @@ invalidate display item clients that will generate different display items.
 At the beginning of the PrePaint tree walk, a root `PaintInvalidatorContext`
 is created for the root `LayoutView`. During the tree walk, one
 `PaintInvalidatorContext` is created for each visited object based on the
-`PaintInvalidatorContext` passed from the parent object. It tracks the following
-information to provide O(1) complexity access to them if possible:
-
-*   Paint invalidation container (Slimming Paint v1 only): As described by
-    the definitions in [Other glossaries](#Other-glossaries), the paint
-    invalidation container for stacked objects can differ from normal objects,
-    we have to track both separately. Here is an example:
-
-        <div style="overflow: scroll">
-            <div id=A style="position: absolute"></div>
-            <div id=B></div>
-        </div>
-
-    If the scroller is composited (for high-DPI screens for example), it is the
-    paint invalidation container for div B, but not A.
-
-*   Painting layer: the layer which will initiate painting of the current
-    object. It's the same value as `LayoutObject::PaintingLayer()`.
+`PaintInvalidatorContext` passed from the parent object. It tracks the painting
+layer which will initiate painting of the current object.
 
 [`PaintInvalidator`](PaintInvalidator.h) initializes `PaintInvalidatorContext`
 for the current object, then calls `LayoutObject::InvalidatePaint()` which
@@ -579,19 +386,19 @@ IsolationPiercing vs IsolationBlocked subtree update reasons.
 #### Fragments
 
 In the absence of multicolumn/pagination, there is a 1:1 correspondence between
-self-painting `PaintLayer`s and `FragmentData`. If there is
-multicolumn/pagination, there may be more `FragmentData`s.. If a `PaintLayer`
-has a property node, each of its fragments will have one. The parent of a
-fragment's property node is the property node that belongs to the ancestor
-`PaintLayer` which is part of the same column. For example, if there are 3
-columns and both a parent and child `PaintLayer` have a transform, there will be
-3 `FragmentData` objects for the parent, 3 for the child, each `FragmentData`
-will have its own `TransformPaintPropertyNode`, and the child's ith fragment's
-transform will point to the ith parent's transform.
+`LayoutObject`s and `FragmentData`. If there is multicolumn/pagination,
+there may be more `FragmentData`s. If a `LayoutObject` has a property node,
+each of its fragments will have one. The parent of a fragment's property node is
+the property node that belongs to the ancestor `LayoutObject` which is part of
+the same column. For example, if there are 3 columns and both a parent and child
+`LayoutObject` have a transform, there will be 3 `FragmentData` objects for
+the parent, 3 for the child, each `FragmentData` will have its own
+`TransformPaintPropertyNode`, and the child's ith fragment's transform will
+point to the ith parent's transform.
 
 Each `FragmentData` receives its own `ClipPaintPropertyNode`. They
 also store a unique `PaintOffset, `PaginationOffset and
-`LocalBordreBoxProperties` object.
+`LocalBorderBoxProperties` object.
 
 See
 [`LayoutMultiColumnFlowThread.h`](../layout/layout_multi_column_flow_thread.h)
@@ -602,20 +409,13 @@ for a much more detail about multicolumn/pagination.
 Paint walks the LayoutObject tree in paint-order and produces a list of
 display items. This is implemented using static painter classes
 (e.g., [`BlockPainter`](block_painter.cc)) and appends display items to a
-[`PaintController`](../../platform/graphics/paint/paint_controller.h). During
+[`PaintController`](../../platform/graphics/paint/paint_controller.h). There
+is only one `PaintController` for the entire `LocalFrameView`. During
 this treewalk, the current property tree state is maintained (see:
 `PaintController::UpdateCurrentPaintChunkProperties`). The `PaintController`
 segments the display item list into
 [`PaintChunk`](../../platform/graphics/paint/paint_chunk.h)s which are
 sequential display items that share a common property tree state.
-
-With the
-[current compositing algorithm](#Current-compositing-algorithm-CompositeBeforePaint_),
-the paint-order `LayoutObject` treewalk is initiated by `GraphicsLayer`s, and
-each `GraphicsLayer` contains a `PaintController`. In the new compositing
-approach,
-[CompositeAfterPaint](##New-compositing-algorithm-CompositeAfterPaint_), there
-is only one `PaintController` for the entire `LocalFrameView`.
 
 ### Paint result caching
 
@@ -647,8 +447,7 @@ a PaintLayer and whether we can use cached subsequence for a PaintLayer. See
 During painting, we walk the layout tree multiple times for multiple paint
 phases. Sometimes a layer contain nothing needing a certain paint phase and we
 can skip tree walk for such empty phases. Now we have optimized
-`PaintPhaseDescendantBlockBackgroundsOnly`, `PaintPhaseDescendantOutlinesOnly`
-and `PaintPhaseFloat` for empty paint phases.
+`PaintPhaseDescendantOutlinesOnly` and `PaintPhaseFloat` for empty paint phases.
 
 During paint invalidation, we set the containing self-painting layer's
 `NeedsPaintPhaseXXX` flag if the object has something needing to be painted in
@@ -663,27 +462,73 @@ if an object changes style and creates a self-painting-layer, we copy the flags
 from its containing self-painting layer to this layer, assuming that this layer
 needs all paint phases that its container self-painting layer needs.
 
-We could update the `NeedsPaintPhaseXXX` flags in a separate tree walk, but that
-would regress performance of the first paint. For CompositeAfterPaint, we can
-update the flags during the pre-painting tree walk to simplify the logic.
+### Hit test information recording
 
-### Hit test painting
+Hit testing is done in paint-order, and to preserve this information the paint
+system is re-used to record hit test information when painting the background.
+This information is then used in the compositor to implement cc-side hit
+testing. Hit test information is recorded even if there is no painted content.
 
-Hit testing is done in paint-order. Hit test display items are emitted in the
-background phase of painting. Hit test display items are produced even if there
-is no painted content.
+We record different types of hit test information in the following data
+structures:
+
+1. Paint chunk bounds
+
+   The bounds of the current paint chunk are expanded to ensure the bounds
+   contain the hit testable area.
+
+2. [`HitTestData::touch_action_rects`](../../platform/graphics/paint/hit_test_data.h)
+
+   Used for [touch action rects](http://docs.google.com/document/u/1/d/1ksiqEPkDeDuI_l5HvWlq1MfzFyDxSnsNB8YXIaXa3sE/view)
+   which are areas of the page that allow certain gesture effects, as well as
+   areas of the page that disallow touch events due to blocking touch event
+   handlers.
+
+3. [`HitTestData::wheel_event_rects`](../../platform/graphics/paint/hit_test_data.h)
+
+   Used for [wheel event handler regions](https://docs.google.com/document/d/1ar4WhVnLA-fmw6atgP-23iq-ys_NfFoGb3LA5AgaylA/view)
+      which are areas of the page that disallow default wheel event processing
+      due to blocking wheel event handlers.
+
+4. [`HitTestData::scroll_translation`](../../platform/graphics/paint/hit_test_data.h)
+   and
+   [`HitTestData::scroll_hit_test_rect`](../../platform/graphics/paint/hit_test_data.h)
+
+   Used to create
+   [non-fast scrollable regions](https://docs.google.com/document/d/1IyYJ6bVF7KZq96b_s5NrAzGtVoBXn_LQnya9y4yT3iw/view)
+   to prevent compositor scrolling of non-composited scrollers, plugins with
+   blocking scroll event handlers, and resize handles.
+
+   If `scroll_translation` is not null, this is also used to force a special
+   cc::Layer that is marked as being scrollable when composited scrolling is
+   needed for the scroller.
+
+### Scrollbar painting
+
+During painting, for a non-custom scrollbar we create a
+[ScrollbarDisplayItem](../../platform/graphics/paint/scrollbar_display_item.h)
+which contains a [cc::Scrollbar](../../../../cc/input/scrollbar.h) and other
+information that are needed to actually paint the scrollbar into a paint record
+or to create a cc scrollbar layer. During PaintArtifactCompositor update,
+we decide whether to composite the scrollbar and, if not composited, actually
+paint the scrollbar as a paint record, otherwise create a cc scrollbar layer
+of type cc::SolidColorScrollbarLayer, cc::PaintedScrollbarLayer or
+cc::PaintedOverlayScrollbarLayer depending on the type of the scrollbar.
+
+Custom scrollbars are still painted into drawing display items directly.
 
 ### PaintNG
 
-[LayoutNG](../layout/ng/README.md]) is a project that will change how Layout
+[LayoutNG](../layout/ng/README.md) is a project that will change how Layout
 generates geometry/style information for painting. Instead of modifying
 LayoutObjects, LayoutNG will generate an NGFragment tree.
 
 NGPaintFragments are:
-* immutable
-* all coordinates are physical. See
+
+*    immutable
+*    all coordinates are physical. See
 [layout_box_model_object.h](../layout/layout_box_model_object.h).
-* instead of Location(), NGFragment has Offset(), a physical offset from parent
+*    instead of Location(), NGFragment has Offset(), a physical offset from parent
 fragment.
 
 The goal is for PaintNG to eventually paint from NGFragment tree,

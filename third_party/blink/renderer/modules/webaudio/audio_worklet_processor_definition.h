@@ -5,10 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_WORKLET_PROCESSOR_DEFINITION_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_WORKLET_PROCESSOR_DEFINITION_H_
 
+#include "third_party/blink/renderer/bindings/modules/v8/v8_audio_param_descriptor.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/modules/webaudio/audio_param_descriptor.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "v8/include/v8.h"
 
@@ -25,7 +26,7 @@ class V8BlinkAudioWorkletProcessorConstructor;
 // This is constructed and destroyed on a worker thread, and all methods also
 // must be called on the worker thread.
 class MODULES_EXPORT AudioWorkletProcessorDefinition final
-    : public GarbageCollectedFinalized<AudioWorkletProcessorDefinition>,
+    : public GarbageCollected<AudioWorkletProcessorDefinition>,
       public NameClient {
  public:
   static AudioWorkletProcessorDefinition* Create(
@@ -37,7 +38,7 @@ class MODULES_EXPORT AudioWorkletProcessorDefinition final
       const String& name,
       V8BlinkAudioWorkletProcessorConstructor* constructor,
       V8BlinkAudioWorkletProcessCallback* process);
-  ~AudioWorkletProcessorDefinition();
+  ~AudioWorkletProcessorDefinition() final;
 
   const String& GetName() const { return name_; }
   V8BlinkAudioWorkletProcessorConstructor* ConstructorFunction() const {
@@ -56,7 +57,7 @@ class MODULES_EXPORT AudioWorkletProcessorDefinition final
   bool IsSynchronized() const { return is_synchronized_; }
   void MarkAsSynchronized() { is_synchronized_ = true; }
 
-  void Trace(blink::Visitor* visitor);
+  void Trace(Visitor* visitor) const;
 
   const char* NameInHeapSnapshot() const override {
     return "AudioWorkletProcessorDefinition";
@@ -67,7 +68,7 @@ class MODULES_EXPORT AudioWorkletProcessorDefinition final
   bool is_synchronized_ = false;
 
   // The definition is per global scope. The active instance of
-  // |AudioProcessorWorklet| should be passed into these to perform JS function.
+  // AudioProcessorWorklet should be passed into these to perform JS function.
   Member<V8BlinkAudioWorkletProcessorConstructor> constructor_;
   Member<V8BlinkAudioWorkletProcessCallback> process_;
 

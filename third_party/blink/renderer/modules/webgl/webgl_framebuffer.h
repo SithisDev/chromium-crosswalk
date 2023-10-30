@@ -29,6 +29,8 @@
 #include "third_party/blink/renderer/modules/webgl/webgl_context_object.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_shared_object.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace gpu {
 namespace gles2 {
@@ -48,6 +50,8 @@ class WebGLFramebuffer final : public WebGLContextObject {
   class WebGLAttachment : public GarbageCollected<WebGLAttachment>,
                           public NameClient {
    public:
+    ~WebGLAttachment() override = default;
+
     virtual WebGLSharedObject* Object() const = 0;
     virtual bool IsSharedObject(WebGLSharedObject*) const = 0;
     virtual bool Valid() const = 0;
@@ -59,21 +63,20 @@ class WebGLFramebuffer final : public WebGLContextObject {
                           GLenum target,
                           GLenum attachment) = 0;
 
-    virtual void Trace(blink::Visitor* visitor) {}
+    virtual void Trace(Visitor* visitor) const {}
 
    protected:
     WebGLAttachment();
   };
 
-  explicit WebGLFramebuffer(WebGLRenderingContextBase*, bool opaque);
+  explicit WebGLFramebuffer(WebGLRenderingContextBase*, bool opaque = false);
   ~WebGLFramebuffer() override;
-
-  static WebGLFramebuffer* Create(WebGLRenderingContextBase*);
 
   // An opaque framebuffer is one whose attachments are created and managed by
   // the browser and not inspectable or alterable via Javascript. This is
   // primarily used by the VRWebGLLayer interface.
-  static WebGLFramebuffer* CreateOpaque(WebGLRenderingContextBase*);
+  static WebGLFramebuffer* CreateOpaque(WebGLRenderingContextBase*,
+                                        bool has_stencil);
 
   GLuint Object() const { return object_; }
 
@@ -110,6 +113,9 @@ class WebGLFramebuffer final : public WebGLContextObject {
 
   bool Opaque() const { return opaque_; }
   void MarkOpaqueBufferComplete(bool complete) { opaque_complete_ = complete; }
+  void SetOpaqueHasStencil(bool has_stencil) {
+    opaque_has_stencil_ = has_stencil;
+  }
 
   // Wrapper for drawBuffersEXT/drawBuffersARB to work around a driver bug.
   void DrawBuffers(const Vector<GLenum>& bufs);
@@ -120,7 +126,7 @@ class WebGLFramebuffer final : public WebGLContextObject {
 
   GLenum GetReadBuffer() const { return read_buffer_; }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
   const char* NameInHeapSnapshot() const override { return "WebGLFramebuffer"; }
 
  protected:
@@ -162,6 +168,7 @@ class WebGLFramebuffer final : public WebGLContextObject {
   bool web_gl1_depth_stencil_consistent_;
   bool contents_changed_ = false;
   const bool opaque_;
+  bool opaque_has_stencil_ = false;
   bool opaque_complete_ = false;
 
   Vector<GLenum> draw_buffers_;

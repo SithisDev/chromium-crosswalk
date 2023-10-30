@@ -5,9 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_COMMON_IDLE_HELPER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCHEDULER_COMMON_IDLE_HELPER_H_
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/task/task_observer.h"
+#include "base/time/time.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/scheduler/common/cancelable_closure_holder.h"
 #include "third_party/blink/renderer/platform/scheduler/common/scheduler_helper.h"
@@ -41,13 +41,15 @@ class SchedulerHelper;
 //
 // Idle tasks are supplied a deadline, and should endeavor to finished before it
 // ends to avoid jank.
-class PLATFORM_EXPORT IdleHelper : public base::MessageLoop::TaskObserver,
+class PLATFORM_EXPORT IdleHelper : public base::TaskObserver,
                                    public SingleThreadIdleTaskRunner::Delegate {
  public:
   // Used to by scheduler implementations to customize idle behaviour.
   class PLATFORM_EXPORT Delegate {
    public:
     Delegate();
+    Delegate(const Delegate&) = delete;
+    Delegate& operator=(const Delegate&) = delete;
     virtual ~Delegate();
 
     // If it's ok to enter a long idle period, return true.  Otherwise return
@@ -69,9 +71,6 @@ class PLATFORM_EXPORT IdleHelper : public base::MessageLoop::TaskObserver,
 
     // Signals that the task list has changed.
     virtual void OnPendingTasksChanged(bool has_tasks) = 0;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(Delegate);
   };
 
   // Keep IdleHelper::IdlePeriodStateToString in sync with this enum.
@@ -87,7 +86,7 @@ class PLATFORM_EXPORT IdleHelper : public base::MessageLoop::TaskObserver,
   };
 
   // The maximum length of an idle period.
-  static const int kMaximumIdlePeriodMillis = 50;
+  static constexpr base::TimeDelta kMaximumIdlePeriod = base::Milliseconds(50);
 
   // |helper| and |delegate| are not owned by IdleHelper object and must
   // outlive it.
@@ -97,6 +96,8 @@ class PLATFORM_EXPORT IdleHelper : public base::MessageLoop::TaskObserver,
       const char* idle_period_tracing_name,
       base::TimeDelta required_quiescence_duration_before_long_idle_period,
       scoped_refptr<base::sequence_manager::TaskQueue> idle_queue);
+  IdleHelper(const IdleHelper&) = delete;
+  IdleHelper& operator=(const IdleHelper&) = delete;
   ~IdleHelper() override;
 
   // Prevents any further idle tasks from running.
@@ -145,8 +146,9 @@ class PLATFORM_EXPORT IdleHelper : public base::MessageLoop::TaskObserver,
   void DidProcessIdleTask() override;
   base::TimeTicks NowTicks() override;
 
-  // base::MessageLoop::TaskObserver implementation:
-  void WillProcessTask(const base::PendingTask& pending_task) override;
+  // base::TaskObserver implementation:
+  void WillProcessTask(const base::PendingTask& pending_task,
+                       bool was_blocked_or_low_priority) override;
   void DidProcessTask(const base::PendingTask& pending_task) override;
 
   IdlePeriodState SchedulerIdlePeriodState() const;
@@ -165,6 +167,8 @@ class PLATFORM_EXPORT IdleHelper : public base::MessageLoop::TaskObserver,
     State(SchedulerHelper* helper,
           Delegate* delegate,
           const char* idle_period_tracing_name);
+    State(const State&) = delete;
+    State& operator=(const State&) = delete;
     virtual ~State();
 
     void UpdateState(IdlePeriodState new_state,
@@ -194,8 +198,7 @@ class PLATFORM_EXPORT IdleHelper : public base::MessageLoop::TaskObserver,
     bool idle_period_trace_event_started_;
     bool running_idle_task_for_tracing_;
     const char* idle_period_tracing_name_;
-
-    DISALLOW_COPY_AND_ASSIGN(State);
+    const char* last_sub_trace_event_name_ = nullptr;
   };
 
   // The minimum duration of an idle period.
@@ -240,8 +243,6 @@ class PLATFORM_EXPORT IdleHelper : public base::MessageLoop::TaskObserver,
 
   base::WeakPtr<IdleHelper> weak_idle_helper_ptr_;
   base::WeakPtrFactory<IdleHelper> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(IdleHelper);
 };
 
 }  // namespace scheduler

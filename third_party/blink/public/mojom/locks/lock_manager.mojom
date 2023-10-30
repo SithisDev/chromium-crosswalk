@@ -15,7 +15,7 @@ interface LockHandle {};
 interface LockRequest {
   // Request was granted. Associated to maintain ordering within
   // a LockManager, to match task queue behavior required by spec.
-  Granted(associated LockHandle lock_handle);
+  Granted(pending_associated_remote<LockHandle> lock_handle);
 
   // Request failed; e.g. request was only "if available" and it was not.
   Failed();
@@ -47,7 +47,7 @@ struct LockInfo {
 // availablility and options. Once granted, the lock will be held until
 // explicitly released or the holding context is terminated.
 //
-// Proposal: https://wicg.github.io/web-locks
+// Proposal: https://w3c.github.io/web-locks
 
 interface LockManager {
   // PREEMPT corresponds to the |steal| option in the API; if used then
@@ -69,7 +69,7 @@ interface LockManager {
   RequestLock(string name,
               LockMode mode,
               WaitMode wait,
-              associated LockRequest request);
+              pending_associated_remote<LockRequest> request);
 
   // Produces a snapshot of the lock manager's state. Web applications
   // can use this for diagnostic purposes.

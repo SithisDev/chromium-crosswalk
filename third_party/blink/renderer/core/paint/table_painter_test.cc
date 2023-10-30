@@ -15,7 +15,13 @@ using testing::ElementsAre;
 
 namespace blink {
 
-using TablePainterTest = PaintControllerPaintTest;
+class TablePainterTest : public PaintControllerPaintTest,
+                         private ScopedLayoutNGForTest {
+ protected:
+  TablePainterTest() : ScopedLayoutNGForTest(false) {}
+};
+
+// using TablePainterTest = PaintControllerPaintTest;
 INSTANTIATE_PAINT_TEST_SUITE_P(TablePainterTest);
 
 TEST_P(TablePainterTest, Background) {
@@ -34,24 +40,22 @@ TEST_P(TablePainterTest, Background) {
   LayoutObject& row1 = *GetLayoutObjectByElementId("row1");
   LayoutObject& row2 = *GetLayoutObjectByElementId("row2");
 
-  InvalidateAll(RootPaintController());
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
-  Paint(IntRect(0, 0, 200, 200));
+  InvalidateAll();
+  UpdateAllLifecyclePhasesExceptPaint();
+  PaintContents(gfx::Rect(0, 0, 200, 200));
 
   EXPECT_THAT(
-      RootPaintController().GetDisplayItemList(),
-      ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                           DisplayItem::kDocumentBackground),
-                  IsSameId(&row1, DisplayItem::kBoxDecorationBackground)));
+      ContentDisplayItems(),
+      ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
+                  IsSameId(row1.Id(), DisplayItem::kBoxDecorationBackground)));
 
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
-  Paint(IntRect(0, 300, 200, 1000));
+  UpdateAllLifecyclePhasesExceptPaint();
+  PaintContents(gfx::Rect(0, 300, 200, 1000));
 
   EXPECT_THAT(
-      RootPaintController().GetDisplayItemList(),
-      ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                           DisplayItem::kDocumentBackground),
-                  IsSameId(&row2, DisplayItem::kBoxDecorationBackground)));
+      ContentDisplayItems(),
+      ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
+                  IsSameId(row2.Id(), DisplayItem::kBoxDecorationBackground)));
 }
 
 TEST_P(TablePainterTest, BackgroundWithCellSpacing) {
@@ -76,49 +80,44 @@ TEST_P(TablePainterTest, BackgroundWithCellSpacing) {
   LayoutObject& cell1 = *GetLayoutObjectByElementId("cell1");
   LayoutObject& cell2 = *GetLayoutObjectByElementId("cell2");
 
-  InvalidateAll(RootPaintController());
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
+  InvalidateAll();
+  UpdateAllLifecyclePhasesExceptPaint();
   // Intersects cell1 and the spacing between cell1 and cell2.
-  Paint(IntRect(0, 200, 200, 150));
+  PaintContents(gfx::Rect(0, 200, 200, 150));
 
   EXPECT_THAT(
-      RootPaintController().GetDisplayItemList(),
-      ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                           DisplayItem::kDocumentBackground),
-                  IsSameId(&row1, DisplayItem::kBoxDecorationBackground),
-                  IsSameId(&cell1, DisplayItem::kBoxDecorationBackground)));
+      ContentDisplayItems(),
+      ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
+                  IsSameId(row1.Id(), DisplayItem::kBoxDecorationBackground),
+                  IsSameId(cell1.Id(), DisplayItem::kBoxDecorationBackground)));
 
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
+  UpdateAllLifecyclePhasesExceptPaint();
   // Intersects the spacing only.
-  Paint(IntRect(0, 250, 100, 100));
+  PaintContents(gfx::Rect(0, 250, 100, 100));
 
   EXPECT_THAT(
-      RootPaintController().GetDisplayItemList(),
-      ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                           DisplayItem::kDocumentBackground),
-                  IsSameId(&row1, DisplayItem::kBoxDecorationBackground)));
+      ContentDisplayItems(),
+      ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
+                  IsSameId(row1.Id(), DisplayItem::kBoxDecorationBackground)));
 
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
+  UpdateAllLifecyclePhasesExceptPaint();
   // Intersects cell2 only.
-  Paint(IntRect(0, 350, 200, 150));
+  PaintContents(gfx::Rect(0, 350, 200, 150));
 
   EXPECT_THAT(
-      RootPaintController().GetDisplayItemList(),
-      ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                           DisplayItem::kDocumentBackground),
-                  IsSameId(&row2, DisplayItem::kBoxDecorationBackground),
-                  IsSameId(&cell2, DisplayItem::kBoxDecorationBackground)));
+      ContentDisplayItems(),
+      ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
+                  IsSameId(row2.Id(), DisplayItem::kBoxDecorationBackground),
+                  IsSameId(cell2.Id(), DisplayItem::kBoxDecorationBackground)));
 }
 
 TEST_P(TablePainterTest, BackgroundInSelfPaintingRow) {
   SetBodyInnerHTML(R"HTML(
     <style>
       body { margin: 0 }
-      td { width: 200px; height: 200px; border: 0; background-color: green;
-    }
+      td { width: 200px; height: 200px; border: 0; background-color: green; }
       tr { background-color: blue; opacity: 0.5; }
-      table { border: none; border-spacing: 100px; border-collapse:
-    separate; }
+      table { border: none; border-spacing: 100px; border-collapse: separate; }
     </style>
     <table>
       <tr id='row'><td id='cell1'><td id='cell2'></td></tr>
@@ -129,36 +128,33 @@ TEST_P(TablePainterTest, BackgroundInSelfPaintingRow) {
   LayoutObject& cell2 = *GetLayoutObjectByElementId("cell2");
   LayoutObject& row = *GetLayoutObjectByElementId("row");
 
-  InvalidateAll(RootPaintController());
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
+  InvalidateAll();
+  UpdateAllLifecyclePhasesExceptPaint();
   // Intersects cell1 and the spacing between cell1 and cell2.
-  Paint(IntRect(200, 0, 200, 200));
+  PaintContents(gfx::Rect(200, 0, 200, 200));
 
   EXPECT_THAT(
-      RootPaintController().GetDisplayItemList(),
-      ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                           DisplayItem::kDocumentBackground),
-                  IsSameId(&row, DisplayItem::kBoxDecorationBackground),
-                  IsSameId(&cell1, DisplayItem::kBoxDecorationBackground)));
+      ContentDisplayItems(),
+      ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
+                  IsSameId(row.Id(), DisplayItem::kBoxDecorationBackground),
+                  IsSameId(cell1.Id(), DisplayItem::kBoxDecorationBackground)));
 
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
+  UpdateAllLifecyclePhasesExceptPaint();
   // Intersects the spacing only.
-  Paint(IntRect(300, 0, 100, 100));
+  PaintContents(gfx::Rect(300, 0, 100, 100));
 
-  EXPECT_THAT(RootPaintController().GetDisplayItemList(),
-              ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                                   DisplayItem::kDocumentBackground)));
+  EXPECT_THAT(ContentDisplayItems(),
+              ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM));
 
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
+  UpdateAllLifecyclePhasesExceptPaint();
   // Intersects cell2 only.
-  Paint(IntRect(450, 0, 200, 200));
+  PaintContents(gfx::Rect(450, 0, 200, 200));
 
   EXPECT_THAT(
-      RootPaintController().GetDisplayItemList(),
-      ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                           DisplayItem::kDocumentBackground),
-                  IsSameId(&row, DisplayItem::kBoxDecorationBackground),
-                  IsSameId(&cell2, DisplayItem::kBoxDecorationBackground)));
+      ContentDisplayItems(),
+      ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
+                  IsSameId(row.Id(), DisplayItem::kBoxDecorationBackground),
+                  IsSameId(cell2.Id(), DisplayItem::kBoxDecorationBackground)));
 }
 
 TEST_P(TablePainterTest, CollapsedBorderAndOverflow) {
@@ -174,21 +170,24 @@ TEST_P(TablePainterTest, CollapsedBorderAndOverflow) {
     </table>
   )HTML");
 
-  auto& cell = *ToLayoutTableCell(GetLayoutObjectByElementId("cell"));
-  InvalidateAll(RootPaintController());
-  GetDocument().View()->UpdateAllLifecyclePhasesExceptPaint();
+  const LayoutObject* cell_layout_object = GetLayoutObjectByElementId("cell");
+  const LayoutNGTableCellInterface* cell =
+      ToInterface<LayoutNGTableCellInterface>(cell_layout_object);
+  InvalidateAll();
+  UpdateAllLifecyclePhasesExceptPaint();
   // Intersects the overflowing part of cell but not border box.
-  Paint(IntRect(0, 0, 100, 100));
+  PaintContents(gfx::Rect(0, 0, 100, 100));
 
   // We should paint all display items of cell.
-  EXPECT_THAT(
-      RootPaintController().GetDisplayItemList(),
-      ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                           DisplayItem::kDocumentBackground),
-                  IsSameId(&cell, DisplayItem::kBoxDecorationBackground),
-                  IsSameId(cell.Row(), DisplayItem::kTableCollapsedBorders),
-                  IsSameId(&cell, DisplayItem::PaintPhaseToDrawingType(
-                                      PaintPhase::kSelfOutlineOnly))));
+  EXPECT_THAT(ContentDisplayItems(),
+              ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
+                          IsSameId(cell_layout_object->Id(),
+                                   DisplayItem::kBoxDecorationBackground),
+                          IsSameId(cell->RowInterface()->ToLayoutObject()->Id(),
+                                   DisplayItem::kTableCollapsedBorders),
+                          IsSameId(cell_layout_object->Id(),
+                                   DisplayItem::PaintPhaseToDrawingType(
+                                       PaintPhase::kSelfOutlineOnly))));
 }
 
 TEST_P(TablePainterTest, DontPaintEmptyDecorationBackground) {
@@ -206,16 +205,63 @@ TEST_P(TablePainterTest, DontPaintEmptyDecorationBackground) {
     </tr>
   )HTML");
 
-  auto* table1 = ToLayoutTable(GetLayoutObjectByElementId("table1"));
-  auto* table2 = ToLayoutTable(GetLayoutObjectByElementId("table2"));
-  EXPECT_THAT(RootPaintController().GetDisplayItemList(),
-              ElementsAre(IsSameId(&ViewScrollingBackgroundClient(),
-                                   kDocumentBackgroundType),
-                          IsSameId(table1, kBackgroundType),
-                          IsSameId(table1->FirstBody()->FirstRow()->FirstCell(),
-                                   kBackgroundType),
-                          IsSameId(table2->FirstBody()->FirstRow(),
+  auto* table1 = GetLayoutObjectByElementId("table1");
+  auto* table2 = GetLayoutObjectByElementId("table2");
+  const LayoutObject* table_1_descendant =
+      ToInterface<LayoutNGTableInterface>(table1)
+          ->FirstBodyInterface()
+          ->FirstRowInterface()
+          ->FirstCellInterface()
+          ->ToLayoutObject();
+  const LayoutObject* table_2_descendant =
+      ToInterface<LayoutNGTableInterface>(table2)
+          ->FirstBodyInterface()
+          ->FirstRowInterface()
+          ->ToLayoutObject();
+  EXPECT_THAT(ContentDisplayItems(),
+              ElementsAre(VIEW_SCROLLING_BACKGROUND_DISPLAY_ITEM,
+                          IsSameId(table1->Id(), kBackgroundType),
+                          IsSameId(table_1_descendant->Id(), kBackgroundType),
+                          IsSameId(table_2_descendant->Id(),
                                    DisplayItem::kTableCollapsedBorders)));
+}
+
+TEST_P(TablePainterTest, TouchActionOnTable) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      table {
+        width: 100px;
+        height: 100px;
+        touch-action: none;
+      }
+    </style>
+    <table></table>
+  )HTML");
+  const auto& paint_chunk = *ContentPaintChunks().begin();
+  EXPECT_EQ(paint_chunk.hit_test_data->touch_action_rects[0].rect,
+            gfx::Rect(0, 0, 100, 100));
+}
+
+TEST_P(TablePainterTest, TouchActionOnTableCell) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      body { margin: 0; }
+      table {
+        border-collapse: collapse;
+      }
+      td {
+        width: 100px;
+        height: 100px;
+        touch-action: none;
+        padding: 0;
+      }
+    </style>
+    <table><tr><td></td></tr></table>
+  )HTML");
+  const auto& paint_chunk = *ContentPaintChunks().begin();
+  EXPECT_EQ(paint_chunk.hit_test_data->touch_action_rects[0].rect,
+            gfx::Rect(0, 0, 100, 100));
 }
 
 }  // namespace blink

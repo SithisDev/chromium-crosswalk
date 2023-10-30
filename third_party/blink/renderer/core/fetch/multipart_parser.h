@@ -5,12 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_MULTIPART_PARSER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_MULTIPART_PARSER_H_
 
-#include "base/macros.h"
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/network/http_header_map.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -25,7 +25,7 @@ namespace blink {
 // - If MultipartParser::cancel() is called, Client's methods will not be
 //   called anymore.
 class CORE_EXPORT MultipartParser final
-    : public GarbageCollectedFinalized<MultipartParser> {
+    : public GarbageCollected<MultipartParser> {
  public:
   // Client recieves parsed part header fields and data.
   class CORE_EXPORT Client : public GarbageCollectedMixin {
@@ -40,17 +40,19 @@ class CORE_EXPORT MultipartParser final
     virtual void PartDataInMultipartReceived(const char* bytes, size_t) = 0;
     // The method is called whenever all data of a complete part is parsed.
     virtual void PartDataInMultipartFullyReceived() = 0;
-    void Trace(blink::Visitor* visitor) override {}
+    void Trace(Visitor* visitor) const override {}
   };
 
   MultipartParser(Vector<char> boundary, Client*);
+  MultipartParser(const MultipartParser&) = delete;
+  MultipartParser& operator=(const MultipartParser&) = delete;
   bool AppendData(const char* bytes, size_t);
   void Cancel();
   bool Finish();
 
   bool IsCancelled() const { return state_ == State::kCancelled; }
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   class Matcher {
@@ -108,8 +110,6 @@ class CORE_EXPORT MultipartParser final
     kCancelled,
     kFinished
   } state_;
-
-  DISALLOW_COPY_AND_ASSIGN(MultipartParser);
 };
 
 }  // namespace blink

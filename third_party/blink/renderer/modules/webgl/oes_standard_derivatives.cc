@@ -25,6 +25,8 @@
 
 #include "third_party/blink/renderer/modules/webgl/oes_standard_derivatives.h"
 
+#include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
+
 namespace blink {
 
 OESStandardDerivatives::OESStandardDerivatives(
@@ -36,11 +38,6 @@ OESStandardDerivatives::OESStandardDerivatives(
 
 WebGLExtensionName OESStandardDerivatives::GetName() const {
   return kOESStandardDerivativesName;
-}
-
-OESStandardDerivatives* OESStandardDerivatives::Create(
-    WebGLRenderingContextBase* context) {
-  return MakeGarbageCollected<OESStandardDerivatives>(context);
 }
 
 bool OESStandardDerivatives::Supported(WebGLRenderingContextBase* context) {

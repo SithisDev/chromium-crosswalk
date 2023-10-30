@@ -8,21 +8,21 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
 class ScriptPromise;
 class ScriptState;
-class Visitor;
 
 // A thin wrapper around v8::Promise::Resolver that matches the semantics used
 // for promises in the standard. StreamPromiseResolver is used for promises that
 // need to be stored somewhere: promises on the stack should generally use
 // v8::Local<v8::Promise>, or ScriptPromise if they are to be returned to the
 // bindings code.
-class CORE_EXPORT StreamPromiseResolver
-    : public GarbageCollectedFinalized<StreamPromiseResolver> {
+class CORE_EXPORT StreamPromiseResolver final
+    : public GarbageCollected<StreamPromiseResolver> {
  public:
   // Implements "a promise rejected with" from the INFRA standard.
   // https://www.w3.org/2001/tag/doc/promises-guide/#a-promise-rejected-with
@@ -45,9 +45,14 @@ class CORE_EXPORT StreamPromiseResolver
   static StreamPromiseResolver* CreateRejected(ScriptState*,
                                                v8::Local<v8::Value> reason);
 
+  // Similar to CreateRejected but marks the promise as silent before rejecting.
+  // https://crbug.com/1132506
+  static StreamPromiseResolver* CreateRejectedAndSilent(
+      ScriptState*,
+      v8::Local<v8::Value> reason);
+
   // Creates an initialised promise.
   explicit StreamPromiseResolver(ScriptState*);
-  ~StreamPromiseResolver();
 
   // Resolves the promise with |value|. Does nothing if the promise is already
   // settled.
@@ -70,13 +75,17 @@ class CORE_EXPORT StreamPromiseResolver
   // an unhandled rejection.
   void MarkAsHandled(v8::Isolate*);
 
+  // Marks the promise as silent so that it doesn't pause the debugger when it
+  // rejects.
+  void MarkAsSilent(v8::Isolate*);
+
   // Returns the state of the promise, one of pending, fulfilled or rejected.
   v8::Promise::PromiseState State(v8::Isolate*) const;
 
   // Returns true if the the promise is not pending.
   bool IsSettled() const { return is_settled_; }
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   TraceWrapperV8Reference<v8::Promise::Resolver> resolver_;

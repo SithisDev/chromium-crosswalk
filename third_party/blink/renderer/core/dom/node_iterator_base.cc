@@ -24,9 +24,11 @@
 
 #include "third_party/blink/renderer/core/dom/node_iterator_base.h"
 
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_node_filter.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
@@ -79,16 +81,15 @@ unsigned NodeIteratorBase::AcceptNode(Node* node,
 
   UseCounter::Count(
       ExecutionContext::From(filter_->CallbackRelevantScriptState()),
-      filter_->IsCallbackObjectCallableForNodeIteratorBase()
-          ? WebFeature::kNodeFilterIsFunction
-          : WebFeature::kNodeFilterIsObject);
+      filter_->IsCallbackObjectCallable() ? WebFeature::kNodeFilterIsFunction
+                                          : WebFeature::kNodeFilterIsObject);
 
   // 7. Unset the active flag.
   // 8. Return result.
   return result;
 }
 
-void NodeIteratorBase::Trace(Visitor* visitor) {
+void NodeIteratorBase::Trace(Visitor* visitor) const {
   visitor->Trace(root_);
   visitor->Trace(filter_);
 }

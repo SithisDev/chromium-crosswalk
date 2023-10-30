@@ -25,7 +25,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_STYLE_GENERATED_IMAGE_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
@@ -35,31 +38,41 @@ class CSSImageGeneratorValue;
 class Document;
 class ImageResourceObserver;
 
-// This class represents a generated <image> such as a gradient, cross-fade or
-// paint(...) function.
+// This class represents a generated <image> such as a gradient or paint(...)
+// function. Use only for images that have no intrinsic dimensions.
 class CORE_EXPORT StyleGeneratedImage final : public StyleImage {
  public:
-  explicit StyleGeneratedImage(const CSSImageGeneratorValue&);
+  using ContainerSizes = CSSToLengthConversionData::ContainerSizes;
+
+  explicit StyleGeneratedImage(const CSSImageGeneratorValue&,
+                               const ContainerSizes&);
 
   WrappedImagePtr Data() const override { return image_generator_value_.Get(); }
 
   CSSValue* CssValue() const override;
-  CSSValue* ComputedCSSValue() const override;
+  CSSValue* ComputedCSSValue(const ComputedStyle&,
+                             bool allow_visited_style) const override;
 
-  FloatSize ImageSize(const Document&,
-                      float multiplier,
-                      const LayoutSize& default_object_size) const override;
-  bool HasIntrinsicSize() const override { return fixed_size_; }
+  bool IsAccessAllowed(String&) const override { return true; }
+
+  gfx::SizeF ImageSize(float multiplier,
+                       const gfx::SizeF& default_object_size,
+                       RespectImageOrientationEnum) const override;
+  bool HasIntrinsicSize() const override { return false; }
   void AddClient(ImageResourceObserver*) override;
   void RemoveClient(ImageResourceObserver*) override;
   // The |target_size| is the desired image size
   scoped_refptr<Image> GetImage(const ImageResourceObserver&,
                                 const Document&,
                                 const ComputedStyle&,
-                                const FloatSize& target_size) const override;
+                                const gfx::SizeF& target_size) const override;
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const override;
 
-  void Trace(blink::Visitor*) override;
+  bool IsUsingCustomProperty(const AtomicString& custom_property_name,
+                             const Document&) const;
+  bool IsUsingCurrentColor() const;
+
+  void Trace(Visitor*) const override;
 
  private:
   bool IsEqual(const StyleImage&) const override;
@@ -67,7 +80,7 @@ class CORE_EXPORT StyleGeneratedImage final : public StyleImage {
   // TODO(sashab): Replace this with <const CSSImageGeneratorValue> once
   // Member<> supports const types.
   Member<CSSImageGeneratorValue> image_generator_value_;
-  const bool fixed_size_;
+  ContainerSizes container_sizes_;
 };
 
 template <>
@@ -78,4 +91,4 @@ struct DowncastTraits<StyleGeneratedImage> {
 };
 
 }  // namespace blink
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_STYLE_GENERATED_IMAGE_H_

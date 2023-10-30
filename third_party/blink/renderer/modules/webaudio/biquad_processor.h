@@ -41,8 +41,9 @@ namespace blink {
 
 class BiquadProcessor final : public AudioDSPKernelProcessor {
  public:
-  // This values are used in histograms and should not be renumbered or deleted.
-  enum FilterType {
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  enum class FilterType {
     kLowPass = 0,
     kHighPass = 1,
     kBandPass = 2,
@@ -50,11 +51,13 @@ class BiquadProcessor final : public AudioDSPKernelProcessor {
     kHighShelf = 4,
     kPeaking = 5,
     kNotch = 6,
-    kAllpass = 7
+    kAllpass = 7,
+    kMaxValue = kAllpass,
   };
 
   BiquadProcessor(float sample_rate,
                   uint32_t number_of_channels,
+                  unsigned render_quantum_frames,
                   AudioParamHandler& frequency,
                   AudioParamHandler& q,
                   AudioParamHandler& gain,
@@ -80,6 +83,7 @@ class BiquadProcessor final : public AudioDSPKernelProcessor {
 
   bool FilterCoefficientsDirty() const { return filter_coefficients_dirty_; }
   bool HasSampleAccurateValues() const { return has_sample_accurate_values_; }
+  bool IsAudioRate() const { return is_audio_rate_; }
 
   AudioParamHandler& Parameter1() { return *parameter1_; }
   AudioParamHandler& Parameter2() { return *parameter2_; }
@@ -90,7 +94,7 @@ class BiquadProcessor final : public AudioDSPKernelProcessor {
   void SetType(FilterType);
 
  private:
-  FilterType type_;
+  FilterType type_ = FilterType::kLowPass;
 
   scoped_refptr<AudioParamHandler> parameter1_;
   scoped_refptr<AudioParamHandler> parameter2_;
@@ -98,10 +102,13 @@ class BiquadProcessor final : public AudioDSPKernelProcessor {
   scoped_refptr<AudioParamHandler> parameter4_;
 
   // so DSP kernels know when to re-compute coefficients
-  bool filter_coefficients_dirty_;
+  bool filter_coefficients_dirty_ = true;
 
   // Set to true if any of the filter parameters are sample-accurate.
-  bool has_sample_accurate_values_;
+  bool has_sample_accurate_values_ = false;
+
+  // Set to true if any of the filter parameters are a-rate.
+  bool is_audio_rate_;
 };
 
 }  // namespace blink

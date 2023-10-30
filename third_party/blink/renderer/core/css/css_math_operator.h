@@ -11,10 +11,21 @@ namespace blink {
 
 class CSSParserToken;
 
-enum class CSSMathOperator { kAdd, kSubtract, kMultiply, kDivide, kInvalid };
+enum class CSSMathOperator {
+  kAdd,
+  kSubtract,
+  kMultiply,
+  kDivide,
+  kMin,
+  kMax,
+  kClamp,
+  kInvalid
+};
 
 CSSMathOperator ParseCSSArithmeticOperator(const CSSParserToken& token);
 String ToString(CSSMathOperator);
+
+bool IsComparison(CSSMathOperator);
 
 }  // namespace blink
 

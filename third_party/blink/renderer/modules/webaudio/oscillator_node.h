@@ -27,9 +27,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_OSCILLATOR_NODE_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_oscillator_options.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_param.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_scheduled_source_node.h"
-#include "third_party/blink/renderer/modules/webaudio/oscillator_options.h"
+#include "third_party/blink/renderer/modules/webaudio/oscillator_handler.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 
@@ -39,77 +40,9 @@ class BaseAudioContext;
 class ExceptionState;
 class OscillatorOptions;
 class PeriodicWave;
+class PeriodicWaveImpl;
 
 // OscillatorNode is an audio generator of periodic waveforms.
-
-class OscillatorHandler final : public AudioScheduledSourceHandler {
- public:
-  // The waveform type.
-  // These must be defined as in the .idl file.
-  enum : uint8_t {
-    SINE = 0,
-    SQUARE = 1,
-    SAWTOOTH = 2,
-    TRIANGLE = 3,
-    CUSTOM = 4
-  };
-
-  static scoped_refptr<OscillatorHandler> Create(AudioNode&,
-                                                 float sample_rate,
-                                                 const String& oscillator_type,
-                                                 PeriodicWave* wave_table,
-                                                 AudioParamHandler& frequency,
-                                                 AudioParamHandler& detune);
-  ~OscillatorHandler() override;
-
-  // AudioHandler
-  void Process(uint32_t frames_to_process) override;
-
-  String GetType() const;
-  void SetType(const String&, ExceptionState&);
-
-  void SetPeriodicWave(PeriodicWave*);
-
-  void HandleStoppableSourceNode() override;
-
- private:
-  OscillatorHandler(AudioNode&,
-                    float sample_rate,
-                    const String& oscillator_type,
-                    PeriodicWave* wave_table,
-                    AudioParamHandler& frequency,
-                    AudioParamHandler& detune);
-  bool SetType(uint8_t);  // Returns true on success.
-
-  // Returns true if there are sample-accurate timeline parameter changes.
-  bool CalculateSampleAccuratePhaseIncrements(uint32_t frames_to_process);
-
-  bool PropagatesSilence() const override;
-
-  // One of the waveform types defined in the enum.
-  uint8_t type_;
-
-  // Frequency value in Hertz.
-  scoped_refptr<AudioParamHandler> frequency_;
-
-  // Detune value (deviating from the frequency) in Cents.
-  scoped_refptr<AudioParamHandler> detune_;
-
-  bool first_render_;
-
-  // m_virtualReadIndex is a sample-frame index into our buffer representing the
-  // current playback position.  Since it's floating-point, it has sub-sample
-  // accuracy.
-  double virtual_read_index_;
-
-  // Stores sample-accurate values calculated according to frequency and detune.
-  AudioFloatArray phase_increments_;
-  AudioFloatArray detune_values_;
-
-  // PeriodicWave is held alive by OscillatorNode.
-  CrossThreadWeakPersistent<PeriodicWave> periodic_wave_;
-};
-
 class OscillatorNode final : public AudioScheduledSourceNode {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -125,7 +58,7 @@ class OscillatorNode final : public AudioScheduledSourceNode {
   OscillatorNode(BaseAudioContext&,
                  const String& oscillator_type,
                  PeriodicWave* wave_table);
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   String type() const;
   void setType(const String&, ExceptionState&);
@@ -135,12 +68,13 @@ class OscillatorNode final : public AudioScheduledSourceNode {
 
   OscillatorHandler& GetOscillatorHandler() const;
 
+  // InspectorHelperMixin
+  void ReportDidCreate() final;
+  void ReportWillBeDestroyed() final;
+
  private:
   Member<AudioParam> frequency_;
   Member<AudioParam> detune_;
-  // This PeriodicWave is held alive here to allow referencing it from
-  // OscillatorHandler via weak reference.
-  Member<PeriodicWave> periodic_wave_;
 };
 
 }  // namespace blink

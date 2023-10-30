@@ -4,7 +4,7 @@
 
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/core/animation/animation_test_helper.h"
+#include "third_party/blink/renderer/core/animation/animation_test_helpers.h"
 #include "third_party/blink/renderer/core/animation/css_number_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/interpolation_effect.h"
 #include "third_party/blink/renderer/core/animation/transition_interpolation.h"
@@ -14,10 +14,10 @@ namespace blink {
 namespace {
 
 double GetInterpolableNumber(Interpolation* value) {
-  TransitionInterpolation* interpolation = ToTransitionInterpolation(value);
+  auto* interpolation = To<TransitionInterpolation>(value);
   std::unique_ptr<TypedInterpolationValue> interpolated_value =
       interpolation->GetInterpolatedValue();
-  return ToInterpolableNumber(interpolated_value->GetInterpolableValue())
+  return To<InterpolableNumber>(interpolated_value->GetInterpolableValue())
       .Value();
 }
 
@@ -29,9 +29,9 @@ Interpolation* CreateInterpolation(int from, int to) {
   CSSNumberInterpolationType interpolation_type(property_handle);
   InterpolationValue start(std::make_unique<InterpolableNumber>(from));
   InterpolationValue end(std::make_unique<InterpolableNumber>(to));
-  return TransitionInterpolation::Create(property_handle, interpolation_type,
-                                         std::move(start), std::move(end),
-                                         nullptr, nullptr);
+  return MakeGarbageCollected<TransitionInterpolation>(
+      property_handle, interpolation_type, std::move(start), std::move(end),
+      nullptr, nullptr);
 }
 
 }  // namespace

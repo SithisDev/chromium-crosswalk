@@ -4,17 +4,16 @@
 
 #include "third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope_proxy.h"
 
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "third_party/blink/public/mojom/script/script_type.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/loader/worker_fetch_context.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
-#include "third_party/blink/renderer/core/workers/worker_content_settings_client.h"
 #include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
@@ -31,27 +30,40 @@ PaintWorkletGlobalScopeProxy::PaintWorkletGlobalScopeProxy(
     WorkletModuleResponsesMap* module_responses_map,
     size_t global_scope_number) {
   DCHECK(IsMainThread());
-  Document* document = frame->GetDocument();
-  reporting_proxy_ =
-      std::make_unique<MainThreadWorkletReportingProxy>(document);
+  LocalDOMWindow* window = frame->DomWindow();
+  reporting_proxy_ = std::make_unique<MainThreadWorkletReportingProxy>(window);
 
   String global_scope_name =
       StringView("PaintWorklet #") + String::Number(global_scope_number);
 
-  auto* worker_clients = MakeGarbageCollected<WorkerClients>();
-  ProvideContentSettingsClientToWorker(
-      worker_clients, frame->Client()->CreateWorkerContentSettingsClient());
+  LocalFrameClient* frame_client = frame->Client();
+  const String user_agent =
+      RuntimeEnabledFeatures::SendFullUserAgentAfterReductionEnabled(window)
+          ? frame_client->FullUserAgent()
+          : RuntimeEnabledFeatures::UserAgentReductionEnabled(window)
+                ? frame_client->ReducedUserAgent()
+                : frame_client->UserAgent();
 
   auto creation_params = std::make_unique<GlobalScopeCreationParams>(
-      document->Url(), mojom::ScriptType::kModule,
-      OffMainThreadWorkerScriptFetchOption::kEnabled, global_scope_name,
-      document->UserAgent(), frame->Client()->CreateWorkerFetchContext(),
-      document->GetContentSecurityPolicy()->Headers(),
-      document->GetReferrerPolicy(), document->GetSecurityOrigin(),
-      document->IsSecureContext(), document->GetHttpsState(), worker_clients,
-      document->AddressSpace(), OriginTrialContext::GetTokens(document).get(),
+      window->Url(), mojom::blink::ScriptType::kModule, global_scope_name,
+      user_agent, frame_client->UserAgentMetadata(),
+      frame_client->CreateWorkerFetchContext(),
+      mojo::Clone(window->GetContentSecurityPolicy()->GetParsedPolicies()),
+      Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
+      window->GetReferrerPolicy(), window->GetSecurityOrigin(),
+      window->IsSecureContext(), window->GetHttpsState(),
+      nullptr /* worker_clients */,
+      frame_client->CreateWorkerContentSettingsClient(),
+      OriginTrialContext::GetInheritedTrialFeatures(window).get(),
       base::UnguessableToken::Create(), nullptr /* worker_settings */,
-      kV8CacheOptionsDefault, module_responses_map);
+      mojom::blink::V8CacheOptions::kDefault, module_responses_map,
+      mojo::NullRemote() /* browser_interface_broker */,
+      window->GetFrame()->Loader().CreateWorkerCodeCacheHost(),
+      BeginFrameProviderParams(), nullptr /* parent_permissions_policy */,
+      window->GetAgentClusterID(), ukm::kInvalidSourceId,
+      window->GetExecutionContextToken(),
+      window->CrossOriginIsolatedCapability(),
+      window->IsolatedApplicationCapability());
   global_scope_ = PaintWorkletGlobalScope::Create(
       frame, std::move(creation_params), *reporting_proxy_);
 }
@@ -89,7 +101,7 @@ CSSPaintDefinition* PaintWorkletGlobalScopeProxy::FindDefinition(
   return global_scope_->FindDefinition(name);
 }
 
-void PaintWorkletGlobalScopeProxy::Trace(blink::Visitor* visitor) {
+void PaintWorkletGlobalScopeProxy::Trace(Visitor* visitor) const {
   visitor->Trace(global_scope_);
 }
 

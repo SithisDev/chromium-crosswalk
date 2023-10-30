@@ -42,9 +42,6 @@ class HTMLSourceElement final : public HTMLElement {
   explicit HTMLSourceElement(Document&);
   ~HTMLSourceElement() override;
 
-  // Returns attributes that should be checked against Trusted Types
-  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
-
   const AtomicString& type() const;
   void setType(const AtomicString&);
 
@@ -56,7 +53,9 @@ class HTMLSourceElement final : public HTMLElement {
   void RemoveMediaQueryListListener();
   void AddMediaQueryListListener();
 
-  void Trace(Visitor*) override;
+  bool IsRichlyEditableForAccessibility() const override { return false; }
+
+  void Trace(Visitor*) const override;
 
  private:
   void DispatchPendingEvent();
@@ -65,6 +64,7 @@ class HTMLSourceElement final : public HTMLElement {
 
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
+  void AttributeChanged(const AttributeModificationParams&) override;
   bool IsURLAttribute(const Attribute&) const override;
   void ParseAttribute(const AttributeModificationParams&) override;
 

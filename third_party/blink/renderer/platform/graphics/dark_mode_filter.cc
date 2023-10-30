@@ -6,169 +6,281 @@
 
 #include <cmath>
 
-#include "base/logging.h"
-#include "base/optional.h"
+#include "base/check_op.h"
+#include "base/command_line.h"
+#include "base/containers/lru_cache.h"
+#include "base/notreached.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/switches.h"
+#include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_color_classifier.h"
 #include "third_party/blink/renderer/platform/graphics/dark_mode_color_filter.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_types.h"
+#include "third_party/blink/renderer/platform/graphics/dark_mode_image_cache.h"
+#include "third_party/blink/renderer/platform/graphics/dark_mode_image_classifier.h"
+#include "third_party/blink/renderer/platform/graphics/image.h"
+#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
+#include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
-#include "third_party/skia/include/effects/SkColorMatrix.h"
+#include "ui/gfx/color_utils.h"
 
 namespace blink {
+
 namespace {
 
-#if DCHECK_IS_ON()
+const size_t kMaxCacheSize = 1024u;
+constexpr SkColor SK_ColorDark = SkColorSetARGB(0xFF, 0x12, 0x12, 0x12);
 
-// Floats that differ by this amount or less are considered to be equal.
-const float kFloatEqualityEpsilon = 0.0001;
-
-bool AreFloatsEqual(float a, float b) {
-  return std::fabs(a - b) <= kFloatEqualityEpsilon;
+bool IsRasterSideDarkModeForImagesEnabled() {
+  static bool enabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableRasterSideDarkModeForImages);
+  return enabled;
 }
 
-void VerifySettingsAreUnchanged(const DarkModeSettings& a,
-                                const DarkModeSettings& b) {
-  if (a.mode == DarkMode::kOff)
-    return;
+bool ShouldUseRasterSidePath(Image* image) {
+  DCHECK(image);
 
-  DCHECK_EQ(a.image_policy, b.image_policy);
-  DCHECK_EQ(a.text_brightness_threshold, b.text_brightness_threshold);
-  DCHECK_EQ(a.grayscale, b.grayscale);
-  DCHECK(AreFloatsEqual(a.contrast, b.contrast));
-  DCHECK(AreFloatsEqual(a.image_grayscale_percent, b.image_grayscale_percent));
+  // Raster-side path is not enabled.
+  if (!IsRasterSideDarkModeForImagesEnabled())
+    return false;
+
+  // Raster-side path is only supported for bitmap images.
+  return image->IsBitmapImage();
 }
 
-#endif  // DCHECK_IS_ON()
+sk_sp<SkColorFilter> GetDarkModeFilterForImageOnMainThread(
+    DarkModeFilter* filter,
+    Image* image,
+    const SkIRect& rounded_src) {
+  SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Blink.DarkMode.ApplyToImageOnMainThread");
 
-bool ShouldApplyToImage(const DarkModeSettings& settings,
-                        const FloatRect& src_rect,
-                        Image* image) {
-  switch (settings.image_policy) {
-    case DarkModeImagePolicy::kFilterSmart:
-      return image->ShouldApplyDarkModeFilter(src_rect);
-    case DarkModeImagePolicy::kFilterAll:
-      return true;
-    default:
-      return false;
+  sk_sp<SkColorFilter> color_filter;
+  DarkModeImageCache* cache = image->GetDarkModeImageCache();
+  DCHECK(cache);
+  if (cache->Exists(rounded_src)) {
+    color_filter = cache->Get(rounded_src);
+  } else {
+    // Performance warning: Calling AsSkBitmapForCurrentFrame() will
+    // synchronously decode image.
+    SkBitmap bitmap =
+        image->AsSkBitmapForCurrentFrame(kDoNotRespectImageOrientation);
+    SkPixmap pixmap;
+    bitmap.peekPixels(&pixmap);
+    color_filter = filter->GenerateImageFilter(pixmap, rounded_src);
+
+    // Using blink side dark mode for images, it is hard to implement
+    // caching mechanism for partially loaded bitmap image content, as
+    // content id for the image frame being rendered gets decided during
+    // rastering only. So caching of dark mode result will be deferred until
+    // default frame is completely received. This will help get correct
+    // classification results for incremental content received for the given
+    // image.
+    if (!image->IsBitmapImage() || image->CurrentFrameIsComplete())
+      cache->Add(rounded_src, color_filter);
   }
-}
-
-// TODO(gilmanmh): If grayscaling images in dark mode proves popular among
-// users, consider experimenting with different grayscale algorithms.
-sk_sp<SkColorFilter> MakeGrayscaleFilter(float grayscale_percent) {
-  DCHECK_GE(grayscale_percent, 0.0f);
-  DCHECK_LE(grayscale_percent, 1.0f);
-
-  SkColorMatrix grayscale_matrix;
-  grayscale_matrix.setSaturation(1.0f - grayscale_percent);
-  return SkColorFilters::Matrix(grayscale_matrix);
+  return color_filter;
 }
 
 }  // namespace
 
-DarkModeFilter::DarkModeFilter()
-    : text_classifier_(nullptr),
-      color_filter_(nullptr),
-      image_filter_(nullptr) {
-  DarkModeSettings default_settings;
-  default_settings.mode = DarkMode::kOff;
-  UpdateSettings(default_settings);
-}
+// DarkModeInvertedColorCache - Implements cache for inverted colors.
+class DarkModeInvertedColorCache {
+ public:
+  DarkModeInvertedColorCache() : cache_(kMaxCacheSize) {}
+  ~DarkModeInvertedColorCache() = default;
+
+  SkColor GetInvertedColor(DarkModeColorFilter* filter, SkColor color) {
+    SkColor key(color);
+    auto it = cache_.Get(key);
+    if (it != cache_.end())
+      return it->second;
+
+    SkColor inverted_color = filter->InvertColor(color);
+    cache_.Put(key, static_cast<SkColor>(inverted_color));
+    return inverted_color;
+  }
+
+  void Clear() { cache_.Clear(); }
+
+  size_t size() { return cache_.size(); }
+
+ private:
+  base::HashingLRUCache<SkColor, SkColor> cache_;
+};
+
+DarkModeFilter::DarkModeFilter(const DarkModeSettings& settings)
+    : immutable_(settings),
+      inverted_color_cache_(new DarkModeInvertedColorCache()) {}
 
 DarkModeFilter::~DarkModeFilter() {}
 
-void DarkModeFilter::UpdateSettings(const DarkModeSettings& new_settings) {
-  // Dark mode can be activated or deactivated on a per-page basis, depending on
-  // whether the original page theme is already dark. However, there is
-  // currently no mechanism to change the other settings after starting Chrome.
-  // As such, if the mode doesn't change, we don't need to do anything.
-  if (settings_.mode == new_settings.mode) {
-#if DCHECK_IS_ON()
-    VerifySettingsAreUnchanged(settings_, new_settings);
-#endif
+DarkModeFilter::ImmutableData::ImmutableData(const DarkModeSettings& settings)
+    : settings(settings),
+      foreground_classifier(nullptr),
+      background_classifier(nullptr),
+      image_classifier(nullptr),
+      color_filter(nullptr),
+      image_filter(nullptr) {
+  color_filter = DarkModeColorFilter::FromSettings(settings);
+  if (!color_filter)
     return;
-  }
 
-  settings_ = new_settings;
-  color_filter_ = DarkModeColorFilter::FromSettings(settings_);
-  if (!color_filter_) {
-    image_filter_ = nullptr;
-    return;
-  }
+  image_filter = color_filter->ToSkColorFilter();
 
-  if (settings_.image_grayscale_percent > 0.0f)
-    image_filter_ = MakeGrayscaleFilter(settings_.image_grayscale_percent);
-  else
-    image_filter_ = color_filter_->ToSkColorFilter();
-
-  text_classifier_ =
-      DarkModeColorClassifier::MakeTextColorClassifier(settings_);
-  background_classifier_ =
-      DarkModeColorClassifier::MakeBackgroundColorClassifier(settings_);
+  foreground_classifier =
+      DarkModeColorClassifier::MakeForegroundColorClassifier(settings);
+  background_classifier =
+      DarkModeColorClassifier::MakeBackgroundColorClassifier(settings);
+  image_classifier = std::make_unique<DarkModeImageClassifier>();
 }
 
-Color DarkModeFilter::InvertColorIfNeeded(const Color& color,
-                                          ElementRole role) {
-  if (IsDarkModeActive() && ShouldApplyToColor(color, role))
-    return color_filter_->InvertColor(color);
+DarkModeImagePolicy DarkModeFilter::GetDarkModeImagePolicy() const {
+  return immutable_.settings.image_policy;
+}
+
+// Heuristic to maintain contrast for borders (see: crbug.com/1263545)
+SkColor DarkModeFilter::AdjustDarkenColor(SkColor color,
+                                          DarkModeFilter::ElementRole role,
+                                          SkColor contrast_background) {
+  if (role != DarkModeFilter::ElementRole::kBorder)
+    return color;
+
+  if (contrast_background == 0)
+    contrast_background = SK_ColorDark;
+
+  if (color == SkColorSetARGB(SkColorGetA(color), 0, 0, 0))
+    return color;
+
+  if (color_utils::GetContrastRatio(color, contrast_background) <
+      color_utils::kMinimumReadableContrastRatio)
+    return color;
+
+  return AdjustDarkenColor(Color::FromSkColor(color).Dark().Rgb(), role,
+                           contrast_background);
+}
+
+SkColor DarkModeFilter::InvertColorIfNeeded(SkColor color,
+                                            ElementRole role,
+                                            SkColor contrast_background) {
+  return AdjustDarkenColor(
+      InvertColorIfNeeded(color, role), role,
+      InvertColorIfNeeded(contrast_background, ElementRole::kBackground));
+}
+
+SkColor DarkModeFilter::InvertColorIfNeeded(SkColor color, ElementRole role) {
+  if (!immutable_.color_filter)
+    return color;
+
+  if (ShouldApplyToColor(color, role)) {
+    return inverted_color_cache_->GetInvertedColor(
+        immutable_.color_filter.get(), color);
+  }
+
   return color;
 }
 
-// TODO(gilmanmh): Investigate making |image| a const reference. This code
-// relies on Image::ShouldApplyDarkModeFilter(), which is not const. If it
-// could be made const, then |image| could also be const.
-void DarkModeFilter::ApplyToImageFlagsIfNeeded(const FloatRect& src_rect,
-                                               Image* image,
-                                               cc::PaintFlags* flags) {
-  if (!image_filter_ || !ShouldApplyToImage(settings(), src_rect, image))
+void DarkModeFilter::ApplyFilterToImage(Image* image,
+                                        cc::PaintFlags* flags,
+                                        const SkRect& src) {
+  DCHECK(image);
+  DCHECK(flags);
+  DCHECK_NE(GetDarkModeImagePolicy(), DarkModeImagePolicy::kFilterNone);
+
+  if (GetDarkModeImagePolicy() == DarkModeImagePolicy::kFilterAll) {
+    flags->setColorFilter(GetImageFilter());
     return;
-  flags->setColorFilter(image_filter_);
+  }
+
+  // Raster-side dark mode path - Just set the dark mode on flags and dark
+  // mode will be applied at compositor side during rasterization.
+  if (ShouldUseRasterSidePath(image)) {
+    flags->setUseDarkModeForImage(true);
+    return;
+  }
+
+  // Blink-side dark mode path - Apply dark mode to images in main thread
+  // only. If the result is not cached, calling this path is expensive and
+  // will block main thread.
+  sk_sp<SkColorFilter> color_filter =
+      GetDarkModeFilterForImageOnMainThread(this, image, src.roundOut());
+  if (color_filter)
+    flags->setColorFilter(std::move(color_filter));
 }
 
-base::Optional<cc::PaintFlags> DarkModeFilter::ApplyToFlagsIfNeeded(
+bool DarkModeFilter::ShouldApplyFilterToImage(ImageType type) const {
+  DarkModeImagePolicy image_policy = GetDarkModeImagePolicy();
+  if (image_policy == DarkModeImagePolicy::kFilterNone)
+    return false;
+  if (image_policy == DarkModeImagePolicy::kFilterAll)
+    return true;
+
+  // kIcon: Do not consider images being drawn into bigger rect as these
+  // images are not meant for icons or representing smaller widgets. These
+  // images are considered as photos which should be untouched.
+  // kSeparator: Images being drawn from very smaller |src| rect, i.e. one of
+  // the dimensions is very small, can be used for the border around the content
+  // or showing separator. Consider these images irrespective of size of the
+  // rect being drawn to. Classifying them will not be too costly.
+  return type == ImageType::kIcon || type == ImageType::kSeparator;
+}
+
+sk_sp<SkColorFilter> DarkModeFilter::GenerateImageFilter(
+    const SkPixmap& pixmap,
+    const SkIRect& src) const {
+  DCHECK(immutable_.settings.image_policy == DarkModeImagePolicy::kFilterSmart);
+  DCHECK(immutable_.image_filter);
+
+  return (immutable_.image_classifier->Classify(pixmap, src) ==
+          DarkModeResult::kApplyFilter)
+             ? immutable_.image_filter
+             : nullptr;
+}
+
+sk_sp<SkColorFilter> DarkModeFilter::GetImageFilter() const {
+  DCHECK(immutable_.image_filter);
+  return immutable_.image_filter;
+}
+
+absl::optional<cc::PaintFlags> DarkModeFilter::ApplyToFlagsIfNeeded(
     const cc::PaintFlags& flags,
-    ElementRole role) {
-  if (!IsDarkModeActive())
-    return base::nullopt;
+    ElementRole role,
+    SkColor contrast_background) {
+  if (!immutable_.color_filter || flags.HasShader())
+    return absl::nullopt;
 
   cc::PaintFlags dark_mode_flags = flags;
-  if (flags.HasShader()) {
-    dark_mode_flags.setColorFilter(color_filter_->ToSkColorFilter());
-  } else if (ShouldApplyToColor(flags.getColor(), role)) {
-    Color inverted_color = color_filter_->InvertColor(flags.getColor());
-    dark_mode_flags.setColor(
-        SkColorSetARGB(inverted_color.Alpha(), inverted_color.Red(),
-                       inverted_color.Green(), inverted_color.Blue()));
+  SkColor flags_color = flags.getColor();
+  if (ShouldApplyToColor(flags_color, role)) {
+    flags_color = inverted_color_cache_->GetInvertedColor(
+        immutable_.color_filter.get(), flags_color);
   }
+  dark_mode_flags.setColor(AdjustDarkenColor(
+      flags_color, role,
+      InvertColorIfNeeded(contrast_background, ElementRole::kBackground)));
 
-  return base::make_optional<cc::PaintFlags>(std::move(dark_mode_flags));
+  return absl::make_optional<cc::PaintFlags>(std::move(dark_mode_flags));
 }
 
-bool DarkModeFilter::IsDarkModeActive() const {
-  return !!color_filter_;
+bool DarkModeFilter::ShouldApplyToColor(SkColor color, ElementRole role) {
+  switch (role) {
+    case ElementRole::kBorder:
+    case ElementRole::kSVG:
+    case ElementRole::kForeground:
+    case ElementRole::kListSymbol:
+      DCHECK(immutable_.foreground_classifier);
+      return immutable_.foreground_classifier->ShouldInvertColor(color) ==
+             DarkModeResult::kApplyFilter;
+    case ElementRole::kBackground:
+      DCHECK(immutable_.background_classifier);
+      return immutable_.background_classifier->ShouldInvertColor(color) ==
+             DarkModeResult::kApplyFilter;
+    default:
+      return false;
+  }
+  NOTREACHED();
 }
 
-// We don't check IsDarkModeActive() because the caller is expected to have
-// already done so. This allows the caller to exit earlier if it needs to
-// perform some other logic in between confirming dark mode is active and
-// checking the color classifiers.
-bool DarkModeFilter::ShouldApplyToColor(const Color& color, ElementRole role) {
-  if (role == ElementRole::kBackground) {
-    // Calling get() is necessary below because operator<< in std::unique_ptr is
-    // a C++20 feature.
-    // TODO(https://crbug.com/980914): Drop .get() once we move to C++20.
-    DCHECK_NE(background_classifier_.get(), nullptr);
-    return background_classifier_->ShouldInvertColor(color) ==
-           DarkModeClassification::kApplyFilter;
-  }
-
-  DCHECK_EQ(role, ElementRole::kText);
-  // Calling get() is necessary below because operator<< in std::unique_ptr is
-  // a C++20 feature.
-  // TODO(https://crbug.com/980914): Drop .get() once we move to C++20.
-  DCHECK_NE(text_classifier_.get(), nullptr);
-  return text_classifier_->ShouldInvertColor(color) ==
-         DarkModeClassification::kApplyFilter;
+size_t DarkModeFilter::GetInvertedColorCacheSizeForTesting() {
+  return inverted_color_cache_->size();
 }
 
 }  // namespace blink

@@ -32,8 +32,13 @@
 
 #include <stdint.h>
 
-#include "base/stl_util.h"
+#include "base/test/scoped_command_line.h"
+#include "base/unguessable_token.h"
+#include "net/base/url_util.h"
+#include "services/network/public/cpp/is_potentially_trustworthy_unittest.h"
+#include "services/network/public/cpp/network_switches.h"
 #include "services/network/public/mojom/cors.mojom-blink.h"
+#include "services/network/public/mojom/cors_origin_pattern.mojom-blink.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/blob/blob_url.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
@@ -42,8 +47,10 @@
 #include "third_party/blink/renderer/platform/weborigin/security_origin_hash.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_operators.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "url/gurl.h"
+#include "url/origin_abstract_tests.h"
 #include "url/url_util.h"
 
 namespace blink {
@@ -51,16 +58,26 @@ namespace blink {
 const uint16_t kMaxAllowedPort = UINT16_MAX;
 
 class SecurityOriginTest : public testing::Test {
- private:
+ protected:
   void TearDown() override { SecurityPolicy::ClearOriginAccessList(); }
+
+  const absl::optional<url::Origin::Nonce>& GetNonceForOrigin(
+      const SecurityOrigin& origin) {
+    return origin.nonce_if_opaque_;
+  }
+
+  const base::UnguessableToken* GetNonceForSerializationForOrigin(
+      const SecurityOrigin& origin) {
+    return origin.GetNonceForSerialization();
+  }
 };
 
 TEST_F(SecurityOriginTest, ValidPortsCreateTupleOrigins) {
   uint16_t ports[] = {0, 80, 443, 5000, kMaxAllowedPort};
 
-  for (size_t i = 0; i < base::size(ports); ++i) {
+  for (size_t i = 0; i < std::size(ports); ++i) {
     scoped_refptr<const SecurityOrigin> origin =
-        SecurityOrigin::Create("http", "example.com", ports[i]);
+        SecurityOrigin::CreateFromValidTuple("http", "example.com", ports[i]);
     EXPECT_FALSE(origin->IsOpaque())
         << "Port " << ports[i] << " should have generated a tuple origin.";
   }
@@ -72,9 +89,9 @@ TEST_F(SecurityOriginTest, LocalAccess) {
   scoped_refptr<const SecurityOrigin> file2 =
       SecurityOrigin::CreateFromString("file:///etc/shadow");
 
-  EXPECT_TRUE(file1->IsSameSchemeHostPort(file1.get()));
-  EXPECT_TRUE(file1->IsSameSchemeHostPort(file2.get()));
-  EXPECT_TRUE(file2->IsSameSchemeHostPort(file1.get()));
+  EXPECT_TRUE(file1->IsSameOriginWith(file1.get()));
+  EXPECT_TRUE(file1->IsSameOriginWith(file2.get()));
+  EXPECT_TRUE(file2->IsSameOriginWith(file1.get()));
 
   EXPECT_TRUE(file1->CanAccess(file1.get()));
   EXPECT_TRUE(file1->CanAccess(file2.get()));
@@ -83,146 +100,17 @@ TEST_F(SecurityOriginTest, LocalAccess) {
   // Block |file1|'s access to local origins. It should now be same-origin
   // with itself, but shouldn't have access to |file2|.
   file1->BlockLocalAccessFromLocalOrigin();
-  EXPECT_TRUE(file1->IsSameSchemeHostPort(file1.get()));
-  EXPECT_FALSE(file1->IsSameSchemeHostPort(file2.get()));
-  EXPECT_FALSE(file2->IsSameSchemeHostPort(file1.get()));
+  EXPECT_TRUE(file1->IsSameOriginWith(file1.get()));
+  EXPECT_FALSE(file1->IsSameOriginWith(file2.get()));
+  EXPECT_FALSE(file2->IsSameOriginWith(file1.get()));
 
   EXPECT_TRUE(file1->CanAccess(file1.get()));
   EXPECT_FALSE(file1->CanAccess(file2.get()));
   EXPECT_FALSE(file2->CanAccess(file1.get()));
 }
 
-TEST_F(SecurityOriginTest, IsPotentiallyTrustworthy) {
-  struct TestCase {
-    bool access_granted;
-    const char* url;
-  };
-
-  TestCase inputs[] = {
-      // Access is granted to webservers running on localhost.
-      {true, "http://localhost"},
-      {true, "http://LOCALHOST"},
-      {true, "http://localhost:100"},
-      {true, "http://a.localhost"},
-      {true, "http://127.0.0.1"},
-      {true, "http://127.0.0.2"},
-      {true, "http://127.1.0.2"},
-      {true, "http://0177.00.00.01"},
-      {true, "http://[::1]"},
-      {true, "http://[0:0::1]"},
-      {true, "http://[0:0:0:0:0:0:0:1]"},
-      {true, "http://[::1]:21"},
-      {true, "http://127.0.0.1:8080"},
-      {true, "ftp://127.0.0.1"},
-      {true, "ftp://127.0.0.1:443"},
-      {true, "ws://127.0.0.1"},
-
-      // Access is denied to non-localhost over HTTP
-      {false, "http://[1::]"},
-      {false, "http://[::2]"},
-      {false, "http://[1::1]"},
-      {false, "http://[1:2::3]"},
-      {false, "http://[::127.0.0.1]"},
-      {false, "http://a.127.0.0.1"},
-      {false, "http://127.0.0.1.b"},
-      {false, "http://localhost.a"},
-
-      // Access is granted to all secure transports.
-      {true, "https://foobar.com"},
-      {true, "wss://foobar.com"},
-
-      // Access is denied to insecure transports.
-      {false, "ftp://foobar.com"},
-      {false, "http://foobar.com"},
-      {false, "http://foobar.com:443"},
-      {false, "ws://foobar.com"},
-
-      // Access is granted to local files
-      {true, "file:///home/foobar/index.html"},
-
-      // blob: URLs must look to the inner URL's origin, and apply the same
-      // rules as above. Spot check some of them
-      {true, "blob:http://localhost:1000/578223a1-8c13-17b3-84d5-eca045ae384a"},
-      {true, "blob:https://foopy:99/578223a1-8c13-17b3-84d5-eca045ae384a"},
-      {false, "blob:http://baz:99/578223a1-8c13-17b3-84d5-eca045ae384a"},
-      {false, "blob:ftp://evil:99/578223a1-8c13-17b3-84d5-eca045ae384a"},
-
-      // filesystem: URLs work the same as blob: URLs, and look to the inner
-      // URL for security origin.
-      {true, "filesystem:http://localhost:1000/foo"},
-      {true, "filesystem:https://foopy:99/foo"},
-      {false, "filesystem:http://baz:99/foo"},
-      {false, "filesystem:ftp://evil:99/foo"},
-  };
-
-  for (size_t i = 0; i < base::size(inputs); ++i) {
-    SCOPED_TRACE(inputs[i].url);
-    scoped_refptr<const SecurityOrigin> origin =
-        SecurityOrigin::CreateFromString(inputs[i].url);
-    String error_message;
-    EXPECT_EQ(inputs[i].access_granted, origin->IsPotentiallyTrustworthy());
-  }
-
-  // Anonymous opaque origins are not considered secure.
-  scoped_refptr<SecurityOrigin> opaque_origin =
-      SecurityOrigin::CreateUniqueOpaque();
-  EXPECT_FALSE(opaque_origin->IsPotentiallyTrustworthy());
-}
-
-TEST_F(SecurityOriginTest, IsSecure) {
-  struct TestCase {
-    bool is_secure;
-    const char* url;
-  } inputs[] = {
-      {false, "blob:ftp://evil:99/578223a1-8c13-17b3-84d5-eca045ae384a"},
-      {false, "blob:http://example.com/578223a1-8c13-17b3-84d5-eca045ae384a"},
-      {false, "file:///etc/passwd"},
-      {false, "ftp://example.com/"},
-      {false, "http://example.com/"},
-      {false, "ws://example.com/"},
-      {true, "blob:https://example.com/578223a1-8c13-17b3-84d5-eca045ae384a"},
-      {true, "https://example.com/"},
-      {true, "wss://example.com/"},
-
-      {true, "about:blank"},
-      {false, ""},
-      {false, "\0"},
-  };
-
-  for (auto test : inputs)
-    EXPECT_EQ(test.is_secure, SecurityOrigin::IsSecure(KURL(test.url)))
-        << "URL: '" << test.url << "'";
-
-  EXPECT_FALSE(SecurityOrigin::IsSecure(NullURL()));
-}
-
-TEST_F(SecurityOriginTest, IsSecureViaTrustworthy) {
-  const char* urls[] = {"http://localhost/", "http://localhost:8080/",
-                        "http://127.0.0.1/", "http://127.0.0.1:8080/",
-                        "http://[::1]/"};
-
-  for (const char* test : urls) {
-    KURL url(test);
-    EXPECT_FALSE(SecurityOrigin::IsSecure(url));
-    SecurityPolicy::AddOriginToTrustworthySafelist(
-        SecurityOrigin::CreateFromString(url)->ToRawString());
-    EXPECT_TRUE(SecurityOrigin::IsSecure(url));
-  }
-}
-
-TEST_F(SecurityOriginTest, IsSecureViaTrustworthyHostnamePattern) {
-  KURL url("http://bar.foo.com");
-  EXPECT_FALSE(SecurityOrigin::IsSecure(url));
-  SecurityPolicy::AddOriginToTrustworthySafelist("*.foo.com");
-  EXPECT_TRUE(SecurityOrigin::IsSecure(url));
-}
-
-// Tests that a URL with no host does not match a hostname pattern.
-TEST_F(SecurityOriginTest, IsSecureViaTrustworthyHostnamePatternEmptyHostname) {
-  KURL url("file://foo");
-  EXPECT_FALSE(SecurityOrigin::IsSecure(url));
-  SecurityPolicy::AddOriginToTrustworthySafelist("*.foo.com");
-  EXPECT_FALSE(SecurityOrigin::IsSecure(url));
+TEST_F(SecurityOriginTest, IsNullURLSecure) {
+  EXPECT_FALSE(network::IsUrlPotentiallyTrustworthy(GURL(NullURL())));
 }
 
 TEST_F(SecurityOriginTest, CanAccess) {
@@ -239,7 +127,7 @@ TEST_F(SecurityOriginTest, CanAccess) {
       {false, "file:///", "file://localhost/"},
   };
 
-  for (size_t i = 0; i < base::size(tests); ++i) {
+  for (size_t i = 0; i < std::size(tests); ++i) {
     scoped_refptr<const SecurityOrigin> origin1 =
         SecurityOrigin::CreateFromString(tests[i].origin1);
     scoped_refptr<const SecurityOrigin> origin2 =
@@ -346,7 +234,7 @@ TEST_F(SecurityOriginTest, CanRequest) {
       {false, "https://foobar.com", "https://bazbar.com"},
   };
 
-  for (size_t i = 0; i < base::size(tests); ++i) {
+  for (size_t i = 0; i < std::size(tests); ++i) {
     scoped_refptr<const SecurityOrigin> origin =
         SecurityOrigin::CreateFromString(tests[i].origin);
     blink::KURL url(tests[i].url);
@@ -511,28 +399,6 @@ TEST_F(SecurityOriginTest, PunycodeNotUnicode) {
   EXPECT_FALSE(origin->CanRequest(unicode_url));
 }
 
-TEST_F(SecurityOriginTest, PortAndEffectivePortMethod) {
-  struct TestCase {
-    uint16_t port;
-    uint16_t effective_port;
-    const char* origin;
-  } cases[] = {
-      {0, 80, "http://example.com"},
-      {0, 80, "http://example.com:80"},
-      {81, 81, "http://example.com:81"},
-      {0, 443, "https://example.com"},
-      {0, 443, "https://example.com:443"},
-      {444, 444, "https://example.com:444"},
-  };
-
-  for (const auto& test : cases) {
-    scoped_refptr<const SecurityOrigin> origin =
-        SecurityOrigin::CreateFromString(test.origin);
-    EXPECT_EQ(test.port, origin->Port());
-    EXPECT_EQ(test.effective_port, origin->EffectivePort());
-  }
-}
-
 TEST_F(SecurityOriginTest, CreateFromTuple) {
   struct TestCase {
     const char* scheme;
@@ -541,17 +407,17 @@ TEST_F(SecurityOriginTest, CreateFromTuple) {
     const char* origin;
   } cases[] = {
       {"http", "example.com", 80, "http://example.com"},
+      {"http", "example.com", 0, "http://example.com:0"},
       {"http", "example.com", 81, "http://example.com:81"},
       {"https", "example.com", 443, "https://example.com"},
       {"https", "example.com", 444, "https://example.com:444"},
       {"file", "", 0, "file://"},
       {"file", "example.com", 0, "file://"},
-      {"gopher", "Foo.com", 70, "gopher://foo.com"},
   };
 
   for (const auto& test : cases) {
     scoped_refptr<const SecurityOrigin> origin =
-        SecurityOrigin::Create(test.scheme, test.host, test.port);
+        SecurityOrigin::CreateFromValidTuple(test.scheme, test.host, test.port);
     EXPECT_EQ(test.origin, origin->ToString()) << test.origin;
   }
 }
@@ -589,17 +455,17 @@ TEST_F(SecurityOriginTest, OpaquenessPropagatesToBlobUrls) {
   }
 }
 
-TEST_F(SecurityOriginTest, OpaqueOriginIsSameSchemeHostPort) {
+TEST_F(SecurityOriginTest, OpaqueOriginIsSameOriginWith) {
   scoped_refptr<const SecurityOrigin> opaque_origin =
       SecurityOrigin::CreateUniqueOpaque();
   scoped_refptr<const SecurityOrigin> tuple_origin =
       SecurityOrigin::CreateFromString("http://example.com");
 
-  EXPECT_TRUE(opaque_origin->IsSameSchemeHostPort(opaque_origin.get()));
-  EXPECT_FALSE(SecurityOrigin::CreateUniqueOpaque()->IsSameSchemeHostPort(
+  EXPECT_TRUE(opaque_origin->IsSameOriginWith(opaque_origin.get()));
+  EXPECT_FALSE(SecurityOrigin::CreateUniqueOpaque()->IsSameOriginWith(
       opaque_origin.get()));
-  EXPECT_FALSE(tuple_origin->IsSameSchemeHostPort(opaque_origin.get()));
-  EXPECT_FALSE(opaque_origin->IsSameSchemeHostPort(tuple_origin.get()));
+  EXPECT_FALSE(tuple_origin->IsSameOriginWith(opaque_origin.get()));
+  EXPECT_FALSE(opaque_origin->IsSameOriginWith(tuple_origin.get()));
 }
 
 TEST_F(SecurityOriginTest, CanonicalizeHost) {
@@ -629,8 +495,9 @@ TEST_F(SecurityOriginTest, CanonicalizeHost) {
 }
 
 TEST_F(SecurityOriginTest, UrlOriginConversions) {
+  url::ScopedSchemeRegistryForTests scoped_registry;
+  url::AddNoAccessScheme("no-access");
   url::AddLocalScheme("nonstandard-but-local");
-  SchemeRegistry::RegisterURLSchemeAsLocal("nonstandard-but-local");
   struct TestCases {
     const char* const url;
     const char* const scheme;
@@ -658,17 +525,18 @@ TEST_F(SecurityOriginTest, UrlOriginConversions) {
       {"http://example.com:123/?query", "http", "example.com", 123},
       {"https://example.com/#1234", "https", "example.com", 443},
       {"https://u:p@example.com:123/?query#1234", "https", "example.com", 123},
+      {"https://example.com:0/", "https", "example.com", 0},
 
       // Nonstandard schemes.
       {"unrecognized-scheme://localhost/", "", "", 0, true},
       {"mailto:localhost/", "", "", 0, true},
       {"about:blank", "", "", 0, true},
 
+      // Custom no-access scheme.
+      {"no-access:blah", "", "", 0, true},
+
       // Registered URLs
       {"ftp://example.com/", "ftp", "example.com", 21},
-      // crbug.com/781342
-      // Conversion doesn't work for gopher.
-      // {"gopher://example.com/", "gopher", "example.com", 70},
       {"ws://example.com/", "ws", "example.com", 80},
       {"wss://example.com/", "wss", "example.com", 443},
 
@@ -688,9 +556,6 @@ TEST_F(SecurityOriginTest, UrlOriginConversions) {
        123},
       {"blob:https://example.com/guid-goes-here", "https", "example.com", 443},
       {"blob:http://u:p@example.com/guid-goes-here", "http", "example.com", 80},
-
-      // Gopher:
-      {"gopher://8u.9.Vx6/", "gopher", "8u.9.vx6", 70},
   };
 
   for (const auto& test_case : cases) {
@@ -711,29 +576,27 @@ TEST_F(SecurityOriginTest, UrlOriginConversions) {
     EXPECT_EQ(test_case.scheme, security_origin_via_kurl->Protocol());
     EXPECT_EQ(test_case.host, security_origin_via_gurl->Host());
     EXPECT_EQ(test_case.host, security_origin_via_kurl->Host());
-    EXPECT_EQ(security_origin_via_gurl->Port(),
-              security_origin_via_kurl->Port());
-    EXPECT_EQ(test_case.port, security_origin_via_gurl->EffectivePort());
-    EXPECT_EQ(test_case.port, security_origin_via_kurl->EffectivePort());
+    EXPECT_EQ(test_case.port, security_origin_via_gurl->Port());
+    EXPECT_EQ(test_case.port, security_origin_via_kurl->Port());
     EXPECT_EQ(test_case.opaque, security_origin_via_gurl->IsOpaque());
     EXPECT_EQ(test_case.opaque, security_origin_via_kurl->IsOpaque());
-    EXPECT_EQ(!test_case.opaque, security_origin_via_kurl->IsSameSchemeHostPort(
+    EXPECT_EQ(!test_case.opaque, security_origin_via_kurl->IsSameOriginWith(
                                      security_origin_via_gurl.get()));
-    EXPECT_EQ(!test_case.opaque, security_origin_via_gurl->IsSameSchemeHostPort(
+    EXPECT_EQ(!test_case.opaque, security_origin_via_gurl->IsSameOriginWith(
                                      security_origin_via_kurl.get()));
 
     if (!test_case.opaque) {
       scoped_refptr<const SecurityOrigin> security_origin =
-          SecurityOrigin::Create(test_case.scheme, test_case.host,
-                                 test_case.port);
-      EXPECT_TRUE(security_origin->IsSameSchemeHostPort(
-          security_origin_via_gurl.get()));
-      EXPECT_TRUE(security_origin->IsSameSchemeHostPort(
-          security_origin_via_kurl.get()));
-      EXPECT_TRUE(security_origin_via_gurl->IsSameSchemeHostPort(
-          security_origin.get()));
-      EXPECT_TRUE(security_origin_via_kurl->IsSameSchemeHostPort(
-          security_origin.get()));
+          SecurityOrigin::CreateFromValidTuple(test_case.scheme, test_case.host,
+                                               test_case.port);
+      EXPECT_TRUE(
+          security_origin->IsSameOriginWith(security_origin_via_gurl.get()));
+      EXPECT_TRUE(
+          security_origin->IsSameOriginWith(security_origin_via_kurl.get()));
+      EXPECT_TRUE(
+          security_origin_via_gurl->IsSameOriginWith(security_origin.get()));
+      EXPECT_TRUE(
+          security_origin_via_kurl->IsSameOriginWith(security_origin.get()));
     }
 
     // Test ToUrlOrigin
@@ -816,6 +679,7 @@ TEST_F(SecurityOriginTest, EffectiveDomainSetFromDom) {
 }
 
 TEST_F(SecurityOriginTest, ToTokenForFastCheck) {
+  base::UnguessableToken agent_cluster_id = base::UnguessableToken::Create();
   constexpr struct {
     const char* url;
     const char* token;
@@ -839,27 +703,14 @@ TEST_F(SecurityOriginTest, ToTokenForFastCheck) {
 
   for (const auto& test : kTestCases) {
     SCOPED_TRACE(test.url);
-    scoped_refptr<const SecurityOrigin> origin =
-        SecurityOrigin::CreateFromString(test.url);
-    EXPECT_EQ(test.token, origin->ToTokenForFastCheck()) << test.token;
+    scoped_refptr<SecurityOrigin> origin =
+        SecurityOrigin::CreateFromString(test.url)->GetOriginForAgentCluster(
+            agent_cluster_id);
+    String expected_token;
+    if (test.token)
+      expected_token = test.token + String(agent_cluster_id.ToString().c_str());
+    EXPECT_EQ(expected_token, origin->ToTokenForFastCheck()) << expected_token;
   }
-}
-
-TEST_F(SecurityOriginTest, NonStandardScheme) {
-  scoped_refptr<const SecurityOrigin> origin =
-      SecurityOrigin::CreateFromString("cow://");
-  EXPECT_TRUE(origin->IsOpaque());
-}
-
-TEST_F(SecurityOriginTest, NonStandardSchemeWithAndroidWebViewHack) {
-  url::EnableNonStandardSchemesForAndroidWebView();
-  scoped_refptr<const SecurityOrigin> origin =
-      SecurityOrigin::CreateFromString("cow://");
-  EXPECT_FALSE(origin->IsOpaque());
-  EXPECT_EQ("cow", origin->Protocol());
-  EXPECT_EQ("", origin->Host());
-  EXPECT_EQ(0, origin->Port());
-  url::Shutdown();
 }
 
 TEST_F(SecurityOriginTest, OpaqueIsolatedCopy) {
@@ -867,7 +718,7 @@ TEST_F(SecurityOriginTest, OpaqueIsolatedCopy) {
       SecurityOrigin::CreateUniqueOpaque();
   scoped_refptr<const SecurityOrigin> copied = origin->IsolatedCopy();
   EXPECT_TRUE(origin->CanAccess(copied.get()));
-  EXPECT_TRUE(origin->IsSameSchemeHostPort(copied.get()));
+  EXPECT_TRUE(origin->IsSameOriginWith(copied.get()));
   EXPECT_EQ(SecurityOriginHash::GetHash(origin),
             SecurityOriginHash::GetHash(copied));
   EXPECT_TRUE(SecurityOriginHash::Equal(origin, copied));
@@ -882,7 +733,7 @@ TEST_F(SecurityOriginTest, EdgeCases) {
   scoped_refptr<SecurityOrigin> local =
       SecurityOrigin::CreateFromString("file:///foo/bar");
   local->BlockLocalAccessFromLocalOrigin();
-  EXPECT_TRUE(local->IsSameSchemeHostPort(local.get()));
+  EXPECT_TRUE(local->IsSameOriginWith(local.get()));
 }
 
 TEST_F(SecurityOriginTest, RegistrableDomain) {
@@ -906,4 +757,493 @@ TEST_F(SecurityOriginTest, RegistrableDomain) {
   EXPECT_EQ(String("example.com"), subdomain->RegistrableDomain());
 }
 
+TEST_F(SecurityOriginTest, IsSameOriginWith) {
+  struct TestCase {
+    bool same_origin;
+    const char* a;
+    const char* b;
+  } tests[] = {{true, "https://a.com", "https://a.com"},
+
+               // Schemes
+               {false, "https://a.com", "http://a.com"},
+
+               // Hosts
+               {false, "https://a.com", "https://not-a.com"},
+               {false, "https://a.com", "https://sub.a.com"},
+
+               // Ports
+               {true, "https://a.com", "https://a.com:443"},
+               {false, "https://a.com", "https://a.com:444"},
+               {false, "https://a.com:442", "https://a.com:443"},
+
+               // Opaque
+               {false, "data:text/html,whatever", "data:text/html,whatever"}};
+
+  for (const auto& test : tests) {
+    SCOPED_TRACE(testing::Message() << "Origin 1: `" << test.a << "` "
+                                    << "Origin 2: `" << test.b << "`\n");
+    scoped_refptr<SecurityOrigin> a = SecurityOrigin::CreateFromString(test.a);
+    scoped_refptr<SecurityOrigin> b = SecurityOrigin::CreateFromString(test.b);
+    EXPECT_EQ(test.same_origin, a->IsSameOriginWith(b.get()));
+    EXPECT_EQ(test.same_origin, b->IsSameOriginWith(a.get()));
+
+    // Self-comparison
+    EXPECT_TRUE(a->IsSameOriginWith(a.get()));
+    EXPECT_TRUE(b->IsSameOriginWith(b.get()));
+
+    // DeriveNewOpaqueOrigin
+    EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginWith(a.get()));
+    EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginWith(a.get()));
+    EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginWith(b.get()));
+    EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginWith(b.get()));
+    EXPECT_FALSE(a->IsSameOriginWith(a->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(b->IsSameOriginWith(a->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(a->IsSameOriginWith(b->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(b->IsSameOriginWith(b->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginWith(
+        a->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginWith(
+        b->DeriveNewOpaqueOrigin().get()));
+
+    // UniversalAccess does not change the result.
+    a->GrantUniversalAccess();
+    EXPECT_EQ(test.same_origin, a->IsSameOriginWith(b.get()));
+    EXPECT_EQ(test.same_origin, b->IsSameOriginWith(a.get()));
+  }
+}
+
+TEST_F(SecurityOriginTest, IsSameOriginWithWithLocalScheme) {
+  scoped_refptr<SecurityOrigin> a =
+      SecurityOrigin::CreateFromString("file:///etc/passwd");
+  scoped_refptr<SecurityOrigin> b =
+      SecurityOrigin::CreateFromString("file:///etc/hosts");
+
+  // Self-comparison
+  EXPECT_TRUE(a->IsSameOriginWith(a.get()));
+  EXPECT_TRUE(b->IsSameOriginWith(b.get()));
+
+  // block_local_access_from_local_origin_ defaults to `false`:
+  EXPECT_TRUE(a->IsSameOriginWith(b.get()));
+  EXPECT_TRUE(b->IsSameOriginWith(a.get()));
+
+  // DeriveNewOpaqueOrigin
+  EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginWith(a.get()));
+  EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginWith(a.get()));
+  EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginWith(b.get()));
+  EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginWith(b.get()));
+  EXPECT_FALSE(a->IsSameOriginWith(a->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(b->IsSameOriginWith(a->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(a->IsSameOriginWith(b->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(b->IsSameOriginWith(b->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginWith(
+      a->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginWith(
+      b->DeriveNewOpaqueOrigin().get()));
+
+  // Set block_local_access_from_local_origin_ to `true`:
+  a->BlockLocalAccessFromLocalOrigin();
+  EXPECT_FALSE(a->IsSameOriginWith(b.get()));
+  EXPECT_FALSE(b->IsSameOriginWith(a.get()));
+
+  // Self-comparison should still be true.
+  EXPECT_TRUE(a->IsSameOriginWith(a.get()));
+  EXPECT_TRUE(b->IsSameOriginWith(b.get()));
+
+  // UniversalAccess does not override
+  a->GrantUniversalAccess();
+  EXPECT_FALSE(a->IsSameOriginWith(b.get()));
+  EXPECT_FALSE(b->IsSameOriginWith(a.get()));
+}
+
+TEST_F(SecurityOriginTest, IsSameOriginDomainWith) {
+  struct TestCase {
+    bool same_origin_domain;
+    const char* a;
+    const char* domain_a;  // empty string === no `domain` set.
+    const char* b;
+    const char* domain_b;
+  } tests[] = {
+      {true, "https://a.com", "", "https://a.com", ""},
+      {false, "https://a.com", "a.com", "https://a.com", ""},
+      {true, "https://a.com", "a.com", "https://a.com", "a.com"},
+      {false, "https://sub.a.com", "", "https://a.com", ""},
+      {false, "https://sub.a.com", "a.com", "https://a.com", ""},
+      {true, "https://sub.a.com", "a.com", "https://a.com", "a.com"},
+      {true, "https://sub.a.com", "a.com", "https://sub.a.com", "a.com"},
+      {true, "https://sub.a.com", "a.com", "https://sub.sub.a.com", "a.com"},
+
+      // Schemes.
+      {false, "https://a.com", "", "http://a.com", ""},
+      {false, "https://a.com", "a.com", "http://a.com", ""},
+      {false, "https://a.com", "a.com", "http://a.com", "a.com"},
+      {false, "https://sub.a.com", "a.com", "http://a.com", ""},
+      {false, "https://a.com", "a.com", "http://sub.a.com", "a.com"},
+
+      // Ports? Why would they matter?
+      {true, "https://a.com:443", "", "https://a.com", ""},
+      {false, "https://a.com:444", "", "https://a.com", ""},
+      {false, "https://a.com:444", "", "https://a.com:442", ""},
+
+      {false, "https://a.com:443", "a.com", "https://a.com", ""},
+      {false, "https://a.com:444", "a.com", "https://a.com", ""},
+      {false, "https://a.com:444", "a.com", "https://a.com:442", ""},
+
+      {true, "https://a.com:443", "a.com", "https://a.com", "a.com"},
+      {true, "https://a.com:444", "a.com", "https://a.com", "a.com"},
+      {true, "https://a.com:444", "a.com", "https://a.com:442", "a.com"},
+
+      {false, "https://sub.a.com:443", "", "https://a.com", ""},
+      {false, "https://sub.a.com:444", "", "https://a.com", ""},
+      {false, "https://sub.a.com:444", "", "https://a.com:442", ""},
+
+      {false, "https://sub.a.com:443", "a.com", "https://a.com", ""},
+      {false, "https://sub.a.com:444", "a.com", "https://a.com", ""},
+      {false, "https://sub.a.com:444", "a.com", "https://a.com:442", ""},
+
+      {true, "https://sub.a.com:443", "a.com", "https://a.com", "a.com"},
+      {true, "https://sub.a.com:444", "a.com", "https://a.com", "a.com"},
+      {true, "https://sub.a.com:444", "a.com", "https://a.com:442", "a.com"},
+  };
+
+  for (const auto& test : tests) {
+    SCOPED_TRACE(testing::Message()
+                 << "Origin 1: `" << test.a << "` (`" << test.domain_a << "`)\n"
+                 << "Origin 2: `" << test.b << "` (`" << test.domain_b
+                 << "`)\n");
+    scoped_refptr<SecurityOrigin> a = SecurityOrigin::CreateFromString(test.a);
+    if (strlen(test.domain_a))
+      a->SetDomainFromDOM(test.domain_a);
+    scoped_refptr<SecurityOrigin> b = SecurityOrigin::CreateFromString(test.b);
+    if (strlen(test.domain_b))
+      b->SetDomainFromDOM(test.domain_b);
+    EXPECT_EQ(test.same_origin_domain, a->IsSameOriginDomainWith(b.get()));
+    EXPECT_EQ(test.same_origin_domain, b->IsSameOriginDomainWith(a.get()));
+
+    // Self-comparison
+    EXPECT_TRUE(a->IsSameOriginDomainWith(a.get()));
+    EXPECT_TRUE(b->IsSameOriginDomainWith(b.get()));
+
+    // DeriveNewOpaqueOrigin
+    EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(a.get()));
+    EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(a.get()));
+    EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(b.get()));
+    EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(b.get()));
+    EXPECT_FALSE(a->IsSameOriginDomainWith(a->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(b->IsSameOriginDomainWith(a->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(a->IsSameOriginDomainWith(b->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(b->IsSameOriginDomainWith(b->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(
+        a->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(
+        b->DeriveNewOpaqueOrigin().get()));
+
+    // UniversalAccess does not override.
+    a->GrantUniversalAccess();
+    EXPECT_EQ(test.same_origin_domain, a->IsSameOriginDomainWith(b.get()));
+    EXPECT_EQ(test.same_origin_domain, b->IsSameOriginDomainWith(a.get()));
+  }
+}
+
+TEST_F(SecurityOriginTest, IsSameOriginDomainWithWithLocalScheme) {
+  scoped_refptr<SecurityOrigin> a =
+      SecurityOrigin::CreateFromString("file:///etc/passwd");
+  scoped_refptr<SecurityOrigin> b =
+      SecurityOrigin::CreateFromString("file:///etc/hosts");
+
+  // Self-comparison
+  EXPECT_TRUE(a->IsSameOriginDomainWith(a.get()));
+  EXPECT_TRUE(b->IsSameOriginDomainWith(b.get()));
+
+  // block_local_access_from_local_origin_ defaults to `false`:
+  EXPECT_TRUE(a->IsSameOriginDomainWith(b.get()));
+  EXPECT_TRUE(b->IsSameOriginDomainWith(a.get()));
+
+  // DeriveNewOpaqueOrigin
+  EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(a.get()));
+  EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(a.get()));
+  EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(b.get()));
+  EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(b.get()));
+  EXPECT_FALSE(a->IsSameOriginDomainWith(a->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(b->IsSameOriginDomainWith(a->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(a->IsSameOriginDomainWith(b->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(b->IsSameOriginDomainWith(b->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(
+      a->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameOriginDomainWith(
+      b->DeriveNewOpaqueOrigin().get()));
+
+  // Set block_local_access_from_local_origin_ to `true`:
+  a->BlockLocalAccessFromLocalOrigin();
+  EXPECT_FALSE(a->IsSameOriginDomainWith(b.get()));
+  EXPECT_FALSE(b->IsSameOriginDomainWith(a.get()));
+
+  // Self-comparison should still be true.
+  EXPECT_TRUE(a->IsSameOriginDomainWith(a.get()));
+  EXPECT_TRUE(b->IsSameOriginDomainWith(b.get()));
+
+  // UniversalAccess does not override
+  a->GrantUniversalAccess();
+  EXPECT_FALSE(a->IsSameOriginDomainWith(b.get()));
+  EXPECT_FALSE(b->IsSameOriginDomainWith(a.get()));
+}
+
+TEST_F(SecurityOriginTest, IsSameSiteWith) {
+  struct TestCase {
+    bool same_site;
+    const char* a;
+    const char* b;
+  } tests[] = {
+      // Same tuple origin.
+      {true, "https://a.com", "https://a.com"},
+      // Same registrable domain.
+      {true, "https://a.com", "https://sub.a.com"},
+      {true, "https://sub1.a.com", "https://sub2.a.com"},
+      // Schemes differ.
+      {false, "https://a.com", "http://a.com"},
+      {false, "https://a.com", "wss://a.com"},
+      // Registrable domains differ.
+      {false, "https://a.com", "https://b.com"},
+      {false, "https://sub.a.com", "https://sub.b.com"},
+      {false, "https://a.com", "https://aaaaa.com"},
+      // If there is no registrable domain, the hosts must match.
+      {true, "https://com", "https://com"},
+      {true, "https://123.4.5.6:788", "https://123.4.5.6:789"},
+      // Ports don't matter.
+      {true, "https://a.com:443", "https://a.com:444"},
+      // Opaque vs tuple origins cannot be same site.
+      {false, "data:text/html,whatever", "https://a.com"},
+      // Two different opaque origins cannot be same site.
+      {false, "data:text/html,whatever", "data:text/html,whatever"},
+  };
+
+  for (const auto& test : tests) {
+    SCOPED_TRACE(testing::Message() << "Origin 1: `" << test.a << "` "
+                                    << "Origin 2: `" << test.b << "`\n");
+    scoped_refptr<SecurityOrigin> a = SecurityOrigin::CreateFromString(test.a);
+    scoped_refptr<SecurityOrigin> b = SecurityOrigin::CreateFromString(test.b);
+    EXPECT_EQ(test.same_site, a->IsSameSiteWith(b.get()));
+    EXPECT_EQ(test.same_site, b->IsSameSiteWith(a.get()));
+
+    // Self-comparison
+    EXPECT_TRUE(a->IsSameSiteWith(a.get()));
+    EXPECT_TRUE(b->IsSameSiteWith(b.get()));
+
+    // DeriveNewOpaqueOrigin
+    EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameSiteWith(a.get()));
+    EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameSiteWith(a.get()));
+    EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameSiteWith(b.get()));
+    EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameSiteWith(b.get()));
+    EXPECT_FALSE(a->IsSameSiteWith(a->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(b->IsSameSiteWith(a->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(a->IsSameSiteWith(b->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(b->IsSameSiteWith(b->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameSiteWith(
+        a->DeriveNewOpaqueOrigin().get()));
+    EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameSiteWith(
+        b->DeriveNewOpaqueOrigin().get()));
+
+    // UniversalAccess does not change the result.
+    a->GrantUniversalAccess();
+    EXPECT_EQ(test.same_site, a->IsSameSiteWith(b.get()));
+    EXPECT_EQ(test.same_site, b->IsSameSiteWith(a.get()));
+  }
+
+  // Identical opaque origins are same site.
+  scoped_refptr<SecurityOrigin> opaque = SecurityOrigin::CreateUniqueOpaque();
+  scoped_refptr<SecurityOrigin> opaque_copy = opaque->IsolatedCopy();
+  EXPECT_TRUE(opaque->IsSameSiteWith(opaque_copy.get()));
+  EXPECT_TRUE(opaque_copy->IsSameSiteWith(opaque.get()));
+}
+
+TEST_F(SecurityOriginTest, IsSameSiteWithWithLocalScheme) {
+  scoped_refptr<SecurityOrigin> a =
+      SecurityOrigin::CreateFromString("file:///etc/passwd");
+  scoped_refptr<SecurityOrigin> b =
+      SecurityOrigin::CreateFromString("file:///etc/hosts");
+
+  // Self-comparison
+  EXPECT_TRUE(a->IsSameSiteWith(a.get()));
+  EXPECT_TRUE(b->IsSameSiteWith(b.get()));
+
+  // block_local_access_from_local_origin_ defaults to `false`:
+  EXPECT_TRUE(a->IsSameSiteWith(b.get()));
+  EXPECT_TRUE(b->IsSameSiteWith(a.get()));
+
+  // DeriveNewOpaqueOrigin
+  EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameSiteWith(a.get()));
+  EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameSiteWith(a.get()));
+  EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameSiteWith(b.get()));
+  EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameSiteWith(b.get()));
+  EXPECT_FALSE(a->IsSameSiteWith(a->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(b->IsSameSiteWith(a->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(a->IsSameSiteWith(b->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(b->IsSameSiteWith(b->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(a->DeriveNewOpaqueOrigin()->IsSameSiteWith(
+      a->DeriveNewOpaqueOrigin().get()));
+  EXPECT_FALSE(b->DeriveNewOpaqueOrigin()->IsSameSiteWith(
+      b->DeriveNewOpaqueOrigin().get()));
+
+  // Set block_local_access_from_local_origin_ to `true`:
+  // They are still same site because the schemes and hosts are the same.
+  a->BlockLocalAccessFromLocalOrigin();
+  EXPECT_TRUE(a->IsSameSiteWith(b.get()));
+  EXPECT_TRUE(b->IsSameSiteWith(a.get()));
+
+  // Self-comparison should still be true.
+  EXPECT_TRUE(a->IsSameSiteWith(a.get()));
+  EXPECT_TRUE(b->IsSameSiteWith(b.get()));
+}
+
+// Non-canonical hosts provided to the string constructor should end up
+// canonicalized:
+TEST_F(SecurityOriginTest, PercentEncodesHost) {
+  EXPECT_EQ(
+      SecurityOrigin::CreateFromString("http://foo,.example.test/")->Host(),
+      "foo%2C.example.test");
+
+  EXPECT_EQ(
+      SecurityOrigin::CreateFromString("http://foo%2C.example.test/")->Host(),
+      "foo%2C.example.test");
+}
+
+TEST_F(SecurityOriginTest, NewOpaqueOriginLazyInitsNonce) {
+  scoped_refptr<SecurityOrigin> opaque_origin =
+      SecurityOrigin::CreateUniqueOpaque();
+
+  scoped_refptr<SecurityOrigin> tuple_origin =
+      SecurityOrigin::Create(KURL("https://example.com/"));
+  scoped_refptr<SecurityOrigin> derived_opaque_origin =
+      tuple_origin->DeriveNewOpaqueOrigin();
+
+  EXPECT_TRUE(opaque_origin->IsOpaque());
+  // There should be a nonce...
+  EXPECT_TRUE(GetNonceForOrigin(*opaque_origin).has_value());
+  // ...but it should not be initialised yet.
+  EXPECT_TRUE(GetNonceForOrigin(*opaque_origin)->raw_token().is_empty());
+
+  EXPECT_TRUE(derived_opaque_origin->IsOpaque());
+  // There should be a nonce...
+  EXPECT_TRUE(GetNonceForOrigin(*derived_opaque_origin).has_value());
+  // ...but it should not be initialised yet.
+  EXPECT_TRUE(
+      GetNonceForOrigin(*derived_opaque_origin)->raw_token().is_empty());
+
+  // Even checking CanAccess does not need to trigger initialisation: two
+  // uninitialised nonces can only be equal if they are the same object.
+  EXPECT_TRUE(opaque_origin->CanAccess(opaque_origin));
+  EXPECT_FALSE(opaque_origin->CanAccess(derived_opaque_origin));
+  EXPECT_TRUE(derived_opaque_origin->CanAccess(derived_opaque_origin));
+
+  EXPECT_TRUE(GetNonceForOrigin(*opaque_origin)->raw_token().is_empty());
+  EXPECT_TRUE(
+      GetNonceForOrigin(*derived_opaque_origin)->raw_token().is_empty());
+
+  // However, forcing the nonce to be serialized should trigger initialisation.
+  (void)GetNonceForSerializationForOrigin(*opaque_origin);
+  (void)GetNonceForSerializationForOrigin(*derived_opaque_origin);
+
+  EXPECT_FALSE(GetNonceForOrigin(*opaque_origin)->raw_token().is_empty());
+  EXPECT_FALSE(
+      GetNonceForOrigin(*derived_opaque_origin)->raw_token().is_empty());
+}
+
 }  // namespace blink
+
+// Apparently INSTANTIATE_TYPED_TEST_SUITE_P needs to be used in the same
+// namespace as where the typed test suite was defined.
+namespace url {
+
+class BlinkSecurityOriginTestTraits {
+ public:
+  using OriginType = scoped_refptr<blink::SecurityOrigin>;
+
+  static OriginType CreateOriginFromString(base::StringPiece s) {
+    return blink::SecurityOrigin::CreateFromString(String::FromUTF8(s));
+  }
+
+  static OriginType CreateUniqueOpaqueOrigin() {
+    return blink::SecurityOrigin::CreateUniqueOpaque();
+  }
+
+  static OriginType CreateWithReferenceOrigin(
+      base::StringPiece url,
+      const OriginType& reference_origin) {
+    return blink::SecurityOrigin::CreateWithReferenceOrigin(
+        blink::KURL(String::FromUTF8(url)), reference_origin.get());
+  }
+
+  static OriginType DeriveNewOpaqueOrigin(const OriginType& reference_origin) {
+    return reference_origin->DeriveNewOpaqueOrigin();
+  }
+
+  static bool IsOpaque(const OriginType& origin) { return origin->IsOpaque(); }
+
+  static std::string GetScheme(const OriginType& origin) {
+    return origin->Protocol().Utf8();
+  }
+
+  static std::string GetHost(const OriginType& origin) {
+    return origin->Host().Utf8();
+  }
+
+  static uint16_t GetPort(const OriginType& origin) { return origin->Port(); }
+
+  static SchemeHostPort GetTupleOrPrecursorTupleIfOpaque(
+      const OriginType& origin) {
+    const blink::SecurityOrigin* precursor =
+        origin->GetOriginOrPrecursorOriginIfOpaque();
+    if (!precursor)
+      return SchemeHostPort();
+    return SchemeHostPort(precursor->Protocol().Utf8(),
+                          precursor->Host().Utf8(), precursor->Port());
+  }
+
+  static bool IsSameOrigin(const OriginType& a, const OriginType& b) {
+    return a->IsSameOriginWith(b.get());
+  }
+
+  static std::string Serialize(const OriginType& origin) {
+    return origin->ToString().Utf8();
+  }
+
+  static bool IsValidUrl(base::StringPiece str) {
+    return blink::KURL(String::FromUTF8(str)).IsValid();
+  }
+
+  static bool IsOriginPotentiallyTrustworthy(const OriginType& origin) {
+    return origin->IsPotentiallyTrustworthy();
+  }
+
+  static bool IsUrlPotentiallyTrustworthy(base::StringPiece str) {
+    // Note: intentionally avoid constructing GURL() directly from `str`, since
+    // this is a test harness intended to exercise the behavior of `KURL` and
+    // `SecurityOrigin`.
+    return network::IsUrlPotentiallyTrustworthy(
+        GURL(blink::KURL(String::FromUTF8(str))));
+  }
+
+  static bool IsOriginOfLocalhost(const OriginType& origin) {
+    return origin->IsLocalhost();
+  }
+
+  // Only static members = no constructors are needed.
+  BlinkSecurityOriginTestTraits() = delete;
+};
+
+INSTANTIATE_TYPED_TEST_SUITE_P(BlinkSecurityOrigin,
+                               AbstractOriginTest,
+                               BlinkSecurityOriginTestTraits);
+
+}  // namespace url
+
+// Apparently INSTANTIATE_TYPED_TEST_SUITE_P needs to be used in the same
+// namespace as where the typed test suite was defined.
+namespace network {
+namespace test {
+
+INSTANTIATE_TYPED_TEST_SUITE_P(BlinkSecurityOrigin,
+                               AbstractTrustworthinessTest,
+                               url::BlinkSecurityOriginTestTraits);
+
+}  // namespace test
+}  // namespace network

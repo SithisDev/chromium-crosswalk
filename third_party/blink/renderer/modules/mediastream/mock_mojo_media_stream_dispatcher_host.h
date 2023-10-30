@@ -5,10 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_MOCK_MOJO_MEDIA_STREAM_DISPATCHER_HOST_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_MOCK_MOJO_MEDIA_STREAM_DISPATCHER_HOST_H_
 
-#include <string>
-
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "build/build_config.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/common/mediastream/media_stream_controls.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
@@ -19,18 +18,28 @@ namespace blink {
 class MockMojoMediaStreamDispatcherHost
     : public mojom::blink::MediaStreamDispatcherHost {
  public:
-  MockMojoMediaStreamDispatcherHost();
+  MockMojoMediaStreamDispatcherHost() = default;
+
+  MockMojoMediaStreamDispatcherHost(const MockMojoMediaStreamDispatcherHost&) =
+      delete;
+  MockMojoMediaStreamDispatcherHost& operator=(
+      const MockMojoMediaStreamDispatcherHost&) = delete;
+
   ~MockMojoMediaStreamDispatcherHost() override;
 
-  mojom::blink::MediaStreamDispatcherHostPtr CreateInterfacePtrAndBind();
+  mojo::PendingRemote<mojom::blink::MediaStreamDispatcherHost>
+  CreatePendingRemoteAndBind();
 
-  void GenerateStream(int32_t request_id,
-                      mojom::blink::StreamControlsPtr controls,
-                      bool user_gesture,
-                      GenerateStreamCallback callback) override;
+  void GenerateStreams(
+      int32_t request_id,
+      const StreamControls& controls,
+      bool user_gesture,
+      mojom::blink::StreamSelectionInfoPtr audio_stream_selection_info_ptr,
+      GenerateStreamsCallback callback) override;
   void CancelRequest(int32_t request_id) override;
-  void StopStreamDevice(const WTF::String& device_id,
-                        int32_t session_id) override;
+  void StopStreamDevice(
+      const WTF::String& device_id,
+      const absl::optional<base::UnguessableToken>& session_id) override;
   void OpenDevice(int32_t request_id,
                   const WTF::String& device_id,
                   mojom::blink::MediaStreamType type,
@@ -38,21 +47,41 @@ class MockMojoMediaStreamDispatcherHost
 
   MOCK_METHOD1(CloseDevice, void(const WTF::String&));
   MOCK_METHOD3(SetCapturingLinkSecured,
-               void(int32_t, mojom::blink::MediaStreamType, bool));
+               void(const absl::optional<base::UnguessableToken>&,
+                    mojom::blink::MediaStreamType,
+                    bool));
   MOCK_METHOD1(OnStreamStarted, void(const WTF::String&));
+  MOCK_METHOD3(KeepDeviceAliveForTransfer,
+               void(const base::UnguessableToken&,
+                    const base::UnguessableToken&,
+                    KeepDeviceAliveForTransferCallback));
+#if !BUILDFLAG(IS_ANDROID)
+  MOCK_METHOD2(FocusCapturedSurface, void(const WTF::String&, bool));
+  MOCK_METHOD4(Crop,
+               void(const base::UnguessableToken&,
+                    const base::Token&,
+                    uint32_t,
+                    CropCallback));
+#endif
+  void GetOpenDevice(int32_t request_id,
+                     const base::UnguessableToken&,
+                     const base::UnguessableToken&,
+                     GetOpenDeviceCallback) override;
 
-  void IncrementSessionId() { ++session_id_; }
+  void ResetSessionId() { session_id_ = base::UnguessableToken::Create(); }
   void DoNotRunCallback() { do_not_run_cb_ = true; }
+  const base::UnguessableToken& session_id() { return session_id_; }
 
   int request_stream_counter() const { return request_stream_counter_; }
   int stop_audio_device_counter() const { return stop_audio_device_counter_; }
   int stop_video_device_counter() const { return stop_video_device_counter_; }
 
-  const WTF::Vector<mojom::blink::MediaStreamDevicePtr>& audio_devices() const {
-    return audio_devices_;
+  const blink::mojom::blink::StreamDevices& devices() const {
+    return stream_devices_;
   }
-  const WTF::Vector<mojom::blink::MediaStreamDevicePtr>& video_devices() const {
-    return video_devices_;
+
+  void SetStreamDevices(const blink::mojom::blink::StreamDevices& devices) {
+    stream_devices_ = devices;
   }
 
  private:
@@ -60,14 +89,12 @@ class MockMojoMediaStreamDispatcherHost
   int request_stream_counter_ = 0;
   int stop_audio_device_counter_ = 0;
   int stop_video_device_counter_ = 0;
-  int session_id_ = 0;
+  base::UnguessableToken session_id_ = base::UnguessableToken::Create();
   bool do_not_run_cb_ = false;
-  WTF::Vector<mojom::blink::MediaStreamDevicePtr> audio_devices_;
-  WTF::Vector<mojom::blink::MediaStreamDevicePtr> video_devices_;
-  GenerateStreamCallback generate_stream_cb_;
-  mojo::Binding<mojom::blink::MediaStreamDispatcherHost> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockMojoMediaStreamDispatcherHost);
+  blink::mojom::blink::StreamDevices stream_devices_;
+  GenerateStreamsCallback generate_stream_cb_;
+  GetOpenDeviceCallback get_open_device_cb_;
+  mojo::Receiver<mojom::blink::MediaStreamDispatcherHost> receiver_{this};
 };
 
 }  // namespace blink

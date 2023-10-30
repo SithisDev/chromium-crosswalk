@@ -21,8 +21,6 @@
 
 #include "third_party/blink/renderer/core/html/forms/html_options_collection.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/html_element_or_long.h"
-#include "third_party/blink/renderer/bindings/core/v8/html_option_element_or_html_opt_group_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_option_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -31,7 +29,7 @@ namespace blink {
 
 HTMLOptionsCollection::HTMLOptionsCollection(ContainerNode& select)
     : HTMLCollection(select, kSelectOptions, kDoesNotOverrideItemAfter) {
-  DCHECK(IsHTMLSelectElement(select));
+  DCHECK(IsA<HTMLSelectElement>(select));
 }
 
 HTMLOptionsCollection::HTMLOptionsCollection(ContainerNode& select,
@@ -71,40 +69,40 @@ void HTMLOptionsCollection::SupportedPropertyNames(Vector<String>& names) {
 }
 
 void HTMLOptionsCollection::add(
-    const HTMLOptionElementOrHTMLOptGroupElement& element,
-    const HTMLElementOrLong& before,
+    const V8UnionHTMLOptGroupElementOrHTMLOptionElement* element,
+    const V8UnionHTMLElementOrLong* before,
     ExceptionState& exception_state) {
-  ToHTMLSelectElement(ownerNode()).add(element, before, exception_state);
+  To<HTMLSelectElement>(ownerNode()).add(element, before, exception_state);
 }
 
 void HTMLOptionsCollection::remove(int index) {
-  ToHTMLSelectElement(ownerNode()).remove(index);
+  To<HTMLSelectElement>(ownerNode()).remove(index);
 }
 
 int HTMLOptionsCollection::selectedIndex() const {
-  return ToHTMLSelectElement(ownerNode()).selectedIndex();
+  return To<HTMLSelectElement>(ownerNode()).selectedIndex();
 }
 
 void HTMLOptionsCollection::setSelectedIndex(int index) {
-  ToHTMLSelectElement(ownerNode()).setSelectedIndex(index);
+  To<HTMLSelectElement>(ownerNode()).setSelectedIndex(index);
 }
 
 void HTMLOptionsCollection::setLength(unsigned length,
                                       ExceptionState& exception_state) {
-  ToHTMLSelectElement(ownerNode()).setLength(length, exception_state);
+  To<HTMLSelectElement>(ownerNode()).setLength(length, exception_state);
 }
 
-bool HTMLOptionsCollection::AnonymousIndexedSetter(
+IndexedPropertySetterResult HTMLOptionsCollection::AnonymousIndexedSetter(
     unsigned index,
     HTMLOptionElement* value,
     ExceptionState& exception_state) {
-  HTMLSelectElement& base = ToHTMLSelectElement(ownerNode());
+  auto& base = To<HTMLSelectElement>(ownerNode());
   if (!value) {  // undefined or null
     base.remove(index);
-    return true;
+    return IndexedPropertySetterResult::kIntercepted;
   }
   base.SetOption(index, value, exception_state);
-  return true;
+  return IndexedPropertySetterResult::kIntercepted;
 }
 
 }  // namespace blink

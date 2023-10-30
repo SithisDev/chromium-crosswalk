@@ -9,21 +9,27 @@
 
 namespace blink {
 
+class ExceptionState;
 class GPUBindGroupLayoutDescriptor;
 
-class GPUBindGroupLayout : public DawnObject<DawnBindGroupLayout> {
+class GPUBindGroupLayout : public DawnObject<WGPUBindGroupLayout> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static GPUBindGroupLayout* Create(
       GPUDevice* device,
-      const GPUBindGroupLayoutDescriptor* webgpu_desc);
+      const GPUBindGroupLayoutDescriptor* webgpu_desc,
+      ExceptionState& exception_state);
   explicit GPUBindGroupLayout(GPUDevice* device,
-                              DawnBindGroupLayout bind_group_layout);
-  ~GPUBindGroupLayout() override;
+                              WGPUBindGroupLayout bind_group_layout);
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(GPUBindGroupLayout);
+  GPUBindGroupLayout(const GPUBindGroupLayout&) = delete;
+  GPUBindGroupLayout& operator=(const GPUBindGroupLayout&) = delete;
+
+  void setLabelImpl(const String& value) override {
+    std::string utf8_label = value.Utf8();
+    GetProcs().bindGroupLayoutSetLabel(GetHandle(), utf8_label.c_str());
+  }
 };
 
 }  // namespace blink

@@ -41,7 +41,7 @@ WebVector<WebElement> WebSelectElement::GetListItems() const {
   const HeapVector<Member<HTMLElement>>& source_items =
       ConstUnwrap<HTMLSelectElement>()->GetListItems();
   WebVector<WebElement> items(source_items.size());
-  for (size_t i = 0; i < source_items.size(); ++i)
+  for (wtf_size_t i = 0; i < source_items.size(); ++i)
     items[i] = WebElement(source_items[i].Get());
 
   return items;
@@ -51,7 +51,7 @@ WebSelectElement::WebSelectElement(HTMLSelectElement* element)
     : WebFormControlElement(element) {}
 
 DEFINE_WEB_NODE_TYPE_CASTS(WebSelectElement,
-                           IsHTMLSelectElement(ConstUnwrap<Node>()))
+                           IsA<HTMLSelectElement>(ConstUnwrap<Node>()))
 
 WebSelectElement& WebSelectElement::operator=(HTMLSelectElement* element) {
   private_ = element;
@@ -59,7 +59,7 @@ WebSelectElement& WebSelectElement::operator=(HTMLSelectElement* element) {
 }
 
 WebSelectElement::operator HTMLSelectElement*() const {
-  return ToHTMLSelectElement(private_.Get());
+  return blink::To<HTMLSelectElement>(private_.Get());
 }
 
 }  // namespace blink

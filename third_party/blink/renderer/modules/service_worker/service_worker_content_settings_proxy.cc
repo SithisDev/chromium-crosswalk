@@ -6,34 +6,41 @@
 
 #include <memory>
 
+#include "base/metrics/histogram_macros.h"
+#include "third_party/blink/renderer/platform/wtf/thread_specific.h"
+
 namespace blink {
 
 ServiceWorkerContentSettingsProxy::ServiceWorkerContentSettingsProxy(
-    mojom::blink::WorkerContentSettingsProxyPtrInfo host_info)
+    mojo::PendingRemote<mojom::blink::WorkerContentSettingsProxy> host_info)
     : host_info_(std::move(host_info)) {}
 
 ServiceWorkerContentSettingsProxy::~ServiceWorkerContentSettingsProxy() =
     default;
 
-bool ServiceWorkerContentSettingsProxy::RequestFileSystemAccessSync() {
-  NOTREACHED();
-  return false;
-}
-
-bool ServiceWorkerContentSettingsProxy::AllowIndexedDB(
-    const blink::WebSecurityOrigin&) {
+bool ServiceWorkerContentSettingsProxy::AllowStorageAccessSync(
+    StorageType storage_type) {
   bool result = false;
-  GetService()->AllowIndexedDB(&result);
-  return result;
+  if (storage_type == StorageType::kIndexedDB) {
+    SCOPED_UMA_HISTOGRAM_TIMER("ServiceWorker.AllowIndexedDBTime");
+    GetService()->AllowIndexedDB(&result);
+    return result;
+  } else if (storage_type == StorageType::kFileSystem) {
+    NOTREACHED();
+    return false;
+  } else {
+    // TODO(shuagga@microsoft.com): Revisit this default in the future.
+    return true;
+  }
 }
 
 // Use ThreadSpecific to ensure that |content_settings_instance_host| is
 // destructed on worker thread.
 // Each worker has a dedicated thread so this is safe.
-mojom::blink::WorkerContentSettingsProxyPtr&
+mojo::Remote<mojom::blink::WorkerContentSettingsProxy>&
 ServiceWorkerContentSettingsProxy::GetService() {
   DEFINE_THREAD_SAFE_STATIC_LOCAL(
-      ThreadSpecific<mojom::blink::WorkerContentSettingsProxyPtr>,
+      ThreadSpecific<mojo::Remote<mojom::blink::WorkerContentSettingsProxy>>,
       content_settings_instance_host, ());
   if (!content_settings_instance_host.IsSet()) {
     DCHECK(host_info_.is_valid());

@@ -7,8 +7,8 @@
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_frame.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hasher.h"
 
@@ -340,43 +340,11 @@ void TestUpdateRequiredPreviousFrameAfterFirstDecode(
   }
 }
 
-void TestResumePartialDecodeAfterClearFrameBufferCache(
-    DecoderCreator create_decoder,
-    SharedBuffer* full_buffer) {
-  const Vector<char> full_data = full_buffer->CopyAs<Vector<char>>();
-  Vector<unsigned> baseline_hashes;
-  CreateDecodingBaseline(create_decoder, full_buffer, &baseline_hashes);
-  size_t frame_count = baseline_hashes.size();
-
-  std::unique_ptr<ImageDecoder> decoder = create_decoder();
-
-  // Let frame 0 be partially decoded.
-  scoped_refptr<SharedBuffer> data = SharedBuffer::Create();
-  const char* source = full_data.data();
-  do {
-    data->Append(source++, 1u);
-    decoder->SetData(data.get(), false);
-  } while (!decoder->FrameCount() ||
-           decoder->DecodeFrameBufferAtIndex(0)->GetStatus() ==
-               ImageFrame::kFrameEmpty);
-
-  // Skip to the last frame and clear.
-  decoder->SetData(full_buffer, true);
-  EXPECT_EQ(frame_count, decoder->FrameCount());
-  ImageFrame* last_frame = decoder->DecodeFrameBufferAtIndex(frame_count - 1);
-  EXPECT_EQ(baseline_hashes[frame_count - 1], HashBitmap(last_frame->Bitmap()));
-  decoder->ClearCacheExceptFrame(kNotFound);
-
-  // Resume decoding of the first frame.
-  ImageFrame* first_frame = decoder->DecodeFrameBufferAtIndex(0);
-  EXPECT_EQ(ImageFrame::kFrameComplete, first_frame->GetStatus());
-  EXPECT_EQ(baseline_hashes[0], HashBitmap(first_frame->Bitmap()));
-}
-
 void TestByteByByteDecode(DecoderCreator create_decoder,
                           const char* file,
                           size_t expected_frame_count,
                           int expected_repetition_count) {
+  SCOPED_TRACE(file);
   scoped_refptr<SharedBuffer> data = ReadFile(file);
   ASSERT_TRUE(data.get());
   TestByteByByteDecode(create_decoder, data.get(), expected_frame_count,
@@ -387,6 +355,7 @@ void TestByteByByteDecode(DecoderCreator create_decoder,
                           const char* file,
                           size_t expected_frame_count,
                           int expected_repetition_count) {
+  SCOPED_TRACE(file);
   scoped_refptr<SharedBuffer> data = ReadFile(dir, file);
   ASSERT_TRUE(data.get());
   TestByteByByteDecode(create_decoder, data.get(), expected_frame_count,
@@ -516,23 +485,6 @@ void TestUpdateRequiredPreviousFrameAfterFirstDecode(
   scoped_refptr<SharedBuffer> data = ReadFile(file);
   ASSERT_TRUE(data.get());
   TestUpdateRequiredPreviousFrameAfterFirstDecode(create_decoder, data.get());
-}
-
-void TestResumePartialDecodeAfterClearFrameBufferCache(
-    DecoderCreator create_decoder,
-    const char* dir,
-    const char* file) {
-  scoped_refptr<SharedBuffer> data = ReadFile(dir, file);
-  ASSERT_TRUE(data.get());
-  TestResumePartialDecodeAfterClearFrameBufferCache(create_decoder, data.get());
-}
-
-void TestResumePartialDecodeAfterClearFrameBufferCache(
-    DecoderCreator create_decoder,
-    const char* file) {
-  scoped_refptr<SharedBuffer> data = ReadFile(file);
-  ASSERT_TRUE(data.get());
-  TestResumePartialDecodeAfterClearFrameBufferCache(create_decoder, data.get());
 }
 
 static uint32_t PremultiplyColor(uint32_t c) {

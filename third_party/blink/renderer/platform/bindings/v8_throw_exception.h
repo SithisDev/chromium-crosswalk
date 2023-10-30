@@ -28,7 +28,9 @@
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-forward.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-local-handle.h"
 
 namespace blink {
 
@@ -52,12 +54,21 @@ class PLATFORM_EXPORT V8ThrowException {
                                                 const String& message);
   static v8::Local<v8::Value> CreateTypeError(v8::Isolate*,
                                               const String& message);
+  static v8::Local<v8::Value> CreateWasmCompileError(v8::Isolate*,
+                                                     const String& message);
+  static v8::Local<v8::Value> CreateWasmLinkError(v8::Isolate*,
+                                                  const String& message);
+  static v8::Local<v8::Value> CreateWasmRuntimeError(v8::Isolate*,
+                                                     const String& message);
 
   static void ThrowError(v8::Isolate*, const String& message);
   static void ThrowRangeError(v8::Isolate*, const String& message);
   static void ThrowReferenceError(v8::Isolate*, const String& message);
   static void ThrowSyntaxError(v8::Isolate*, const String& message);
   static void ThrowTypeError(v8::Isolate*, const String& message);
+  static void ThrowWasmCompileError(v8::Isolate*, const String& message);
+  static void ThrowWasmLinkError(v8::Isolate*, const String& message);
+  static void ThrowWasmRuntimeError(v8::Isolate*, const String& message);
 };
 
 }  // namespace blink

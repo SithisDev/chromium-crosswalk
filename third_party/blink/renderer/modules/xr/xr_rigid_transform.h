@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
@@ -16,6 +15,7 @@ namespace blink {
 
 class DOMPointInit;
 class DOMPointReadOnly;
+class ExceptionState;
 class TransformationMatrix;
 
 // MODULES_EXPORT is required for unit tests using XRRigidTransform (currently
@@ -26,7 +26,12 @@ class MODULES_EXPORT XRRigidTransform : public ScriptWrappable {
  public:
   explicit XRRigidTransform(const TransformationMatrix&);
   XRRigidTransform(DOMPointInit*, DOMPointInit*);
-  static XRRigidTransform* Create(DOMPointInit*, DOMPointInit*);
+  static XRRigidTransform* Create(DOMPointInit*,
+                                  DOMPointInit*,
+                                  ExceptionState&);
+
+  XRRigidTransform(const XRRigidTransform&) = delete;
+  XRRigidTransform& operator=(const XRRigidTransform&) = delete;
 
   ~XRRigidTransform() override = default;
 
@@ -38,7 +43,7 @@ class MODULES_EXPORT XRRigidTransform : public ScriptWrappable {
   TransformationMatrix InverseTransformMatrix();
   TransformationMatrix TransformMatrix();  // copies matrix_
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void DecomposeMatrix();
@@ -50,8 +55,6 @@ class MODULES_EXPORT XRRigidTransform : public ScriptWrappable {
   Member<XRRigidTransform> inverse_;
   Member<DOMFloat32Array> matrix_array_;
   std::unique_ptr<TransformationMatrix> matrix_;
-
-  DISALLOW_COPY_AND_ASSIGN(XRRigidTransform);
 };
 
 }  // namespace blink

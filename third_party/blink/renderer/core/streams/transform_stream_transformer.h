@@ -5,46 +5,41 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_STREAMS_TRANSFORM_STREAM_TRANSFORMER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STREAMS_TRANSFORM_STREAM_TRANSFORMER_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
 class ExceptionState;
-class TransformStreamDefaultControllerInterface;
-class Visitor;
+class ScriptPromise;
+class ScriptState;
+class TransformStreamDefaultController;
 
 // Interface to be implemented by C++ code that needs to create a
-// TransformStream. Very similar to the JavaScript [Transformer
-// API](https://streams.spec.whatwg.org/#transformer-api), but asynchronous
-// transforms are not currently supported. Errors should be signalled by
-// exceptions.
-//
-// An instance is stored in a JS object as a Persistent reference, so to avoid
-// uncollectable cycles implementations must not directly or indirectly strongly
-// reference any JS object.
+// TransformStream. Based on the JavaScript [Transformer
+// API](https://streams.spec.whatwg.org/#transformer-api). Errors should be
+// signalled by exceptions or promise rejections.
 class CORE_EXPORT TransformStreamTransformer
-    : public GarbageCollectedFinalized<TransformStreamTransformer> {
+    : public GarbageCollected<TransformStreamTransformer> {
  public:
   TransformStreamTransformer() = default;
+  TransformStreamTransformer(const TransformStreamTransformer&) = delete;
+  TransformStreamTransformer& operator=(const TransformStreamTransformer&) =
+      delete;
   virtual ~TransformStreamTransformer() = default;
 
-  virtual void Transform(v8::Local<v8::Value> chunk,
-                         TransformStreamDefaultControllerInterface*,
-                         ExceptionState&) = 0;
-  virtual void Flush(TransformStreamDefaultControllerInterface*,
-                     ExceptionState&) = 0;
+  virtual ScriptPromise Transform(v8::Local<v8::Value> chunk,
+                                  TransformStreamDefaultController*,
+                                  ExceptionState&) = 0;
+  virtual ScriptPromise Flush(TransformStreamDefaultController*,
+                              ExceptionState&) = 0;
 
   // Returns the ScriptState associated with this Transformer.
   virtual ScriptState* GetScriptState() = 0;
 
-  virtual void Trace(Visitor*) {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TransformStreamTransformer);
+  virtual void Trace(Visitor*) const {}
 };
 
 }  // namespace blink

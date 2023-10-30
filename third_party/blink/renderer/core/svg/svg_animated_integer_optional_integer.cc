@@ -30,7 +30,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_animated_integer_optional_integer.h"
 
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -58,7 +58,7 @@ SVGAnimatedIntegerOptionalInteger::SVGAnimatedIntegerOptionalInteger(
   second_integer_->SetParentOptionalInteger(this);
 }
 
-void SVGAnimatedIntegerOptionalInteger::Trace(blink::Visitor* visitor) {
+void SVGAnimatedIntegerOptionalInteger::Trace(Visitor* visitor) const {
   visitor->Trace(first_integer_);
   visitor->Trace(second_integer_);
   SVGAnimatedPropertyCommon<SVGIntegerOptionalInteger>::Trace(visitor);

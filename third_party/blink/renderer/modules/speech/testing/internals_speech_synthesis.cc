@@ -30,34 +30,25 @@
 
 #include "third_party/blink/renderer/modules/speech/testing/internals_speech_synthesis.h"
 
-#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/testing/internals.h"
-#include "third_party/blink/renderer/modules/speech/dom_window_speech_synthesis.h"
 #include "third_party/blink/renderer/modules/speech/speech_synthesis.h"
-#include "third_party/blink/renderer/modules/speech/testing/platform_speech_synthesizer_mock.h"
+#include "third_party/blink/renderer/modules/speech/testing/mojom_speech_synthesis_mock.h"
 
 namespace blink {
 
-void InternalsSpeechSynthesis::enableMockSpeechSynthesizer(
-    ScriptState* script_state,
-    Internals&,
-    DOMWindow* window) {
+void InternalsSpeechSynthesis::enableMockSpeechSynthesizer(Internals&,
+                                                           DOMWindow* window) {
   // TODO(dcheng): Performing a local/remote check is an anti-pattern. However,
   // it is necessary here since |window| is an argument passed from Javascript,
   // and the Window interface is accessible cross origin. The long-term fix is
   // to make the Internals object per-context, so |window| doesn't need to
   // passed as an argument.
-  auto* local_dom_window = DynamicTo<LocalDOMWindow>(window);
-  if (!local_dom_window)
+  auto* local_window = DynamicTo<LocalDOMWindow>(window);
+  if (!local_window)
     return;
-  SpeechSynthesis* synthesis = DOMWindowSpeechSynthesis::speechSynthesis(
-      script_state, *local_dom_window);
-  if (!synthesis)
-    return;
-
-  synthesis->SetPlatformSynthesizer(PlatformSpeechSynthesizerMock::Create(
-      synthesis, ExecutionContext::From(script_state)));
+  SpeechSynthesis::CreateForTesting(
+      *local_window, MojomSpeechSynthesisMock::Create(local_window));
 }
 
 }  // namespace blink

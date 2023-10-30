@@ -25,16 +25,22 @@
 
 #include "third_party/blink/renderer/core/script/pending_script.h"
 
-#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/mojom/script/script_type.mojom-shared.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_parser_timing.h"
-#include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/loader/render_blocking_resource_manager.h"
 #include "third_party/blink/renderer/core/script/ignore_destructive_write_count_incrementer.h"
 #include "third_party/blink/renderer/core/script/script_element_base.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/task_attribution_tracker.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 
 namespace blink {
 
@@ -60,7 +66,8 @@ PendingScript::PendingScript(ScriptElementBase* element,
       starting_position_(starting_position),
       virtual_time_pauser_(CreateWebScopedVirtualTimePauser(element)),
       client_(nullptr),
-      original_context_document_(element->GetDocument().ContextDocument()),
+      original_element_document_(&element->GetDocument()),
+      original_execution_context_(element->GetExecutionContext()),
       created_during_document_write_(
           element->GetDocument().IsInDocumentWrite()) {}
 
@@ -126,48 +133,45 @@ void PendingScript::MarkParserBlockingLoadStartTime() {
 }
 
 // <specdef href="https://html.spec.whatwg.org/C/#execute-the-script-block">
-void PendingScript::ExecuteScriptBlock(const KURL& document_url) {
+void PendingScript::ExecuteScriptBlock() {
   TRACE_EVENT0("blink", "PendingScript::ExecuteScriptBlock");
-  Document* context_document = element_->GetDocument().ContextDocument();
-  if (!context_document) {
+  ExecutionContext* context = element_->GetExecutionContext();
+  if (!context) {
     Dispose();
     return;
   }
 
-  LocalFrame* frame = context_document->GetFrame();
+  LocalFrame* frame = To<LocalDOMWindow>(context)->GetFrame();
   if (!frame) {
     Dispose();
     return;
   }
 
-  if (OriginalContextDocument() != context_document) {
-    if (GetScriptType() == mojom::ScriptType::kModule) {
-      // Do not execute module scripts if they are moved between documents.
-      Dispose();
-      return;
-    }
-
-    // TODO(hiroshige): Also do not execute classic scripts.
-    // https://crbug.com/721914
-    UseCounter::Count(context_document,
-                      WebFeature::kEvaluateScriptMovedBetweenDocuments);
+  if (original_execution_context_ != context) {
+    // Do not execute scripts if they are moved between contexts.
+    Dispose();
+    return;
   }
 
-  Script* script = GetSource(document_url);
+  if (original_element_document_ != &element_->GetDocument()) {
+    // Do not execute scripts if they are moved between element documents (under
+    // the same context Document).
+    Dispose();
+    return;
+  }
 
-  if (script && !IsExternal()) {
-    AtomicString nonce = element_->GetNonceForElement();
-    if (!element_->AllowInlineScriptForCSP(nonce, StartingPosition().line_,
-                                           script->InlineSourceTextForCSP())) {
-      // Consider as if:
-      //
-      // <spec step="2">If the script's script is null, ...</spec>
-      //
-      // retrospectively, if the CSP check fails, which is considered as load
-      // failure.
-      script = nullptr;
+  std::unique_ptr<scheduler::TaskAttributionTracker::TaskScope>
+      task_attribution_scope;
+  if (ScriptState* script_state = ToScriptStateForMainWorld(frame)) {
+    DCHECK(ThreadScheduler::Current());
+    if (auto* tracker =
+            ThreadScheduler::Current()->GetTaskAttributionTracker()) {
+      task_attribution_scope =
+          tracker->CreateTaskScope(script_state, absl::nullopt);
     }
   }
+
+  Script* script = GetSource();
 
   const bool was_canceled = WasCanceled();
   const bool is_external = IsExternal();
@@ -195,7 +199,14 @@ void PendingScript::ExecuteScriptBlockInternal(
     base::TimeTicks parser_blocking_load_start_time,
     bool is_controlled_by_script_runner) {
   Document& element_document = element->GetDocument();
-  Document* context_document = element_document.ContextDocument();
+  Document* context_document =
+      To<LocalDOMWindow>(element_document.GetExecutionContext())->document();
+
+  // Unblock rendering on scriptElement.
+  if (element_document.GetRenderBlockingResourceManager()) {
+    element_document.GetRenderBlockingResourceManager()->RemovePendingScript(
+        *element);
+  }
 
   // <spec step="2">If the script's script is null, fire an event named error at
   // the element, and return.</spec>
@@ -227,8 +238,9 @@ void PendingScript::ExecuteScriptBlockInternal(
     // <spec step="3">If the script is from an external file, or the script's
     // type is "module", ...</spec>
     const bool needs_increment =
-        is_external || script->GetScriptType() == mojom::ScriptType::kModule ||
-        is_imported_script;
+        is_external || is_imported_script ||
+        script->GetScriptType() == mojom::blink::ScriptType::kModule;
+
     // <spec step="3">... then increment the ignore-destructive-writes counter
     // of the script element's node document. Let neutralized doc be that
     // Document.</spec>
@@ -257,7 +269,7 @@ void PendingScript::ExecuteScriptBlockInternal(
     // <spec step="4.B.1">Assert: The script element's node document's
     // currentScript attribute is null.</spec>
     ScriptElementBase* current_script = nullptr;
-    if (script->GetScriptType() == mojom::ScriptType::kClassic)
+    if (script->GetScriptType() == mojom::blink::ScriptType::kClassic)
       current_script = element;
     context_document->PushCurrentScript(current_script);
 
@@ -272,8 +284,7 @@ void PendingScript::ExecuteScriptBlockInternal(
     //
     // <spec step="4.B.2">Run the module script given by the script's
     // script.</spec>
-    script->RunScript(context_document->GetFrame(),
-                      element_document.GetSecurityOrigin());
+    script->RunScript(context_document->domWindow());
 
     // <spec step="4.A.4">Set the script element's node document's currentScript
     // attribute to old script element.</spec>
@@ -302,10 +313,11 @@ void PendingScript::ExecuteScriptBlockInternal(
     element->DispatchLoadEvent();
 }
 
-void PendingScript::Trace(Visitor* visitor) {
+void PendingScript::Trace(Visitor* visitor) const {
   visitor->Trace(element_);
   visitor->Trace(client_);
-  visitor->Trace(original_context_document_);
+  visitor->Trace(original_execution_context_);
+  visitor->Trace(original_element_document_);
 }
 
 bool PendingScript::IsControlledByScriptRunner() const {
@@ -323,6 +335,7 @@ bool PendingScript::IsControlledByScriptRunner() const {
 
     case ScriptSchedulingType::kInOrder:
     case ScriptSchedulingType::kAsync:
+    case ScriptSchedulingType::kForceInOrder:
       return true;
   }
   NOTREACHED();

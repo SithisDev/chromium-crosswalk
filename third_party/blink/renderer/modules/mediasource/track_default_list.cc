@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/modules/mediasource/track_default_list.h"
 
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 
@@ -59,13 +60,11 @@ TrackDefault* TrackDefaultList::item(unsigned index) const {
   return track_defaults_[index].Get();
 }
 
-TrackDefaultList::TrackDefaultList() = default;
-
 TrackDefaultList::TrackDefaultList(
     const HeapVector<Member<TrackDefault>>& track_defaults)
     : track_defaults_(track_defaults) {}
 
-void TrackDefaultList::Trace(blink::Visitor* visitor) {
+void TrackDefaultList::Trace(Visitor* visitor) const {
   visitor->Trace(track_defaults_);
   ScriptWrappable::Trace(visitor);
 }

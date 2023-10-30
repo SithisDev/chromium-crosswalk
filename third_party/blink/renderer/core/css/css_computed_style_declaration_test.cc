@@ -4,8 +4,10 @@
 
 #include "third_party/blink/renderer/core/css/css_computed_style_declaration.h"
 
+#include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 
 namespace blink {
@@ -13,8 +15,10 @@ namespace blink {
 class CSSComputedStyleDeclarationTest : public PageTestBase {};
 
 TEST_F(CSSComputedStyleDeclarationTest, CleanAncestorsNoRecalc) {
-  GetDocument().body()->SetInnerHTMLFromString(R"HTML(
-    <div id=dirty></div>
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <div>
+      <div id=dirty></div>
+    </div>
     <div>
       <div id=target style='color:green'></div>
     </div>
@@ -34,8 +38,10 @@ TEST_F(CSSComputedStyleDeclarationTest, CleanAncestorsNoRecalc) {
 }
 
 TEST_F(CSSComputedStyleDeclarationTest, CleanShadowAncestorsNoRecalc) {
-  GetDocument().body()->SetInnerHTMLFromString(R"HTML(
-    <div id=dirty></div>
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <div>
+      <div id=dirty></div>
+    </div>
     <div id=host></div>
   )HTML");
 
@@ -43,7 +49,7 @@ TEST_F(CSSComputedStyleDeclarationTest, CleanShadowAncestorsNoRecalc) {
 
   ShadowRoot& shadow_root =
       host->AttachShadowRootInternal(ShadowRootType::kOpen);
-  shadow_root.SetInnerHTMLFromString(R"HTML(
+  shadow_root.setInnerHTML(R"HTML(
     <div id=target style='color:green'></div>
   )HTML");
 
@@ -61,45 +67,46 @@ TEST_F(CSSComputedStyleDeclarationTest, CleanShadowAncestorsNoRecalc) {
   EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdate());
 }
 
-TEST_F(CSSComputedStyleDeclarationTest, NeedsAdjacentStyleRecalc) {
-  GetDocument().body()->SetInnerHTMLFromString(R"HTML(
+TEST_F(CSSComputedStyleDeclarationTest, AdjacentInvalidation) {
+  GetDocument().body()->setInnerHTML(R"HTML(
     <style>
-      #a + #b { color: green }
+      #b { color: red; }
+      .test + #b { color: green; }
     </style>
-    <div id="container" style="display:none">
+    <div>
       <span id="a"></span>
-      <span id="b">
-        <span id="c"></span>
-        <span id="d"></span>
-      </span>
+      <span id="b"></span>
     </div>
+    <div id="c"></div>
   )HTML");
 
   UpdateAllLifecyclePhasesForTest();
 
   EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdate());
 
-  Element* container = GetDocument().getElementById("container");
-  Element* c_span = GetDocument().getElementById("c");
-  Element* d_span = GetDocument().getElementById("d");
-  d_span->setAttribute("style", "color:pink");
+  Element* a = GetDocument().getElementById("a");
+  Element* b = GetDocument().getElementById("b");
+  Element* c = GetDocument().getElementById("c");
+
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdate());
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*a));
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*b));
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c));
+
+  auto* computed = MakeGarbageCollected<CSSComputedStyleDeclaration>(b);
+
+  EXPECT_EQ("rgb(255, 0, 0)",
+            computed->GetPropertyValue(CSSPropertyID::kColor));
+
+  a->classList().Add("test");
 
   EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdate());
-  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdateForNode(*d_span));
-  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c_span));
-  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c_span, true));
-  EXPECT_FALSE(container->NeedsAdjacentStyleRecalc());
-
-  auto* computed = MakeGarbageCollected<CSSComputedStyleDeclaration>(c_span);
+  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdateForNode(*a));
+  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdateForNode(*b));
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c));
 
   EXPECT_EQ("rgb(0, 128, 0)",
             computed->GetPropertyValue(CSSPropertyID::kColor));
-
-  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdate());
-  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdateForNode(*d_span));
-  EXPECT_TRUE(GetDocument().NeedsLayoutTreeUpdateForNode(*c_span));
-  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*c_span, true));
-  EXPECT_TRUE(container->NeedsAdjacentStyleRecalc());
 }
 
 TEST_F(CSSComputedStyleDeclarationTest,
@@ -112,6 +119,44 @@ TEST_F(CSSComputedStyleDeclarationTest,
       computed->GetPropertyCSSValue(CSSPropertyID::kVariable);
   EXPECT_FALSE(result);
   // Don't crash.
+}
+
+// https://crbug.com/1115877
+TEST_F(CSSComputedStyleDeclarationTest, SVGBlockSizeLayoutDependent) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <svg viewBox="0 0 400 400">
+      <rect width="400" height="400"></rect>
+    </svg>
+  )HTML");
+
+  Element* rect = GetDocument().QuerySelector("rect");
+  auto* computed = MakeGarbageCollected<CSSComputedStyleDeclaration>(rect);
+
+  EXPECT_EQ("400px", computed->GetPropertyValue(CSSPropertyID::kBlockSize));
+
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdate());
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*rect));
+  EXPECT_FALSE(rect->NeedsStyleRecalc());
+  EXPECT_FALSE(rect->GetLayoutObject()->NeedsLayout());
+}
+
+// https://crbug.com/1115877
+TEST_F(CSSComputedStyleDeclarationTest, SVGInlineSizeLayoutDependent) {
+  GetDocument().body()->setInnerHTML(R"HTML(
+    <svg viewBox="0 0 400 400">
+      <rect width="400" height="400"></rect>
+    </svg>
+  )HTML");
+
+  Element* rect = GetDocument().QuerySelector("rect");
+  auto* computed = MakeGarbageCollected<CSSComputedStyleDeclaration>(rect);
+
+  EXPECT_EQ("400px", computed->GetPropertyValue(CSSPropertyID::kInlineSize));
+
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdate());
+  EXPECT_FALSE(GetDocument().NeedsLayoutTreeUpdateForNode(*rect));
+  EXPECT_FALSE(rect->NeedsStyleRecalc());
+  EXPECT_FALSE(rect->GetLayoutObject()->NeedsLayout());
 }
 
 }  // namespace blink

@@ -5,7 +5,7 @@
 #include "third_party/blink/renderer/core/html/media/picture_in_picture_interstitial.h"
 
 #include "cc/layers/layer.h"
-#include "third_party/blink/public/platform/web_localized_string.h"
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect_read_only.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
@@ -15,15 +15,15 @@
 #include "third_party/blink/renderer/core/resize_observer/resize_observer.h"
 #include "third_party/blink/renderer/core/resize_observer/resize_observer_entry.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 
 namespace {
 
 constexpr base::TimeDelta kPictureInPictureStyleChangeTransitionDuration =
-    base::TimeDelta::FromMilliseconds(200);
+    base::Milliseconds(200);
 constexpr base::TimeDelta kPictureInPictureHiddenAnimationSeconds =
-    base::TimeDelta::FromMilliseconds(300);
+    base::Milliseconds(300);
 
 }  // namespace
 
@@ -47,7 +47,7 @@ class PictureInPictureInterstitial::VideoElementResizeObserverDelegate final
     interstitial_->NotifyElementSizeChanged(*entries[0]->contentRect());
   }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(interstitial_);
     ResizeObserver::Delegate::Trace(visitor);
   }
@@ -60,7 +60,7 @@ PictureInPictureInterstitial::PictureInPictureInterstitial(
     HTMLVideoElement& videoElement)
     : HTMLDivElement(videoElement.GetDocument()),
       resize_observer_(ResizeObserver::Create(
-          videoElement.GetDocument(),
+          videoElement.GetDocument().domWindow(),
           MakeGarbageCollected<VideoElementResizeObserverDelegate>(this))),
       interstitial_timer_(
           videoElement.GetDocument().GetTaskRunner(TaskType::kInternalMedia),
@@ -73,7 +73,8 @@ PictureInPictureInterstitial::PictureInPictureInterstitial(
   background_image_->SetShadowPseudoId(
       AtomicString("-internal-media-interstitial-background-image"));
   background_image_->setAttribute(
-      html_names::kSrcAttr, videoElement.getAttribute(html_names::kPosterAttr));
+      html_names::kSrcAttr,
+      videoElement.FastGetAttribute(html_names::kPosterAttr));
   ParserAppendChild(background_image_);
 
   message_element_ = MakeGarbageCollected<HTMLDivElement>(GetDocument());
@@ -81,7 +82,7 @@ PictureInPictureInterstitial::PictureInPictureInterstitial(
       AtomicString("-internal-picture-in-picture-interstitial-message"));
   message_element_->setInnerText(
       GetVideoElement().GetLocale().QueryString(
-          WebLocalizedString::kPictureInPictureInterstitialText),
+          IDS_MEDIA_PICTURE_IN_PICTURE_INTERSTITIAL_TEXT),
       ASSERT_NO_EXCEPTION);
   ParserAppendChild(message_element_);
 
@@ -126,7 +127,7 @@ Node::InsertionNotificationRequest PictureInPictureInterstitial::InsertedInto(
     ContainerNode& root) {
   if (GetVideoElement().isConnected() && !resize_observer_) {
     resize_observer_ = ResizeObserver::Create(
-        GetVideoElement().GetDocument(),
+        GetVideoElement().GetDocument().domWindow(),
         MakeGarbageCollected<VideoElementResizeObserverDelegate>(this));
     resize_observer_->observe(&GetVideoElement());
   }
@@ -169,11 +170,12 @@ void PictureInPictureInterstitial::ToggleInterstitialTimerFired(TimerBase*) {
 void PictureInPictureInterstitial::OnPosterImageChanged() {
   background_image_->setAttribute(
       html_names::kSrcAttr,
-      GetVideoElement().getAttribute(html_names::kPosterAttr));
+      GetVideoElement().FastGetAttribute(html_names::kPosterAttr));
 }
 
-void PictureInPictureInterstitial::Trace(Visitor* visitor) {
+void PictureInPictureInterstitial::Trace(Visitor* visitor) const {
   visitor->Trace(resize_observer_);
+  visitor->Trace(interstitial_timer_);
   visitor->Trace(video_element_);
   visitor->Trace(background_image_);
   visitor->Trace(message_element_);

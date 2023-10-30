@@ -26,10 +26,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_V8_STRING_RESOURCE_H_
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_V8_STRING_RESOURCE_H_
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/string_resource.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
 #include "v8/include/v8.h"
 
@@ -49,6 +51,9 @@ class V8StringResource {
   STACK_ALLOCATED();
 
  public:
+  V8StringResource(const V8StringResource&) = delete;
+  V8StringResource& operator=(const V8StringResource&) = delete;
+
   V8StringResource() : mode_(kExternalize) {}
 
   V8StringResource(v8::Local<v8::Value> object)
@@ -75,13 +80,23 @@ class V8StringResource {
     return PrepareFast() || PrepareSlow(isolate, exception_state);
   }
 
-  bool Prepare(ExceptionState& exception_state) {  // DEPRECATED
-    return PrepareFast() ||
-           PrepareSlow(v8::Isolate::GetCurrent(), exception_state);
-  }
+  // Implicit conversions needed to make Blink bindings easier to use.
 
+  // NOLINTNEXTLINE(google-explicit-constructor)
   operator String() const { return ToString<String>(); }
+
+  // NOLINTNEXTLINE(google-explicit-constructor)
   operator AtomicString() const { return ToString<AtomicString>(); }
+
+  // NOLINTNEXTLINE(google-explicit-constructor)
+  operator StringView() const {
+    if (LIKELY(!v8_object_.IsEmpty())) {
+      return ToBlinkStringView(v8_object_.As<v8::String>(), backing_store_,
+                               mode_);
+    }
+
+    return string_;
+  }
 
  private:
   bool PrepareFast() {
@@ -126,9 +141,7 @@ class V8StringResource {
   template <class StringType>
   StringType ToString() const {
     if (LIKELY(!v8_object_.IsEmpty()))
-      return ToBlinkString<StringType>(
-          const_cast<v8::Local<v8::Value>*>(&v8_object_)->As<v8::String>(),
-          mode_);
+      return ToBlinkString<StringType>(v8_object_.As<v8::String>(), mode_);
 
     return StringType(string_);
   }
@@ -136,6 +149,8 @@ class V8StringResource {
   v8::Local<v8::Value> v8_object_;
   ExternalMode mode_;
   String string_;
+
+  mutable WTF::StringView::StackBackingStore backing_store_;
 };
 
 template <>

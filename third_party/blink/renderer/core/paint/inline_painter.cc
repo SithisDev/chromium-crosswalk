@@ -6,10 +6,8 @@
 
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/layout_inline.h"
-#include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_text_fragment.h"
 #include "third_party/blink/renderer/core/paint/line_box_list_painter.h"
 #include "third_party/blink/renderer/core/paint/ng/ng_inline_box_fragment_painter.h"
-#include "third_party/blink/renderer/core/paint/ng/ng_paint_fragment.h"
 #include "third_party/blink/renderer/core/paint/ng/ng_text_fragment_painter.h"
 #include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
@@ -25,45 +23,22 @@ void InlinePainter::Paint(const PaintInfo& paint_info) {
   const auto& local_paint_info = paint_state.GetPaintInfo();
 
   if (local_paint_info.phase == PaintPhase::kForeground &&
-      local_paint_info.IsPrinting()) {
+      local_paint_info.ShouldAddUrlMetadata()) {
     ObjectPainter(layout_inline_)
-        .AddPDFURLRectIfNeeded(local_paint_info, paint_offset);
+        .AddURLRectIfNeeded(local_paint_info, paint_offset);
   }
 
   ScopedPaintTimingDetectorBlockPaintHook
       scoped_paint_timing_detector_block_paint_hook;
-  if (RuntimeEnabledFeatures::FirstContentfulPaintPlusPlusEnabled() ||
-      RuntimeEnabledFeatures::ElementTimingEnabled(
-          &layout_inline_.GetDocument())) {
-    if (paint_info.phase == PaintPhase::kForeground) {
-      scoped_paint_timing_detector_block_paint_hook.EmplaceIfNeeded(
-          layout_inline_, paint_info.context.GetPaintController()
-                              .CurrentPaintChunkProperties());
-    }
+  if (paint_info.phase == PaintPhase::kForeground) {
+    scoped_paint_timing_detector_block_paint_hook.EmplaceIfNeeded(
+        layout_inline_,
+        paint_info.context.GetPaintController().CurrentPaintChunkProperties());
   }
 
   if (layout_inline_.IsInLayoutNGInlineFormattingContext()) {
-    for (const NGPaintFragment* fragment :
-         NGPaintFragment::SafeInlineFragmentsFor(&layout_inline_)) {
-      auto child_offset = paint_offset +
-                          fragment->InlineOffsetToContainerBox() -
-                          fragment->Offset();
-
-      if (fragment->PhysicalFragment().IsText()) {
-        const auto& text_fragment =
-            To<NGPhysicalTextFragment>(fragment->PhysicalFragment());
-        DOMNodeId node_id = kInvalidDOMNodeId;
-        if (auto* node = text_fragment.GetNode()) {
-          if (node->GetLayoutObject()->IsText())
-            node_id = ToLayoutText(node->GetLayoutObject())->EnsureNodeId();
-        }
-        NGTextFragmentPainter(*fragment).Paint(paint_info, child_offset,
-                                               node_id);
-
-      } else {
-        NGInlineBoxFragmentPainter(*fragment).Paint(paint_info, child_offset);
-      }
-    }
+    NGInlineBoxFragmentPainter::PaintAllFragments(layout_inline_, paint_info,
+                                                  paint_offset);
     return;
   }
 

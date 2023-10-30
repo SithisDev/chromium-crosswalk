@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/html/track/text_track.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -20,7 +20,8 @@ TEST(TextTrackListTest, InvalidateTrackIndexes) {
   const size_t kNumTextTracks = 4;
   TextTrack* text_tracks[kNumTextTracks];
   for (size_t i = 0; i < kNumTextTracks; ++i) {
-    text_tracks[i] = TextTrack::Create("subtitles", "", "");
+    text_tracks[i] =
+        MakeGarbageCollected<TextTrack>("subtitles", "", "", *list->Owner());
     list->Append(text_tracks[i]);
   }
 

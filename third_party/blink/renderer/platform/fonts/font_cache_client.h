@@ -31,18 +31,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_CACHE_CLIENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_CACHE_CLIENT_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 
 namespace blink {
 
 class PLATFORM_EXPORT FontCacheClient
-    : public GarbageCollectedFinalized<FontCacheClient> {
+    : public GarbageCollected<FontCacheClient> {
  public:
   virtual ~FontCacheClient() = default;
 
   virtual void FontCacheInvalidated() = 0;
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 };
 
 }  // namespace blink

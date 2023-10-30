@@ -4,6 +4,7 @@
 
 module blink.mojom;
 
+import "mojo/public/mojom/base/big_buffer.mojom";
 import "mojo/public/mojom/base/string16.mojom";
 
 // These interfaces allow an object implemented outside the Blink renderer
@@ -17,7 +18,12 @@ import "mojo/public/mojom/base/string16.mojom";
 //
 // Identifiers used by this object apply only within this RemoteObjectHost.
 interface RemoteObjectHost {
-  GetObject(int32 object_id, RemoteObject& request);
+  // Binds |receiver| to an implementation of RemoteObject corresponding to
+  // |object_id|.
+  GetObject(int32 object_id, pending_receiver<RemoteObject> receiver);
+
+  // Increase the object's reference count when the named object is injected to JS.
+  AcquireObject(int32 object_id);
 
   // Ideally lifetime would be scoped to an associated RemoteObject pipe. This
   // is complicated by the fact that the missing support for associated
@@ -32,11 +38,48 @@ interface RemoteObject {
   [Sync] GetMethods() => (array<string> method_names);
   [Sync] InvokeMethod(string name, array<RemoteInvocationArgument> arguments)
       => (RemoteInvocationResult result);
+
+  // Notifies ReleaseObject is called by RemoteObjectHost interface to ensure
+  // the object's unreference when the pipe is closed.
+  NotifyReleasedObject();
+};
+
+// Implemented in the renderer.
+interface RemoteObjectGatewayFactory {
+  // Creates an implementation of RemoteObjectGateway associated with |host|
+  // and binds it to |gateway|.
+  CreateRemoteObjectGateway(pending_remote<RemoteObjectHost> host,
+                            pending_receiver<RemoteObjectGateway> gateway);
+};
+
+// Implemented in the renderer.
+interface RemoteObjectGateway {
+  // Exposes object with |name| and |id| to the frame.
+  AddNamedObject(string name, int32 object_id);
+
+  // Removes object with |name| from the frame context.
+  RemoveNamedObject(string name);
 };
 
 enum SingletonJavaScriptValue {
   kNull,
   kUndefined,
+};
+
+enum RemoteArrayType {
+  kInt8Array = 1,
+  kUint8Array,
+  kInt16Array,
+  kUint16Array,
+  kInt32Array,
+  kUint32Array,
+  kFloat32Array,
+  kFloat64Array,
+};
+
+struct RemoteTypedArray {
+  RemoteArrayType type;
+  mojo_base.mojom.BigBuffer buffer;
 };
 
 union RemoteInvocationArgument {
@@ -45,6 +88,8 @@ union RemoteInvocationArgument {
   mojo_base.mojom.String16 string_value;
   SingletonJavaScriptValue singleton_value;
   array<RemoteInvocationArgument> array_value;
+  RemoteTypedArray typed_array_value;
+  int32 object_id_value;
 };
 
 enum RemoteInvocationError {
@@ -52,6 +97,7 @@ enum RemoteInvocationError {
   METHOD_NOT_FOUND,
   OBJECT_GET_CLASS_BLOCKED,
   EXCEPTION_THROWN,
+  NON_ASSIGNABLE_TYPES,
 };
 
 union RemoteInvocationResultValue {

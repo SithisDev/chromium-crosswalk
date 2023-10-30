@@ -30,14 +30,17 @@
 
 namespace blink {
 
-WebGLTexture* WebGLTexture::Create(WebGLRenderingContextBase* ctx) {
-  return MakeGarbageCollected<WebGLTexture>(ctx);
-}
-
 WebGLTexture::WebGLTexture(WebGLRenderingContextBase* ctx)
     : WebGLSharedPlatform3DObject(ctx), target_(0) {
   GLuint texture;
   ctx->ContextGL()->GenTextures(1, &texture);
+  SetObject(texture);
+}
+
+WebGLTexture::WebGLTexture(WebGLRenderingContextBase* ctx,
+                           GLuint texture,
+                           GLenum target)
+    : WebGLSharedPlatform3DObject(ctx), target_(target) {
   SetObject(texture);
 }
 

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/service_worker/respond_with_observer.h"
 
+#include "third_party/blink/public/mojom/service_worker/service_worker_error_type.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
@@ -22,12 +23,13 @@ void RespondWithObserver::WillDispatchEvent() {
 }
 
 void RespondWithObserver::DidDispatchEvent(
+    ScriptState* script_state,
     DispatchEventResult dispatch_result) {
   if (state_ != kInitial)
     return;
 
   if (dispatch_result == DispatchEventResult::kNotCanceled) {
-    OnNoResponse();
+    OnNoResponse(script_state);
   } else {
     OnResponseRejected(ServiceWorkerResponseError::kDefaultPrevented);
   }
@@ -64,9 +66,8 @@ void RespondWithObserver::RespondWith(ScriptState* script_state,
   bool will_wait = observer_->WaitUntil(
       script_state, script_promise, exception_state,
       WTF::BindRepeating(&RespondWithObserver::ResponseWasFulfilled,
-                         WrapPersistent(this), exception_state.Context(),
-                         WTF::Unretained(exception_state.InterfaceName()),
-                         WTF::Unretained(exception_state.PropertyName())),
+                         WrapPersistent(this), WrapPersistent(script_state),
+                         exception_state.GetContext()),
       WTF::BindRepeating(&RespondWithObserver::ResponseWasRejected,
                          WrapPersistent(this),
                          ServiceWorkerResponseError::kPromiseRejected));
@@ -86,25 +87,30 @@ void RespondWithObserver::ResponseWasRejected(ServiceWorkerResponseError error,
 }
 
 void RespondWithObserver::ResponseWasFulfilled(
-    ExceptionState::ContextType context_type,
-    const char* interface_name,
-    const char* property_name,
+    ScriptState* script_state,
+    const ExceptionContext& exception_context,
     const ScriptValue& value) {
-  OnResponseFulfilled(value, context_type, interface_name, property_name);
+  OnResponseFulfilled(script_state, value, exception_context);
   state_ = kDone;
+}
+
+bool RespondWithObserver::WaitUntil(ScriptState* script_state,
+                                    ScriptPromise promise,
+                                    ExceptionState& exception_state) {
+  return observer_->WaitUntil(script_state, promise, exception_state);
 }
 
 RespondWithObserver::RespondWithObserver(ExecutionContext* context,
                                          int event_id,
                                          WaitUntilObserver* observer)
-    : ContextClient(context),
+    : ExecutionContextClient(context),
       event_id_(event_id),
       state_(kInitial),
       observer_(observer) {}
 
-void RespondWithObserver::Trace(blink::Visitor* visitor) {
+void RespondWithObserver::Trace(Visitor* visitor) const {
   visitor->Trace(observer_);
-  ContextClient::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
 }
 
 }  // namespace blink

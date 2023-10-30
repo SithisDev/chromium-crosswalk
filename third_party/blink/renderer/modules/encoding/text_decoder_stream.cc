@@ -7,13 +7,16 @@
 #include <memory>
 #include <utility>
 
-#include "third_party/blink/renderer/bindings/core/v8/array_buffer_or_array_buffer_view.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
-#include "third_party/blink/renderer/core/streams/transform_stream_default_controller_interface.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_text_decoder_options.h"
+#include "third_party/blink/renderer/core/streams/transform_stream_default_controller.h"
 #include "third_party/blink/renderer/core/streams/transform_stream_transformer.h"
+#include "third_party/blink/renderer/core/typed_arrays/dom_array_piece.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/encoding/encoding.h"
-#include "third_party/blink/renderer/modules/encoding/text_decoder_options.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/to_v8.h"
@@ -36,46 +39,46 @@ class TextDecoderStream::Transformer final : public TransformStreamTransformer {
         ignore_bom_(ignore_bom),
         encoding_has_bom_removal_(EncodingHasBomRemoval(encoding)) {}
 
+  Transformer(const Transformer&) = delete;
+  Transformer& operator=(const Transformer&) = delete;
+
   // Implements the type conversion part of the "decode and enqueue a chunk"
   // algorithm.
-  void Transform(v8::Local<v8::Value> chunk,
-                 TransformStreamDefaultControllerInterface* controller,
-                 ExceptionState& exception_state) override {
-    ArrayBufferOrArrayBufferView bufferSource;
-    V8ArrayBufferOrArrayBufferView::ToImpl(
-        script_state_->GetIsolate(), chunk, bufferSource,
-        UnionTypeConversionMode::kNotNullable, exception_state);
+  ScriptPromise Transform(v8::Local<v8::Value> chunk,
+                          TransformStreamDefaultController* controller,
+                          ExceptionState& exception_state) override {
+    auto* buffer_source = V8BufferSource::Create(script_state_->GetIsolate(),
+                                                 chunk, exception_state);
     if (exception_state.HadException())
-      return;
+      return ScriptPromise();
 
     // This implements the "get a copy of the bytes held by the buffer source"
-    // algorithm (https://heycam.github.io/webidl/#dfn-get-buffer-source-copy).
-    if (bufferSource.IsArrayBufferView()) {
-      const auto* view = bufferSource.GetAsArrayBufferView().View();
-      const char* start = static_cast<const char*>(view->BaseAddress());
-      uint32_t length = view->byteLength();
-      DecodeAndEnqueue(start, length, WTF::FlushBehavior::kDoNotFlush,
-                       controller, exception_state);
-      return;
+    // algorithm (https://webidl.spec.whatwg.org/#dfn-get-buffer-source-copy).
+    DOMArrayPiece array_piece(buffer_source);
+    if (array_piece.ByteLength() > std::numeric_limits<uint32_t>::max()) {
+      exception_state.ThrowRangeError(
+          "Buffer size exceeds maximum heap object size.");
+      return ScriptPromise();
     }
-    DCHECK(bufferSource.IsArrayBuffer());
-    const auto* array_buffer = bufferSource.GetAsArrayBuffer();
-    const char* start = static_cast<const char*>(array_buffer->Data());
-    uint32_t length = array_buffer->ByteLength();
-    DecodeAndEnqueue(start, length, WTF::FlushBehavior::kDoNotFlush, controller,
+    DecodeAndEnqueue(static_cast<char*>(array_piece.Data()),
+                     static_cast<uint32_t>(array_piece.ByteLength()),
+                     WTF::FlushBehavior::kDoNotFlush, controller,
                      exception_state);
+    return ScriptPromise::CastUndefined(script_state_);
   }
 
   // Implements the "encode and flush" algorithm.
-  void Flush(TransformStreamDefaultControllerInterface* controller,
-             ExceptionState& exception_state) override {
+  ScriptPromise Flush(TransformStreamDefaultController* controller,
+                      ExceptionState& exception_state) override {
     DecodeAndEnqueue(nullptr, 0u, WTF::FlushBehavior::kDataEOF, controller,
                      exception_state);
+
+    return ScriptPromise::CastUndefined(script_state_);
   }
 
   ScriptState* GetScriptState() override { return script_state_; }
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(script_state_);
     TransformStreamTransformer::Trace(visitor);
   }
@@ -86,7 +89,7 @@ class TextDecoderStream::Transformer final : public TransformStreamTransformer {
   void DecodeAndEnqueue(const char* start,
                         uint32_t length,
                         WTF::FlushBehavior flush,
-                        TransformStreamDefaultControllerInterface* controller,
+                        TransformStreamDefaultController* controller,
                         ExceptionState& exception_state) {
     const UChar kBOM = 0xFEFF;
 
@@ -111,7 +114,9 @@ class TextDecoderStream::Transformer final : public TransformStreamTransformer {
       }
     }
 
-    controller->Enqueue(ToV8(outputChunk, script_state_), exception_state);
+    controller->enqueue(script_state_,
+                        ScriptValue::From(script_state_, outputChunk),
+                        exception_state);
   }
 
   static bool EncodingHasBomRemoval(const WTF::TextEncoding& encoding) {
@@ -127,8 +132,6 @@ class TextDecoderStream::Transformer final : public TransformStreamTransformer {
   const bool ignore_bom_;
   const bool encoding_has_bom_removal_;
   bool bom_seen_;
-
-  DISALLOW_COPY_AND_ASSIGN(Transformer);
 };
 
 TextDecoderStream* TextDecoderStream::Create(ScriptState* script_state,
@@ -164,7 +167,7 @@ WritableStream* TextDecoderStream::writable() const {
   return transform_->Writable();
 }
 
-void TextDecoderStream::Trace(Visitor* visitor) {
+void TextDecoderStream::Trace(Visitor* visitor) const {
   visitor->Trace(transform_);
   ScriptWrappable::Trace(visitor);
 }
@@ -173,13 +176,15 @@ TextDecoderStream::TextDecoderStream(ScriptState* script_state,
                                      const WTF::TextEncoding& encoding,
                                      const TextDecoderOptions* options,
                                      ExceptionState& exception_state)
-    : transform_(MakeGarbageCollected<TransformStream>()),
+    : transform_(TransformStream::Create(
+          script_state,
+          MakeGarbageCollected<Transformer>(script_state,
+                                            encoding,
+                                            options->fatal(),
+                                            options->ignoreBOM()),
+          exception_state)),
       encoding_(encoding),
       fatal_(options->fatal()),
-      ignore_bom_(options->ignoreBOM()) {
-  transform_->Init(MakeGarbageCollected<Transformer>(script_state, encoding,
-                                                     fatal_, ignore_bom_),
-                   script_state, exception_state);
-}
+      ignore_bom_(options->ignoreBOM()) {}
 
 }  // namespace blink

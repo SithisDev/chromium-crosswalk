@@ -5,7 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_CHILD_FRAME_DISCONNECTOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_CHILD_FRAME_DISCONNECTOR_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -18,7 +20,7 @@ class ChildFrameDisconnector {
  public:
   enum DisconnectPolicy { kRootAndDescendants, kDescendantsOnly };
 
-  explicit ChildFrameDisconnector(Node& root) : root_(root) {}
+  explicit ChildFrameDisconnector(Node& root) : root_(&root) {}
 
   void Disconnect(DisconnectPolicy = kRootAndDescendants);
 
@@ -28,7 +30,7 @@ class ChildFrameDisconnector {
   Node& Root() const { return *root_; }
 
   HeapVector<Member<HTMLFrameOwnerElement>, 10> frame_owners_;
-  Member<Node> root_;
+  Node* root_;
 };
 
 }  // namespace blink

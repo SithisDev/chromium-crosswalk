@@ -9,18 +9,21 @@
 
 namespace blink {
 
-class GPUCommandBuffer : public DawnObject<DawnCommandBuffer> {
+class GPUCommandBuffer : public DawnObject<WGPUCommandBuffer> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static GPUCommandBuffer* Create(GPUDevice* device,
-                                  DawnCommandBuffer command_buffer);
   explicit GPUCommandBuffer(GPUDevice* device,
-                            DawnCommandBuffer command_buffer);
-  ~GPUCommandBuffer() override;
+                            WGPUCommandBuffer command_buffer);
+
+  GPUCommandBuffer(const GPUCommandBuffer&) = delete;
+  GPUCommandBuffer& operator=(const GPUCommandBuffer&) = delete;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GPUCommandBuffer);
+  void setLabelImpl(const String& value) override {
+    std::string utf8_label = value.Utf8();
+    GetProcs().commandBufferSetLabel(GetHandle(), utf8_label.c_str());
+  }
 };
 
 }  // namespace blink

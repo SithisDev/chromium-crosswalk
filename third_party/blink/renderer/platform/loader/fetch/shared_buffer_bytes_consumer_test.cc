@@ -10,7 +10,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/loader/testing/bytes_consumer_test_reader.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_task_runner.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 
 namespace blink {
 
@@ -33,9 +33,7 @@ TEST(SharedBufferBytesConsumerTest, Read) {
   auto task_runner = base::MakeRefCounted<scheduler::FakeTaskRunner>();
   auto* test_reader =
       MakeGarbageCollected<BytesConsumerTestReader>(bytes_consumer);
-  Vector<char> data_from_consumer;
-  BytesConsumer::Result result;
-  std::tie(result, data_from_consumer) = test_reader->Run(task_runner.get());
+  auto [result, data_from_consumer] = test_reader->Run(task_runner.get());
   EXPECT_EQ(BytesConsumer::Result::kDone, result);
   EXPECT_EQ(PublicState::kClosed, bytes_consumer->GetPublicState());
   EXPECT_EQ(flatten_expected_data,

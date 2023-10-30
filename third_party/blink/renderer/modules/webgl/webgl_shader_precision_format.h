@@ -28,7 +28,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_WEBGL_SHADER_PRECISION_FORMAT_H_
 
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/khronos/GLES2/gl2.h"
 
 namespace blink {
@@ -37,10 +36,6 @@ class WebGLShaderPrecisionFormat final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static WebGLShaderPrecisionFormat* Create(GLint range_min,
-                                            GLint range_max,
-                                            GLint precision);
-
   WebGLShaderPrecisionFormat(GLint range_min, GLint range_max, GLint precision);
 
   GLint rangeMin() const;

@@ -43,7 +43,7 @@ WebSettingsImpl::WebSettingsImpl(Settings* settings,
     : settings_(settings),
       dev_tools_emulator_(dev_tools_emulator),
       render_v_sync_notification_enabled_(false),
-      auto_zoom_focused_node_to_legible_scale_(false),
+      auto_zoom_focused_editable_to_legible_scale_(false),
       support_deprecated_target_density_dpi_(false),
       viewport_meta_non_user_scalable_quirk_(false),
       clobber_user_agent_initial_scale_quirk_(false) {
@@ -107,9 +107,9 @@ void WebSettingsImpl::SetFantasyFontFamily(const WebString& font,
     settings_->NotifyGenericFontFamilyChange();
 }
 
-void WebSettingsImpl::SetPictographFontFamily(const WebString& font,
-                                              UScriptCode script) {
-  if (settings_->GetGenericFontFamilySettings().UpdatePictograph(font, script))
+void WebSettingsImpl::SetMathFontFamily(const WebString& font,
+                                        UScriptCode script) {
+  if (settings_->GetGenericFontFamilySettings().UpdateMath(font, script))
     settings_->NotifyGenericFontFamilyChange();
 }
 
@@ -133,15 +133,15 @@ void WebSettingsImpl::SetMinimumLogicalFontSize(int size) {
   settings_->SetMinimumLogicalFontSize(size);
 }
 
-void WebSettingsImpl::SetAutoplayPolicy(AutoplayPolicy policy) {
+void WebSettingsImpl::SetAutoplayPolicy(mojom::blink::AutoplayPolicy policy) {
   settings_->SetAutoplayPolicy(
       static_cast<blink::AutoplayPolicy::Type>(policy));
 }
 
-void WebSettingsImpl::SetAutoZoomFocusedNodeToLegibleScale(
-    bool auto_zoom_focused_node_to_legible_scale) {
-  auto_zoom_focused_node_to_legible_scale_ =
-      auto_zoom_focused_node_to_legible_scale;
+void WebSettingsImpl::SetAutoZoomFocusedEditableToLegibleScale(
+    bool auto_zoom_focused_editable_to_legible_scale) {
+  auto_zoom_focused_editable_to_legible_scale_ =
+      auto_zoom_focused_editable_to_legible_scale;
 }
 
 void WebSettingsImpl::SetTextAutosizingEnabled(bool enabled) {
@@ -150,6 +150,10 @@ void WebSettingsImpl::SetTextAutosizingEnabled(bool enabled) {
 
 void WebSettingsImpl::SetAccessibilityFontScaleFactor(float font_scale_factor) {
   settings_->SetAccessibilityFontScaleFactor(font_scale_factor);
+}
+
+void WebSettingsImpl::SetAccessibilityAlwaysShowFocus(bool always_show_focus) {
+  settings_->SetAccessibilityAlwaysShowFocus(always_show_focus);
 }
 
 void WebSettingsImpl::SetAccessibilityPasswordValuesEnabled(bool enabled) {
@@ -230,9 +234,9 @@ void WebSettingsImpl::SetLoadsImagesAutomatically(
   settings_->SetLoadsImagesAutomatically(loads_images_automatically);
 }
 
-void WebSettingsImpl::SetImageAnimationPolicy(ImageAnimationPolicy policy) {
-  settings_->SetImageAnimationPolicy(
-      static_cast<blink::ImageAnimationPolicy>(policy));
+void WebSettingsImpl::SetImageAnimationPolicy(
+    mojom::blink::ImageAnimationPolicy policy) {
+  settings_->SetImageAnimationPolicy(policy);
 }
 
 void WebSettingsImpl::SetImagesEnabled(bool enabled) {
@@ -255,17 +259,16 @@ void WebSettingsImpl::SetAvailablePointerTypes(int pointers) {
   dev_tools_emulator_->SetAvailablePointerTypes(pointers);
 }
 
-void WebSettingsImpl::SetPrimaryPointerType(PointerType pointer) {
-  dev_tools_emulator_->SetPrimaryPointerType(
-      static_cast<blink::PointerType>(pointer));
+void WebSettingsImpl::SetPrimaryPointerType(mojom::blink::PointerType pointer) {
+  dev_tools_emulator_->SetPrimaryPointerType(pointer);
 }
 
 void WebSettingsImpl::SetAvailableHoverTypes(int types) {
   dev_tools_emulator_->SetAvailableHoverTypes(types);
 }
 
-void WebSettingsImpl::SetPrimaryHoverType(HoverType type) {
-  dev_tools_emulator_->SetPrimaryHoverType(static_cast<blink::HoverType>(type));
+void WebSettingsImpl::SetPrimaryHoverType(mojom::blink::HoverType type) {
+  dev_tools_emulator_->SetPrimaryHoverType(type);
 }
 
 void WebSettingsImpl::SetPreferHiddenVolumeControls(bool enabled) {
@@ -282,7 +285,7 @@ void WebSettingsImpl::SetDOMPasteAllowed(bool enabled) {
 
 void WebSettingsImpl::SetShrinksViewportContentToFit(
     bool shrink_viewport_content) {
-  settings_->SetShrinksViewportContentToFit(shrink_viewport_content);
+  dev_tools_emulator_->SetShrinksViewportContentToFit(shrink_viewport_content);
 }
 
 void WebSettingsImpl::SetSpatialNavigationEnabled(bool enabled) {
@@ -335,10 +338,6 @@ void WebSettingsImpl::SetJavaScriptCanAccessClipboard(bool enabled) {
   settings_->SetJavaScriptCanAccessClipboard(enabled);
 }
 
-void WebSettingsImpl::SetXSSAuditorEnabled(bool enabled) {
-  settings_->SetXSSAuditorEnabled(enabled);
-}
-
 void WebSettingsImpl::SetTextTrackKindUserPreference(
     TextTrackKindUserPreference preference) {
   settings_->SetTextTrackKindUserPreference(
@@ -381,10 +380,6 @@ void WebSettingsImpl::SetTextTrackWindowColor(const WebString& color) {
   settings_->SetTextTrackWindowColor(color);
 }
 
-void WebSettingsImpl::SetTextTrackWindowPadding(const WebString& padding) {
-  settings_->SetTextTrackWindowPadding(padding);
-}
-
 void WebSettingsImpl::SetTextTrackWindowRadius(const WebString& radius) {
   settings_->SetTextTrackWindowRadius(radius);
 }
@@ -425,12 +420,12 @@ void WebSettingsImpl::SetTouchDragDropEnabled(bool enabled) {
   settings_->SetTouchDragDropEnabled(enabled);
 }
 
-void WebSettingsImpl::SetBarrelButtonForDragEnabled(bool enabled) {
-  settings_->SetBarrelButtonForDragEnabled(enabled);
+void WebSettingsImpl::SetTouchDragEndContextMenu(bool enabled) {
+  settings_->SetTouchDragEndContextMenu(enabled);
 }
 
-void WebSettingsImpl::SetOfflineWebApplicationCacheEnabled(bool enabled) {
-  settings_->SetOfflineWebApplicationCacheEnabled(enabled);
+void WebSettingsImpl::SetBarrelButtonForDragEnabled(bool enabled) {
+  settings_->SetBarrelButtonForDragEnabled(enabled);
 }
 
 void WebSettingsImpl::SetWebGL1Enabled(bool enabled) {
@@ -461,12 +456,9 @@ void WebSettingsImpl::SetShowContextMenuOnMouseUp(bool enabled) {
   settings_->SetShowContextMenuOnMouseUp(enabled);
 }
 
-void WebSettingsImpl::SetEditingBehavior(EditingBehavior behavior) {
-  settings_->SetEditingBehaviorType(static_cast<EditingBehaviorType>(behavior));
-}
-
-void WebSettingsImpl::SetMockScrollbarsEnabled(bool enabled) {
-  settings_->SetMockScrollbarsEnabled(enabled);
+void WebSettingsImpl::SetEditingBehavior(
+    mojom::blink::EditingBehavior behavior) {
+  settings_->SetEditingBehaviorType(behavior);
 }
 
 void WebSettingsImpl::SetHideScrollbars(bool enabled) {
@@ -491,10 +483,6 @@ void WebSettingsImpl::SetAntialiasedClips2dCanvasEnabled(bool enabled) {
 
 void WebSettingsImpl::SetPreferCompositingToLCDTextEnabled(bool enabled) {
   dev_tools_emulator_->SetPreferCompositingToLCDTextEnabled(enabled);
-}
-
-void WebSettingsImpl::SetMinimumAccelerated2dCanvasSize(int num_pixels) {
-  settings_->SetMinimumAccelerated2dCanvasSize(num_pixels);
 }
 
 void WebSettingsImpl::SetHideDownloadUI(bool hide) {
@@ -541,12 +529,6 @@ void WebSettingsImpl::SetStrictlyBlockBlockableMixedContent(bool enabled) {
   settings_->SetStrictlyBlockBlockableMixedContent(enabled);
 }
 
-void WebSettingsImpl::SetPassiveEventListenerDefault(
-    PassiveEventListenerDefault default_value) {
-  settings_->SetPassiveListenerDefault(
-      static_cast<PassiveListenerDefault>(default_value));
-}
-
 void WebSettingsImpl::SetPasswordEchoEnabled(bool flag) {
   settings_->SetPasswordEchoEnabled(flag);
 }
@@ -572,10 +554,6 @@ void WebSettingsImpl::SetPrefersReducedMotion(bool enabled) {
   settings_->SetPrefersReducedMotion(enabled);
 }
 
-void WebSettingsImpl::SetEnableTouchAdjustment(bool enabled) {
-  settings_->SetTouchAdjustmentEnabled(enabled);
-}
-
 bool WebSettingsImpl::ViewportEnabled() const {
   return settings_->GetViewportEnabled();
 }
@@ -596,16 +574,8 @@ bool WebSettingsImpl::ShrinksViewportContentToFit() const {
   return settings_->GetShrinksViewportContentToFit();
 }
 
-void WebSettingsImpl::SetShouldRespectImageOrientation(bool enabled) {
-  settings_->SetShouldRespectImageOrientation(enabled);
-}
-
 void WebSettingsImpl::SetPictureInPictureEnabled(bool enabled) {
   settings_->SetPictureInPictureEnabled(enabled);
-}
-
-void WebSettingsImpl::SetDataSaverHoldbackWebApi(bool enabled) {
-  settings_->SetDataSaverHoldbackWebApi(enabled);
 }
 
 void WebSettingsImpl::SetWebAppScope(const WebString& scope) {
@@ -625,15 +595,24 @@ void WebSettingsImpl::SetImmersiveModeEnabled(bool enabled) {
 }
 
 void WebSettingsImpl::SetViewportEnabled(bool enabled) {
-  settings_->SetViewportEnabled(enabled);
+  dev_tools_emulator_->SetViewportEnabled(enabled);
 }
 
 void WebSettingsImpl::SetViewportMetaEnabled(bool enabled) {
-  settings_->SetViewportMetaEnabled(enabled);
+  dev_tools_emulator_->SetViewportMetaEnabled(enabled);
 }
 
 void WebSettingsImpl::SetSyncXHRInDocumentsEnabled(bool enabled) {
   settings_->SetSyncXHRInDocumentsEnabled(enabled);
+}
+
+void WebSettingsImpl::SetTargetBlankImpliesNoOpenerEnabledWillBeRemoved(
+    bool enabled) {
+  settings_->SetTargetBlankImpliesNoOpenerEnabledWillBeRemoved(enabled);
+}
+
+void WebSettingsImpl::SetAllowNonEmptyNavigatorPlugins(bool enabled) {
+  settings_->SetAllowNonEmptyNavigatorPlugins(enabled);
 }
 
 void WebSettingsImpl::SetCaretBrowsingEnabled(bool enabled) {
@@ -668,19 +647,15 @@ void WebSettingsImpl::SetSmartInsertDeleteEnabled(bool enabled) {
   settings_->SetSmartInsertDeleteEnabled(enabled);
 }
 
-void WebSettingsImpl::SetUseSolidColorScrollbars(bool enabled) {
-  settings_->SetUseSolidColorScrollbars(enabled);
-}
-
 void WebSettingsImpl::SetMainFrameResizesAreOrientationChanges(bool enabled) {
   dev_tools_emulator_->SetMainFrameResizesAreOrientationChanges(enabled);
 }
 
-void WebSettingsImpl::SetV8CacheOptions(V8CacheOptions options) {
-  settings_->SetV8CacheOptions(static_cast<blink::V8CacheOptions>(options));
+void WebSettingsImpl::SetV8CacheOptions(mojom::blink::V8CacheOptions options) {
+  settings_->SetV8CacheOptions(options);
 }
 
-void WebSettingsImpl::SetViewportStyle(WebViewportStyle style) {
+void WebSettingsImpl::SetViewportStyle(mojom::blink::ViewportStyle style) {
   dev_tools_emulator_->SetViewportStyle(style);
 }
 
@@ -767,19 +742,39 @@ void WebSettingsImpl::SetForceDarkModeEnabled(bool enabled) {
 }
 
 void WebSettingsImpl::SetPreferredColorScheme(
-    PreferredColorScheme color_scheme) {
+    mojom::blink::PreferredColorScheme color_scheme) {
   settings_->SetPreferredColorScheme(color_scheme);
 }
 
-void WebSettingsImpl::SetForcedColors(ForcedColors forced_colors) {
-  settings_->SetForcedColors(forced_colors);
+void WebSettingsImpl::SetPreferredContrast(
+    mojom::blink::PreferredContrast contrast) {
+  settings_->SetPreferredContrast(contrast);
 }
 
-STATIC_ASSERT_ENUM(WebSettings::ImageAnimationPolicy::kAllowed,
-                   kImageAnimationPolicyAllowed);
-STATIC_ASSERT_ENUM(WebSettings::ImageAnimationPolicy::kAnimateOnce,
-                   kImageAnimationPolicyAnimateOnce);
-STATIC_ASSERT_ENUM(WebSettings::ImageAnimationPolicy::kNoAnimation,
-                   kImageAnimationPolicyNoAnimation);
+void WebSettingsImpl::SetNavigationControls(
+    NavigationControls navigation_controls) {
+  settings_->SetNavigationControls(navigation_controls);
+}
+
+void WebSettingsImpl::SetAriaModalPrunesAXTree(bool enabled) {
+  settings_->SetAriaModalPrunesAXTree(enabled);
+}
+
+void WebSettingsImpl::SetUseAXMenuList(bool enabled) {
+  settings_->SetUseAXMenuList(enabled);
+}
+
+void WebSettingsImpl::SetSelectionClipboardBufferAvailable(bool available) {
+  settings_->SetSelectionClipboardBufferAvailable(available);
+}
+
+void WebSettingsImpl::SetAccessibilityIncludeSvgGElement(bool include) {
+  settings_->SetAccessibilityIncludeSvgGElement(include);
+}
+
+void WebSettingsImpl::SetWebXRImmersiveArAllowed(
+    bool webxr_immersive_ar_allowed) {
+  settings_->SetWebXRImmersiveArAllowed(webxr_immersive_ar_allowed);
+}
 
 }  // namespace blink

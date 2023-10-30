@@ -28,7 +28,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_XMLHTTPREQUEST_XML_HTTP_REQUEST_PROGRESS_EVENT_THROTTLE_H_
 
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -50,7 +51,7 @@ class XMLHttpRequest;
 // - ProgressEvent means an event using the ProgressEvent interface defined in
 //   the spec.
 class XMLHttpRequestProgressEventThrottle final
-    : public GarbageCollectedFinalized<XMLHttpRequestProgressEventThrottle>,
+    : public GarbageCollected<XMLHttpRequestProgressEventThrottle>,
       public TimerBase {
   // Need to promptly stop this timer when it is deemed finalizable.
   USING_PRE_FINALIZER(XMLHttpRequestProgressEventThrottle, Stop);
@@ -83,7 +84,7 @@ class XMLHttpRequestProgressEventThrottle final
   // depending on the value of the ProgressEventAction argument.
   void DispatchReadyStateChangeEvent(Event*, DeferredEventAction);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   // Dispatches a "progress" progress event and usually a readyStateChange

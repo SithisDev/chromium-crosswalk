@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://github.com/gpuweb/gpuweb/blob/master/design/sketch.webidl
+// https://gpuweb.github.io/gpuweb/
 
-typedef unsigned long GPUShaderStageFlags;
+typedef [EnforceRange] unsigned long GPUShaderStageFlags;
 [
-    RuntimeEnabled=WebGPU
-] interface GPUShaderStage {
-    const unsigned long NONE = 0;
+    Exposed(Window WebGPU, DedicatedWorker WebGPU),
+    SecureContext
+] namespace GPUShaderStage {
     const unsigned long VERTEX = 1;
     const unsigned long FRAGMENT = 2;
     const unsigned long COMPUTE = 4;

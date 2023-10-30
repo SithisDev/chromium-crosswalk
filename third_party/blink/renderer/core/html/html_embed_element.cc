@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/html/html_image_loader.h"
 #include "third_party/blink/renderer/core/html/html_object_element.h"
@@ -40,21 +41,16 @@
 
 namespace blink {
 
-using namespace html_names;
-
 HTMLEmbedElement::HTMLEmbedElement(Document& document,
                                    const CreateElementFlags flags)
-    : HTMLPlugInElement(kEmbedTag,
-                        document,
-                        flags,
-                        kShouldPreferPlugInsForImages) {
+    : HTMLPlugInElement(html_names::kEmbedTag, document, flags) {
   EnsureUserAgentShadowRoot();
 }
 
 const AttrNameToTrustedType& HTMLEmbedElement::GetCheckedAttributeTypes()
     const {
   DEFINE_STATIC_LOCAL(AttrNameToTrustedType, attribute_map,
-                      ({{"src", SpecificTrustedType::kTrustedScriptURL}}));
+                      ({{"src", SpecificTrustedType::kScriptURL}}));
   return attribute_map;
 }
 
@@ -62,10 +58,8 @@ static inline LayoutEmbeddedContent* FindPartLayoutObject(const Node* n) {
   if (!n->GetLayoutObject())
     n = Traversal<HTMLObjectElement>::FirstAncestor(*n);
 
-  if (n && n->GetLayoutObject() &&
-      n->GetLayoutObject()->IsLayoutEmbeddedContent())
-    return ToLayoutEmbeddedContent(n->GetLayoutObject());
-
+  if (n)
+    return DynamicTo<LayoutEmbeddedContent>(n->GetLayoutObject());
   return nullptr;
 }
 
@@ -75,7 +69,7 @@ LayoutEmbeddedContent* HTMLEmbedElement::ExistingLayoutEmbeddedContent() const {
 
 bool HTMLEmbedElement::IsPresentationAttribute(
     const QualifiedName& name) const {
-  if (name == kHiddenAttr)
+  if (name == html_names::kHiddenAttr)
     return true;
   return HTMLPlugInElement::IsPresentationAttribute(name);
 }
@@ -84,16 +78,11 @@ void HTMLEmbedElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == kHiddenAttr) {
-    if (DeprecatedEqualIgnoringCase(value, "yes") ||
-        DeprecatedEqualIgnoringCase(value, "true")) {
-      AddPropertyToPresentationAttributeStyle(
-          style, CSSPropertyID::kWidth, 0,
-          CSSPrimitiveValue::UnitType::kPixels);
-      AddPropertyToPresentationAttributeStyle(
-          style, CSSPropertyID::kHeight, 0,
-          CSSPrimitiveValue::UnitType::kPixels);
-    }
+  if (name == html_names::kHiddenAttr) {
+    AddPropertyToPresentationAttributeStyle(
+        style, CSSPropertyID::kWidth, 0, CSSPrimitiveValue::UnitType::kPixels);
+    AddPropertyToPresentationAttributeStyle(
+        style, CSSPropertyID::kHeight, 0, CSSPrimitiveValue::UnitType::kPixels);
   } else {
     HTMLPlugInElement::CollectStyleForPresentationAttribute(name, value, style);
   }
@@ -101,36 +90,42 @@ void HTMLEmbedElement::CollectStyleForPresentationAttribute(
 
 void HTMLEmbedElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  // Changing an attribute may change the content, type of content, layout
-  // object type, or all of the above. Not safe to re-use through reattach.
-  SetDisposeView();
-
-  if (params.name == kTypeAttr) {
+  if (params.name == html_names::kTypeAttr) {
     SetServiceType(params.new_value.LowerASCII());
     wtf_size_t pos = service_type_.Find(";");
     if (pos != kNotFound)
       SetServiceType(service_type_.Left(pos));
+    SetDisposeView();
     if (GetLayoutObject()) {
       SetNeedsPluginUpdate(true);
       GetLayoutObject()->SetNeedsLayoutAndFullPaintInvalidation(
           "Embed type changed");
     }
-  } else if (params.name == kCodeAttr) {
+  } else if (params.name == html_names::kCodeAttr) {
     // TODO(schenney): Remove this branch? It's not in the spec and we're not in
     // the HTMLAppletElement hierarchy.
     SetUrl(StripLeadingAndTrailingHTMLSpaces(params.new_value));
-  } else if (params.name == kSrcAttr) {
+    SetDisposeView();
+  } else if (params.name == html_names::kSrcAttr) {
+    // https://html.spec.whatwg.org/multipage/iframe-embed-object.html#the-embed-element
+    // The spec says that when the url attribute is changed and the embed
+    // element is "potentially active," we should run the embed element setup
+    // steps.
+    // We don't follow the "potentially active" definition precisely here, but
+    // it works.
     SetUrl(StripLeadingAndTrailingHTMLSpaces(params.new_value));
+    SetDisposeView();
     if (GetLayoutObject() && IsImageType()) {
       if (!image_loader_)
         image_loader_ = MakeGarbageCollected<HTMLImageLoader>(this);
       image_loader_->UpdateFromElement(ImageLoader::kUpdateIgnorePreviousError);
     } else if (GetLayoutObject()) {
-      // Check if this Embed can transition from potentially-active to active
-      if (FastHasAttribute(kTypeAttr)) {
-        SetNeedsPluginUpdate(true);
-        ReattachOnPluginChangeIfNeeded();
+      if (!FastHasAttribute(html_names::kTypeAttr)) {
+        UseCounter::Count(GetDocument(),
+                          WebFeature::kEmbedElementWithoutTypeSrcChanged);
       }
+      SetNeedsPluginUpdate(true);
+      ReattachOnPluginChangeIfNeeded();
     }
   } else {
     HTMLPlugInElement::ParseAttribute(params);
@@ -188,7 +183,8 @@ bool HTMLEmbedElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
   // represents nothing:
 
   // * The element has neither a src attribute nor a type attribute.
-  if (!FastHasAttribute(kSrcAttr) && !FastHasAttribute(kTypeAttr))
+  if (!FastHasAttribute(html_names::kSrcAttr) &&
+      !FastHasAttribute(html_names::kTypeAttr))
     return false;
 
   // * The element has a media element ancestor.
@@ -197,7 +193,7 @@ bool HTMLEmbedElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
   // * The element has an ancestor object element that is not showing its
   //   fallback content.
   ContainerNode* p = parentNode();
-  if (auto* object = ToHTMLObjectElementOrNull(p)) {
+  if (auto* object = DynamicTo<HTMLObjectElement>(p)) {
     if (!object->WillUseFallbackContentAtLayout() &&
         !object->UseFallbackContent()) {
       return false;
@@ -207,12 +203,12 @@ bool HTMLEmbedElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
 }
 
 bool HTMLEmbedElement::IsURLAttribute(const Attribute& attribute) const {
-  return attribute.GetName() == kSrcAttr ||
+  return attribute.GetName() == html_names::kSrcAttr ||
          HTMLPlugInElement::IsURLAttribute(attribute);
 }
 
 const QualifiedName& HTMLEmbedElement::SubResourceAttributeName() const {
-  return kSrcAttr;
+  return html_names::kSrcAttr;
 }
 
 bool HTMLEmbedElement::IsInteractiveContent() const {

@@ -6,7 +6,7 @@
  *
  * Other contributors:
  *   Robert O'Callahan <roc+@cs.cmu.edu>
- *   David Baron <dbaron@fas.harvard.edu>
+ *   David Baron <dbaron@dbaron.org>
  *   Christian Biesinger <cbiesinger@web.de>
  *   Randall Jesup <rjesup@wgate.com>
  *   Roland Mainz <roland.mainz@informatik.med.uni-giessen.de>
@@ -45,18 +45,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PAINT_LAYER_STACKING_NODE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PAINT_LAYER_STACKING_NODE_H_
 
-#include <memory>
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class PaintLayer;
-class PaintLayerCompositor;
 class ComputedStyle;
 
 // This class is only for PaintLayer, PaintLayerPaintOrderIterator and
@@ -90,12 +87,13 @@ class ComputedStyle;
 // We create PaintLayerStackingNode only for real stacking contexts with stacked
 // children. PaintLayerPaintOrder[Reverse]Iterator can iterate normal flow
 // children in paint order with or without a stacking node.
-class CORE_EXPORT PaintLayerStackingNode {
-  USING_FAST_MALLOC(PaintLayerStackingNode);
-
+class CORE_EXPORT PaintLayerStackingNode
+    : public GarbageCollected<PaintLayerStackingNode> {
  public:
-  explicit PaintLayerStackingNode(PaintLayer&);
-  ~PaintLayerStackingNode();
+  explicit PaintLayerStackingNode(PaintLayer*);
+  PaintLayerStackingNode(const PaintLayerStackingNode&) = delete;
+  PaintLayerStackingNode& operator=(const PaintLayerStackingNode&) = delete;
+  ~PaintLayerStackingNode() = default;
 
   void DirtyZOrderLists();
   void UpdateZOrderLists();
@@ -104,7 +102,7 @@ class CORE_EXPORT PaintLayerStackingNode {
   static bool StyleDidChange(PaintLayer& paint_layer,
                              const ComputedStyle* old_style);
 
-  using PaintLayers = Vector<PaintLayer*>;
+  using PaintLayers = HeapVector<Member<PaintLayer>>;
 
   const PaintLayers& PosZOrderList() const {
     DCHECK(!z_order_lists_dirty_);
@@ -115,15 +113,23 @@ class CORE_EXPORT PaintLayerStackingNode {
     return neg_z_order_list_;
   }
 
-  const PaintLayers* LayersPaintingOverlayScrollbarsAfter(
+  const PaintLayers* LayersPaintingOverlayOverflowControlsAfter(
       const PaintLayer* layer) const {
     DCHECK(!z_order_lists_dirty_);
-    auto it = layer_to_overlay_scrollbars_painting_after_.find(layer);
-    return it == layer_to_overlay_scrollbars_painting_after_.end() ? nullptr
-                                                                   : &it->value;
+    auto it = layer_to_overlay_overflow_controls_painting_after_.find(layer);
+    return it == layer_to_overlay_overflow_controls_painting_after_.end()
+               ? nullptr
+               : it->value;
   }
 
-  void ClearNeedsReorderOverlayScrollbars();
+  const PaintLayers& OverlayOverflowControlsReorderedList() const {
+    DCHECK(!z_order_lists_dirty_);
+    return overlay_overflow_controls_reordered_list_;
+  }
+
+  void ClearNeedsReorderOverlayOverflowControls();
+
+  void Trace(Visitor* visitor) const;
 
  private:
   void RebuildZOrderLists();
@@ -131,14 +137,7 @@ class CORE_EXPORT PaintLayerStackingNode {
   struct HighestLayers;
   void CollectLayers(PaintLayer&, HighestLayers*);
 
-#if DCHECK_IS_ON()
-  void UpdateStackingParentForZOrderLists(
-      PaintLayerStackingNode* stacking_parent);
-#endif
-
-  PaintLayerCompositor* Compositor() const;
-
-  PaintLayer& layer_;
+  Member<PaintLayer> layer_;
 
   // Holds a sorted list of all the descendant nodes within that have z-indices
   // of 0 (or is treated as 0 for positioned objects) or greater.
@@ -146,52 +145,57 @@ class CORE_EXPORT PaintLayerStackingNode {
   // Holds descendants within our stacking context with negative z-indices.
   PaintLayers neg_z_order_list_;
 
-  // Overlay scrollbars need to be painted above all scrollable contents, even
-  // if the contents are stacked in a stacking context which is an ancestor of
-  // the scrolling layer, for example:
+  // Overlay overflow controls(scrollbar or resizer) need to be painted above
+  // all child contents, even if the contents are stacked in a stacking context
+  // which is an ancestor of the scrolling or resizing layer, for example:
   //   <div id="stacking-context" style="opacity: 0.5">
   //     <div id="other" style="position: relative; z-index: 10></div>
-  //     <div id="scroller" style="overflow: scroll">
+  //     <div id="target" style="overflow: scroll; resize: both">
   //       <div id="child" style="position: relative">CHILD</div>
   //     </div>
   //   </div>
   // and
   //   <div id="stacking-context" style="opacity: 0.5">
   //     <div id="other" style="position: relative; z-index: 10></div>
-  //     <div id="scroller" style="overflow: scroll; position: relative">
+  //     <div id="target" style="overflow: scroll; position: relative">
   //       <div id="child" style="position: absolute; z-index: 5">CHILD</div>
   //     </div>
   //   </div>
   //
-  // The paint order without reordering overlay scrollbars would be:
-  //            stacking-context
-  //               /    |    \
-  //         scroller child  other
-  //            |
-  //    overlay scrollbars
-  // where the overlay scrollbars would be painted incorrectly below |child|
-  // which is scrollable by |scroller|.
+  // The paint order without reordering overlay overflow controls would be:
+  //              stacking-context
+  //                 /      |    \
+  //              target  child  other
+  //                |
+  //    overlay overflow controls
+  // where the overlay overflow controls would be painted incorrectly below
+  // |child| which is the sub content of |target|.
   //
-  // To paint the overlay scrollbars above all scrollable contents, we need to
+  // To paint the overlay overflow controls above all child contents, we need to
   // reorder the z-order of overlay scrollbars in the stacking context:
-  //            stacking-context
-  //             /    |    |   \
-  //       scroller child  |   other
-  //                       |
-  //                overlay scrollbars
+  //              stacking-context
+  //              /      |    |   \
+  //           target  child  |  other
+  //                          |
+  //               overlay overflow controls
   //
-  // This map records which PaintLayers (the values of the map) have overlay
-  // scrollbars which should paint after the given PaintLayer (the key of the
-  // map). The value of the map is a list of PaintLayers because there may be
-  // more than one scroller in the same stacking context with overlay
-  // scrollbars.
-  HashMap<const PaintLayer*, PaintLayers>
-      layer_to_overlay_scrollbars_painting_after_;
+  // This map records the PaintLayers (the values of the map) that have overlay
+  // overflow controls that should paint after the given PaintLayer (the key of
+  // the map). The value of the map is a list of PaintLayers because there may
+  // be more than one scrolling or resizing container in the same stacking
+  // context with overlay overflow controls.
+  // For the above example, this map has one entry {child: target} which means
+  // that |target|'s overlay overflow controls should be painted after |child|.
+  HeapHashMap<Member<const PaintLayer>, Member<PaintLayers>>
+      layer_to_overlay_overflow_controls_painting_after_;
+
+  // All PaintLayers (just in current stacking context, child stacking contexts
+  // will have their own list) that have overlay overflow controls that should
+  // paint reordered. For the above example, this has one entry {target}.
+  PaintLayers overlay_overflow_controls_reordered_list_;
 
   // Indicates whether the z-order lists above are dirty.
-  bool z_order_lists_dirty_ : 1;
-
-  DISALLOW_COPY_AND_ASSIGN(PaintLayerStackingNode);
+  bool z_order_lists_dirty_ = true;
 };
 
 }  // namespace blink

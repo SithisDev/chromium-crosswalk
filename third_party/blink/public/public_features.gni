@@ -5,15 +5,14 @@
 import("//build/config/ui.gni")
 
 declare_args() {
-  # If debug_devtools is set to true, JavaScript files for DevTools are stored
-  # as is and loaded from disk. Otherwise, a concatenated file is stored in
-  # resources.pak. It is still possible to load JS files from disk by passing
-  # --debug-devtools cmdline switch.
-  debug_devtools = false
+  # If true, adds support for JPEG XL image decoding.
+  enable_jxl_decoder = !is_ios
 }
 
-# Unhandled Tap enable means Contextual Search aka Tap to Search.
+# Unhandled Tap enable means Contextual Search aka Touch to Search.
+# TODO(donnd): remove all unhandled-tap handling after the Long-press experiment
+#              is fully launched.
 enable_unhandled_tap = is_android
 
 # Use Minikin hyphenation engine.
-use_minikin_hyphenation = is_android
+use_minikin_hyphenation = !is_mac

@@ -4,14 +4,25 @@
 
 #include "third_party/blink/renderer/modules/xr/xr_rigid_transform.h"
 
+#include <cmath>
 #include <utility>
 
-#include "third_party/blink/renderer/core/geometry/dom_point_init.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_point_init.h"
 #include "third_party/blink/renderer/core/geometry/dom_point_read_only.h"
 #include "third_party/blink/renderer/modules/xr/xr_utils.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 
 namespace blink {
+
+namespace {
+
+bool IsComponentValid(DOMPointInit* point) {
+  DCHECK(point);
+  return std::isfinite(point->x()) && std::isfinite(point->y()) &&
+         std::isfinite(point->z()) && std::isfinite(point->w());
+}
+}  // anonymous namespace
 
 // makes a deep copy of transformationMatrix
 XRRigidTransform::XRRigidTransform(
@@ -24,22 +35,15 @@ void XRRigidTransform::DecomposeMatrix() {
   // decompose matrix to position and orientation
   TransformationMatrix::DecomposedType decomposed;
   bool succeeded = matrix_->Decompose(decomposed);
-  if (succeeded) {
-    position_ =
-        DOMPointReadOnly::Create(decomposed.translate_x, decomposed.translate_y,
-                                 decomposed.translate_z, 1.0);
+  DCHECK(succeeded) << "Matrix decompose failed for " << matrix_->ToString();
 
-    // TODO(https://crbug.com/929841): Minuses are needed as a workaround for
-    // bug in TransformationMatrix so that callers can still pass non-inverted
-    // quaternions.
-    orientation_ = makeNormalizedQuaternion(
-        -decomposed.quaternion_x, -decomposed.quaternion_y,
-        -decomposed.quaternion_z, decomposed.quaternion_w);
-  } else {
-    // TODO(crbug.com/969149): Is this the correct way to handle a failure here?
-    position_ = DOMPointReadOnly::Create(0.0, 0.0, 0.0, 1.0);
-    orientation_ = DOMPointReadOnly::Create(0.0, 0.0, 0.0, 1.0);
-  }
+  position_ =
+      DOMPointReadOnly::Create(decomposed.translate_x, decomposed.translate_y,
+                               decomposed.translate_z, 1.0);
+
+  orientation_ = makeNormalizedQuaternion(
+      decomposed.quaternion_x, decomposed.quaternion_y, decomposed.quaternion_z,
+      decomposed.quaternion_w);
 }
 
 XRRigidTransform::XRRigidTransform(DOMPointInit* position,
@@ -63,7 +67,44 @@ XRRigidTransform::XRRigidTransform(DOMPointInit* position,
 }
 
 XRRigidTransform* XRRigidTransform::Create(DOMPointInit* position,
-                                           DOMPointInit* orientation) {
+                                           DOMPointInit* orientation,
+                                           ExceptionState& exception_state) {
+  if (position && position->w() != 1.0) {
+    exception_state.ThrowTypeError("W component of position must be 1.0");
+    return nullptr;
+  }
+
+  if ((position && !IsComponentValid(position)) ||
+      (orientation && !IsComponentValid(orientation))) {
+    exception_state.ThrowTypeError(
+        "Position and Orientation must consist of only finite values");
+    return nullptr;
+  }
+
+  if (orientation) {
+    double x = orientation->x();
+    double y = orientation->y();
+    double z = orientation->z();
+    double w = orientation->w();
+    double sq_len = x * x + y * y + z * z + w * w;
+
+    // The only way for the result of a square root to be 0 is if the squared
+    // number is 0, so save the square root operation and just compare to 0 now.
+    if (sq_len == 0.0) {
+      exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                        "Orientation's length cannot be 0");
+      return nullptr;
+    } else if (!std::isfinite(sq_len)) {
+      // If the orientation has any large numbers that cause us to overflow when
+      // calculating the length, we won't be able to generate a valid normalized
+      // quaternion.
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kInvalidStateError,
+          "Orientation is too large to normalize");
+      return nullptr;
+    }
+  }
+
   return MakeGarbageCollected<XRRigidTransform>(position, orientation);
 }
 
@@ -73,8 +114,7 @@ DOMFloat32Array* XRRigidTransform::matrix() {
     matrix_array_ = transformationMatrixToDOMFloat32Array(*matrix_);
   }
 
-  if (!matrix_array_ || !matrix_array_->View() ||
-      !matrix_array_->View()->Data()) {
+  if (!matrix_array_ || !matrix_array_->Data()) {
     // A page may take the matrix_array_ value and detach it so matrix_array_ is
     // a detached array buffer.  This breaks the inspector, so return null
     // instead.
@@ -109,12 +149,9 @@ void XRRigidTransform::EnsureMatrix() {
     decomp.scale_y = 1;
     decomp.scale_z = 1;
 
-    // TODO(https://crbug.com/929841): Minuses are needed as a workaround for
-    // bug in TransformationMatrix so that callers can still pass non-inverted
-    // quaternions.
-    decomp.quaternion_x = -orientation_->x();
-    decomp.quaternion_y = -orientation_->y();
-    decomp.quaternion_z = -orientation_->z();
+    decomp.quaternion_x = orientation_->x();
+    decomp.quaternion_y = orientation_->y();
+    decomp.quaternion_z = orientation_->z();
     decomp.quaternion_w = orientation_->w();
 
     decomp.translate_x = position_->x();
@@ -131,13 +168,19 @@ void XRRigidTransform::EnsureInverse() {
   // the caching is safe.
   if (!inverse_) {
     EnsureMatrix();
-    DCHECK(matrix_->IsInvertible());
-    inverse_ = MakeGarbageCollected<XRRigidTransform>(matrix_->Inverse());
+    TransformationMatrix inverse;
+    if (!matrix_->GetInverse(&inverse)) {
+      DLOG(ERROR) << "Matrix was not invertible: " << matrix_->ToString();
+      // TODO(https://crbug.com/1258611): Define behavior for non-invertible
+      // matrices. Note that this is consistent with earlier behavior, which
+      // just always passed matrix_->Inverse() whether it was invertible or not.
+    }
+    inverse_ = MakeGarbageCollected<XRRigidTransform>(inverse);
     inverse_->inverse_ = this;
   }
 }
 
-void XRRigidTransform::Trace(blink::Visitor* visitor) {
+void XRRigidTransform::Trace(Visitor* visitor) const {
   visitor->Trace(position_);
   visitor->Trace(orientation_);
   visitor->Trace(inverse_);

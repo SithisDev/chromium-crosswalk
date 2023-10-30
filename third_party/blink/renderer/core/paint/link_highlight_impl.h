@@ -28,18 +28,18 @@
 
 #include <memory>
 
+#include "base/time/time.h"
 #include "cc/layers/content_layer_client.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_client.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_delegate.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
-#include "third_party/blink/renderer/platform/graphics/link_highlight.h"
 #include "third_party/blink/renderer/platform/graphics/path.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace cc {
 class Layer;
@@ -48,77 +48,61 @@ class PictureLayer;
 
 namespace blink {
 
+class EffectPaintPropertyNode;
 class GraphicsContext;
-class GraphicsLayer;
-class LayoutBoxModelObject;
-class Node;
+class PaintArtifactCompositor;
 
-class CORE_EXPORT LinkHighlightImpl final : public LinkHighlight,
-                                            public CompositorAnimationDelegate,
+class CORE_EXPORT LinkHighlightImpl final : public CompositorAnimationDelegate,
                                             public CompositorAnimationClient {
+  USING_FAST_MALLOC(LinkHighlightImpl);
+
  public:
   explicit LinkHighlightImpl(Node*);
   ~LinkHighlightImpl() override;
 
-  void StartHighlightAnimationIfNeeded();
-
-  // Recalculates |path_| based on |node_|'s geometry and updates the link
-  // highlight layer. To avoid re-computing |path_|, a dirty bit is used
-  // (see |geometry_needs_update_| and |Invalidate()|) which is based on raster
-  // invalidation of the owning graphics layer.
-  void UpdateGeometry();
+  void UpdateOpacityAndRequestAnimation();
 
   // CompositorAnimationDelegate implementation.
-  void NotifyAnimationStarted(double monotonic_time, int group) override;
-  void NotifyAnimationFinished(double monotonic_time, int group) override;
-  void NotifyAnimationAborted(double monotonic_time, int group) override {}
-
-  // LinkHighlight implementation.
-  void Invalidate() override;
-  cc::Layer* Layer() override;
-  void ClearCurrentGraphicsLayer() override;
-  FloatPoint GetOffsetFromTransformNode() const override {
-    return offset_from_transform_node_;
-  }
+  void NotifyAnimationStarted(base::TimeDelta monotonic_time,
+                              int group) override {}
+  void NotifyAnimationFinished(base::TimeDelta monotonic_time,
+                               int group) override;
+  void NotifyAnimationAborted(base::TimeDelta monotonic_time,
+                              int group) override {}
 
   // CompositorAnimationClient implementation.
   CompositorAnimation* GetCompositorAnimation() const override;
 
-  GraphicsLayer* CurrentGraphicsLayerForTesting() const {
-    return current_graphics_layer_;
+  LayoutObject* GetLayoutObject() const {
+    return node_ ? node_->GetLayoutObject() : nullptr;
   }
-
-  Node* GetNode() const { return node_; }
 
   CompositorElementId ElementIdForTesting() const { return element_id_; }
 
-  const EffectPaintPropertyNode& Effect() const override;
+  const EffectPaintPropertyNode& Effect() const { return *effect_; }
 
+  void UpdateBeforePrePaint();
+  void UpdateAfterPrePaint();
   void Paint(GraphicsContext&);
+  void UpdateAfterPaint(
+      const PaintArtifactCompositor* paint_artifact_compositor);
 
   wtf_size_t FragmentCountForTesting() const { return fragments_.size(); }
-  cc::PictureLayer* LayerForTesting(size_t index) const {
+  cc::PictureLayer* LayerForTesting(wtf_size_t index) const {
     return fragments_[index].Layer();
   }
 
  private:
-  // TODO(crbug.com/967281): These NOINLINEs are for more accurate crash stack
-  // in the crash reports.
-  NOINLINE void ReleaseResources();
-  NOINLINE void ComputeQuads(const Node&, Vector<FloatQuad>&) const;
+  void ReleaseResources();
 
-  NOINLINE void AttachLinkHighlightToCompositingLayer(
-      const LayoutBoxModelObject& paint_invalidation_container);
-  NOINLINE void ClearGraphicsLayerLinkHighlightPointer();
-  // This function computes the highlight path, and returns true if it has
-  // changed size since the last call to this function.
-  NOINLINE bool ComputeHighlightLayerPathAndPosition(
-      const LayoutBoxModelObject&);
-
-  void SetPaintArtifactCompositorNeedsUpdate();
+  void StartCompositorAnimation();
+  void StopCompositorAnimation();
+  void SetNeedsRepaintAndCompositingUpdate();
   void UpdateOpacity(float opacity);
 
   class LinkHighlightFragment : private cc::ContentLayerClient {
+    DISALLOW_NEW();
+
    public:
     LinkHighlightFragment();
     ~LinkHighlightFragment() override;
@@ -130,11 +114,9 @@ class CORE_EXPORT LinkHighlightImpl final : public LinkHighlight,
 
    private:
     // cc::ContentLayerClient implementation.
-    gfx::Rect PaintableRegion() override;
-    scoped_refptr<cc::DisplayItemList> PaintContentsToDisplayList(
-        PaintingControlSetting painting_control) override;
+    gfx::Rect PaintableRegion() const override;
+    scoped_refptr<cc::DisplayItemList> PaintContentsToDisplayList() override;
     bool FillsBoundsCompletely() const override { return false; }
-    size_t GetApproximateUnsharedMemoryUsage() const override { return 0; }
 
     scoped_refptr<cc::PictureLayer> layer_;
     Path path_;
@@ -142,15 +124,14 @@ class CORE_EXPORT LinkHighlightImpl final : public LinkHighlight,
   };
   Vector<LinkHighlightFragment> fragments_;
 
-  Persistent<Node> node_;
-  GraphicsLayer* current_graphics_layer_;
-  bool is_scrolling_graphics_layer_;
+  WeakPersistent<Node> node_;
   std::unique_ptr<CompositorAnimation> compositor_animation_;
   scoped_refptr<EffectPaintPropertyNode> effect_;
-  FloatPoint offset_from_transform_node_;
 
-  bool geometry_needs_update_;
-  bool is_animating_;
+  // True if an animation has been requested.
+  bool start_compositor_animation_ = false;
+  bool is_animating_on_compositor_ = false;
+  int compositor_keyframe_model_id_ = 0;
   base::TimeTicks start_time_;
   CompositorElementId element_id_;
 };

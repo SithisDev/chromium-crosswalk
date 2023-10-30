@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/modules/xr/xr_input_source_array.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 
 namespace blink {
 
@@ -29,7 +28,10 @@ XRInputSource* XRInputSourceArray::operator[](unsigned index) const {
 }
 
 XRInputSource* XRInputSourceArray::GetWithSourceId(uint32_t source_id) {
-  return input_sources_.at(source_id);
+  auto it = input_sources_.find(source_id);
+  if (it != input_sources_.end())
+    return it->value;
+  return nullptr;
 }
 
 void XRInputSourceArray::RemoveWithSourceId(uint32_t source_id) {
@@ -43,7 +45,7 @@ void XRInputSourceArray::SetWithSourceId(uint32_t source_id,
   input_sources_.Set(source_id, input_source);
 }
 
-void XRInputSourceArray::Trace(blink::Visitor* visitor) {
+void XRInputSourceArray::Trace(Visitor* visitor) const {
   visitor->Trace(input_sources_);
   ScriptWrappable::Trace(visitor);
 }

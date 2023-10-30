@@ -5,15 +5,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SCROLLING_ELEMENT_FRAGMENT_ANCHOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SCROLLING_ELEMENT_FRAGMENT_ANCHOR_H_
 
+#include "base/gtest_prod_util.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/page/scrolling/fragment_anchor.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
 class LocalFrame;
 class KURL;
+class Node;
 
 // An element fragment anchor is a FragmentAnchor based on a single element.
 // This is the traditional fragment anchor of the web. For example, the fragment
@@ -29,9 +32,13 @@ class CORE_EXPORT ElementFragmentAnchor final : public FragmentAnchor {
   // Parses the URL fragment and, if possible, creates and returns a fragment
   // based on an Element in the page. Returns nullptr otherwise. Produces side
   // effects related to fragment targeting in the page in either case.
-  static ElementFragmentAnchor* TryCreate(const KURL& url, LocalFrame& frame);
+  static ElementFragmentAnchor* TryCreate(const KURL& url,
+                                          LocalFrame& frame,
+                                          bool should_scroll);
 
   ElementFragmentAnchor(Node& anchor_node, LocalFrame& frame);
+  ElementFragmentAnchor(const ElementFragmentAnchor&) = delete;
+  ElementFragmentAnchor& operator=(const ElementFragmentAnchor&) = delete;
   ~ElementFragmentAnchor() override = default;
 
   // Will attempt to scroll the anchor into view.
@@ -43,17 +50,14 @@ class CORE_EXPORT ElementFragmentAnchor final : public FragmentAnchor {
   // Used to let the anchor know the frame's been scrolled and so we should
   // abort keeping the fragment target in view to avoid fighting with user
   // scrolls.
-  void DidScroll(ScrollType type) override;
+  void DidScroll(mojom::blink::ScrollType type) override;
 
   // Attempts to focus the anchor if we couldn't focus right after install
   // (because rendering was blocked at the time). This can cause script to run
   // so we can't do it in Invoke.
-  void PerformPreRafActions() override;
+  void PerformScriptableActions() override;
 
-  // We can dispose of the fragment once load has been completed.
-  void DidCompleteLoad() override;
-
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ElementFragmentAnchorTest,
@@ -62,7 +66,6 @@ class CORE_EXPORT ElementFragmentAnchor final : public FragmentAnchor {
   void ApplyFocusIfNeeded();
 
   WeakMember<Node> anchor_node_;
-  Member<LocalFrame> frame_;
   bool needs_focus_;
 
   // While this is true, the fragment is still "active" in the sense that we
@@ -70,8 +73,6 @@ class CORE_EXPORT ElementFragmentAnchor final : public FragmentAnchor {
   // Invoke has no effect and the fragment can be disposed (unless focus is
   // still needed).
   bool needs_invoke_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ElementFragmentAnchor);
 };
 
 }  // namespace blink

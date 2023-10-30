@@ -7,12 +7,12 @@
 
 #include <vector>
 
-#include "base/containers/span.h"
-#include "base/macros.h"
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/messaging/cloneable_message.h"
 #include "third_party/blink/public/common/messaging/message_port_channel.h"
 #include "third_party/blink/public/mojom/array_buffer/array_buffer_contents.mojom.h"
+#include "third_party/blink/public/mojom/blob/blob.mojom.h"
+#include "third_party/blink/public/mojom/messaging/delegated_capability.mojom-shared.h"
 #include "third_party/blink/public/mojom/messaging/user_activation_snapshot.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -36,22 +36,12 @@ struct BLINK_COMMON_EXPORT TransferableMessage : public CloneableMessage {
   // The contents of any ImageBitmaps being transferred as part of this message.
   std::vector<SkBitmap> image_bitmap_contents_array;
 
-  // Whether the recipient should have a user gesture when it processes this
-  // message. This is a legacy bit used only without User Activation v2.
-  bool has_user_gesture = false;
-
   // The state of user activation.
   mojom::UserActivationSnapshotPtr user_activation;
 
-  // Whether the state of user activation should be transferred to the
-  // destination frame.
-  bool transfer_user_activation = false;
-
-  // Whether the destination frame is allowed to autoplay.
-  bool allow_autoplay = false;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TransferableMessage);
+  // What capability, if any, is delegated to the destination frame.
+  mojom::DelegatedCapability delegated_capability =
+      mojom::DelegatedCapability::kNone;
 };
 
 }  // namespace blink

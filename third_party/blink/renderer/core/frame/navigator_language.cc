@@ -4,9 +4,9 @@
 
 #include "third_party/blink/renderer/core/frame/navigator_language.h"
 
+#include "services/network/public/cpp/features.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/language.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -18,7 +18,7 @@ Vector<String> ParseAndSanitize(const String& accept_languages) {
   // Sanitizing tokens. We could do that more extensively but we should assume
   // that the accept languages are already sane and support BCP47. It is
   // likely a waste of time to make sure the tokens matches that spec here.
-  for (size_t i = 0; i < languages.size(); ++i) {
+  for (wtf_size_t i = 0; i < languages.size(); ++i) {
     String& token = languages[i];
     token = token.StripWhiteSpace();
     if (token.length() >= 3 && token[2] == '_')
@@ -31,39 +31,16 @@ Vector<String> ParseAndSanitize(const String& accept_languages) {
   return languages;
 }
 
-NavigatorLanguage::NavigatorLanguage(ExecutionContext* context)
-    : context_(context) {}
+NavigatorLanguage::NavigatorLanguage(ExecutionContext* execution_context)
+    : execution_context_(execution_context) {}
 
 AtomicString NavigatorLanguage::language() {
-  if (RuntimeEnabledFeatures::NavigatorLanguageInInsecureContextEnabled() ||
-      context_->IsSecureContext()) {
-    return AtomicString(languages().front());
-  }
-  return AtomicString();
+  return AtomicString(languages().front());
 }
 
 const Vector<String>& NavigatorLanguage::languages() {
-  if (RuntimeEnabledFeatures::NavigatorLanguageInInsecureContextEnabled() ||
-      context_->IsSecureContext()) {
-    EnsureUpdatedLanguage();
-    return languages_;
-  }
-  DEFINE_STATIC_LOCAL(const Vector<String>, empty_vector, {});
-  return empty_vector;
-}
-
-AtomicString NavigatorLanguage::SerializeLanguagesForClientHintHeader() {
   EnsureUpdatedLanguage();
-
-  StringBuilder builder;
-  for (size_t i = 0; i < languages_.size(); i++) {
-    if (i)
-      builder.Append(", ");
-    builder.Append('"');
-    builder.Append(languages_[i]);
-    builder.Append('"');
-  }
-  return builder.ToAtomicString();
+  return languages_;
 }
 
 bool NavigatorLanguage::IsLanguagesDirty() const {
@@ -82,20 +59,25 @@ void NavigatorLanguage::SetLanguagesForTesting(const String& languages) {
 void NavigatorLanguage::EnsureUpdatedLanguage() {
   if (languages_dirty_) {
     String accept_languages_override;
-    probe::ApplyAcceptLanguageOverride(context_, &accept_languages_override);
+    probe::ApplyAcceptLanguageOverride(execution_context_,
+                                       &accept_languages_override);
 
     if (!accept_languages_override.IsNull()) {
       languages_ = ParseAndSanitize(accept_languages_override);
     } else {
       languages_ = ParseAndSanitize(GetAcceptLanguages());
+      if (base::FeatureList::IsEnabled(
+              network::features::kReduceAcceptLanguage)) {
+        languages_ = Vector<String>({languages_.front()});
+      }
     }
 
     languages_dirty_ = false;
   }
 }
 
-void NavigatorLanguage::Trace(blink::Visitor* visitor) {
-  visitor->Trace(context_);
+void NavigatorLanguage::Trace(Visitor* visitor) const {
+  visitor->Trace(execution_context_);
 }
 
 }  // namespace blink

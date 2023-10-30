@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_TRAVERSAL_RANGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_TRAVERSAL_RANGE_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -22,7 +22,7 @@ class TraversalRange {
   Iterator end() { return Iterator::End(); }
 
  private:
-  Member<const StartNodeType> start_;
+  const StartNodeType* start_;
 };
 
 template <class Traversal>
@@ -39,7 +39,7 @@ class TraversalIteratorBase {
  protected:
   explicit TraversalIteratorBase(NodeType* current) : current_(current) {}
 
-  Member<NodeType> current_;
+  NodeType* current_;
 };
 
 template <class Traversal>
@@ -81,7 +81,7 @@ class TraversalDescendantIterator : public TraversalIteratorBase<Traversal> {
 
  private:
   TraversalDescendantIterator() : TraversalIteratorBase<Traversal>(nullptr) {}
-  Member<const StartNodeType> root_;
+  const StartNodeType* root_ = nullptr;
 };
 
 template <class Traversal>
@@ -102,7 +102,7 @@ class TraversalInclusiveDescendantIterator
   }
 
  private:
-  Member<const StartNodeType> root_;
+  const StartNodeType* root_;
 };
 
 template <class Traversal>

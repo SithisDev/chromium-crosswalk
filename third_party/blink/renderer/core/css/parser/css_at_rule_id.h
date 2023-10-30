@@ -11,18 +11,25 @@ namespace blink {
 
 class CSSParserContext;
 
-enum CSSAtRuleID {
+enum class CSSAtRuleID {
   kCSSAtRuleInvalid,
   kCSSAtRuleCharset,
   kCSSAtRuleFontFace,
-  kCSSAtRuleFontFeatureValues,
+  kCSSAtRuleFontPaletteValues,
   kCSSAtRuleImport,
   kCSSAtRuleKeyframes,
+  kCSSAtRuleLayer,
   kCSSAtRuleMedia,
   kCSSAtRuleNamespace,
   kCSSAtRulePage,
+  kCSSAtRulePositionFallback,
   kCSSAtRuleProperty,
+  kCSSAtRuleContainer,
+  kCSSAtRuleCounterStyle,
+  kCSSAtRuleScope,
+  kCSSAtRuleScrollTimeline,
   kCSSAtRuleSupports,
+  kCSSAtRuleTry,
   kCSSAtRuleViewport,
   kCSSAtRuleWebkitKeyframes,
 };

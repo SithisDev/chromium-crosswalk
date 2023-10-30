@@ -7,11 +7,14 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/exception_code.h"
+#include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "v8/include/v8.h"
 
 namespace blink {
+
+class DOMException;
 
 // Provides utility functions to create and/or throw DOM Exceptions.
 class CORE_EXPORT V8ThrowDOMException {
@@ -31,7 +34,23 @@ class CORE_EXPORT V8ThrowDOMException {
       DOMExceptionCode,
       const String& sanitized_message,
       const String& unsanitized_message = String());
+
+  // Same as CreateOrEmpty, but performs CHECK for exception to not be empty.
+  static v8::Local<v8::Value> CreateOrDie(
+      v8::Isolate*,
+      DOMExceptionCode,
+      const String& sanitized_message,
+      const String& unsanitized_message = String());
+
+  // Attaches a stacktrace to an existing DOMException object. This should only
+  // be used when initializing a subclass of DOMException. In other cases, uses
+  // CreateOrEmpty().
+  //
+  // Returns a V8 Value wrapping the DOMException.
+  static v8::Local<v8::Value> AttachStackProperty(v8::Isolate*, DOMException*);
 };
+
+extern const V8PrivateProperty::SymbolKey kPrivatePropertyDOMExceptionError;
 
 }  // namespace blink
 

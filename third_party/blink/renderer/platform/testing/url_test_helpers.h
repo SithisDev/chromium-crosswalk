@@ -31,8 +31,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_TESTING_URL_TEST_HELPERS_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TESTING_URL_TEST_HELPERS_H_
 
+#include "services/network/public/mojom/ip_address_space.mojom-shared.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
+#include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
@@ -71,7 +73,11 @@ WebURL RegisterMockedURLLoadFromBase(
 void RegisterMockedURLLoad(
     const WebURL& full_url,
     const WebString& file_path,
-    const WebString& mime_type = WebString::FromUTF8("text/html"));
+    const WebString& mime_type = WebString::FromUTF8("text/html"),
+    WebURLLoaderMockFactory* mock_factory =
+        WebURLLoaderMockFactory::GetSingletonInstance(),
+    network::mojom::IPAddressSpace address_space =
+        network::mojom::IPAddressSpace::kPublic);
 
 // Unregisters a URL that has been registered, so that the same URL can be
 // registered again from the another test.
@@ -83,9 +89,18 @@ void RegisterMockedURLLoadWithCustomResponse(const WebURL& full_url,
                                              WebURLResponse);
 
 // Registers a mock URL that returns a 404 error.
-void RegisterMockedErrorURLLoad(const WebURL& full_url);
+void RegisterMockedErrorURLLoad(
+    const WebURL& full_url,
+    WebURLLoaderMockFactory* mock_factory =
+        WebURLLoaderMockFactory::GetSingletonInstance());
+
+void UnregisterAllURLsAndClearMemoryCache();
+
+void SetLoaderDelegate(WebURLLoaderTestDelegate* delegate);
+
+void ServeAsynchronousRequests();
 
 }  // namespace url_test_helpers
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_TESTING_URL_TEST_HELPERS_H_

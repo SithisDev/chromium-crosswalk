@@ -6,15 +6,22 @@
 
 #include "third_party/blink/renderer/core/css/media_query_evaluator.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
-#include "third_party/blink/renderer/core/css/parser/sizes_calc_parser.h"
+#include "third_party/blink/renderer/core/css/parser/sizes_math_function_parser.h"
 #include "third_party/blink/renderer/core/media_type_names.h"
 
 namespace blink {
 
-SizesAttributeParser::SizesAttributeParser(MediaValues* media_values,
-                                           const String& attribute)
-    : media_values_(media_values), length_(0), length_was_set_(false) {
-  DCHECK(media_values_.Get());
+SizesAttributeParser::SizesAttributeParser(
+    MediaValues* media_values,
+    const String& attribute,
+    const ExecutionContext* execution_context)
+    : media_values_(media_values),
+      execution_context_(execution_context),
+      length_(0),
+      length_was_set_(false) {
+  DCHECK(media_values_);
+  DCHECK(media_values_->Width().has_value());
+  DCHECK(media_values_->Height().has_value());
   is_valid_ =
       Parse(CSSParserTokenRange(CSSTokenizer(attribute).TokenizeToEOF()));
 }
@@ -36,11 +43,11 @@ bool SizesAttributeParser::CalculateLengthInPixels(CSSParserTokenRange range,
     if ((media_values_->ComputeLength(start_token.NumericValue(),
                                       start_token.GetUnitType(), length)) &&
         (length >= 0)) {
-      result = clampTo<float>(length);
+      result = ClampTo<float>(length);
       return true;
     }
   } else if (type == kFunctionToken) {
-    SizesCalcParser calc_parser(range, media_values_);
+    SizesMathFunctionParser calc_parser(range, media_values_);
     if (!calc_parser.IsValid())
       return false;
     result = calc_parser.Result();
@@ -56,7 +63,7 @@ bool SizesAttributeParser::CalculateLengthInPixels(CSSParserTokenRange range,
 bool SizesAttributeParser::MediaConditionMatches(
     const MediaQuerySet& media_condition) {
   // A Media Condition cannot have a media type other then screen.
-  MediaQueryEvaluator media_query_evaluator(*media_values_);
+  MediaQueryEvaluator media_query_evaluator(media_values_);
   return media_query_evaluator.Eval(media_condition);
 }
 
@@ -81,9 +88,9 @@ bool SizesAttributeParser::Parse(CSSParserTokenRange range) {
     if (!CalculateLengthInPixels(
             range.MakeSubRange(length_token_start, length_token_end), length))
       continue;
-    scoped_refptr<MediaQuerySet> media_condition =
-        MediaQueryParser::ParseMediaCondition(
-            range.MakeSubRange(media_condition_start, length_token_start));
+    MediaQuerySet* media_condition = MediaQueryParser::ParseMediaCondition(
+        range.MakeSubRange(media_condition_start, length_token_start),
+        execution_context_);
     if (!media_condition || !MediaConditionMatches(*media_condition))
       continue;
     length_ = length;
@@ -101,7 +108,7 @@ float SizesAttributeParser::EffectiveSize() {
 
 float SizesAttributeParser::EffectiveSizeDefaultValue() {
   // Returning the equivalent of "100vw"
-  return clampTo<float>(media_values_->ViewportWidth());
+  return ClampTo<float>(*media_values_->Width());
 }
 
 }  // namespace blink

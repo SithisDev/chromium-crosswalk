@@ -31,13 +31,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ELEMENT_ANIMATIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ELEMENT_ANIMATIONS_H_
 
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/animation/css/css_animations.h"
 #include "third_party/blink/renderer/core/animation/effect_stack.h"
 #include "third_party/blink/renderer/core/animation/worklet_animation_base.h"
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/properties/css_bitset.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_counted_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
@@ -46,11 +49,36 @@ class CSSAnimations;
 using AnimationCountedSet = HeapHashCountedSet<WeakMember<Animation>>;
 using WorkletAnimationSet = HeapHashSet<WeakMember<WorkletAnimationBase>>;
 
-class CORE_EXPORT ElementAnimations
-    : public GarbageCollectedFinalized<ElementAnimations> {
+class CORE_EXPORT ElementAnimations final
+    : public GarbageCollected<ElementAnimations> {
  public:
   ElementAnimations();
+  ElementAnimations(const ElementAnimations&) = delete;
+  ElementAnimations& operator=(const ElementAnimations&) = delete;
   ~ElementAnimations();
+
+  enum class CompositedPaintStatus {
+    // Either no animation is running that affects the target property, or a
+    // fresh compositing decision is required for an animated property.
+    // Any style change for the corresponding property requires paint
+    // invalidation. Even if rendered by a composited animation, we need to
+    // trigger repaint in order to set up a worklet paint image. If the property
+    // is animated, paint will decide if the animation is composited and will
+    // update the status accordingly.
+    kNeedsRepaintOrNoAnimation = 0,
+
+    // An animation is affecting the target property, but it is not being
+    // composited. Paint can short-circuit setting up a worklet paint image
+    // since it is not required. Any style change affecting the target property
+    // requires repaint, but no new compositing decision.
+    kNotComposited = 1,
+
+    // An animation affecting the target property is being rendered on the
+    // compositor. Though repaint won't get triggered by a change to the
+    // property, it can still be triggered for other reasons, in which case a
+    // worklet paint image must be generated.
+    kComposited = 2
+  };
 
   // Animations that are currently active for this element, their effects will
   // be applied during a style recalc. CSS Transitions are included in this
@@ -70,27 +98,31 @@ class CORE_EXPORT ElementAnimations
 
   bool IsEmpty() const {
     return effect_stack_.IsEmpty() && css_animations_.IsEmpty() &&
-           animations_.IsEmpty();
+           animations_.IsEmpty() && worklet_animations_.IsEmpty();
   }
 
   void RestartAnimationOnCompositor();
 
-  void UpdateAnimationFlags(ComputedStyle&);
   void SetAnimationStyleChange(bool animation_style_change) {
     animation_style_change_ = animation_style_change;
   }
-
-  const ComputedStyle* BaseComputedStyle() const;
-  void UpdateBaseComputedStyle(const ComputedStyle*);
-  void ClearBaseComputedStyle();
-
-  bool AnimationsPreserveAxisAlignment() const;
-
-  void Trace(blink::Visitor*);
-
- private:
   bool IsAnimationStyleChange() const { return animation_style_change_; }
 
+  bool UpdateBoxSizeAndCheckTransformAxisAlignment(const gfx::SizeF& box_size);
+  bool IsIdentityOrTranslation() const;
+
+  // TODO(crbug.com/1301961): Consider converting to an array or flat map of
+  // fields for paint properties that can be composited.
+  CompositedPaintStatus CompositedBackgroundColorStatus() {
+    return static_cast<CompositedPaintStatus>(
+        composited_background_color_status_);
+  }
+
+  void SetCompositedBackgroundColorStatus(CompositedPaintStatus status);
+
+  void Trace(Visitor*) const;
+
+ private:
   EffectStack effect_stack_;
   CSSAnimations css_animations_;
   AnimationCountedSet animations_;
@@ -102,12 +134,17 @@ class CORE_EXPORT ElementAnimations
   // style, we store a cached value of the 'base' computed style (e.g. with no
   // change from the running animations) and use that during style recalc,
   // applying only the animation changes on top of it.
-  bool animation_style_change_;
-  scoped_refptr<ComputedStyle> base_computed_style_;
+  //
+  // See also StyleBaseData.
+  bool animation_style_change_ : 1;
 
-  // CSSAnimations checks if a style change is due to animation.
-  friend class CSSAnimations;
-  DISALLOW_COPY_AND_ASSIGN(ElementAnimations);
+  // The decision of whether to composite a background color animation needs to
+  // be made at Paint time and respected by the compositor.
+  // The size of the bit-field must be updated if adding new
+  // CompositedPaintStatus values to ensure that it can hold the value.
+  unsigned composited_background_color_status_ : 2;
+
+  FRIEND_TEST_ALL_PREFIXES(StyleEngineTest, PseudoElementBaseComputedStyle);
 };
 
 }  // namespace blink

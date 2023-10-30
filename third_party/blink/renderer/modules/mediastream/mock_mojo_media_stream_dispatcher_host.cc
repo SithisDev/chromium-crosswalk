@@ -6,65 +6,93 @@
 
 #include <utility>
 
-#include "base/strings/string_number_conversions.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-blink.h"
 
 namespace blink {
 
-MockMojoMediaStreamDispatcherHost::MockMojoMediaStreamDispatcherHost()
-    : binding_(this) {}
-
 MockMojoMediaStreamDispatcherHost::~MockMojoMediaStreamDispatcherHost() {}
 
-mojom::blink::MediaStreamDispatcherHostPtr
-MockMojoMediaStreamDispatcherHost::CreateInterfacePtrAndBind() {
-  mojom::blink::MediaStreamDispatcherHostPtr dispatcher_host;
-  binding_.Bind(mojo::MakeRequest(&dispatcher_host));
-  return dispatcher_host;
+mojo::PendingRemote<mojom::blink::MediaStreamDispatcherHost>
+MockMojoMediaStreamDispatcherHost::CreatePendingRemoteAndBind() {
+  return receiver_.BindNewPipeAndPassRemote();
 }
 
-void MockMojoMediaStreamDispatcherHost::GenerateStream(
+void MockMojoMediaStreamDispatcherHost::GenerateStreams(
     int32_t request_id,
-    mojom::blink::StreamControlsPtr controls,
+    const StreamControls& controls,
     bool user_gesture,
-    GenerateStreamCallback callback) {
+    mojom::blink::StreamSelectionInfoPtr audio_stream_selection_info_ptr,
+    GenerateStreamsCallback callback) {
   request_id_ = request_id;
-  audio_devices_.clear();
-  video_devices_.clear();
   ++request_stream_counter_;
+  stream_devices_ = blink::mojom::blink::StreamDevices();
 
-  if (controls->audio->requested) {
-    mojom::blink::MediaStreamDevicePtr audio_device =
-        mojom::blink::MediaStreamDevice::New();
-    audio_device->id =
-        controls->audio->device_id + WTF::String::Number(session_id_);
-    audio_device->name = "microphone";
-    audio_device->type = controls->audio->stream_type;
-    audio_device->session_id = session_id_;
-    audio_device->matched_output_device_id =
-        "associated_output_device_id" + WTF::String::Number(request_id_);
-    audio_devices_.push_back(std::move(audio_device));
+  blink::mojom::StreamSelectionStrategy strategy =
+      audio_stream_selection_info_ptr->strategy;
+  if (controls.audio.requested &&
+      (strategy == blink::mojom::StreamSelectionStrategy::SEARCH_BY_DEVICE_ID ||
+       strategy == blink::mojom::StreamSelectionStrategy::FORCE_NEW_STREAM)) {
+    stream_devices_.audio_device = MediaStreamDevice(
+        controls.audio.stream_type,
+        controls.audio.device_id + session_id_.ToString(), "microphone");
+    stream_devices_.audio_device.value().set_session_id(session_id_);
+    stream_devices_.audio_device.value().matched_output_device_id =
+        "associated_output_device_id" + session_id_.ToString();
   }
 
-  if (controls->video->requested) {
-    mojom::blink::MediaStreamDevicePtr video_device =
-        mojom::blink::MediaStreamDevice::New();
-    video_device->id =
-        controls->video->device_id + WTF::String::Number(session_id_);
-    video_device->name = "usb video camera";
-    video_device->type = controls->video->stream_type;
-    video_device->video_facing = media::mojom::blink::VideoFacingMode::USER;
-    video_device->session_id = session_id_;
-    video_devices_.push_back(std::move(video_device));
+  if (controls.video.requested) {
+    stream_devices_.video_device = MediaStreamDevice(
+        controls.video.stream_type,
+        controls.video.device_id + session_id_.ToString(), "usb video camera");
+    stream_devices_.video_device.value().video_facing =
+        media::MEDIA_VIDEO_FACING_USER;
+    stream_devices_.video_device.value().set_session_id(session_id_);
   }
 
   if (do_not_run_cb_) {
     generate_stream_cb_ = std::move(callback);
   } else {
-    std::move(callback).Run(
-        mojom::blink::MediaStreamRequestResult::OK,
-        WTF::String("dummy") + WTF::String::Number(request_id_),
-        std::move(audio_devices_), std::move(video_devices_));
+    // TODO(crbug.com/1300883): Generalize to multiple streams.
+    blink::mojom::blink::StreamDevicesSetPtr stream_devices_set =
+        blink::mojom::blink::StreamDevicesSet::New();
+    stream_devices_set->stream_devices.emplace_back(stream_devices_.Clone());
+    std::move(callback).Run(mojom::blink::MediaStreamRequestResult::OK,
+                            String("dummy") + String::Number(request_id_),
+                            std::move(stream_devices_set),
+                            /*pan_tilt_zoom_allowed=*/false);
+  }
+}
+
+void MockMojoMediaStreamDispatcherHost::GetOpenDevice(
+    int32_t request_id,
+    const base::UnguessableToken&,
+    const base::UnguessableToken&,
+    GetOpenDeviceCallback callback) {
+  request_id_ = request_id;
+  ++request_stream_counter_;
+
+  if (do_not_run_cb_) {
+    get_open_device_cb_ = std::move(callback);
+  } else {
+    blink::mojom::blink::StreamDevicesSetPtr stream_devices_set =
+        blink::mojom::blink::StreamDevicesSet::New();
+    stream_devices_set->stream_devices.emplace_back(stream_devices_.Clone());
+    if (stream_devices_.video_device) {
+      std::move(callback).Run(mojom::blink::MediaStreamRequestResult::OK,
+                              mojom::blink::GetOpenDeviceResponse::New(
+                                  String("dummy") + String::Number(request_id_),
+                                  *stream_devices_.video_device,
+                                  /*pan_tilt_zoom_allowed=*/false));
+    } else if (stream_devices_.audio_device) {
+      std::move(callback).Run(mojom::blink::MediaStreamRequestResult::OK,
+                              mojom::blink::GetOpenDeviceResponse::New(
+                                  String("dummy") + String::Number(request_id_),
+                                  *stream_devices_.audio_device,
+                                  /*pan_tilt_zoom_allowed=*/false));
+    } else {
+      std::move(callback).Run(
+          mojom::blink::MediaStreamRequestResult::INVALID_STATE, nullptr);
+    }
   }
 }
 
@@ -73,16 +101,19 @@ void MockMojoMediaStreamDispatcherHost::CancelRequest(int32_t request_id) {
 }
 
 void MockMojoMediaStreamDispatcherHost::StopStreamDevice(
-    const WTF::String& device_id,
-    int32_t session_id) {
-  for (const mojom::blink::MediaStreamDevicePtr& device : audio_devices_) {
-    if (device->id == device_id && device->session_id == session_id) {
+    const String& device_id,
+    const absl::optional<base::UnguessableToken>& session_id) {
+  if (stream_devices_.audio_device.has_value()) {
+    const MediaStreamDevice& device = stream_devices_.audio_device.value();
+    if (device.id == device_id.Utf8() && device.session_id() == session_id) {
       ++stop_audio_device_counter_;
       return;
     }
   }
-  for (const mojom::blink::MediaStreamDevicePtr& device : video_devices_) {
-    if (device->id == device_id && device->session_id == session_id) {
+
+  if (stream_devices_.video_device.has_value()) {
+    const MediaStreamDevice& device = stream_devices_.video_device.value();
+    if (device.id == device_id.Utf8() && device.session_id() == session_id) {
       ++stop_video_device_counter_;
       return;
     }
@@ -92,17 +123,15 @@ void MockMojoMediaStreamDispatcherHost::StopStreamDevice(
 
 void MockMojoMediaStreamDispatcherHost::OpenDevice(
     int32_t request_id,
-    const WTF::String& device_id,
+    const String& device_id,
     mojom::blink::MediaStreamType type,
     OpenDeviceCallback callback) {
-  mojom::blink::MediaStreamDevicePtr device =
-      mojom::blink::MediaStreamDevice::New();
-  device->id = device_id;
-  device->type = type;
-  device->session_id = session_id_;
+  MediaStreamDevice device;
+  device.id = device_id.Utf8();
+  device.type = type;
+  device.set_session_id(session_id_);
   std::move(callback).Run(true /* success */,
-                          "dummy" + WTF::String::Number(request_id),
-                          std::move(device));
+                          "dummy" + String::Number(request_id), device);
 }
 
 }  // namespace blink

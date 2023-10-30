@@ -9,10 +9,10 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
 
 namespace blink {
 
@@ -53,6 +53,7 @@ void StyleInvalidator::Invalidate(Document& document, Element* root_element) {
   }
   document.ClearChildNeedsStyleInvalidation();
   pending_invalidation_map_.clear();
+  pending_nth_sets_.clear();
 }
 
 StyleInvalidator::StyleInvalidator(
@@ -91,10 +92,6 @@ ALWAYS_INLINE bool StyleInvalidator::MatchesCurrentInvalidationSets(
                                                     kInvalidateCustomPseudo);
     return true;
   }
-
-  if (invalidation_flags_.InsertionPointCrossing() &&
-      element.IsV0InsertionPoint())
-    return true;
 
   for (auto* const invalidation_set : invalidation_sets_) {
     if (invalidation_set->InvalidatesElement(element))
@@ -186,17 +183,28 @@ void StyleInvalidator::PushInvalidationSetsForContainerNode(
     ContainerNode& node,
     SiblingData& sibling_data) {
   auto pending_invalidations_iterator = pending_invalidation_map_.find(&node);
-  DCHECK(pending_invalidations_iterator != pending_invalidation_map_.end());
+  if (pending_invalidations_iterator == pending_invalidation_map_.end()) {
+    NOTREACHED() << "We should strictly not have marked an element for "
+                    "invalidation without any pending invalidations.";
+    return;
+  }
   NodeInvalidationSets& pending_invalidations =
       pending_invalidations_iterator->value;
 
+  DCHECK(pending_nth_sets_.IsEmpty());
+
   for (const auto& invalidation_set : pending_invalidations.Siblings()) {
     CHECK(invalidation_set->IsAlive());
-    sibling_data.PushInvalidationSet(
-        To<SiblingInvalidationSet>(*invalidation_set));
+    if (invalidation_set->IsNthSiblingInvalidationSet()) {
+      AddPendingNthSiblingInvalidationSet(
+          To<NthSiblingInvalidationSet>(*invalidation_set));
+    } else {
+      sibling_data.PushInvalidationSet(
+          To<SiblingInvalidationSet>(*invalidation_set));
+    }
   }
 
-  if (node.GetStyleChangeType() >= kSubtreeStyleChange)
+  if (node.GetStyleChangeType() == kSubtreeStyleChange)
     return;
 
   if (!pending_invalidations.Descendants().IsEmpty()) {
@@ -205,12 +213,11 @@ void StyleInvalidator::PushInvalidationSetsForContainerNode(
       PushInvalidationSet(*invalidation_set);
     }
     if (UNLIKELY(*g_style_invalidator_tracing_enabled)) {
-      TRACE_EVENT_INSTANT1(
+      DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT_WITH_CATEGORIES(
           TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"),
-          "StyleInvalidatorInvalidationTracking", TRACE_EVENT_SCOPE_THREAD,
-          "data",
-          inspector_style_invalidator_invalidate_event::InvalidationList(
-              node, pending_invalidations.Descendants()));
+          "StyleInvalidatorInvalidationTracking",
+          inspector_style_invalidator_invalidate_event::InvalidationList, node,
+          pending_invalidations.Descendants());
     }
   }
 }
@@ -236,9 +243,13 @@ void StyleInvalidator::InvalidateShadowRootChildren(Element& element) {
     SiblingData sibling_data;
     if (!WholeSubtreeInvalid()) {
       if (UNLIKELY(root->NeedsStyleInvalidation())) {
+        // The shadow root does not have any siblings. There should never be any
+        // other sets than the nth set to schedule.
+        DCHECK(sibling_data.IsEmpty());
         PushInvalidationSetsForContainerNode(*root, sibling_data);
       }
     }
+    PushNthSiblingInvalidationSets(sibling_data);
     for (Element* child = ElementTraversal::FirstChild(*root); child;
          child = ElementTraversal::NextSibling(*child)) {
       Invalidate(*child, sibling_data);
@@ -249,10 +260,13 @@ void StyleInvalidator::InvalidateShadowRootChildren(Element& element) {
 }
 
 void StyleInvalidator::InvalidateChildren(Element& element) {
-  SiblingData sibling_data;
-  if (UNLIKELY(!!element.GetShadowRoot())) {
+  if (UNLIKELY(!!element.GetShadowRoot()))
     InvalidateShadowRootChildren(element);
-  }
+
+  // Initialization of the variable costs up to 15% on blink_perf.css
+  // AttributeDescendantSelector.html benchmark.
+  SiblingData sibling_data STACK_UNINITIALIZED;
+  PushNthSiblingInvalidationSets(sibling_data);
 
   for (Element* child = ElementTraversal::FirstChild(element); child;
        child = ElementTraversal::NextSibling(*child)) {
@@ -271,7 +285,7 @@ void StyleInvalidator::Invalidate(Element& element, SiblingData& sibling_data) {
   // sets or to continue to accumulate new invalidation sets as we descend the
   // tree.
   if (!WholeSubtreeInvalid()) {
-    if (element.GetStyleChangeType() >= kSubtreeStyleChange) {
+    if (element.GetStyleChangeType() == kSubtreeStyleChange) {
       SetWholeSubtreeInvalid();
     } else if (CheckInvalidationSetsAgainstElement(element, sibling_data)) {
       element.SetNeedsStyleRecalc(kLocalStyleChange,
@@ -289,14 +303,9 @@ void StyleInvalidator::Invalidate(Element& element, SiblingData& sibling_data) {
     // styles but we do it. If we ever stop doing that then this code and the
     // PushInvalidationSetsForContainerNode above need to move out of the
     // if-block.
-    if (InvalidatesSlotted() && IsHTMLSlotElement(element))
-      InvalidateSlotDistributedElements(ToHTMLSlotElement(element));
-
-    if (InsertionPointCrossing() && element.IsV0InsertionPoint()) {
-      element.SetNeedsStyleRecalc(kSubtreeStyleChange,
-                                  StyleChangeReasonForTracing::Create(
-                                      style_change_reason::kStyleInvalidator));
-    }
+    auto* html_slot_element = DynamicTo<HTMLSlotElement>(element);
+    if (html_slot_element && InvalidatesSlotted())
+      InvalidateSlotDistributedElements(*html_slot_element);
   }
 
   // We need to recurse into children if:
@@ -304,9 +313,12 @@ void StyleInvalidator::Invalidate(Element& element, SiblingData& sibling_data) {
   //   could apply to the descendants.
   // * there are invalidation sets attached to descendants then we need to
   //   clear the flags on the nodes, whether we use the sets or not.
-  if ((!WholeSubtreeInvalid() && HasInvalidationSets()) ||
+  if ((!WholeSubtreeInvalid() && HasInvalidationSets() &&
+       element.GetComputedStyle()) ||
       element.ChildNeedsStyleInvalidation()) {
     InvalidateChildren(element);
+  } else {
+    ClearPendingNthSiblingInvalidationSets();
   }
 
   element.ClearChildNeedsStyleInvalidation();

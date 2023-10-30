@@ -32,12 +32,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_WORKER_INSPECTOR_CONTROLLER_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/unguessable_token.h"
 #include "third_party/blink/renderer/core/inspector/devtools_agent.h"
 #include "third_party/blink/renderer/core/inspector/inspector_task_runner.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -53,7 +52,7 @@ class WorkerThreadDebugger;
 struct WorkerDevToolsParams;
 
 class WorkerInspectorController final
-    : public GarbageCollectedFinalized<WorkerInspectorController>,
+    : public GarbageCollected<WorkerInspectorController>,
       public trace_event::EnabledStateObserver,
       public DevToolsAgent::Client,
       private Thread::TaskObserver {
@@ -69,8 +68,11 @@ class WorkerInspectorController final
                             WorkerThreadDebugger*,
                             scoped_refptr<InspectorTaskRunner>,
                             std::unique_ptr<WorkerDevToolsParams>);
+  WorkerInspectorController(const WorkerInspectorController&) = delete;
+  WorkerInspectorController& operator=(const WorkerInspectorController&) =
+      delete;
   ~WorkerInspectorController() override;
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
   CoreProbeSink* GetProbeSink() const { return probe_sink_.Get(); }
   DevToolsAgent* GetDevToolsAgent() const { return agent_.Get(); }
@@ -80,7 +82,7 @@ class WorkerInspectorController final
 
  private:
   // Thread::TaskObserver implementation.
-  void WillProcessTask(const base::PendingTask&) override;
+  void WillProcessTask(const base::PendingTask&, bool) override;
   void DidProcessTask(const base::PendingTask&) override;
 
   // blink::trace_event::EnabledStateObserver implementation:
@@ -92,7 +94,7 @@ class WorkerInspectorController final
   // DevToolsAgent::Client implementation.
   void AttachSession(DevToolsSession*, bool restore) override;
   void DetachSession(DevToolsSession*) override;
-  void InspectElement(const WebPoint&) override;
+  void InspectElement(const gfx::Point&) override;
   void DebuggerTaskStarted() override;
   void DebuggerTaskFinished() override;
 
@@ -109,9 +111,7 @@ class WorkerInspectorController final
   base::UnguessableToken worker_devtools_token_;
   base::UnguessableToken parent_devtools_token_;
   KURL url_;
-  PlatformThreadId worker_thread_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(WorkerInspectorController);
+  const PlatformThreadId worker_thread_id_;
 };
 
 }  // namespace blink

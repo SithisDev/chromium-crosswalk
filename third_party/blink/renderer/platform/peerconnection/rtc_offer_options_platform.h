@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_PEERCONNECTION_RTC_OFFER_OPTIONS_PLATFORM_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_PEERCONNECTION_RTC_OFFER_OPTIONS_PLATFORM_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -26,7 +26,7 @@ class RTCOfferOptionsPlatform final
   bool VoiceActivityDetection() const { return voice_activity_detection_; }
   bool IceRestart() const { return ice_restart_; }
 
-  void Trace(blink::Visitor* visitor) {}
+  void Trace(Visitor* visitor) const {}
 
  private:
   int32_t offer_to_receive_video_;

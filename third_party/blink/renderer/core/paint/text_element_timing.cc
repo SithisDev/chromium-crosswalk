@@ -11,10 +11,9 @@
 #include "third_party/blink/renderer/core/paint/image_element_timing.h"
 #include "third_party/blink/renderer/core/paint/text_paint_timing_detector.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/float_clip_rect.h"
 #include "third_party/blink/renderer/platform/graphics/paint/geometry_mapper.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace blink {
 
@@ -34,57 +33,50 @@ TextElementTiming& TextElementTiming::From(LocalDOMWindow& window) {
 
 TextElementTiming::TextElementTiming(LocalDOMWindow& window)
     : Supplement<LocalDOMWindow>(window),
-      performance_(DOMWindowPerformance::performance(window)) {
-  DCHECK(RuntimeEnabledFeatures::ElementTimingEnabled(
-      GetSupplementable()->document()));
-}
+      performance_(DOMWindowPerformance::performance(window)) {}
 
 // static
-FloatRect TextElementTiming::ComputeIntersectionRect(
+gfx::RectF TextElementTiming::ComputeIntersectionRect(
     const LayoutObject& object,
-    const IntRect& aggregated_visual_rect,
-    const PropertyTreeState& property_tree_state,
+    const gfx::Rect& aggregated_visual_rect,
+    const PropertyTreeStateOrAlias& property_tree_state,
     const LocalFrameView* frame_view) {
   Node* node = object.GetNode();
   DCHECK(node);
   if (!NeededForElementTiming(*node))
-    return FloatRect();
+    return gfx::RectF();
 
   return ElementTimingUtils::ComputeIntersectionRect(
       &frame_view->GetFrame(), aggregated_visual_rect, property_tree_state);
 }
 
-void TextElementTiming::OnTextObjectsPainted(
-    const Deque<base::WeakPtr<TextRecord>>& text_nodes_painted) {
+bool TextElementTiming::CanReportElements() const {
   DCHECK(performance_);
-  // If the entries cannot be exposed via PerformanceObserver nor added to the
-  // buffer, bail out.
-  if (!performance_->HasObserverFor(PerformanceEntry::kElement) &&
-      performance_->IsElementTimingBufferFull()) {
-    return;
-  }
-  for (const auto record : text_nodes_painted) {
-    Node* node = DOMNodeIds::NodeForId(record->node_id);
-    if (!node || node->IsInShadowTree())
-      continue;
-
-    // Text aggregators should be Elements!
-    DCHECK(node->IsElementNode());
-    auto* element = To<Element>(node);
-    const AtomicString& attr =
-        element->FastGetAttribute(html_names::kElementtimingAttr);
-    if (attr.IsEmpty())
-      continue;
-
-    const AtomicString& id = element->GetIdAttribute();
-    DEFINE_STATIC_LOCAL(const AtomicString, kTextPaint, ("text-paint"));
-    performance_->AddElementTiming(
-        kTextPaint, g_empty_string, record->element_timing_rect_,
-        record->paint_time, base::TimeTicks(), attr, IntSize(), id, element);
-  }
+  return performance_->HasObserverFor(PerformanceEntry::kElement) ||
+         !performance_->IsElementTimingBufferFull();
 }
 
-void TextElementTiming::Trace(blink::Visitor* visitor) {
+void TextElementTiming::OnTextObjectPainted(const TextRecord& record) {
+  Node* node = record.node_;
+  if (!node || node->IsInShadowTree())
+    return;
+
+  // Text aggregators should be Elements!
+  DCHECK(node->IsElementNode());
+  auto* element = To<Element>(node);
+  if (!element->FastHasAttribute(html_names::kElementtimingAttr))
+    return;
+
+  const AtomicString& id = element->GetIdAttribute();
+  DEFINE_STATIC_LOCAL(const AtomicString, kTextPaint, ("text-paint"));
+  performance_->AddElementTiming(
+      kTextPaint, g_empty_string, record.element_timing_rect_,
+      record.paint_time, base::TimeTicks(),
+      element->FastGetAttribute(html_names::kElementtimingAttr), gfx::Size(),
+      id, element);
+}
+
+void TextElementTiming::Trace(Visitor* visitor) const {
   Supplement<LocalDOMWindow>::Trace(visitor);
   visitor->Trace(performance_);
 }

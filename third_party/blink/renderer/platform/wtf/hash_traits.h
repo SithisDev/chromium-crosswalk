@@ -22,12 +22,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_HASH_TRAITS_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_HASH_TRAITS_H_
 
-#include <string.h>  // For memset.
+#include <string.h>
+
 #include <limits>
 #include <memory>
 #include <type_traits>
 #include <utility>
+
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/atomic_operations.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_functions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_table_deleted_value_type.h"
@@ -43,13 +46,24 @@ struct EnumOrGenericHashTraits;
 template <typename T>
 struct HashTraits;
 
+namespace {
+template <typename T, bool = IsTraceable<T>::value>
+struct ClearMemoryAtomicallyIfNeeded {
+  static void Clear(T* slot) { memset(static_cast<void*>(slot), 0, sizeof(T)); }
+};
+template <typename T>
+struct ClearMemoryAtomicallyIfNeeded<T, true> {
+  static void Clear(T* slot) { AtomicMemzero<sizeof(T), alignof(T)>(slot); }
+};
+}  // namespace
+
 template <typename T>
 struct GenericHashTraitsBase<false, T> {
   // The emptyValueIsZero flag is used to optimize allocation of empty hash
   // tables with zeroed memory.
   static const bool kEmptyValueIsZero = false;
 
-  // The hasIsEmptyValueFunction flag allows the hash table to automatically
+  // The kHasIsEmptyValueFunction flag allows the hash table to automatically
   // generate code to check for the empty value when it can be done with the
   // equality operator, but allows custom functions for cases like String that
   // need them.
@@ -86,10 +100,12 @@ struct GenericHashTraitsBase<false, T> {
     static const bool value = !std::is_pod<T>::value;
   };
 
-  static const WeakHandlingFlag kWeakHandlingFlag =
-      IsWeak<T>::value ? kWeakHandling : kNoWeakHandling;
-
   static constexpr bool kCanHaveDeletedValue = true;
+
+  // The kCanTraceConcurrently value is used by Oilpan concurrent marking. Only
+  // type for which HashTraits<T>::kCanTraceConcurrently is true can be traced
+  // on a concurrent thread.
+  static constexpr bool kCanTraceConcurrently = false;
 };
 
 // Default integer traits disallow both 0 and -1 as keys (max value instead of
@@ -193,7 +209,7 @@ struct HashTraits<P*> : GenericHashTraits<P*> {
   static void ConstructDeletedValue(P*& slot, bool) {
     slot = reinterpret_cast<P*>(-1);
   }
-  static bool IsDeletedValue(P* value) {
+  static bool IsDeletedValue(const P* value) {
     return value == reinterpret_cast<P*>(-1);
   }
 };
@@ -206,12 +222,18 @@ struct SimpleClassHashTraits : GenericHashTraits<T> {
     static const bool value = false;
   };
   static void ConstructDeletedValue(T& slot, bool) {
-    new (NotNull, &slot) T(kHashTableDeletedValue);
+    new (NotNullTag::kNotNull, &slot) T(kHashTableDeletedValue);
   }
   static bool IsDeletedValue(const T& value) {
     return value.IsHashTableDeletedValue();
   }
 };
+
+// Default traits disallow both 0 and max as keys -- use these traits to allow
+// all values as keys.
+template <typename T>
+struct HashTraits<IntegralWithAllKeys<T>>
+    : SimpleClassHashTraits<IntegralWithAllKeys<T>> {};
 
 template <typename P>
 struct HashTraits<scoped_refptr<P>> : SimpleClassHashTraits<scoped_refptr<P>> {
@@ -292,7 +314,8 @@ struct HashTraits<std::unique_ptr<T>>
   static void ConstructDeletedValue(std::unique_ptr<T>& slot, bool) {
     // Dirty trick: implant an invalid pointer to unique_ptr. Destructor isn't
     // called for deleted buckets, so this is okay.
-    new (NotNull, &slot) std::unique_ptr<T>(reinterpret_cast<T*>(1u));
+    new (NotNullTag::kNotNull, &slot)
+        std::unique_ptr<T>(reinterpret_cast<T*>(1u));
   }
   static bool IsDeletedValue(const std::unique_ptr<T>& value) {
     return value.get() == reinterpret_cast<T*>(1u);
@@ -371,8 +394,10 @@ struct PairHashTraits
     // at a later point, the same assumptions around memory zeroing must
     // hold as they did at the initial allocation.  Therefore we zero the
     // value part of the slot here for GC collections.
-    if (zero_value)
-      memset(reinterpret_cast<void*>(&slot.second), 0, sizeof(slot.second));
+    if (zero_value) {
+      ClearMemoryAtomicallyIfNeeded<typename SecondTraits::TraitType>::Clear(
+          &slot.second);
+    }
   }
   static bool IsDeletedValue(const TraitType& value) {
     return FirstTraits::IsDeletedValue(value.first);
@@ -399,6 +424,10 @@ struct KeyValuePair {
   KeyTypeArg key;
   ValueTypeArg value;
 };
+
+template <typename K, typename V>
+struct IsWeak<KeyValuePair<K, V>>
+    : std::integral_constant<bool, IsWeak<K>::value || IsWeak<V>::value> {};
 
 template <typename KeyTraitsArg, typename ValueTraitsArg>
 struct KeyValuePairHashTraits
@@ -434,23 +463,24 @@ struct KeyValuePairHashTraits
         ValueTraits::template NeedsToForbidGCOnMove<>::value;
   };
 
-  static const WeakHandlingFlag kWeakHandlingFlag =
-      (KeyTraits::kWeakHandlingFlag == kWeakHandling ||
-       ValueTraits::kWeakHandlingFlag == kWeakHandling)
-          ? kWeakHandling
-          : kNoWeakHandling;
-
   static const unsigned kMinimumTableSize = KeyTraits::kMinimumTableSize;
 
   static void ConstructDeletedValue(TraitType& slot, bool zero_value) {
     KeyTraits::ConstructDeletedValue(slot.key, zero_value);
     // See similar code in this file for why we need to do this.
-    if (zero_value)
-      memset(reinterpret_cast<void*>(&slot.value), 0, sizeof(slot.value));
+    if (zero_value) {
+      ClearMemoryAtomicallyIfNeeded<typename ValueTraits::TraitType>::Clear(
+          &slot.value);
+    }
   }
   static bool IsDeletedValue(const TraitType& value) {
     return KeyTraits::IsDeletedValue(value.key);
   }
+
+  static constexpr bool kCanTraceConcurrently =
+      KeyTraitsArg::kCanTraceConcurrently &&
+      (ValueTraitsArg::kCanTraceConcurrently ||
+       !IsTraceable<typename ValueTraitsArg::TraitType>::value);
 };
 
 template <typename Key, typename Value>

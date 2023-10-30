@@ -4,14 +4,18 @@
 
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 
-#include "base/single_thread_task_runner.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "gpu/command_buffer/client/raster_interface.h"
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
 #include "gpu/config/gpu_feature_info.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
+#include "third_party/blink/public/platform/web_url.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
-#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
@@ -58,6 +62,10 @@ static void CreateContextProviderOnMainThread(
   context_attributes.enable_raster_interface = true;
   context_attributes.support_grcontext = true;
 
+  // The shared GPU context should not trigger a switch to the high-performance
+  // GPU.
+  context_attributes.prefer_low_power_gpu = true;
+
   *gpu_compositing_disabled = Platform::Current()->IsGpuCompositingDisabled();
   if (*gpu_compositing_disabled && only_if_gpu_compositing) {
     waitable_event->Signal();
@@ -84,9 +92,7 @@ void SharedGpuContext::CreateContextProviderIfNeeded(
   // TODO(danakj): This needs to check that the context is being used on the
   // thread it was made on, or else lock it.
   if (context_provider_wrapper_ &&
-      context_provider_wrapper_->ContextProvider()
-              ->ContextGL()
-              ->GetGraphicsResetStatusKHR() == GL_NO_ERROR) {
+      !context_provider_wrapper_->ContextProvider()->IsContextLost()) {
     // If the context isn't lost then |is_gpu_compositing_disabled_| state
     // hasn't changed yet. RenderThreadImpl::CompositingModeFallbackToSoftware()
     // will lose the context to let us know if it changes.
@@ -110,8 +116,18 @@ void SharedGpuContext::CreateContextProviderIfNeeded(
         Platform::Current()->IsGpuCompositingDisabled();
     if (is_gpu_compositing_disabled_ && only_if_gpu_compositing)
       return;
-    auto context_provider =
-        Platform::Current()->CreateSharedOffscreenGraphicsContext3DProvider();
+    std::unique_ptr<blink::WebGraphicsContext3DProvider> context_provider;
+    if (base::FeatureList::IsEnabled(blink::features::kDawn2dCanvas)) {
+      context_provider =
+          Platform::Current()->CreateWebGPUGraphicsContext3DProvider(
+              blink::WebURL());
+      if (context_provider) {
+        context_provider->BindToCurrentThread();
+      }
+    } else {
+      context_provider =
+          Platform::Current()->CreateSharedOffscreenGraphicsContext3DProvider();
+    }
     if (context_provider) {
       context_provider_wrapper_ =
           std::make_unique<WebGraphicsContext3DProviderWrapper>(
@@ -123,7 +139,7 @@ void SharedGpuContext::CreateContextProviderIfNeeded(
     // this once per thread.
     base::WaitableEvent waitable_event;
     scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-        Thread::MainThread()->GetTaskRunner();
+        Thread::MainThread()->GetDeprecatedTaskRunner();
     PostCrossThreadTask(
         *task_runner, FROM_HERE,
         CrossThreadBindOnce(

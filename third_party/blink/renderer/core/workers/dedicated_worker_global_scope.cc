@@ -32,23 +32,29 @@
 
 #include <memory>
 #include "base/feature_list.h"
+#include "base/metrics/histogram_macros.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/loader/worker_main_script_load_parameters.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/post_message_helper.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_post_message_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
+#include "third_party/blink/renderer/core/event_target_names.h"
+#include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/inspector/worker_thread_debugger.h"
-#include "third_party/blink/renderer/core/messaging/post_message_options.h"
+#include "third_party/blink/renderer/core/messaging/blink_transferable_message.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker_object_proxy.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker_thread.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worker_classic_script_loader.h"
 #include "third_party/blink/renderer/core/workers/worker_clients.h"
 #include "third_party/blink/renderer/core/workers/worker_module_tree_client.h"
+#include "third_party/blink/renderer/platform/back_forward_cache_buffer_limit_tracker.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
@@ -60,51 +66,159 @@ namespace blink {
 DedicatedWorkerGlobalScope* DedicatedWorkerGlobalScope::Create(
     std::unique_ptr<GlobalScopeCreationParams> creation_params,
     DedicatedWorkerThread* thread,
-    base::TimeTicks time_origin) {
-  std::unique_ptr<Vector<String>> outside_origin_trial_tokens =
-      std::move(creation_params->origin_trial_tokens);
+    base::TimeTicks time_origin,
+    mojo::PendingRemote<mojom::blink::DedicatedWorkerHost>
+        dedicated_worker_host,
+    mojo::PendingRemote<mojom::blink::BackForwardCacheControllerHost>
+        back_forward_cache_controller_host) {
+  std::unique_ptr<Vector<OriginTrialFeature>> inherited_trial_features =
+      std::move(creation_params->inherited_trial_features);
+  BeginFrameProviderParams begin_frame_provider_params =
+      creation_params->begin_frame_provider_params;
 
-  // Off-the-main-thread worker script fetch:
-  // Initialize() is called after script fetch.
-  if (creation_params->off_main_thread_fetch_option ==
-      OffMainThreadWorkerScriptFetchOption::kEnabled) {
-    return MakeGarbageCollected<DedicatedWorkerGlobalScope>(
-        std::move(creation_params), thread, time_origin,
-        std::move(outside_origin_trial_tokens));
-  }
-
-  // Legacy on-the-main-thread worker script fetch (to be removed):
   KURL response_script_url = creation_params->script_url;
   network::mojom::ReferrerPolicy response_referrer_policy =
       creation_params->referrer_policy;
-  mojom::IPAddressSpace response_address_space =
-      *creation_params->response_address_space;
+  const bool parent_cross_origin_isolated_capability =
+      creation_params->parent_cross_origin_isolated_capability;
+  const bool parent_isolated_application_capability =
+      creation_params->parent_isolated_application_capability;
+
+  Vector<network::mojom::blink::ContentSecurityPolicyPtr> response_csp =
+      std::move(creation_params->response_content_security_policies);
   auto* global_scope = MakeGarbageCollected<DedicatedWorkerGlobalScope>(
       std::move(creation_params), thread, time_origin,
-      std::move(outside_origin_trial_tokens));
-  // Pass dummy CSP headers here as it is superseded by outside's CSP headers in
-  // Initialize().
-  // Pass dummy origin trial tokens here as it is already set to outside's
-  // origin trial tokens in DedicatedWorkerGlobalScope's constructor.
-  global_scope->Initialize(response_script_url, response_referrer_policy,
-                           response_address_space, Vector<CSPHeaderAndType>(),
-                           nullptr /* response_origin_trial_tokens */);
-  return global_scope;
+      std::move(inherited_trial_features), begin_frame_provider_params,
+      parent_cross_origin_isolated_capability,
+      parent_isolated_application_capability, std::move(dedicated_worker_host),
+      std::move(back_forward_cache_controller_host));
+
+  if (global_scope->IsOffMainThreadScriptFetchDisabled()) {
+    // Legacy on-the-main-thread worker script fetch (to be removed):
+    // Pass dummy origin trial tokens here as it is already set to outside's
+    // origin trial tokens in DedicatedWorkerGlobalScope's constructor.
+    global_scope->Initialize(response_script_url, response_referrer_policy,
+                             std::move(response_csp),
+                             nullptr /* response_origin_trial_tokens */);
+    return global_scope;
+  } else {
+    // Off-the-main-thread worker script fetch:
+    // Initialize() is called after script fetch.
+    return global_scope;
+  }
+}
+
+// static
+DedicatedWorkerGlobalScope::ParsedCreationParams
+DedicatedWorkerGlobalScope::ParseCreationParams(
+    std::unique_ptr<GlobalScopeCreationParams> creation_params) {
+  ParsedCreationParams parsed_creation_params;
+
+  // Copy some stuff we need after passing the creation params to
+  // WorkerGlobalScope.
+  parsed_creation_params.parent_context_token =
+      creation_params->parent_context_token.value();
+  parsed_creation_params.starter_secure_context =
+      creation_params->starter_secure_context;
+
+  if (!RuntimeEnabledFeatures::SecureContextFixForWorkersEnabled()) {
+    // Preserve incorrect behavior when the fix is not enabled.
+    creation_params->starter_secure_context = true;
+  }
+
+  parsed_creation_params.creation_params = std::move(creation_params);
+  return parsed_creation_params;
 }
 
 DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(
     std::unique_ptr<GlobalScopeCreationParams> creation_params,
     DedicatedWorkerThread* thread,
     base::TimeTicks time_origin,
-    std::unique_ptr<Vector<String>> outside_origin_trial_tokens)
-    : WorkerGlobalScope(std::move(creation_params), thread, time_origin) {
+    std::unique_ptr<Vector<OriginTrialFeature>> inherited_trial_features,
+    const BeginFrameProviderParams& begin_frame_provider_params,
+    bool parent_cross_origin_isolated_capability,
+    bool parent_isolated_application_capability,
+    mojo::PendingRemote<mojom::blink::DedicatedWorkerHost>
+        dedicated_worker_host,
+    mojo::PendingRemote<mojom::blink::BackForwardCacheControllerHost>
+        back_forward_cache_controller_host)
+    : DedicatedWorkerGlobalScope(
+          ParseCreationParams(std::move(creation_params)),
+          thread,
+          time_origin,
+          std::move(inherited_trial_features),
+          begin_frame_provider_params,
+          parent_cross_origin_isolated_capability,
+          parent_isolated_application_capability,
+          std::move(dedicated_worker_host),
+          std::move(back_forward_cache_controller_host)) {}
+
+DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(
+    ParsedCreationParams parsed_creation_params,
+    DedicatedWorkerThread* thread,
+    base::TimeTicks time_origin,
+    std::unique_ptr<Vector<OriginTrialFeature>> inherited_trial_features,
+    const BeginFrameProviderParams& begin_frame_provider_params,
+    bool parent_cross_origin_isolated_capability,
+    bool parent_isolated_application_capability,
+    mojo::PendingRemote<mojom::blink::DedicatedWorkerHost>
+        dedicated_worker_host,
+    mojo::PendingRemote<mojom::blink::BackForwardCacheControllerHost>
+        back_forward_cache_controller_host)
+    : WorkerGlobalScope(std::move(parsed_creation_params.creation_params),
+                        thread,
+                        time_origin,
+                        false),
+      token_(thread->WorkerObjectProxy().token()),
+      parent_token_(parsed_creation_params.parent_context_token),
+      cross_origin_isolated_capability_(Agent::IsCrossOriginIsolated()),
+      isolated_application_capability_(Agent::IsIsolatedApplication()),
+      animation_frame_provider_(
+          MakeGarbageCollected<WorkerAnimationFrameProvider>(
+              this,
+              begin_frame_provider_params)) {
+  // TODO(https://crbug.com/780031): When the right blink feature is disabled,
+  // we can incorrectly compute the secure context bit for this worker. It
+  // should never be true when the creator context was non-secure.
+  if (IsSecureContext() && !parsed_creation_params.starter_secure_context) {
+    CountUse(mojom::blink::WebFeature::kSecureContextIncorrectForWorker);
+  }
+
+  // https://html.spec.whatwg.org/C/#run-a-worker
+  // Step 14.10 "If shared is false and owner's cross-origin isolated
+  // capability is false, then set worker global scope's cross-origin isolated
+  // capability to false."
+  if (!parent_cross_origin_isolated_capability) {
+    cross_origin_isolated_capability_ = false;
+  }
+
+  // TODO(mkwst): This needs a specification.
+  if (!parent_isolated_application_capability) {
+    isolated_application_capability_ = false;
+  }
+
   // Dedicated workers don't need to pause after script fetch.
   ReadyToRunWorkerScript();
-  // Inherit the outside's origin trial tokens.
-  OriginTrialContext::AddTokens(this, outside_origin_trial_tokens.get());
+  // Inherit the outside's enabled origin trial features.
+  OriginTrialContext::ActivateWorkerInheritedFeatures(
+      this, inherited_trial_features.get());
+
+  dedicated_worker_host_.Bind(std::move(dedicated_worker_host),
+                              GetTaskRunner(TaskType::kInternalDefault));
+  back_forward_cache_controller_host_.Bind(
+      std::move(back_forward_cache_controller_host),
+      GetTaskRunner(TaskType::kInternalDefault));
 }
 
 DedicatedWorkerGlobalScope::~DedicatedWorkerGlobalScope() = default;
+
+void DedicatedWorkerGlobalScope::Dispose() {
+  BackForwardCacheBufferLimitTracker::Get()
+      .DidRemoveFrameOrWorkerFromBackForwardCache(
+          total_bytes_buffered_while_in_back_forward_cache_);
+  total_bytes_buffered_while_in_back_forward_cache_ = 0;
+  WorkerGlobalScope::Dispose();
+}
 
 const AtomicString& DedicatedWorkerGlobalScope::InterfaceName() const {
   return event_target_names::kDedicatedWorkerGlobalScope;
@@ -114,30 +228,32 @@ const AtomicString& DedicatedWorkerGlobalScope::InterfaceName() const {
 void DedicatedWorkerGlobalScope::Initialize(
     const KURL& response_url,
     network::mojom::ReferrerPolicy response_referrer_policy,
-    mojom::IPAddressSpace response_address_space,
-    const Vector<CSPHeaderAndType>& /* response_csp_headers */,
+    Vector<network::mojom::blink::ContentSecurityPolicyPtr> response_csp,
     const Vector<String>* /* response_origin_trial_tokens */) {
-  // Step 12.3. "Set worker global scope's url to response's url."
+  // Step 14.3. "Set worker global scope's url to response's url."
   InitializeURL(response_url);
 
-  // Step 12.4. "Set worker global scope's HTTPS state to response's HTTPS
+  // Step 14.4. "Set worker global scope's HTTPS state to response's HTTPS
   // state."
   // This is done in the constructor of WorkerGlobalScope.
 
-  // Step 12.5. "Set worker global scope's referrer policy to the result of
+  // Step 14.5. "Set worker global scope's referrer policy to the result of
   // parsing the `Referrer-Policy` header of response."
   SetReferrerPolicy(response_referrer_policy);
 
-  // https://wicg.github.io/cors-rfc1918/#integration-html
-  SetAddressSpace(response_address_space);
-
-  // Step 12.6. "Execute the Initialize a global object's CSP list algorithm
-  // on worker global scope and response. [CSP]"
-  // DedicatedWorkerGlobalScope inherits the outside's CSP instead of the
-  // response CSP headers. These should be called after SetAddressSpace() to
-  // correctly override the address space by the "treat-as-public-address" CSP
-  // directive.
-  InitContentSecurityPolicyFromVector(OutsideContentSecurityPolicyHeaders());
+  // The following is the Content-Security-Policy part of "Initialize worker
+  // global scope's policy container"
+  // https://html.spec.whatwg.org/#initialize-worker-policy-container
+  //
+  // For workers delivered from network schemes we use the parsed CSP from the
+  // response headers, while for local schemes CSP is inherited from the owner.
+  Vector<network::mojom::blink::ContentSecurityPolicyPtr> csp_list =
+      response_url.ProtocolIsAbout() || response_url.ProtocolIsData() ||
+              response_url.ProtocolIs("blob") ||
+              response_url.ProtocolIs("filesystem")
+          ? mojo::Clone(OutsideContentSecurityPolicies())
+          : std::move(response_csp);
+  InitContentSecurityPolicyFromVector(std::move(csp_list));
   BindContentSecurityPolicyToExecutionContext();
 
   // This should be called after OriginTrialContext::AddTokens() to install
@@ -145,21 +261,38 @@ void DedicatedWorkerGlobalScope::Initialize(
   // DedicatedWorkerGlobalScope inherits the outside's OriginTrialTokens in the
   // constructor instead of the response origin trial tokens.
   ScriptController()->PrepareForEvaluation();
+
+  // Step 14.11. "If is shared is false and response's url's scheme is "data",
+  // then set worker global scope's cross-origin isolated capability to false."
+  if (response_url.ProtocolIsData()) {
+    cross_origin_isolated_capability_ = false;
+
+    // TODO(mkwst): This needs a spec.
+    isolated_application_capability_ = false;
+  }
 }
 
 // https://html.spec.whatwg.org/C/#worker-processing-model
 void DedicatedWorkerGlobalScope::FetchAndRunClassicScript(
     const KURL& script_url,
+    std::unique_ptr<WorkerMainScriptLoadParameters>
+        worker_main_script_load_params,
+    std::unique_ptr<PolicyContainer> policy_container,
     const FetchClientSettingsObjectSnapshot& outside_settings_object,
     WorkerResourceTimingNotifier& outside_resource_timing_notifier,
     const v8_inspector::V8StackTraceId& stack_id) {
-  DCHECK(base::FeatureList::IsEnabled(
-      features::kOffMainThreadDedicatedWorkerScriptFetch));
+  DCHECK(base::FeatureList::IsEnabled(features::kPlzDedicatedWorker));
   DCHECK(!IsContextPaused());
+
+  // TODO(crbug.com/1177199): SetPolicyContainer once we passed down policy
+  // container from DedicatedWorkerHost
 
   // Step 12. "Fetch a classic worker script given url, outside settings,
   // destination, and inside settings."
-  auto destination = mojom::RequestContextType::WORKER;
+  mojom::blink::RequestContextType context_type =
+      mojom::blink::RequestContextType::WORKER;
+  network::mojom::RequestDestination destination =
+      network::mojom::RequestDestination::kWorker;
 
   // Step 12.1. "Set request's reserved client to inside settings."
   // The browesr process takes care of this.
@@ -172,7 +305,8 @@ void DedicatedWorkerGlobalScope::FetchAndRunClassicScript(
       *this,
       CreateOutsideSettingsFetcher(outside_settings_object,
                                    outside_resource_timing_notifier),
-      script_url, destination, network::mojom::RequestMode::kSameOrigin,
+      script_url, std::move(worker_main_script_load_params), context_type,
+      destination, network::mojom::RequestMode::kSameOrigin,
       network::mojom::CredentialsMode::kSameOrigin,
       WTF::Bind(&DedicatedWorkerGlobalScope::DidReceiveResponseForClassicScript,
                 WrapWeakPersistent(this),
@@ -185,23 +319,49 @@ void DedicatedWorkerGlobalScope::FetchAndRunClassicScript(
 // https://html.spec.whatwg.org/C/#worker-processing-model
 void DedicatedWorkerGlobalScope::FetchAndRunModuleScript(
     const KURL& module_url_record,
+    std::unique_ptr<WorkerMainScriptLoadParameters>
+        worker_main_script_load_params,
+    std::unique_ptr<PolicyContainer> policy_container,
     const FetchClientSettingsObjectSnapshot& outside_settings_object,
     WorkerResourceTimingNotifier& outside_resource_timing_notifier,
-    network::mojom::CredentialsMode credentials_mode) {
+    network::mojom::CredentialsMode credentials_mode,
+    RejectCoepUnsafeNone reject_coep_unsafe_none) {
+  // TODO(crbug.com/1177199): SetPolicyContainer once we passed down policy
+  // container from DedicatedWorkerHost
+
+  reject_coep_unsafe_none_ = reject_coep_unsafe_none;
+
+  if (worker_main_script_load_params) {
+    SetWorkerMainScriptLoadingParametersForModules(
+        std::move(worker_main_script_load_params));
+  }
+
   // Step 12: "Let destination be "sharedworker" if is shared is true, and
   // "worker" otherwise."
-  mojom::RequestContextType destination = mojom::RequestContextType::WORKER;
-
-  Modulator* modulator = Modulator::From(ScriptController()->GetScriptState());
+  mojom::blink::RequestContextType context_type =
+      mojom::blink::RequestContextType::WORKER;
+  network::mojom::RequestDestination destination =
+      network::mojom::RequestDestination::kWorker;
 
   // Step 13: "... Fetch a module worker script graph given url, outside
   // settings, destination, the value of the credentials member of options, and
   // inside settings."
   FetchModuleScript(module_url_record, outside_settings_object,
-                    outside_resource_timing_notifier, destination,
+                    outside_resource_timing_notifier, context_type, destination,
                     credentials_mode,
                     ModuleScriptCustomFetchType::kWorkerConstructor,
-                    MakeGarbageCollected<WorkerModuleTreeClient>(modulator));
+                    MakeGarbageCollected<WorkerModuleTreeClient>(
+                        ScriptController()->GetScriptState()));
+}
+
+bool DedicatedWorkerGlobalScope::IsOffMainThreadScriptFetchDisabled() {
+  // The top-level dedicated worker script is loaded on the main thread when the
+  // script type is classic and PlzDedicatedWorker (off-the-main-thread script
+  // fetch) is disabled.
+  // TODO(https://crbug.com/835717): Remove this function after dedicated
+  // workers support off-the-main-thread script fetch by default.
+  return GetScriptType() == mojom::blink::ScriptType::kClassic &&
+         !base::FeatureList::IsEnabled(features::kPlzDedicatedWorker);
 }
 
 const String DedicatedWorkerGlobalScope::name() const {
@@ -210,7 +370,7 @@ const String DedicatedWorkerGlobalScope::name() const {
 
 void DedicatedWorkerGlobalScope::postMessage(ScriptState* script_state,
                                              const ScriptValue& message,
-                                             Vector<ScriptValue>& transfer,
+                                             HeapVector<ScriptValue>& transfer,
                                              ExceptionState& exception_state) {
   PostMessageOptions* options = PostMessageOptions::Create();
   if (!transfer.IsEmpty())
@@ -232,6 +392,8 @@ void DedicatedWorkerGlobalScope::postMessage(ScriptState* script_state,
   DCHECK(serialized_message);
   BlinkTransferableMessage transferable_message;
   transferable_message.message = serialized_message;
+  transferable_message.sender_origin =
+      GetExecutionContext()->GetSecurityOrigin()->IsolatedCopy();
   // Disentangle the port in preparation for sending it to the remote context.
   transferable_message.ports = MessagePort::DisentanglePorts(
       ExecutionContext::From(script_state), transferables.message_ports,
@@ -249,8 +411,7 @@ void DedicatedWorkerGlobalScope::postMessage(ScriptState* script_state,
 void DedicatedWorkerGlobalScope::DidReceiveResponseForClassicScript(
     WorkerClassicScriptLoader* classic_script_loader) {
   DCHECK(IsContextThread());
-  DCHECK(base::FeatureList::IsEnabled(
-      features::kOffMainThreadDedicatedWorkerScriptFetch));
+  DCHECK(base::FeatureList::IsEnabled(features::kPlzDedicatedWorker));
   probe::DidReceiveScriptResponse(this, classic_script_loader->Identifier());
 }
 
@@ -259,18 +420,25 @@ void DedicatedWorkerGlobalScope::DidFetchClassicScript(
     WorkerClassicScriptLoader* classic_script_loader,
     const v8_inspector::V8StackTraceId& stack_id) {
   DCHECK(IsContextThread());
-  DCHECK(base::FeatureList::IsEnabled(
-      features::kOffMainThreadDedicatedWorkerScriptFetch));
+  DCHECK(base::FeatureList::IsEnabled(features::kPlzDedicatedWorker));
 
   // Step 12. "If the algorithm asynchronously completes with null, then:"
   if (classic_script_loader->Failed()) {
     // Step 12.1. "Queue a task to fire an event named error at worker."
-    // Step 12.2. "Run the environment discarding steps for inside settings."
-    // Step 12.3. "Return."
+    // DidFailToFetchClassicScript() will asynchronously fire the event.
     ReportingProxy().DidFailToFetchClassicScript();
+
+    // Step 12.2. "Run the environment discarding steps for inside settings."
+    // Do nothing because the HTML spec doesn't define these steps for web
+    // workers.
+
+    // Schedule worker termination.
+    close();
+
+    // Step 12.3. "Return."
     return;
   }
-  ReportingProxy().DidFetchScript(classic_script_loader->AppCacheID());
+  ReportingProxy().DidFetchScript();
   probe::ScriptImported(this, classic_script_loader->Identifier(),
                         classic_script_loader->SourceText());
 
@@ -282,13 +450,13 @@ void DedicatedWorkerGlobalScope::DidFetchClassicScript(
   }
 
   // Step 12.3-12.6 are implemented in Initialize().
-  // Pass dummy CSP headers here as it is superseded by outside's CSP headers in
-  // Initialize().
   // Pass dummy origin trial tokens here as it is already set to outside's
   // origin trial tokens in DedicatedWorkerGlobalScope's constructor.
   Initialize(classic_script_loader->ResponseURL(), response_referrer_policy,
-             classic_script_loader->ResponseAddressSpace(),
-             Vector<CSPHeaderAndType>(),
+             classic_script_loader->GetContentSecurityPolicy()
+                 ? mojo::Clone(classic_script_loader->GetContentSecurityPolicy()
+                                   ->GetParsedPolicies())
+                 : Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
              nullptr /* response_origin_trial_tokens */);
 
   // Step 12.7. "Asynchronously complete the perform the fetch steps with
@@ -298,13 +466,89 @@ void DedicatedWorkerGlobalScope::DidFetchClassicScript(
       classic_script_loader->ReleaseCachedMetadata(), stack_id);
 }
 
+int DedicatedWorkerGlobalScope::requestAnimationFrame(
+    V8FrameRequestCallback* callback,
+    ExceptionState& exception_state) {
+  auto* frame_callback = MakeGarbageCollected<V8FrameCallback>(callback);
+  frame_callback->SetUseLegacyTimeBase(false);
+
+  int ret = animation_frame_provider_->RegisterCallback(frame_callback);
+
+  if (ret == WorkerAnimationFrameProvider::kInvalidCallbackId) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotSupportedError,
+        "requestAnimationFrame not supported in this Worker.");
+  }
+
+  return ret;
+}
+
+void DedicatedWorkerGlobalScope::cancelAnimationFrame(int id) {
+  animation_frame_provider_->CancelCallback(id);
+}
+
 DedicatedWorkerObjectProxy& DedicatedWorkerGlobalScope::WorkerObjectProxy()
     const {
   return static_cast<DedicatedWorkerThread*>(GetThread())->WorkerObjectProxy();
 }
 
-void DedicatedWorkerGlobalScope::Trace(blink::Visitor* visitor) {
+void DedicatedWorkerGlobalScope::UpdateBackForwardCacheDisablingFeatures(
+    uint64_t features_mask) {
+  // `back_forward_cache_controller_host_` might not be bound when non-
+  // PlzDedicatedWorker is used. Non-PlzDedicatedWorker will be removed in near
+  // future.
+  // TODO(hajimehoshi): Remove this 'if' branch after non-PlzDedicatedWorker is
+  // removed.
+  if (!back_forward_cache_controller_host_.is_bound()) {
+    return;
+  }
+
+  back_forward_cache_controller_host_
+      ->DidChangeBackForwardCacheDisablingFeatures(features_mask);
+}
+
+void DedicatedWorkerGlobalScope::Trace(Visitor* visitor) const {
+  visitor->Trace(dedicated_worker_host_);
+  visitor->Trace(back_forward_cache_controller_host_);
+  visitor->Trace(animation_frame_provider_);
   WorkerGlobalScope::Trace(visitor);
+}
+
+void DedicatedWorkerGlobalScope::EvictFromBackForwardCache(
+    mojom::blink::RendererEvictionReason reason) {
+  if (!base::FeatureList::IsEnabled(
+          features::kBackForwardCacheDedicatedWorker)) {
+    return;
+  }
+  if (!back_forward_cache_controller_host_.is_bound()) {
+    return;
+  }
+  if (!GetExecutionContext()->is_in_back_forward_cache()) {
+    // Don't send an eviction message unless the document associated with this
+    // DedicatedWorker is in back/forward cache.
+    // TODO(crbug.com/1163843): Maybe also check if eviction is already disabled
+    // for the document?
+    return;
+  }
+  UMA_HISTOGRAM_ENUMERATION("BackForwardCache.Eviction.Renderer", reason);
+  back_forward_cache_controller_host_->EvictFromBackForwardCache(reason);
+}
+
+void DedicatedWorkerGlobalScope::DidBufferLoadWhileInBackForwardCache(
+    size_t num_bytes) {
+  total_bytes_buffered_while_in_back_forward_cache_ += num_bytes;
+  BackForwardCacheBufferLimitTracker::Get().DidBufferBytes(num_bytes);
+}
+
+void DedicatedWorkerGlobalScope::SetIsInBackForwardCache(
+    bool is_in_back_forward_cache) {
+  WorkerGlobalScope::SetIsInBackForwardCache(is_in_back_forward_cache);
+  if (!is_in_back_forward_cache) {
+    BackForwardCacheBufferLimitTracker::Get()
+        .DidRemoveFrameOrWorkerFromBackForwardCache(
+            total_bytes_buffered_while_in_back_forward_cache_);
+    total_bytes_buffered_while_in_back_forward_cache_ = 0;
+  }
 }
 
 }  // namespace blink

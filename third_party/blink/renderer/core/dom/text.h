@@ -25,7 +25,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_TEXT_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css/style_recalc.h"
+#include "third_party/blink/renderer/core/css/style_recalc_change.h"
 #include "third_party/blink/renderer/core/dom/character_data.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
@@ -73,7 +73,7 @@ class CORE_EXPORT Text : public CharacterData {
   bool CanContainRangeEndPoint() const final { return true; }
   NodeType getNodeType() const override;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   String nodeName() const override;

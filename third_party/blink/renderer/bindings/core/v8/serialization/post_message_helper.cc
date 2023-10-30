@@ -4,20 +4,22 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/serialization/post_message_helper.h"
 
+#include "third_party/blink/public/mojom/messaging/user_activation_snapshot.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_post_message_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_structured_serialize_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_window_post_message_options.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
-#include "third_party/blink/renderer/core/frame/window_post_message_options.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
-#include "third_party/blink/renderer/core/messaging/post_message_options.h"
 
 namespace blink {
 
 scoped_refptr<SerializedScriptValue> PostMessageHelper::SerializeMessageByMove(
     v8::Isolate* isolate,
     const ScriptValue& message,
-    const PostMessageOptions* options,
+    const StructuredSerializeOptions* options,
     Transferables& transferables,
     ExceptionState& exception_state) {
   if (options->hasTransfer() && !options->transfer().IsEmpty()) {
@@ -42,7 +44,7 @@ scoped_refptr<SerializedScriptValue> PostMessageHelper::SerializeMessageByMove(
 scoped_refptr<SerializedScriptValue> PostMessageHelper::SerializeMessageByCopy(
     v8::Isolate* isolate,
     const ScriptValue& message,
-    const PostMessageOptions* options,
+    const StructuredSerializeOptions* options,
     Transferables& transferables,
     ExceptionState& exception_state) {
   if (options->hasTransfer() && !options->transfer().IsEmpty()) {
@@ -71,7 +73,7 @@ scoped_refptr<SerializedScriptValue> PostMessageHelper::SerializeMessageByCopy(
   if (exception_state.HadException())
     return nullptr;
 
-  // Neuter the original array buffers on the sender context.
+  // Detach the original array buffers on the sender context.
   SerializedScriptValue::TransferArrayBufferContents(
       isolate, transferable_array_buffers, exception_state);
   if (exception_state.HadException())
@@ -92,11 +94,11 @@ PostMessageHelper::CreateUserActivationSnapshot(
     const PostMessageOptions* options) {
   if (!options->includeUserActivation())
     return nullptr;
-  if (LocalDOMWindow* dom_window = execution_context->ExecutingWindow()) {
+  if (auto* dom_window = DynamicTo<LocalDOMWindow>(execution_context)) {
     if (LocalFrame* frame = dom_window->GetFrame()) {
       return mojom::blink::UserActivationSnapshot::New(
-          frame->HasBeenActivated(),
-          LocalFrame::HasTransientUserActivation(frame, false));
+          frame->HasStickyUserActivation(),
+          LocalFrame::HasTransientUserActivation(frame));
     }
   }
   return nullptr;
@@ -105,11 +107,11 @@ PostMessageHelper::CreateUserActivationSnapshot(
 // static
 scoped_refptr<const SecurityOrigin> PostMessageHelper::GetTargetOrigin(
     const WindowPostMessageOptions* options,
-    const Document& source_document,
+    const ExecutionContext& context,
     ExceptionState& exception_state) {
   const String& target_origin = options->targetOrigin();
   if (target_origin == "/")
-    return source_document.GetSecurityOrigin();
+    return context.GetSecurityOrigin();
   if (target_origin == "*")
     return nullptr;
   scoped_refptr<const SecurityOrigin> target =

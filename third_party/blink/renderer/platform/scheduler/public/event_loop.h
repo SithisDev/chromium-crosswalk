@@ -22,6 +22,7 @@ class MicrotaskQueue;
 namespace blink {
 
 class Agent;
+class FrameOrWorkerScheduler;
 
 namespace scheduler {
 
@@ -58,6 +59,9 @@ class PLATFORM_EXPORT EventLoop final : public WTF::RefCounted<EventLoop> {
   USING_FAST_MALLOC(EventLoop);
 
  public:
+  EventLoop(const EventLoop&) = delete;
+  EventLoop& operator=(const EventLoop&) = delete;
+
   // Queues |cb| to the backing v8::MicrotaskQueue.
   void EnqueueMicrotask(base::OnceClosure cb);
 
@@ -72,15 +76,21 @@ class PLATFORM_EXPORT EventLoop final : public WTF::RefCounted<EventLoop> {
   void Disable();
   void Enable();
 
+  void AttachScheduler(FrameOrWorkerScheduler*);
+  void DetachScheduler(FrameOrWorkerScheduler*);
+
   // Returns the MicrotaskQueue instance to be associated to v8::Context. Pass
   // it to v8::Context::New().
   v8::MicrotaskQueue* microtask_queue() const { return microtask_queue_.get(); }
+
+  bool IsSchedulerAttachedForTest(FrameOrWorkerScheduler*);
 
  private:
   friend class WTF::RefCounted<EventLoop>;
   friend blink::Agent;
 
-  explicit EventLoop(v8::Isolate* isolate);
+  EventLoop(v8::Isolate* isolate,
+            std::unique_ptr<v8::MicrotaskQueue> microtask_queue = nullptr);
   ~EventLoop();
 
   static void RunPendingMicrotask(void* data);
@@ -89,8 +99,7 @@ class PLATFORM_EXPORT EventLoop final : public WTF::RefCounted<EventLoop> {
   bool loop_enabled_ = true;
   Deque<base::OnceClosure> pending_microtasks_;
   std::unique_ptr<v8::MicrotaskQueue> microtask_queue_;
-
-  DISALLOW_COPY_AND_ASSIGN(EventLoop);
+  HashSet<FrameOrWorkerScheduler*> schedulers_;
 };
 
 }  // namespace scheduler

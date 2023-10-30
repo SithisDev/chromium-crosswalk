@@ -27,15 +27,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_TESTING_INTERNAL_SETTINGS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TESTING_INTERNAL_SETTINGS_H_
 
-#include "third_party/blink/public/common/manifest/web_display_mode.h"
-#include "third_party/blink/renderer/core/editing/editing_behavior_types.h"
+#include "third_party/blink/public/mojom/manifest/display_mode.mojom-shared.h"
+#include "third_party/blink/public/mojom/webpreferences/web_preferences.mojom-blink.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/testing/internal_settings_generated.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
-#include "third_party/blink/renderer/platform/graphics/image_animation_policy.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace blink {
 
@@ -44,15 +43,10 @@ class Page;
 class Settings;
 
 class InternalSettings final : public InternalSettingsGenerated,
-                               public Supplement<Page> {
-  USING_GARBAGE_COLLECTED_MIXIN(InternalSettings);
+                               public InternalSettingsPageSupplementBase {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static const char kSupplementName[];
-
-  static void PrepareForLeakDetection();
-
   class Backup {
     DISALLOW_NEW();
 
@@ -60,21 +54,17 @@ class InternalSettings final : public InternalSettingsGenerated,
     explicit Backup(Settings*);
     void RestoreTo(Settings*);
 
-    bool original_csp_;
     bool original_overlay_scrollbars_enabled_;
-    EditingBehaviorType original_editing_behavior_;
+    mojom::EditingBehavior original_editing_behavior_;
     bool original_text_autosizing_enabled_;
-    IntSize original_text_autosizing_window_size_override_;
+    gfx::Size original_text_autosizing_window_size_override_;
     float original_accessibility_font_scale_factor_;
     String original_media_type_override_;
-    WebDisplayMode original_display_mode_override_;
-    bool original_mock_scrollbars_enabled_;
+    blink::mojom::DisplayMode original_display_mode_override_;
     bool original_mock_gesture_tap_highlights_enabled_;
-    bool lang_attribute_aware_form_control_ui_enabled_;
     bool images_enabled_;
     String default_video_poster_url_;
-    ImageAnimationPolicy original_image_animation_policy_;
-    bool original_scroll_top_left_interop_enabled_;
+    mojom::blink::ImageAnimationPolicy original_image_animation_policy_;
   };
 
   static InternalSettings* From(Page&);
@@ -102,16 +92,14 @@ class InternalSettings final : public InternalSettingsGenerated,
   void setFantasyFontFamily(const AtomicString& family,
                             const String& script,
                             ExceptionState&);
-  void setPictographFontFamily(const AtomicString& family,
-                               const String& script,
-                               ExceptionState&);
-
+  void setMathFontFamily(const AtomicString& family,
+                         const String& script,
+                         ExceptionState&);
   void setDefaultVideoPosterURL(const String& url, ExceptionState&);
   void setEditingBehavior(const String&, ExceptionState&);
   void setImagesEnabled(bool, ExceptionState&);
   void setMediaTypeOverride(const String& media_type, ExceptionState&);
   void setDisplayModeOverride(const String& display_mode, ExceptionState&);
-  void setMockScrollbarsEnabled(bool, ExceptionState&);
   void setHideScrollbars(bool, ExceptionState&);
   void setMockGestureTapHighlightsEnabled(bool, ExceptionState&);
   void setTextAutosizingEnabled(bool, ExceptionState&);
@@ -127,23 +115,16 @@ class InternalSettings final : public InternalSettingsGenerated,
   void setViewportStyle(const String& preference, ExceptionState&);
   void setPresentationReceiver(bool, ExceptionState&);
   void setAutoplayPolicy(const String&, ExceptionState&);
-
-  // FIXME: The following are RuntimeEnabledFeatures and likely
-  // cannot be changed after process start. These setters should
-  // be removed or moved onto internals.runtimeFlags:
-  void setLangAttributeAwareFormControlUIEnabled(bool);
-  void setExperimentalContentSecurityPolicyFeaturesEnabled(bool);
+  void setUniversalAccessFromFileURLs(bool, ExceptionState&);
   void setImageAnimationPolicy(const String&, ExceptionState&);
-  void setScrollTopLeftInteropEnabled(bool);
-
-  void Trace(blink::Visitor*) override;
-
   void setAvailablePointerTypes(const String&, ExceptionState&);
   void setPrimaryPointerType(const String&, ExceptionState&);
   void setAvailableHoverTypes(const String&, ExceptionState&);
   void setPrimaryHoverType(const String&, ExceptionState&);
   void SetDnsPrefetchLogging(bool, ExceptionState&);
   void SetPreloadLogging(bool, ExceptionState&);
+
+  void Trace(Visitor*) const override;
 
  private:
   Settings* GetSettings() const;

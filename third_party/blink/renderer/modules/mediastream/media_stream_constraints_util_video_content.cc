@@ -2,18 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/public/web/modules/mediastream/media_stream_constraints_util_video_content.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_video_content.h"
 
 #include <algorithm>
 #include <cmath>
 #include <utility>
 
 #include "media/base/limits.h"
+#include "media/base/video_types.h"
 #include "third_party/blink/public/common/mediastream/media_stream_controls.h"
-#include "third_party/blink/public/platform/web_media_constraints.h"
 #include "third_party/blink/public/platform/web_string.h"
-#include "third_party/blink/public/web/modules/mediastream/media_stream_constraints_util_sets.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_sets.h"
+#include "third_party/blink/renderer/platform/mediastream/media_constraints.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -34,16 +37,15 @@ static_assert(kDefaultScreenCastHeight <= kMaxScreenCastDimension,
 
 const double kMaxScreenCastFrameRate = 120.0;
 const double kDefaultScreenCastFrameRate =
-    blink::MediaStreamVideoSource::kDefaultFrameRate;
+    MediaStreamVideoSource::kDefaultFrameRate;
 
 namespace {
 
-using blink::VideoCaptureSettings;
-using ResolutionSet = blink::media_constraints::ResolutionSet;
+using ResolutionSet = media_constraints::ResolutionSet;
 using Point = ResolutionSet::Point;
-using StringSet = blink::media_constraints::DiscreteSet<std::string>;
-using BoolSet = blink::media_constraints::DiscreteSet<bool>;
-using DoubleRangeSet = blink::media_constraints::NumericRangeSet<double>;
+using StringSet = media_constraints::DiscreteSet<std::string>;
+using BoolSet = media_constraints::DiscreteSet<bool>;
+using DoubleRangeSet = media_constraints::NumericRangeSet<double>;
 
 constexpr double kMinScreenCastAspectRatio =
     static_cast<double>(kMinScreenCastDimension) /
@@ -57,7 +59,7 @@ class VideoContentCaptureCandidates {
   VideoContentCaptureCandidates()
       : has_explicit_max_height_(false), has_explicit_max_width_(false) {}
   explicit VideoContentCaptureCandidates(
-      const blink::WebMediaTrackConstraintSet& constraint_set)
+      const MediaTrackConstraintSetPlatform& constraint_set)
       : resolution_set_(ResolutionSet::FromConstraintSet(constraint_set)),
         has_explicit_max_height_(ConstraintHasMax(constraint_set.height) &&
                                  ConstraintMax(constraint_set.height) <=
@@ -69,11 +71,11 @@ class VideoContentCaptureCandidates {
             DoubleRangeSet::FromConstraint(constraint_set.frame_rate,
                                            0.0,
                                            kMaxScreenCastFrameRate)),
-        device_id_set_(blink::media_constraints::StringSetFromConstraint(
+        device_id_set_(media_constraints::StringSetFromConstraint(
             constraint_set.device_id)),
-        noise_reduction_set_(blink::media_constraints::BoolSetFromConstraint(
+        noise_reduction_set_(media_constraints::BoolSetFromConstraint(
             constraint_set.goog_noise_reduction)),
-        rescale_set_(blink::media_constraints::RescaleSetFromConstraint(
+        rescale_set_(media_constraints::RescaleSetFromConstraint(
             constraint_set.resize_mode)) {}
 
   VideoContentCaptureCandidates(VideoContentCaptureCandidates&& other) =
@@ -174,7 +176,7 @@ gfx::Size ToGfxSize(const Point& point) {
 
 double SelectFrameRateFromCandidates(
     const DoubleRangeSet& candidate_set,
-    const blink::WebMediaTrackConstraintSet& basic_constraint_set,
+    const MediaTrackConstraintSetPlatform& basic_constraint_set,
     double default_frame_rate) {
   double frame_rate = basic_constraint_set.frame_rate.HasIdeal()
                           ? basic_constraint_set.frame_rate.Ideal()
@@ -189,7 +191,7 @@ double SelectFrameRateFromCandidates(
 
 media::VideoCaptureParams SelectVideoCaptureParamsFromCandidates(
     const VideoContentCaptureCandidates& candidates,
-    const blink::WebMediaTrackConstraintSet& basic_constraint_set,
+    const MediaTrackConstraintSetPlatform& basic_constraint_set,
     int default_height,
     int default_width,
     double default_frame_rate,
@@ -200,9 +202,13 @@ media::VideoCaptureParams SelectVideoCaptureParamsFromCandidates(
       candidates.resolution_set().SelectClosestPointToIdeal(
           basic_constraint_set, default_height, default_width);
   media::VideoCaptureParams params;
+  // If zero-copy tab capture is enabled, we want the capturer to auto-select
+  // the pixel format:
   params.requested_format = media::VideoCaptureFormat(
       ToGfxSize(requested_resolution), static_cast<float>(requested_frame_rate),
-      media::PIXEL_FORMAT_I420);
+      RuntimeEnabledFeatures::ZeroCopyTabCaptureEnabled()
+          ? media::PIXEL_FORMAT_UNKNOWN
+          : media::PIXEL_FORMAT_I420);
   params.resolution_change_policy = SelectResolutionPolicyFromCandidates(
       candidates.resolution_set(), default_resolution_policy);
   // Content capture always uses default power-line frequency.
@@ -213,7 +219,7 @@ media::VideoCaptureParams SelectVideoCaptureParamsFromCandidates(
 
 std::string SelectDeviceIDFromCandidates(
     const StringSet& candidates,
-    const blink::WebMediaTrackConstraintSet& basic_constraint_set) {
+    const MediaTrackConstraintSetPlatform& basic_constraint_set) {
   DCHECK(!candidates.IsEmpty());
   if (basic_constraint_set.device_id.HasIdeal()) {
     // If there are multiple elements specified by ideal, break ties by choosing
@@ -237,35 +243,35 @@ std::string SelectDeviceIDFromCandidates(
   return candidates.FirstElement();
 }
 
-base::Optional<bool> SelectNoiseReductionFromCandidates(
+absl::optional<bool> SelectNoiseReductionFromCandidates(
     const BoolSet& candidates,
-    const blink::WebMediaTrackConstraintSet& basic_constraint_set) {
+    const MediaTrackConstraintSetPlatform& basic_constraint_set) {
   DCHECK(!candidates.IsEmpty());
   if (basic_constraint_set.goog_noise_reduction.HasIdeal() &&
       candidates.Contains(basic_constraint_set.goog_noise_reduction.Ideal())) {
-    return base::Optional<bool>(
+    return absl::optional<bool>(
         basic_constraint_set.goog_noise_reduction.Ideal());
   }
 
   if (candidates.is_universal())
-    return base::Optional<bool>();
+    return absl::optional<bool>();
 
   // A non-universal BoolSet can have at most one element.
-  return base::Optional<bool>(candidates.FirstElement());
+  return absl::optional<bool>(candidates.FirstElement());
 }
 
 bool SelectRescaleFromCandidates(
     const BoolSet& candidates,
-    const blink::WebMediaTrackConstraintSet& basic_constraint_set) {
+    const MediaTrackConstraintSetPlatform& basic_constraint_set) {
   DCHECK(!candidates.IsEmpty());
   if (basic_constraint_set.resize_mode.HasIdeal()) {
     for (const auto& ideal_resize_value :
          basic_constraint_set.resize_mode.Ideal()) {
-      if (ideal_resize_value == blink::WebMediaStreamTrack::kResizeModeNone &&
+      if (ideal_resize_value == WebMediaStreamTrack::kResizeModeNone &&
           candidates.Contains(false)) {
         return false;
       } else if (ideal_resize_value ==
-                     blink::WebMediaStreamTrack::kResizeModeRescale &&
+                     WebMediaStreamTrack::kResizeModeRescale &&
                  candidates.Contains(true)) {
         return true;
       }
@@ -288,8 +294,8 @@ int ClampToValidScreenCastDimension(int value) {
 
 VideoCaptureSettings SelectResultFromCandidates(
     const VideoContentCaptureCandidates& candidates,
-    const blink::WebMediaTrackConstraintSet& basic_constraint_set,
-    blink::mojom::MediaStreamType stream_type,
+    const MediaTrackConstraintSetPlatform& basic_constraint_set,
+    mojom::MediaStreamType stream_type,
     int screen_width,
     int screen_height) {
   std::string device_id = SelectDeviceIDFromCandidates(
@@ -329,7 +335,7 @@ VideoCaptureSettings SelectResultFromCandidates(
 
   // This default comes from the old algorithm.
   media::ResolutionChangePolicy default_resolution_policy =
-      stream_type == blink::mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE
+      stream_type == mojom::MediaStreamType::GUM_TAB_VIDEO_CAPTURE
           ? media::ResolutionChangePolicy::FIXED_RESOLUTION
           : media::ResolutionChangePolicy::ANY_WITHIN_LIMIT;
 
@@ -338,7 +344,7 @@ VideoCaptureSettings SelectResultFromCandidates(
           candidates, basic_constraint_set, default_height, default_width,
           default_frame_rate, default_resolution_policy);
 
-  base::Optional<bool> noise_reduction = SelectNoiseReductionFromCandidates(
+  absl::optional<bool> noise_reduction = SelectNoiseReductionFromCandidates(
       candidates.noise_reduction_set(), basic_constraint_set);
 
   bool enable_rescale = SelectRescaleFromCandidates(candidates.rescale_set(),
@@ -357,7 +363,7 @@ VideoCaptureSettings SelectResultFromCandidates(
 
 VideoCaptureSettings UnsatisfiedConstraintsResult(
     const VideoContentCaptureCandidates& candidates,
-    const blink::WebMediaTrackConstraintSet& constraint_set) {
+    const MediaTrackConstraintSetPlatform& constraint_set) {
   DCHECK(candidates.IsEmpty());
   if (candidates.resolution_set().IsHeightEmpty()) {
     return VideoCaptureSettings(constraint_set.height.GetName());
@@ -380,8 +386,8 @@ VideoCaptureSettings UnsatisfiedConstraintsResult(
 }  // namespace
 
 VideoCaptureSettings SelectSettingsVideoContentCapture(
-    const blink::WebMediaConstraints& constraints,
-    blink::mojom::MediaStreamType stream_type,
+    const MediaConstraints& constraints,
+    mojom::MediaStreamType stream_type,
     int screen_width,
     int screen_height) {
   VideoContentCaptureCandidates candidates;

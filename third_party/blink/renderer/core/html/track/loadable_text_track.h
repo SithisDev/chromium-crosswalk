@@ -27,8 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_TRACK_LOADABLE_TEXT_TRACK_H_
 
 #include "third_party/blink/renderer/core/html/track/text_track.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -40,7 +39,7 @@ class LoadableTextTrack final : public TextTrack {
   ~LoadableTextTrack() override;
 
   // TextTrack method.
-  void setMode(const AtomicString&) override;
+  void setMode(const V8TextTrackMode&) override;
 
   using TextTrack::AddListOfCues;
 
@@ -49,17 +48,18 @@ class LoadableTextTrack final : public TextTrack {
 
   bool IsDefault() const override;
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   Member<HTMLTrackElement> track_element_;
 };
 
-DEFINE_TYPE_CASTS(LoadableTextTrack,
-                  TextTrack,
-                  track,
-                  track->TrackType() == TextTrack::kTrackElement,
-                  track.TrackType() == TextTrack::kTrackElement);
+template <>
+struct DowncastTraits<LoadableTextTrack> {
+  static bool AllowFrom(const TextTrack& track) {
+    return track.TrackType() == TextTrack::kTrackElement;
+  }
+};
 
 }  // namespace blink
 

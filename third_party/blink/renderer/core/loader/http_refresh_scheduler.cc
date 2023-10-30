@@ -33,6 +33,9 @@
 #include "third_party/blink/renderer/core/loader/http_refresh_scheduler.h"
 
 #include <memory>
+
+#include "base/trace_event/trace_event.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/events/current_input_event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -40,7 +43,9 @@
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+
+static constexpr base::TimeDelta kMaxScheduledDelay =
+    base::Seconds(INT32_MAX / 1000);
 
 namespace blink {
 
@@ -61,18 +66,18 @@ static ClientNavigationReason ToReason(
 HttpRefreshScheduler::HttpRefreshScheduler(Document* document)
     : document_(document) {}
 
-bool HttpRefreshScheduler::IsScheduledWithin(double interval) const {
+bool HttpRefreshScheduler::IsScheduledWithin(base::TimeDelta interval) const {
   return refresh_ && refresh_->delay <= interval;
 }
 
 void HttpRefreshScheduler::Schedule(
-    double delay,
+    base::TimeDelta delay,
     const KURL& url,
     Document::HttpRefreshType http_refresh_type) {
   DCHECK(document_->GetFrame());
   if (!document_->GetFrame()->IsNavigationAllowed())
     return;
-  if (delay < 0 || delay > INT_MAX / 1000)
+  if (delay.is_negative() || delay > kMaxScheduledDelay)
     return;
   if (url.IsEmpty())
     return;
@@ -90,20 +95,30 @@ void HttpRefreshScheduler::Schedule(
 }
 
 void HttpRefreshScheduler::NavigateTask() {
+  TRACE_EVENT2("navigation", "HttpRefreshScheduler::NavigateTask",
+               "document_url", document_->Url().GetString().Utf8(),
+               "refresh_url", refresh_->url.GetString().Utf8());
+
   DCHECK(document_->GetFrame());
   std::unique_ptr<ScheduledHttpRefresh> refresh(refresh_.release());
 
-  FrameLoadRequest request(document_, ResourceRequest(refresh->url));
+  FrameLoadRequest request(document_->domWindow(),
+                           ResourceRequest(refresh->url));
   request.SetInputStartTime(refresh->input_timestamp);
   request.SetClientRedirectReason(refresh->reason);
 
-  // We want a new back/forward list item if the refresh timeout is > 1 second.
   WebFrameLoadType load_type = WebFrameLoadType::kStandard;
-  if (EqualIgnoringFragmentIdentifier(document_->Url(), refresh->url)) {
+  // If the urls match, process the refresh as a reload. However, if an initial
+  // empty document has its url modified via document.open() and the refresh is
+  // to that url, it will confuse the browser process to report it as a reload
+  // in a frame where there hasn't actually been a navigation yet. Therefore,
+  // don't treat as a reload if all this frame has ever seen is empty documents.
+  if (EqualIgnoringFragmentIdentifier(document_->Url(), refresh->url) &&
+      document_->GetFrame()->Loader().HasLoadedNonInitialEmptyDocument()) {
     request.GetResourceRequest().SetCacheMode(
         mojom::FetchCacheMode::kValidateCache);
     load_type = WebFrameLoadType::kReload;
-  } else if (refresh->delay <= 1) {
+  } else if (refresh->delay <= base::Seconds(1)) {
     load_type = WebFrameLoadType::kReplaceCurrentItem;
   }
 
@@ -124,7 +139,7 @@ void HttpRefreshScheduler::MaybeStartTimer() {
   navigate_task_handle_ = PostDelayedCancellableTask(
       *document_->GetTaskRunner(TaskType::kInternalLoading), FROM_HERE,
       WTF::Bind(&HttpRefreshScheduler::NavigateTask, WrapWeakPersistent(this)),
-      base::TimeDelta::FromSecondsD(refresh_->delay));
+      refresh_->delay);
 
   probe::FrameScheduledNavigation(document_->GetFrame(), refresh_->url,
                                   refresh_->delay, refresh_->reason);
@@ -138,7 +153,7 @@ void HttpRefreshScheduler::Cancel() {
   refresh_.reset();
 }
 
-void HttpRefreshScheduler::Trace(blink::Visitor* visitor) {
+void HttpRefreshScheduler::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
 }
 

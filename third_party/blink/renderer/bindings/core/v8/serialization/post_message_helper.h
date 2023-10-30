@@ -6,17 +6,17 @@
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SERIALIZATION_POST_MESSAGE_HELPER_H_
 
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/public/mojom/messaging/user_activation_snapshot.mojom-blink.h"
+#include "third_party/blink/public/mojom/messaging/user_activation_snapshot.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-class Document;
 class ExecutionContext;
 class ExceptionState;
 class PostMessageOptions;
+class StructuredSerializeOptions;
 class ScriptValue;
 class SecurityOrigin;
 class SerializedScriptValue;
@@ -30,14 +30,14 @@ class CORE_EXPORT PostMessageHelper {
   static scoped_refptr<SerializedScriptValue> SerializeMessageByMove(
       v8::Isolate*,
       const ScriptValue& message,
-      const PostMessageOptions* options,
+      const StructuredSerializeOptions* options,
       Transferables& transferables,
       ExceptionState&);
 
   static scoped_refptr<SerializedScriptValue> SerializeMessageByCopy(
       v8::Isolate*,
       const ScriptValue& message,
-      const PostMessageOptions* options,
+      const StructuredSerializeOptions* options,
       Transferables& transferables,
       ExceptionState&);
 
@@ -51,10 +51,10 @@ class CORE_EXPORT PostMessageHelper {
   // provided is an invalid URL.
   static scoped_refptr<const SecurityOrigin> GetTargetOrigin(
       const WindowPostMessageOptions* options,
-      const Document& document,
+      const ExecutionContext& context,
       ExceptionState& state);
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SERIALIZATION_POST_MESSAGE_HELPER_H_

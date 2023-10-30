@@ -12,92 +12,99 @@
 namespace blink {
 
 NGBlockChildIterator::NGBlockChildIterator(NGLayoutInputNode first_child,
-                                           const NGBlockBreakToken* break_token)
-    : child_(first_child), break_token_(break_token), child_token_idx_(0) {
-  // Locate the first child to resume layout at.
-  if (!break_token)
-    return;
-  const auto& child_break_tokens = break_token->ChildBreakTokens();
-  if (!child_break_tokens.size()) {
-    if (!break_token->IsBreakBefore()) {
-      // We had a break token, but no child break token, and we're not
-      // at the start. This means that we're just processing empty
-      // content, such as the trailing childless portion of a block
-      // with specified height.
-      child_ = nullptr;
-    }
-    return;
+                                           const NGBlockBreakToken* break_token,
+                                           bool calculate_child_idx)
+    : next_unstarted_child_(first_child),
+      break_token_(break_token),
+      child_token_idx_(0) {
+  if (calculate_child_idx) {
+    // If we are set up to provide the child index, we also need to visit all
+    // siblings, also when processing break tokens.
+    child_idx_.emplace(0);
+    tracked_child_ = first_child;
   }
-  auto first_node_child =
-      To<NGBlockNode>(break_token->InputNode()).FirstChild();
-  resuming_at_inline_formatting_context_ =
-      first_node_child && first_node_child.IsInline();
-  child_ = child_break_tokens[0]->InputNode();
+  if (break_token_) {
+    const auto& child_break_tokens = break_token_->ChildBreakTokens();
+    // If there are child break tokens, we don't yet know which one is the the
+    // next unstarted child (need to get past the child break tokens first). If
+    // we've already seen all children, there will be no unstarted children.
+    if (!child_break_tokens.empty() || break_token_->HasSeenAllChildren())
+      next_unstarted_child_ = nullptr;
+    // We're already done with this parent break token if there are no child
+    // break tokens, so just forget it right away.
+    if (child_break_tokens.empty())
+      break_token_ = nullptr;
+  }
 }
 
 NGBlockChildIterator::Entry NGBlockChildIterator::NextChild(
     const NGInlineBreakToken* previous_inline_break_token) {
-  const NGBreakToken* child_break_token = nullptr;
-
-  if (previous_inline_break_token &&
-      !previous_inline_break_token->IsFinished()) {
+  if (previous_inline_break_token) {
+    DCHECK(!child_idx_);
     return Entry(previous_inline_break_token->InputNode(),
-                 previous_inline_break_token);
+                 previous_inline_break_token, absl::nullopt);
   }
 
-  if (break_token_) {
-    // If we're resuming layout after a fragmentainer break, we need to skip
-    // siblings that we're done with. We may have been able to fully lay out
-    // some node(s) preceding a node that we had to break inside (and therefore
-    // were not able to fully lay out). This happens when we have parallel
-    // flows [1], which are caused by floats, overflow, etc.
-    //
-    // [1] https://drafts.csswg.org/css-break/#parallel-flows
-    const auto& child_break_tokens = break_token_->ChildBreakTokens();
-
-    if (resuming_at_inline_formatting_context_) {
-      // When resuming inside an inline formatting context, just process the
-      // break tokens. There'll be any number of break tokens for broken floats,
-      // followed by at most one break token for the actual inline formatting
-      // context where we had to give up in the previous fragmentainer. The node
-      // structure will not be of any help at all, since the break tokens will
-      // be associated with nodes that are not siblings.
-      while (child_token_idx_ < child_break_tokens.size()) {
-        const auto* token = child_break_tokens[child_token_idx_];
-        child_token_idx_++;
-        if (!token->IsFinished())
-          return Entry(token->InputNode(), token);
+  if (did_handle_first_child_) {
+    if (break_token_) {
+      const auto& child_break_tokens = break_token_->ChildBreakTokens();
+      if (child_token_idx_ == child_break_tokens.size()) {
+        // We reached the last child break token. Prepare for the next unstarted
+        // sibling, and forget the parent break token.
+        if (!break_token_->HasSeenAllChildren()) {
+          AdvanceToNextChild(
+              child_break_tokens[child_token_idx_ - 1]->InputNode());
+        }
+        break_token_ = nullptr;
       }
-      return Entry(nullptr, nullptr);
+    } else if (next_unstarted_child_) {
+      AdvanceToNextChild(next_unstarted_child_);
     }
-
-    do {
-      // Early exit if we've exhausted our child break tokens.
-      if (child_token_idx_ >= child_break_tokens.size())
-        break;
-
-      // This child break token candidate doesn't match the current node, this
-      // node must be unfinished.
-      const NGBreakToken* child_break_token_candidate =
-          child_break_tokens[child_token_idx_];
-      if (child_break_token_candidate->InputNode() != child_)
-        break;
-
-      ++child_token_idx_;
-
-      // We have only found a node if its break token is unfinished.
-      if (!child_break_token_candidate->IsFinished()) {
-        child_break_token = child_break_token_candidate;
-        break;
-      }
-    } while ((child_ = child_.NextSibling()));
+  } else {
+    did_handle_first_child_ = true;
   }
 
-  NGLayoutInputNode child = child_;
-  if (child_)
-    child_ = child_.NextSibling();
+  const NGBreakToken* current_child_break_token = nullptr;
+  absl::optional<wtf_size_t> current_child_idx;
+  NGLayoutInputNode current_child = next_unstarted_child_;
+  if (break_token_) {
+    // If we're resuming layout after a fragmentainer break, we'll first resume
+    // the children that fragmented earlier (represented by one break token
+    // each).
+    DCHECK(!next_unstarted_child_);
+    const auto& child_break_tokens = break_token_->ChildBreakTokens();
+    DCHECK_LT(child_token_idx_, child_break_tokens.size());
+    current_child_break_token = child_break_tokens[child_token_idx_++];
+    current_child = current_child_break_token->InputNode();
 
-  return Entry(child, child_break_token);
+    if (child_idx_) {
+      while (tracked_child_ != current_child) {
+        tracked_child_ = tracked_child_.NextSibling();
+        (*child_idx_)++;
+      }
+      current_child_idx = child_idx_;
+    }
+  } else if (next_unstarted_child_) {
+    current_child_idx = child_idx_;
+  }
+
+  // Layout of a preceding sibling may have triggered removal of a
+  // later sibling. Container query evaluations may trigger such
+  // removals. As long as we just walk the node siblings, we're
+  // fine, but if the later sibling was among the incoming
+  // child break tokens, we now have a problem (but hopefully an
+  // impossible scenario)
+#if DCHECK_IS_ON()
+  if (const LayoutBox* box = current_child.GetLayoutBox())
+    DCHECK(box->IsLayoutNGObjectForFormattedText() || box->Parent());
+#endif
+  return Entry(current_child, current_child_break_token, current_child_idx);
+}
+
+void NGBlockChildIterator::AdvanceToNextChild(const NGLayoutInputNode& child) {
+  next_unstarted_child_ = child.NextSibling();
+  if (child_idx_)
+    (*child_idx_)++;
 }
 
 }  // namespace blink

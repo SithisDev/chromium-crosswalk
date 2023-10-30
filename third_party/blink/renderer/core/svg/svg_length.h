@@ -21,12 +21,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_LENGTH_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_LENGTH_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
-#include "third_party/blink/renderer/core/svg/properties/svg_property.h"
+#include "third_party/blink/renderer/core/svg/properties/svg_listable_property.h"
 #include "third_party/blink/renderer/core/svg/svg_length_context.h"
 #include "third_party/blink/renderer/core/svg/svg_parsing_error.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -34,7 +36,7 @@ class QualifiedName;
 
 class SVGLengthTearOff;
 
-class SVGLength final : public SVGPropertyBase {
+class CORE_EXPORT SVGLength final : public SVGListablePropertyBase {
  public:
   typedef SVGLengthTearOff TearOffType;
 
@@ -56,11 +58,10 @@ class SVGLength final : public SVGPropertyBase {
   explicit SVGLength(SVGLengthMode = SVGLengthMode::kOther);
   SVGLength(Initial, SVGLengthMode);
   SVGLength(const CSSPrimitiveValue&, SVGLengthMode);
-  SVGLength(const SVGLength&);
 
   void SetInitial(unsigned);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   SVGLength* Clone() const;
   SVGPropertyBase* CloneForAnimation(const String&) const override;
@@ -91,9 +92,6 @@ class SVGLength final : public SVGPropertyBase {
   // value is 1.0).
   float ValueAsPercentage() const;
 
-  // Returns a number to be used as percentage (so full value is 100)
-  float ValueAsPercentage100() const;
-
   // Scale the input value by this SVGLength. Higher precision than input *
   // valueAsPercentage().
   float ScaleByPercentage(float) const;
@@ -108,9 +106,17 @@ class SVGLength final : public SVGPropertyBase {
 
   // Helper functions
   bool IsRelative() const;
-  bool IsFontRelative() const { return value_->IsFontRelativeLength(); }
+  bool IsFontRelative() const {
+    // TODO(crbug.com/979895): This is the result of a refactoring, which might
+    // have revealed an existing bug with calculated lengths. Investigate.
+    return value_->IsNumericLiteralValue() &&
+           To<CSSNumericLiteralValue>(*value_).IsFontRelativeLength();
+  }
   bool IsCalculated() const { return value_->IsCalculated(); }
   bool IsPercentage() const { return value_->IsPercentage(); }
+  bool HasContainerRelativeUnits() const {
+    return value_->HasContainerRelativeUnits();
+  }
 
   bool IsNegativeNumericLiteral() const;
   bool IsZero() const { return value_->GetFloatValue() == 0; }
@@ -120,16 +126,17 @@ class SVGLength final : public SVGPropertyBase {
   static bool NegativeValuesForbiddenForAnimatedLengthAttribute(
       const QualifiedName&);
 
-  void Add(SVGPropertyBase*, SVGElement*) override;
-  void CalculateAnimatedValue(SVGAnimationElement*,
-                              float percentage,
-                              unsigned repeat_count,
-                              SVGPropertyBase* from,
-                              SVGPropertyBase* to,
-                              SVGPropertyBase* to_at_end_of_duration_value,
-                              SVGElement* context_element) override;
-  float CalculateDistance(SVGPropertyBase* to,
-                          SVGElement* context_element) override;
+  void Add(const SVGPropertyBase*, const SVGElement*) override;
+  void CalculateAnimatedValue(
+      const SMILAnimationEffectParameters&,
+      float percentage,
+      unsigned repeat_count,
+      const SVGPropertyBase* from,
+      const SVGPropertyBase* to,
+      const SVGPropertyBase* to_at_end_of_duration_value,
+      const SVGElement* context_element) override;
+  float CalculateDistance(const SVGPropertyBase* to,
+                          const SVGElement* context_element) const override;
 
   static AnimatedPropertyType ClassType() { return kAnimatedLength; }
   AnimatedPropertyType GetType() const override { return ClassType(); }
@@ -139,7 +146,12 @@ class SVGLength final : public SVGPropertyBase {
   unsigned unit_mode_ : 2;
 };
 
-DEFINE_SVG_PROPERTY_TYPE_CASTS(SVGLength);
+template <>
+struct DowncastTraits<SVGLength> {
+  static bool AllowFrom(const SVGPropertyBase& value) {
+    return value.GetType() == SVGLength::ClassType();
+  }
+};
 
 }  // namespace blink
 

@@ -7,12 +7,14 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
-
-class LocalFrame;
+class Element;
 class KURL;
+class LocalFrame;
+class ScrollIntoViewOptions;
 
 // This class is an interface for the concept of a "fragment anchor". A
 // fragment anchor allows a page to link to a specific part of a page by using
@@ -24,8 +26,7 @@ class KURL;
 // can implement, allowing fragments to specify different kinds of anchors.
 // Callers should use the TryCreate static method to create and return the
 // appropriate type of base class.
-class CORE_EXPORT FragmentAnchor
-    : public GarbageCollectedFinalized<FragmentAnchor> {
+class CORE_EXPORT FragmentAnchor : public GarbageCollected<FragmentAnchor> {
  public:
   // Parses the fragment string and tries to create a FragmentAnchor object of
   // the appropriate derived type. If no anchor could be created from the given
@@ -33,8 +34,9 @@ class CORE_EXPORT FragmentAnchor
   // will be performed, for example, setting/clearing :target and svgView().
   static FragmentAnchor* TryCreate(const KURL& url,
                                    LocalFrame& frame,
-                                   bool same_document_navigation);
+                                   bool should_scroll);
 
+  explicit FragmentAnchor(LocalFrame& frame) : frame_(frame) {}
   FragmentAnchor() = default;
   virtual ~FragmentAnchor() = default;
 
@@ -49,11 +51,19 @@ class CORE_EXPORT FragmentAnchor
   // anchor to perform some initialization.
   virtual void Installed() = 0;
 
-  virtual void DidScroll(ScrollType type) = 0;
-  virtual void PerformPreRafActions() = 0;
-  virtual void DidCompleteLoad() = 0;
+  virtual void DidScroll(mojom::blink::ScrollType type) = 0;
+  virtual void PerformScriptableActions() = 0;
 
-  virtual void Trace(blink::Visitor*) {}
+  virtual void Trace(Visitor*) const;
+
+  virtual bool IsTextFragmentAnchor() { return false; }
+
+  virtual bool IsSelectorFragmentAnchor() { return false; }
+
+  virtual void ScrollElementIntoViewWithOptions(Element* element_to_scroll,
+                                                ScrollIntoViewOptions* options);
+
+  Member<LocalFrame> frame_;
 };
 
 }  // namespace blink

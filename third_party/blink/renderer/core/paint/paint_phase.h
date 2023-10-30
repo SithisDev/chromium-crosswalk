@@ -29,17 +29,22 @@
 
 namespace blink {
 
-// The painting of a layer occurs in 4 phases, Each involves a recursive
+// The painting of a layer occurs in 5 phases, Each involves a recursive
 // descent into the layer's layout objects in painting order:
 //  1. Background phase: backgrounds and borders of all blocks are painted.
-//     Inlines are not painted at all. Touch-action hit test rects are also
-//     painted during this phase (see: paint/README.md#hit-test-painting).
-//  2. Float phase: floating objects are painted above block backgrounds but
+//     Inlines are not painted at all. Touch-action and wheel hit test rects are
+//     also painted during this phase (see: paint/README.md#hit-test-painting).
+//  2. ForcedColorsModeBackplate phase: a readability backplate is painted
+//     behind all inline text, split by paragraph. This phase should only paint
+//     content when in forced colors mode to ensure readability for text above
+//     images.
+//  3. Float phase: floating objects are painted above block backgrounds but
 //     entirely below inline content that can overlap them.
-//  3. Foreground phase: all inlines are fully painted. Atomic inline elements
-//     will get all 4 phases invoked on them during this phase, as if they were
-//     stacking contexts (see ObjectPainter::paintAllPhasesAtomically()).
-//  4. Outline phase: outlines are painted over the foreground.
+//  4. Foreground phase: all inlines are fully painted. Atomic inline elements
+//     will get all 4 non-backplate phases invoked on them during this phase,
+//     as if they were stacking contexts (see
+//     ObjectPainter::PaintAllPhasesAtomically()).
+//  5. Outline phase: outlines are painted over the foreground.
 
 enum class PaintPhase {
   // Background phase
@@ -56,9 +61,13 @@ enum class PaintPhase {
   kSelfBlockBackgroundOnly,
   // Paint backgrounds of non-self-painting descendants only. The painter should
   // call each non-self-painting child's paint method by passing
-  // paintInfo.forDescendants() which converts kDescendantBlockBackgroundsOnly
+  // PaintInfo::ForDescendants() which converts kDescendantBlockBackgroundsOnly
   // to kBlockBackground.
   kDescendantBlockBackgroundsOnly,
+
+  // ForcedColorsModeBackplate phase - used to ensure readability in forced
+  // colors mode.
+  kForcedColorsModeBackplate,
 
   // Float phase
   kFloat,
@@ -78,19 +87,19 @@ enum class PaintPhase {
   kSelfOutlineOnly,
   // Paint outlines of non-self-painting descendants only. The painter should
   // call each non-self-painting child's paint method by passing
-  // paintInfo.forDescendants() which converts kDescendantOutlinesOnly to
+  // PaintInfo::ForDescendants() which converts kDescendantOutlinesOnly to
   // kOutline.
   kDescendantOutlinesOnly,
 
   // The below are auxiliary phases which are used to paint special effects.
-  kOverlayScrollbars,
-  kSelection,
+  kOverlayOverflowControls,
+  kSelectionDragImage,
   kTextClip,
   kMask,
 
   kMax = kMask,
   // These values must be kept in sync with DisplayItem::Type and
-  // DisplayItem::typeAsDebugString().
+  // DisplayItem::TypeAsDebugString().
 };
 
 inline bool ShouldPaintSelfBlockBackground(PaintPhase phase) {
@@ -111,26 +120,6 @@ inline bool ShouldPaintDescendantOutlines(PaintPhase phase) {
   return phase == PaintPhase::kOutline ||
          phase == PaintPhase::kDescendantOutlinesOnly;
 }
-
-// Those flags are meant as global tree operations. This means
-// that they should be constant for a paint phase.
-enum GlobalPaintFlag {
-  kGlobalPaintNormalPhase = 0,
-  // Used when painting selection as part of a drag-image. This
-  // flag disables a lot of the painting code and specifically
-  // triggers a PaintPhaseSelection.
-  kGlobalPaintSelectionOnly = 1 << 0,
-  // Used when painting a drag-image or printing in order to
-  // ignore the hardware layers and paint the whole tree
-  // into the topmost layer.
-  kGlobalPaintFlattenCompositingLayers = 1 << 1,
-  // Used when printing in order to adapt the output to the medium, for
-  // instance by not painting shadows and selections on text, and add
-  // URL metadata for links.
-  kGlobalPaintPrinting = 1 << 2
-};
-
-typedef unsigned GlobalPaintFlags;
 
 }  // namespace blink
 

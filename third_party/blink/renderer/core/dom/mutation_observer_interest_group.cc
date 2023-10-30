@@ -71,6 +71,7 @@ bool MutationObserverInterestGroup::IsOldValueRequested() {
 void MutationObserverInterestGroup::EnqueueMutationRecord(
     MutationRecord* mutation) {
   MutationRecord* mutation_with_null_old_value = nullptr;
+
   for (auto& iter : observers_) {
     MutationObserver* observer = iter.key.Get();
     if (HasOldValue(iter.value)) {
@@ -88,7 +89,7 @@ void MutationObserverInterestGroup::EnqueueMutationRecord(
   }
 }
 
-void MutationObserverInterestGroup::Trace(Visitor* visitor) {
+void MutationObserverInterestGroup::Trace(Visitor* visitor) const {
   visitor->Trace(observers_);
 }
 

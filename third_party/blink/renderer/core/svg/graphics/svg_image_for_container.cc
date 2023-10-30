@@ -18,62 +18,70 @@
  */
 
 #include "third_party/blink/renderer/core/svg/graphics/svg_image_for_container.h"
-
-#include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/core/svg/graphics/dark_mode_svg_image_classifier.h"
-#include "third_party/blink/renderer/platform/geometry/float_rect.h"
-#include "third_party/blink/renderer/platform/geometry/float_size.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/skia/include/core/SkImage.h"
+#include "third_party/blink/renderer/platform/graphics/graphics_context.h"
+#include "ui/gfx/geometry/size_conversions.h"
 
 namespace blink {
 
-IntSize SVGImageForContainer::Size() const {
-  FloatSize scaled_container_size(container_size_);
-  scaled_container_size.Scale(zoom_);
-  return RoundedIntSize(scaled_container_size);
+gfx::Size SVGImageForContainer::SizeWithConfig(SizeConfig config) const {
+  return gfx::ToRoundedSize(SizeWithConfigAsFloat(config));
 }
+
+gfx::SizeF SVGImageForContainer::SizeWithConfigAsFloat(SizeConfig) const {
+  return gfx::ScaleSize(container_size_, zoom_);
+}
+
+SVGImageForContainer::SVGImageForContainer(
+    SVGImage* image,
+    const gfx::SizeF& container_size,
+    float zoom,
+    const KURL& url,
+    mojom::blink::PreferredColorScheme preferred_color_scheme)
+    : image_(image), container_size_(container_size), zoom_(zoom), url_(url) {
+  image_->SetPreferredColorScheme(preferred_color_scheme);
+}
+
+SVGImageForContainer::SVGImageForContainer(SVGImage* image,
+                                           const gfx::SizeF& container_size,
+                                           float zoom,
+                                           const KURL& url)
+    : image_(image), container_size_(container_size), zoom_(zoom), url_(url) {}
 
 void SVGImageForContainer::Draw(cc::PaintCanvas* canvas,
                                 const cc::PaintFlags& flags,
-                                const FloatRect& dst_rect,
-                                const FloatRect& src_rect,
-                                RespectImageOrientationEnum,
-                                ImageClampingMode,
-                                ImageDecodingMode) {
-  image_->DrawForContainer(canvas, flags, container_size_, zoom_, dst_rect,
-                           src_rect, url_);
+                                const gfx::RectF& dst_rect,
+                                const gfx::RectF& src_rect,
+                                const ImageDrawOptions& draw_options) {
+  const SVGImage::DrawInfo draw_info(container_size_, zoom_, url_,
+                                     draw_options.apply_dark_mode);
+  image_->DrawForContainer(draw_info, canvas, flags, dst_rect, src_rect);
 }
 
 void SVGImageForContainer::DrawPattern(GraphicsContext& context,
-                                       const FloatRect& src_rect,
-                                       const FloatSize& scale,
-                                       const FloatPoint& phase,
-                                       SkBlendMode op,
-                                       const FloatRect& dst_rect,
-                                       const FloatSize& repeat_spacing) {
-  image_->DrawPatternForContainer(context, container_size_, zoom_, src_rect,
-                                  scale, phase, op, dst_rect, repeat_spacing,
-                                  url_);
+                                       const cc::PaintFlags& flags,
+                                       const gfx::RectF& dst_rect,
+                                       const ImageTilingInfo& tiling_info,
+                                       const ImageDrawOptions& draw_options) {
+  const SVGImage::DrawInfo draw_info(container_size_, zoom_, url_,
+                                     draw_options.apply_dark_mode);
+  image_->DrawPatternForContainer(draw_info, context, flags, dst_rect,
+                                  tiling_info);
 }
 
 bool SVGImageForContainer::ApplyShader(cc::PaintFlags& flags,
-                                       const SkMatrix& local_matrix) {
-  return image_->ApplyShaderForContainer(container_size_, zoom_, url_, flags,
-                                         local_matrix);
+                                       const SkMatrix& local_matrix,
+                                       const gfx::RectF& src_rect,
+                                       const ImageDrawOptions& draw_options) {
+  const SVGImage::DrawInfo draw_info(container_size_, zoom_, url_,
+                                     draw_options.apply_dark_mode);
+  return image_->ApplyShaderForContainer(draw_info, flags, local_matrix);
 }
 
 PaintImage SVGImageForContainer::PaintImageForCurrentFrame() {
-  auto builder = CreatePaintImageBuilder().set_completion_state(
-      image_->completion_state());
-  image_->PopulatePaintRecordForCurrentFrameForContainer(builder, url_, Size());
+  const SVGImage::DrawInfo draw_info(container_size_, zoom_, url_, false);
+  auto builder = CreatePaintImageBuilder();
+  image_->PopulatePaintRecordForCurrentFrameForContainer(draw_info, builder);
   return builder.TakePaintImage();
-}
-
-DarkModeClassification SVGImageForContainer::ClassifyImageForDarkMode(
-    const FloatRect& src_rect) {
-  DarkModeSVGImageClassifier dark_mode_svg_image_classifier;
-  return dark_mode_svg_image_classifier.Classify(image_, src_rect);
 }
 
 }  // namespace blink

@@ -5,15 +5,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_SENSOR_SENSOR_PROXY_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SENSOR_SENSOR_PROXY_H_
 
-#include "base/macros.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading_shared_buffer_reader.h"
-#include "services/device/public/mojom/sensor.mojom-blink.h"
+#include "services/device/public/mojom/sensor.mojom-blink-forward.h"
 #include "services/device/public/mojom/sensor_provider.mojom-blink.h"
 #include "third_party/blink/renderer/core/page/focus_changed_observer.h"
 #include "third_party/blink/renderer/core/page/page_visibility_observer.h"
 #include "third_party/blink/renderer/platform/bindings/exception_code.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -21,11 +21,9 @@ class SensorProviderProxy;
 
 // This class wraps 'Sensor' mojo interface and used by multiple
 // JS sensor instances of the same type (within a single frame).
-class SensorProxy : public GarbageCollectedFinalized<SensorProxy>,
+class SensorProxy : public GarbageCollected<SensorProxy>,
                     public PageVisibilityObserver,
                     public FocusChangedObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(SensorProxy);
-
  public:
   class Observer : public GarbageCollectedMixin {
    public:
@@ -40,6 +38,9 @@ class SensorProxy : public GarbageCollectedFinalized<SensorProxy>,
                                const String& sanitized_message,
                                const String& unsanitized_message) {}
   };
+
+  SensorProxy(const SensorProxy&) = delete;
+  SensorProxy& operator=(const SensorProxy&) = delete;
 
   ~SensorProxy() override;
 
@@ -70,7 +71,7 @@ class SensorProxy : public GarbageCollectedFinalized<SensorProxy>,
   // Detach from the local frame's SensorProviderProxy.
   void Detach();
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   static const char kDefaultErrorDescription[];
 
@@ -82,7 +83,7 @@ class SensorProxy : public GarbageCollectedFinalized<SensorProxy>,
   virtual void Suspend() {}
   virtual void Resume() {}
 
-  device::mojom::blink::SensorProvider* sensor_provider() const;
+  SensorProviderProxy* sensor_provider_proxy() const { return provider_; }
 
   device::mojom::blink::SensorType type_;
   using ObserversSet = HeapHashSet<WeakMember<Observer>>;
@@ -111,8 +112,6 @@ class SensorProxy : public GarbageCollectedFinalized<SensorProxy>,
       sizeof(device::SensorReadingSharedBuffer) ==
           device::mojom::blink::SensorInitParams::kReadBufferSizeForTests,
       "Check reading buffer size for tests");
-
-  DISALLOW_COPY_AND_ASSIGN(SensorProxy);
 };
 
 }  // namespace blink

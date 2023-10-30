@@ -29,7 +29,7 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/track/text_track.h"
 #include "third_party/blink/renderer/core/loader/text_track_loader.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -39,28 +39,23 @@ class LoadableTextTrack;
 class HTMLTrackElement final : public HTMLElement,
                                private TextTrackLoaderClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(HTMLTrackElement);
 
  public:
   explicit HTMLTrackElement(Document&);
-
-  // Returns attributes that should be checked against Trusted Types
-  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
+  ~HTMLTrackElement() override;
 
   const AtomicString& kind();
   void setKind(const AtomicString&);
 
-  enum ReadyState { kNone = 0, kLoading = 1, kLoaded = 2, kError = 3 };
+  enum class ReadyState { kNone = 0, kLoading = 1, kLoaded = 2, kError = 3 };
   ReadyState getReadyState();
   void ScheduleLoad();
 
   TextTrack* track();
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
-  ~HTMLTrackElement() override;
-
   void ParseAttribute(const AttributeModificationParams&) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
@@ -87,7 +82,7 @@ class HTMLTrackElement final : public HTMLElement,
 
   Member<LoadableTextTrack> track_;
   Member<TextTrackLoader> loader_;
-  TaskRunnerTimer<HTMLTrackElement> load_timer_;
+  HeapTaskRunnerTimer<HTMLTrackElement> load_timer_;
   KURL url_;
 };
 

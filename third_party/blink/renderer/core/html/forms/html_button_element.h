@@ -24,17 +24,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_HTML_BUTTON_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_HTML_BUTTON_ELEMENT_H_
 
+#include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 
 namespace blink {
 
-class HTMLButtonElement final : public HTMLFormControlElement {
+class CORE_EXPORT HTMLButtonElement final : public HTMLFormControlElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   explicit HTMLButtonElement(Document&);
-
-  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
 
   void setType(const AtomicString&);
 
@@ -42,8 +41,12 @@ class HTMLButtonElement final : public HTMLFormControlElement {
 
   bool WillRespondToMouseClickEvents() override;
 
+  void DispatchBlurEvent(Element*,
+                         mojom::blink::FocusType,
+                         InputDeviceCapabilities*) override;
+
  private:
-  enum Type { SUBMIT, RESET, BUTTON };
+  enum Type { kSubmit, kReset, kButton };
 
   const AtomicString& FormControlType() const override;
 
@@ -58,20 +61,23 @@ class HTMLButtonElement final : public HTMLFormControlElement {
   void DefaultEventHandler(Event&) override;
   bool HasActivationBehavior() const override;
 
+  // Buttons can trigger popups.
+  PopupTriggerSupport SupportsPopupTriggering() const override {
+    return PopupTriggerSupport::kSupported;
+  }
+
   void AppendToFormData(FormData&) override;
 
   bool IsEnumeratable() const override { return true; }
   bool IsLabelable() const override { return true; }
-  bool TypeShouldForceLegacyLayout() const final { return true; }
   bool IsInteractiveContent() const override;
-  bool SupportsAutofocus() const override;
   bool MatchesDefaultPseudoClass() const override;
 
   bool CanBeSuccessfulSubmitButton() const override;
   bool IsActivatedSubmit() const override;
   void SetActivatedSubmit(bool flag) override;
 
-  void AccessKeyAction(bool send_mouse_events) override;
+  void AccessKeyAction(SimulatedClickCreationScope creation_scope) override;
   bool IsURLAttribute(const Attribute&) const override;
 
   bool CanStartSelection() const override { return false; }
@@ -79,8 +85,10 @@ class HTMLButtonElement final : public HTMLFormControlElement {
   bool IsOptionalFormControl() const override { return true; }
   bool RecalcWillValidate() const override;
 
-  Type type_;
-  bool is_activated_submit_;
+  int DefaultTabIndex() const override;
+
+  Type type_ = kSubmit;
+  bool is_activated_submit_ = false;
 };
 
 }  // namespace blink

@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_FETCH_CLIENT_SETTINGS_OBJECT_SNAPSHOT_H_
 
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
+#include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink-forward.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -22,6 +23,8 @@ namespace blink {
 //     threads (e.g., AtomicString)
 //   - Non-simple members need explicit copying (e.g., String::IsolatedCopy,
 //     KURL::Copy) rather than the copy constructor or the assignment operator.
+//   - This struct cannot contain any garbage-collected object because this
+//     data can be constructed on a thread which runs without Oilpan.
 struct CrossThreadFetchClientSettingsObjectData {
   USING_FAST_MALLOC(CrossThreadFetchClientSettingsObjectData);
 
@@ -34,11 +37,9 @@ struct CrossThreadFetchClientSettingsObjectData {
       String outgoing_referrer,
       HttpsState https_state,
       AllowedByNosniff::MimeTypeCheck mime_type_check_for_classic_worker_script,
-      mojom::IPAddressSpace address_space,
-      WebInsecureRequestPolicy insecure_requests_policy,
+      mojom::blink::InsecureRequestPolicy insecure_requests_policy,
       FetchClientSettingsObject::InsecureNavigationsSet
-          insecure_navigations_set,
-      bool mixed_autoupgrade_opt_out)
+          insecure_navigations_set)
       : global_object_url(std::move(global_object_url)),
         base_url(std::move(base_url)),
         security_origin(std::move(security_origin)),
@@ -47,10 +48,12 @@ struct CrossThreadFetchClientSettingsObjectData {
         https_state(https_state),
         mime_type_check_for_classic_worker_script(
             mime_type_check_for_classic_worker_script),
-        address_space(address_space),
         insecure_requests_policy(insecure_requests_policy),
-        insecure_navigations_set(std::move(insecure_navigations_set)),
-        mixed_autoupgrade_opt_out(mixed_autoupgrade_opt_out) {}
+        insecure_navigations_set(std::move(insecure_navigations_set)) {}
+  CrossThreadFetchClientSettingsObjectData(
+      const CrossThreadFetchClientSettingsObjectData&) = delete;
+  CrossThreadFetchClientSettingsObjectData& operator=(
+      const CrossThreadFetchClientSettingsObjectData&) = delete;
 
   const KURL global_object_url;
   const KURL base_url;
@@ -60,14 +63,9 @@ struct CrossThreadFetchClientSettingsObjectData {
   const HttpsState https_state;
   const AllowedByNosniff::MimeTypeCheck
       mime_type_check_for_classic_worker_script;
-  const mojom::IPAddressSpace address_space;
-  const WebInsecureRequestPolicy insecure_requests_policy;
+  const mojom::blink::InsecureRequestPolicy insecure_requests_policy;
   const FetchClientSettingsObject::InsecureNavigationsSet
       insecure_navigations_set;
-  const bool mixed_autoupgrade_opt_out;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CrossThreadFetchClientSettingsObjectData);
 };
 
 // This takes a partial snapshot of the execution context's states so that an
@@ -94,10 +92,8 @@ class PLATFORM_EXPORT FetchClientSettingsObjectSnapshot final
       const String& outgoing_referrer,
       HttpsState https_state,
       AllowedByNosniff::MimeTypeCheck,
-      mojom::IPAddressSpace,
-      WebInsecureRequestPolicy,
-      InsecureNavigationsSet,
-      bool mixed_autoupgrade_opt_out);
+      mojom::blink::InsecureRequestPolicy,
+      InsecureNavigationsSet);
 
   ~FetchClientSettingsObjectSnapshot() override = default;
 
@@ -114,21 +110,14 @@ class PLATFORM_EXPORT FetchClientSettingsObjectSnapshot final
   }
   HttpsState GetHttpsState() const override { return https_state_; }
 
-  mojom::IPAddressSpace GetAddressSpace() const override {
-    return address_space_;
-  }
-
-  WebInsecureRequestPolicy GetInsecureRequestsPolicy() const override {
+  mojom::blink::InsecureRequestPolicy GetInsecureRequestsPolicy()
+      const override {
     return insecure_requests_policy_;
   }
 
   const InsecureNavigationsSet& GetUpgradeInsecureNavigationsSet()
       const override {
     return insecure_navigations_set_;
-  }
-
-  bool GetMixedAutoUpgradeOptOut() const override {
-    return mixed_autoupgrade_opt_out_;
   }
 
   AllowedByNosniff::MimeTypeCheck MimeTypeCheckForClassicWorkerScript()
@@ -139,12 +128,10 @@ class PLATFORM_EXPORT FetchClientSettingsObjectSnapshot final
   // Gets a copy of the data suitable for passing to another thread.
   std::unique_ptr<CrossThreadFetchClientSettingsObjectData> CopyData() const {
     return std::make_unique<CrossThreadFetchClientSettingsObjectData>(
-        global_object_url_.Copy(), base_url_.Copy(),
-        security_origin_->IsolatedCopy(), referrer_policy_,
-        outgoing_referrer_.IsolatedCopy(), https_state_,
-        mime_type_check_for_classic_worker_script_, address_space_,
-        insecure_requests_policy_, insecure_navigations_set_,
-        mixed_autoupgrade_opt_out_);
+        global_object_url_, base_url_, security_origin_->IsolatedCopy(),
+        referrer_policy_, outgoing_referrer_.IsolatedCopy(), https_state_,
+        mime_type_check_for_classic_worker_script_, insecure_requests_policy_,
+        insecure_navigations_set_);
   }
 
  private:
@@ -156,11 +143,9 @@ class PLATFORM_EXPORT FetchClientSettingsObjectSnapshot final
   const HttpsState https_state_;
   const AllowedByNosniff::MimeTypeCheck
       mime_type_check_for_classic_worker_script_;
-  const mojom::IPAddressSpace address_space_;
 
-  const WebInsecureRequestPolicy insecure_requests_policy_;
+  const mojom::blink::InsecureRequestPolicy insecure_requests_policy_;
   const InsecureNavigationsSet insecure_navigations_set_;
-  const bool mixed_autoupgrade_opt_out_;
 };
 
 }  // namespace blink

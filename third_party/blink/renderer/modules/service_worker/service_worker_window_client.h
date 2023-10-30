@@ -5,11 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_SERVICE_WORKER_SERVICE_WORKER_WINDOW_CLIENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SERVICE_WORKER_SERVICE_WORKER_WINDOW_CLIENT_H_
 
-#include <memory>
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -25,9 +24,6 @@ class MODULES_EXPORT ServiceWorkerWindowClient final
   using ResolveWindowClientCallback = base::OnceCallback<
       void(bool, mojom::blink::ServiceWorkerClientInfoPtr, const String&)>;
 
-  static ServiceWorkerWindowClient* Create(
-      const mojom::blink::ServiceWorkerClientInfo&);
-
   static ResolveWindowClientCallback CreateResolveWindowClientCallback(
       ScriptPromiseResolver*);
 
@@ -41,7 +37,7 @@ class MODULES_EXPORT ServiceWorkerWindowClient final
   ScriptPromise focus(ScriptState*);
   ScriptPromise navigate(ScriptState*, const String& url);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   bool page_hidden_;

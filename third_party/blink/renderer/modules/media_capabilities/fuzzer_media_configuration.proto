@@ -6,7 +6,7 @@ syntax = "proto2";
 
 package mc_fuzzer;
 
-message MediaDecodingConfigProto {
+message MediaConfigProto {
   message VideoConfigProto {
     // String describing mime-type and codecs (e.g. 'video/webm; codecs="vp8"').
     optional string content_type = 1;
@@ -21,7 +21,13 @@ message MediaDecodingConfigProto {
     optional uint32 bitrate = 4;
 
     // String representing the videos frames-per-second (e.g. "60").
-    optional string framerate = 5;
+    optional double framerate = 5;
+
+    // Boolean representing if the spatial scalabilty is required.
+    optional bool spatial_scalability = 6;
+
+    // String representing the scalability mode (e.g. "L3T3_KEY").
+    optional string scalability_mode = 7;
   }
   optional VideoConfigProto video = 1;
 
@@ -42,11 +48,13 @@ message MediaDecodingConfigProto {
   optional AudioConfigProto audio = 2;
 
   // What type of decoding is it?
-  enum MediaDecodingType {
-    FILE = 0;
-    MEDIA_SOURCE = 1;
+  enum MediaType {
+    DECODING_FILE = 0;
+    DECODING_MEDIA_SOURCE = 1;
+    DECODING_WEBRTC = 2;
+    ENCODING_WEBRTC = 3;
   }
-  optional MediaDecodingType type = 3;
+  optional MediaType type = 3;
 
   // For detailed descriptions see
   // https://wicg.github.io/media-capabilities/#dictdef-mediacapabilitieskeysystemconfiguration
@@ -73,10 +81,12 @@ message MediaDecodingConfigProto {
     optional string init_data_type = 2;
 
     // The robustness level associated with the audio content type.
-    optional string audio_robustness = 3;
+    // DEPRECATED: use audio.robustness.
+    optional string audio_robustness = 3 [deprecated = true];
 
     // The robustness level associated with the video content type.
-    optional string video_robustness = 4;
+    // DEPRECATED: use video.robustness.
+    optional string video_robustness = 4 [deprecated = true];
 
     // Whether use of a Distinctive Identifier(s) is required.
     optional MediaKeysRequirement distinctive_identifier = 5
@@ -87,6 +97,14 @@ message MediaDecodingConfigProto {
 
     // A list of MediaKeySessionTypes that must be supported.
     repeated MediaKeySessionType session_types = 7;
+
+    message KeySystemTrackConfig {
+      // The robustness level associated with a given track.
+      optional string robustness = 1;
+    }
+    // Track-specific key system details.
+    optional KeySystemTrackConfig key_system_audio_config = 8;
+    optional KeySystemTrackConfig key_system_video_config = 9;
   }
   optional KeySystemConfig key_system_config = 4;
 }

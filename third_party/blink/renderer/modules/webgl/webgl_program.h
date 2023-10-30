@@ -26,7 +26,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_WEBGL_PROGRAM_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_WEBGL_PROGRAM_H_
 
-#include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_shader.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_shared_platform_3d_object.h"
 
@@ -38,8 +37,6 @@ class WebGLProgram final : public WebGLSharedPlatform3DObject {
  public:
   explicit WebGLProgram(WebGLRenderingContextBase*);
   ~WebGLProgram() override;
-
-  static WebGLProgram* Create(WebGLRenderingContextBase*);
 
   bool LinkStatus(WebGLRenderingContextBase*);
   void setLinkStatus(bool link_status);
@@ -73,7 +70,7 @@ class WebGLProgram final : public WebGLSharedPlatform3DObject {
   bool AttachShader(WebGLShader*);
   bool DetachShader(WebGLShader*);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   void DeleteObjectImpl(gpu::gles2::GLES2Interface*) override;
@@ -95,7 +92,6 @@ class WebGLProgram final : public WebGLSharedPlatform3DObject {
 
   Member<WebGLShader> vertex_shader_;
   Member<WebGLShader> fragment_shader_;
-  Member<WebGLShader> compute_shader_;
 
   bool info_valid_;
 

@@ -35,10 +35,12 @@
 
 namespace blink {
 
+class KeyboardEvent;
+
 class PasswordInputType final : public BaseTextInputType {
  public:
   explicit PasswordInputType(HTMLInputElement& element)
-      : BaseTextInputType(element) {}
+      : BaseTextInputType(Type::kPassword, element) {}
 
  private:
   void CountUsage() override;
@@ -47,6 +49,33 @@ class PasswordInputType final : public BaseTextInputType {
   FormControlState SaveFormControlState() const override;
   void RestoreFormControlState(const FormControlState&) override;
   bool ShouldRespectListAttribute() override;
+
+  bool NeedsContainer() const override;
+  void CreateShadowSubtree() override;
+
+  void UpdateView() override;
+  void CapsLockStateMayHaveChanged() override;
+  bool ShouldDrawCapsLockIndicator() const override;
+  void UpdatePasswordRevealButton();
+  void DidSetValueByUserEdit() override;
+  void DidSetValue(const String&, bool value_changed) override;
+
+  void ForwardEvent(Event& event) override;
+  void HandleKeydownEvent(KeyboardEvent&) override;
+  void HandleBeforeTextInsertedEvent(BeforeTextInsertedEvent&) override;
+
+  void HandleBlurEvent() override;
+  bool SupportsInputModeAttribute() const override;
+
+  bool should_draw_caps_lock_indicator_ = false;
+  bool should_show_reveal_button_ = false;
+};
+
+template <>
+struct DowncastTraits<PasswordInputType> {
+  static bool AllowFrom(const InputType& type) {
+    return type.IsPasswordInputType();
+  }
 };
 
 }  // namespace blink

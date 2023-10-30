@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 
 namespace blink {
 
@@ -15,7 +16,7 @@ enum class AOMRelationListProperty;
 class ExceptionState;
 
 // Accessibility Object Model node list
-// Explainer: https://github.com/WICG/aom/blob/master/explainer.md
+// Explainer: https://github.com/WICG/aom/blob/gh-pages/explainer.md
 // Spec: https://wicg.github.io/aom/spec/
 class CORE_EXPORT AccessibleNodeList : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
@@ -32,11 +33,13 @@ class CORE_EXPORT AccessibleNodeList : public ScriptWrappable {
   AccessibleNode* item(unsigned offset) const;
   void add(AccessibleNode*, AccessibleNode* = nullptr);
   void remove(int index);
-  bool AnonymousIndexedSetter(unsigned, AccessibleNode*, ExceptionState&);
+  IndexedPropertySetterResult AnonymousIndexedSetter(unsigned,
+                                                     AccessibleNode*,
+                                                     ExceptionState&);
   unsigned length() const;
   void setLength(unsigned);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void NotifyChanged();

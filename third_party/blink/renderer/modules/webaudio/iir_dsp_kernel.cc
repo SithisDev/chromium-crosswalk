@@ -12,7 +12,8 @@ IIRDSPKernel::IIRDSPKernel(IIRProcessor* processor)
     : AudioDSPKernel(processor),
       iir_(processor->Feedforward(), processor->Feedback()) {
   tail_time_ =
-      iir_.TailTime(processor->SampleRate(), processor->IsFilterStable());
+      iir_.TailTime(processor->SampleRate(), processor->IsFilterStable(),
+                    processor->RenderQuantumFrames());
 }
 
 void IIRDSPKernel::Process(const float* source,
@@ -28,20 +29,20 @@ void IIRDSPKernel::GetFrequencyResponse(int n_frequencies,
                                         const float* frequency_hz,
                                         float* mag_response,
                                         float* phase_response) {
-  bool is_good =
-      n_frequencies > 0 && frequency_hz && mag_response && phase_response;
-  DCHECK(is_good);
-  if (!is_good)
-    return;
+  DCHECK_GE(n_frequencies, 0);
+  DCHECK(frequency_hz);
+  DCHECK(mag_response);
+  DCHECK(phase_response);
 
   Vector<float> frequency(n_frequencies);
 
-  double nyquist = this->Nyquist();
+  double nyquist = Nyquist();
 
   // Convert from frequency in Hz to normalized frequency (0 -> 1),
   // with 1 equal to the Nyquist frequency.
-  for (int k = 0; k < n_frequencies; ++k)
+  for (int k = 0; k < n_frequencies; ++k) {
     frequency[k] = frequency_hz[k] / nyquist;
+  }
 
   iir_.GetFrequencyResponse(n_frequencies, frequency.data(), mag_response,
                             phase_response);

@@ -11,28 +11,28 @@
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/viewport_data.h"
 #include "third_party/blink/renderer/core/html/html_head_element.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/core/testing/color_scheme_helper.h"
+#include "third_party/blink/renderer/core/testing/mock_policy_container_host.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_compositor.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_request.h"
+#include "third_party/blink/renderer/core/testing/sim/sim_test.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
 
 class HTMLMetaElementTest : public PageTestBase,
-                            private ScopedDisplayCutoutAPIForTest,
-                            private ScopedMetaColorSchemeForTest,
-                            private ScopedMediaQueryPrefersColorSchemeForTest,
-                            private ScopedCSSColorSchemeForTest {
+                            private ScopedDisplayCutoutAPIForTest {
  public:
-  HTMLMetaElementTest()
-      : ScopedDisplayCutoutAPIForTest(true),
-        ScopedMetaColorSchemeForTest(true),
-        ScopedMediaQueryPrefersColorSchemeForTest(true),
-        ScopedCSSColorSchemeForTest(true) {}
+  HTMLMetaElementTest() : ScopedDisplayCutoutAPIForTest(true) {}
   void SetUp() override {
     PageTestBase::SetUp();
     GetDocument().GetSettings()->SetViewportMetaEnabled(true);
@@ -48,29 +48,26 @@ class HTMLMetaElementTest : public PageTestBase,
 
  protected:
   HTMLMetaElement* CreateColorSchemeMeta(const AtomicString& content) {
-    auto* meta = MakeGarbageCollected<HTMLMetaElement>(GetDocument());
+    auto* meta = MakeGarbageCollected<HTMLMetaElement>(GetDocument(),
+                                                       CreateElementFlags());
     meta->setAttribute(html_names::kNameAttr, "color-scheme");
     meta->setAttribute(html_names::kContentAttr, content);
     return meta;
   }
 
   void SetColorScheme(const AtomicString& content) {
-    HTMLMetaElement* meta =
-        ToHTMLMetaElement(GetDocument().head()->firstChild());
+    auto* meta = To<HTMLMetaElement>(GetDocument().head()->firstChild());
     ASSERT_TRUE(meta);
     meta->setAttribute(html_names::kContentAttr, content);
   }
 
-  void ExpectComputedColorScheme(const String& expected) const {
-    auto* computed = MakeGarbageCollected<CSSComputedStyleDeclaration>(
-        GetDocument().documentElement());
-    EXPECT_EQ(expected,
-              computed->GetPropertyValue(CSSPropertyID::kColorScheme));
+  void ExpectPageColorSchemes(ColorSchemeFlags expected) const {
+    EXPECT_EQ(expected, GetDocument().GetStyleEngine().GetPageColorSchemes());
   }
 
  private:
   void LoadTestPageWithViewportFitValue(const String& value) {
-    GetDocument().documentElement()->SetInnerHTMLFromString(
+    GetDocument().documentElement()->setInnerHTML(
         "<head>"
         "<meta name='viewport' content='viewport-fit=" +
         value +
@@ -78,6 +75,7 @@ class HTMLMetaElementTest : public PageTestBase,
         "</head>");
   }
 };
+class HTMLMetaElementSimTest : public SimTest {};
 
 TEST_F(HTMLMetaElementTest, ViewportFit_Auto) {
   EXPECT_EQ(mojom::ViewportFit::kAuto,
@@ -100,139 +98,165 @@ TEST_F(HTMLMetaElementTest, ViewportFit_Invalid) {
 }
 
 TEST_F(HTMLMetaElementTest, ColorSchemeProcessing_FirstWins) {
-  GetDocument().head()->SetInnerHTMLFromString(R"HTML(
+  GetDocument().head()->setInnerHTML(R"HTML(
     <meta name="color-scheme" content="dark">
     <meta name="color-scheme" content="light">
   )HTML");
 
-  ExpectComputedColorScheme("dark");
+  ExpectPageColorSchemes(static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 }
 
 TEST_F(HTMLMetaElementTest, ColorSchemeProcessing_Remove) {
-  GetDocument().head()->SetInnerHTMLFromString(R"HTML(
+  GetDocument().head()->setInnerHTML(R"HTML(
     <meta id="first-meta" name="color-scheme" content="dark">
     <meta name="color-scheme" content="light">
   )HTML");
 
-  ExpectComputedColorScheme("dark");
+  ExpectPageColorSchemes(static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 
   GetDocument().getElementById("first-meta")->remove();
 
-  ExpectComputedColorScheme("light");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kLight));
 }
 
 TEST_F(HTMLMetaElementTest, ColorSchemeProcessing_InsertBefore) {
-  GetDocument().head()->SetInnerHTMLFromString(R"HTML(
+  GetDocument().head()->setInnerHTML(R"HTML(
     <meta name="color-scheme" content="dark">
   )HTML");
 
-  ExpectComputedColorScheme("dark");
+  ExpectPageColorSchemes(static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 
   Element* head = GetDocument().head();
   head->insertBefore(CreateColorSchemeMeta("light"), head->firstChild());
 
-  ExpectComputedColorScheme("light");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kLight));
 }
 
 TEST_F(HTMLMetaElementTest, ColorSchemeProcessing_AppendChild) {
-  GetDocument().head()->SetInnerHTMLFromString(R"HTML(
+  GetDocument().head()->setInnerHTML(R"HTML(
     <meta name="color-scheme" content="dark">
   )HTML");
 
-  ExpectComputedColorScheme("dark");
+  ExpectPageColorSchemes(static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 
   GetDocument().head()->AppendChild(CreateColorSchemeMeta("light"));
 
-  ExpectComputedColorScheme("dark");
+  ExpectPageColorSchemes(static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 }
 
 TEST_F(HTMLMetaElementTest, ColorSchemeProcessing_SetAttribute) {
-  GetDocument().head()->SetInnerHTMLFromString(R"HTML(
+  GetDocument().head()->setInnerHTML(R"HTML(
     <meta id="meta" name="color-scheme" content="dark">
   )HTML");
 
-  ExpectComputedColorScheme("dark");
+  ExpectPageColorSchemes(static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 
   GetDocument().getElementById("meta")->setAttribute(html_names::kContentAttr,
                                                      "light");
 
-  ExpectComputedColorScheme("light");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kLight));
 }
 
 TEST_F(HTMLMetaElementTest, ColorSchemeProcessing_RemoveContentAttribute) {
-  GetDocument().head()->SetInnerHTMLFromString(R"HTML(
+  GetDocument().head()->setInnerHTML(R"HTML(
     <meta id="meta" name="color-scheme" content="dark">
   )HTML");
 
-  ExpectComputedColorScheme("dark");
+  ExpectPageColorSchemes(static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 
   GetDocument().getElementById("meta")->removeAttribute(
       html_names::kContentAttr);
 
-  ExpectComputedColorScheme("normal");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
 }
 
 TEST_F(HTMLMetaElementTest, ColorSchemeProcessing_RemoveNameAttribute) {
-  GetDocument().head()->SetInnerHTMLFromString(R"HTML(
+  GetDocument().head()->setInnerHTML(R"HTML(
     <meta id="meta" name="color-scheme" content="dark">
   )HTML");
 
-  ExpectComputedColorScheme("dark");
+  ExpectPageColorSchemes(static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 
   GetDocument().getElementById("meta")->removeAttribute(html_names::kNameAttr);
 
-  ExpectComputedColorScheme("normal");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
 }
 
 TEST_F(HTMLMetaElementTest, ColorSchemeParsing) {
   GetDocument().head()->AppendChild(CreateColorSchemeMeta(""));
 
   SetColorScheme("");
-  ExpectComputedColorScheme("normal");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
 
   SetColorScheme("normal");
-  ExpectComputedColorScheme("normal");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
 
   SetColorScheme("light");
-  ExpectComputedColorScheme("light");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kLight));
 
   SetColorScheme("dark");
-  ExpectComputedColorScheme("dark");
+  ExpectPageColorSchemes(static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 
   SetColorScheme("light dark");
-  ExpectComputedColorScheme("light dark");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kLight) |
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kDark));
 
   SetColorScheme(" BLUE  light   ");
-  ExpectComputedColorScheme("BLUE light");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kLight));
 
   SetColorScheme("light,dark");
-  ExpectComputedColorScheme("normal");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
 
   SetColorScheme("light,");
-  ExpectComputedColorScheme("normal");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
 
   SetColorScheme(",light");
-  ExpectComputedColorScheme("normal");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
 
   SetColorScheme(", light");
-  ExpectComputedColorScheme("normal");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
 
   SetColorScheme("light, dark");
-  ExpectComputedColorScheme("normal");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
+
+  SetColorScheme("only");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kNormal));
+
+  SetColorScheme("only light");
+  ExpectPageColorSchemes(
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kOnly) |
+      static_cast<ColorSchemeFlags>(ColorSchemeFlag::kLight));
 }
 
 TEST_F(HTMLMetaElementTest, ColorSchemeForcedDarkeningAndMQ) {
-  GetDocument().GetSettings()->SetPreferredColorScheme(
-      PreferredColorScheme::kDark);
+  ColorSchemeHelper color_scheme_helper(GetDocument());
+  color_scheme_helper.SetPreferredColorScheme(
+      mojom::blink::PreferredColorScheme::kDark);
 
   auto* media_query = GetDocument().GetMediaQueryMatcher().MatchMedia(
       "(prefers-color-scheme: dark)");
   EXPECT_TRUE(media_query->matches());
   GetDocument().GetSettings()->SetForceDarkModeEnabled(true);
-  EXPECT_FALSE(media_query->matches());
+  EXPECT_TRUE(media_query->matches());
 
   GetDocument().head()->AppendChild(CreateColorSchemeMeta("light"));
-  EXPECT_FALSE(media_query->matches());
+  EXPECT_TRUE(media_query->matches());
 
   SetColorScheme("dark");
   EXPECT_TRUE(media_query->matches());
@@ -242,12 +266,80 @@ TEST_F(HTMLMetaElementTest, ColorSchemeForcedDarkeningAndMQ) {
 }
 
 TEST_F(HTMLMetaElementTest, ReferrerPolicyWithoutContent) {
-  GetDocument().head()->SetInnerHTMLFromString(R"HTML(
+  GetDocument().head()->setInnerHTML(R"HTML(
     <meta name="referrer" content="strict-origin">
     <meta name="referrer" >
   )HTML");
   EXPECT_EQ(network::mojom::ReferrerPolicy::kStrictOrigin,
-            GetDocument().GetReferrerPolicy());
+            GetFrame().DomWindow()->GetReferrerPolicy());
+  EXPECT_EQ(network::mojom::ReferrerPolicy::kStrictOrigin,
+            GetFrame().DomWindow()->GetPolicyContainer()->GetReferrerPolicy());
+}
+
+TEST_F(HTMLMetaElementTest, ReferrerPolicyUpdatesPolicyContainer) {
+  GetDocument().head()->setInnerHTML(R"HTML(
+    <meta name="referrer" content="strict-origin">
+  )HTML");
+  EXPECT_EQ(network::mojom::ReferrerPolicy::kStrictOrigin,
+            GetFrame().DomWindow()->GetReferrerPolicy());
+  EXPECT_EQ(network::mojom::ReferrerPolicy::kStrictOrigin,
+            GetFrame().DomWindow()->GetPolicyContainer()->GetReferrerPolicy());
+}
+
+// This tests whether Web Monetization counter is properly triggered.
+TEST_F(HTMLMetaElementTest, WebMonetizationCounter) {
+  // <meta> elements that don't have name equal to "monetization" or that lack
+  // a content attribute are not counted.
+  GetDocument().head()->setInnerHTML(R"HTML(
+    <meta name="color-scheme" content="dark">
+    <meta name="monetization">
+  )HTML");
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kHTMLMetaElementMonetization));
+
+  // A <link rel="monetization"> with a content attribute is counted.
+  GetDocument().head()->setInnerHTML(R"HTML(
+    <meta name="monetization" content="$payment.pointer.url">
+  )HTML");
+  EXPECT_TRUE(
+      GetDocument().IsUseCounted(WebFeature::kHTMLMetaElementMonetization));
+
+  // However, it does not affect the counter for <link rel="monetization">.
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kHTMLLinkElementMonetization));
+}
+
+TEST_F(HTMLMetaElementSimTest, WebMonetizationNotCountedInSubFrame) {
+  SimRequest main_resource("https://example.com/", "text/html");
+  SimRequest child_frame_resource("https://example.com/subframe.html",
+                                  "text/html");
+
+  LoadURL("https://example.com/");
+
+  main_resource.Complete(
+      R"HTML(
+        <body onload='console.log("main body onload");'>
+          <iframe src='https://example.com/subframe.html'
+                  onload='console.log("child frame element onload");'></iframe>
+        </body>)HTML");
+
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  child_frame_resource.Complete(R"HTML(
+    <meta name="monetization" content="$payment.pointer.url">
+  )HTML");
+
+  Compositor().BeginFrame();
+  test::RunPendingTasks();
+
+  // Ensure that main frame and subframe are loaded before checking the counter.
+  EXPECT_TRUE(ConsoleMessages().Contains("main body onload"));
+  EXPECT_TRUE(ConsoleMessages().Contains("child frame element onload"));
+
+  // <meta name="monetization"> is not counted in subframes.
+  EXPECT_FALSE(
+      GetDocument().IsUseCounted(WebFeature::kHTMLMetaElementMonetization));
 }
 
 }  // namespace blink

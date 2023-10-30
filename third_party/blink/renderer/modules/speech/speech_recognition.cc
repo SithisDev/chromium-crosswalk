@@ -26,23 +26,29 @@
 #include "third_party/blink/renderer/modules/speech/speech_recognition.h"
 
 #include <algorithm>
+
 #include "build/build_config.h"
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/blink/public/mojom/speech/speech_recognition_error.mojom-blink.h"
+#include "third_party/blink/public/mojom/speech/speech_recognition_result.mojom-blink.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/modules/speech/speech_recognition_controller.h"
 #include "third_party/blink/renderer/modules/speech/speech_recognition_error_event.h"
 #include "third_party/blink/renderer/modules/speech/speech_recognition_event.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 SpeechRecognition* SpeechRecognition::Create(ExecutionContext* context) {
-  Document& document = To<Document>(*context);
-  return MakeGarbageCollected<SpeechRecognition>(document.GetFrame(), context);
+  return MakeGarbageCollected<SpeechRecognition>(To<LocalDOMWindow>(context));
 }
 
 void SpeechRecognition::start(ExceptionState& exception_state) {
-  if (!controller_)
+  if (!controller_ || !GetExecutionContext())
     return;
 
   if (started_) {
@@ -53,21 +59,20 @@ void SpeechRecognition::start(ExceptionState& exception_state) {
 
   final_results_.clear();
 
+  mojo::PendingRemote<mojom::blink::SpeechRecognitionSessionClient>
+      session_client;
   // See https://bit.ly/2S0zRAS for task types.
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-      GetExecutionContext()->GetTaskRunner(blink::TaskType::kMiscPlatformAPI);
-  mojom::blink::SpeechRecognitionSessionClientPtrInfo session_client;
-  binding_.Bind(mojo::MakeRequest(&session_client),
-                GetExecutionContext()->GetInterfaceInvalidator(), task_runner);
-  binding_.set_connection_error_handler(WTF::Bind(
+  receiver_.Bind(
+      session_client.InitWithNewPipeAndPassReceiver(),
+      GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI));
+  receiver_.set_disconnect_handler(WTF::Bind(
       &SpeechRecognition::OnConnectionError, WrapWeakPersistent(this)));
 
-  mojom::blink::SpeechRecognitionSessionRequest session_request =
-      MakeRequest(&session_, GetExecutionContext()->GetInterfaceInvalidator());
-
-  controller_->Start(std::move(session_request), std::move(session_client),
-                     *grammars_, lang_, continuous_, interim_results_,
-                     max_alternatives_);
+  controller_->Start(
+      session_.BindNewPipeAndPassReceiver(
+          GetExecutionContext()->GetTaskRunner(TaskType::kMiscPlatformAPI)),
+      std::move(session_client), *grammars_, lang_, continuous_,
+      interim_results_, max_alternatives_);
   started_ = true;
 }
 
@@ -108,7 +113,7 @@ void SpeechRecognition::ResultRetrieved(
     HeapVector<Member<SpeechRecognitionAlternative>> alternatives;
     alternatives.ReserveInitialCapacity(result->hypotheses.size());
     for (const auto& hypothesis : result->hypotheses) {
-      alternatives.push_back(SpeechRecognitionAlternative::Create(
+      alternatives.push_back(MakeGarbageCollected<SpeechRecognitionAlternative>(
           hypothesis->utterance, hypothesis->confidence));
     }
     aggregated_results.push_back(SpeechRecognitionResult::Create(
@@ -171,7 +176,7 @@ void SpeechRecognition::Ended() {
   started_ = false;
   stopping_ = false;
   session_.reset();
-  binding_.Close();
+  receiver_.reset();
   DispatchEvent(*Event::Create(event_type_names::kEnd));
 }
 
@@ -180,10 +185,10 @@ const AtomicString& SpeechRecognition::InterfaceName() const {
 }
 
 ExecutionContext* SpeechRecognition::GetExecutionContext() const {
-  return ContextLifecycleObserver::GetExecutionContext();
+  return ExecutionContextLifecycleObserver::GetExecutionContext();
 }
 
-void SpeechRecognition::ContextDestroyed(ExecutionContext*) {
+void SpeechRecognition::ContextDestroyed() {
   controller_ = nullptr;
 }
 
@@ -192,7 +197,7 @@ bool SpeechRecognition::HasPendingActivity() const {
 }
 
 void SpeechRecognition::PageVisibilityChanged() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (!GetPage()->IsPageVisible())
     abort();
 #endif
@@ -205,29 +210,32 @@ void SpeechRecognition::OnConnectionError() {
   Ended();
 }
 
-SpeechRecognition::SpeechRecognition(LocalFrame* frame,
-                                     ExecutionContext* context)
-    : ContextLifecycleObserver(context),
-      PageVisibilityObserver(frame ? frame->GetPage() : nullptr),
+SpeechRecognition::SpeechRecognition(LocalDOMWindow* window)
+    : ExecutionContextLifecycleObserver(window),
+      PageVisibilityObserver(window->GetFrame() ? window->GetFrame()->GetPage()
+                                                : nullptr),
       grammars_(SpeechGrammarList::Create()),  // FIXME: The spec is not clear
                                                // on the default value for the
                                                // grammars attribute.
       continuous_(false),
       interim_results_(false),
       max_alternatives_(1),
-      controller_(SpeechRecognitionController::From(frame)),
+      controller_(SpeechRecognitionController::From(*window)),
       started_(false),
       stopping_(false),
-      binding_(this) {}
+      receiver_(this, window),
+      session_(window) {}
 
 SpeechRecognition::~SpeechRecognition() = default;
 
-void SpeechRecognition::Trace(blink::Visitor* visitor) {
+void SpeechRecognition::Trace(Visitor* visitor) const {
   visitor->Trace(grammars_);
   visitor->Trace(controller_);
   visitor->Trace(final_results_);
+  visitor->Trace(receiver_);
+  visitor->Trace(session_);
   EventTargetWithInlineData::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextLifecycleObserver::Trace(visitor);
   PageVisibilityObserver::Trace(visitor);
 }
 

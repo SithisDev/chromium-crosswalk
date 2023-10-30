@@ -4,19 +4,23 @@
 
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_input_element.h"
 
-#include "third_party/blink/public/platform/web_size.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/strings/strcat.h"
+#include "third_party/blink/public/strings/grit/blink_strings.h"
+#include "third_party/blink/renderer/core/css/css_property_names.h"
+#include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/events/gesture_event.h"
 #include "third_party/blink/renderer/core/html/forms/html_label_element.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/html/html_span_element.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_elements_helper.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace {
 
@@ -79,7 +83,7 @@ HTMLElement* MediaControlInputElement::CreateOverflowElement(
       MakeGarbageCollected<HTMLDivElement>(GetDocument());
   overflow_menu_container_->ParserAppendChild(overflow_menu_text_);
   overflow_menu_container_->setAttribute(html_names::kAriaHiddenAttr, "true");
-  aria_label_ = button->getAttribute(html_names::kAriaLabelAttr) + " " +
+  aria_label_ = button->FastGetAttribute(html_names::kAriaLabelAttr) + " " +
                 button->GetOverflowMenuString();
   UpdateOverflowSubtitleElement(button->GetOverflowMenuSubtitleString());
   overflow_label_element_->ParserAppendChild(overflow_menu_container_);
@@ -116,11 +120,12 @@ void MediaControlInputElement::UpdateOverflowSubtitleElement(String text) {
     overflow_menu_subtitle_ =
         MakeGarbageCollected<HTMLSpanElement>(GetDocument());
     overflow_menu_subtitle_->setInnerText(text, ASSERT_NO_EXCEPTION);
-    overflow_menu_subtitle_->setAttribute("class", kOverflowSubtitleCSSClass);
+    overflow_menu_subtitle_->setAttribute(
+        "class", AtomicString(kOverflowSubtitleCSSClass));
 
     overflow_menu_container_->ParserAppendChild(overflow_menu_subtitle_);
     overflow_menu_container_->setAttribute(
-        "class", kOverflowContainerWithSubtitleCSSClass);
+        "class", AtomicString(kOverflowContainerWithSubtitleCSSClass));
   }
   UpdateOverflowLabelAriaLabel(text);
 }
@@ -184,17 +189,16 @@ MediaControlInputElement::MediaControlInputElement(
     : HTMLInputElement(media_controls.GetDocument(), CreateElementFlags()),
       MediaControlElementBase(media_controls, this) {}
 
-WebLocalizedString::Name MediaControlInputElement::GetOverflowStringName()
-    const {
+int MediaControlInputElement::GetOverflowStringId() const {
   NOTREACHED();
-  return WebLocalizedString::kAXAMPMFieldText;
+  return IDS_AX_AM_PM_FIELD_TEXT;
 }
 
 void MediaControlInputElement::UpdateShownState() {
   if (is_overflow_element_) {
     Element* parent = parentElement();
     DCHECK(parent);
-    DCHECK(IsHTMLLabelElement(parent));
+    DCHECK(IsA<HTMLLabelElement>(parent));
 
     if (IsWanted() && DoesFit()) {
       parent->RemoveInlineStyleProperty(CSSPropertyID::kDisplay);
@@ -202,11 +206,6 @@ void MediaControlInputElement::UpdateShownState() {
       parent->SetInlineStyleProperty(CSSPropertyID::kDisplay,
                                      CSSValueID::kNone);
     }
-
-    // Don't update the shown state of the element if we want to hide
-    // icons on the overflow menu.
-    if (!RuntimeEnabledFeatures::OverflowIconsForMediaControlsEnabled())
-      return;
   }
 
   MediaControlElementBase::UpdateShownState();
@@ -220,7 +219,7 @@ void MediaControlInputElement::DefaultEventHandler(Event& event) {
 
   // Unhover the element if the hover is triggered by a tap on
   // a touch screen device to avoid showing hover circle indefinitely.
-  if (event.IsGestureEvent() && IsHovered())
+  if (IsA<GestureEvent>(event) && IsHovered())
     SetHovered(false);
 
   HTMLInputElement::DefaultEventHandler(event);
@@ -254,7 +253,7 @@ bool MediaControlInputElement::IsMediaControlElement() const {
 }
 
 String MediaControlInputElement::GetOverflowMenuString() const {
-  return MediaElement().GetLocale().QueryString(GetOverflowStringName());
+  return MediaElement().GetLocale().QueryString(GetOverflowStringId());
 }
 
 String MediaControlInputElement::GetOverflowMenuSubtitleString() const {
@@ -262,11 +261,8 @@ String MediaControlInputElement::GetOverflowMenuSubtitleString() const {
 }
 
 void MediaControlInputElement::RecordCTREvent(CTREvent event) {
-  String histogram_name =
-      StringView("Media.Controls.CTR.") + GetNameForHistograms();
-  EnumerationHistogram ctr_histogram(histogram_name.Ascii().c_str(),
-                                     static_cast<int>(CTREvent::kCount));
-  ctr_histogram.Count(static_cast<int>(event));
+  base::UmaHistogramEnumeration(
+      base::StrCat({"Media.Controls.CTR.", GetNameForHistograms()}), event);
 }
 
 void MediaControlInputElement::SetClass(const AtomicString& class_name,
@@ -282,19 +278,19 @@ void MediaControlInputElement::UpdateDisplayType() {
     overflow_element_->UpdateDisplayType();
 }
 
-WebSize MediaControlInputElement::GetSizeOrDefault() const {
+gfx::Size MediaControlInputElement::GetSizeOrDefault() const {
   if (IsControlPanelButton()) {
     return MediaControlElementsHelper::GetSizeOrDefault(
-        *this, WebSize(kDefaultButtonSize, kDefaultButtonSize));
+        *this, gfx::Size(kDefaultButtonSize, kDefaultButtonSize));
   }
-  return MediaControlElementsHelper::GetSizeOrDefault(*this, WebSize(0, 0));
+  return MediaControlElementsHelper::GetSizeOrDefault(*this, gfx::Size());
 }
 
 bool MediaControlInputElement::IsDisabled() const {
-  return hasAttribute(html_names::kDisabledAttr);
+  return FastHasAttribute(html_names::kDisabledAttr);
 }
 
-void MediaControlInputElement::Trace(blink::Visitor* visitor) {
+void MediaControlInputElement::Trace(Visitor* visitor) const {
   HTMLInputElement::Trace(visitor);
   MediaControlElementBase::Trace(visitor);
   visitor->Trace(overflow_element_);

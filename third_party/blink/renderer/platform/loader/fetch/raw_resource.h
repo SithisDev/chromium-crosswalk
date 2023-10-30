@@ -25,7 +25,7 @@
 
 #include <memory>
 
-#include "base/optional.h"
+#include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_client.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
+
 class BytesConsumer;
 class BufferingBytesConsumer;
 class FetchParameters;
@@ -47,9 +48,6 @@ class PLATFORM_EXPORT RawResource final : public Resource {
   static RawResource* Fetch(FetchParameters&,
                             ResourceFetcher*,
                             RawResourceClient*);
-  static RawResource* FetchImport(FetchParameters&,
-                                  ResourceFetcher*,
-                                  RawResourceClient*);
   static RawResource* FetchMedia(FetchParameters&,
                                  ResourceFetcher*,
                                  RawResourceClient*);
@@ -61,9 +59,9 @@ class PLATFORM_EXPORT RawResource final : public Resource {
                                     RawResourceClient*);
 
   // Exposed for testing
-  static RawResource* CreateForTest(ResourceRequest request,
+  static RawResource* CreateForTest(const ResourceRequest& request,
                                     ResourceType type) {
-    ResourceLoaderOptions options;
+    ResourceLoaderOptions options(nullptr /* world */);
     return MakeGarbageCollected<RawResource>(request, type, options);
   }
   static RawResource* CreateForTest(const KURL& url,
@@ -79,26 +77,14 @@ class PLATFORM_EXPORT RawResource final : public Resource {
               const ResourceLoaderOptions&);
 
   // Resource implementation
-  MatchStatus CanReuse(const FetchParameters&) const override;
   bool WillFollowRedirect(const ResourceRequest&,
                           const ResourceResponse&) override;
 
-  void SetSerializedCachedMetadata(const uint8_t*, size_t) override;
+  void SetSerializedCachedMetadata(mojo_base::BigBuffer data) override;
 
-  // Used for code caching of fetched code resources. Returns a cache handler
-  // which can only store a single cache metadata entry. This is valid only if
-  // type is kRaw.
-  SingleCachedMetadataHandler* ScriptCacheHandler();
+  scoped_refptr<BlobDataHandle> DownloadedBlob() const;
 
-  scoped_refptr<BlobDataHandle> DownloadedBlob() const {
-    return downloaded_blob_;
-  }
-
-  void Trace(Visitor* visitor) override;
-
- protected:
-  CachedMetadataHandler* CreateCachedMetadataHandler(
-      std::unique_ptr<CachedMetadataSender> send_callback) override;
+  void Trace(Visitor* visitor) const override;
 
  private:
   class RawResourceFactory : public NonTextResourceFactory {
@@ -116,9 +102,9 @@ class PLATFORM_EXPORT RawResource final : public Resource {
   // Resource implementation
   void DidAddClient(ResourceClient*) override;
   void AppendData(const char*, size_t) override;
-  bool ShouldIgnoreHTTPStatusCodeErrors() const override {
-    return !IsLinkPreload();
-  }
+
+  bool ShouldIgnoreHTTPStatusCodeErrors() const override { return true; }
+
   void WillNotFollowRedirect() override;
   void ResponseReceived(const ResourceResponse&) override;
   void ResponseBodyReceived(
@@ -128,9 +114,7 @@ class PLATFORM_EXPORT RawResource final : public Resource {
                    uint64_t total_bytes_to_be_sent) override;
   void DidDownloadData(uint64_t) override;
   void DidDownloadToBlob(scoped_refptr<BlobDataHandle>) override;
-  void ReportResourceTimingToClients(const ResourceTimingInfo&) override;
-  bool MatchPreload(const FetchParameters&,
-                    base::SingleThreadTaskRunner*) override;
+  void MatchPreload(const FetchParameters&) override;
 
   scoped_refptr<BlobDataHandle> downloaded_blob_;
 
@@ -146,8 +130,7 @@ class PLATFORM_EXPORT RawResource final : public Resource {
 inline bool IsRawResource(ResourceType type) {
   return type == ResourceType::kRaw || type == ResourceType::kTextTrack ||
          type == ResourceType::kAudio || type == ResourceType::kVideo ||
-         type == ResourceType::kManifest ||
-         type == ResourceType::kImportResource;
+         type == ResourceType::kManifest;
 }
 inline bool IsRawResource(const Resource& resource) {
   return IsRawResource(resource.GetType());
@@ -186,7 +169,7 @@ class PLATFORM_EXPORT RawResourceClient : public ResourceClient {
                         uint64_t /* totalBytesToBeSent */) {}
   virtual void ResponseBodyReceived(Resource*, BytesConsumer&) {}
   virtual void ResponseReceived(Resource*, const ResourceResponse&) {}
-  virtual void SetSerializedCachedMetadata(Resource*, const uint8_t*, size_t) {}
+  virtual void CachedMetadataReceived(Resource*, mojo_base::BigBuffer) {}
   virtual bool RedirectReceived(Resource*,
                                 const ResourceRequest&,
                                 const ResourceResponse&) {
@@ -194,12 +177,11 @@ class PLATFORM_EXPORT RawResourceClient : public ResourceClient {
   }
   virtual void RedirectBlocked() {}
   virtual void DataDownloaded(Resource*, uint64_t) {}
-  virtual void DidReceiveResourceTiming(Resource*, const ResourceTimingInfo&) {}
   // Called for requests that had DownloadToBlob set to true. Can be called with
   // null if creating the blob failed for some reason (but the download itself
   // otherwise succeeded). Could also not be called at all if the downloaded
   // resource ended up being zero bytes.
-  virtual void DidDownloadToBlob(Resource*, scoped_refptr<BlobDataHandle>) {}
+  virtual void DidDownloadToBlob(Resource*, scoped_refptr<BlobDataHandle>);
 };
 
 // Checks the sequence of callbacks of RawResourceClient. This can be used only
@@ -209,7 +191,6 @@ class PLATFORM_EXPORT RawResourceClientStateChecker final {
 
  public:
   RawResourceClientStateChecker();
-  ~RawResourceClientStateChecker();
 
   // Call before addClient()/removeClient() is called.
   void WillAddClient();
@@ -238,9 +219,10 @@ class PLATFORM_EXPORT RawResourceClientStateChecker final {
     kDataReceived,
     kDataDownloaded,
     kDidDownloadToBlob,
-    kNotifyFinished
+    kNotifyFinished,
+    kDetached,
   };
-  State state_;
+  State state_ = kNotAddedAsClient;
 };
 
 }  // namespace blink

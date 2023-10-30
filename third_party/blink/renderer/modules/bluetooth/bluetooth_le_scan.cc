@@ -4,10 +4,13 @@
 
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth_le_scan.h"
 
+#include "mojo/public/cpp/bindings/receiver_set.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_string_unsignedlong.h"
+
 namespace blink {
 
 BluetoothLEScan::BluetoothLEScan(
-    mojo::BindingId id,
+    mojo::ReceiverId id,
     Bluetooth* bluetooth,
     mojom::blink::WebBluetoothRequestLEScanOptionsPtr options)
     : id_(id),
@@ -28,11 +31,10 @@ BluetoothLEScan::BluetoothLEScan(
         filter_init->setNamePrefix(filter->name_prefix);
 
       if (filter->services && filter->services.has_value()) {
-        HeapVector<blink::StringOrUnsignedLong> services;
+        HeapVector<Member<V8UnionStringOrUnsignedLong>> services;
         for (const auto& uuid : filter->services.value()) {
-          blink::StringOrUnsignedLong uuid_string;
-          uuid_string.SetString(uuid);
-          services.push_back(uuid_string);
+          services.push_back(
+              MakeGarbageCollected<V8UnionStringOrUnsignedLong>(uuid));
         }
         filter_init->setServices(services);
       }
@@ -54,16 +56,15 @@ bool BluetoothLEScan::acceptAllAdvertisements() const {
 }
 
 bool BluetoothLEScan::active() const {
-  return is_active_;
+  return bluetooth_->IsScanActive(id_);
 }
 
 bool BluetoothLEScan::stop() {
   bluetooth_->CancelScan(id_);
-  is_active_ = false;
   return true;
 }
 
-void BluetoothLEScan::Trace(blink::Visitor* visitor) {
+void BluetoothLEScan::Trace(Visitor* visitor) const {
   visitor->Trace(filters_);
   visitor->Trace(bluetooth_);
   ScriptWrappable::Trace(visitor);

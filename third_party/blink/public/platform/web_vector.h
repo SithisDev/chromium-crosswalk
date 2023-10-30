@@ -31,7 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_VECTOR_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_VECTOR_H_
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/web_common.h"
 
@@ -158,8 +158,8 @@ class WebVector {
     return data_[i];
   }
 
-  T* Data() { return data_.data(); }
-  const T* Data() const { return data_.data(); }
+  T* data() { return data_.data(); }
+  const T* data() const { return data_.data(); }
 
   iterator begin() { return data_.begin(); }
   iterator end() { return data_.end(); }
@@ -170,6 +170,9 @@ class WebVector {
   void emplace_back(Args&&... args) {
     data_.emplace_back(std::forward<Args>(args)...);
   }
+
+  void push_back(const T& value) { data_.push_back(value); }
+  void push_back(T&& value) { data_.push_back(std::move(value)); }
 
   void Swap(WebVector<T>& other) { data_.swap(other.data_); }
   void Clear() { data_.clear(); }
@@ -184,10 +187,12 @@ class WebVector {
     data_.insert(begin() + index, value);
   }
 
+  bool Equals(const WebVector<T>& other) const { return data_ == other.data_; }
+
  private:
   std::vector<T> data_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_VECTOR_H_

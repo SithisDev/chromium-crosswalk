@@ -30,13 +30,14 @@ SVGTSpanElement::SVGTSpanElement(Document& document)
 
 LayoutObject* SVGTSpanElement::CreateLayoutObject(const ComputedStyle&,
                                                   LegacyLayout) {
-  return new LayoutSVGTSpan(this);
+  return MakeGarbageCollected<LayoutSVGTSpan>(this);
 }
 
 bool SVGTSpanElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
   if (parentNode() &&
-      (IsSVGAElement(*parentNode()) || IsSVGTextElement(*parentNode()) ||
-       IsSVGTextPathElement(*parentNode()) || IsSVGTSpanElement(*parentNode())))
+      (IsA<SVGAElement>(*parentNode()) || IsA<SVGTextElement>(*parentNode()) ||
+       IsA<SVGTextPathElement>(*parentNode()) ||
+       IsA<SVGTSpanElement>(*parentNode())))
     return SVGElement::LayoutObjectIsNeeded(style);
 
   return false;

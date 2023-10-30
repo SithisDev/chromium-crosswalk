@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_ITERATORS_TEXT_ITERATOR_BEHAVIOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_ITERATORS_TEXT_ITERATOR_BEHAVIOR_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
@@ -19,14 +18,10 @@ class CORE_EXPORT TextIteratorBehavior final {
 
   TextIteratorBehavior(const TextIteratorBehavior& other);
   TextIteratorBehavior();
-  ~TextIteratorBehavior();
 
   bool operator==(const TextIteratorBehavior& other) const;
   bool operator!=(const TextIteratorBehavior& other) const;
 
-  bool CollapseTrailingSpace() const {
-    return values_.bits.collapse_trailing_space;
-  }
   bool DoesNotBreakAtReplacedElement() const {
     return values_.bits.does_not_break_at_replaced_element;
   }
@@ -49,8 +44,6 @@ class CORE_EXPORT TextIteratorBehavior final {
   bool ExcludeAutofilledValue() const {
     return values_.bits.exclude_autofilled_value;
   }
-  // TODO(editing-dev): We should remove unused flag |ForInnerText()|.
-  bool ForInnerText() const { return values_.bits.for_inner_text; }
   bool ForSelectionToString() const {
     return values_.bits.for_selection_to_string;
   }
@@ -72,6 +65,13 @@ class CORE_EXPORT TextIteratorBehavior final {
   bool SuppressesExtraNewlineEmission() const {
     return values_.bits.suppresses_newline_emission;
   }
+
+  bool IgnoresDisplayLock() const { return values_.bits.ignores_display_lock; }
+
+  bool EmitsPunctuationForReplacedElements() const {
+    return values_.bits.emits_punctuation_for_replaced_elements;
+  }
+
   static TextIteratorBehavior EmitsObjectReplacementCharacterBehavior();
   static TextIteratorBehavior IgnoresStyleVisibilityBehavior();
   static TextIteratorBehavior DefaultRangeLengthBehavior();
@@ -82,7 +82,6 @@ class CORE_EXPORT TextIteratorBehavior final {
   union {
     unsigned all;
     struct {
-      bool collapse_trailing_space : 1;
       bool does_not_break_at_replaced_element : 1;
       bool emits_characters_between_all_visible_positions : 1;
       bool emits_image_alt_text : 1;
@@ -93,7 +92,6 @@ class CORE_EXPORT TextIteratorBehavior final {
       bool enters_open_shadow_roots : 1;
       bool enters_text_controls : 1;
       bool exclude_autofilled_value : 1;
-      bool for_inner_text : 1;
       bool for_selection_to_string : 1;
       bool for_window_find : 1;
       bool ignores_style_visibility : 1;
@@ -101,6 +99,8 @@ class CORE_EXPORT TextIteratorBehavior final {
       bool does_not_emit_space_beyond_range_end : 1;
       bool skips_unselectable_content : 1;
       bool suppresses_newline_emission : 1;
+      bool ignores_display_lock : 1;
+      bool emits_punctuation_for_replaced_elements : 1;
     } bits;
   } values_;
 };
@@ -111,11 +111,12 @@ class CORE_EXPORT TextIteratorBehavior::Builder final {
  public:
   explicit Builder(const TextIteratorBehavior&);
   Builder();
+  Builder(const Builder&) = delete;
+  Builder& operator=(const Builder&) = delete;
   ~Builder();
 
   TextIteratorBehavior Build();
 
-  Builder& SetCollapseTrailingSpace(bool);
   Builder& SetDoesNotBreakAtReplacedElement(bool);
   Builder& SetEmitsCharactersBetweenAllVisiblePositions(bool);
   Builder& SetEmitsImageAltText(bool);
@@ -126,7 +127,6 @@ class CORE_EXPORT TextIteratorBehavior::Builder final {
   Builder& SetEntersOpenShadowRoots(bool);
   Builder& SetEntersTextControls(bool);
   Builder& SetExcludeAutofilledValue(bool);
-  Builder& SetForInnerText(bool);
   Builder& SetForSelectionToString(bool);
   Builder& SetForWindowFind(bool);
   Builder& SetIgnoresStyleVisibility(bool);
@@ -134,11 +134,11 @@ class CORE_EXPORT TextIteratorBehavior::Builder final {
   Builder& SetDoesNotEmitSpaceBeyondRangeEnd(bool);
   Builder& SetSkipsUnselectableContent(bool);
   Builder& SetSuppressesExtraNewlineEmission(bool);
+  Builder& SetIgnoresDisplayLock(bool);
+  Builder& SetEmitsPunctuationForReplacedElements(bool);
 
  private:
   TextIteratorBehavior behavior_;
-
-  DISALLOW_COPY_AND_ASSIGN(Builder);
 };
 
 }  // namespace blink

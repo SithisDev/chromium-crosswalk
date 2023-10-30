@@ -7,12 +7,11 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "third_party/blink/public/mojom/presentation/presentation.mojom-blink.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability_callbacks.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -28,10 +27,15 @@ class PresentationAvailabilityObserver;
 // TODO(crbug.com/780109): Improve encapsulation of PresentationAvailability and
 // this class by moving the multiple URL tracking logic to the former, and
 // consolidating this class's APIs to take repeating callbacks.
-class MODULES_EXPORT PresentationAvailabilityState
-    : public GarbageCollectedFinalized<PresentationAvailabilityState> {
+class MODULES_EXPORT PresentationAvailabilityState final
+    : public GarbageCollected<PresentationAvailabilityState> {
  public:
   explicit PresentationAvailabilityState(mojom::blink::PresentationService*);
+
+  PresentationAvailabilityState(const PresentationAvailabilityState&) = delete;
+  PresentationAvailabilityState& operator=(
+      const PresentationAvailabilityState&) = delete;
+
   ~PresentationAvailabilityState();
 
   // Requests availability for the given URLs and invokes the given callbacks
@@ -48,22 +52,26 @@ class MODULES_EXPORT PresentationAvailabilityState
   // callbacks and observers.
   void UpdateAvailability(const KURL&, mojom::blink::ScreenAvailability);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   enum class ListeningState {
-    INACTIVE,
-    WAITING,
-    ACTIVE,
+    kInactive,
+    kWaiting,
+    kActive,
   };
 
   // Tracks listeners of presentation displays availability for
   // |availability_urls|. Shared with PresentationRequest objects with the same
   // set of URLs.
-  class AvailabilityListener
-      : public GarbageCollectedFinalized<AvailabilityListener> {
+  class AvailabilityListener final
+      : public GarbageCollected<AvailabilityListener> {
    public:
     explicit AvailabilityListener(const Vector<KURL>& availability_urls);
+
+    AvailabilityListener(const AvailabilityListener&) = delete;
+    AvailabilityListener& operator=(const AvailabilityListener&) = delete;
+
     ~AvailabilityListener();
 
     const Vector<KURL> urls;
@@ -71,10 +79,7 @@ class MODULES_EXPORT PresentationAvailabilityState
         availability_callbacks;
     HeapVector<Member<PresentationAvailabilityObserver>> availability_observers;
 
-    void Trace(blink::Visitor*);
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(AvailabilityListener);
+    void Trace(Visitor*) const;
   };
 
   // Tracks listening status and screen availability of |availability_url|.
@@ -125,8 +130,6 @@ class MODULES_EXPORT PresentationAvailabilityState
 
   // A pointer to PresentationService owned by PresentationController.
   mojom::blink::PresentationService* const presentation_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(PresentationAvailabilityState);
 };
 
 }  // namespace blink

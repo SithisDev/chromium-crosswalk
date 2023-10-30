@@ -18,7 +18,7 @@
  */
 
 #include "third_party/blink/renderer/core/svg/svg_animated_number_optional_number.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -46,7 +46,7 @@ SVGAnimatedNumberOptionalNumber::SVGAnimatedNumberOptionalNumber(
   second_number_->SetParentOptionalNumber(this);
 }
 
-void SVGAnimatedNumberOptionalNumber::Trace(blink::Visitor* visitor) {
+void SVGAnimatedNumberOptionalNumber::Trace(Visitor* visitor) const {
   visitor->Trace(first_number_);
   visitor->Trace(second_number_);
   SVGAnimatedPropertyCommon<SVGNumberOptionalNumber>::Trace(visitor);

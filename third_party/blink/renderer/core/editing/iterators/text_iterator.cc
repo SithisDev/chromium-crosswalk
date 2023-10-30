@@ -28,6 +28,9 @@
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator.h"
 
 #include <unicode/utf16.h>
+#include "build/build_config.h"
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/display_lock/display_lock_utilities.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
@@ -36,6 +39,7 @@
 #include "third_party/blink/renderer/core/editing/visible_position.h"
 #include "third_party/blink/renderer/core/editing/visible_units.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
@@ -49,8 +53,6 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
-
-using namespace html_names;
 
 namespace {
 
@@ -169,16 +171,20 @@ bool ShouldHandleChildren(const Node& node,
                           const TextIteratorBehavior& behavior) {
   // To support |TextIteratorEmitsImageAltText|, we don't traversal child
   // nodes, in flat tree.
-  if (IsHTMLImageElement(node))
+  if (IsA<HTMLImageElement>(node))
     return false;
   // Traverse internals of text control elements in flat tree only when
   // |EntersTextControls| flag is set.
   if (!behavior.EntersTextControls() && IsTextControl(node))
     return false;
 
-  if (auto* element = DynamicTo<Element>(node)) {
-    if (auto* context = element->GetDisplayLockContext())
-      return context->IsActivatable();
+  if (!behavior.IgnoresDisplayLock()) {
+    if (auto* element = DynamicTo<Element>(node)) {
+      if (auto* context = element->GetDisplayLockContext()) {
+        return !context->IsLocked() ||
+               context->IsActivatable(DisplayLockActivationReason::kSelection);
+      }
+    }
   }
   return true;
 }
@@ -238,8 +244,6 @@ TextIteratorAlgorithm<Strategy>::~TextIteratorAlgorithm() {
   if (!handle_shadow_root_)
     return;
   const Document& document = OwnerDocument();
-  if (behavior_.ForInnerText())
-    document.CountUse(WebFeature::kInnerTextWithShadowTree);
   if (behavior_.ForSelectionToString())
     document.CountUse(WebFeature::kSelectionToStringWithShadowTree);
   if (behavior_.ForWindowFind())
@@ -266,7 +270,7 @@ bool TextIteratorAlgorithm<Strategy>::HandleRememberedProgress() {
     // FIXME: It would be cleaner if we emitted two newlines during the last
     // iteration, instead of using needs_another_newline_.
     Node* last_child = Strategy::LastChild(*node_);
-    const Node* base_node = last_child ? last_child : node_.Get();
+    const Node* base_node = last_child ? last_child : node_;
     EmitChar16AfterNode('\n', *base_node);
     needs_another_newline_ = false;
     return true;
@@ -296,6 +300,15 @@ void TextIteratorAlgorithm<Strategy>::Advance() {
     return;
 
   while (node_ && (node_ != past_end_node_ || shadow_depth_)) {
+    // TODO(crbug.com/1296290): Disable this DCHECK as it's troubling CrOS engs.
+#if DCHECK_IS_ON() && !BUILDFLAG(IS_CHROMEOS)
+    // |node_| shouldn't be after |past_end_node_|.
+    if (past_end_node_) {
+      DCHECK_LE(PositionTemplate<Strategy>(node_, 0),
+                PositionTemplate<Strategy>(past_end_node_, 0));
+    }
+#endif
+
     if (!should_stop_ && StopsOnFormControls() &&
         HTMLFormControlElement::EnclosingFormControlElement(node_))
       should_stop_ = true;
@@ -310,27 +323,35 @@ void TextIteratorAlgorithm<Strategy>::Advance() {
       return;
     }
 
+    // If an element is locked, we shouldn't recurse down into its children
+    // since they might not have up-to-date layout. In particular, they might
+    // not have the NG offset mapping which is required. The display lock can
+    // still be bypassed by marking the iterator behavior to ignore display
+    // lock.
+    const bool locked =
+        !behavior_.IgnoresDisplayLock() &&
+        DisplayLockUtilities::LockedInclusiveAncestorPreventingLayout(*node_);
+
     LayoutObject* layout_object = node_->GetLayoutObject();
-    if (!layout_object) {
-      if (IsA<ShadowRoot>(node_.Get()) || HasDisplayContents(*node_)) {
+    if (!layout_object || locked) {
+      if (!locked && (IsA<ShadowRoot>(node_) || HasDisplayContents(*node_))) {
         // Shadow roots or display: contents elements don't have LayoutObjects,
         // but we want to visit children anyway.
         iteration_progress_ = iteration_progress_ < kHandledNode
                                   ? kHandledNode
                                   : iteration_progress_;
-        handle_shadow_root_ = IsA<ShadowRoot>(node_.Get());
+        handle_shadow_root_ = IsA<ShadowRoot>(node_);
       } else {
         iteration_progress_ = kHandledChildren;
       }
     } else {
       // Enter author shadow roots, from youngest, if any and if necessary.
       if (iteration_progress_ < kHandledOpenShadowRoots) {
-        auto* element = DynamicTo<Element>(node_.Get());
+        auto* element = DynamicTo<Element>(node_);
         if (std::is_same<Strategy, EditingStrategy>::value &&
             EntersOpenShadowRoots() && element && element->OpenShadowRoot()) {
           ShadowRoot* youngest_shadow_root = element->OpenShadowRoot();
-          DCHECK(youngest_shadow_root->GetType() == ShadowRootType::V0 ||
-                 youngest_shadow_root->GetType() == ShadowRootType::kOpen);
+          DCHECK(youngest_shadow_root->IsOpen());
           node_ = youngest_shadow_root;
           iteration_progress_ = kHandledNone;
           ++shadow_depth_;
@@ -344,9 +365,9 @@ void TextIteratorAlgorithm<Strategy>::Advance() {
       // Enter user-agent shadow root, if necessary.
       if (iteration_progress_ < kHandledUserAgentShadowRoot) {
         if (std::is_same<Strategy, EditingStrategy>::value &&
-            EntersTextControls() && layout_object->IsTextControl()) {
+            EntersTextControls() && layout_object->IsTextControlIncludingNG()) {
           ShadowRoot* user_agent_shadow_root =
-              To<Element>(node_.Get())->UserAgentShadowRoot();
+              To<Element>(node_)->UserAgentShadowRoot();
           DCHECK(user_agent_shadow_root->IsUserAgent());
           node_ = user_agent_shadow_root;
           iteration_progress_ = kHandledNone;
@@ -370,11 +391,11 @@ void TextIteratorAlgorithm<Strategy>::Advance() {
                      (layout_object->IsImage() ||
                       layout_object->IsLayoutEmbeddedContent() ||
                       (html_element &&
-                       (IsHTMLFormControlElement(html_element) ||
-                        IsHTMLLegendElement(html_element) ||
-                        IsHTMLImageElement(html_element) ||
-                        IsHTMLMeterElement(html_element) ||
-                        IsHTMLProgressElement(html_element))))) {
+                       (IsA<HTMLFormControlElement>(html_element) ||
+                        IsA<HTMLLegendElement>(html_element) ||
+                        IsA<HTMLImageElement>(html_element) ||
+                        IsA<HTMLMeterElement>(html_element) ||
+                        IsA<HTMLProgressElement>(html_element))))) {
             HandleReplacedElement();
           } else {
             HandleNonTextNode();
@@ -395,61 +416,65 @@ void TextIteratorAlgorithm<Strategy>::Advance() {
                      ? Strategy::FirstChild(*node_)
                      : nullptr;
     if (!next) {
-      // 2. If we've already iterated children or they are not available, go to
-      // the next sibling node.
-      next = Strategy::NextSibling(*node_);
-      if (!next) {
-        // 3. If we are at the last child, go up the node tree until we find a
-        // next sibling.
-        ContainerNode* parent_node = Strategy::Parent(*node_);
-        while (!next && parent_node) {
-          if (node_ == end_node_ ||
-              Strategy::IsDescendantOf(*end_container_, *parent_node))
-            return;
-          bool have_layout_object = node_->GetLayoutObject();
-          node_ = parent_node;
-          fully_clipped_stack_.Pop();
-          parent_node = Strategy::Parent(*node_);
-          if (have_layout_object)
-            ExitNode();
-          if (text_state_.PositionNode()) {
-            iteration_progress_ = kHandledChildren;
-            return;
+      // 2. If we are skipping children, check that |past_end_node_| is not a
+      // descendant, since we shouldn't iterate past it.
+      if (iteration_progress_ >= kHandledChildren || !past_end_node_ ||
+          !Strategy::IsDescendantOf(*past_end_node_, *node_)) {
+        // 3. If we've already iterated children or they are not available, go
+        // to the next sibling node.
+        next = Strategy::NextSibling(*node_);
+        if (!next) {
+          // 4. If we are at the last child, go up the node tree until we find a
+          // next sibling.
+          ContainerNode* parent_node = Strategy::Parent(*node_);
+          while (!next && parent_node) {
+            if (node_ == end_node_ ||
+                Strategy::IsDescendantOf(*end_container_, *parent_node))
+              return;
+            bool have_layout_object = node_->GetLayoutObject();
+            node_ = parent_node;
+            fully_clipped_stack_.Pop();
+            parent_node = Strategy::Parent(*node_);
+            if (have_layout_object)
+              ExitNode();
+            if (text_state_.PositionNode()) {
+              iteration_progress_ = kHandledChildren;
+              return;
+            }
+            next = Strategy::NextSibling(*node_);
           }
-          next = Strategy::NextSibling(*node_);
-        }
 
-        if (!next && !parent_node && shadow_depth_) {
-          // 4. Reached the top of a shadow root. If it's created by author,
-          // then try to visit the next
-          // sibling shadow root, if any.
-          const auto* shadow_root = DynamicTo<ShadowRoot>(node_.Get());
-          if (!shadow_root) {
-            NOTREACHED();
-            should_stop_ = true;
-            return;
+          if (!next && !parent_node && shadow_depth_) {
+            // 5. Reached the top of a shadow root. If it's created by author,
+            // then try to visit the next
+            // sibling shadow root, if any.
+            const auto* shadow_root = DynamicTo<ShadowRoot>(node_);
+            if (!shadow_root) {
+              NOTREACHED();
+              should_stop_ = true;
+              return;
+            }
+            if (shadow_root->IsOpen()) {
+              // We are the shadow root; exit from here and go back to
+              // where we were.
+              node_ = &shadow_root->host();
+              iteration_progress_ = kHandledOpenShadowRoots;
+              --shadow_depth_;
+              fully_clipped_stack_.Pop();
+            } else {
+              // If we are in a closed or user-agent shadow root, then go back
+              // to the host.
+              // TODO(kochi): Make sure we treat closed shadow as user agent
+              // shadow here.
+              DCHECK(shadow_root->GetType() == ShadowRootType::kClosed ||
+                     shadow_root->IsUserAgent());
+              node_ = &shadow_root->host();
+              iteration_progress_ = kHandledUserAgentShadowRoot;
+              --shadow_depth_;
+              fully_clipped_stack_.Pop();
+            }
+            continue;
           }
-          if (shadow_root->GetType() == ShadowRootType::V0 ||
-              shadow_root->GetType() == ShadowRootType::kOpen) {
-            // We are the shadow root; exit from here and go back to
-            // where we were.
-            node_ = &shadow_root->host();
-            iteration_progress_ = kHandledOpenShadowRoots;
-            --shadow_depth_;
-            fully_clipped_stack_.Pop();
-          } else {
-            // If we are in a closed or user-agent shadow root, then go back to
-            // the host.
-            // TODO(kochi): Make sure we treat closed shadow as user agent
-            // shadow here.
-            DCHECK(shadow_root->GetType() == ShadowRootType::kClosed ||
-                   shadow_root->IsUserAgent());
-            node_ = &shadow_root->host();
-            iteration_progress_ = kHandledUserAgentShadowRoot;
-            --shadow_depth_;
-            fully_clipped_stack_.Pop();
-          }
-          continue;
         }
       }
       fully_clipped_stack_.Pop();
@@ -479,7 +504,7 @@ void TextIteratorAlgorithm<Strategy>::HandleTextNode() {
 
   DCHECK_NE(last_text_node_, node_)
       << "We should never call HandleTextNode on the same node twice";
-  const auto* text = To<Text>(node_.Get());
+  const auto* text = To<Text>(node_);
   last_text_node_ = text;
 
   // TODO(editing-dev): Introduce a |DOMOffsetRange| class so that we can pass
@@ -505,10 +530,12 @@ bool TextIteratorAlgorithm<Strategy>::SupportsAltText(const Node& node) {
     return false;
 
   // FIXME: Add isSVGImageElement.
-  if (IsHTMLImageElement(*element))
+  if (IsA<HTMLImageElement>(*element))
     return true;
-  if (IsHTMLInputElement(*element) &&
-      ToHTMLInputElement(node).type() == input_type_names::kImage)
+
+  auto* html_input_element = DynamicTo<HTMLInputElement>(element);
+  if (html_input_element &&
+      html_input_element->type() == input_type_names::kImage)
     return true;
   return false;
 }
@@ -532,14 +559,8 @@ void TextIteratorAlgorithm<Strategy>::HandleReplacedElement() {
   }
 
   DCHECK_EQ(last_text_node_, text_node_handler_.GetNode());
-  if (last_text_node_) {
-    if (text_node_handler_.FixLeadingWhiteSpaceForReplacedElement()) {
-      needs_handle_replaced_element_ = true;
-      return;
-    }
-  }
 
-  if (EntersTextControls() && layout_object->IsTextControl()) {
+  if (EntersTextControls() && layout_object->IsTextControlIncludingNG()) {
     // The shadow tree should be already visited.
     return;
   }
@@ -572,9 +593,10 @@ bool TextIteratorAlgorithm<Strategy>::ShouldEmitTabBeforeNode(
     return false;
 
   // Want a tab before every cell other than the first one
-  LayoutTableCell* rc = ToLayoutTableCell(r);
-  LayoutTable* t = rc->Table();
-  return t && (t->CellPreceding(*rc) || t->CellAbove(*rc));
+  const LayoutNGTableCellInterface* rc =
+      ToInterface<LayoutNGTableCellInterface>(r);
+  const LayoutNGTableInterface* t = rc->TableInterface();
+  return t && !t->IsFirstCell(*rc);
 }
 
 template <typename Strategy>
@@ -583,10 +605,11 @@ bool TextIteratorAlgorithm<Strategy>::ShouldEmitNewlineForNode(
     bool emits_original_text) {
   LayoutObject* layout_object = node.GetLayoutObject();
 
-  if (layout_object ? !layout_object->IsBR() : !IsHTMLBRElement(node))
+  if (layout_object ? !layout_object->IsBR() : !IsA<HTMLBRElement>(node))
     return false;
-  return emits_original_text || !(node.IsInShadowTree() &&
-                                  IsHTMLInputElement(*node.OwnerShadowHost()));
+  return emits_original_text ||
+         !(node.IsInShadowTree() &&
+           IsA<HTMLInputElement>(*node.OwnerShadowHost()));
 }
 
 static bool ShouldEmitNewlinesBeforeAndAfterNode(const Node& node) {
@@ -596,21 +619,30 @@ static bool ShouldEmitNewlinesBeforeAndAfterNode(const Node& node) {
   if (!r) {
     if (HasDisplayContents(node))
       return false;
-    return (node.HasTagName(kBlockquoteTag) || node.HasTagName(kDdTag) ||
-            node.HasTagName(kDivTag) || node.HasTagName(kDlTag) ||
-            node.HasTagName(kDtTag) || node.HasTagName(kH1Tag) ||
-            node.HasTagName(kH2Tag) || node.HasTagName(kH3Tag) ||
-            node.HasTagName(kH4Tag) || node.HasTagName(kH5Tag) ||
-            node.HasTagName(kH6Tag) || node.HasTagName(kHrTag) ||
-            node.HasTagName(kLiTag) || node.HasTagName(kListingTag) ||
-            node.HasTagName(kOlTag) || node.HasTagName(kPTag) ||
-            node.HasTagName(kPreTag) || node.HasTagName(kTrTag) ||
-            node.HasTagName(kUlTag));
+    return (node.HasTagName(html_names::kBlockquoteTag) ||
+            node.HasTagName(html_names::kDdTag) ||
+            node.HasTagName(html_names::kDivTag) ||
+            node.HasTagName(html_names::kDlTag) ||
+            node.HasTagName(html_names::kDtTag) ||
+            node.HasTagName(html_names::kH1Tag) ||
+            node.HasTagName(html_names::kH2Tag) ||
+            node.HasTagName(html_names::kH3Tag) ||
+            node.HasTagName(html_names::kH4Tag) ||
+            node.HasTagName(html_names::kH5Tag) ||
+            node.HasTagName(html_names::kH6Tag) ||
+            node.HasTagName(html_names::kHrTag) ||
+            node.HasTagName(html_names::kLiTag) ||
+            node.HasTagName(html_names::kListingTag) ||
+            node.HasTagName(html_names::kOlTag) ||
+            node.HasTagName(html_names::kPTag) ||
+            node.HasTagName(html_names::kPreTag) ||
+            node.HasTagName(html_names::kTrTag) ||
+            node.HasTagName(html_names::kUlTag));
   }
 
   // Need to make an exception for option and optgroup, because we want to
   // keep the legacy behavior before we added layoutObjects to them.
-  if (IsHTMLOptionElement(node) || IsHTMLOptGroupElement(node))
+  if (IsA<HTMLOptionElement>(node) || IsA<HTMLOptGroupElement>(node))
     return false;
 
   // Need to make an exception for table cells, because they are blocks, but we
@@ -621,8 +653,9 @@ static bool ShouldEmitNewlinesBeforeAndAfterNode(const Node& node) {
   // Need to make an exception for table row elements, because they are neither
   // "inline" or "LayoutBlock", but we want newlines for them.
   if (r->IsTableRow()) {
-    LayoutTable* t = ToLayoutTableRow(r)->Table();
-    if (t && !t->IsInline())
+    const LayoutNGTableInterface* t =
+        ToInterface<LayoutNGTableRowInterface>(r)->TableInterface();
+    if (t && !t->ToLayoutObject()->IsInline())
       return true;
   }
 
@@ -661,7 +694,7 @@ static bool ShouldEmitExtraNewlineForNode(const Node* node) {
   if (!r || !r->IsBox())
     return false;
 
-  return node->HasTagName(kPTag);
+  return node->HasTagName(html_names::kPTag);
 }
 
 // Whether or not we should emit a character as we enter node_ (if it's a
@@ -719,7 +752,7 @@ bool TextIteratorAlgorithm<Strategy>::ShouldRepresentNodeOffsetZero() {
           EVisibility::kVisible ||
       (node_->GetLayoutObject()->IsLayoutBlockFlow() &&
        !To<LayoutBlock>(node_->GetLayoutObject())->Size().Height() &&
-       !IsHTMLBodyElement(*node_)))
+       !IsA<HTMLBodyElement>(*node_)))
     return false;
 
   // The startPos.isNotNull() check is needed because the start could be before
@@ -792,7 +825,7 @@ void TextIteratorAlgorithm<Strategy>::ExitNode() {
   // case it is a block, because the run should start where the
   // emitted character is positioned visually.
   Node* last_child = Strategy::LastChild(*node_);
-  const Node* base_node = last_child ? last_child : node_.Get();
+  const Node* base_node = last_child ? last_child : node_;
   // FIXME: This shouldn't require the last_text_node to be true, but we can't
   // change that without making the logic in _web_attributedStringFromRange
   // match. We'll get that for free when we switch to use TextIterator in
@@ -826,21 +859,18 @@ template <typename Strategy>
 void TextIteratorAlgorithm<Strategy>::EmitChar16AfterNode(UChar code_unit,
                                                           const Node& node) {
   text_state_.EmitChar16AfterNode(code_unit, node);
-  text_node_handler_.ResetCollapsedWhiteSpaceFixup();
 }
 
 template <typename Strategy>
 void TextIteratorAlgorithm<Strategy>::EmitChar16AsNode(UChar code_unit,
                                                        const Node& node) {
   text_state_.EmitChar16AsNode(code_unit, node);
-  text_node_handler_.ResetCollapsedWhiteSpaceFixup();
 }
 
 template <typename Strategy>
 void TextIteratorAlgorithm<Strategy>::EmitChar16BeforeNode(UChar code_unit,
                                                            const Node& node) {
   text_state_.EmitChar16BeforeNode(code_unit, node);
-  text_node_handler_.ResetCollapsedWhiteSpaceFixup();
 }
 
 template <typename Strategy>
@@ -1026,7 +1056,7 @@ static String CreatePlainText(const EphemeralRangeTemplate<Strategy>& range,
   builder.ReserveCapacity(kInitialCapacity);
 
   for (; !it.AtEnd(); it.Advance())
-    it.GetText().AppendTextToStringBuilder(builder);
+    it.GetTextState().AppendTextToStringBuilder(builder);
 
   if (builder.IsEmpty())
     return g_empty_string;

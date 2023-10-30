@@ -30,9 +30,12 @@
 #include "third_party/blink/renderer/core/style/filter_operation.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
+namespace gfx {
+class RectF;
+}
+
 namespace blink {
 
-class FloatRect;
 class SVGResourceClient;
 
 class CORE_EXPORT FilterOperations {
@@ -65,17 +68,16 @@ class CORE_EXPORT FilterOperations {
   // Maps "forward" to determine which pixels in a destination rect are
   // affected by pixels in the source rect.
   // See also FilterEffect::MapRect.
-  FloatRect MapRect(const FloatRect&) const;
+  gfx::RectF MapRect(const gfx::RectF&) const;
 
   bool HasFilterThatAffectsOpacity() const;
   bool HasFilterThatMovesPixels() const;
-
-  bool HasBlurOrReferenceFilter() const;
+  bool HasReferenceFilter() const;
 
   void AddClient(SVGResourceClient&) const;
   void RemoveClient(SVGResourceClient&) const;
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   FilterOperationVector operations_;
@@ -91,7 +93,7 @@ class FilterOperationsWrapper
 
   const FilterOperations& Operations() const { return operations_; }
 
-  void Trace(blink::Visitor* visitor) { visitor->Trace(operations_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(operations_); }
 
  private:
   FilterOperations operations_;

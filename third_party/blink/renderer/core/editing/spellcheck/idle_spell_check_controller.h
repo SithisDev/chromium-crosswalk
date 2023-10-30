@@ -5,16 +5,18 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_SPELLCHECK_IDLE_SPELL_CHECK_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_SPELLCHECK_IDLE_SPELL_CHECK_CONTROLLER_H_
 
-#include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/document_shutdown_observer.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/scripted_idle_task_controller.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
-#include "third_party/blink/renderer/platform/timer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 
 namespace blink {
 
 class ColdModeSpellCheckRequester;
-class LocalFrame;
+class Document;
+class Element;
+class LocalDOMWindow;
 class SpellCheckRequester;
 
 #define FOR_EACH_IDLE_SPELL_CHECK_CONTROLLER_STATE(V) \
@@ -28,16 +30,13 @@ class SpellCheckRequester;
 // Main class for the implementation of idle time spell checker.
 // See design doc for details: https://goo.gl/zONC3v
 class CORE_EXPORT IdleSpellCheckController final
-    : public GarbageCollectedFinalized<IdleSpellCheckController>,
-      public DocumentShutdownObserver {
-  DISALLOW_COPY_AND_ASSIGN(IdleSpellCheckController);
-  USING_GARBAGE_COLLECTED_MIXIN(IdleSpellCheckController);
-
+    : public GarbageCollected<IdleSpellCheckController>,
+      public ExecutionContextLifecycleObserver {
  public:
-  static IdleSpellCheckController* Create(LocalFrame&);
-
-  explicit IdleSpellCheckController(LocalFrame&);
-  ~IdleSpellCheckController();
+  explicit IdleSpellCheckController(LocalDOMWindow&, SpellCheckRequester&);
+  IdleSpellCheckController(const IdleSpellCheckController&) = delete;
+  IdleSpellCheckController& operator=(const IdleSpellCheckController&) = delete;
+  ~IdleSpellCheckController() override;
 
   enum class State {
 #define V(state) k##state,
@@ -49,13 +48,16 @@ class CORE_EXPORT IdleSpellCheckController final
 
   // Transit to HotModeRequested, if possible. Called by operations that need
   // spell checker to follow up.
-  void SetNeedsInvocation();
+  void RespondToChangedSelection();
+  void RespondToChangedContents();
+  void RespondToChangedEnablement();
 
   // Cleans everything up and makes the callback inactive. Should be called when
   // document is detached or spellchecking is globally disabled.
   void Deactivate();
 
-  void DidAttachDocument(Document*);
+  // Called when spellchecking is disabled on the specific element.
+  void SetSpellCheckingDisabled(const Element&);
 
   // Exposed for testing only.
   SpellCheckRequester& GetSpellCheckRequester() const;
@@ -64,50 +66,58 @@ class CORE_EXPORT IdleSpellCheckController final
   void SkipColdModeTimerForTesting();
   int IdleCallbackHandle() const { return idle_callback_handle_; }
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   class IdleCallback;
 
-  LocalFrame& GetFrame() const { return *frame_; }
+  LocalDOMWindow& GetWindow() const;
 
-  // Returns whether there is an active document to work on.
-  bool IsAvailable() const { return LifecycleContext(); }
+  // Return the document to work on. Callable only when GetExecutionContext()
+  // is non-null.
+  Document& GetDocument() const;
 
-  // Return the document to work on. Callable only when IsAvailable() is true.
-  Document& GetDocument() const {
-    DCHECK(IsAvailable());
-    return *LifecycleContext();
+  bool IsInInvocation() const {
+    return state_ == State::kInHotModeInvocation ||
+           state_ == State::kInColdModeInvocation;
   }
 
   // Returns whether spell checking is globally enabled.
   bool IsSpellCheckingEnabled() const;
+
+  // Called by RespondTo*() functions to transit to HotModeRequested state.
+  void SetNeedsInvocation();
 
   // Called at idle time as entrance function.
   void Invoke(IdleDeadline*);
 
   // Functions for hot mode.
   void HotModeInvocation(IdleDeadline*);
+  bool NeedsHotModeCheckingUnderCurrentSelection() const;
 
   // Transit to ColdModeTimerStarted, if possible. Sets up a timer, and requests
   // cold mode invocation if no critical operation occurs before timer firing.
   void SetNeedsColdModeInvocation();
 
   // Functions for cold mode.
-  void ColdModeTimerFired(TimerBase*);
+  void ColdModeTimerFired();
   void ColdModeInvocation(IdleDeadline*);
 
-  // Implements |DocumentShutdownObserver|.
-  void ContextDestroyed(Document*) final;
+  // Implements |ExecutionContextLifecycleObserver|.
+  void ContextDestroyed() final;
 
   void DisposeIdleCallback();
 
-  State state_;
+  State state_ = State::kInactive;
   int idle_callback_handle_;
-  const Member<LocalFrame> frame_;
-  uint64_t last_processed_undo_step_sequence_;
+  uint64_t last_processed_undo_step_sequence_ = 0;
   const Member<ColdModeSpellCheckRequester> cold_mode_requester_;
-  TaskRunnerTimer<IdleSpellCheckController> cold_mode_timer_;
+  Member<SpellCheckRequester> spell_check_requeseter_;
+  TaskHandle cold_mode_timer_;
+
+  bool needs_invocation_for_changed_selection_ = false;
+  bool needs_invocation_for_changed_contents_ = false;
+  bool needs_invocation_for_changed_enablement_ = false;
 
   friend class IdleSpellCheckControllerTest;
 };

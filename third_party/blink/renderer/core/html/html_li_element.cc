@@ -22,6 +22,7 @@
 
 #include "third_party/blink/renderer/core/html/html_li_element.h"
 
+#include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -32,48 +33,50 @@
 
 namespace blink {
 
-using namespace html_names;
-
 HTMLLIElement::HTMLLIElement(Document& document)
-    : HTMLElement(kLiTag, document) {}
+    : HTMLElement(html_names::kLiTag, document) {}
 
 bool HTMLLIElement::IsPresentationAttribute(const QualifiedName& name) const {
-  if (name == kTypeAttr)
+  if (name == html_names::kTypeAttr)
     return true;
   return HTMLElement::IsPresentationAttribute(name);
 }
 
-CSSValueID ListTypeToCSSValueID(const AtomicString& value) {
+AtomicString ListTypeAttributeToStyleName(const AtomicString& value) {
   if (value == "a")
-    return CSSValueID::kLowerAlpha;
+    return "lower-alpha";
   if (value == "A")
-    return CSSValueID::kUpperAlpha;
+    return "upper-alpha";
   if (value == "i")
-    return CSSValueID::kLowerRoman;
+    return "lower-roman";
   if (value == "I")
-    return CSSValueID::kUpperRoman;
+    return "upper-roman";
   if (value == "1")
-    return CSSValueID::kDecimal;
-  if (DeprecatedEqualIgnoringCase(value, "disc"))
-    return CSSValueID::kDisc;
-  if (DeprecatedEqualIgnoringCase(value, "circle"))
-    return CSSValueID::kCircle;
-  if (DeprecatedEqualIgnoringCase(value, "square"))
-    return CSSValueID::kSquare;
-  if (DeprecatedEqualIgnoringCase(value, "none"))
-    return CSSValueID::kNone;
-  return CSSValueID::kInvalid;
+    return "decimal";
+  if (EqualIgnoringASCIICase(value, "disc"))
+    return "disc";
+  if (EqualIgnoringASCIICase(value, "circle"))
+    return "circle";
+  if (EqualIgnoringASCIICase(value, "square"))
+    return "square";
+  return g_null_atom;
 }
 
 void HTMLLIElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == kTypeAttr) {
-    CSSValueID type_value = ListTypeToCSSValueID(value);
-    if (IsValidCSSValueID(type_value)) {
+  if (name == html_names::kTypeAttr) {
+    if (EqualIgnoringASCIICase(value, "none")) {
       AddPropertyToPresentationAttributeStyle(
-          style, CSSPropertyID::kListStyleType, type_value);
+          style, CSSPropertyID::kListStyleType, CSSValueID::kNone);
+    } else {
+      AtomicString list_style_type_name = ListTypeAttributeToStyleName(value);
+      if (!list_style_type_name.IsNull()) {
+        AddPropertyToPresentationAttributeStyle(
+            style, CSSPropertyID::kListStyleType,
+            *MakeGarbageCollected<CSSCustomIdentValue>(list_style_type_name));
+      }
     }
   } else {
     HTMLElement::CollectStyleForPresentationAttribute(name, value, style);
@@ -81,7 +84,7 @@ void HTMLLIElement::CollectStyleForPresentationAttribute(
 }
 
 void HTMLLIElement::ParseAttribute(const AttributeModificationParams& params) {
-  if (params.name == kValueAttr) {
+  if (params.name == html_names::kValueAttr) {
     if (ListItemOrdinal* ordinal = ListItemOrdinal::Get(*this))
       ParseValue(params.new_value, ordinal);
   } else {
@@ -93,26 +96,7 @@ void HTMLLIElement::AttachLayoutTree(AttachContext& context) {
   HTMLElement::AttachLayoutTree(context);
 
   if (ListItemOrdinal* ordinal = ListItemOrdinal::Get(*this)) {
-    DCHECK(!GetDocument().ChildNeedsDistributionRecalc());
-
-    // Find the enclosing list node.
-    Element* list_node = nullptr;
-    Element* current = this;
-    while (!list_node) {
-      current = LayoutTreeBuilderTraversal::ParentElement(*current);
-      if (!current)
-        break;
-      if (IsHTMLUListElement(*current) || IsHTMLOListElement(*current))
-        list_node = current;
-    }
-
-    // If we are not in a list, tell the layoutObject so it can position us
-    // inside.  We don't want to change our style to say "inside" since that
-    // would affect nested nodes.
-    if (!list_node)
-      ordinal->SetNotInList(true, *this);
-
-    ParseValue(FastGetAttribute(kValueAttr), ordinal);
+    ParseValue(FastGetAttribute(html_names::kValueAttr), ordinal);
   }
 }
 

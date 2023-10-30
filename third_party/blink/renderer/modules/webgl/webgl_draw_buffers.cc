@@ -27,6 +27,7 @@
 
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_framebuffer.h"
+#include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
 
 namespace blink {
 
@@ -37,10 +38,6 @@ WebGLDrawBuffers::WebGLDrawBuffers(WebGLRenderingContextBase* context)
 
 WebGLExtensionName WebGLDrawBuffers::GetName() const {
   return kWebGLDrawBuffersName;
-}
-
-WebGLDrawBuffers* WebGLDrawBuffers::Create(WebGLRenderingContextBase* context) {
-  return MakeGarbageCollected<WebGLDrawBuffers>(context);
 }
 
 // static

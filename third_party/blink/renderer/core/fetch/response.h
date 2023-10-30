@@ -5,7 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_RESPONSE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_RESPONSE_H_
 
-#include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom-blink.h"
+#include "services/network/public/mojom/fetch_api.mojom-blink.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -15,7 +16,7 @@
 #include "third_party/blink/renderer/core/fetch/headers.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -25,7 +26,9 @@ class ExceptionState;
 class ResponseInit;
 class ScriptState;
 
-class CORE_EXPORT Response final : public Body {
+class CORE_EXPORT Response final : public ScriptWrappable,
+                                   public ActiveScriptWrappable<Response>,
+                                   public Body {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -53,10 +56,25 @@ class CORE_EXPORT Response final : public Body {
                             const String& url,
                             uint16_t status,
                             ExceptionState&);
+  static Response* staticJson(ScriptState*,
+                              ScriptValue data,
+                              const ResponseInit*,
+                              ExceptionState&);
+
+  static FetchResponseData* CreateUnfilteredFetchResponseDataWithoutBody(
+      ScriptState*,
+      mojom::blink::FetchAPIResponse&);
+
+  static FetchResponseData* FilterResponseData(
+      network::mojom::FetchResponseType response_type,
+      FetchResponseData* response,
+      WTF::Vector<WTF::String>& headers);
 
   explicit Response(ExecutionContext*);
   Response(ExecutionContext*, FetchResponseData*);
   Response(ExecutionContext*, FetchResponseData*, Headers*);
+  Response(const Response&) = delete;
+  Response& operator=(const Response&) = delete;
 
   const FetchResponseData* GetResponse() const { return response_; }
 
@@ -76,8 +94,16 @@ class CORE_EXPORT Response final : public Body {
   // ScriptWrappable
   bool HasPendingActivity() const final;
 
-  // Does not contain the blob response body.
-  mojom::blink::FetchAPIResponsePtr PopulateFetchAPIResponse();
+  // Does not contain the blob response body or any side data blob.
+  // |request_url| is the current request URL that resulted in the response. It
+  // is needed to process some response headers (e.g. CSP).
+  // TODO(lfg, kinuko): The FetchResponseData::url_list_ should include the
+  // request URL per step 9 in Main Fetch
+  // https://fetch.spec.whatwg.org/#main-fetch. Just fixing it might break the
+  // logic in ResourceMultiBufferDataProvider, please see
+  // https://chromium-review.googlesource.com/c/1366464 for more details.
+  mojom::blink::FetchAPIResponsePtr PopulateFetchAPIResponse(
+      const KURL& request_url);
 
   bool HasBody() const;
   BodyStreamBuffer* BodyBuffer() override { return response_->Buffer(); }
@@ -93,7 +119,7 @@ class CORE_EXPORT Response final : public Body {
     return response_->InternalBuffer();
   }
 
-  BodyUsed IsBodyUsed(ExceptionState&) override;
+  bool IsBodyUsed() const override;
 
   String ContentType() const override;
   String MimeType() const override;
@@ -101,17 +127,13 @@ class CORE_EXPORT Response final : public Body {
 
   const Vector<KURL>& InternalURLList() const;
 
-  void Trace(blink::Visitor*) override;
+  FetchHeaderList* InternalHeaderList() const;
 
- protected:
-  // A version of IsBodyUsed() which catches exceptions and returns
-  // false. Should never be used outside DCHECK().
-  bool IsBodyUsedForDCheck(ExceptionState&) override;
+  void Trace(Visitor*) const override;
 
  private:
   const Member<FetchResponseData> response_;
   const Member<Headers> headers_;
-  DISALLOW_COPY_AND_ASSIGN(Response);
 };
 
 }  // namespace blink

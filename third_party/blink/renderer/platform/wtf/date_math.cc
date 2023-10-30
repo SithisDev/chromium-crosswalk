@@ -75,24 +75,21 @@
 #include <math.h>
 #include <stdlib.h>
 #include <time.h>
+#include <unicode/basictz.h>
+#include <unicode/timezone.h>
+
 #include <algorithm>
 #include <limits>
 #include <memory>
 
-#include "base/stl_util.h"
 #include "build/build_config.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
-#include <unicode/basictz.h>
-#include <unicode/timezone.h>
-
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <windows.h>
 #else
 #include <sys/time.h>
@@ -288,7 +285,7 @@ static inline double YmdhmsToSeconds(int year,
 // We follow the recommendation of RFC 2822 to consider all
 // obsolete time zones not listed here equivalent to "-0000".
 static const struct KnownZone {
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
   const
 #endif
       char tz_name[4];
@@ -620,7 +617,7 @@ static double ParseDateFromNullTerminatedCharacters(const char* date_string,
       have_tz = true;
     } else {
       date_wtf_string = String(date_string);
-      for (size_t i = 0; i < base::size(known_zones); ++i) {
+      for (size_t i = 0; i < std::size(known_zones); ++i) {
         if (date_wtf_string.StartsWithIgnoringASCIICase(
                 known_zones[i].tz_name)) {
           offset = known_zones[i].tz_offset;
@@ -657,13 +654,14 @@ static double ParseDateFromNullTerminatedCharacters(const char* date_string,
          kMsPerSecond;
 }
 
-double ParseDateFromNullTerminatedCharacters(const char* date_string) {
+absl::optional<base::Time> ParseDateFromNullTerminatedCharacters(
+    const char* date_string) {
   bool have_tz;
   int offset;
   double ms =
       ParseDateFromNullTerminatedCharacters(date_string, have_tz, offset);
   if (std::isnan(ms))
-    return std::numeric_limits<double>::quiet_NaN();
+    return absl::nullopt;
 
   // fall back to local timezone
   if (!have_tz) {
@@ -672,16 +670,13 @@ double ParseDateFromNullTerminatedCharacters(const char* date_string) {
     UErrorCode status = U_ZERO_ERROR;
     // Handle the conversion of localtime to UTC the same way as the
     // latest ECMA 262 spec for Javascript (v8 does that, too).
-    // TODO(jshin): Once http://bugs.icu-project.org/trac/ticket/13705
-    // is fixed, no casting would be necessary.
     static_cast<const icu::BasicTimeZone*>(timezone.get())
-        ->getOffsetFromLocal(ms, icu::BasicTimeZone::kFormer,
-                             icu::BasicTimeZone::kFormer, raw_offset,
-                             dst_offset, status);
+        ->getOffsetFromLocal(ms, UCAL_TZ_LOCAL_FORMER, UCAL_TZ_LOCAL_FORMER,
+                             raw_offset, dst_offset, status);
     DCHECK(U_SUCCESS(status));
     offset = static_cast<int>((raw_offset + dst_offset) / kMsPerMinute);
   }
-  return ms - (offset * kMsPerMinute);
+  return base::Time::FromJsTime(ms - (offset * kMsPerMinute));
 }
 
 // See http://tools.ietf.org/html/rfc2822#section-3.3 for more information.
@@ -715,13 +710,14 @@ String MakeRFC2822DateString(const base::Time date, int utc_offset) {
   return string_builder.ToString();
 }
 
-double ConvertToLocalTime(double ms) {
+base::TimeDelta ConvertToLocalTime(base::Time time) {
+  double ms = time.ToJsTime();
   std::unique_ptr<icu::TimeZone> timezone(icu::TimeZone::createDefault());
   int32_t raw_offset, dst_offset;
   UErrorCode status = U_ZERO_ERROR;
   timezone->getOffset(ms, false, raw_offset, dst_offset, status);
   DCHECK(U_SUCCESS(status));
-  return (ms + static_cast<double>(raw_offset + dst_offset));
+  return base::Milliseconds(ms + static_cast<double>(raw_offset + dst_offset));
 }
 
 }  // namespace WTF

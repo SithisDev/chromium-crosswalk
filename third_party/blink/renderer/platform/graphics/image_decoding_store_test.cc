@@ -27,6 +27,7 @@
 
 #include <memory>
 #include "base/memory/memory_pressure_listener.h"
+#include "base/run_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/graphics/image_frame_generator.h"
 #include "third_party/blink/renderer/platform/graphics/test/mock_image_decoder.h"
@@ -52,11 +53,11 @@ class ImageDecodingStoreTest : public testing::Test,
     ASSERT_TRUE(false);
   }
 
-  ImageFrame::Status GetStatus(size_t index) override {
+  ImageFrame::Status GetStatus(wtf_size_t index) override {
     return ImageFrame::kFramePartial;
   }
 
-  size_t FrameCount() override { return 1; }
+  wtf_size_t FrameCount() override { return 1; }
   int RepetitionCount() const override { return kAnimationNone; }
   base::TimeDelta FrameDuration() const override { return base::TimeDelta(); }
 

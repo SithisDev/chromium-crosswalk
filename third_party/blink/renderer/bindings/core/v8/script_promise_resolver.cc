@@ -16,16 +16,43 @@
 
 namespace blink {
 
+class ScriptPromiseResolver::ExceptionStateScope final : public ExceptionState {
+  STACK_ALLOCATED();
+
+ public:
+  explicit ExceptionStateScope(ScriptPromiseResolver* resolver)
+      : ExceptionState(resolver->script_state_->GetIsolate(),
+                       resolver->exception_context_),
+        resolver_(resolver) {
+    CHECK_NE(resolver->exception_context_.GetContext(),
+             ExceptionContext::Context::kEmpty);
+  }
+  ~ExceptionStateScope() {
+    DCHECK(HadException());
+    resolver_->Reject(GetException());
+    ClearException();
+  }
+
+ private:
+  ScriptPromiseResolver* resolver_;
+};
+
 ScriptPromiseResolver::ScriptPromiseResolver(ScriptState* script_state)
-    : ContextLifecycleObserver(ExecutionContext::From(script_state)),
+    : ExecutionContextLifecycleObserver(ExecutionContext::From(script_state)),
       state_(kPending),
       script_state_(script_state),
-      resolver_(script_state),
-      keep_alive_(PERSISTENT_FROM_HERE) {
+      resolver_(script_state) {
   if (GetExecutionContext()->IsContextDestroyed()) {
     state_ = kDetached;
     resolver_.Clear();
   }
+}
+
+ScriptPromiseResolver::ScriptPromiseResolver(
+    ScriptState* script_state,
+    const ExceptionContext& exception_context)
+    : ScriptPromiseResolver(script_state) {
+  exception_context_ = exception_context;
 }
 
 ScriptPromiseResolver::~ScriptPromiseResolver() = default;
@@ -41,7 +68,7 @@ void ScriptPromiseResolver::Dispose() {
       state_ == kDetached || !is_promise_called_ ||
       !GetScriptState()->ContextIsValid() || !GetExecutionContext() ||
       GetExecutionContext()->IsContextDestroyed();
-  if (!is_properly_detached) {
+  if (!is_properly_detached && !suppress_detach_check_) {
     // This is here to make it easier to track down which promise resolvers are
     // being abandoned. See https://crbug.com/873980.
     static crash_reporter::CrashKeyString<1024> trace_key(
@@ -54,8 +81,6 @@ void ScriptPromiseResolver::Dispose() {
   }
 #endif
   deferred_resolve_task_.Cancel();
-  resolver_.Clear();
-  value_.Clear();
 }
 
 void ScriptPromiseResolver::Reject(ExceptionState& exception_state) {
@@ -64,13 +89,38 @@ void ScriptPromiseResolver::Reject(ExceptionState& exception_state) {
   exception_state.ClearException();
 }
 
+void ScriptPromiseResolver::RejectWithDOMException(
+    DOMExceptionCode exception_code,
+    const String& message) {
+  ExceptionStateScope(this).ThrowDOMException(exception_code, message);
+}
+
+void ScriptPromiseResolver::RejectWithSecurityError(
+    const String& sanitized_message,
+    const String& unsanitized_message) {
+  ExceptionStateScope(this).ThrowSecurityError(sanitized_message,
+                                               unsanitized_message);
+}
+
+void ScriptPromiseResolver::RejectWithTypeError(const String& message) {
+  ExceptionStateScope(this).ThrowTypeError(message);
+}
+
+void ScriptPromiseResolver::RejectWithRangeError(const String& message) {
+  ExceptionStateScope(this).ThrowRangeError(message);
+}
+
+void ScriptPromiseResolver::RejectWithWasmCompileError(const String& message) {
+  ExceptionStateScope(this).ThrowWasmCompileError(message);
+}
+
 void ScriptPromiseResolver::Detach() {
   if (state_ == kDetached)
     return;
   deferred_resolve_task_.Cancel();
   state_ = kDetached;
   resolver_.Clear();
-  value_.Clear();
+  value_.Reset();
   keep_alive_.Clear();
 }
 
@@ -91,10 +141,10 @@ void ScriptPromiseResolver::ResolveOrRejectImmediately() {
   DCHECK(!GetExecutionContext()->IsContextPaused());
   {
     if (state_ == kResolving) {
-      resolver_.Resolve(value_.NewLocal(script_state_->GetIsolate()));
+      resolver_.Resolve(value_.Get(script_state_->GetIsolate()));
     } else {
       DCHECK_EQ(state_, kRejecting);
-      resolver_.Reject(value_.NewLocal(script_state_->GetIsolate()));
+      resolver_.Reject(value_.Get(script_state_->GetIsolate()));
     }
   }
   Detach();
@@ -118,9 +168,11 @@ void ScriptPromiseResolver::ResolveOrRejectDeferred() {
   ResolveOrRejectImmediately();
 }
 
-void ScriptPromiseResolver::Trace(blink::Visitor* visitor) {
+void ScriptPromiseResolver::Trace(Visitor* visitor) const {
   visitor->Trace(script_state_);
-  ContextLifecycleObserver::Trace(visitor);
+  visitor->Trace(resolver_);
+  visitor->Trace(value_);
+  ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
 }  // namespace blink

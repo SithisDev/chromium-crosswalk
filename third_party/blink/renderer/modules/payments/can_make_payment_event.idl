@@ -2,17 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://github.com/w3c/payment-handler/pull/170
+// https://w3c.github.io/payment-handler/#the-canmakepaymentevent
 
 [
     RuntimeEnabled=PaymentApp,
-    Constructor(DOMString type, CanMakePaymentEventInit eventInitDict),
     Exposed=ServiceWorker
 ] interface CanMakePaymentEvent : ExtendableEvent {
-    readonly attribute USVString topOrigin;
-    readonly attribute USVString paymentRequestOrigin;
-    readonly attribute FrozenArray<PaymentMethodData> methodData;
-    readonly attribute FrozenArray<PaymentDetailsModifier> modifiers;
+    constructor(DOMString type, CanMakePaymentEventInit eventInitDict);
+    [DeprecateAs=IdentityInCanMakePaymentEvent, RuntimeEnabled=IdentityInCanMakePaymentEventFeature] readonly attribute USVString topOrigin;
+    [DeprecateAs=IdentityInCanMakePaymentEvent, RuntimeEnabled=IdentityInCanMakePaymentEventFeature] readonly attribute USVString paymentRequestOrigin;
+    [DeprecateAs=IdentityInCanMakePaymentEvent, RuntimeEnabled=IdentityInCanMakePaymentEventFeature] readonly attribute FrozenArray<PaymentMethodData> methodData;
+    [DeprecateAs=IdentityInCanMakePaymentEvent, RuntimeEnabled=IdentityInCanMakePaymentEventFeature] readonly attribute FrozenArray<PaymentDetailsModifier> modifiers;
 
     [CallWith=ScriptState, RaisesException] void respondWith(Promise<boolean> canMakePaymentResponse);
 };

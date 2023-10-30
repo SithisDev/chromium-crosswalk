@@ -36,9 +36,14 @@
 namespace blink {
 
 NodeEventContext::NodeEventContext(Node& node, EventTarget& current_target)
-    : node_(node), current_target_(current_target) {}
+    : node_(node, Member<Node>::AtomicInitializerTag{}),
+      current_target_(current_target,
+                      Member<EventTarget>::AtomicInitializerTag{}),
+      tree_scope_event_context_(
+          nullptr,
+          Member<TreeScopeEventContext>::AtomicInitializerTag{}) {}
 
-void NodeEventContext::Trace(Visitor* visitor) {
+void NodeEventContext::Trace(Visitor* visitor) const {
   visitor->Trace(node_);
   visitor->Trace(current_target_);
   visitor->Trace(tree_scope_event_context_);

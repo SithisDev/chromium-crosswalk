@@ -308,6 +308,23 @@ TEST(StringViewTest, ConstructionStringView16) {
   EXPECT_EQ("3", StringView(view16_bit, 2, 1));
 }
 
+TEST(StringViewTest, SubstringContainsOnlyWhitespaceOrEmpty) {
+  EXPECT_TRUE(StringView("  ").SubstringContainsOnlyWhitespaceOrEmpty(0, 1));
+  EXPECT_TRUE(StringView("  ").SubstringContainsOnlyWhitespaceOrEmpty(0, 2));
+  EXPECT_TRUE(StringView("\x20\x09\x0A\x0D")
+                  .SubstringContainsOnlyWhitespaceOrEmpty(0, 4));
+  EXPECT_FALSE(StringView(" a").SubstringContainsOnlyWhitespaceOrEmpty(0, 2));
+  EXPECT_TRUE(StringView(" ").SubstringContainsOnlyWhitespaceOrEmpty(1, 1));
+  EXPECT_TRUE(StringView("").SubstringContainsOnlyWhitespaceOrEmpty(0, 0));
+  EXPECT_TRUE(
+      StringView("  \nABC").SubstringContainsOnlyWhitespaceOrEmpty(0, 3));
+  EXPECT_FALSE(StringView(" \u090A\n")
+                   .SubstringContainsOnlyWhitespaceOrEmpty(
+                       0, StringView(" \u090A\n").length()));
+  EXPECT_FALSE(
+      StringView("\n\x08\x1B").SubstringContainsOnlyWhitespaceOrEmpty(0, 3));
+}
+
 TEST(StringViewTest, ConstructionLiteral8) {
   // StringView(const LChar* chars);
   ASSERT_TRUE(StringView(kChars8).Is8Bit());
@@ -458,6 +475,60 @@ TEST(StringViewTest, EqualIgnoringASCIICase) {
       EqualIgnoringASCIICase(StringView("link different length"), "link"));
 
   EXPECT_TRUE(EqualIgnoringASCIICase(StringView(""), ""));
+}
+
+TEST(StringViewTest, DeprecatedEqualIgnoringCase) {
+  constexpr UChar kLongSAndKelvin[] = {0x017F, 0x212A, 0};
+  EXPECT_TRUE(DeprecatedEqualIgnoringCase("SK", kLongSAndKelvin));
+  EXPECT_TRUE(DeprecatedEqualIgnoringCase("sk", kLongSAndKelvin));
+
+  // Turkish-specific mappings are not applied.
+  constexpr UChar kSmallDotlessI[] = {0x0131, 0};
+  constexpr UChar kCapitalDotI[] = {0x0130, 0};
+  EXPECT_FALSE(DeprecatedEqualIgnoringCase("i", kSmallDotlessI));
+  EXPECT_FALSE(DeprecatedEqualIgnoringCase("i", kCapitalDotI));
+
+  // DeprecatedEqualIgnoringCase() has length-equality check.
+  constexpr UChar kSmallSharpS[] = {0x00DF, 0};
+  constexpr UChar kCapitalSharpS[] = {0x1E9E, 0};
+  EXPECT_FALSE(DeprecatedEqualIgnoringCase("ss", kSmallSharpS));
+  EXPECT_FALSE(DeprecatedEqualIgnoringCase("SS", kSmallSharpS));
+  EXPECT_FALSE(DeprecatedEqualIgnoringCase("ss", kCapitalSharpS));
+  EXPECT_FALSE(DeprecatedEqualIgnoringCase("SS", kCapitalSharpS));
+  constexpr UChar kLigatureFFI[] = {0xFB03, 0};
+  EXPECT_FALSE(DeprecatedEqualIgnoringCase("ffi", kLigatureFFI));
+
+  constexpr UChar kLigatureFFIAndSSSS[] = {0xFB03, 's', 's', 's', 's', 0};
+  constexpr UChar kFFIAndSharpSs[] = {'f', 'f', 'i', 0x00DF, 0x00DF, 0};
+  EXPECT_TRUE(DeprecatedEqualIgnoringCase(kLigatureFFIAndSSSS, kFFIAndSharpSs));
+}
+
+TEST(StringViewTest, NextCodePointOffset) {
+  StringView view8(kChars8);
+  EXPECT_EQ(1u, view8.NextCodePointOffset(0));
+  EXPECT_EQ(2u, view8.NextCodePointOffset(1));
+  EXPECT_EQ(5u, view8.NextCodePointOffset(4));
+
+  StringView view16(u"A\U0001F197X\U0001F232");
+  ASSERT_EQ(6u, view16.length());
+  EXPECT_EQ(1u, view16.NextCodePointOffset(0));
+  EXPECT_EQ(3u, view16.NextCodePointOffset(1));
+  EXPECT_EQ(3u, view16.NextCodePointOffset(2));
+  EXPECT_EQ(4u, view16.NextCodePointOffset(3));
+  EXPECT_EQ(6u, view16.NextCodePointOffset(4));
+
+  const UChar kLead = 0xD800;
+  StringView broken1(&kLead, 1);
+  EXPECT_EQ(1u, broken1.NextCodePointOffset(0));
+
+  const UChar kLeadAndNotTrail[] = {0xD800, 0x20, 0};
+  StringView broken2(kLeadAndNotTrail);
+  EXPECT_EQ(1u, broken2.NextCodePointOffset(0));
+  EXPECT_EQ(2u, broken2.NextCodePointOffset(1));
+
+  const UChar kTrail = 0xDC00;
+  StringView broken3(&kTrail, 1);
+  EXPECT_EQ(1u, broken3.NextCodePointOffset(0));
 }
 
 }  // namespace WTF

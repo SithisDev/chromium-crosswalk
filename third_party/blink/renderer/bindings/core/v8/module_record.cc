@@ -3,10 +3,14 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/bindings/core/v8/module_record.h"
-
+#include "base/feature_list.h"
+#include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/mojom/v8_cache_options.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/boxed_v8_module.h"
 #include "third_party/blink/renderer/bindings/core/v8/referrer_script_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
+#include "third_party/blink/renderer/core/loader/modulescript/module_script_creation_params.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/core/script/module_record_resolver.h"
@@ -14,6 +18,8 @@
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/script_fetch_options.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
+#include "third_party/blink/renderer/platform/wtf/text/text_position.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
@@ -32,119 +38,97 @@ ModuleRecordProduceCacheData::ModuleRecordProduceCacheData(
     v8::Local<v8::UnboundModuleScript> unbound_script =
         module->GetUnboundModuleScript();
     if (!unbound_script.IsEmpty())
-      unbound_script_.Set(isolate, unbound_script);
+      unbound_script_.Reset(isolate, unbound_script);
   }
 }
 
-void ModuleRecordProduceCacheData::Trace(blink::Visitor* visitor) {
+void ModuleRecordProduceCacheData::Trace(Visitor* visitor) const {
   visitor->Trace(cache_handler_);
-  visitor->Trace(unbound_script_.UnsafeCast<v8::Value>());
+  visitor->Trace(unbound_script_);
 }
 
-ModuleRecord::ModuleRecord() = default;
-
-ModuleRecord::ModuleRecord(v8::Isolate* isolate,
-                           v8::Local<v8::Module> module,
-                           const KURL& source_url)
-    : module_(SharedPersistent<v8::Module>::Create(module, isolate)),
-      identity_hash_(static_cast<unsigned>(module->GetIdentityHash())),
-      source_url_(source_url.GetString()) {
-  DCHECK(!module_->IsEmpty());
-}
-
-ModuleRecord::~ModuleRecord() = default;
-
-ModuleRecord ModuleRecord::Compile(
-    v8::Isolate* isolate,
-    const String& source,
-    const KURL& source_url,
-    const KURL& base_url,
+v8::Local<v8::Module> ModuleRecord::Compile(
+    ScriptState* script_state,
+    const ModuleScriptCreationParams& params,
     const ScriptFetchOptions& options,
     const TextPosition& text_position,
     ExceptionState& exception_state,
-    V8CacheOptions v8_cache_options,
-    SingleCachedMetadataHandler* cache_handler,
-    ScriptSourceLocationType source_location_type,
+    mojom::blink::V8CacheOptions v8_cache_options,
     ModuleRecordProduceCacheData** out_produce_cache_data) {
+  v8::Isolate* isolate = script_state->GetIsolate();
   v8::TryCatch try_catch(isolate);
   v8::Local<v8::Module> module;
 
   // Module scripts currently don't support |kEagerCompile| which can be
-  // used for |kV8CacheOptionsFullCodeWithoutHeatCheck|, so use
-  // |kV8CacheOptionsCodeWithoutHeatCheck| instead.
-  if (v8_cache_options == kV8CacheOptionsFullCodeWithoutHeatCheck) {
-    v8_cache_options = kV8CacheOptionsCodeWithoutHeatCheck;
+  // used for |mojom::blink::V8CacheOptions::kFullCodeWithoutHeatCheck|, so use
+  // |mojom::blink::V8CacheOptions::kCodeWithoutHeatCheck| instead.
+  if (v8_cache_options ==
+      mojom::blink::V8CacheOptions::kFullCodeWithoutHeatCheck) {
+    v8_cache_options = mojom::blink::V8CacheOptions::kCodeWithoutHeatCheck;
   }
 
   v8::ScriptCompiler::CompileOptions compile_options;
   V8CodeCache::ProduceCacheOptions produce_cache_options;
   v8::ScriptCompiler::NoCacheReason no_cache_reason;
+  ExecutionContext* execution_context = ExecutionContext::From(script_state);
+  if (params.CacheHandler()) {
+    params.CacheHandler()->Check(
+        ExecutionContext::GetCodeCacheHostFromContext(execution_context),
+        params.GetSourceText());
+  }
   std::tie(compile_options, produce_cache_options, no_cache_reason) =
-      V8CodeCache::GetCompileOptions(v8_cache_options, cache_handler,
-                                     source.length(), source_location_type);
+      V8CodeCache::GetCompileOptions(v8_cache_options, params.CacheHandler(),
+                                     params.GetSourceText().length(),
+                                     params.SourceLocationType());
 
-  if (!V8ScriptRunner::CompileModule(isolate, source, cache_handler, source_url,
-                                     text_position, compile_options,
-                                     no_cache_reason,
-                                     ReferrerScriptInfo(base_url, options))
+  if (!V8ScriptRunner::CompileModule(
+           isolate, params, text_position, compile_options, no_cache_reason,
+           ReferrerScriptInfo(params.BaseURL(), options))
            .ToLocal(&module)) {
     DCHECK(try_catch.HasCaught());
     exception_state.RethrowV8Exception(try_catch.Exception());
-    return ModuleRecord();
+    return v8::Local<v8::Module>();
   }
   DCHECK(!try_catch.HasCaught());
 
   if (out_produce_cache_data) {
     *out_produce_cache_data =
         MakeGarbageCollected<ModuleRecordProduceCacheData>(
-            isolate, cache_handler, produce_cache_options, module);
+            isolate, params.CacheHandler(), produce_cache_options, module);
   }
 
-  return ModuleRecord(isolate, module, source_url);
+  return module;
 }
 
-ScriptValue ModuleRecord::Instantiate(ScriptState* script_state) {
+ScriptValue ModuleRecord::Instantiate(ScriptState* script_state,
+                                      v8::Local<v8::Module> record,
+                                      const KURL& source_url) {
   v8::Isolate* isolate = script_state->GetIsolate();
   v8::TryCatch try_catch(isolate);
   try_catch.SetVerbose(true);
 
-  DCHECK(!IsNull());
+  DCHECK(!record.IsEmpty());
   v8::Local<v8::Context> context = script_state->GetContext();
-  probe::ExecuteScript probe(ExecutionContext::From(script_state), source_url_);
+  v8::MicrotasksScope microtasks_scope(
+      isolate, ToMicrotaskQueue(script_state),
+      v8::MicrotasksScope::kDoNotRunMicrotasks);
+
+  // Script IDs are not available on errored modules or on non-source text
+  // modules, so we give them a default value.
+  probe::ExecuteScript probe(ExecutionContext::From(script_state), context,
+                             source_url,
+                             record->GetStatus() != v8::Module::kErrored &&
+                                     record->IsSourceTextModule()
+                                 ? record->ScriptId()
+                                 : v8::UnboundScript::kNoScriptId);
   bool success;
-  if (!NewLocal(script_state->GetIsolate())
-           ->InstantiateModule(context, &ResolveModuleCallback)
+  if (!record->InstantiateModule(context, &ResolveModuleCallback)
            .To(&success) ||
       !success) {
     DCHECK(try_catch.HasCaught());
-    return ScriptValue(script_state, try_catch.Exception());
+    return ScriptValue(isolate, try_catch.Exception());
   }
   DCHECK(!try_catch.HasCaught());
-  return ScriptValue();
-}
-
-ScriptValue ModuleRecord::Evaluate(ScriptState* script_state) const {
-  v8::Isolate* isolate = script_state->GetIsolate();
-
-  // Isolate exceptions that occur when executing the code. These exceptions
-  // should not interfere with javascript code we might evaluate from C++ when
-  // returning from here.
-  v8::TryCatch try_catch(isolate);
-
-  ExecutionContext* execution_context = ExecutionContext::From(script_state);
-  probe::ExecuteScript probe(execution_context, source_url_);
-
-  // TODO(kouhei): We currently don't have a code-path which use return value of
-  // EvaluateModule. Stop ignoring result once we have such path.
-  v8::Local<v8::Value> result;
-  if (!V8ScriptRunner::EvaluateModule(isolate, execution_context,
-                                      module_->NewLocal(isolate),
-                                      script_state->GetContext())
-           .ToLocal(&result)) {
-    DCHECK(try_catch.HasCaught());
-    return ScriptValue(script_state, try_catch.Exception());
-  }
-
   return ScriptValue();
 }
 
@@ -153,64 +137,125 @@ void ModuleRecord::ReportException(ScriptState* script_state,
   V8ScriptRunner::ReportException(script_state->GetIsolate(), exception);
 }
 
-Vector<String> ModuleRecord::ModuleRequests(ScriptState* script_state) {
-  if (IsNull())
-    return Vector<String>();
+Vector<ModuleRequest> ModuleRecord::ModuleRequests(
+    ScriptState* script_state,
+    v8::Local<v8::Module> record) {
+  if (record.IsEmpty())
+    return Vector<ModuleRequest>();
 
-  v8::Local<v8::Module> module = module_->NewLocal(script_state->GetIsolate());
+  v8::Local<v8::FixedArray> v8_module_requests = record->GetModuleRequests();
+  int length = v8_module_requests->Length();
+  Vector<ModuleRequest> requests;
+  requests.ReserveInitialCapacity(length);
+  bool needs_text_position =
+      !WTF::IsMainThread() ||
+      probe::ToCoreProbeSink(ExecutionContext::From(script_state))
+          ->HasDevToolsSessions();
 
-  Vector<String> ret;
-
-  int length = module->GetModuleRequestsLength();
-  ret.ReserveInitialCapacity(length);
   for (int i = 0; i < length; ++i) {
-    v8::Local<v8::String> v8_name = module->GetModuleRequest(i);
-    ret.push_back(ToCoreString(v8_name));
+    v8::Local<v8::ModuleRequest> v8_module_request =
+        v8_module_requests->Get(script_state->GetContext(), i)
+            .As<v8::ModuleRequest>();
+    v8::Local<v8::String> v8_specifier = v8_module_request->GetSpecifier();
+    TextPosition position = TextPosition::MinimumPosition();
+    if (needs_text_position) {
+      // The source position is only used by DevTools for module requests and
+      // only visible if devtools is open when the request is initiated.
+      // Calculating the source position is not free and V8 has to initialize
+      // the line end information for the complete module, thus we try to
+      // avoid this additional work here if DevTools is closed.
+      int source_offset = v8_module_request->GetSourceOffset();
+      v8::Location v8_loc = record->SourceOffsetToLocation(source_offset);
+      position = TextPosition(
+          OrdinalNumber::FromZeroBasedInt(v8_loc.GetLineNumber()),
+          OrdinalNumber::FromZeroBasedInt(v8_loc.GetColumnNumber()));
+    }
+    Vector<ImportAssertion> import_assertions =
+        ModuleRecord::ToBlinkImportAssertions(
+            script_state->GetContext(), record,
+            v8_module_request->GetImportAssertions(),
+            /*v8_import_assertions_has_positions=*/true);
+
+    requests.emplace_back(ToCoreString(v8_specifier), position,
+                          import_assertions);
   }
-  return ret;
+
+  return requests;
 }
 
-Vector<TextPosition> ModuleRecord::ModuleRequestPositions(
-    ScriptState* script_state) {
-  if (IsNull())
-    return Vector<TextPosition>();
-  v8::Local<v8::Module> module = module_->NewLocal(script_state->GetIsolate());
-
-  Vector<TextPosition> ret;
-
-  int length = module->GetModuleRequestsLength();
-  ret.ReserveInitialCapacity(length);
-  for (int i = 0; i < length; ++i) {
-    v8::Location v8_loc = module->GetModuleRequestLocation(i);
-    ret.emplace_back(OrdinalNumber::FromZeroBasedInt(v8_loc.GetLineNumber()),
-                     OrdinalNumber::FromZeroBasedInt(v8_loc.GetColumnNumber()));
-  }
-  return ret;
-}
-
-v8::Local<v8::Value> ModuleRecord::V8Namespace(v8::Isolate* isolate) {
-  DCHECK(!IsNull());
-  v8::Local<v8::Module> module = module_->NewLocal(isolate);
-  return module->GetModuleNamespace();
+v8::Local<v8::Value> ModuleRecord::V8Namespace(v8::Local<v8::Module> record) {
+  DCHECK(!record.IsEmpty());
+  return record->GetModuleNamespace();
 }
 
 v8::MaybeLocal<v8::Module> ModuleRecord::ResolveModuleCallback(
     v8::Local<v8::Context> context,
     v8::Local<v8::String> specifier,
+    v8::Local<v8::FixedArray> import_assertions,
     v8::Local<v8::Module> referrer) {
   v8::Isolate* isolate = context->GetIsolate();
   Modulator* modulator = Modulator::From(ScriptState::From(context));
   DCHECK(modulator);
 
-  // TODO(shivanisha): Can a valid source url be passed to the constructor.
-  ModuleRecord referrer_record(isolate, referrer, KURL());
+  ModuleRequest module_request(
+      ToCoreStringWithNullCheck(specifier), TextPosition::MinimumPosition(),
+      ModuleRecord::ToBlinkImportAssertions(
+          context, referrer, import_assertions,
+          /*v8_import_assertions_has_positions=*/true));
+
   ExceptionState exception_state(isolate, ExceptionState::kExecutionContext,
                                  "ModuleRecord", "resolveModuleCallback");
-  ModuleRecord resolved = modulator->GetModuleRecordResolver()->Resolve(
-      ToCoreStringWithNullCheck(specifier), referrer_record, exception_state);
-  DCHECK(!resolved.IsNull());
+  v8::Local<v8::Module> resolved =
+      modulator->GetModuleRecordResolver()->Resolve(module_request, referrer,
+                                                    exception_state);
+  DCHECK(!resolved.IsEmpty());
   DCHECK(!exception_state.HadException());
-  return resolved.module_->NewLocal(isolate);
+
+  return resolved;
+}
+
+Vector<ImportAssertion> ModuleRecord::ToBlinkImportAssertions(
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Module> record,
+    v8::Local<v8::FixedArray> v8_import_assertions,
+    bool v8_import_assertions_has_positions) {
+  // If v8_import_assertions_has_positions == true then v8_import_assertions has
+  // source position information and is given in the form [key1, value1,
+  // source_offset1, key2, value2, source_offset2, ...]. Otherwise if
+  // v8_import_assertions_has_positions == false, then v8_import_assertions is
+  // in the form [key1, value1, key2, value2, ...].
+  const int kV8AssertionEntrySize = v8_import_assertions_has_positions ? 3 : 2;
+
+  Vector<ImportAssertion> import_assertions;
+  int number_of_import_assertions =
+      v8_import_assertions->Length() / kV8AssertionEntrySize;
+  import_assertions.ReserveInitialCapacity(number_of_import_assertions);
+  for (int i = 0; i < number_of_import_assertions; ++i) {
+    v8::Local<v8::String> v8_assertion_key =
+        v8_import_assertions->Get(context, i * kV8AssertionEntrySize)
+            .As<v8::String>();
+    v8::Local<v8::String> v8_assertion_value =
+        v8_import_assertions->Get(context, (i * kV8AssertionEntrySize) + 1)
+            .As<v8::String>();
+    TextPosition assertion_position = TextPosition::MinimumPosition();
+    if (v8_import_assertions_has_positions) {
+      int32_t v8_assertion_source_offset =
+          v8_import_assertions->Get(context, (i * kV8AssertionEntrySize) + 2)
+              .As<v8::Int32>()
+              ->Value();
+      v8::Location v8_assertion_loc =
+          record->SourceOffsetToLocation(v8_assertion_source_offset);
+      assertion_position = TextPosition(
+          OrdinalNumber::FromZeroBasedInt(v8_assertion_loc.GetLineNumber()),
+          OrdinalNumber::FromZeroBasedInt(v8_assertion_loc.GetColumnNumber()));
+    }
+
+    import_assertions.emplace_back(ToCoreString(v8_assertion_key),
+                                   ToCoreString(v8_assertion_value),
+                                   assertion_position);
+  }
+
+  return import_assertions;
 }
 
 }  // namespace blink

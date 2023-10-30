@@ -27,10 +27,10 @@
     "none",
     "total",
 
-    // https://github.com/WICG/indexed-db-observers/blob/gh-pages/EXPLAINER.md//records
-    "add",
-    "put",
-    "delete",
-    "clear",
+    // The IDBTransactionDurability enum is still being standardized.
+    // https://chromestatus.com/feature/5730701489995776
+    "default",
+    "relaxed",
+    "strict",
   ],
 }

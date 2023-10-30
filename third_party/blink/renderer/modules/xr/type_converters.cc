@@ -4,15 +4,17 @@
 
 #include "third_party/blink/renderer/modules/xr/type_converters.h"
 
+#include "ui/gfx/geometry/point3_f.h"
+
 namespace mojo {
 
-base::Optional<blink::XRPlane::Orientation>
-TypeConverter<base::Optional<blink::XRPlane::Orientation>,
+absl::optional<blink::XRPlane::Orientation>
+TypeConverter<absl::optional<blink::XRPlane::Orientation>,
               device::mojom::blink::XRPlaneOrientation>::
     Convert(const device::mojom::blink::XRPlaneOrientation& orientation) {
   switch (orientation) {
     case device::mojom::blink::XRPlaneOrientation::UNKNOWN:
-      return base::nullopt;
+      return absl::nullopt;
     case device::mojom::blink::XRPlaneOrientation::HORIZONTAL:
       return blink::XRPlane::Orientation::kHorizontal;
     case device::mojom::blink::XRPlaneOrientation::VERTICAL:
@@ -20,46 +22,10 @@ TypeConverter<base::Optional<blink::XRPlane::Orientation>,
   }
 }
 
-blink::TransformationMatrix
-TypeConverter<blink::TransformationMatrix, device::mojom::blink::VRPosePtr>::
-    Convert(const device::mojom::blink::VRPosePtr& pose) {
-  DCHECK(pose);
-
-  blink::TransformationMatrix result;
-  blink::TransformationMatrix::DecomposedType decomp = {};
-
-  decomp.perspective_w = 1;
-  decomp.scale_x = 1;
-  decomp.scale_y = 1;
-  decomp.scale_z = 1;
-
-  if (pose->orientation) {
-    // TODO(https://crbug.com/929841): Remove negation once the bug is fixed.
-    gfx::Quaternion quat = pose->orientation->inverse();
-    decomp.quaternion_x = quat.x();
-    decomp.quaternion_y = quat.y();
-    decomp.quaternion_z = quat.z();
-    decomp.quaternion_w = quat.w();
-  } else {
-    decomp.quaternion_w = 1.0;
-  }
-
-  if (pose->position) {
-    decomp.translate_x = pose->position->x;
-    decomp.translate_y = pose->position->y;
-    decomp.translate_z = pose->position->z;
-  }
-
-  result.Recompose(decomp);
-
-  return result;
-}
-
 blink::HeapVector<blink::Member<blink::DOMPointReadOnly>>
 TypeConverter<blink::HeapVector<blink::Member<blink::DOMPointReadOnly>>,
-              WTF::Vector<device::mojom::blink::XRPlanePointDataPtr>>::
-    Convert(const WTF::Vector<device::mojom::blink::XRPlanePointDataPtr>&
-                vertices) {
+              Vector<device::mojom::blink::XRPlanePointDataPtr>>::
+    Convert(const Vector<device::mojom::blink::XRPlanePointDataPtr>& vertices) {
   blink::HeapVector<blink::Member<blink::DOMPointReadOnly>> result;
 
   for (const auto& vertex_data : vertices) {

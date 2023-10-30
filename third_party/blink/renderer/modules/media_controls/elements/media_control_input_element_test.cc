@@ -5,14 +5,16 @@
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_input_element.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
 
 namespace blink {
@@ -34,7 +36,7 @@ class MediaControlInputElementImpl final : public MediaControlInputElement {
     SetIsWanted(false);
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     MediaControlInputElement::Trace(visitor);
   }
 
@@ -44,8 +46,8 @@ class MediaControlInputElementImpl final : public MediaControlInputElement {
                                : "MediaControlInputElementImpl";
   }
 
-  WebLocalizedString::Name GetOverflowStringName() const final {
-    return WebLocalizedString::kOverflowMenuDownload;
+  int GetOverflowStringId() const final {
+    return IDS_MEDIA_OVERFLOW_MENU_DOWNLOAD;
   }
 };
 
@@ -170,7 +172,7 @@ TEST_F(MediaControlInputElementTest, ClickRecordsInteraction) {
   ControlInputElement().MaybeRecordDisplayed();
 
   ControlInputElement().DispatchSimulatedClick(
-      Event::CreateBubble(event_type_names::kClick), kSendNoEvents);
+      Event::CreateBubble(event_type_names::kClick));
 
   histogram_tester_.ExpectTotalCount(kControlInputElementHistogramName, 2);
   histogram_tester_.ExpectBucketCount(kControlInputElementHistogramName, 0, 1);
@@ -276,6 +278,36 @@ TEST_F(MediaControlInputElementTest, ShouldRecordDisplayStates_Preload) {
   MediaElement().setAttribute(html_names::kPreloadAttr, "auto");
   EXPECT_FALSE(
       MediaControlInputElement::ShouldRecordDisplayStates(MediaElement()));
+}
+
+TEST_F(MediaControlInputElementTest, StyleRecalcForIsWantedAndFit) {
+  GetDocument().body()->appendChild(&ControlInputElement());
+  ControlInputElement().SetIsWanted(false);
+  ControlInputElement().SetDoesFit(false);
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(ControlInputElement().GetLayoutObject());
+
+  ControlInputElement().SetIsWanted(false);
+  ControlInputElement().SetDoesFit(false);
+  EXPECT_FALSE(ControlInputElement().NeedsStyleRecalc());
+
+  ControlInputElement().SetIsWanted(true);
+  ControlInputElement().SetDoesFit(false);
+  EXPECT_TRUE(ControlInputElement().NeedsStyleRecalc());
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_FALSE(ControlInputElement().GetLayoutObject());
+  EXPECT_FALSE(ControlInputElement().NeedsStyleRecalc());
+
+  ControlInputElement().SetIsWanted(true);
+  ControlInputElement().SetDoesFit(true);
+  EXPECT_TRUE(ControlInputElement().NeedsStyleRecalc());
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_TRUE(ControlInputElement().GetLayoutObject());
+  EXPECT_FALSE(ControlInputElement().NeedsStyleRecalc());
+
+  ControlInputElement().SetIsWanted(true);
+  ControlInputElement().SetDoesFit(true);
+  EXPECT_FALSE(ControlInputElement().NeedsStyleRecalc());
 }
 
 }  // namespace blink

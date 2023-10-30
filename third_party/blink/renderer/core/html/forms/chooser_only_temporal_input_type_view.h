@@ -30,31 +30,34 @@
 #include "third_party/blink/renderer/core/html/forms/date_time_chooser.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_chooser_client.h"
 #include "third_party/blink/renderer/core/html/forms/keyboard_clickable_input_type_view.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 
 namespace blink {
 
 class ChooserOnlyTemporalInputTypeView final
-    : public GarbageCollectedFinalized<ChooserOnlyTemporalInputTypeView>,
+    : public GarbageCollected<ChooserOnlyTemporalInputTypeView>,
       public KeyboardClickableInputTypeView,
       public DateTimeChooserClient {
-  USING_GARBAGE_COLLECTED_MIXIN(ChooserOnlyTemporalInputTypeView);
   USING_PRE_FINALIZER(ChooserOnlyTemporalInputTypeView, CloseDateTimeChooser);
 
  public:
   ChooserOnlyTemporalInputTypeView(HTMLInputElement&, BaseTemporalInputType&);
   ~ChooserOnlyTemporalInputTypeView() override;
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void CloseDateTimeChooser();
 
   // InputTypeView functions:
+  void Blur() final;
   void CreateShadowSubtree() override;
   void ClosePopupView() override;
   void ValueAttributeChanged() override;
   void DidSetValue(const String&, bool value_changed) override;
   void HandleDOMActivateEvent(Event&) override;
+  ControlPart AutoAppearance() const override;
+  void OpenPopupView() override;
   void UpdateView() override;
 
   // DateTimeChooserClient functions:

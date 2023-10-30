@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_NAMESPACE_RULE_H_
 
 #include "third_party/blink/renderer/core/css/css_rule.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
@@ -25,10 +26,10 @@ class CSSNamespaceRule final : public CSSRule {
   AtomicString namespaceURI() const;
   AtomicString prefix() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
-  CSSRule::Type type() const override { return kNamespaceRule; }
+  CSSRule::Type GetType() const override { return kNamespaceRule; }
 
   Member<StyleRuleNamespace> namespace_rule_;
 };
@@ -36,7 +37,7 @@ class CSSNamespaceRule final : public CSSRule {
 template <>
 struct DowncastTraits<CSSNamespaceRule> {
   static bool AllowFrom(const CSSRule& rule) {
-    return rule.type() == CSSRule::kNamespaceRule;
+    return rule.GetType() == CSSRule::kNamespaceRule;
   }
 };
 

@@ -14,13 +14,14 @@
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
 
 class WebNodeTest : public PageTestBase {
  protected:
   void SetInnerHTML(const String& html) {
-    GetDocument().documentElement()->SetInnerHTMLFromString(html);
+    GetDocument().documentElement()->setInnerHTML(html);
   }
 
   WebNode Root() { return WebNode(GetDocument().documentElement()); }
@@ -66,7 +67,7 @@ TEST_F(WebNodeSimTest, IsFocused) {
                                      "text/css");
 
   LoadURL("https://example.com/test.html");
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
 
   main_resource.Write(R"HTML(
     <!DOCTYPE html>
@@ -76,13 +77,13 @@ TEST_F(WebNodeSimTest, IsFocused) {
 
   css_resource.Start();
 
-  EXPECT_TRUE(GetDocument().GetStyleEngine().HasPendingRenderBlockingSheets());
-
   WebNode input_node(GetDocument().getElementById("focusable"));
   EXPECT_FALSE(input_node.IsFocusable());
+  EXPECT_FALSE(GetDocument().HaveRenderBlockingStylesheetsLoaded());
 
   main_resource.Finish();
   css_resource.Complete("dummy {}");
+  test::RunPendingTasks();
   EXPECT_TRUE(input_node.IsFocusable());
 }
 

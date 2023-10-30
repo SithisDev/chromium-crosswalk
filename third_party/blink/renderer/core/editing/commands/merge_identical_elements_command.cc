@@ -42,8 +42,8 @@ MergeIdenticalElementsCommand::MergeIdenticalElementsCommand(Element* first,
 }
 
 void MergeIdenticalElementsCommand::DoApply(EditingState*) {
-  if (element1_->nextSibling() != element2_ || !HasEditableStyle(*element1_) ||
-      !HasEditableStyle(*element2_))
+  if (element1_->nextSibling() != element2_ || !IsEditable(*element1_) ||
+      !IsEditable(*element2_))
     return;
 
   at_child_ = element2_->firstChild();
@@ -66,7 +66,7 @@ void MergeIdenticalElementsCommand::DoUnapply() {
   Node* at_child = at_child_.Release();
 
   ContainerNode* parent = element2_->parentNode();
-  if (!parent || !HasEditableStyle(*parent))
+  if (!parent || !IsEditable(*parent))
     return;
 
   DummyExceptionStateForTesting exception_state;
@@ -84,7 +84,7 @@ void MergeIdenticalElementsCommand::DoUnapply() {
     element1_->AppendChild(child.Release(), exception_state);
 }
 
-void MergeIdenticalElementsCommand::Trace(Visitor* visitor) {
+void MergeIdenticalElementsCommand::Trace(Visitor* visitor) const {
   visitor->Trace(element1_);
   visitor->Trace(element2_);
   visitor->Trace(at_child_);

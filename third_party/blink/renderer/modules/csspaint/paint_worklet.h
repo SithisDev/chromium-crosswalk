@@ -7,15 +7,14 @@
 
 #include <memory>
 
-#include "base/macros.h"
-#include "third_party/blink/renderer/core/css/css_syntax_descriptor.h"
+#include "third_party/blink/renderer/core/css/css_syntax_definition.h"
 #include "third_party/blink/renderer/core/workers/worklet.h"
 #include "third_party/blink/renderer/modules/csspaint/document_paint_definition.h"
 #include "third_party/blink/renderer/modules/csspaint/paint_worklet_global_scope_proxy.h"
 #include "third_party/blink/renderer/modules/csspaint/paint_worklet_pending_generator_registry.h"
 #include "third_party/blink/renderer/modules/csspaint/paint_worklet_proxy_client.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -25,8 +24,6 @@ class CSSPaintImageGeneratorImpl;
 // https://drafts.css-houdini.org/css-paint-api/#dom-css-paintworklet
 class MODULES_EXPORT PaintWorklet : public Worklet,
                                     public Supplement<LocalDOMWindow> {
-  USING_GARBAGE_COLLECTED_MIXIN(PaintWorklet);
-
  public:
   static const char kSupplementName[];
 
@@ -34,19 +31,22 @@ class MODULES_EXPORT PaintWorklet : public Worklet,
   static const wtf_size_t kNumGlobalScopesPerThread;
   static PaintWorklet* From(LocalDOMWindow&);
 
-  explicit PaintWorklet(LocalFrame*);
+  explicit PaintWorklet(LocalDOMWindow&);
+
+  PaintWorklet(const PaintWorklet&) = delete;
+  PaintWorklet& operator=(const PaintWorklet&) = delete;
+
   ~PaintWorklet() override;
 
   void AddPendingGenerator(const String& name, CSSPaintImageGeneratorImpl*);
   // The |container_size| is without subpixel snapping.
   scoped_refptr<Image> Paint(const String& name,
                              const ImageResourceObserver&,
-                             const FloatSize& container_size,
-                             const CSSStyleValueVector*,
-                             float device_scale_factor);
+                             const gfx::SizeF& container_size,
+                             const CSSStyleValueVector*);
 
   int WorkletId() const { return worklet_id_; }
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   // The DocumentDefinitionMap tracks definitions registered via
   // registerProperty; definitions are only considered valid once all global
@@ -72,7 +72,7 @@ class MODULES_EXPORT PaintWorklet : public Worklet,
       const String& name,
       Vector<CSSPropertyID> native_properties,
       Vector<String> custom_properties,
-      Vector<CSSSyntaxDescriptor> input_argument_types,
+      Vector<CSSSyntaxDefinition> input_argument_types,
       double alpha);
 
   HeapVector<Member<WorkletGlobalScopeProxy>>& GetGlobalScopesForTesting() {
@@ -88,6 +88,8 @@ class MODULES_EXPORT PaintWorklet : public Worklet,
   void SetProxyClientForTesting(PaintWorkletProxyClient* proxy_client) {
     proxy_client_ = proxy_client;
   }
+
+  void ResetIsPaintOffThreadForTesting();
 
  protected:
   // Since paint worklet has more than one global scope, we MUST override this
@@ -140,7 +142,11 @@ class MODULES_EXPORT PaintWorklet : public Worklet,
   // to ensure that all global scopes get the same proxy client.
   Member<PaintWorkletProxyClient> proxy_client_;
 
-  DISALLOW_COPY_AND_ASSIGN(PaintWorklet);
+  // When running layout test, paint worklet has to be on the main thread
+  // because "enable-threaded-compositing" is off by default. However, some unit
+  // tests may be testing the functionality of the APIs when the paint worklet
+  // is off the main thread.
+  bool is_paint_off_thread_;
 };
 
 }  // namespace blink

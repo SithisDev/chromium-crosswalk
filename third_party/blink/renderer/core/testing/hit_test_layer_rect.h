@@ -34,7 +34,7 @@
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect_read_only.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -51,7 +51,7 @@ class HitTestLayerRect final : public ScriptWrappable {
   DOMRectReadOnly* layerRect() const { return layer_rect_.Get(); }
   DOMRectReadOnly* hitTestRect() const { return hit_test_rect_.Get(); }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(layer_rect_);
     visitor->Trace(hit_test_rect_);
     ScriptWrappable::Trace(visitor);

@@ -27,11 +27,11 @@
 
 #include <stdint.h>
 #include "base/callback_forward.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/task/task_observer.h"
 #include "base/threading/thread.h"
-#include "third_party/blink/public/platform/web_thread_type.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_type.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace base {
@@ -45,14 +45,15 @@ class TaskTimeObserver;
 namespace blink {
 
 class FrameOrWorkerScheduler;
+class MainThread;
+class NonMainThread;
 class ThreadScheduler;
-class Platform;
 
 // Always an integer value.
 typedef uintptr_t PlatformThreadId;
 
 struct PLATFORM_EXPORT ThreadCreationParams {
-  explicit ThreadCreationParams(WebThreadType);
+  explicit ThreadCreationParams(ThreadType);
 
   ThreadCreationParams& SetThreadNameForTest(const char* name);
 
@@ -62,10 +63,14 @@ struct PLATFORM_EXPORT ThreadCreationParams {
 
   ThreadCreationParams& SetSupportsGC(bool supports_gc);
 
-  WebThreadType thread_type;
+  ThreadType thread_type;
   const char* name;
   FrameOrWorkerScheduler* frame_or_worker_scheduler;  // NOT OWNED
-  base::ThreadPriority thread_priority = base::ThreadPriority::NORMAL;
+
+  // Do NOT set the thread priority for non-WebAudio usages. Please consult
+  // scheduler-dev@ first in order to use an elevated thread priority.
+  base::ThreadType base_thread_type = base::ThreadType::kDefault;
+
   bool supports_gc = false;
 };
 
@@ -77,22 +82,11 @@ class PLATFORM_EXPORT Thread {
   USING_FAST_MALLOC(Thread);
 
  public:
-  friend class Platform;  // For SetMainThread() and IsSimpleMainThread().
-  friend class ScopedMainThreadOverrider;  // For SetMainThread().
-
   // An IdleTask is expected to complete before the deadline it is passed.
   using IdleTask = base::OnceCallback<void(base::TimeTicks deadline)>;
 
   // TaskObserver is an observer fired before and after a task is executed.
-  using TaskObserver = base::MessageLoop::TaskObserver;
-
-  // Creates a new thread. This may be called from a non-main thread (e.g.
-  // nested Web workers).
-  static std::unique_ptr<Thread> CreateThread(const ThreadCreationParams&);
-
-  // Creates a WebAudio-specific thread with the elevated priority. Do NOT use
-  // for any other purpose.
-  static std::unique_ptr<Thread> CreateWebAudioThread();
+  using TaskObserver = base::TaskObserver;
 
   // Create and save (as a global variable) the compositor thread. The thread
   // will be accessible through CompositorThread().
@@ -102,13 +96,15 @@ class PLATFORM_EXPORT Thread {
   static Thread* Current();
 
   // Return an interface to the main thread.
-  static Thread* MainThread();
+  static blink::MainThread* MainThread();
 
   // Return an interface to the compositor thread (if initialized). This can be
   // null if the renderer was created with threaded rendering disabled.
-  static Thread* CompositorThread();
+  static NonMainThread* CompositorThread();
 
   Thread();
+  Thread(const Thread&) = delete;
+  Thread& operator=(const Thread&) = delete;
   virtual ~Thread();
 
   // Must be called immediately after the construction.
@@ -120,12 +116,12 @@ class PLATFORM_EXPORT Thread {
   // Default scheduler task queue does not give scheduler enough freedom to
   // manage task priorities and should not be used.
   // Use ExecutionContext::GetTaskRunner instead (crbug.com/624696).
-  virtual scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() const {
+  virtual scoped_refptr<base::SingleThreadTaskRunner> GetDeprecatedTaskRunner()
+      const {
     return nullptr;
   }
 
   bool IsCurrentThread() const;
-  virtual PlatformThreadId ThreadId() const { return 0; }
 
   // TaskObserver is an object that receives task notifications from the
   // MessageLoop.
@@ -152,20 +148,6 @@ class PLATFORM_EXPORT Thread {
 
  protected:
   static void UpdateThreadTLS(Thread* thread);
-
- private:
-  // For Platform and ScopedMainThreadOverrider. Return the thread object
-  // previously set (if any).
-  //
-  // This is done this way because we need to be able to "override" the main
-  // thread temporarily for ScopedTestingPlatformSupport.
-  static std::unique_ptr<Thread> SetMainThread(std::unique_ptr<Thread>);
-
-  // This is used to identify the actual Thread instance. This should be
-  // used only in Platform, and other users should ignore this.
-  virtual bool IsSimpleMainThread() const { return false; }
-
-  DISALLOW_COPY_AND_ASSIGN(Thread);
 };
 
 }  // namespace blink

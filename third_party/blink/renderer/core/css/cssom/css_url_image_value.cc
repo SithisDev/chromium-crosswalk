@@ -14,15 +14,16 @@ const String& CSSURLImageValue::url() const {
   return value_->RelativeUrl();
 }
 
-base::Optional<IntSize> CSSURLImageValue::IntrinsicSize() const {
+absl::optional<gfx::Size> CSSURLImageValue::IntrinsicSize() const {
   if (Status() != ResourceStatus::kCached)
-    return base::nullopt;
+    return absl::nullopt;
 
   DCHECK(!value_->IsCachePending());
   ImageResourceContent* resource_content = value_->CachedImage()->CachedImage();
+
   return resource_content
-             ? resource_content->IntrinsicSize(kDoNotRespectImageOrientation)
-             : IntSize(0, 0);
+             ? resource_content->IntrinsicSize(kRespectImageOrientation)
+             : gfx::Size(0, 0);
 }
 
 ResourceStatus CSSURLImageValue::Status() const {
@@ -33,8 +34,10 @@ ResourceStatus CSSURLImageValue::Status() const {
 
 scoped_refptr<Image> CSSURLImageValue::GetSourceImageForCanvas(
     SourceImageStatus*,
-    AccelerationHint,
-    const FloatSize&) {
+    const gfx::SizeF&,
+    const AlphaDisposition alpha_disposition) {
+  // UnpremultiplyAlpha is not implemented yet.
+  DCHECK_EQ(alpha_disposition, kPremultiplyAlpha);
   return GetImage();
 }
 
@@ -58,7 +61,7 @@ const CSSValue* CSSURLImageValue::ToCSSValue() const {
   return value_;
 }
 
-void CSSURLImageValue::Trace(blink::Visitor* visitor) {
+void CSSURLImageValue::Trace(Visitor* visitor) const {
   visitor->Trace(value_);
   CSSStyleImageValue::Trace(visitor);
 }

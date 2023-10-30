@@ -6,17 +6,27 @@
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_DEDICATED_WORKER_HOST_FACTORY_CLIENT_H_
 
 #include "base/memory/ref_counted.h"
+#include "base/unguessable_token.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/mojom/blob/blob_url_store.mojom-shared.h"
+#include "third_party/blink/public/mojom/frame/back_forward_cache_controller.mojom-shared.h"
+#include "third_party/blink/public/mojom/frame/lifecycle.mojom-shared.h"
+#include "third_party/blink/public/platform/cross_variant_mojo_util.h"
+#include "third_party/blink/public/platform/web_fetch_client_settings_object.h"
 
 namespace base {
 class SingleThreadTaskRunner;
 }
 
+namespace network {
+struct CrossOriginEmbedderPolicy;
+}
+
 namespace blink {
 
-class WebSecurityOrigin;
 class WebURL;
 class WebWorkerFetchContext;
 
@@ -24,24 +34,28 @@ class WebWorkerFetchContext;
 // content::DedicatedWorkerHostFactoryClient from blink::DedicatedWorker.
 class WebDedicatedWorkerHostFactoryClient {
  public:
+  using CreateWorkerHostCallback = base::OnceCallback<void(
+      const network::CrossOriginEmbedderPolicy&,
+      CrossVariantMojoRemote<
+          mojom::BackForwardCacheControllerHostInterfaceBase>)>;
+
   virtual ~WebDedicatedWorkerHostFactoryClient() = default;
 
   // Requests the creation of DedicatedWorkerHost in the browser process.
   // For non-PlzDedicatedWorker. This will be removed once PlzDedicatedWorker is
   // enabled by default.
   virtual void CreateWorkerHostDeprecated(
-      const blink::WebSecurityOrigin& script_origin) = 0;
-  // For PlzDedicatedWorker.
-  // TODO(nhiroki): Pack |fetch_client_*| into some struct like
-  // WebFetchClientSettingsObject.
-  virtual void CreateWorkerHost(
+      const DedicatedWorkerToken& dedicated_worker_token,
       const blink::WebURL& script_url,
-      const blink::WebSecurityOrigin& script_origin,
+      CreateWorkerHostCallback callback) = 0;
+  // For PlzDedicatedWorker.
+  virtual void CreateWorkerHost(
+      const DedicatedWorkerToken& dedicated_worker_token,
+      const blink::WebURL& script_url,
       network::mojom::CredentialsMode credentials_mode,
-      const blink::WebSecurityOrigin& fetch_client_security_origin,
-      network::mojom::ReferrerPolicy fetch_client_referrer_policy,
-      const blink::WebURL& fetch_client_outgoing_referrer,
-      mojo::ScopedMessagePipeHandle blob_url_token) = 0;
+      const blink::WebFetchClientSettingsObject& fetch_client_settings_object,
+      CrossVariantMojoRemote<mojom::BlobURLTokenInterfaceBase>
+          blob_url_token) = 0;
 
   // Clones the given WebWorkerFetchContext for nested workers.
   virtual scoped_refptr<WebWorkerFetchContext> CloneWorkerFetchContext(

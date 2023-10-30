@@ -17,33 +17,43 @@ class MODULES_EXPORT AXVirtualObject : public AXObject {
  public:
   AXVirtualObject(AXObjectCacheImpl&, AccessibleNode*);
   ~AXVirtualObject() override;
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   // AXObject overrides.
   void Detach() override;
-  AXObject* ComputeParent() const override { return parent_; }
   bool IsVirtualObject() const override { return true; }
   void AddChildren() override;
-  void ChildrenChanged() override;
+  void ChildrenChangedWithCleanLayout() override;
   const AtomicString& GetAOMPropertyOrARIAAttribute(
       AOMStringProperty) const override;
   bool HasAOMPropertyOrARIAAttribute(AOMBooleanProperty,
                                      bool& result) const override;
   AccessibleNode* GetAccessibleNode() const override;
   String TextAlternative(bool recursive,
-                         bool in_aria_labelled_by_traversal,
+                         const AXObject* aria_label_or_description_root,
                          AXObjectSet& visited,
                          ax::mojom::NameFrom&,
                          AXRelatedObjectVector*,
                          NameSources*) const override;
+  Document* GetDocument() const override;
+  ax::mojom::blink::Role DetermineAccessibilityRole() override;
+  ax::mojom::blink::Role NativeRoleIgnoringAria() const override;
+  ax::mojom::blink::Role AriaRoleAttribute() const override;
 
  private:
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 
   Member<AccessibleNode> accessible_node_;
+
+  ax::mojom::blink::Role aria_role_;
 };
 
-DEFINE_AX_OBJECT_TYPE_CASTS(AXVirtualObject, IsVirtualObject());
+template <>
+struct DowncastTraits<AXVirtualObject> {
+  static bool AllowFrom(const AXObject& object) {
+    return object.IsVirtualObject();
+  }
+};
 
 }  // namespace blink
 

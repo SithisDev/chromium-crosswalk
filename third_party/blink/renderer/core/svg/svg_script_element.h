@@ -21,12 +21,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_SCRIPT_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_SCRIPT_ELEMENT_H_
 
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/dom/create_element_flags.h"
 #include "third_party/blink/renderer/core/script/script_element_base.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/bindings/parkable_string.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -36,7 +38,6 @@ class SVGScriptElement final : public SVGElement,
                                public SVGURIReference,
                                public ScriptElementBase {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SVGScriptElement);
 
  public:
   SVGScriptElement(Document&, const CreateElementFlags);
@@ -51,16 +52,18 @@ class SVGScriptElement final : public SVGElement,
 
   const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
 
-  void Trace(blink::Visitor*) override;
+  V8HTMLOrSVGScriptElement* AsV8HTMLOrSVGScriptElement() override;
+  DOMNodeId GetDOMNodeId() override;
+
+  void Trace(Visitor*) const override;
 
  private:
   void ParseAttribute(const AttributeModificationParams&) override;
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void DidNotifySubtreeInsertionsToDocument() override;
   void ChildrenChanged(const ChildrenChange&) override;
-  void DidMoveToNewDocument(Document& old_document) override;
 
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
   bool IsURLAttribute(const Attribute&) const override;
   bool IsStructurallyExternal() const override { return HasSourceAttribute(); }
   void FinishParsingChildren() override;
@@ -76,27 +79,31 @@ class SVGScriptElement final : public SVGElement,
   String ForAttributeValue() const override { return String(); }
   String IntegrityAttributeValue() const override { return String(); }
   String ReferrerPolicyAttributeValue() const override { return String(); }
-  String ImportanceAttributeValue() const override { return String(); }
+  String FetchPriorityAttributeValue() const override { return String(); }
   String LanguageAttributeValue() const override { return String(); }
   bool NomoduleAttributeValue() const override { return false; }
   String SourceAttributeValue() const override;
   String TypeAttributeValue() const override;
-  String TextFromChildren() override;
+  String ChildTextContent() override;
+  String ScriptTextInternalSlot() const override;
   bool HasSourceAttribute() const override;
+  bool HasAttributionsrcAttribute() const override { return false; }
   bool IsConnected() const override;
   bool HasChildren() const override;
   const AtomicString& GetNonceForElement() const override;
   bool ElementHasDuplicateAttributes() const override {
     return HasDuplicateAttribute();
   }
+  bool IsPotentiallyRenderBlocking() const override { return false; }
   bool AllowInlineScriptForCSP(const AtomicString& nonce,
                                const WTF::OrdinalNumber&,
                                const String& script_content) override;
   Document& GetDocument() const override;
+  ExecutionContext* GetExecutionContext() const override;
   void DispatchLoadEvent() override;
   void DispatchErrorEvent() override;
-  void SetScriptElementForBinding(
-      HTMLScriptElementOrSVGScriptElement&) override;
+
+  Type GetScriptElementType() override;
 
   Element& CloneWithoutAttributesAndChildren(Document&) const override;
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override {
@@ -104,6 +111,8 @@ class SVGScriptElement final : public SVGElement,
   }
 
   bool have_fired_load_ = false;
+
+  ParkableString script_text_internal_slot_;
 
   Member<ScriptLoader> loader_;
 };

@@ -38,12 +38,15 @@
 #include "base/run_loop.h"
 #include "base/test/icu_test_util.h"
 #include "base/test/test_discardable_memory_allocator.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
-#include "third_party/blink/public/platform/interface_provider.h"
+#include "gin/public/v8_platform.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/web_runtime_features.h"
 #include "third_party/blink/renderer/platform/font_family_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/renderer_resource_coordinator.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/heap_test_platform.h"
+#include "third_party/blink/renderer/platform/heap/heap_test_utilities.h"
+#include "third_party/blink/renderer/platform/heap/process_heap.h"
 #include "third_party/blink/renderer/platform/language.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
@@ -54,23 +57,24 @@
 
 namespace blink {
 
-class TestingPlatformSupport::TestingInterfaceProvider
-    : public blink::InterfaceProvider {
+class TestingPlatformSupport::TestingBrowserInterfaceBroker
+    : public ThreadSafeBrowserInterfaceBrokerProxy {
  public:
-  TestingInterfaceProvider() = default;
-  virtual ~TestingInterfaceProvider() = default;
+  TestingBrowserInterfaceBroker() = default;
+  ~TestingBrowserInterfaceBroker() override = default;
 
-  void GetInterface(const char* name,
-                    mojo::ScopedMessagePipeHandle handle) override {
+  void GetInterfaceImpl(mojo::GenericPendingReceiver receiver) override {
     auto& override_callback = GetOverrideCallback();
+    auto interface_name = receiver.interface_name().value_or("");
     if (!override_callback.is_null()) {
-      override_callback.Run(name, std::move(handle));
+      override_callback.Run(interface_name.c_str(), receiver.PassPipe());
       return;
     }
-    if (std::string(name) == mojom::blink::MimeRegistry::Name_) {
-      mojo::MakeStrongBinding(
+    if (interface_name == mojom::blink::MimeRegistry::Name_) {
+      mojo::MakeSelfOwnedReceiver(
           std::make_unique<MockMimeRegistry>(),
-          mojom::blink::MimeRegistryRequest(std::move(handle)));
+          mojo::PendingReceiver<mojom::blink::MimeRegistry>(
+              receiver.PassPipe()));
       return;
     }
   }
@@ -85,7 +89,7 @@ class TestingPlatformSupport::TestingInterfaceProvider
 
 TestingPlatformSupport::ScopedOverrideMojoInterface::
     ScopedOverrideMojoInterface(GetInterfaceCallback callback)
-    : auto_reset_(&TestingInterfaceProvider::GetOverrideCallback(),
+    : auto_reset_(&TestingBrowserInterfaceBroker::GetOverrideCallback(),
                   std::move(callback)) {}
 
 TestingPlatformSupport::ScopedOverrideMojoInterface::
@@ -93,7 +97,7 @@ TestingPlatformSupport::ScopedOverrideMojoInterface::
 
 TestingPlatformSupport::TestingPlatformSupport()
     : old_platform_(Platform::Current()),
-      interface_provider_(new TestingInterfaceProvider) {
+      interface_broker_(base::MakeRefCounted<TestingBrowserInterfaceBroker>()) {
   DCHECK(old_platform_);
   DCHECK(WTF::IsMainThread());
 }
@@ -106,26 +110,69 @@ WebString TestingPlatformSupport::DefaultLocale() {
   return WebString::FromUTF8("en-US");
 }
 
-WebBlobRegistry* TestingPlatformSupport::GetBlobRegistry() {
-  return old_platform_ ? old_platform_->GetBlobRegistry() : nullptr;
+WebData TestingPlatformSupport::GetDataResource(
+    int resource_id,
+    ui::ResourceScaleFactor scale_factor) {
+  return old_platform_
+             ? old_platform_->GetDataResource(resource_id, scale_factor)
+             : WebData();
 }
 
-WebURLLoaderMockFactory* TestingPlatformSupport::GetURLLoaderMockFactory() {
-  return old_platform_ ? old_platform_->GetURLLoaderMockFactory() : nullptr;
+std::string TestingPlatformSupport::GetDataResourceString(int resource_id) {
+  return old_platform_ ? old_platform_->GetDataResourceString(resource_id)
+                       : std::string();
 }
 
-std::unique_ptr<WebURLLoaderFactory>
-TestingPlatformSupport::CreateDefaultURLLoaderFactory() {
-  return old_platform_ ? old_platform_->CreateDefaultURLLoaderFactory()
-                       : nullptr;
+ThreadSafeBrowserInterfaceBrokerProxy*
+TestingPlatformSupport::GetBrowserInterfaceBroker() {
+  return interface_broker_.get();
 }
 
-WebData TestingPlatformSupport::GetDataResource(const char* name) {
-  return old_platform_ ? old_platform_->GetDataResource(name) : WebData();
-}
+// ValueConverter only for simple data types used in tests.
+class V8ValueConverterForTest final : public WebV8ValueConverter {
+ public:
+  void SetDateAllowed(bool val) override {}
+  void SetRegExpAllowed(bool val) override {}
 
-InterfaceProvider* TestingPlatformSupport::GetInterfaceProvider() {
-  return interface_provider_.get();
+  v8::Local<v8::Value> ToV8Value(base::ValueView,
+                                 v8::Local<v8::Context> context) override {
+    NOTREACHED();
+    return v8::Local<v8::Value>();
+  }
+  std::unique_ptr<base::Value> FromV8Value(
+      v8::Local<v8::Value> val,
+      v8::Local<v8::Context> context) override {
+    CHECK(!val.IsEmpty());
+
+    v8::Context::Scope context_scope(context);
+    auto* isolate = context->GetIsolate();
+    v8::HandleScope handle_scope(isolate);
+
+    if (val->IsBoolean()) {
+      return std::make_unique<base::Value>(
+          base::Value(val->ToBoolean(isolate)->Value()));
+    }
+
+    if (val->IsInt32()) {
+      return std::make_unique<base::Value>(
+          base::Value(val.As<v8::Int32>()->Value()));
+    }
+
+    if (val->IsString()) {
+      v8::String::Utf8Value utf8(isolate, val);
+      return std::make_unique<base::Value>(
+          base::Value(std::string(*utf8, utf8.length())));
+    }
+
+    // Returns `nullptr` for a broader range of values than actual
+    // `V8ValueConverter`.
+    return nullptr;
+  }
+};
+
+std::unique_ptr<blink::WebV8ValueConverter>
+TestingPlatformSupport::CreateWebV8ValueConverter() {
+  return std::make_unique<V8ValueConverterForTest>();
 }
 
 void TestingPlatformSupport::RunUntilIdle() {
@@ -139,9 +186,6 @@ bool TestingPlatformSupport::IsThreadedAnimationEnabled() {
 void TestingPlatformSupport::SetThreadedAnimationEnabled(bool enabled) {
   is_threaded_animation_enabled_ = enabled;
 }
-
-class ScopedUnittestsEnvironmentSetup::DummyRendererResourceCoordinator final
-    : public blink::RendererResourceCoordinator {};
 
 ScopedUnittestsEnvironmentSetup::ScopedUnittestsEnvironmentSetup(int argc,
                                                                  char** argv) {
@@ -163,8 +207,8 @@ ScopedUnittestsEnvironmentSetup::ScopedUnittestsEnvironmentSetup(int argc,
   dummy_platform_ = std::make_unique<Platform>();
   Platform::SetCurrentPlatformForTesting(dummy_platform_.get());
 
-  WTF::Partitions::Initialize(nullptr);
-  WTF::Initialize(nullptr);
+  WTF::Partitions::Initialize();
+  WTF::Initialize();
 
   // This must be called after WTF::Initialize(), because ThreadSpecific<>
   // used in this function depends on WTF::IsMainThread().
@@ -173,14 +217,17 @@ ScopedUnittestsEnvironmentSetup::ScopedUnittestsEnvironmentSetup(int argc,
   testing_platform_support_ = std::make_unique<TestingPlatformSupport>();
   Platform::SetCurrentPlatformForTesting(testing_platform_support_.get());
 
-  dummy_renderer_resource_coordinator_ =
-      std::make_unique<DummyRendererResourceCoordinator>();
-  RendererResourceCoordinator::SetCurrentRendererResourceCoordinatorForTesting(
-      dummy_renderer_resource_coordinator_.get());
-
   ProcessHeap::Init();
-  ThreadState::AttachMainThread();
-  blink::ThreadState::Current()->DetachFromIsolate();
+  // Initializing ThreadState for testing with a testing specific platform.
+  // ScopedUnittestsEnvironmentSetup keeps the platform alive until the end of
+  // the test. The testing platform is initialized using gin::V8Platform which
+  // is the default platform used by ThreadState.
+  // Note that the platform is not initialized by AttachMainThreadForTesting
+  // to avoid including test-only headers in production build targets.
+  v8_platform_for_heap_testing_ =
+      std::make_unique<HeapTestingPlatformAdapter>(gin::V8Platform::Get());
+  ThreadState::AttachMainThreadForTesting(v8_platform_for_heap_testing_.get());
+  conservative_gc_scope_.emplace(ThreadState::Current());
   http_names::Init();
   fetch_initiator_type_names::Init();
 

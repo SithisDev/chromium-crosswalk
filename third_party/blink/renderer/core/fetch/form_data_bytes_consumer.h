@@ -7,7 +7,8 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/loader/fetch/bytes_consumer.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
@@ -16,6 +17,7 @@ namespace blink {
 class DOMArrayBuffer;
 class DOMArrayBufferView;
 class EncodedFormData;
+class ExecutionContext;
 
 class FormDataBytesConsumer final : public BytesConsumer {
  public:
@@ -28,14 +30,6 @@ class FormDataBytesConsumer final : public BytesConsumer {
   CORE_EXPORT FormDataBytesConsumer(ExecutionContext*,
                                     scoped_refptr<EncodedFormData>,
                                     BytesConsumer* consumer_for_testing);
-
-  CORE_EXPORT static FormDataBytesConsumer* CreateForTesting(
-      ExecutionContext* execution_context,
-      scoped_refptr<EncodedFormData> form_data,
-      BytesConsumer* consumer) {
-    return MakeGarbageCollected<FormDataBytesConsumer>(
-        execution_context, std::move(form_data), consumer);
-  }
 
   // BytesConsumer implementation
   Result BeginRead(const char** buffer, size_t* available) override {
@@ -62,7 +56,7 @@ class FormDataBytesConsumer final : public BytesConsumer {
   Error GetError() const override { return impl_->GetError(); }
   String DebugName() const override { return impl_->DebugName(); }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(impl_);
     BytesConsumer::Trace(visitor);
   }

@@ -22,6 +22,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_a_element.h"
 
+#include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/attr.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -41,14 +42,13 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/svg/animation/svg_smil_element.h"
+#include "third_party/blink/renderer/core/svg/svg_animated_string.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/core/xlink_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 
 namespace blink {
-
-using namespace html_names;
 
 SVGAElement::SVGAElement(Document& document)
     : SVGGraphicsElement(svg_names::kATag, document),
@@ -59,7 +59,7 @@ SVGAElement::SVGAElement(Document& document)
   AddToPropertyMap(svg_target_);
 }
 
-void SVGAElement::Trace(blink::Visitor* visitor) {
+void SVGAElement::Trace(Visitor* visitor) const {
   visitor->Trace(svg_target_);
   SVGGraphicsElement::Trace(visitor);
   SVGURIReference::Trace(visitor);
@@ -75,11 +75,11 @@ String SVGAElement::title() const {
   return SVGElement::title();
 }
 
-void SVGAElement::SvgAttributeChanged(const QualifiedName& attr_name) {
+void SVGAElement::SvgAttributeChanged(const SvgAttributeChangedParams& params) {
   // Unlike other SVG*Element classes, SVGAElement only listens to
   // SVGURIReference changes as none of the other properties changes the linking
   // behaviour for our <a> element.
-  if (SVGURIReference::IsKnownAttribute(attr_name)) {
+  if (SVGURIReference::IsKnownAttribute(params.name)) {
     SVGElement::InvalidationGuard invalidation_guard(this);
 
     bool was_link = IsLink();
@@ -94,16 +94,16 @@ void SVGAElement::SvgAttributeChanged(const QualifiedName& attr_name) {
     return;
   }
 
-  SVGGraphicsElement::SvgAttributeChanged(attr_name);
+  SVGGraphicsElement::SvgAttributeChanged(params);
 }
 
 LayoutObject* SVGAElement::CreateLayoutObject(const ComputedStyle&,
                                               LegacyLayout) {
   auto* svg_element = DynamicTo<SVGElement>(parentNode());
   if (svg_element && svg_element->IsTextContent())
-    return new LayoutSVGInline(this);
+    return MakeGarbageCollected<LayoutSVGInline>(this);
 
-  return new LayoutSVGTransformableContainer(this);
+  return MakeGarbageCollected<LayoutSVGTransformableContainer>(this);
 }
 
 void SVGAElement::DefaultEventHandler(Event& event) {
@@ -137,11 +137,13 @@ void SVGAElement::DefaultEventHandler(Event& event) {
         return;
 
       FrameLoadRequest frame_request(
-          &GetDocument(), ResourceRequest(GetDocument().CompleteURL(url)));
+          GetDocument().domWindow(),
+          ResourceRequest(GetDocument().CompleteURL(url)));
       frame_request.SetNavigationPolicy(NavigationPolicyFromEvent(&event));
       frame_request.SetTriggeringEventInfo(
-          event.isTrusted() ? WebTriggeringEventInfo::kFromTrustedEvent
-                            : WebTriggeringEventInfo::kFromUntrustedEvent);
+          event.isTrusted()
+              ? mojom::blink::TriggeringEventInfo::kFromTrustedEvent
+              : mojom::blink::TriggeringEventInfo::kFromUntrustedEvent);
       frame_request.GetResourceRequest().SetHasUserGesture(
           LocalFrame::HasTransientUserActivation(GetDocument().GetFrame()));
 
@@ -164,13 +166,12 @@ bool SVGAElement::HasActivationBehavior() const {
   return true;
 }
 
-int SVGAElement::tabIndex() const {
-  // Skip the supportsFocus check in SVGElement.
-  return Element::tabIndex();
+int SVGAElement::DefaultTabIndex() const {
+  return 0;
 }
 
 bool SVGAElement::SupportsFocus() const {
-  if (HasEditableStyle(*this))
+  if (IsEditable(*this))
     return SVGGraphicsElement::SupportsFocus();
   // If not a link we should still be able to focus the element if it has
   // tabIndex.
@@ -178,12 +179,12 @@ bool SVGAElement::SupportsFocus() const {
 }
 
 bool SVGAElement::ShouldHaveFocusAppearance() const {
-  return (GetDocument().LastFocusType() != kWebFocusTypeMouse) ||
+  return (GetDocument().LastFocusType() != mojom::blink::FocusType::kMouse) ||
          SVGGraphicsElement::SupportsFocus();
 }
 
 bool SVGAElement::IsURLAttribute(const Attribute& attribute) const {
-  return attribute.GetName().LocalName() == kHrefAttr ||
+  return attribute.GetName().LocalName() == html_names::kHrefAttr ||
          SVGGraphicsElement::IsURLAttribute(attribute);
 }
 
@@ -195,7 +196,7 @@ bool SVGAElement::IsMouseFocusable() const {
 }
 
 bool SVGAElement::IsKeyboardFocusable() const {
-  if (IsFocusable() && Element::SupportsFocus())
+  if (IsBaseElementFocusable() && Element::SupportsFocus())
     return SVGElement::IsKeyboardFocusable();
   if (IsLink() && !GetDocument().GetPage()->GetChromeClient().TabsToLinks())
     return false;
@@ -205,7 +206,7 @@ bool SVGAElement::IsKeyboardFocusable() const {
 bool SVGAElement::CanStartSelection() const {
   if (!IsLink())
     return SVGElement::CanStartSelection();
-  return HasEditableStyle(*this);
+  return IsEditable(*this);
 }
 
 bool SVGAElement::WillRespondToMouseClickEvents() {

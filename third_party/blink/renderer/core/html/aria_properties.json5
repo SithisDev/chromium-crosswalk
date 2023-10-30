@@ -15,6 +15,8 @@
       enum: ["inline", "list", "both", "none"],
       type: "token"
     },
+    {name: "aria-braillelabel", type: "string"},
+    {name: "aria-brailleroledescription", type: "string"},
     {name: "aria-busy", default: "false", type: "boolean"},
     {
       name: "aria-checked",
@@ -33,6 +35,7 @@
       type: "token"
     },
     {name: "aria-describedby", type: "IDREF_list"},
+    {name: "aria-description", type: "string"},
     {name: "aria-details", type: "IDREF"},
     {name: "aria-disabled", default: "false", type: "boolean"},
     {
@@ -61,8 +64,6 @@
       enum: ["false", "true", "menu", "listbox", "tree", "grid", "dialog"],
       type: "token"
     },
-    // aria-help is not specced but we have historically supported it.
-    {name: "aria-help", type: "string"},
     {
       name: "aria-hidden",
       default: "undefined",
@@ -129,10 +130,16 @@
       enum: ["ascending", "descending", "none", "other"],
       type: "token"
     },
+    {
+      name: "aria-touchpassthrough",
+      type: "boolean",
+      runtimeEnabled: "AriaTouchPassthrough"
+    },
     {name: "aria-valuemax", type: "decimal"},
     {name: "aria-valuemin", type: "decimal"},
     {name: "aria-valuenow", type: "decimal"},
     {name: "aria-valuetext", type: "string"},
+    {name: "aria-virtualcontent", type: "string"},
   ],
   roles: [
     {

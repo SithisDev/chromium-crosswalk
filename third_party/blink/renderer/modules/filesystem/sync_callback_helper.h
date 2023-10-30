@@ -34,7 +34,7 @@
 
 #include "third_party/blink/renderer/core/fileapi/file_error.h"
 #include "third_party/blink/renderer/modules/filesystem/file_system_callbacks.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
@@ -46,7 +46,7 @@ class DOMFileSystemCallbacksSyncHelper final
  public:
   DOMFileSystemCallbacksSyncHelper() = default;
 
-  void Trace(blink::Visitor* visitor) { visitor->Trace(result_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(result_); }
 
   // Simple/new success and error callback wrappers.
   void OnSuccess(CallbackArg* arg) {

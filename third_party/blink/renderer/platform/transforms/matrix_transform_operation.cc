@@ -25,37 +25,67 @@
 
 namespace blink {
 
+scoped_refptr<TransformOperation> MatrixTransformOperation::Accumulate(
+    const TransformOperation& other_op) {
+  DCHECK(other_op.IsSameType(*this));
+  const auto& other = To<MatrixTransformOperation>(other_op);
+
+  // Similar to interpolation, accumulating matrices is done by decomposing
+  // them, accumulating the individual functions, and then recomposing.
+
+  TransformationMatrix::Decomposed2dType from_decomp;
+  TransformationMatrix::Decomposed2dType to_decomp;
+  if (!other.matrix_.Decompose2D(from_decomp) ||
+      !matrix_.Decompose2D(to_decomp)) {
+    return nullptr;
+  }
+
+  // For a 2D matrix, the components can just be naively summed, noting that
+  // scale uses 1-based addition.
+  from_decomp.scale_x += to_decomp.scale_x - 1;
+  from_decomp.scale_y += to_decomp.scale_y - 1;
+  from_decomp.skew_xy += to_decomp.skew_xy;
+  from_decomp.translate_x += to_decomp.translate_x;
+  from_decomp.translate_y += to_decomp.translate_y;
+  from_decomp.angle += to_decomp.angle;
+
+  TransformationMatrix result;
+  result.Recompose2D(from_decomp);
+  return MatrixTransformOperation::Create(result);
+}
+
 scoped_refptr<TransformOperation> MatrixTransformOperation::Blend(
     const TransformOperation* from,
     double progress,
     bool blend_to_identity) {
-  if (from && !from->IsSameType(*this))
-    return this;
+  DCHECK(!from || CanBlendWith(*from));
 
   // convert the TransformOperations into matrices
-  TransformationMatrix from_t;
-  TransformationMatrix to_t(a_, b_, c_, d_, e_, f_);
-  if (!to_t.IsInvertible())
+  if (!matrix_.IsInvertible())
     return nullptr;
+
+  TransformationMatrix from_t;
   if (from) {
     const MatrixTransformOperation* m =
         static_cast<const MatrixTransformOperation*>(from);
-    from_t.SetMatrix(m->a_, m->b_, m->c_, m->d_, m->e_, m->f_);
+    from_t = m->matrix_;
     if (!from_t.IsInvertible())
       return nullptr;
   }
 
+  TransformationMatrix to_t = matrix_;
   if (blend_to_identity)
     std::swap(from_t, to_t);
 
   to_t.Blend(from_t, progress);
-  return MatrixTransformOperation::Create(to_t.A(), to_t.B(), to_t.C(),
-                                          to_t.D(), to_t.E(), to_t.F());
+  return MatrixTransformOperation::Create(to_t);
 }
 
 scoped_refptr<TransformOperation> MatrixTransformOperation::Zoom(
     double factor) {
-  return Create(a_, b_, c_, d_, e_ * factor, f_ * factor);
+  TransformationMatrix m = matrix_;
+  m.Zoom(factor);
+  return Create(m);
 }
 
 }  // namespace blink

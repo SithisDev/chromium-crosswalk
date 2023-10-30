@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/modules/sensor/linear_acceleration_sensor.h"
 
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
+
 using device::mojom::blink::SensorType;
 
 namespace blink {
@@ -32,9 +34,9 @@ LinearAccelerationSensor::LinearAccelerationSensor(
                     options,
                     exception_state,
                     SensorType::LINEAR_ACCELERATION,
-                    {mojom::FeaturePolicyFeature::kAccelerometer}) {}
+                    {mojom::blink::PermissionsPolicyFeature::kAccelerometer}) {}
 
-void LinearAccelerationSensor::Trace(blink::Visitor* visitor) {
+void LinearAccelerationSensor::Trace(Visitor* visitor) const {
   Accelerometer::Trace(visitor);
 }
 

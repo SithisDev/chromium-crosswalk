@@ -28,10 +28,12 @@
 
 #include <memory>
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_source_data.h"
+#include "third_party/blink/renderer/core/css/css_scope_rule.h"
 #include "third_party/blink/renderer/core/css/css_style_declaration.h"
-#include "third_party/blink/renderer/core/inspector/protocol/CSS.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/core/inspector/protocol/css.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -40,9 +42,12 @@ namespace blink {
 
 class CSSKeyframeRule;
 class CSSMediaRule;
+class CSSContainerRule;
 class CSSStyleDeclaration;
 class CSSStyleRule;
 class CSSStyleSheet;
+class CSSSupportsRule;
+class Document;
 class Element;
 class ExceptionState;
 class InspectorNetworkAgent;
@@ -52,24 +57,28 @@ class InspectorStyleSheetBase;
 typedef HeapVector<Member<CSSRule>> CSSRuleVector;
 typedef Vector<unsigned> LineEndings;
 
-class InspectorStyle final : public GarbageCollectedFinalized<InspectorStyle> {
+class InspectorStyle final : public GarbageCollected<InspectorStyle> {
  public:
   InspectorStyle(CSSStyleDeclaration*,
                  CSSRuleSourceData*,
                  InspectorStyleSheetBase* parent_style_sheet);
-  ~InspectorStyle();
 
   CSSStyleDeclaration* CssStyle() { return style_.Get(); }
+  InspectorStyleSheetBase* InspectorStyleSheet() {
+    return parent_style_sheet_.Get();
+  }
   std::unique_ptr<protocol::CSS::CSSStyle> BuildObjectForStyle();
   bool StyleText(String* result);
   bool TextForRange(const SourceRange&, String* result);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   void PopulateAllProperties(Vector<CSSPropertySourceData>& result);
   std::unique_ptr<protocol::CSS::CSSStyle> StyleWithProperties();
   String ShorthandValue(const String& shorthand_property);
+  std::unique_ptr<protocol::Array<protocol::CSS::CSSProperty>>
+  LonghandProperties(const CSSPropertySourceData& property_entry);
 
   Member<CSSStyleDeclaration> style_;
   Member<CSSRuleSourceData> source_data_;
@@ -77,7 +86,7 @@ class InspectorStyle final : public GarbageCollectedFinalized<InspectorStyle> {
 };
 
 class InspectorStyleSheetBase
-    : public GarbageCollectedFinalized<InspectorStyleSheetBase> {
+    : public GarbageCollected<InspectorStyleSheetBase> {
  public:
   class CORE_EXPORT Listener {
    public:
@@ -86,13 +95,14 @@ class InspectorStyleSheetBase
     virtual void StyleSheetChanged(InspectorStyleSheetBase*) = 0;
   };
   virtual ~InspectorStyleSheetBase() = default;
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 
   String Id() { return id_; }
 
   virtual bool SetText(const String&, ExceptionState&) = 0;
   virtual bool GetText(String* result) = 0;
   virtual String SourceMapURL() { return String(); }
+  virtual const Document* GetDocument() = 0;
 
   std::unique_ptr<protocol::CSS::CSSStyle> BuildObjectForStyle(
       CSSStyleDeclaration*);
@@ -109,6 +119,7 @@ class InspectorStyleSheetBase
   Listener* GetListener() { return listener_; }
   void OnStyleSheetTextChanged();
   const LineEndings* GetLineEndings();
+  void ResetLineEndings();
 
   virtual InspectorStyle* GetInspectorStyle(CSSStyleDeclaration*) = 0;
 
@@ -122,13 +133,6 @@ class InspectorStyleSheetBase
 
 class InspectorStyleSheet : public InspectorStyleSheetBase {
  public:
-  static InspectorStyleSheet* Create(InspectorNetworkAgent*,
-                                     CSSStyleSheet* page_style_sheet,
-                                     const String& origin,
-                                     const String& document_url,
-                                     InspectorStyleSheetBase::Listener*,
-                                     InspectorResourceContainer*);
-
   InspectorStyleSheet(InspectorNetworkAgent*,
                       CSSStyleSheet* page_style_sheet,
                       const String& origin,
@@ -136,11 +140,14 @@ class InspectorStyleSheet : public InspectorStyleSheetBase {
                       InspectorStyleSheetBase::Listener*,
                       InspectorResourceContainer*);
   ~InspectorStyleSheet() override;
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   String FinalURL();
   bool SetText(const String&, ExceptionState&) override;
   bool GetText(String* result) override;
+  void MarkForSync() { marked_for_sync_ = true; }
+  void SyncTextIfNeeded();
+
   CSSStyleRule* SetRuleSelector(const SourceRange&,
                                 const String& selector,
                                 SourceRange* new_range,
@@ -161,6 +168,21 @@ class InspectorStyleSheet : public InspectorStyleSheetBase {
                                  SourceRange* new_range,
                                  String* old_selector,
                                  ExceptionState&);
+  CSSContainerRule* SetContainerRuleText(const SourceRange&,
+                                         const String& selector,
+                                         SourceRange* new_range,
+                                         String* old_selector,
+                                         ExceptionState&);
+  CSSScopeRule* SetScopeRuleText(const SourceRange&,
+                                 const String& selector,
+                                 SourceRange* new_range,
+                                 String* old_selector,
+                                 ExceptionState&);
+  CSSSupportsRule* SetSupportsRuleText(const SourceRange&,
+                                       const String& selector,
+                                       SourceRange* new_range,
+                                       String* old_selector,
+                                       ExceptionState&);
   CSSStyleRule* AddRule(const String& rule_text,
                         const SourceRange& location,
                         SourceRange* added_range,
@@ -171,7 +193,7 @@ class InspectorStyleSheet : public InspectorStyleSheetBase {
 
   std::unique_ptr<protocol::CSS::CSSStyleSheetHeader>
   BuildObjectForStyleSheetInfo();
-  std::unique_ptr<protocol::CSS::CSSRule> BuildObjectForRuleWithoutMedia(
+  std::unique_ptr<protocol::CSS::CSSRule> BuildObjectForRuleWithoutAncestorData(
       CSSStyleRule*);
   std::unique_ptr<protocol::CSS::RuleUsage> BuildObjectForRuleUsage(CSSRule*,
                                                                     bool);
@@ -189,6 +211,7 @@ class InspectorStyleSheet : public InspectorStyleSheetBase {
   const CSSRuleVector& FlatRules();
   CSSRuleSourceData* SourceDataForRule(CSSRule*);
   String SourceMapURL() override;
+  const Document* GetDocument() override;
 
  protected:
   InspectorStyle* GetInspectorStyle(CSSStyleDeclaration*) override;
@@ -214,6 +237,8 @@ class InspectorStyleSheet : public InspectorStyleSheetBase {
   bool ResourceStyleSheetText(String* result);
   bool InlineStyleSheetText(String* result);
   bool InspectorStyleSheetText(String* result);
+  String CollectStyleSheetRules();
+  bool CSSOMStyleSheetText(String* result);
   std::unique_ptr<protocol::Array<protocol::CSS::Value>> SelectorsFromSource(
       CSSRuleSourceData*,
       const String&);
@@ -221,11 +246,17 @@ class InspectorStyleSheet : public InspectorStyleSheetBase {
   bool HasSourceURL();
   bool StartsAtZero();
 
+  bool IsMutable() const;
+  void Reset();
+  void UpdateText();
+
   void ReplaceText(const SourceRange&,
                    const String& text,
                    SourceRange* new_range,
                    String* old_text);
   void InnerSetText(const String& new_text, bool mark_as_locally_modified);
+  void ParseText(const String& text);
+  String MergeCSSOMRulesWithText(const String& text);
   Element* OwnerStyleElement();
 
   Member<InspectorResourceContainer> resource_container_;
@@ -245,12 +276,12 @@ class InspectorStyleSheet : public InspectorStyleSheetBase {
   IndexMap rule_to_source_data_;
   IndexMap source_data_to_rule_;
   String source_url_;
+  // True means that CSSOM rules are to be synced with the original source text.
+  bool marked_for_sync_;
 };
 
 class InspectorStyleSheetForInlineStyle final : public InspectorStyleSheetBase {
  public:
-  static InspectorStyleSheetForInlineStyle* Create(Element*, Listener*);
-
   InspectorStyleSheetForInlineStyle(Element*, Listener*);
   void DidModifyElementAttribute();
   bool SetText(const String&, ExceptionState&) override;
@@ -258,7 +289,9 @@ class InspectorStyleSheetForInlineStyle final : public InspectorStyleSheetBase {
   CSSStyleDeclaration* InlineStyle();
   CSSRuleSourceData* RuleSourceData();
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
+
+  const Document* GetDocument() override;
 
  protected:
   InspectorStyle* GetInspectorStyle(CSSStyleDeclaration*) override;
@@ -275,4 +308,4 @@ class InspectorStyleSheetForInlineStyle final : public InspectorStyleSheetBase {
 
 }  // namespace blink
 
-#endif  // !defined(InspectorStyleSheet_h)
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_STYLE_SHEET_H_

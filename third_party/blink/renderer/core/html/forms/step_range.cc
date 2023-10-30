@@ -21,6 +21,7 @@
 #include "third_party/blink/renderer/core/html/forms/step_range.h"
 
 #include <float.h>
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
@@ -34,7 +35,8 @@ StepRange::StepRange()
       step_(1),
       step_base_(0),
       has_step_(false),
-      has_range_limitations_(false) {}
+      has_range_limitations_(false),
+      supports_reversed_range_(false) {}
 
 StepRange::StepRange(const StepRange& step_range) = default;
 
@@ -42,6 +44,7 @@ StepRange::StepRange(const Decimal& step_base,
                      const Decimal& minimum,
                      const Decimal& maximum,
                      bool has_range_limitations,
+                     bool supports_reversed_range,
                      const Decimal& step,
                      const StepDescription& step_description)
     : maximum_(maximum),
@@ -50,7 +53,8 @@ StepRange::StepRange(const Decimal& step_base,
       step_base_(step_base.IsFinite() ? step_base : 1),
       step_description_(step_description),
       has_step_(step.IsFinite()),
-      has_range_limitations_(has_range_limitations) {
+      has_range_limitations_(has_range_limitations),
+      supports_reversed_range_(supports_reversed_range) {
   DCHECK(maximum_.IsFinite());
   DCHECK(minimum_.IsFinite());
   DCHECK(step_.IsFinite());
@@ -100,7 +104,7 @@ Decimal StepRange::ParseStep(AnyStepHandling any_step_handling,
   if (step_string.IsEmpty())
     return step_description.DefaultValue();
 
-  if (DeprecatedEqualIgnoringCase(step_string, "any")) {
+  if (EqualIgnoringASCIICase(step_string, "any")) {
     switch (any_step_handling) {
       case kRejectAny:
         return Decimal::Nan();
@@ -172,15 +176,27 @@ bool StepRange::StepMismatch(const Decimal& value_for_check) const {
 Decimal StepRange::StepSnappedMaximum() const {
   Decimal base = StepBase();
   Decimal step = Step();
+  if (step < Decimal(0))
+    return Decimal::Nan();
   if (base - step == base || !(base / step).IsFinite())
     return Decimal::Nan();
-  Decimal aligned_maximum = base + ((Maximum() - base) / step).Floor() * step;
+  Decimal divided = ((Maximum() - base) / step);
+  Decimal aligned_maximum;
+  if (divided == divided.Floor())
+    aligned_maximum = Maximum();
+  else
+    aligned_maximum = base + divided.Floor() * step;
   if (aligned_maximum > Maximum())
     aligned_maximum -= step;
   DCHECK_LE(aligned_maximum, Maximum());
   if (aligned_maximum < Minimum())
     return Decimal::Nan();
   return aligned_maximum;
+}
+
+// https://html.spec.whatwg.org/C/#has-a-reversed-range
+bool StepRange::HasReversedRange() const {
+  return supports_reversed_range_ && Maximum() < Minimum();
 }
 
 }  // namespace blink

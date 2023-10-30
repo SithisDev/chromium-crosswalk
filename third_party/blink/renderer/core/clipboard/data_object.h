@@ -34,7 +34,9 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/clipboard/data_object_item.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -43,7 +45,7 @@
 namespace blink {
 
 class KURL;
-class SharedBuffer;
+class SystemClipboard;
 class WebDragData;
 
 enum class PasteMode;
@@ -51,10 +53,8 @@ enum class PasteMode;
 // A data object for holding data that would be in a clipboard or moved
 // during a drag-n-drop operation. This is the data that WebCore is aware
 // of and is not specific to a platform.
-class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
+class CORE_EXPORT DataObject : public GarbageCollected<DataObject>,
                                public Supplementable<DataObject> {
-  USING_GARBAGE_COLLECTED_MIXIN(DataObject);
-
  public:
   struct CORE_EXPORT Observer : public GarbageCollectedMixin {
     // Called whenever |item_list_| is modified. Note it can be called multiple
@@ -63,10 +63,10 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
     virtual void OnItemListChanged() = 0;
   };
 
-  static DataObject* CreateFromClipboard(PasteMode);
+  static DataObject* CreateFromClipboard(SystemClipboard*, PasteMode);
   static DataObject* CreateFromString(const String&);
   static DataObject* Create();
-  static DataObject* Create(WebDragData);
+  static DataObject* Create(const WebDragData&);
 
   DataObject();
   virtual ~DataObject();
@@ -100,7 +100,9 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
   Vector<String> Filenames() const;
   void AddFilename(const String& filename,
                    const String& display_name,
-                   const String& file_system_id);
+                   const String& file_system_id,
+                   scoped_refptr<FileSystemAccessDropData>
+                       file_system_access_entry = nullptr);
 
   // Used for dragging in filesystem from the desktop.
   void SetFilesystemId(const String& file_system_id) {
@@ -112,10 +114,11 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
   }
 
   // Used to handle files (images) being dragged out.
-  void AddSharedBuffer(scoped_refptr<SharedBuffer>,
-                       const KURL&,
-                       const String& filename_extension,
-                       const AtomicString& content_disposition);
+  void AddFileSharedBuffer(scoped_refptr<SharedBuffer>,
+                           bool is_accessible_from_start_frame,
+                           const KURL&,
+                           const String& filename_extension,
+                           const AtomicString& content_disposition);
 
   int GetModifiers() const { return modifiers_; }
   void SetModifiers(int modifiers) { modifiers_ = modifiers; }
@@ -124,7 +127,7 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
   // whenever the underlying item_list_ changes.
   void AddObserver(Observer*);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   WebDragData ToWebDragData();
 
@@ -145,4 +148,4 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CLIPBOARD_DATA_OBJECT_H_

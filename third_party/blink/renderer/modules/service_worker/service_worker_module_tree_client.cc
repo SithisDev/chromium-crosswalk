@@ -4,8 +4,8 @@
 
 #include "third_party/blink/renderer/modules/service_worker/service_worker_module_tree_client.h"
 
-#include "third_party/blink/public/mojom/appcache/appcache.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/script/module_script.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
@@ -13,8 +13,8 @@
 namespace blink {
 
 ServiceWorkerModuleTreeClient::ServiceWorkerModuleTreeClient(
-    Modulator* modulator)
-    : modulator_(modulator) {}
+    ScriptState* script_state)
+    : script_state_(script_state) {}
 
 // This client is used for both new and installed scripts. In the new scripts
 // case, this is a partial implementation of the custom "perform the fetch" hook
@@ -24,9 +24,8 @@ ServiceWorkerModuleTreeClient::ServiceWorkerModuleTreeClient(
 // script resource.
 void ServiceWorkerModuleTreeClient::NotifyModuleTreeLoadFinished(
     ModuleScript* module_script) {
-  auto* execution_context =
-      ExecutionContext::From(modulator_->GetScriptState());
-  auto* worker_global_scope = To<WorkerGlobalScope>(execution_context);
+  auto* worker_global_scope =
+      To<WorkerGlobalScope>(ExecutionContext::From(script_state_));
   blink::WorkerReportingProxy& worker_reporting_proxy =
       worker_global_scope->ReportingProxy();
 
@@ -39,17 +38,34 @@ void ServiceWorkerModuleTreeClient::NotifyModuleTreeLoadFinished(
     worker_global_scope->close();
     return;
   }
-  worker_reporting_proxy.DidFetchScript(mojom::blink::kAppCacheNoCacheId);
+
+  // With top-level await: https://github.com/w3c/ServiceWorker/pull/1444
+  if (!module_script->HasEmptyRecord()) {
+    v8::Local<v8::Module> record = module_script->V8Module();
+    if (record->GetStatus() >= v8::Module::kInstantiated &&
+        record->IsGraphAsync()) {
+      worker_reporting_proxy.DidFailToFetchModuleScript();
+      worker_global_scope->AddConsoleMessage(
+          MakeGarbageCollected<ConsoleMessage>(
+              mojom::blink::ConsoleMessageSource::kJavaScript,
+              mojom::blink::ConsoleMessageLevel::kError,
+              "Top-level await is disallowed in service workers."));
+      worker_global_scope->close();
+      return;
+    }
+  }
+
+  worker_reporting_proxy.DidFetchScript();
 
   // (In the update case) Step 9: "Else, continue the rest of these steps after
   // the algorithm's asynchronous completion, with script being the asynchronous
   // completion value."
   worker_global_scope->WorkerScriptFetchFinished(
-      *module_script, base::nullopt /* v8_inspector::V8StackTraceId */);
+      *module_script, absl::nullopt /* v8_inspector::V8StackTraceId */);
 }
 
-void ServiceWorkerModuleTreeClient::Trace(blink::Visitor* visitor) {
-  visitor->Trace(modulator_);
+void ServiceWorkerModuleTreeClient::Trace(Visitor* visitor) const {
+  visitor->Trace(script_state_);
   ModuleTreeClient::Trace(visitor);
 }
 

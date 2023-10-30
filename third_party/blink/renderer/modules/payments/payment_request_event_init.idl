@@ -12,4 +12,6 @@ dictionary PaymentRequestEventInit : ExtendableEventInit {
     PaymentCurrencyAmount total;
     sequence<PaymentDetailsModifier> modifiers;
     DOMString instrumentKey;
+    PaymentOptions paymentOptions;
+    sequence<PaymentShippingOption> shippingOptions;
 };

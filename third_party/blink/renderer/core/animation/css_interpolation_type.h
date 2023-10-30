@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_INTERPOLATION_TYPE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_INTERPOLATION_TYPE_H_
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/animation/css_interpolation_environment.h"
 #include "third_party/blink/renderer/core/animation/interpolation_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -22,7 +23,7 @@ class CORE_EXPORT CSSInterpolationType : public InterpolationType {
    public:
     bool IsValid(const InterpolationEnvironment& environment,
                  const InterpolationValue& underlying) const final {
-      return IsValid(ToCSSInterpolationEnvironment(environment).GetState(),
+      return IsValid(To<CSSInterpolationEnvironment>(environment).GetState(),
                      underlying);
     }
 
@@ -63,7 +64,21 @@ class CORE_EXPORT CSSInterpolationType : public InterpolationType {
                                         const InterpolationValue& underlying,
                                         ConversionCheckers&) const final;
 
-  virtual void AdditiveKeyframeHook(InterpolationValue&) const {}
+  // The interpolation stack has an optimization where we perform compositing
+  // after interpolation. This is against spec, but it works for simple addition
+  // cases and halves the amount of computation needed. Some types require
+  // compositing before interpolation (e.g. if their composition operator is a
+  // concatenation), however, and for those we define this method that is called
+  // pre-interpolation.
+  // TODO(crbug.com/1009230): Revisit the post-interpolation composite
+  // optimization.
+  virtual InterpolationValue PreInterpolationCompositeIfNeeded(
+      InterpolationValue value,
+      const InterpolationValue& underlying,
+      EffectModel::CompositeOperation,
+      ConversionCheckers&) const {
+    return value;
+  }
 
   InterpolationValue MaybeConvertUnderlyingValue(
       const InterpolationEnvironment&) const final;

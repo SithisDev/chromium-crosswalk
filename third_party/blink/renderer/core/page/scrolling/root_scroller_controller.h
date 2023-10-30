@@ -6,14 +6,15 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SCROLLING_ROOT_SCROLLER_CONTROLLER_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 class Document;
 class Element;
 class HTMLFrameOwnerElement;
-class PaintLayer;
+class Node;
 
 // Manages the root scroller associated with a given document. The root
 // scroller causes browser controls movement, overscroll effects and prevents
@@ -40,25 +41,11 @@ class CORE_EXPORT RootScrollerController
  public:
   explicit RootScrollerController(Document&);
 
-  void Trace(blink::Visitor*);
-
-  // Sets the element that will be used as the root scroller. This can be
-  // nullptr, in which case we'll use the default element (documentElement) as
-  // the effective root scroller.
-  void Set(Element*);
-
-  // Returns the element currently set as the root scroller from script. This
-  // differs from the effective root scroller since the set Element may not
-  // currently be a valid root scroller. e.g. If the page sets an Element
-  // with `display: none`, get() will return that element, even though the
-  // effective root scroller will remain the document Node.
-  Element* Get() const;
+  void Trace(Visitor*) const;
 
   // This returns the Element that's actually being used to control viewport
-  // actions right now. This is different from get() if a root scroller hasn't
-  // been set, or if the set root scroller isn't currently a valid scroller.
-  // See README.md for the difference between the root scroller from Get(), the
-  // effective rootScroller, and the global RootScroller in
+  // actions right now. See README.md for the difference between the effective
+  // root scroller and the global root scroller in
   // TopDocumentRootScrollerController.
   Node& EffectiveRootScroller() const;
 
@@ -72,10 +59,6 @@ class CORE_EXPORT RootScrollerController
   // root scroller and set the appropriate properties on the view.
   void DidUpdateIFrameFrameView(HTMLFrameOwnerElement&);
 
-  // Returns the PaintLayer associated with the currently effective root
-  // scroller.
-  PaintLayer* RootScrollerPaintLayer() const;
-
   void ElementRemoved(const Element&);
 
   // In the "implicit root scroller" mode, we might promote an element to
@@ -88,12 +71,14 @@ class CORE_EXPORT RootScrollerController
 
   // Called as part of the main document lifecycle. This will iterate the frame
   // tree in post order and select the effective root scroller in each frame.
-  void PerformRootScrollerSelection();
+  // Returns true if root scroller selection changed.
+  bool PerformRootScrollerSelection();
 
  private:
   // Ensures the effective root scroller is currently valid and replaces it
-  // with the default if not.
-  void RecomputeEffectiveRootScroller();
+  // with the default if not. Returns true if the effective root scroller
+  // changed.
+  bool RecomputeEffectiveRootScroller();
 
   // Determines whether the given element meets the criteria to become the
   // effective root scroller.
@@ -121,8 +106,8 @@ class CORE_EXPORT RootScrollerController
 
   // Called after layout, runs through implicit candidates, removing ones that
   // are no longer meet the root scroller restrictions. Of the remaining ones,
-  // will choose the best and set it as the implicit_root_scroller_.
-  void ProcessImplicitCandidates();
+  // will choose the best and return it.
+  Element* ImplicitRootScrollerFromCandidates();
 
   // Calls function for each non-throttled frame's RootScrollerController in
   // post tree order.
@@ -132,12 +117,6 @@ class CORE_EXPORT RootScrollerController
   // The owning Document whose root scroller this object manages.
   WeakMember<Document> document_;
 
-  // The Element that was set from script as rootScroller for this Document.
-  // Depending on its validity to be the root scroller (e.g. a display: none
-  // element isn't a valid root scroller), this may not actually be the
-  // Element being used as the root scroller.
-  WeakMember<Element> root_scroller_;
-
   // The Node currently being used as the root scroller in this Document.
   // If the m_rootScroller is valid this will point to it. Otherwise, it'll
   // use the document Node. It'll never be nullptr since the Document owns the
@@ -146,11 +125,8 @@ class CORE_EXPORT RootScrollerController
 
   // Candidate Elements that we should examine after layout to determine which
   // should be root scroller. This is used when "implicit root scroller" is
-  // enabled, where a valid Element can become the root scroller without being
-  // explicitly set using document.setRootScroller.
+  // enabled, where a valid Element can become the root scroller.
   HeapHashSet<WeakMember<Element>> implicit_candidates_;
-
-  WeakMember<Element> implicit_root_scroller_;
 };
 
 }  // namespace blink

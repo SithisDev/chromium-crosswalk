@@ -32,24 +32,19 @@
 
 namespace blink {
 
-using namespace vector_math;
-
-ReverbAccumulationBuffer::ReverbAccumulationBuffer(size_t length)
+ReverbAccumulationBuffer::ReverbAccumulationBuffer(uint32_t length)
     : buffer_(length), read_index_(0), read_time_frame_(0) {}
 
 void ReverbAccumulationBuffer::ReadAndClear(float* destination,
-                                            size_t number_of_frames) {
-  size_t buffer_length = buffer_.size();
-  bool is_copy_safe =
-      read_index_ <= buffer_length && number_of_frames <= buffer_length;
+                                            uint32_t number_of_frames) {
+  uint32_t buffer_length = buffer_.size();
 
-  DCHECK(is_copy_safe);
-  if (!is_copy_safe)
-    return;
+  DCHECK_LE(read_index_, buffer_length);
+  DCHECK_LE(number_of_frames, buffer_length);
 
-  size_t frames_available = buffer_length - read_index_;
-  size_t number_of_frames1 = std::min(number_of_frames, frames_available);
-  size_t number_of_frames2 = number_of_frames - number_of_frames1;
+  uint32_t frames_available = buffer_length - read_index_;
+  uint32_t number_of_frames1 = std::min(number_of_frames, frames_available);
+  uint32_t number_of_frames2 = number_of_frames - number_of_frames1;
 
   float* source = buffer_.Data();
   memcpy(destination, source + read_index_, sizeof(float) * number_of_frames1);
@@ -66,43 +61,42 @@ void ReverbAccumulationBuffer::ReadAndClear(float* destination,
   read_time_frame_ += number_of_frames;
 }
 
-void ReverbAccumulationBuffer::UpdateReadIndex(int* read_index,
-                                               size_t number_of_frames) const {
+void ReverbAccumulationBuffer::UpdateReadIndex(
+    uint32_t* read_index,
+    uint32_t number_of_frames) const {
   // Update caller's readIndex
   *read_index = (*read_index + number_of_frames) % buffer_.size();
 }
 
-int ReverbAccumulationBuffer::Accumulate(float* source,
-                                         size_t number_of_frames,
-                                         int* read_index,
-                                         size_t delay_frames) {
-  size_t buffer_length = buffer_.size();
+uint32_t ReverbAccumulationBuffer::Accumulate(float* source,
+                                              uint32_t number_of_frames,
+                                              uint32_t* read_index,
+                                              size_t delay_frames) {
+  uint32_t buffer_length = buffer_.size();
 
-  size_t write_index = (*read_index + delay_frames) % buffer_length;
+  uint32_t write_index = (*read_index + delay_frames) % buffer_length;
 
   // Update caller's readIndex
   *read_index = (*read_index + number_of_frames) % buffer_length;
 
-  size_t frames_available = buffer_length - write_index;
-  size_t number_of_frames1 = std::min(number_of_frames, frames_available);
-  size_t number_of_frames2 = number_of_frames - number_of_frames1;
+  uint32_t frames_available = buffer_length - write_index;
+  uint32_t number_of_frames1 = std::min(number_of_frames, frames_available);
+  uint32_t number_of_frames2 = number_of_frames - number_of_frames1;
 
   float* destination = buffer_.Data();
 
-  bool is_safe = write_index <= buffer_length &&
-                 number_of_frames1 + write_index <= buffer_length &&
-                 number_of_frames2 <= buffer_length;
-  DCHECK(is_safe);
-  if (!is_safe)
-    return 0;
+  DCHECK_LE(write_index, buffer_length);
+  DCHECK_LE(number_of_frames1 + write_index, buffer_length);
+  DCHECK_LE(number_of_frames2, buffer_length);
 
-  Vadd(source, 1, destination + write_index, 1, destination + write_index, 1,
-       number_of_frames1);
+  vector_math::Vadd(source, 1, destination + write_index, 1,
+                    destination + write_index, 1, number_of_frames1);
 
   // Handle wrap-around if necessary
-  if (number_of_frames2 > 0)
-    Vadd(source + number_of_frames1, 1, destination, 1, destination, 1,
-         number_of_frames2);
+  if (number_of_frames2 > 0) {
+    vector_math::Vadd(source + number_of_frames1, 1, destination, 1,
+                      destination, 1, number_of_frames2);
+  }
 
   return write_index;
 }

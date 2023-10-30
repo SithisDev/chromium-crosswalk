@@ -4,11 +4,11 @@
 
 // https://github.com/wicg/trusted-types
 
-typedef (DOMString or TrustedScriptURL) ScriptURLString;
+typedef [StringContext=TrustedScriptURL] USVString ScriptURLString;
 
 [
-    Exposed=Window,
-    RuntimeEnabled=TrustedDOMTypes
+    Exposed=(Window, Worker)
 ] interface TrustedScriptURL {
     stringifier;
+    USVString toJSON();
 };

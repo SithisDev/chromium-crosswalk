@@ -26,4 +26,9 @@ blink_modules_sources("background_fetch") {
     "service_worker_registration_background_fetch.cc",
     "service_worker_registration_background_fetch.h",
   ]
+
+  deps = [
+    "//third_party/blink/renderer/modules/cache_storage:cache_storage",
+    "//third_party/blink/renderer/modules/manifest:manifest",
+  ]
 }

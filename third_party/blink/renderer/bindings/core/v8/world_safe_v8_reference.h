@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -47,45 +47,65 @@ class CORE_EXPORT WorldSafeV8ReferenceInternal final {
 // provides accessors that check whether the value is accessed in the same world
 // or not, also provides an accessor that clones the value when accessed across
 // worlds.
+//
+// TODO(crbug.com/1008765): Allow WorldSafeV8Reference created/set not in
+// context.
 template <typename V8Type>
 class WorldSafeV8Reference final {
   DISALLOW_NEW();
 
  public:
   WorldSafeV8Reference() = default;
-  explicit WorldSafeV8Reference(v8::Isolate* isolate, v8::Local<V8Type> value)
-      : v8_reference_(isolate, value),
-        world_(&DOMWrapperWorld::Current(isolate)) {
-    WorldSafeV8ReferenceInternal::MaybeCheckCreationContextWorld(*world_.get(),
-                                                                 value);
+
+  WorldSafeV8Reference(v8::Isolate* isolate, v8::Local<V8Type> value) {
+    if (value.IsEmpty())
+      return;
+
+    v8_reference_.Reset(isolate, value);
+    // Basically, |world_| is a world when this V8 reference is created.
+    // However, when this V8 reference isn't created in context and value is
+    // object, we set |world_| to a value's creation cotext's world.
+    if (isolate->InContext()) {
+      world_ = &DOMWrapperWorld::Current(isolate);
+      WorldSafeV8ReferenceInternal::MaybeCheckCreationContextWorld(
+          *world_.get(), value);
+    } else if (value->IsObject()) {
+      ScriptState* script_state = ScriptState::From(
+          value.template As<v8::Object>()->GetCreationContextChecked());
+      world_ = &script_state->World();
+    }
   }
   ~WorldSafeV8Reference() = default;
 
-  // Returns the V8 reference.  Crashes if |target_script_state|'s world is
-  // different from this V8 reference's world.
+  // Returns the V8 reference.  Crashes if |world_| is set and it is
+  // different from |target_script_state|'s world.
   v8::Local<V8Type> Get(ScriptState* target_script_state) const {
     DCHECK(!v8_reference_.IsEmpty());
-    CHECK_EQ(world_.get(), &target_script_state->World());
-    return v8_reference_.NewLocal(target_script_state->GetIsolate());
+    if (world_) {
+      CHECK_EQ(world_.get(), &target_script_state->World());
+    }
+    return v8_reference_.Get(target_script_state->GetIsolate());
   }
 
   // Returns a V8 reference that is safe to access in |target_script_state|.
   // The return value may be a cloned object.
   v8::Local<V8Type> GetAcrossWorld(ScriptState* target_script_state) const {
+    CHECK(world_);
     return WorldSafeV8ReferenceInternal::ToWorldSafeValue(
                target_script_state, v8_reference_, *world_.get())
         .template As<V8Type>();
   }
 
-  // Sets a new V8 reference.  Crashes if |new_value|'s world is different from
-  // this V8 reference's world.
+  // Sets a new V8 reference.  Crashes if |world_| is set and it is
+  // different from |new_value|'s world.
   void Set(v8::Isolate* isolate, v8::Local<V8Type> new_value) {
     DCHECK(!new_value.IsEmpty());
+    CHECK(isolate->InContext());
     const DOMWrapperWorld& new_world = DOMWrapperWorld::Current(isolate);
     WorldSafeV8ReferenceInternal::MaybeCheckCreationContextWorld(new_world,
                                                                  new_value);
     CHECK(v8_reference_.IsEmpty() || world_.get() == &new_world);
-    v8_reference_.Set(isolate, new_value);
+    v8_reference_.Reset(isolate, new_value);
     world_ = WrapRefCounted(&new_world);
   }
 
@@ -93,19 +113,27 @@ class WorldSafeV8Reference final {
   // world of this V8 reference will be |new_value|'s world.
   void SetAcrossWorld(v8::Isolate* isolate, v8::Local<V8Type> new_value) {
     DCHECK(!new_value.IsEmpty());
+    CHECK(isolate->InContext());
     const DOMWrapperWorld& new_world = DOMWrapperWorld::Current(isolate);
-    v8_reference_.Set(isolate, new_value);
+    v8_reference_.Reset(isolate, new_value);
     world_ = WrapRefCounted(&new_world);
   }
 
   void Reset() {
-    v8_reference_.Clear();
+    v8_reference_.Reset();
     world_.reset();
   }
 
   bool IsEmpty() const { return v8_reference_.IsEmpty(); }
 
-  void Trace(blink::Visitor* visitor) { visitor->Trace(v8_reference_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(v8_reference_); }
+
+  WorldSafeV8Reference& operator=(const WorldSafeV8Reference<V8Type>& other) =
+      default;
+
+  bool operator==(const WorldSafeV8Reference<V8Type>& other) const {
+    return v8_reference_ == other.v8_reference_;
+  }
 
  private:
   TraceWrapperV8Reference<V8Type> v8_reference_;
@@ -113,10 +141,42 @@ class WorldSafeV8Reference final {
   // It's guaranteed that, if |v8_reference_| is a v8::Object, the world of the
   // creation context of |v8_reference_| is the same as |world_|.
   scoped_refptr<const DOMWrapperWorld> world_;
-
-  DISALLOW_COPY_AND_ASSIGN(WorldSafeV8Reference);
 };
 
 }  // namespace blink
+
+namespace WTF {
+
+template <typename V8Type>
+struct VectorTraits<blink::WorldSafeV8Reference<V8Type>>
+    : VectorTraitsBase<blink::WorldSafeV8Reference<V8Type>> {
+  STATIC_ONLY(VectorTraits);
+
+  static constexpr bool kCanInitializeWithMemset =
+      VectorTraits<
+          blink::TraceWrapperV8Reference<V8Type>>::kCanInitializeWithMemset &&
+      VectorTraits<scoped_refptr<const blink::DOMWrapperWorld>>::
+          kCanInitializeWithMemset;
+  static constexpr bool kCanClearUnusedSlotsWithMemset =
+      VectorTraits<blink::TraceWrapperV8Reference<V8Type>>::
+          kCanClearUnusedSlotsWithMemset &&
+      VectorTraits<scoped_refptr<const blink::DOMWrapperWorld>>::
+          kCanClearUnusedSlotsWithMemset;
+  static constexpr bool kCanCopyWithMemcpy =
+      VectorTraits<
+          blink::TraceWrapperV8Reference<V8Type>>::kCanCopyWithMemcpy &&
+      VectorTraits<
+          scoped_refptr<const blink::DOMWrapperWorld>>::kCanCopyWithMemcpy;
+  static constexpr bool kCanMoveWithMemcpy =
+      VectorTraits<
+          blink::TraceWrapperV8Reference<V8Type>>::kCanMoveWithMemcpy &&
+      VectorTraits<
+          scoped_refptr<const blink::DOMWrapperWorld>>::kCanMoveWithMemcpy;
+
+  static constexpr bool kCanTraceConcurrently = VectorTraits<
+      blink::TraceWrapperV8Reference<V8Type>>::kCanTraceConcurrently;
+};
+
+}  // namespace WTF
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_WORLD_SAFE_V8_REFERENCE_H_

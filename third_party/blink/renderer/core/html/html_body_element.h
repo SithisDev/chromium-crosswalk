@@ -39,6 +39,9 @@ class CORE_EXPORT HTMLBodyElement final : public HTMLElement {
   explicit HTMLBodyElement(Document&);
   ~HTMLBodyElement() override;
 
+  // HTMLElement override
+  bool IsHTMLBodyElement() const override { return true; }
+
   DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(blur, kBlur)
   DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(error, kError)
   DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(focus, kFocus)
@@ -56,6 +59,7 @@ class CORE_EXPORT HTMLBodyElement final : public HTMLElement {
       MutableCSSPropertyValueSet*) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
   void DidNotifySubtreeInsertionsToDocument() override;
 
   bool IsURLAttribute(const Attribute&) const override;

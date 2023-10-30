@@ -9,7 +9,7 @@
 #include <memory>
 #include "third_party/blink/renderer/modules/websockets/web_pepper_socket_impl.h"
 #include "third_party/blink/renderer/modules/websockets/websocket_channel_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -21,15 +21,9 @@ namespace blink {
 // WebPepperSocketImpl cannot be on Oilpan's heap. Thus we need to introduce a
 // proxy class to decouple WebPepperSocketImpl from WebSocketChannelClient.
 class WebPepperSocketChannelClientProxy final
-    : public GarbageCollectedFinalized<WebPepperSocketChannelClientProxy>,
+    : public GarbageCollected<WebPepperSocketChannelClientProxy>,
       public WebSocketChannelClient {
-  USING_GARBAGE_COLLECTED_MIXIN(WebPepperSocketChannelClientProxy);
-
  public:
-  static WebPepperSocketChannelClientProxy* Create(WebPepperSocketImpl* impl) {
-    return MakeGarbageCollected<WebPepperSocketChannelClientProxy>(impl);
-  }
-
   explicit WebPepperSocketChannelClientProxy(WebPepperSocketImpl* impl)
       : impl_(impl) {}
 
@@ -64,7 +58,7 @@ class WebPepperSocketChannelClientProxy final
     impl->DidClose(status, code, reason);
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     WebSocketChannelClient::Trace(visitor);
   }
 

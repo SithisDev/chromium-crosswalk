@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth_remote_gatt_service.h"
 
 #include <utility>
+
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
@@ -13,6 +14,7 @@
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth_error.h"
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth_remote_gatt_characteristic.h"
 #include "third_party/blink/renderer/modules/bluetooth/bluetooth_uuid.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
@@ -27,7 +29,7 @@ BluetoothRemoteGATTService::BluetoothRemoteGATTService(
       device_instance_id_(device_instance_id),
       device_(device) {}
 
-void BluetoothRemoteGATTService::Trace(blink::Visitor* visitor) {
+void BluetoothRemoteGATTService::Trace(Visitor* visitor) const {
   visitor->Trace(device_);
   ScriptWrappable::Trace(visitor);
 }
@@ -40,7 +42,7 @@ void BluetoothRemoteGATTService::GetCharacteristicsCallback(
     mojom::blink::WebBluetoothGATTQueryQuantity quantity,
     ScriptPromiseResolver* resolver,
     mojom::blink::WebBluetoothResult result,
-    base::Optional<
+    absl::optional<
         Vector<mojom::blink::WebBluetoothRemoteGATTCharacteristicPtr>>
         characteristics) {
   if (!resolver->GetExecutionContext() ||
@@ -88,7 +90,7 @@ void BluetoothRemoteGATTService::GetCharacteristicsCallback(
 
 ScriptPromise BluetoothRemoteGATTService::getCharacteristic(
     ScriptState* script_state,
-    const StringOrUnsignedLong& characteristic,
+    const V8BluetoothCharacteristicUUID* characteristic,
     ExceptionState& exception_state) {
   String characteristic_uuid =
       BluetoothUUID::getCharacteristic(characteristic, exception_state);
@@ -96,13 +98,13 @@ ScriptPromise BluetoothRemoteGATTService::getCharacteristic(
     return ScriptPromise();
 
   return GetCharacteristicsImpl(
-      script_state, mojom::blink::WebBluetoothGATTQueryQuantity::SINGLE,
-      characteristic_uuid);
+      script_state, exception_state,
+      mojom::blink::WebBluetoothGATTQueryQuantity::SINGLE, characteristic_uuid);
 }
 
 ScriptPromise BluetoothRemoteGATTService::getCharacteristics(
     ScriptState* script_state,
-    const StringOrUnsignedLong& characteristic,
+    const V8BluetoothCharacteristicUUID* characteristic,
     ExceptionState& exception_state) {
   String characteristic_uuid =
       BluetoothUUID::getCharacteristic(characteristic, exception_state);
@@ -110,34 +112,40 @@ ScriptPromise BluetoothRemoteGATTService::getCharacteristics(
     return ScriptPromise();
 
   return GetCharacteristicsImpl(
-      script_state, mojom::blink::WebBluetoothGATTQueryQuantity::MULTIPLE,
+      script_state, exception_state,
+      mojom::blink::WebBluetoothGATTQueryQuantity::MULTIPLE,
       characteristic_uuid);
 }
 
 ScriptPromise BluetoothRemoteGATTService::getCharacteristics(
     ScriptState* script_state,
-    ExceptionState&) {
+    ExceptionState& exception_state) {
   return GetCharacteristicsImpl(
-      script_state, mojom::blink::WebBluetoothGATTQueryQuantity::MULTIPLE);
+      script_state, exception_state,
+      mojom::blink::WebBluetoothGATTQueryQuantity::MULTIPLE);
 }
 
 ScriptPromise BluetoothRemoteGATTService::GetCharacteristicsImpl(
     ScriptState* script_state,
+    ExceptionState& exception_state,
     mojom::blink::WebBluetoothGATTQueryQuantity quantity,
     const String& characteristics_uuid) {
-  if (!device_->gatt()->connected()) {
-    return ScriptPromise::RejectWithDOMException(
-        script_state, BluetoothError::CreateNotConnectedException(
-                          BluetoothOperation::kCharacteristicsRetrieval));
+  if (!device_->gatt()->connected() ||
+      !device_->GetBluetooth()->IsServiceBound()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNetworkError,
+        BluetoothError::CreateNotConnectedExceptionMessage(
+            BluetoothOperation::kCharacteristicsRetrieval));
+    return ScriptPromise();
   }
 
   if (!device_->IsValidService(service_->instance_id)) {
-    return ScriptPromise::RejectWithDOMException(
-        script_state, BluetoothError::CreateDOMException(
-                          BluetoothErrorCode::kInvalidService,
-                          "Service with UUID " + service_->uuid +
-                              " is no longer valid. Remember to retrieve "
-                              "the service again after reconnecting."));
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidStateError,
+        "Service with UUID " + service_->uuid +
+            " is no longer valid. Remember to retrieve "
+            "the service again after reconnecting.");
+    return ScriptPromise();
   }
 
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);

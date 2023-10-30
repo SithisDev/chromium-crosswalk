@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/modules/webgl/ext_float_blend.h"
 
+#include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
+
 namespace blink {
 
 EXTFloatBlend::EXTFloatBlend(WebGLRenderingContextBase* context)
@@ -13,10 +15,6 @@ EXTFloatBlend::EXTFloatBlend(WebGLRenderingContextBase* context)
 
 WebGLExtensionName EXTFloatBlend::GetName() const {
   return kEXTFloatBlendName;
-}
-
-EXTFloatBlend* EXTFloatBlend::Create(WebGLRenderingContextBase* context) {
-  return MakeGarbageCollected<EXTFloatBlend>(context);
 }
 
 bool EXTFloatBlend::Supported(WebGLRenderingContextBase* context) {

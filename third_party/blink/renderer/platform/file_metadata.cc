@@ -30,14 +30,18 @@
 
 #include "third_party/blink/renderer/platform/file_metadata.h"
 
-#include "base/optional.h"
+#include <limits>
+#include <string>
+
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/filename_util.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/file/file_utilities.mojom-blink.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
-#include "third_party/blink/public/platform/interface_provider.h"
-#include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/renderer/platform/mojo/mojo_binding_context.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
-#include "third_party/blink/renderer/platform/wtf/thread_specific.h"
 #include "url/gurl.h"
 
 namespace blink {
@@ -45,10 +49,8 @@ namespace blink {
 // static
 FileMetadata FileMetadata::From(const base::File::Info& file_info) {
   FileMetadata file_metadata;
-  if (file_info.last_modified.is_null())
-    file_metadata.modification_time = std::numeric_limits<double>::quiet_NaN();
-  else
-    file_metadata.modification_time = file_info.last_modified.ToJsTime();
+  file_metadata.modification_time =
+      NullableTimeToOptionalTime(file_info.last_modified);
   file_metadata.length = file_info.size;
   if (file_info.is_directory)
     file_metadata.type = FileMetadata::kTypeDirectory;
@@ -57,40 +59,29 @@ FileMetadata FileMetadata::From(const base::File::Info& file_info) {
   return file_metadata;
 }
 
-bool GetFileSize(const String& path, int64_t& result) {
+bool GetFileSize(const String& path,
+                 const MojoBindingContext& context,
+                 int64_t& result) {
   FileMetadata metadata;
-  if (!GetFileMetadata(path, metadata))
+  if (!GetFileMetadata(path, context, metadata))
     return false;
   result = metadata.length;
   return true;
 }
 
-bool GetFileModificationTime(const String& path, double& result) {
-  FileMetadata metadata;
-  if (!GetFileMetadata(path, metadata))
-    return false;
-  result = metadata.modification_time;
-  return true;
-}
+bool GetFileMetadata(const String& path,
+                     const MojoBindingContext& context,
+                     FileMetadata& metadata) {
+  mojo::Remote<mojom::blink::FileUtilitiesHost> host;
+  context.GetBrowserInterfaceBroker().GetInterface(
+      host.BindNewPipeAndPassReceiver());
 
-bool GetFileMetadata(const String& path, FileMetadata& metadata) {
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(
-      ThreadSpecific<mojom::blink::FileUtilitiesHostPtr>, thread_specific_host,
-      ());
-  auto& host = *thread_specific_host;
-  if (!host) {
-    Platform::Current()->GetInterfaceProvider()->GetInterface(
-        mojo::MakeRequest(&host));
-  }
-
-  base::Optional<base::File::Info> file_info;
+  absl::optional<base::File::Info> file_info;
   if (!host->GetFileInfo(WebStringToFilePath(path), &file_info) || !file_info)
     return false;
 
-  // Blink now expects NaN as uninitialized/null Date.
-  metadata.modification_time = file_info->last_modified.is_null()
-                                   ? std::numeric_limits<double>::quiet_NaN()
-                                   : file_info->last_modified.ToJsTime();
+  metadata.modification_time =
+      NullableTimeToOptionalTime(file_info->last_modified);
   metadata.length = file_info->size;
   metadata.type = file_info->is_directory ? FileMetadata::kTypeDirectory
                                           : FileMetadata::kTypeFile;

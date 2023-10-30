@@ -27,11 +27,14 @@
 
 #include <numeric>
 
+#include "base/containers/contains.h"
+#include "base/ranges/algorithm.h"
+
 namespace blink {
 
 FilterOperations::FilterOperations() = default;
 
-void FilterOperations::Trace(blink::Visitor* visitor) {
+void FilterOperations::Trace(Visitor* visitor) const {
   visitor->Trace(operations_);
 }
 
@@ -55,9 +58,8 @@ bool FilterOperations::CanInterpolateWith(const FilterOperations& other) const {
   auto can_interpolate = [](FilterOperation* operation) {
     return FilterOperation::CanInterpolate(operation->GetType());
   };
-  if (!std::all_of(Operations().begin(), Operations().end(), can_interpolate) ||
-      !std::all_of(other.Operations().begin(), other.Operations().end(),
-                   can_interpolate)) {
+  if (!base::ranges::all_of(Operations(), can_interpolate) ||
+      !base::ranges::all_of(other.Operations(), can_interpolate)) {
     return false;
   }
 
@@ -70,18 +72,8 @@ bool FilterOperations::CanInterpolateWith(const FilterOperations& other) const {
   return true;
 }
 
-bool FilterOperations::HasBlurOrReferenceFilter() const {
-  for (const auto& operation : operations_) {
-    FilterOperation::OperationType type = operation->GetType();
-    if (type == FilterOperation::BLUR || type == FilterOperation::REFERENCE) {
-      return true;
-    }
-  }
-  return false;
-}
-
-FloatRect FilterOperations::MapRect(const FloatRect& rect) const {
-  auto accumulate_mapped_rect = [](const FloatRect& rect,
+gfx::RectF FilterOperations::MapRect(const gfx::RectF& rect) const {
+  auto accumulate_mapped_rect = [](const gfx::RectF& rect,
                                    const Member<FilterOperation>& op) {
     return op->MapRect(rect);
   };
@@ -90,27 +82,32 @@ FloatRect FilterOperations::MapRect(const FloatRect& rect) const {
 }
 
 bool FilterOperations::HasFilterThatAffectsOpacity() const {
-  return std::any_of(
-      operations_.begin(), operations_.end(),
-      [](const auto& operation) { return operation->AffectsOpacity(); });
+  return base::ranges::any_of(operations_, [](const auto& operation) {
+    return operation->AffectsOpacity();
+  });
 }
 
 bool FilterOperations::HasFilterThatMovesPixels() const {
-  return std::any_of(
-      operations_.begin(), operations_.end(),
-      [](const auto& operation) { return operation->MovesPixels(); });
+  return base::ranges::any_of(operations_, [](const auto& operation) {
+    return operation->MovesPixels();
+  });
+}
+
+bool FilterOperations::HasReferenceFilter() const {
+  return base::Contains(operations_, FilterOperation::OperationType::kReference,
+                        &FilterOperation::GetType);
 }
 
 void FilterOperations::AddClient(SVGResourceClient& client) const {
   for (FilterOperation* operation : operations_) {
-    if (operation->GetType() == FilterOperation::REFERENCE)
+    if (operation->GetType() == FilterOperation::OperationType::kReference)
       To<ReferenceFilterOperation>(*operation).AddClient(client);
   }
 }
 
 void FilterOperations::RemoveClient(SVGResourceClient& client) const {
   for (FilterOperation* operation : operations_) {
-    if (operation->GetType() == FilterOperation::REFERENCE)
+    if (operation->GetType() == FilterOperation::OperationType::kReference)
       To<ReferenceFilterOperation>(*operation).RemoveClient(client);
   }
 }

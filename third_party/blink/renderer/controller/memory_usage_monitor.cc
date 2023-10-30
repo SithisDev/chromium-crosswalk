@@ -4,18 +4,31 @@
 
 #include "third_party/blink/renderer/controller/memory_usage_monitor.h"
 
+#include "base/observer_list.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
-#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/heap/process_heap.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 
 namespace blink {
 
 namespace {
-constexpr base::TimeDelta kPingInterval = base::TimeDelta::FromSeconds(1);
+constexpr base::TimeDelta kPingInterval = base::Seconds(1);
 }
 
 MemoryUsageMonitor::MemoryUsageMonitor() {
-  timer_.SetTaskRunner(Thread::MainThread()->GetTaskRunner());
+  MainThreadScheduler* scheduler =
+      Thread::MainThread()->Scheduler()->ToMainThreadScheduler();
+  DCHECK(scheduler);
+  timer_.SetTaskRunner(scheduler->NonWakingTaskRunner());
+}
+
+MemoryUsageMonitor::MemoryUsageMonitor(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner_for_testing,
+    const base::TickClock* clock_for_testing)
+    : timer_(clock_for_testing) {
+  timer_.SetTaskRunner(task_runner_for_testing);
 }
 
 void MemoryUsageMonitor::AddObserver(Observer* observer) {
@@ -70,7 +83,7 @@ void MemoryUsageMonitor::TimerFired() {
   MemoryUsage usage = GetCurrentMemoryUsage();
   for (auto& observer : observers_)
     observer.OnMemoryPing(usage);
-  if (!observers_.might_have_observers())
+  if (observers_.empty())
     StopMonitoring();
 }
 

@@ -7,13 +7,11 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/threading/thread_checker.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_parameters.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -34,6 +32,9 @@ class AudioTrackEncoder : public WTF::ThreadSafeRefCounted<AudioTrackEncoder> {
 
   explicit AudioTrackEncoder(OnEncodedAudioCB on_encoded_audio_cb);
 
+  AudioTrackEncoder(const AudioTrackEncoder&) = delete;
+  AudioTrackEncoder& operator=(const AudioTrackEncoder&) = delete;
+
   virtual void OnSetFormat(const media::AudioParameters& params) = 0;
   virtual void EncodeAudio(std::unique_ptr<media::AudioBus> audio_bus,
                            base::TimeTicks capture_time) = 0;
@@ -53,8 +54,6 @@ class AudioTrackEncoder : public WTF::ThreadSafeRefCounted<AudioTrackEncoder> {
 
   // The original input audio parameters.
   media::AudioParameters input_params_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioTrackEncoder);
 };
 
 }  // namespace blink

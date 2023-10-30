@@ -46,7 +46,7 @@ class CORE_EXPORT Attr final : public Node {
   Element* ownerElement() const { return element_; }
 
   const AtomicString& value() const;
-  void setValue(const AtomicString&);
+  void setValue(const AtomicString&, ExceptionState&);
 
   const QualifiedName GetQualifiedName() const;
 
@@ -57,7 +57,7 @@ class CORE_EXPORT Attr final : public Node {
   const AtomicString& namespaceURI() const { return name_.NamespaceURI(); }
   const AtomicString& prefix() const { return name_.Prefix(); }
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   bool IsElementNode() const =
@@ -67,7 +67,9 @@ class CORE_EXPORT Attr final : public Node {
   NodeType getNodeType() const override { return kAttributeNode; }
 
   String nodeValue() const override { return value(); }
-  void setNodeValue(const String&) override;
+  void setNodeValue(const String&, ExceptionState&) override;
+  void setTextContentForBinding(const V8UnionStringOrTrustedScript* value,
+                                ExceptionState& exception_state) override;
   Node* Clone(Document&, CloneChildrenFlag) const override;
 
   bool IsAttributeNode() const override { return true; }

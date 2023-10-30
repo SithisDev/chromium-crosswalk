@@ -38,9 +38,8 @@ class CORE_EXPORT CharacterData : public Node {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  // Makes the data either Parkable or Atomic. This enables de-duplication in
-  // both cases, the first one allowing compression as well.
-  void MakeParkableOrAtomize();
+  // Makes the data Parkable. This enables de-duplication and compression.
+  void MakeParkable();
   const String& data() const {
     return is_parkable_ ? parkable_data_.ToString() : data_;
   }
@@ -95,7 +94,7 @@ class CORE_EXPORT CharacterData : public Node {
 
  private:
   String nodeValue() const final;
-  void setNodeValue(const String&) final;
+  void setNodeValue(const String&, ExceptionState&) final;
   bool IsCharacterDataNode() const final { return true; }
   void SetDataAndUpdate(const String&,
                         unsigned offset_of_replaced_data,

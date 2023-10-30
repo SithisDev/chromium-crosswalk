@@ -22,62 +22,35 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 
 #include <algorithm>
+
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_prescient_networking.h"
-#include "third_party/blink/public/platform/web_screen_info.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/page/frame_tree.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scoped_page_pauser.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "ui/display/screen_info.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace blink {
 
-void ChromeClient::Trace(blink::Visitor* visitor) {
+void ChromeClient::Trace(Visitor* visitor) const {
   visitor->Trace(last_mouse_over_node_);
 }
 
 void ChromeClient::InstallSupplements(LocalFrame& frame) {
   CoreInitializer::GetInstance().InstallSupplements(frame);
-}
-
-void ChromeClient::SetWindowRectWithAdjustment(const IntRect& pending_rect,
-                                               LocalFrame& frame) {
-  IntRect screen = GetScreenInfo().available_rect;
-  IntRect window = pending_rect;
-
-  IntSize minimum_size = MinimumWindowSize();
-  IntSize size_for_constraining_move = minimum_size;
-  // Let size 0 pass through, since that indicates default size, not minimum
-  // size.
-  if (window.Width()) {
-    window.SetWidth(std::min(std::max(minimum_size.Width(), window.Width()),
-                             screen.Width()));
-    size_for_constraining_move.SetWidth(window.Width());
-  }
-  if (window.Height()) {
-    window.SetHeight(std::min(std::max(minimum_size.Height(), window.Height()),
-                              screen.Height()));
-    size_for_constraining_move.SetHeight(window.Height());
-  }
-
-  // Constrain the window position within the valid screen area.
-  window.SetX(
-      std::max(screen.X(),
-               std::min(window.X(),
-                        screen.MaxX() - size_for_constraining_move.Width())));
-  window.SetY(
-      std::max(screen.Y(),
-               std::min(window.Y(),
-                        screen.MaxY() - size_for_constraining_move.Height())));
-  SetWindowRect(window, frame);
 }
 
 bool ChromeClient::CanOpenUIElementIfDuringPageDismissal(
@@ -104,21 +77,17 @@ Page* ChromeClient::CreateWindow(
     const FrameLoadRequest& r,
     const AtomicString& frame_name,
     const WebWindowFeatures& features,
-    WebSandboxFlags sandbox_flags,
-    const FeaturePolicy::FeatureState& opener_feature_state,
-    const SessionStorageNamespaceId& session_storage_namespace_id) {
-// This feature is being disabled on trunk but an easily-merged CL is needed for
-// merging back to stable. https://crbug.com/936080
-#if 0
+    network::mojom::blink::WebSandboxFlags sandbox_flags,
+    const SessionStorageNamespaceId& session_storage_namespace_id,
+    bool& consumed_user_gesture) {
   if (!CanOpenUIElementIfDuringPageDismissal(
           frame->Tree().Top(), UIElementType::kPopup, g_empty_string)) {
     return nullptr;
   }
-#endif
 
   return CreateWindowDelegate(frame, r, frame_name, features, sandbox_flags,
-                              opener_feature_state,
-                              session_storage_namespace_id);
+                              session_storage_namespace_id,
+                              consumed_user_gesture);
 }
 
 template <typename Delegate>
@@ -190,7 +159,7 @@ void ChromeClient::MouseDidMoveOverElement(LocalFrame& frame,
   if (!result.GetScrollbar() && result.InnerNode() &&
       result.InnerNode()->GetDocument().IsDNSPrefetchEnabled()) {
     WebPrescientNetworking* web_prescient_networking =
-        Platform::Current()->PrescientNetworking();
+        frame.PrescientNetworking();
     if (web_prescient_networking) {
       web_prescient_networking->PrefetchDNS(result.AbsoluteLinkURL().Host());
     }
@@ -201,12 +170,12 @@ void ChromeClient::MouseDidMoveOverElement(LocalFrame& frame,
   if (result.GetScrollbar())
     ClearToolTip(frame);
   else
-    SetToolTip(frame, location, result);
+    UpdateTooltipUnderCursor(frame, location, result);
 }
 
-void ChromeClient::SetToolTip(LocalFrame& frame,
-                              const HitTestLocation& location,
-                              const HitTestResult& result) {
+void ChromeClient::UpdateTooltipUnderCursor(LocalFrame& frame,
+                                            const HitTestLocation& location,
+                                            const HitTestResult& result) {
   // First priority is a tooltip for element with "title" attribute.
   TextDirection tool_tip_direction;
   String tool_tip = result.Title(tool_tip_direction);
@@ -220,7 +189,7 @@ void ChromeClient::SetToolTip(LocalFrame& frame,
       // FIXME: We should obtain text direction of tooltip from
       // ChromeClient or platform. As of October 2011, all client
       // implementations don't use text direction information for
-      // ChromeClient::setToolTip. We'll work on tooltip text
+      // ChromeClient::UpdateTooltipUnderCursor. We'll work on tooltip text
       // direction during bidi cleanup in form inputs.
       tool_tip_direction = TextDirection::kLtr;
     }
@@ -234,7 +203,7 @@ void ChromeClient::SetToolTip(LocalFrame& frame,
   // a different node with the same tooltip text, make sure the previous
   // tooltip is unset, so that it does not get stuck positioned relative
   // to the previous node).
-  // The ::setToolTip overload, which is be called down the road,
+  // The ::UpdateTooltipUnderCursor overload, which is be called down the road,
   // ensures a new tooltip to be displayed with the new context.
   if (result.InnerNodeOrImageMapImage() != last_mouse_over_node_ &&
       !last_tool_tip_text_.IsEmpty() && tool_tip == last_tool_tip_text_)
@@ -243,13 +212,29 @@ void ChromeClient::SetToolTip(LocalFrame& frame,
   last_tool_tip_point_ = location.Point();
   last_tool_tip_text_ = tool_tip;
   last_mouse_over_node_ = result.InnerNodeOrImageMapImage();
-  SetToolTip(frame, tool_tip, tool_tip_direction);
+  current_tool_tip_text_for_test_ = last_tool_tip_text_;
+  UpdateTooltipUnderCursor(frame, tool_tip, tool_tip_direction);
+}
+
+void ChromeClient::ElementFocusedFromKeypress(LocalFrame& frame,
+                                              const Element* element) {
+  String tooltip_text = element->title();
+  if (tooltip_text.IsNull())
+    tooltip_text = element->DefaultToolTip();
+
+  LayoutObject* layout_object = element->GetLayoutObject();
+  if (layout_object) {
+    TextDirection tooltip_direction = layout_object->StyleRef().Direction();
+    UpdateTooltipFromKeyboard(frame, tooltip_text, tooltip_direction,
+                              element->BoundsInWidget());
+  }
 }
 
 void ChromeClient::ClearToolTip(LocalFrame& frame) {
-  // Do not check m_lastToolTip* and do not update them intentionally.
+  current_tool_tip_text_for_test_ = String();
+  // Do not check last_tool_tip_* and do not update them intentionally.
   // We don't want to show tooltips with same content after clearToolTip().
-  SetToolTip(frame, String(), TextDirection::kLtr);
+  UpdateTooltipUnderCursor(frame, String(), TextDirection::kLtr);
 }
 
 bool ChromeClient::Print(LocalFrame* frame) {
@@ -259,20 +244,35 @@ bool ChromeClient::Print(LocalFrame* frame) {
     return false;
   }
 
-  if (frame->GetDocument()->IsSandboxed(WebSandboxFlags::kModals)) {
-    UseCounter::Count(frame->GetDocument(),
+  if (frame->DomWindow()->IsSandboxed(
+          network::mojom::blink::WebSandboxFlags::kModals)) {
+    UseCounter::Count(frame->DomWindow(),
                       WebFeature::kDialogInSandboxedContext);
-    frame->Console().AddMessage(ConsoleMessage::Create(
-        mojom::ConsoleMessageSource::kSecurity,
-        mojom::ConsoleMessageLevel::kError,
-        "Ignored call to 'print()'. The document is sandboxed, and the "
-        "'allow-modals' keyword is not set."));
+    frame->Console().AddMessage(MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kSecurity,
+        mojom::blink::ConsoleMessageLevel::kError,
+        frame->IsInFencedFrameTree()
+            ? "Ignored call to 'print()'. The document is in a fenced frame "
+              "tree."
+            : "Ignored call to 'print()'. The document is sandboxed, and the "
+              "'allow-modals' keyword is not set."));
+    return false;
+  }
+
+  // print() returns quietly during prerendering.
+  // https://wicg.github.io/nav-speculation/prerendering.html#patch-modals
+  if (frame->GetDocument()->IsPrerendering()) {
+    frame->Console().AddMessage(MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kJavaScript,
+        mojom::blink::ConsoleMessageLevel::kError,
+        "Ignored call to 'print()' during prerendering."));
     return false;
   }
 
   // Suspend pages in case the client method runs a new event loop that would
   // otherwise cause the load to continue while we're in the middle of
   // executing JavaScript.
+  // TODO(crbug.com/956832): Remove this when it is safe to do so.
   ScopedPagePauser pauser;
 
   PrintDelegate(frame);

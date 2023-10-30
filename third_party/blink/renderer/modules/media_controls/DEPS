@@ -1,6 +1,6 @@
 include_rules = [
+  "+media/base/media_switches.h",
   "+mojo/public/cpp/bindings",
-  "+services/device/public/mojom/constants.mojom-blink.h",
   "+services/device/public/mojom/screen_orientation.mojom-blink.h",
   "-third_party/blink/renderer/modules",
   "+third_party/blink/renderer/modules/device_orientation",

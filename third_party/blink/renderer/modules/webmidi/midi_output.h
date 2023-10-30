@@ -36,7 +36,7 @@
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_port.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 
 namespace blink {
 
@@ -47,14 +47,6 @@ class MIDIOutput final : public MIDIPort {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static MIDIOutput* Create(MIDIAccess*,
-                            unsigned port_index,
-                            const String& id,
-                            const String& manufacturer,
-                            const String& name,
-                            const String& version,
-                            midi::mojom::PortState);
-
   MIDIOutput(MIDIAccess*,
              unsigned port_index,
              const String& id,
@@ -71,14 +63,14 @@ class MIDIOutput final : public MIDIPort {
   void send(NotShared<DOMUint8Array>, ExceptionState&);
   void send(Vector<unsigned>, ExceptionState&);
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void DidOpen(bool opened) override;
   void SendInternal(DOMUint8Array*, base::TimeTicks timestamp, ExceptionState&);
 
   unsigned port_index_;
-  HeapDeque<std::pair<Member<DOMUint8Array>, base::TimeTicks>> pending_data_;
+  HeapVector<std::pair<Member<DOMUint8Array>, base::TimeTicks>> pending_data_;
 };
 
 }  // namespace blink

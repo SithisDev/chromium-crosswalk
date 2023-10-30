@@ -31,33 +31,97 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_DOCUMENT_ANIMATIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_DOCUMENT_ANIMATIONS_H_
 
-#include "base/optional.h"
-#include "third_party/blink/renderer/core/css/css_property_names.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/core/animation/animation.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
-#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
+class AnimationTimeline;
 class Document;
 class PaintArtifactCompositor;
 
-class DocumentAnimations {
-  STATIC_ONLY(DocumentAnimations);
-
+class CORE_EXPORT DocumentAnimations final
+    : public GarbageCollected<DocumentAnimations> {
  public:
-  static void UpdateAnimationTimingForAnimationFrame(Document&);
-  static bool NeedsAnimationTimingUpdate(const Document&);
-  static void UpdateAnimationTimingIfNeeded(Document&);
+  DocumentAnimations(Document*);
+  ~DocumentAnimations() = default;
+
+  uint64_t TransitionGeneration() const {
+    return current_transition_generation_;
+  }
+  void IncrementTrasitionGeneration() { current_transition_generation_++; }
+  void AddTimeline(AnimationTimeline&);
+  void UpdateAnimationTimingForAnimationFrame();
+  bool NeedsAnimationTimingUpdate();
+  void UpdateAnimationTimingIfNeeded();
+  void GetAnimationsTargetingTreeScope(HeapVector<Member<Animation>>&,
+                                       const TreeScope&);
 
   // Updates existing animations as part of generating a new (document
   // lifecycle) frame. Note that this considers and updates state for
   // both composited and non-composited animations.
-  static void UpdateAnimations(
-      Document&,
+  void UpdateAnimations(
       DocumentLifecycle::LifecycleState required_lifecycle_state,
-      const PaintArtifactCompositor* paint_artifact_compositor);
+      const PaintArtifactCompositor*,
+      bool compositor_properties_updated);
+
+  size_t GetAnimationsCount();
+
+  void MarkAnimationsCompositorPending();
+
+  HeapVector<Member<Animation>> getAnimations(const TreeScope&);
+
+  // All newly created AnimationTimelines are considered "unvalidated". This
+  // means that the internal state of the timeline is considered tentative,
+  // and that computing the actual state may require an additional style/layout
+  // pass.
+  //
+  // The lifecycle update will call this function after style and layout has
+  // completed. The function will then go though all unvalidated timelines,
+  // and compare the current state snapshot to a fresh state snapshot. If they
+  // are equal, then the tentative state turned out to be correct, and no
+  // further action is needed. Otherwise, all effects targets associated with
+  // the timeline are marked for recalc, which causes the style/layout phase
+  // to run again.
+  //
+  // https://github.com/w3c/csswg-drafts/issues/5261
+  void ValidateTimelines();
+
+  // Detach compositor timelines to prevent further ticking of any animations
+  // associated with the timelines.  Detached timelines may be subsequently
+  // reattached if needed.
+  void DetachCompositorTimelines();
+
+  const HeapHashSet<WeakMember<AnimationTimeline>>& GetTimelinesForTesting()
+      const {
+    return timelines_;
+  }
+  const HeapHashSet<WeakMember<AnimationTimeline>>&
+  GetUnvalidatedTimelinesForTesting() const {
+    return unvalidated_timelines_;
+  }
+  uint64_t current_transition_generation_;
+  void Trace(Visitor*) const;
+
+ protected:
+  using ReplaceableAnimationsMap =
+      HeapHashMap<Member<Element>, Member<HeapVector<Member<Animation>>>>;
+  void RemoveReplacedAnimations(ReplaceableAnimationsMap*);
+
+ private:
+  void MarkPendingIfCompositorPropertyAnimationChanges(
+      const PaintArtifactCompositor*);
+
+  Member<Document> document_;
+  HeapHashSet<WeakMember<AnimationTimeline>> timelines_;
+  HeapHashSet<WeakMember<AnimationTimeline>> unvalidated_timelines_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_DOCUMENT_ANIMATIONS_H_

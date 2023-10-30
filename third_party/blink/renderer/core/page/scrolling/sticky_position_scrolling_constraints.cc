@@ -3,20 +3,21 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/page/scrolling/sticky_position_scrolling_constraints.h"
+
+#include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 
 namespace blink {
 
-FloatSize StickyPositionScrollingConstraints::ComputeStickyOffset(
-    const FloatRect& content_box_rect,
-    const StickyConstraintsMap& constraints_map) {
-  FloatRect sticky_box_rect = scroll_container_relative_sticky_box_rect;
-  FloatRect containing_block_rect =
+void StickyPositionScrollingConstraints::ComputeStickyOffset(
+    const gfx::PointF& scroll_position) {
+  PhysicalRect sticky_box_rect = scroll_container_relative_sticky_box_rect;
+  PhysicalRect containing_block_rect =
       scroll_container_relative_containing_block_rect;
-  FloatSize ancestor_sticky_box_offset =
-      AncestorStickyBoxOffset(constraints_map);
-  FloatSize ancestor_containing_block_offset =
-      AncestorContainingBlockOffset(constraints_map);
+  PhysicalOffset ancestor_sticky_box_offset = AncestorStickyBoxOffset();
+  PhysicalOffset ancestor_containing_block_offset =
+      AncestorContainingBlockOffset();
 
   // Adjust the cached rect locations for any sticky ancestor elements. The
   // sticky offset applied to those ancestors affects us as follows:
@@ -41,90 +42,110 @@ FloatSize StickyPositionScrollingConstraints::ComputeStickyOffset(
   // shifting produces the final sticky offset below.
   //
   // As per the spec, 'left' overrides 'right' and 'top' overrides 'bottom'.
-  FloatRect box_rect = sticky_box_rect;
+  PhysicalRect box_rect = sticky_box_rect;
+
+  PhysicalRect content_box_rect = constraining_rect;
+  // If the sticky object is fixed to view, it doesn't scroll, so ignore
+  // scroll_position.
+  if (!is_fixed_to_view)
+    content_box_rect.Move(PhysicalOffset::FromPointFFloor(scroll_position));
 
   if (is_anchored_right) {
-    float right_limit = content_box_rect.MaxX() - right_offset;
-    float right_delta =
-        std::min<float>(0, right_limit - sticky_box_rect.MaxX());
-    float available_space =
-        std::min<float>(0, containing_block_rect.X() - sticky_box_rect.X());
+    LayoutUnit right_limit = content_box_rect.Right() - right_offset;
+    LayoutUnit right_delta = right_limit - sticky_box_rect.Right();
+    LayoutUnit available_space =
+        containing_block_rect.X() - sticky_box_rect.X();
+
+    right_delta = right_delta.ClampPositiveToZero();
+    available_space = available_space.ClampPositiveToZero();
+
     if (right_delta < available_space)
       right_delta = available_space;
 
-    box_rect.Move(right_delta, 0);
+    box_rect.Move(PhysicalOffset(right_delta, LayoutUnit()));
   }
 
   if (is_anchored_left) {
-    float left_limit = content_box_rect.X() + left_offset;
-    float left_delta = std::max<float>(0, left_limit - sticky_box_rect.X());
-    float available_space = std::max<float>(
-        0, containing_block_rect.MaxX() - sticky_box_rect.MaxX());
+    LayoutUnit left_limit = content_box_rect.X() + left_offset;
+    LayoutUnit left_delta = left_limit - sticky_box_rect.X();
+    LayoutUnit available_space =
+        containing_block_rect.Right() - sticky_box_rect.Right();
+
+    left_delta = left_delta.ClampNegativeToZero();
+    available_space = available_space.ClampNegativeToZero();
+
     if (left_delta > available_space)
       left_delta = available_space;
 
-    box_rect.Move(left_delta, 0);
+    box_rect.Move(PhysicalOffset(left_delta, LayoutUnit()));
   }
 
   if (is_anchored_bottom) {
-    float bottom_limit = content_box_rect.MaxY() - bottom_offset;
-    float bottom_delta =
-        std::min<float>(0, bottom_limit - sticky_box_rect.MaxY());
-    float available_space =
-        std::min<float>(0, containing_block_rect.Y() - sticky_box_rect.Y());
+    LayoutUnit bottom_limit = content_box_rect.Bottom() - bottom_offset;
+    LayoutUnit bottom_delta = bottom_limit - sticky_box_rect.Bottom();
+    LayoutUnit available_space =
+        containing_block_rect.Y() - sticky_box_rect.Y();
+
+    bottom_delta = bottom_delta.ClampPositiveToZero();
+    available_space = available_space.ClampPositiveToZero();
+
     if (bottom_delta < available_space)
       bottom_delta = available_space;
 
-    box_rect.Move(0, bottom_delta);
+    box_rect.Move(PhysicalOffset(LayoutUnit(), bottom_delta));
   }
 
   if (is_anchored_top) {
-    float top_limit = content_box_rect.Y() + top_offset;
-    float top_delta = std::max<float>(0, top_limit - sticky_box_rect.Y());
-    float available_space = std::max<float>(
-        0, containing_block_rect.MaxY() - sticky_box_rect.MaxY());
+    LayoutUnit top_limit = content_box_rect.Y() + top_offset;
+    LayoutUnit top_delta = top_limit - sticky_box_rect.Y();
+    LayoutUnit available_space =
+        containing_block_rect.Bottom() - sticky_box_rect.Bottom();
+
+    top_delta = top_delta.ClampNegativeToZero();
+    available_space = available_space.ClampNegativeToZero();
+
     if (top_delta > available_space)
       top_delta = available_space;
 
-    box_rect.Move(0, top_delta);
+    box_rect.Move(PhysicalOffset(LayoutUnit(), top_delta));
   }
 
-  FloatSize sticky_offset = box_rect.Location() - sticky_box_rect.Location();
+  sticky_offset_ = box_rect.offset - sticky_box_rect.offset;
 
   // Now that we have computed our current sticky offset, update the cached
   // accumulated sticky offsets.
-  total_sticky_box_sticky_offset = ancestor_sticky_box_offset + sticky_offset;
-  total_containing_block_sticky_offset = ancestor_sticky_box_offset +
-                                         ancestor_containing_block_offset +
-                                         sticky_offset;
-
-  return sticky_offset;
+  total_sticky_box_sticky_offset_ = ancestor_sticky_box_offset + sticky_offset_;
+  total_containing_block_sticky_offset_ = ancestor_sticky_box_offset +
+                                          ancestor_containing_block_offset +
+                                          sticky_offset_;
 }
 
-FloatSize StickyPositionScrollingConstraints::GetOffsetForStickyPosition(
-    const StickyConstraintsMap& constraints_map) const {
-  return total_sticky_box_sticky_offset -
-         AncestorStickyBoxOffset(constraints_map);
+void StickyPositionScrollingConstraints::Trace(Visitor* visitor) const {
+  visitor->Trace(nearest_sticky_layer_shifting_sticky_box);
+  visitor->Trace(nearest_sticky_layer_shifting_containing_block);
+  visitor->Trace(containing_scroll_container_layer);
 }
 
-FloatSize StickyPositionScrollingConstraints::AncestorStickyBoxOffset(
-    const StickyConstraintsMap& constraints_map) const {
+PhysicalOffset StickyPositionScrollingConstraints::AncestorStickyBoxOffset()
+    const {
   if (!nearest_sticky_layer_shifting_sticky_box)
-    return FloatSize();
-  DCHECK(constraints_map.Contains(nearest_sticky_layer_shifting_sticky_box));
-  return constraints_map.at(nearest_sticky_layer_shifting_sticky_box)
-      .total_sticky_box_sticky_offset;
+    return PhysicalOffset();
+  auto* constraints =
+      nearest_sticky_layer_shifting_sticky_box->GetLayoutObject()
+          .StickyConstraints();
+  DCHECK(constraints);
+  return constraints->total_sticky_box_sticky_offset_;
 }
 
-FloatSize StickyPositionScrollingConstraints::AncestorContainingBlockOffset(
-    const StickyConstraintsMap& constraints_map) const {
-  if (!nearest_sticky_layer_shifting_containing_block) {
-    return FloatSize();
-  }
-  DCHECK(
-      constraints_map.Contains(nearest_sticky_layer_shifting_containing_block));
-  return constraints_map.at(nearest_sticky_layer_shifting_containing_block)
-      .total_containing_block_sticky_offset;
+PhysicalOffset
+StickyPositionScrollingConstraints::AncestorContainingBlockOffset() const {
+  if (!nearest_sticky_layer_shifting_containing_block)
+    return PhysicalOffset();
+  auto* constraints =
+      nearest_sticky_layer_shifting_containing_block->GetLayoutObject()
+          .StickyConstraints();
+  DCHECK(constraints);
+  return constraints->total_containing_block_sticky_offset_;
 }
 
 }  // namespace blink

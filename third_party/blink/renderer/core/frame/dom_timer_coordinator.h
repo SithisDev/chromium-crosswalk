@@ -5,12 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_DOM_TIMER_COORDINATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_DOM_TIMER_COORDINATOR_H_
 
-#include <memory>
-
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
+#include "base/task/single_thread_task_runner.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -27,7 +24,9 @@ class DOMTimerCoordinator {
   DISALLOW_NEW();
 
  public:
-  explicit DOMTimerCoordinator(scoped_refptr<base::SingleThreadTaskRunner>);
+  DOMTimerCoordinator() = default;
+  DOMTimerCoordinator(const DOMTimerCoordinator&) = delete;
+  DOMTimerCoordinator& operator=(const DOMTimerCoordinator&) = delete;
 
   // Creates and installs a new timer. Returns the assigned ID.
   int InstallNewTimeout(ExecutionContext*,
@@ -50,11 +49,7 @@ class DOMTimerCoordinator {
   // deeper timer nesting level, see DOMTimer::DOMTimer.
   void SetTimerNestingLevel(int level) { timer_nesting_level_ = level; }
 
-  scoped_refptr<base::SingleThreadTaskRunner> TimerTaskRunner() const {
-    return timer_task_runner_;
-  }
-
-  void Trace(blink::Visitor*);  // Oilpan.
+  void Trace(Visitor*) const;  // Oilpan.
 
  private:
   int NextID();
@@ -62,11 +57,8 @@ class DOMTimerCoordinator {
   using TimeoutMap = HeapHashMap<int, Member<DOMTimer>>;
   TimeoutMap timers_;
 
-  int circular_sequential_id_;
-  int timer_nesting_level_;
-  scoped_refptr<base::SingleThreadTaskRunner> timer_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(DOMTimerCoordinator);
+  int circular_sequential_id_ = 0;
+  int timer_nesting_level_ = 0;
 };
 
 }  // namespace blink

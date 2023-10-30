@@ -5,8 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_ANIMATIONWORKLET_ANIMATION_WORKLET_PROXY_CLIENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_ANIMATIONWORKLET_ANIMATION_WORKLET_PROXY_CLIENT_H_
 
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/gtest_prod_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/workers/worker_clients.h"
 #include "third_party/blink/renderer/modules/animationworklet/animation_worklet_global_scope.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
@@ -26,12 +26,9 @@ class WorkletGlobalScope;
 // This is constructed on the main thread but it is used in the worklet backing
 // thread.
 class MODULES_EXPORT AnimationWorkletProxyClient
-    : public GarbageCollectedFinalized<AnimationWorkletProxyClient>,
+    : public GarbageCollected<AnimationWorkletProxyClient>,
       public Supplement<WorkerClients>,
       public AnimationWorkletMutator {
-  USING_GARBAGE_COLLECTED_MIXIN(AnimationWorkletProxyClient);
-  DISALLOW_COPY_AND_ASSIGN(AnimationWorkletProxyClient);
-
  public:
   static const char kSupplementName[];
   static const int8_t kNumStatelessGlobalScopes;
@@ -44,7 +41,12 @@ class MODULES_EXPORT AnimationWorkletProxyClient
       scoped_refptr<base::SingleThreadTaskRunner> compositor_mutatee_runner,
       base::WeakPtr<AnimationWorkletMutatorDispatcherImpl> main_thread_mutatee,
       scoped_refptr<base::SingleThreadTaskRunner> main_thread_mutatee_runner);
-  void Trace(blink::Visitor*) override;
+
+  AnimationWorkletProxyClient(const AnimationWorkletProxyClient&) = delete;
+  AnimationWorkletProxyClient& operator=(const AnimationWorkletProxyClient&) =
+      delete;
+
+  void Trace(Visitor*) const override;
 
   virtual void SynchronizeAnimatorName(const String& animator_name);
   virtual void AddGlobalScope(WorkletGlobalScope*);

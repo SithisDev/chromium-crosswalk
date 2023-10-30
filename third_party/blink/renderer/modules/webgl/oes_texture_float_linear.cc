@@ -25,6 +25,8 @@
 
 #include "third_party/blink/renderer/modules/webgl/oes_texture_float_linear.h"
 
+#include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
+
 namespace blink {
 
 OESTextureFloatLinear::OESTextureFloatLinear(WebGLRenderingContextBase* context)
@@ -35,11 +37,6 @@ OESTextureFloatLinear::OESTextureFloatLinear(WebGLRenderingContextBase* context)
 
 WebGLExtensionName OESTextureFloatLinear::GetName() const {
   return kOESTextureFloatLinearName;
-}
-
-OESTextureFloatLinear* OESTextureFloatLinear::Create(
-    WebGLRenderingContextBase* context) {
-  return MakeGarbageCollected<OESTextureFloatLinear>(context);
 }
 
 bool OESTextureFloatLinear::Supported(WebGLRenderingContextBase* context) {

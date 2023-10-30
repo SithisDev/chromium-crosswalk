@@ -18,10 +18,8 @@ namespace blink {
 
 namespace {
 class MockFormValidationMessageClient
-    : public GarbageCollectedFinalized<MockFormValidationMessageClient>,
+    : public GarbageCollected<MockFormValidationMessageClient>,
       public ValidationMessageClient {
-  USING_GARBAGE_COLLECTED_MIXIN(MockFormValidationMessageClient);
-
  public:
   void ShowValidationMessage(const Element& anchor,
                              const String&,
@@ -45,7 +43,7 @@ class MockFormValidationMessageClient
   void DocumentDetached(const Document&) override {}
   void DidChangeFocusTo(const Element*) override {}
   void WillBeDestroyed() override {}
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(anchor_);
     ValidationMessageClient::Trace(visitor);
   }
@@ -72,7 +70,7 @@ void HTMLFormControlElementTest::SetUp() {
 TEST_F(HTMLFormControlElementTest, customValidationMessageTextDirection) {
   SetHtmlInnerHTML("<body><input pattern='abc' value='def' id=input></body>");
 
-  HTMLInputElement* input = ToHTMLInputElement(GetElementById("input"));
+  auto* input = To<HTMLInputElement>(GetElementById("input"));
   input->setCustomValidity(
       String::FromUTF8("\xD8\xB9\xD8\xB1\xD8\xA8\xD9\x89"));
   input->setAttribute(
@@ -122,7 +120,7 @@ TEST_F(HTMLFormControlElementTest, UpdateValidationMessageSkippedIfPrinting) {
   GetPage().SetValidationMessageClientForTesting(validation_message_client);
   Page::OrdinaryPages().insert(&GetPage());
 
-  HTMLInputElement* input = ToHTMLInputElement(GetElementById("input"));
+  auto* input = To<HTMLInputElement>(GetElementById("input"));
   ScopedPagePauser pauser;  // print() pauses the page.
   input->reportValidity();
   EXPECT_FALSE(validation_message_client->IsValidationMessageVisible(*input));
@@ -133,7 +131,7 @@ TEST_F(HTMLFormControlElementTest, DoNotUpdateLayoutDuringDOMMutation) {
   // ShowValidationMessage(). So calling it during DOM mutation is
   // dangerous. This test ensures ShowValidationMessage() is NOT called in
   // appendChild(). crbug.com/756408
-  GetDocument().documentElement()->SetInnerHTMLFromString("<select></select>");
+  GetDocument().documentElement()->setInnerHTML("<select></select>");
   auto* const select =
       To<HTMLFormControlElement>(GetDocument().QuerySelector("select"));
   auto* const optgroup =
@@ -154,7 +152,7 @@ TEST_F(HTMLFormControlElementTest, DoNotUpdateLayoutDuringDOMMutation) {
 TEST_F(HTMLFormControlElementTest, UniqueRendererFormControlId) {
   SetHtmlInnerHTML("<body><input id=input1><input id=input2></body>");
   auto* form_control1 = To<HTMLFormControlElement>(GetElementById("input1"));
-  unsigned first_id = form_control1->UniqueRendererFormControlId();
+  uint64_t first_id = form_control1->UniqueRendererFormControlId();
   auto* form_control2 = To<HTMLFormControlElement>(GetElementById("input2"));
   EXPECT_EQ(first_id + 1, form_control2->UniqueRendererFormControlId());
   SetHtmlInnerHTML("<body><select id=select1></body>");

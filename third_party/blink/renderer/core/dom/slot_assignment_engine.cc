@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/slot_assignment.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
 namespace blink {
 
@@ -54,7 +55,7 @@ void SlotAssignmentEngine::RecalcSlotAssignments() {
   DCHECK(shadow_roots_needing_recalc_.IsEmpty());
 }
 
-void SlotAssignmentEngine::Trace(Visitor* visitor) {
+void SlotAssignmentEngine::Trace(Visitor* visitor) const {
   visitor->Trace(shadow_roots_needing_recalc_);
 }
 

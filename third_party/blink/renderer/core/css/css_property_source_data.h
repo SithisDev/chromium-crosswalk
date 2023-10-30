@@ -32,7 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PROPERTY_SOURCE_DATA_H_
 
 #include "third_party/blink/renderer/core/css/style_rule.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -83,10 +83,10 @@ WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::CSSPropertySourceData)
 
 namespace blink {
 
-class CSSRuleSourceData : public GarbageCollectedFinalized<CSSRuleSourceData> {
+class CSSRuleSourceData final : public GarbageCollected<CSSRuleSourceData> {
  public:
   explicit CSSRuleSourceData(StyleRule::RuleType type) : type(type) {}
-  void Trace(blink::Visitor* visitor) { visitor->Trace(child_rules); }
+  void Trace(Visitor* visitor) const { visitor->Trace(child_rules); }
 
   bool HasProperties() const {
     return type == StyleRule::kStyle || type == StyleRule::kFontFace ||
@@ -96,6 +96,12 @@ class CSSRuleSourceData : public GarbageCollectedFinalized<CSSRuleSourceData> {
   bool HasMedia() const {
     return type == StyleRule::kMedia || type == StyleRule::kImport;
   }
+
+  bool HasContainer() const { return type == StyleRule::kContainer; }
+
+  bool HasSupports() const { return type == StyleRule::kSupports; }
+
+  bool HasScope() const { return type == StyleRule::kScope; }
 
   StyleRule::RuleType type;
 

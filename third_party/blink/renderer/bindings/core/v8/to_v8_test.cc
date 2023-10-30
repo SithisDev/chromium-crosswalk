@@ -9,7 +9,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/testing/garbage_collected_script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -49,7 +49,7 @@ class GarbageCollectedHolderForToV8Test
       GarbageCollectedScriptWrappable* script_wrappable)
       : script_wrappable_(script_wrappable) {}
 
-  void Trace(blink::Visitor* visitor) { visitor->Trace(script_wrappable_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(script_wrappable_); }
 
   // This should be public in order to access a Member<X> object.
   Member<GarbageCollectedScriptWrappable> script_wrappable_;
@@ -152,7 +152,7 @@ TEST(ToV8Test, undefinedType) {
 
 TEST(ToV8Test, scriptValue) {
   V8TestingScope scope;
-  ScriptValue value(scope.GetScriptState(),
+  ScriptValue value(scope.GetIsolate(),
                     v8::Number::New(scope.GetIsolate(), 1234));
 
   TEST_TOV8("1234", value);
@@ -300,7 +300,7 @@ TEST(ToV8Test, heapVector) {
 
 TEST(ToV8Test, withScriptState) {
   V8TestingScope scope;
-  ScriptValue value(scope.GetScriptState(),
+  ScriptValue value(scope.GetIsolate(),
                     v8::Number::New(scope.GetIsolate(), 1234.0));
 
   v8::Local<v8::Value> actual = ToV8(value, scope.GetScriptState());
@@ -316,13 +316,13 @@ TEST(ToV8Test, nullableDouble) {
   v8::Isolate* isolate = scope.GetIsolate();
   {
     v8::Local<v8::Value> actual =
-        ToV8(base::Optional<double>(42.0), global, isolate);
+        ToV8(absl::optional<double>(42.0), global, isolate);
     ASSERT_TRUE(actual->IsNumber());
     EXPECT_EQ(42.0, actual.As<v8::Number>()->Value());
   }
   {
     v8::Local<v8::Value> actual =
-        ToV8(base::Optional<double>(), global, isolate);
+        ToV8(absl::optional<double>(), global, isolate);
     EXPECT_TRUE(actual->IsNull());
   }
 }

@@ -27,6 +27,7 @@
 
 #include "cc/paint/node_id.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
+#include "third_party/blink/renderer/platform/fonts/font_fallback_iterator.h"
 #include "third_party/blink/renderer/platform/fonts/font_fallback_list.h"
 #include "third_party/blink/renderer/platform/fonts/font_fallback_priority.h"
 #include "third_party/blink/renderer/platform/fonts/simple_font_data.h"
@@ -35,13 +36,15 @@
 #include "third_party/blink/renderer/platform/text/tab_size.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
-#include "third_party/blink/renderer/platform/wtf/math_extras.h"
-#include "third_party/blink/renderer/platform/wtf/text/character_names.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
 
-// To avoid conflicts with the CreateWindow macro from the Windows SDK...
+// To avoid conflicts with the DrawText macro from the Windows SDK...
 #undef DrawText
+
+namespace gfx {
+class PointF;
+class RectF;
+}
 
 namespace cc {
 class PaintCanvas;
@@ -51,10 +54,6 @@ class PaintFlags;
 namespace blink {
 
 struct CharacterRange;
-class FloatPoint;
-class FloatRect;
-class FontFallbackIterator;
-class FontData;
 class FontSelector;
 class ShapeCache;
 class TextRun;
@@ -66,7 +65,8 @@ class PLATFORM_EXPORT Font {
 
  public:
   Font();
-  Font(const FontDescription&);
+  explicit Font(const FontDescription&);
+  Font(const FontDescription&, FontSelector*);
   ~Font();
 
   Font(const Font&);
@@ -79,53 +79,54 @@ class PLATFORM_EXPORT Font {
     return font_description_;
   }
 
-  void Update(FontSelector*) const;
+  enum class DrawType { kGlyphsOnly, kGlyphsAndClusters };
 
   enum CustomFontNotReadyAction {
     kDoNotPaintIfFontNotReady,
     kUseFallbackIfFontNotReady
   };
 
-  // TODO(layout-dev): Once zoom-for-dsf launches on Mac the device_scale_factor
-  // parameter can be removed from all of these methods.
-  // https://crbug.com/716231
   void DrawText(cc::PaintCanvas*,
                 const TextRunPaintInfo&,
-                const FloatPoint&,
+                const gfx::PointF&,
                 float device_scale_factor,
-                const cc::PaintFlags&) const;
+                const cc::PaintFlags&,
+                DrawType = DrawType::kGlyphsOnly) const;
   void DrawText(cc::PaintCanvas*,
                 const TextRunPaintInfo&,
-                const FloatPoint&,
+                const gfx::PointF&,
                 float device_scale_factor,
                 cc::NodeId node_id,
-                const cc::PaintFlags&) const;
+                const cc::PaintFlags&,
+                DrawType = DrawType::kGlyphsOnly) const;
   void DrawText(cc::PaintCanvas*,
                 const NGTextFragmentPaintInfo&,
-                const FloatPoint&,
+                const gfx::PointF&,
                 float device_scale_factor,
                 cc::NodeId node_id,
-                const cc::PaintFlags&) const;
+                const cc::PaintFlags&,
+                DrawType = DrawType::kGlyphsOnly) const;
   bool DrawBidiText(cc::PaintCanvas*,
                     const TextRunPaintInfo&,
-                    const FloatPoint&,
+                    const gfx::PointF&,
                     CustomFontNotReadyAction,
                     float device_scale_factor,
-                    const cc::PaintFlags&) const;
+                    const cc::PaintFlags&,
+                    DrawType = DrawType::kGlyphsOnly) const;
   void DrawEmphasisMarks(cc::PaintCanvas*,
                          const TextRunPaintInfo&,
                          const AtomicString& mark,
-                         const FloatPoint&,
+                         const gfx::PointF&,
                          float device_scale_factor,
                          const cc::PaintFlags&) const;
   void DrawEmphasisMarks(cc::PaintCanvas*,
                          const NGTextFragmentPaintInfo&,
                          const AtomicString& mark,
-                         const FloatPoint&,
+                         const gfx::PointF&,
                          float device_scale_factor,
                          const cc::PaintFlags&) const;
 
-  FloatRect TextInkBounds(const NGTextFragmentPaintInfo&) const;
+  gfx::RectF TextInkBounds(const NGTextFragmentPaintInfo&) const;
 
   struct TextIntercept {
     float begin_, end_;
@@ -153,18 +154,17 @@ class PLATFORM_EXPORT Font {
   // origin.
   float Width(const TextRun&,
               HashSet<const SimpleFontData*>* fallback_fonts = nullptr,
-              FloatRect* glyph_bounds = nullptr) const;
+              gfx::RectF* glyph_bounds = nullptr) const;
 
   int OffsetForPosition(const TextRun&,
                         float position,
                         IncludePartialGlyphsOption,
                         BreakGlyphsOption) const;
-  FloatRect SelectionRectForText(const TextRun&,
-                                 const FloatPoint&,
-                                 float height,
-                                 int from = 0,
-                                 int to = -1) const;
-  FloatRect BoundingBox(const TextRun&, int from = 0, int to = -1) const;
+  gfx::RectF SelectionRectForText(const TextRun&,
+                                  const gfx::PointF&,
+                                  float height,
+                                  int from = 0,
+                                  int to = -1) const;
   CharacterRange GetCharacterRange(const TextRun&,
                                    unsigned from,
                                    unsigned to) const;
@@ -203,7 +203,6 @@ class PLATFORM_EXPORT Font {
   // loaded. This *should* not happen but in reality it does ever now and then
   // when, for whatever reason, the last resort font cannot be loaded.
   const SimpleFontData* PrimaryFont() const;
-  const FontData* FontDataAt(unsigned) const;
 
   // Access the shape cache associated with this particular font object.
   // Should *not* be retained across layout calls as it may become invalid.
@@ -215,53 +214,51 @@ class PLATFORM_EXPORT Font {
   bool CanShapeWordByWord() const;
 
   void SetCanShapeWordByWordForTesting(bool b) {
-    can_shape_word_by_word_ = b;
-    shape_word_by_word_computed_ = true;
+    EnsureFontFallbackList()->SetCanShapeWordByWordForTesting(b);
   }
 
   void ReportNotDefGlyph() const;
+
+  void ReportEmojiSegmentGlyphCoverage(unsigned num_clusters,
+                                       unsigned num_broken_clusters) const;
 
  private:
   enum ForTextEmphasisOrNot { kNotForTextEmphasis, kForTextEmphasis };
 
   GlyphData GetEmphasisMarkGlyphData(const AtomicString&) const;
 
-  bool ComputeCanShapeWordByWord() const;
-
  public:
   FontSelector* GetFontSelector() const;
-  scoped_refptr<FontFallbackIterator> CreateFontFallbackIterator(
-      FontFallbackPriority) const;
+  FontFallbackIterator CreateFontFallbackIterator(
+      FontFallbackPriority fallback_priority) const {
+    EnsureFontFallbackList();
+    return FontFallbackIterator(font_description_, font_fallback_list_,
+                                fallback_priority);
+  }
 
   void WillUseFontData(const String& text) const;
 
-  bool LoadingCustomFonts() const;
   bool IsFallbackValid() const;
 
   bool ShouldSkipDrawing() const {
-    return font_fallback_list_ && font_fallback_list_->ShouldSkipDrawing();
+    if (!font_fallback_list_)
+      return false;
+    return EnsureFontFallbackList()->ShouldSkipDrawing();
   }
 
  private:
+  // TODO(xiaochengh): The function not only initializes null FontFallbackList,
+  // but also syncs invalid FontFallbackList. Rename it for better readability.
+  FontFallbackList* EnsureFontFallbackList() const;
+  void RevalidateFontFallbackList() const;
+  void ReleaseFontFallbackListRef() const;
+
   FontDescription font_description_;
   mutable scoped_refptr<FontFallbackList> font_fallback_list_;
-  mutable unsigned can_shape_word_by_word_ : 1;
-  mutable unsigned shape_word_by_word_computed_ : 1;
-
-  // For m_fontDescription & m_fontFallbackList access.
-  friend class CachingWordShaper;
 };
 
-inline Font::~Font() = default;
-
 inline const SimpleFontData* Font::PrimaryFont() const {
-  DCHECK(font_fallback_list_);
-  return font_fallback_list_->PrimarySimpleFontData(font_description_);
-}
-
-inline const FontData* Font::FontDataAt(unsigned index) const {
-  DCHECK(font_fallback_list_);
-  return font_fallback_list_->FontDataAt(font_description_, index);
+  return EnsureFontFallbackList()->PrimarySimpleFontData(font_description_);
 }
 
 inline FontSelector* Font::GetFontSelector() const {
@@ -276,21 +273,16 @@ inline float Font::TabWidth(const SimpleFontData* font_data,
   return base_tab_width ? base_tab_width : GetFontDescription().LetterSpacing();
 }
 
-inline float Font::TabWidth(const SimpleFontData* font_data,
-                            const TabSize& tab_size,
-                            float position) const {
-  float base_tab_width = TabWidth(font_data, tab_size);
-  float distance_to_tab_stop = base_tab_width - fmodf(position, base_tab_width);
-
-  // Let the minimum width be the half of the space width so that it's always
-  // recognizable.  if the distance to the next tab stop is less than that,
-  // advance an additional tab stop.
-  if (distance_to_tab_stop < font_data->SpaceWidth() / 2)
-    distance_to_tab_stop += base_tab_width;
-
-  return distance_to_tab_stop;
-}
-
 }  // namespace blink
 
-#endif
+namespace WTF {
+
+template <>
+struct CrossThreadCopier<blink::Font>
+    : public CrossThreadCopierPassThrough<blink::Font> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+}  // namespace WTF
+
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_FONT_H_

@@ -185,22 +185,21 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
     if (iter_->type_ == FormDataElement::kDataPipe) {
       // Create the data pipe consumer if there isn't one yet.
       if (!data_pipe_consumer_) {
-        network::mojom::blink::DataPipeGetterPtr* data_pipe_getter =
-            iter_->data_pipe_getter_->GetPtr();
+        network::mojom::blink::DataPipeGetter* data_pipe_getter =
+            iter_->data_pipe_getter_->GetDataPipeGetter();
 
         mojo::ScopedDataPipeProducerHandle pipe_producer_handle;
         mojo::ScopedDataPipeConsumerHandle pipe_consumer_handle;
-        MojoResult rv = mojo::CreateDataPipe(nullptr, &pipe_producer_handle,
-                                             &pipe_consumer_handle);
+        MojoResult rv = mojo::CreateDataPipe(nullptr, pipe_producer_handle,
+                                             pipe_consumer_handle);
         if (rv != MOJO_RESULT_OK) {
           return Result::kError;
         }
 
-        (*data_pipe_getter)
-            ->Read(
-                std::move(pipe_producer_handle),
-                WTF::Bind(&DataPipeAndDataBytesConsumer::DataPipeGetterCallback,
-                          WrapWeakPersistent(this)));
+        data_pipe_getter->Read(
+            std::move(pipe_producer_handle),
+            WTF::Bind(&DataPipeAndDataBytesConsumer::DataPipeGetterCallback,
+                      WrapWeakPersistent(this)));
         DataPipeBytesConsumer::CompletionNotifier* completion_notifier =
             nullptr;
         data_pipe_consumer_ = MakeGarbageCollected<DataPipeBytesConsumer>(
@@ -314,7 +313,7 @@ class DataPipeAndDataBytesConsumer final : public BytesConsumer {
 
   String DebugName() const override { return "DataPipeAndDataBytesConsumer"; }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(execution_context_);
     visitor->Trace(client_);
     visitor->Trace(simple_consumer_);
@@ -409,7 +408,8 @@ class ComplexFormDataBytesConsumer final : public BytesConsumer {
         case FormDataElement::kEncodedFile: {
           auto file_length = element.file_length_;
           if (file_length < 0) {
-            if (!GetFileSize(element.filename_, file_length)) {
+            if (!GetFileSize(element.filename_, *execution_context,
+                             file_length)) {
               form_data_ = nullptr;
               blob_bytes_consumer_ = BytesConsumer::CreateErrored(
                   Error("Cannot determine a file size"));
@@ -480,7 +480,7 @@ class ComplexFormDataBytesConsumer final : public BytesConsumer {
   Error GetError() const override { return blob_bytes_consumer_->GetError(); }
   String DebugName() const override { return "ComplexFormDataBytesConsumer"; }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(blob_bytes_consumer_);
     BytesConsumer::Trace(visitor);
   }
@@ -498,10 +498,14 @@ FormDataBytesConsumer::FormDataBytesConsumer(const String& string)
               UTF8Encoding().Encode(string, WTF::kNoUnencodables)))) {}
 
 FormDataBytesConsumer::FormDataBytesConsumer(DOMArrayBuffer* buffer)
-    : FormDataBytesConsumer(buffer->Data(), buffer->ByteLength()) {}
+    : FormDataBytesConsumer(
+          buffer->Data(),
+          base::checked_cast<wtf_size_t>(buffer->ByteLength())) {}
 
 FormDataBytesConsumer::FormDataBytesConsumer(DOMArrayBufferView* view)
-    : FormDataBytesConsumer(view->BaseAddress(), view->byteLength()) {}
+    : FormDataBytesConsumer(
+          view->BaseAddress(),
+          base::checked_cast<wtf_size_t>(view->byteLength())) {}
 
 FormDataBytesConsumer::FormDataBytesConsumer(const void* data, wtf_size_t size)
     : impl_(MakeGarbageCollected<SimpleFormDataBytesConsumer>(

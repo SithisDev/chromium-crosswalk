@@ -27,16 +27,16 @@ String CSSRayValue::CustomCSSText() const {
     result.Append(contain_->CssText());
   }
   result.Append(')');
-  return result.ToString();
+  return result.ReleaseString();
 }
 
 bool CSSRayValue::Equals(const CSSRayValue& other) const {
-  return DataEquivalent(angle_, other.angle_) &&
-         DataEquivalent(size_, other.size_) &&
-         DataEquivalent(contain_, other.contain_);
+  return base::ValuesEquivalent(angle_, other.angle_) &&
+         base::ValuesEquivalent(size_, other.size_) &&
+         base::ValuesEquivalent(contain_, other.contain_);
 }
 
-void CSSRayValue::TraceAfterDispatch(blink::Visitor* visitor) {
+void CSSRayValue::TraceAfterDispatch(blink::Visitor* visitor) const {
   visitor->Trace(angle_);
   visitor->Trace(size_);
   visitor->Trace(contain_);

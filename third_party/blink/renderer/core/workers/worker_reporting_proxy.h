@@ -32,11 +32,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_WORKERS_WORKER_REPORTING_PROXY_H_
 
 #include <memory>
-#include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
+#include "third_party/blink/public/mojom/devtools/console_message.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/web_feature_forward.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -52,7 +51,6 @@ class CORE_EXPORT WorkerReportingProxy {
   virtual ~WorkerReportingProxy() = default;
 
   virtual void CountFeature(WebFeature) {}
-  virtual void CountDeprecation(WebFeature) {}
   virtual void ReportException(const String& error_message,
                                std::unique_ptr<SourceLocation>,
                                int exception_id) {}
@@ -68,54 +66,31 @@ class CORE_EXPORT WorkerReportingProxy {
   // WorkerThread::InitializeOnWorkerThread.
   virtual void DidCreateWorkerGlobalScope(WorkerOrWorkletGlobalScope*) {}
 
-  // Invoked when the WorkerGlobalScope is initialized on
-  // WorkerThread::InitializeOnWorkerThread. This is synchronously called after
-  // WillInitializeWorkerContext().
-  virtual void DidInitializeWorkerContext() {}
-
   // Invoked when the worker's main script is loaded on
   // WorkerThread::InitializeOnWorkerThread(). Only invoked when the script was
   // loaded on the worker thread, i.e., via InstalledScriptsManager rather than
   // via ResourceLoader. Called before WillEvaluateClassicScript().
   virtual void DidLoadClassicScript() {}
 
-  // Invoked when it's failed to load the worker's main script on the worker
-  // thread.
-  virtual void DidFailToLoadClassicScript() {}
-
   // Invoked on success to fetch the worker's main classic/module script from
   // network. This is not called when the script is loaded from
   // InstalledScriptsManager.
-  // |app_cache_id| should be set correctly for shared workers.
-  // In non-shared-worker cases, |app_cache_id| is not used.
-  virtual void DidFetchScript(int64_t app_cache_id) {}
+  virtual void DidFetchScript() {}
 
-  // Invoked on failure to fetch the worker's classic script from network. This
-  // is not called when the script is loaded from InstalledScriptsManager.
+  // Invoked on failure to fetch the worker's classic script (either from
+  // network or InstalledScriptsManager).
   virtual void DidFailToFetchClassicScript() {}
 
   // Invoked on failure to fetch the worker's module script (either from network
   // or InstalledScriptsManager).
   virtual void DidFailToFetchModuleScript() {}
 
-  // Invoked when the main classic script is about to be evaluated.
-  virtual void WillEvaluateClassicScript(size_t script_size,
-                                         size_t cached_metadata_size) {}
+  // Invoked when the main classic/module script is about to be evaluated.
+  virtual void WillEvaluateScript() {}
 
-  // Invoked when an imported classic script is about to be evaluated.
-  virtual void WillEvaluateImportedClassicScript(size_t script_size,
-                                                 size_t cached_metadata_size) {}
-
-  // Invoked when the worker's main module script is about to be evaluated.
-  virtual void WillEvaluateModuleScript() {}
-
-  // Invoked when the main classic script is evaluated. |success| is true if the
+  // Invoked when the worker main script is evaluated. |success| is true if the
   // evaluation completed with no uncaught exception.
-  virtual void DidEvaluateClassicScript(bool success) {}
-
-  // Invoked when the worker's main module script is evaluated. |success| is
-  // true if the evaluation completed with no uncaught exception.
-  virtual void DidEvaluateModuleScript(bool success) {}
+  virtual void DidEvaluateTopLevelScript(bool success) {}
 
   // Invoked when close() is invoked on the worker context.
   virtual void DidCloseWorkerGlobalScope() {}

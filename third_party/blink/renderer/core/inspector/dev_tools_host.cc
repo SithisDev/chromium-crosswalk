@@ -29,14 +29,15 @@
 
 #include "third_party/blink/renderer/core/inspector/dev_tools_host.h"
 
-#include "third_party/blink/public/web/web_menu_item_info.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
+#include <utility>
+
+#include "base/json/json_reader.h"
+#include "third_party/blink/public/common/context_menu_data/menu_item_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
 #include "third_party/blink/renderer/core/clipboard/system_clipboard.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
-#include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -49,13 +50,14 @@
 #include "third_party/blink/renderer/core/page/context_menu_controller.h"
 #include "third_party/blink/renderer/core/page/context_menu_provider.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/script/classic_script.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -63,14 +65,14 @@ namespace blink {
 class FrontendMenuProvider final : public ContextMenuProvider {
  public:
   FrontendMenuProvider(DevToolsHost* devtools_host,
-                       WebVector<WebMenuItemInfo> items)
+                       WebVector<MenuItemInfo> items)
       : devtools_host_(devtools_host), items_(std::move(items)) {}
   ~FrontendMenuProvider() override {
     // Verify that this menu provider has been detached.
     DCHECK(!devtools_host_);
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(devtools_host_);
     ContextMenuProvider::Trace(visitor);
   }
@@ -86,7 +88,7 @@ class FrontendMenuProvider final : public ContextMenuProvider {
     items_.Clear();
   }
 
-  WebVector<WebMenuItemInfo> PopulateContextMenu() override {
+  WebVector<MenuItemInfo> PopulateContextMenu() override {
     return std::move(items_);
   }
 
@@ -99,7 +101,7 @@ class FrontendMenuProvider final : public ContextMenuProvider {
 
  private:
   Member<DevToolsHost> devtools_host_;
-  WebVector<WebMenuItemInfo> items_;
+  WebVector<MenuItemInfo> items_;
 };
 
 DevToolsHost::DevToolsHost(InspectorFrontendClient* client,
@@ -110,7 +112,7 @@ DevToolsHost::DevToolsHost(InspectorFrontendClient* client,
 
 DevToolsHost::~DevToolsHost() = default;
 
-void DevToolsHost::Trace(blink::Visitor* visitor) {
+void DevToolsHost::Trace(Visitor* visitor) const {
   visitor->Trace(client_);
   visitor->Trace(frontend_frame_);
   visitor->Trace(menu_provider_);
@@ -120,20 +122,10 @@ void DevToolsHost::Trace(blink::Visitor* visitor) {
 void DevToolsHost::EvaluateScript(const String& expression) {
   if (ScriptForbiddenScope::IsScriptForbidden())
     return;
-  if (!frontend_frame_)
-    return;
-  ScriptState* script_state = ToScriptStateForMainWorld(frontend_frame_);
-  if (!script_state)
-    return;
-  ScriptState::Scope scope(script_state);
-  std::unique_ptr<UserGestureIndicator> gesture_indicator =
-      LocalFrame::NotifyUserActivation(frontend_frame_);
-  v8::MicrotasksScope microtasks(script_state->GetIsolate(),
-                                 v8::MicrotasksScope::kRunMicrotasks);
-  ScriptSourceCode source_code(expression, ScriptSourceLocationType::kInternal,
-                               nullptr, KURL(), TextPosition());
-  V8ScriptRunner::CompileAndRunInternalScript(script_state->GetIsolate(),
-                                              script_state, source_code);
+  DCHECK(!ScriptForbiddenScope::WillBeScriptForbidden());
+  ClassicScript::CreateUnspecifiedScript(expression,
+                                         ScriptSourceLocationType::kInternal)
+      ->RunScriptOnScriptState(ToScriptStateForMainWorld(frontend_frame_));
 }
 
 void DevToolsHost::DisconnectClient() {
@@ -149,52 +141,47 @@ float DevToolsHost::zoomFactor() {
   if (!frontend_frame_)
     return 1;
   float zoom_factor = frontend_frame_->PageZoomFactor();
-  // Cancel the device scale factor applied to the zoom factor in
-  // use-zoom-for-dsf mode.
+  // Cancel the device scale factor applied to the zoom factor.
   const ChromeClient* client =
       frontend_frame_->View()->GetChromeClient();
-  float window_to_viewport_ratio = client->WindowToViewportScalar(1.0f);
+  float window_to_viewport_ratio =
+      client->WindowToViewportScalar(frontend_frame_, 1.0f);
   return zoom_factor / window_to_viewport_ratio;
 }
 
 void DevToolsHost::copyText(const String& text) {
-  SystemClipboard::GetInstance().WritePlainText(text);
-  SystemClipboard::GetInstance().CommitWrite();
-}
-
-static String EscapeUnicodeNonCharacters(const String& str) {
-  const UChar kNonChar = 0xD800;
-
-  unsigned i = 0;
-  while (i < str.length() && str[i] < kNonChar)
-    ++i;
-  if (i == str.length())
-    return str;
-
-  StringBuilder dst;
-  dst.Append(str, 0, i);
-  for (; i < str.length(); ++i) {
-    UChar c = str[i];
-    if (c >= kNonChar) {
-      unsigned symbol = static_cast<unsigned>(c);
-      String symbol_code = String::Format("\\u%04X", symbol);
-      dst.Append(symbol_code);
-    } else {
-      dst.Append(c);
-    }
-  }
-  return dst.ToString();
+  frontend_frame_->GetSystemClipboard()->WritePlainText(text);
+  frontend_frame_->GetSystemClipboard()->CommitWrite();
 }
 
 void DevToolsHost::sendMessageToEmbedder(const String& message) {
+  if (client_) {
+    // Strictly convert, as we expect message to be serialized JSON.
+    auto value = base::JSONReader::Read(
+        message.Utf8(WTF::UTF8ConversionMode::kStrictUTF8Conversion));
+    if (!value || !value->is_dict()) {
+      ScriptState* script_state = ToScriptStateForMainWorld(frontend_frame_);
+      if (!script_state)
+        return;
+      V8ThrowException::ThrowTypeError(
+          script_state->GetIsolate(),
+          value ? "Message to embedder must deserialize to a dictionary value"
+                : "Message to embedder couldn't be JSON-deserialized");
+      return;
+    }
+    client_->SendMessageToEmbedder(std::move(value->GetDict()));
+  }
+}
+
+void DevToolsHost::sendMessageToEmbedder(base::Value::Dict message) {
   if (client_)
-    client_->SendMessageToEmbedder(EscapeUnicodeNonCharacters(message));
+    client_->SendMessageToEmbedder(std::move(message));
 }
 
 void DevToolsHost::ShowContextMenu(LocalFrame* target_frame,
                                    float x,
                                    float y,
-                                   WebVector<WebMenuItemInfo> items) {
+                                   WebVector<MenuItemInfo> items) {
   DCHECK(frontend_frame_);
   auto* menu_provider =
       MakeGarbageCollected<FrontendMenuProvider>(this, std::move(items));

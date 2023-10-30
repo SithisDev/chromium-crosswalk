@@ -5,6 +5,7 @@
 #include "third_party/blink/public/common/fetch/fetch_api_request_body_mojom_traits.h"
 
 #include "services/network/public/cpp/url_request_mojom_traits.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom.h"
 
 namespace mojo {
 
@@ -18,29 +19,6 @@ bool StructTraits<blink::mojom::FetchAPIRequestBodyDataView,
   body->set_identifier(data.identifier());
   body->set_contains_sensitive_info(data.contains_sensitive_info());
   *out = std::move(body);
-  return true;
-}
-
-bool StructTraits<
-    blink::mojom::FetchAPIDataElementDataView,
-    network::DataElement>::Read(blink::mojom::FetchAPIDataElementDataView data,
-                                network::DataElement* out) {
-  if (!data.ReadPath(&out->path_) || !data.ReadFile(&out->file_) ||
-      !data.ReadBlobUuid(&out->blob_uuid_) ||
-      !data.ReadExpectedModificationTime(&out->expected_modification_time_)) {
-    return false;
-  }
-  if (data.type() == network::mojom::DataElementType::kBytes) {
-    if (!data.ReadBuf(&out->buf_))
-      return false;
-  }
-  out->type_ = data.type();
-  out->data_pipe_getter_ =
-      data.TakeDataPipeGetter<network::mojom::DataPipeGetterPtrInfo>();
-  out->chunked_data_pipe_getter_ = data.TakeChunkedDataPipeGetter<
-      network::mojom::ChunkedDataPipeGetterPtrInfo>();
-  out->offset_ = data.offset();
-  out->length_ = data.length();
   return true;
 }
 

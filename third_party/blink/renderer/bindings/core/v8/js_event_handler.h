@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/js_based_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_event_handler_non_null.h"
+#include "third_party/blink/renderer/core/core_export.h"
 
 namespace blink {
 
@@ -42,7 +43,7 @@ class CORE_EXPORT JSEventHandler : public JSBasedEventListener {
       : event_handler_(event_handler), type_(type) {}
 
   // blink::CustomWrappable overrides:
-  void Trace(blink::Visitor* visitor) override;
+  void Trace(Visitor* visitor) const override;
 
   // blink::EventListener overrides:
   bool IsEventHandler() const final { return true; }

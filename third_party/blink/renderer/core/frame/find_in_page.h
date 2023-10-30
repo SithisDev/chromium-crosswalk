@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FIND_IN_PAGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_FIND_IN_PAGE_H_
 
+#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -16,7 +17,7 @@
 #include "third_party/blink/public/web/web_plugin_container.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/finder/text_finder.h"
-#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 
@@ -24,14 +25,13 @@ namespace blink {
 
 class WebLocalFrameImpl;
 class WebString;
-struct WebFloatRect;
 
-class CORE_EXPORT FindInPage final
-    : public GarbageCollectedFinalized<FindInPage>,
-      public mojom::blink::FindInPage {
-
+class CORE_EXPORT FindInPage final : public GarbageCollected<FindInPage>,
+                                     public mojom::blink::FindInPage {
  public:
   FindInPage(WebLocalFrameImpl& frame, InterfaceRegistry* interface_registry);
+  FindInPage(const FindInPage&) = delete;
+  FindInPage& operator=(const FindInPage&) = delete;
 
   bool FindInternal(int identifier,
                     const WebString& search_text,
@@ -39,45 +39,41 @@ class CORE_EXPORT FindInPage final
                     bool wrap_within_frame,
                     bool* active_now = nullptr);
 
-  void SetTickmarks(const WebVector<WebRect>&);
+  void SetTickmarks(const WebElement& target,
+                    const WebVector<gfx::Rect>& tickmarks);
 
   int FindMatchMarkersVersion() const;
 
+#if BUILDFLAG(IS_ANDROID)
   // Returns the bounding box of the active find-in-page match marker or an
   // empty rect if no such marker exists. The rect is returned in find-in-page
   // coordinates.
-  WebFloatRect ActiveFindMatchRect();
+  gfx::RectF ActiveFindMatchRect();
+#endif
 
   void ReportFindInPageMatchCount(int request_id, int count, bool final_update);
 
   void ReportFindInPageSelection(int request_id,
                                  int active_match_ordinal,
-                                 const blink::WebRect& selection_rect,
+                                 const gfx::Rect& selection_rect,
                                  bool final_update);
 
   // mojom::blink::FindInPage overrides
   void Find(int request_id,
             const String& search_text,
             mojom::blink::FindOptionsPtr) final;
-
-  void SetClient(mojo::PendingRemote<mojom::blink::FindInPageClient>) final;
-
-  void ActivateNearestFindResult(int request_id, const WebFloatPoint&) final;
-
-  // Stops the current find-in-page, following the given |action|
   void StopFinding(mojom::StopFindAction action) final;
-
-  // Returns the distance (squared) to the closest find-in-page match from the
-  // provided point, in find-in-page coordinates.
-  void GetNearestFindResult(const WebFloatPoint&,
+  void ClearActiveFindMatch() final;
+  void SetClient(mojo::PendingRemote<mojom::blink::FindInPageClient>) final;
+#if BUILDFLAG(IS_ANDROID)
+  void GetNearestFindResult(const gfx::PointF&,
                             GetNearestFindResultCallback) final;
 
-  // Returns the bounding boxes of the find-in-page match markers in the frame,
-  // in find-in-page coordinates.
+  void ActivateNearestFindResult(int request_id, const gfx::PointF&) final;
+#endif
+#if BUILDFLAG(IS_ANDROID)
   void FindMatchRects(int current_version, FindMatchRectsCallback) final;
-
-  // Clears the active find match in the frame, if one exists.
-  void ClearActiveFindMatch() final;
+#endif
 
   TextFinder* GetTextFinder() const;
 
@@ -96,7 +92,7 @@ class CORE_EXPORT FindInPage final
 
   void Dispose();
 
-  void Trace(blink::Visitor* visitor) {
+  void Trace(Visitor* visitor) const {
     visitor->Trace(text_finder_);
     visitor->Trace(frame_);
   }
@@ -112,8 +108,6 @@ class CORE_EXPORT FindInPage final
   mojo::Remote<mojom::blink::FindInPageClient> client_;
 
   mojo::AssociatedReceiver<mojom::blink::FindInPage> receiver_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(FindInPage);
 };
 
 }  // namespace blink

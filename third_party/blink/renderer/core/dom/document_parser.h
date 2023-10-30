@@ -27,7 +27,8 @@
 #include <memory>
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/name_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -37,12 +38,11 @@ class DocumentParserClient;
 class ScriptableDocumentParser;
 class TextResourceDecoder;
 
-class CORE_EXPORT DocumentParser
-    : public GarbageCollectedFinalized<DocumentParser>,
-      public NameClient {
+class CORE_EXPORT DocumentParser : public GarbageCollected<DocumentParser>,
+                                   public NameClient {
  public:
-  virtual ~DocumentParser();
-  virtual void Trace(Visitor*);
+  ~DocumentParser() override;
+  virtual void Trace(Visitor*) const;
   const char* NameInHeapSnapshot() const override { return "DocumentParser"; }
 
   virtual ScriptableDocumentParser* AsScriptableDocumentParser() {
@@ -101,6 +101,14 @@ class CORE_EXPORT DocumentParser
   // HTMLDocumentParser to dispatch preloads.
   virtual void DocumentElementAvailable() {}
 
+  // Notifies the parser that any data which was added when preloading can now
+  // be parsed.
+  virtual void CommitPreloadedData() {}
+
+  // Notifies the parser that this is a good time to send requests for any
+  // preloads that may be pending.
+  virtual void FlushPendingPreloads() {}
+
   void SetDocumentWasLoadedAsPartOfNavigation() {
     document_was_loaded_as_part_of_navigation_ = true;
   }
@@ -108,9 +116,8 @@ class CORE_EXPORT DocumentParser
     return document_was_loaded_as_part_of_navigation_;
   }
 
-  // FIXME: The names are not very accurate :(
-  virtual void PauseScheduledTasks();
-  virtual void UnpauseScheduledTasks();
+  void SetIsPreloading(bool is_preloading) { is_preloading_ = is_preloading; }
+  bool IsPreloading() const { return is_preloading_; }
 
   void AddClient(DocumentParserClient*);
   void RemoveClient(DocumentParserClient*);
@@ -127,6 +134,7 @@ class CORE_EXPORT DocumentParser
   };
   ParserState state_;
   bool document_was_loaded_as_part_of_navigation_;
+  bool is_preloading_ = false;
 
   // Every DocumentParser needs a pointer back to the document.
   // document_ will be 0 after the parser is stopped.

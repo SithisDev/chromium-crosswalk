@@ -5,26 +5,26 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_WORKERS_MAIN_THREAD_WORKLET_REPORTING_PROXY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_WORKERS_MAIN_THREAD_WORKLET_REPORTING_PROXY_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 
 namespace blink {
 
-class Document;
+class ExecutionContext;
 
 class CORE_EXPORT MainThreadWorkletReportingProxy
     : public WorkerReportingProxy {
  public:
-  explicit MainThreadWorkletReportingProxy(Document*);
+  explicit MainThreadWorkletReportingProxy(ExecutionContext*);
   ~MainThreadWorkletReportingProxy() override = default;
 
   // Implements WorkerReportingProxy.
   void CountFeature(WebFeature) override;
-  void CountDeprecation(WebFeature) override;
   void DidTerminateWorkerThread() override;
 
  private:
-  Persistent<Document> document_;
+  Persistent<ExecutionContext> context_;
 };
 
 }  // namespace blink

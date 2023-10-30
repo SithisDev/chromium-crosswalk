@@ -9,7 +9,7 @@
 #include "third_party/blink/renderer/core/animation/keyframe.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/animation/timing_function.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -49,11 +49,11 @@ class CORE_EXPORT InterpolationEffect
       double apply_from,
       double apply_to);
 
-  void Trace(Visitor*);
+  void Trace(Visitor*) const;
 
  private:
-  class InterpolationRecord
-      : public GarbageCollectedFinalized<InterpolationRecord> {
+  class InterpolationRecord final
+      : public GarbageCollected<InterpolationRecord> {
    public:
     InterpolationRecord(Interpolation* interpolation,
                         scoped_refptr<TimingFunction> easing,
@@ -75,7 +75,7 @@ class CORE_EXPORT InterpolationEffect
     double apply_from_;
     double apply_to_;
 
-    void Trace(Visitor* visitor) { visitor->Trace(interpolation_); }
+    void Trace(Visitor* visitor) const { visitor->Trace(interpolation_); }
   };
 
   bool is_populated_;

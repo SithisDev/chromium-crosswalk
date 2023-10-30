@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/name_node_list.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
 
@@ -17,7 +17,7 @@ namespace {
 
 class LiveNodeListRegistryTest : public PageTestBase {
  public:
-  void SetUp() override { PageTestBase::SetUp(IntSize()); }
+  void SetUp() override { PageTestBase::SetUp(gfx::Size()); }
 
  protected:
   const LiveNodeListBase* CreateNodeList() {
@@ -100,10 +100,10 @@ TEST_F(LiveNodeListRegistryTest, ExplicitRemove) {
 // This is a hack for test purposes. The test below forces a GC to happen and
 // claims that there are no GC pointers on the stack. For this to be valid, the
 // tracker itself must live on the heap, not on the stack.
-struct LiveNodeListRegistryWrapper
-    : public GarbageCollectedFinalized<LiveNodeListRegistryWrapper> {
+struct LiveNodeListRegistryWrapper final
+    : public GarbageCollected<LiveNodeListRegistryWrapper> {
   LiveNodeListRegistry registry;
-  void Trace(Visitor* visitor) { visitor->Trace(registry); }
+  void Trace(Visitor* visitor) const { visitor->Trace(registry); }
 };
 
 // The set of types which match should be updated as elements are removed due to

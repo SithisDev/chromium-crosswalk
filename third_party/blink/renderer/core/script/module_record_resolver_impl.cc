@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/script/module_record_resolver_impl.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/module_record.h"
+#include "third_party/blink/renderer/core/loader/modulescript/module_script_creation_params.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/core/script/module_script.h"
 
@@ -13,36 +14,42 @@ namespace blink {
 void ModuleRecordResolverImpl::RegisterModuleScript(
     const ModuleScript* module_script) {
   DCHECK(module_script);
-  if (module_script->Record().IsNull())
+  v8::Local<v8::Module> module = module_script->V8Module();
+  if (module.IsEmpty())
     return;
 
+  v8::Isolate* isolate = modulator_->GetScriptState()->GetIsolate();
+  BoxedV8Module* record = MakeGarbageCollected<BoxedV8Module>(isolate, module);
   DVLOG(1) << "ModuleRecordResolverImpl::RegisterModuleScript(url="
-           << module_script->BaseURL().GetString()
-           << ", hash=" << ModuleRecordHash::GetHash(module_script->Record())
-           << ")";
+           << module_script->BaseUrl().GetString()
+           << ", hash=" << BoxedV8ModuleHash::GetHash(record) << ")";
 
-  auto result =
-      record_to_module_script_map_.Set(module_script->Record(), module_script);
+  auto result = record_to_module_script_map_.Set(record, module_script);
+
   DCHECK(result.is_new_entry);
 }
 
 void ModuleRecordResolverImpl::UnregisterModuleScript(
     const ModuleScript* module_script) {
   DCHECK(module_script);
-  if (module_script->Record().IsNull())
+  v8::Local<v8::Module> module = module_script->V8Module();
+  if (module.IsEmpty())
     return;
 
+  v8::Isolate* isolate = modulator_->GetScriptState()->GetIsolate();
+  BoxedV8Module* record = MakeGarbageCollected<BoxedV8Module>(isolate, module);
   DVLOG(1) << "ModuleRecordResolverImpl::UnregisterModuleScript(url="
-           << module_script->BaseURL().GetString()
-           << ", hash=" << ModuleRecordHash::GetHash(module_script->Record())
-           << ")";
+           << module_script->BaseUrl().GetString()
+           << ", hash=" << BoxedV8ModuleHash::GetHash(record) << ")";
 
-  record_to_module_script_map_.erase(module_script->Record());
+  record_to_module_script_map_.erase(record);
 }
 
 const ModuleScript* ModuleRecordResolverImpl::GetModuleScriptFromModuleRecord(
-    const ModuleRecord& record) const {
-  const auto it = record_to_module_script_map_.find(record);
+    v8::Local<v8::Module> module) const {
+  v8::Isolate* isolate = modulator_->GetScriptState()->GetIsolate();
+  const auto it = record_to_module_script_map_.find(
+      MakeGarbageCollected<BoxedV8Module>(isolate, module));
   CHECK_NE(it, record_to_module_script_map_.end())
       << "Failed to find ModuleScript corresponding to the "
          "record.[[HostDefined]]";
@@ -52,12 +59,17 @@ const ModuleScript* ModuleRecordResolverImpl::GetModuleScriptFromModuleRecord(
 
 // <specdef
 // href="https://html.spec.whatwg.org/C/#hostresolveimportedmodule(referencingscriptormodule,-specifier)">
-ModuleRecord ModuleRecordResolverImpl::Resolve(
-    const String& specifier,
-    const ModuleRecord& referrer,
+v8::Local<v8::Module> ModuleRecordResolverImpl::Resolve(
+    const ModuleRequest& module_request,
+    v8::Local<v8::Module> referrer,
     ExceptionState& exception_state) {
-  DVLOG(1) << "ModuleRecordResolverImpl::resolve(specifier=\"" << specifier
-           << ", referrer.hash=" << ModuleRecordHash::GetHash(referrer) << ")";
+  v8::Isolate* isolate = modulator_->GetScriptState()->GetIsolate();
+  DVLOG(1) << "ModuleRecordResolverImpl::resolve(specifier=\""
+           << module_request.specifier << ", referrer.hash="
+           << BoxedV8ModuleHash::GetHash(
+                  MakeGarbageCollected<BoxedV8Module>(isolate, referrer))
+           << ")";
+
   // <spec step="3">If referencingScriptOrModule is not null, then:</spec>
   //
   // Currently this function implements the spec before
@@ -80,37 +92,42 @@ ModuleRecord ModuleRecordResolverImpl::Resolve(
   // <spec step="3.3">Set base URL to referencing script's base URL.</spec>
   // <spec step="5">Let url be the result of resolving a module specifier given
   // base URL and specifier.</spec>
-  KURL url = referrer_module->ResolveModuleSpecifier(specifier);
+  KURL url = referrer_module->ResolveModuleSpecifier(module_request.specifier);
+  ModuleType child_module_type =
+      modulator_->ModuleTypeFromRequest(module_request);
 
   // <spec step="6">Assert: url is never failure, because resolving a module
   // specifier must have been previously successful with these same two
   // arguments ...</spec>
   DCHECK(url.IsValid());
+  CHECK_NE(child_module_type, ModuleType::kInvalid);
 
   // <spec step="7">Let resolved module script be moduleMap[url]. (This entry
   // must exist for us to have gotten to this point.)</spec>
-  ModuleScript* module_script = modulator_->GetFetchedModuleScript(url);
+  ModuleScript* module_script =
+      modulator_->GetFetchedModuleScript(url, child_module_type);
 
   // <spec step="8">Assert: resolved module script is a module script (i.e., is
   // not null or "fetching").</spec>
   //
   // <spec step="9">Assert: resolved module script's record is not null.</spec>
   DCHECK(module_script);
-  CHECK(!module_script->Record().IsNull());
+  v8::Local<v8::Module> record = module_script->V8Module();
+  CHECK(!record.IsEmpty());
 
   // <spec step="10">Return resolved module script's record.</spec>
-  return module_script->Record();
+  return record;
 }
 
-void ModuleRecordResolverImpl::ContextDestroyed(ExecutionContext*) {
+void ModuleRecordResolverImpl::ContextDestroyed() {
   // crbug.com/725816 : What we should really do is to make the map key
   // weak reference to v8::Module.
   record_to_module_script_map_.clear();
 }
 
-void ModuleRecordResolverImpl::Trace(Visitor* visitor) {
+void ModuleRecordResolverImpl::Trace(Visitor* visitor) const {
   ModuleRecordResolver::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextLifecycleObserver::Trace(visitor);
   visitor->Trace(record_to_module_script_map_);
   visitor->Trace(modulator_);
 }

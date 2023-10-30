@@ -8,6 +8,7 @@
 #include <inttypes.h>
 
 #include "base/containers/span.h"
+#include "base/types/strong_alias.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
@@ -21,7 +22,6 @@ class ResourceError;
 class ResourceRequest;
 class ResourceResponse;
 enum class ResourceType : uint8_t;
-struct FetchInitiatorInfo;
 
 // ResourceLoadObserver is a collection of functions which meet following
 // conditions.
@@ -37,7 +37,7 @@ struct FetchInitiatorInfo;
 // All functions except for the destructor and the trace method must be pure
 // virtual, and must not be called when the associated fetcher is detached.
 class PLATFORM_EXPORT ResourceLoadObserver
-    : public GarbageCollectedFinalized<ResourceLoadObserver> {
+    : public GarbageCollected<ResourceLoadObserver> {
  public:
   virtual ~ResourceLoadObserver() = default;
 
@@ -46,11 +46,12 @@ class PLATFORM_EXPORT ResourceLoadObserver
 
   // Called when the request is about to be sent. This is called on initial and
   // every redirect request.
-  virtual void WillSendRequest(uint64_t identifier,
-                               const ResourceRequest&,
+  virtual void WillSendRequest(const ResourceRequest&,
                                const ResourceResponse& redirect_response,
                                ResourceType,
-                               const FetchInitiatorInfo&) = 0;
+                               const ResourceLoaderOptions&,
+                               RenderBlockingBehavior,
+                               const Resource*) = 0;
 
   // Called when the priority of the request changes.
   virtual void DidChangePriority(uint64_t identifier,
@@ -87,14 +88,20 @@ class PLATFORM_EXPORT ResourceLoadObserver
                                 int64_t decoded_body_length,
                                 bool should_report_corb_blocking) = 0;
 
+  using IsInternalRequest = base::StrongAlias<class IsInternalRequestTag, bool>;
   // Called when a request fails.
   virtual void DidFailLoading(const KURL&,
                               uint64_t identifier,
                               const ResourceError&,
                               int64_t encoded_data_length,
-                              bool is_internal_request) = 0;
+                              IsInternalRequest) = 0;
 
-  virtual void Trace(Visitor*) {}
+  // Called when the RenderBlockingBehavior given to WillSendRequest changes.
+  virtual void DidChangeRenderBlockingBehavior(
+      Resource* resource,
+      const FetchParameters& params) = 0;
+
+  virtual void Trace(Visitor*) const {}
 };
 
 }  // namespace blink

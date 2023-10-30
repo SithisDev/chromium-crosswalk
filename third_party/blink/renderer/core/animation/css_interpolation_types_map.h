@@ -9,11 +9,10 @@
 #include "third_party/blink/renderer/core/animation/interpolation_types_map.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
-class CSSSyntaxDescriptor;
+class CSSSyntaxDefinition;
 class PropertyRegistry;
 
 class CORE_EXPORT CSSInterpolationTypesMap : public InterpolationTypesMap {
@@ -26,11 +25,12 @@ class CORE_EXPORT CSSInterpolationTypesMap : public InterpolationTypesMap {
 
   static InterpolationTypes CreateInterpolationTypesForCSSSyntax(
       const AtomicString& property_name,
-      const CSSSyntaxDescriptor&,
+      const CSSSyntaxDefinition&,
       const PropertyRegistration&);
 
  private:
-  Member<const PropertyRegistry> registry_;
+  const Document& document_;
+  const PropertyRegistry* registry_;
   bool allow_all_animations_;
 };
 

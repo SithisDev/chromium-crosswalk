@@ -5,15 +5,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_OBJECT_PAINT_INVALIDATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_OBJECT_PAINT_INVALIDATOR_H_
 
-#include "base/auto_reset.h"
-#include "base/macros.h"
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/graphics/paint/display_item_client.h"
 #include "third_party/blink/renderer/platform/graphics/paint_invalidation_reason.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
-class DisplayItemClient;
 class LayoutObject;
 struct PaintInvalidatorContext;
 
@@ -35,18 +35,30 @@ class CORE_EXPORT ObjectPaintInvalidator {
     InvalidateDisplayItemClient(client, reason);
   }
 
-  void InvalidateDisplayItemClientsIncludingNonCompositingDescendants(
-      PaintInvalidationReason);
-
-  // The caller should ensure the painting layer has been SetNeedsRepaint before
-  // calling this function.
-  void InvalidateDisplayItemClient(const DisplayItemClient&,
-                                   PaintInvalidationReason);
-
-  void InvalidatePaintIncludingNonCompositingDescendants();
-  void InvalidatePaintIncludingNonSelfPaintingLayerDescendants();
+  // The caller should ensure the painting layer has been SetNeedsRepaint
+  // before calling this function.
+  void InvalidateDisplayItemClient(const DisplayItemClient& client,
+                                   PaintInvalidationReason reason) {
+#if DCHECK_IS_ON()
+    // It's caller's responsibility to ensure PaintingLayer's NeedsRepaint is
+    // set. Don't set the flag here because getting PaintLayer has cost and the
+    // caller can use various ways (e.g.
+    // PaintInvalidatinContext::painting_layer) to reduce the cost.
+    CheckPaintLayerNeedsRepaint();
+#endif
+    TRACE_EVENT_INSTANT2(TRACE_DISABLED_BY_DEFAULT("blink.invalidation"),
+                         "InvalidateDisplayItemClient",
+                         TRACE_EVENT_SCOPE_GLOBAL, "client",
+                         client.DebugName().Utf8(), "reason",
+                         PaintInvalidationReasonToString(reason));
+    client.Invalidate(reason);
+  }
 
  protected:
+#if DCHECK_IS_ON()
+  void CheckPaintLayerNeedsRepaint();
+#endif
+
   const LayoutObject& object_;
 };
 
@@ -64,12 +76,9 @@ class ObjectPaintInvalidatorWithContext : public ObjectPaintInvalidator {
   void InvalidatePaintWithComputedReason(PaintInvalidationReason);
 
  private:
-  PaintInvalidationReason InvalidateSelection(PaintInvalidationReason);
-  PaintInvalidationReason InvalidatePartialRect(PaintInvalidationReason);
-
   const PaintInvalidatorContext& context_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_OBJECT_PAINT_INVALIDATOR_H_

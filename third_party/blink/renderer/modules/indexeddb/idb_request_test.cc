@@ -30,7 +30,11 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_refptr.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "build/build_config.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_receiver.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink.h"
@@ -42,7 +46,6 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_database.h"
-#include "third_party/blink/renderer/modules/indexeddb/idb_database_callbacks.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_key.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_key_path.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_metadata.h"
@@ -52,14 +55,15 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_transaction.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value_wrapping.h"
-#include "third_party/blink/renderer/modules/indexeddb/mock_web_idb_database.h"
-#include "third_party/blink/renderer/modules/indexeddb/mock_web_idb_transaction.h"
+#include "third_party/blink/renderer/modules/indexeddb/mock_idb_database.h"
+#include "third_party/blink/renderer/modules/indexeddb/mock_idb_transaction.h"
 #include "third_party/blink/renderer/modules/indexeddb/web_idb_callbacks.h"
+#include "third_party/blink/renderer/modules/indexeddb/web_idb_database.h"
+#include "third_party/blink/renderer/modules/indexeddb/web_idb_transaction.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
-#include "third_party/blink/renderer/platform/wtf/dtoa/utils.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "v8/include/v8.h"
 
@@ -70,9 +74,10 @@ class BackendDatabaseWithMockedClose
     : public testing::StrictMock<mojom::blink::IDBDatabase> {
  public:
   explicit BackendDatabaseWithMockedClose(
-      mojom::blink::IDBDatabaseAssociatedRequest request)
-      : binding_(this, std::move(request)) {
-    binding_.set_connection_error_handler(
+      mojo::PendingAssociatedReceiver<mojom::blink::IDBDatabase>
+          pending_receiver)
+      : receiver_(this, std::move(pending_receiver)) {
+    receiver_.set_disconnect_handler(
         base::BindOnce(&BackendDatabaseWithMockedClose::DatabaseDestroyed,
                        base::Unretained(this)));
   }
@@ -82,20 +87,14 @@ class BackendDatabaseWithMockedClose
   void RenameObjectStore(int64_t transaction_id,
                          int64_t object_store_id,
                          const WTF::String& new_name) override {}
-  void CreateTransaction(
-      mojom::blink::IDBTransactionAssociatedRequest transaction_request,
-      int64_t transaction_id,
-      const WTF::Vector<int64_t>& object_store_ids,
-      mojom::blink::IDBTransactionMode mode) override {}
+  void CreateTransaction(mojo::PendingAssociatedReceiver<
+                             mojom::blink::IDBTransaction> transaction_receiver,
+                         int64_t transaction_id,
+                         const WTF::Vector<int64_t>& object_store_ids,
+                         mojom::blink::IDBTransactionMode mode,
+                         mojom::blink::IDBTransactionDurability) override {}
   MOCK_METHOD0(Close, void());
   void VersionChangeIgnored() override {}
-  void AddObserver(int64_t transaction_id,
-                   int32_t observer_id,
-                   bool include_transaction,
-                   bool no_records,
-                   bool values,
-                   uint32_t operation_types) override {}
-  void RemoveObservers(const WTF::Vector<int32_t>& observers) override {}
   void Get(int64_t transaction_id,
            int64_t object_store_id,
            int64_t index_id,
@@ -124,24 +123,27 @@ class BackendDatabaseWithMockedClose
       mojom::blink::IDBCursorDirection direction,
       bool key_only,
       mojom::blink::IDBTaskType task_type,
-      mojom::blink::IDBCallbacksAssociatedPtrInfo callbacks) override {}
+      mojom::blink::IDBDatabase::OpenCursorCallback callback) override {}
   void Count(int64_t transaction_id,
              int64_t object_store_id,
              int64_t index_id,
              mojom::blink::IDBKeyRangePtr key_range,
-             mojom::blink::IDBCallbacksAssociatedPtrInfo callbacks) override {}
-  void DeleteRange(
-      int64_t transaction_id,
-      int64_t object_store_id,
-      mojom::blink::IDBKeyRangePtr key_range,
-      mojom::blink::IDBCallbacksAssociatedPtrInfo callbacks) override {}
+             mojo::PendingAssociatedRemote<mojom::blink::IDBCallbacks>
+                 pending_callbacks) override {}
+  void DeleteRange(int64_t transaction_id,
+                   int64_t object_store_id,
+                   mojom::blink::IDBKeyRangePtr key_range,
+                   mojo::PendingAssociatedRemote<mojom::blink::IDBCallbacks>
+                       pending_callbacks) override {}
   void GetKeyGeneratorCurrentNumber(
       int64_t transaction_id,
       int64_t object_store_id,
-      mojom::blink::IDBCallbacksAssociatedPtrInfo callbacks) override {}
+      mojo::PendingAssociatedRemote<mojom::blink::IDBCallbacks>
+          pending_callbacks) override {}
   void Clear(int64_t transaction_id,
              int64_t object_store_id,
-             mojom::blink::IDBCallbacksAssociatedPtrInfo callbacks) override {}
+             mojo::PendingAssociatedRemote<mojom::blink::IDBCallbacks>
+                 pending_callbacks) override {}
   void CreateIndex(int64_t transaction_id,
                    int64_t object_store_id,
                    int64_t index_id,
@@ -162,13 +164,13 @@ class BackendDatabaseWithMockedClose
 
  private:
   bool destroyed_ = false;
-  mojo::AssociatedBinding<mojom::blink::IDBDatabase> binding_;
+  mojo::AssociatedReceiver<mojom::blink::IDBDatabase> receiver_;
 };
 
 class IDBRequestTest : public testing::Test {
  protected:
   void SetUp() override {
-    url_loader_mock_factory_ = platform_->GetURLLoaderMockFactory();
+    url_loader_mock_factory_ = WebURLLoaderMockFactory::GetSingletonInstance();
     WebURLResponse response;
     response.SetCurrentRequestUrl(KURL("blob:"));
     url_loader_mock_factory_->RegisterURLProtocol(WebString("blob"), response,
@@ -179,18 +181,27 @@ class IDBRequestTest : public testing::Test {
     url_loader_mock_factory_->UnregisterAllURLsAndClearMemoryCache();
   }
 
-  void BuildTransaction(
-      V8TestingScope& scope,
-      std::unique_ptr<MockWebIDBDatabase> database_backend,
-      std::unique_ptr<MockWebIDBTransaction> transaction_backend) {
+  void BuildTransaction(V8TestingScope& scope,
+                        MockIDBDatabase& mock_database,
+                        MockIDBTransaction& mock_transaction) {
+    auto database_backend = std::make_unique<WebIDBDatabase>(
+        mock_database.BindNewEndpointAndPassDedicatedRemote(),
+        /*task_runner=*/nullptr);
     db_ = MakeGarbageCollected<IDBDatabase>(
         scope.GetExecutionContext(), std::move(database_backend),
-        MakeGarbageCollected<IDBDatabaseCallbacks>(), scope.GetIsolate());
+        mojo::NullAssociatedReceiver(), mojo::NullRemote());
+
+    auto transaction_backend = std::make_unique<WebIDBTransaction>(
+        /*task_runner=*/nullptr, kTransactionId);
+    auto transaction_receiver = transaction_backend->CreateReceiver();
+    transaction_receiver.EnableUnassociatedUsage();
+    mock_transaction.Bind(std::move(transaction_receiver));
 
     HashSet<String> transaction_scope = {"store"};
     transaction_ = IDBTransaction::CreateNonVersionChange(
         scope.GetScriptState(), std::move(transaction_backend), kTransactionId,
-        transaction_scope, mojom::IDBTransactionMode::ReadOnly, db_.Get());
+        transaction_scope, mojom::IDBTransactionMode::ReadOnly,
+        mojom::IDBTransactionDurability::Relaxed, db_.Get());
 
     IDBKeyPath store_key_path("primaryKey");
     scoped_refptr<IDBObjectStoreMetadata> store_metadata = base::AdoptRef(
@@ -208,6 +219,8 @@ class IDBRequestTest : public testing::Test {
   static constexpr int64_t kStoreId = 5678;
 };
 
+const int64_t IDBRequestTest::kTransactionId;
+
 void EnsureIDBCallbacksDontThrow(IDBRequest* request,
                                  ExceptionState& exception_state) {
   ASSERT_TRUE(request->transaction());
@@ -224,22 +237,17 @@ void EnsureIDBCallbacksDontThrow(IDBRequest* request,
   request->HandleResponse();
   request->HandleResponse(IDBKey::CreateInvalid(), IDBKey::CreateInvalid(),
                           CreateNullIDBValueForTesting(scope.GetIsolate()));
-  request->EnqueueResponse(Vector<String>());
 
   EXPECT_TRUE(!exception_state.HadException());
 }
 
 TEST_F(IDBRequestTest, EventsAfterEarlyDeathStop) {
   V8TestingScope scope;
-  const int64_t kTransactionId = 1234;
-  auto database_backend = std::make_unique<MockWebIDBDatabase>();
-  auto transaction_backend = std::make_unique<MockWebIDBTransaction>(
-      scope.GetExecutionContext()->GetTaskRunner(TaskType::kDatabaseAccess),
-      kTransactionId);
-  EXPECT_CALL(*transaction_backend, Commit(0)).Times(1);
-  EXPECT_CALL(*database_backend, Close()).Times(1);
-  BuildTransaction(scope, std::move(database_backend),
-                   std::move(transaction_backend));
+  MockIDBDatabase database_backend;
+  MockIDBTransaction transaction_backend;
+  EXPECT_CALL(database_backend, Close()).Times(1);
+  EXPECT_CALL(transaction_backend, Commit(0)).Times(1);
+  BuildTransaction(scope, database_backend, transaction_backend);
 
   ASSERT_TRUE(!scope.GetExceptionState().HadException());
   ASSERT_TRUE(transaction_);
@@ -254,19 +262,17 @@ TEST_F(IDBRequestTest, EventsAfterEarlyDeathStop) {
   scope.GetExecutionContext()->NotifyContextDestroyed();
 
   EnsureIDBCallbacksDontThrow(request, scope.GetExceptionState());
+  transaction_->transaction_backend()->FlushForTesting();
+  database_backend.Flush();
 }
 
 TEST_F(IDBRequestTest, EventsAfterDoneStop) {
   V8TestingScope scope;
-  const int64_t kTransactionId = 1234;
-  auto database_backend = std::make_unique<MockWebIDBDatabase>();
-  auto transaction_backend = std::make_unique<MockWebIDBTransaction>(
-      scope.GetExecutionContext()->GetTaskRunner(TaskType::kDatabaseAccess),
-      kTransactionId);
-  EXPECT_CALL(*transaction_backend, Commit(0)).Times(1);
-  EXPECT_CALL(*database_backend, Close()).Times(1);
-  BuildTransaction(scope, std::move(database_backend),
-                   std::move(transaction_backend));
+  MockIDBDatabase database_backend;
+  MockIDBTransaction transaction_backend;
+  EXPECT_CALL(database_backend, Close()).Times(1);
+  EXPECT_CALL(transaction_backend, Commit(0)).Times(1);
+  BuildTransaction(scope, database_backend, transaction_backend);
 
   ASSERT_TRUE(!scope.GetExceptionState().HadException());
   ASSERT_TRUE(transaction_);
@@ -280,19 +286,17 @@ TEST_F(IDBRequestTest, EventsAfterDoneStop) {
   scope.GetExecutionContext()->NotifyContextDestroyed();
 
   EnsureIDBCallbacksDontThrow(request, scope.GetExceptionState());
+  transaction_->transaction_backend()->FlushForTesting();
+  database_backend.Flush();
 }
 
 TEST_F(IDBRequestTest, EventsAfterEarlyDeathStopWithQueuedResult) {
   V8TestingScope scope;
-  const int64_t kTransactionId = 1234;
-  auto database_backend = std::make_unique<MockWebIDBDatabase>();
-  auto transaction_backend = std::make_unique<MockWebIDBTransaction>(
-      scope.GetExecutionContext()->GetTaskRunner(TaskType::kDatabaseAccess),
-      kTransactionId);
-  EXPECT_CALL(*transaction_backend, Commit(0)).Times(1);
-  EXPECT_CALL(*database_backend, Close()).Times(1);
-  BuildTransaction(scope, std::move(database_backend),
-                   std::move(transaction_backend));
+  MockIDBDatabase database_backend;
+  MockIDBTransaction transaction_backend;
+  EXPECT_CALL(database_backend, Close()).Times(1);
+  EXPECT_CALL(transaction_backend, Commit(0)).Times(1);
+  BuildTransaction(scope, database_backend, transaction_backend);
 
   ASSERT_TRUE(!scope.GetExceptionState().HadException());
   ASSERT_TRUE(transaction_);
@@ -309,19 +313,27 @@ TEST_F(IDBRequestTest, EventsAfterEarlyDeathStopWithQueuedResult) {
   EnsureIDBCallbacksDontThrow(request, scope.GetExceptionState());
   url_loader_mock_factory_->ServeAsynchronousRequests();
   EnsureIDBCallbacksDontThrow(request, scope.GetExceptionState());
+  transaction_->transaction_backend()->FlushForTesting();
+  database_backend.Flush();
 }
 
-TEST_F(IDBRequestTest, EventsAfterEarlyDeathStopWithTwoQueuedResults) {
+// This test is flaky on Marshmallow 64 bit Tester because the test is
+// crashing. See <http://crbug.com/1068057>.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_EventsAfterEarlyDeathStopWithTwoQueuedResults \
+  DISABLED_EventsAfterEarlyDeathStopWithTwoQueuedResults
+#else
+#define MAYBE_EventsAfterEarlyDeathStopWithTwoQueuedResults \
+  EventsAfterEarlyDeathStopWithTwoQueuedResults
+#endif
+
+TEST_F(IDBRequestTest, MAYBE_EventsAfterEarlyDeathStopWithTwoQueuedResults) {
   V8TestingScope scope;
-  const int64_t kTransactionId = 1234;
-  auto database_backend = std::make_unique<MockWebIDBDatabase>();
-  auto transaction_backend = std::make_unique<MockWebIDBTransaction>(
-      scope.GetExecutionContext()->GetTaskRunner(TaskType::kDatabaseAccess),
-      kTransactionId);
-  EXPECT_CALL(*transaction_backend, Commit(0)).Times(1);
-  EXPECT_CALL(*database_backend, Close()).Times(1);
-  BuildTransaction(scope, std::move(database_backend),
-                   std::move(transaction_backend));
+  MockIDBDatabase database_backend;
+  MockIDBTransaction transaction_backend;
+  EXPECT_CALL(database_backend, Close()).Times(1);
+  EXPECT_CALL(transaction_backend, Commit(0)).Times(1);
+  BuildTransaction(scope, database_backend, transaction_backend);
 
   ASSERT_TRUE(!scope.GetExceptionState().HadException());
   ASSERT_TRUE(transaction_);
@@ -346,9 +358,21 @@ TEST_F(IDBRequestTest, EventsAfterEarlyDeathStopWithTwoQueuedResults) {
   url_loader_mock_factory_->ServeAsynchronousRequests();
   EnsureIDBCallbacksDontThrow(request1, scope.GetExceptionState());
   EnsureIDBCallbacksDontThrow(request2, scope.GetExceptionState());
+  transaction_->transaction_backend()->FlushForTesting();
+  database_backend.Flush();
 }
 
-TEST_F(IDBRequestTest, AbortErrorAfterAbort) {
+// This test is flaky on Marshmallow 64 bit Tester because the test is
+// crashing. See <http://crbug.com/1068057>.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_AbortErrorAfterAbort \
+  DISABLED_AbortErrorAfterAbort
+#else
+#define MAYBE_AbortErrorAfterAbort \
+  AbortErrorAfterAbort
+#endif
+
+TEST_F(IDBRequestTest, MAYBE_AbortErrorAfterAbort) {
   V8TestingScope scope;
   IDBTransaction* transaction = nullptr;
   IDBRequest* request =
@@ -372,53 +396,54 @@ TEST_F(IDBRequestTest, AbortErrorAfterAbort) {
 
 TEST_F(IDBRequestTest, ConnectionsAfterStopping) {
   V8TestingScope scope;
-  const int64_t kTransactionId = 1234;
   const int64_t kVersion = 1;
   const int64_t kOldVersion = 0;
   const IDBDatabaseMetadata metadata;
-  Persistent<IDBDatabaseCallbacks> callbacks =
-      MakeGarbageCollected<IDBDatabaseCallbacks>();
 
   {
-    mojom::blink::IDBDatabaseAssociatedPtr ptr;
-    std::unique_ptr<BackendDatabaseWithMockedClose> mock_database =
-        std::make_unique<BackendDatabaseWithMockedClose>(
-            mojo::MakeRequestAssociatedWithDedicatedPipe(&ptr));
-    EXPECT_CALL(*mock_database, Close()).Times(1);
+    MockIDBDatabase mock_database;
+    mojo::AssociatedRemote<mojom::blink::IDBDatabase> remote;
+    mock_database.Bind(remote.BindNewEndpointAndPassDedicatedReceiver());
+    EXPECT_CALL(mock_database, Close()).Times(1);
 
-    auto transaction_backend = std::make_unique<MockWebIDBTransaction>(
-        scope.GetExecutionContext()->GetTaskRunner(TaskType::kDatabaseAccess),
-        kTransactionId);
+    auto transaction_backend = std::make_unique<WebIDBTransaction>(
+        /*task_runner=*/nullptr, kTransactionId);
+    auto transaction_receiver = transaction_backend->CreateReceiver();
+    transaction_receiver.EnableUnassociatedUsage();
+
     auto* request = MakeGarbageCollected<IDBOpenDBRequest>(
-        scope.GetScriptState(), callbacks, std::move(transaction_backend),
-        kTransactionId, kVersion, IDBRequest::AsyncTraceState());
+        scope.GetScriptState(), mojo::NullAssociatedReceiver(),
+        std::move(transaction_backend), kTransactionId, kVersion,
+        IDBRequest::AsyncTraceState(), mojo::NullRemote());
     EXPECT_EQ(request->readyState(), "pending");
     std::unique_ptr<WebIDBCallbacks> callbacks = request->CreateWebCallbacks();
 
     scope.GetExecutionContext()->NotifyContextDestroyed();
-    callbacks->UpgradeNeeded(ptr.PassInterface(), kOldVersion,
+    callbacks->UpgradeNeeded(remote.Unbind(), kOldVersion,
                              mojom::IDBDataLoss::None, String(), metadata);
     platform_->RunUntilIdle();
   }
 
   {
-    mojom::blink::IDBDatabaseAssociatedPtr ptr;
-    std::unique_ptr<BackendDatabaseWithMockedClose> mock_database =
-        std::make_unique<BackendDatabaseWithMockedClose>(
-            mojo::MakeRequestAssociatedWithDedicatedPipe(&ptr));
-    EXPECT_CALL(*mock_database, Close()).Times(1);
+    MockIDBDatabase mock_database;
+    mojo::AssociatedRemote<mojom::blink::IDBDatabase> remote;
+    mock_database.Bind(remote.BindNewEndpointAndPassDedicatedReceiver());
+    EXPECT_CALL(mock_database, Close()).Times(1);
 
-    auto transaction_backend = std::make_unique<MockWebIDBTransaction>(
-        scope.GetExecutionContext()->GetTaskRunner(TaskType::kDatabaseAccess),
-        kTransactionId);
+    auto transaction_backend = std::make_unique<WebIDBTransaction>(
+        /*task_runner=*/nullptr, kTransactionId);
+    auto transaction_receiver = transaction_backend->CreateReceiver();
+    transaction_receiver.EnableUnassociatedUsage();
+
     auto* request = MakeGarbageCollected<IDBOpenDBRequest>(
-        scope.GetScriptState(), callbacks, std::move(transaction_backend),
-        kTransactionId, kVersion, IDBRequest::AsyncTraceState());
+        scope.GetScriptState(), mojo::NullAssociatedReceiver(),
+        std::move(transaction_backend), kTransactionId, kVersion,
+        IDBRequest::AsyncTraceState(), mojo::NullRemote());
     EXPECT_EQ(request->readyState(), "pending");
     std::unique_ptr<WebIDBCallbacks> callbacks = request->CreateWebCallbacks();
 
     scope.GetExecutionContext()->NotifyContextDestroyed();
-    callbacks->SuccessDatabase(ptr.PassInterface(), metadata);
+    callbacks->SuccessDatabase(remote.Unbind(), metadata);
     platform_->RunUntilIdle();
   }
 }

@@ -31,13 +31,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CONTROLLER_DEV_TOOLS_FRONTEND_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CONTROLLER_DEV_TOOLS_FRONTEND_IMPL_H_
 
-#include "base/macros.h"
-#include "mojo/public/cpp/bindings/associated_binding.h"
+#include "base/values.h"
 #include "third_party/blink/public/mojom/devtools/devtools_frontend.mojom-blink.h"
 #include "third_party/blink/renderer/core/inspector/inspector_frontend_client.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_associated_receiver.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_associated_remote.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -48,24 +48,28 @@ class LocalFrame;
 // This class lives as long as a frame (being a supplement), or until
 // it's host (mojom.DevToolsFrontendHost) is destroyed.
 class DevToolsFrontendImpl final
-    : public GarbageCollectedFinalized<DevToolsFrontendImpl>,
+    : public GarbageCollected<DevToolsFrontendImpl>,
       public Supplement<LocalFrame>,
       public mojom::blink::DevToolsFrontend,
       public InspectorFrontendClient {
-  USING_GARBAGE_COLLECTED_MIXIN(DevToolsFrontendImpl);
-
  public:
   static const char kSupplementName[];
 
-  static void BindMojoRequest(LocalFrame*,
-                              mojom::blink::DevToolsFrontendAssociatedRequest);
+  static void BindMojoRequest(
+      LocalFrame*,
+      mojo::PendingAssociatedReceiver<mojom::blink::DevToolsFrontend>);
   static DevToolsFrontendImpl* From(LocalFrame*);
 
-  DevToolsFrontendImpl(LocalFrame&,
-                       mojom::blink::DevToolsFrontendAssociatedRequest);
+  DevToolsFrontendImpl(
+      LocalFrame&,
+      mojo::PendingAssociatedReceiver<mojom::blink::DevToolsFrontend>);
+
+  DevToolsFrontendImpl(const DevToolsFrontendImpl&) = delete;
+  DevToolsFrontendImpl& operator=(const DevToolsFrontendImpl&) = delete;
+
   ~DevToolsFrontendImpl() override;
   void DidClearWindowObject();
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void DestroyOnHostGone();
@@ -73,20 +77,25 @@ class DevToolsFrontendImpl final
   // mojom::blink::DevToolsFrontend implementation.
   void SetupDevToolsFrontend(
       const String& api_script,
-      mojom::blink::DevToolsFrontendHostAssociatedPtrInfo) override;
+      mojo::PendingAssociatedRemote<mojom::blink::DevToolsFrontendHost>)
+      override;
   void SetupDevToolsExtensionAPI(const String& extension_api) override;
 
   // InspectorFrontendClient implementation.
-  void SendMessageToEmbedder(const String&) override;
+  void SendMessageToEmbedder(base::Value::Dict) override;
 
   Member<DevToolsHost> devtools_host_;
   String api_script_;
-  mojom::blink::DevToolsFrontendHostAssociatedPtr host_;
-  mojo::AssociatedBinding<mojom::blink::DevToolsFrontend> binding_;
-
-  DISALLOW_COPY_AND_ASSIGN(DevToolsFrontendImpl);
+  // The host_ must outlive the ExecutionContext of LocalFrame, so it should not
+  // be associated with the ExecutionContext of LocalFrame.
+  HeapMojoAssociatedRemote<mojom::blink::DevToolsFrontendHost> host_{nullptr};
+  // The receiver_ must outlive the ExecutionContext of LocalFrame, so it should
+  // not be associated with the ExecutionContext of LocalFrame.
+  HeapMojoAssociatedReceiver<mojom::blink::DevToolsFrontend,
+                             DevToolsFrontendImpl>
+      receiver_{this, nullptr};
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CONTROLLER_DEV_TOOLS_FRONTEND_IMPL_H_

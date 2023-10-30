@@ -8,16 +8,17 @@ blink_modules_sources("wake_lock") {
   sources = [
     "wake_lock.cc",
     "wake_lock.h",
-    "wake_lock_controller.cc",
-    "wake_lock_controller.h",
-    "wake_lock_state_record.cc",
-    "wake_lock_state_record.h",
+    "wake_lock_manager.cc",
+    "wake_lock_manager.h",
+    "wake_lock_sentinel.cc",
+    "wake_lock_sentinel.h",
     "wake_lock_type.cc",
     "wake_lock_type.h",
   ]
   deps = [
     "//mojo/public/cpp/bindings",
     "//services/service_manager/public/cpp",
+    "//third_party/blink/renderer/modules/permissions",
     "//third_party/blink/renderer/platform",
   ]
 }

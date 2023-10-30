@@ -23,8 +23,9 @@
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 
 #include "build/build_config.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_keyboard_event_init.h"
 #include "third_party/blink/renderer/core/editing/ime/input_method_controller.h"
 #include "third_party/blink/renderer/core/event_interface_names.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -41,13 +42,13 @@ namespace {
 
 const AtomicString& EventTypeForKeyboardEventType(WebInputEvent::Type type) {
   switch (type) {
-    case WebInputEvent::kKeyUp:
+    case WebInputEvent::Type::kKeyUp:
       return event_type_names::kKeyup;
-    case WebInputEvent::kRawKeyDown:
+    case WebInputEvent::Type::kRawKeyDown:
       return event_type_names::kKeydown;
-    case WebInputEvent::kChar:
+    case WebInputEvent::Type::kChar:
       return event_type_names::kKeypress;
-    case WebInputEvent::kKeyDown:
+    case WebInputEvent::Type::kKeyDown:
       // The caller should disambiguate the combined event into RawKeyDown or
       // Char events.
       break;
@@ -132,7 +133,7 @@ KeyboardEvent::KeyboardEvent(const WebKeyboardEvent& key,
   else
     key_code_ = char_code_;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // FIXME: Check to see if this applies to other OS.
   // If the key event belongs to IME composition then propagate to JS.
   if (key.native_key_code == 0xE5)  // VKEY_PROCESSKEY
@@ -218,7 +219,7 @@ void KeyboardEvent::InitLocationModifiers(unsigned location) {
   }
 }
 
-void KeyboardEvent::Trace(blink::Visitor* visitor) {
+void KeyboardEvent::Trace(Visitor* visitor) const {
   UIEventWithKeyState::Trace(visitor);
 }
 

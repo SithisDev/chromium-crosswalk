@@ -5,13 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_TEXT_INDENT_INTERPOLATION_TYPE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_TEXT_INDENT_INTERPOLATION_TYPE_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/animation/css_interpolation_type.h"
 
 namespace blink {
 
 class CSSTextIndentInterpolationType : public CSSInterpolationType {
  public:
-  CSSTextIndentInterpolationType(PropertyHandle property)
+  explicit CSSTextIndentInterpolationType(PropertyHandle property)
       : CSSInterpolationType(property) {
     DCHECK_EQ(CssProperty().PropertyID(), CSSPropertyID::kTextIndent);
   }

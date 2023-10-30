@@ -7,7 +7,8 @@
 
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -26,13 +27,6 @@ class PushSubscriptionOptions final : public ScriptWrappable {
       const PushSubscriptionOptionsInit* options_init,
       ExceptionState& exception_state);
 
-  static PushSubscriptionOptions* Create(
-      bool user_visible_only,
-      const WTF::Vector<uint8_t>& application_server_key) {
-    return MakeGarbageCollected<PushSubscriptionOptions>(
-        user_visible_only, application_server_key);
-  }
-
   explicit PushSubscriptionOptions(
       bool user_visible_only,
       const WTF::Vector<uint8_t>& application_server_key);
@@ -44,10 +38,7 @@ class PushSubscriptionOptions final : public ScriptWrappable {
     return application_server_key_;
   }
 
-  // Whether the application server key follows the VAPID protocol.
-  bool IsApplicationServerKeyVapid() const;
-
-  void Trace(blink::Visitor* visitor) override;
+  void Trace(Visitor* visitor) const override;
 
  private:
   bool user_visible_only_;

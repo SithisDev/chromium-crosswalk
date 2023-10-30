@@ -5,13 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_SURFACE_LAYER_BRIDGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_SURFACE_LAYER_BRIDGE_H_
 
-#include <memory>
-
 #include "base/memory/scoped_refptr.h"
-#include "base/time/time.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/common/surfaces/surface_id.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/frame_sinks/embedded_frame_sink.mojom-blink.h"
 #include "third_party/blink/public/platform/web_surface_layer_bridge.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
@@ -21,13 +20,7 @@ class SolidColorLayer;
 class SurfaceLayer;
 }  // namespace cc
 
-namespace viz {
-class SurfaceInfo;
-}  // namespace viz
-
 namespace blink {
-
-class WebLayerTreeView;
 
 // The SurfaceLayerBridge facilitates communication about changes to a Surface
 // between the Render and Browser processes.
@@ -37,7 +30,8 @@ class PLATFORM_EXPORT SurfaceLayerBridge
       public WebSurfaceLayerBridge {
  public:
   SurfaceLayerBridge(
-      WebLayerTreeView*,
+      viz::FrameSinkId parent_frame_sink_id,
+      ContainsVideo contains_video,
       WebSurfaceLayerBridgeObserver*,
       cc::UpdateSubmissionStateCB update_submission_state_callback);
   ~SurfaceLayerBridge() override;
@@ -45,9 +39,8 @@ class PLATFORM_EXPORT SurfaceLayerBridge
   void CreateSolidColorLayer();
 
   // Implementation of blink::mojom::blink::EmbeddedFrameSinkClient
-  void OnFirstSurfaceActivation(const viz::SurfaceInfo&) override;
   void BindSurfaceEmbedder(
-      mojom::blink::SurfaceEmbedderRequest request) override;
+      mojo::PendingReceiver<mojom::blink::SurfaceEmbedder> receiver) override;
 
   void EmbedSurface(const viz::SurfaceId& surface_id);
 
@@ -65,7 +58,8 @@ class PLATFORM_EXPORT SurfaceLayerBridge
     return current_surface_id_;
   }
 
-  base::TimeTicks GetLocalSurfaceIdAllocationTime() const override;
+  void RegisterFrameSinkHierarchy() override;
+  void UnregisterFrameSinkHierarchy() override;
 
  private:
   scoped_refptr<cc::SurfaceLayer> surface_layer_;
@@ -75,11 +69,14 @@ class PLATFORM_EXPORT SurfaceLayerBridge
   WebSurfaceLayerBridgeObserver* observer_;
   cc::UpdateSubmissionStateCB update_submission_state_callback_;
   viz::ParentLocalSurfaceIdAllocator parent_local_surface_id_allocator_;
-  mojo::Binding<blink::mojom::blink::EmbeddedFrameSinkClient> binding_;
-  mojo::Binding<blink::mojom::blink::SurfaceEmbedder> surface_embedder_binding_;
+  mojo::Receiver<blink::mojom::blink::EmbeddedFrameSinkClient> receiver_{this};
+  mojo::Receiver<blink::mojom::blink::SurfaceEmbedder>
+      surface_embedder_receiver_{this};
+  mojo::Remote<mojom::blink::EmbeddedFrameSinkProvider>
+      embedded_frame_sink_provider_;
 
-  const bool enable_surface_synchronization_;
   const viz::FrameSinkId frame_sink_id_;
+  const ContainsVideo contains_video_;
   viz::SurfaceId current_surface_id_;
   const viz::FrameSinkId parent_frame_sink_id_;
   bool opaque_ = false;

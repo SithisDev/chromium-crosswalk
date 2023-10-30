@@ -21,6 +21,8 @@
 
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
 #include "third_party/blink/renderer/platform/network/form_data_encoder.h"
 #include "third_party/blink/renderer/platform/network/wrapped_data_pipe_getter.h"
@@ -33,15 +35,11 @@ FormDataElement::FormDataElement() : type_(kData) {}
 FormDataElement::FormDataElement(const Vector<char>& array)
     : type_(kData), data_(array) {}
 
-bool FormDataElement::IsSafeToSendToAnotherThread() const {
-  return filename_.IsSafeToSendToAnotherThread() &&
-         blob_uuid_.IsSafeToSendToAnotherThread();
-}
-
-FormDataElement::FormDataElement(const String& filename,
-                                 int64_t file_start,
-                                 int64_t file_length,
-                                 double expected_file_modification_time)
+FormDataElement::FormDataElement(
+    const String& filename,
+    int64_t file_start,
+    int64_t file_length,
+    const absl::optional<base::Time>& expected_file_modification_time)
     : type_(kEncodedFile),
       filename_(filename),
       file_start_(file_start),
@@ -52,7 +50,9 @@ FormDataElement::FormDataElement(const String& blob_uuid,
                                  scoped_refptr<BlobDataHandle> optional_handle)
     : type_(kEncodedBlob),
       blob_uuid_(blob_uuid),
-      optional_blob_data_handle_(std::move(optional_handle)) {}
+      optional_blob_data_handle_(std::move(optional_handle)) {
+  DCHECK(optional_blob_data_handle_);
+}
 
 FormDataElement::FormDataElement(
     scoped_refptr<WrappedDataPipeGetter> data_pipe_getter)
@@ -111,14 +111,8 @@ scoped_refptr<EncodedFormData> EncodedFormData::Create(const void* data,
 scoped_refptr<EncodedFormData> EncodedFormData::Create(
     base::span<const char> string) {
   scoped_refptr<EncodedFormData> result = Create();
-  result->AppendData(string.data(), string.size());
-  return result;
-}
-
-scoped_refptr<EncodedFormData> EncodedFormData::Create(
-    const Vector<char>& vector) {
-  scoped_refptr<EncodedFormData> result = Create();
-  result->AppendData(vector.data(), vector.size());
+  result->AppendData(string.data(),
+                     base::checked_cast<wtf_size_t>(string.size()));
   return result;
 }
 
@@ -140,18 +134,19 @@ scoped_refptr<EncodedFormData> EncodedFormData::DeepCopy() const {
         form_data->elements_.UncheckedAppend(FormDataElement(e.data_));
         break;
       case FormDataElement::kEncodedFile:
-        form_data->elements_.UncheckedAppend(FormDataElement(
-            e.filename_.IsolatedCopy(), e.file_start_, e.file_length_,
-            e.expected_file_modification_time_));
+        form_data->elements_.UncheckedAppend(
+            FormDataElement(e.filename_, e.file_start_, e.file_length_,
+                            e.expected_file_modification_time_));
         break;
       case FormDataElement::kEncodedBlob:
-        form_data->elements_.UncheckedAppend(FormDataElement(
-            e.blob_uuid_.IsolatedCopy(), e.optional_blob_data_handle_));
+        form_data->elements_.UncheckedAppend(
+            FormDataElement(e.blob_uuid_, e.optional_blob_data_handle_));
         break;
       case FormDataElement::kDataPipe:
-        network::mojom::blink::DataPipeGetterPtr data_pipe_getter;
-        (*e.data_pipe_getter_->GetPtr())
-            ->Clone(mojo::MakeRequest(&data_pipe_getter));
+        mojo::PendingRemote<network::mojom::blink::DataPipeGetter>
+            data_pipe_getter;
+        e.data_pipe_getter_->GetDataPipeGetter()->Clone(
+            data_pipe_getter.InitWithNewPipeAndPassReceiver());
         auto wrapped = base::MakeRefCounted<WrappedDataPipeGetter>(
             std::move(data_pipe_getter));
         form_data->elements_.UncheckedAppend(
@@ -171,15 +166,18 @@ void EncodedFormData::AppendData(const void* data, wtf_size_t size) {
   memcpy(e.data_.data() + old_size, data, size);
 }
 
-void EncodedFormData::AppendFile(const String& filename) {
-  elements_.push_back(
-      FormDataElement(filename, 0, BlobData::kToEndOfFile, InvalidFileTime()));
+void EncodedFormData::AppendFile(
+    const String& filename,
+    const absl::optional<base::Time>& expected_modification_time) {
+  elements_.push_back(FormDataElement(filename, 0, BlobData::kToEndOfFile,
+                                      expected_modification_time));
 }
 
-void EncodedFormData::AppendFileRange(const String& filename,
-                                      int64_t start,
-                                      int64_t length,
-                                      double expected_modification_time) {
+void EncodedFormData::AppendFileRange(
+    const String& filename,
+    int64_t start,
+    int64_t length,
+    const absl::optional<base::Time>& expected_modification_time) {
   elements_.push_back(
       FormDataElement(filename, start, length, expected_modification_time));
 }
@@ -240,13 +238,7 @@ uint64_t EncodedFormData::SizeInBytes() const {
 }
 
 bool EncodedFormData::IsSafeToSendToAnotherThread() const {
-  if (!HasOneRef())
-    return false;
-  for (auto& element : elements_) {
-    if (!element.IsSafeToSendToAnotherThread())
-      return false;
-  }
-  return true;
+  return HasOneRef();
 }
 
 }  // namespace blink

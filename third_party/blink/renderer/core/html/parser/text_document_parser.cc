@@ -30,11 +30,12 @@
 
 namespace blink {
 
-using namespace html_names;
-
 TextDocumentParser::TextDocumentParser(HTMLDocument& document,
                                        ParserSynchronizationPolicy sync_policy)
-    : HTMLDocumentParser(document, sync_policy),
+    : HTMLDocumentParser(document,
+                         sync_policy,
+                         kDisallowPrefetching,
+                         /* can_use_background_token_producer= */ false),
       have_inserted_fake_pre_element_(false) {}
 
 TextDocumentParser::~TextDocumentParser() = default;
@@ -51,13 +52,24 @@ void TextDocumentParser::AppendBytes(const char* data, size_t length) {
 void TextDocumentParser::InsertFakePreElement() {
   // In principle, we should create a specialized tree builder for
   // TextDocuments, but instead we re-use the existing HTMLTreeBuilder. We
-  // create a fake token and give it to the tree builder rather than sending
-  // fake bytes through the front-end of the parser to avoid distrubing the
-  // line/column number calculations.
+  // create two fake tokens and pass them to the tree builder rather than
+  // sending fake bytes through the front-end of the parser to avoid disturbing
+  // the line/column number calculations.
   Vector<Attribute> attributes;
-  attributes.push_back(
-      Attribute(kStyleAttr, "word-wrap: break-word; white-space: pre-wrap;"));
-  AtomicHTMLToken fake_pre(HTMLToken::kStartTag, kPreTag.LocalName(),
+
+  // Allow the browser to display the text file in dark mode if it is set as
+  // the preferred color scheme.
+  attributes.push_back(Attribute(html_names::kNameAttr, "color-scheme"));
+  attributes.push_back(Attribute(html_names::kContentAttr, "light dark"));
+  AtomicHTMLToken fake_meta(HTMLToken::kStartTag, html_names::HTMLTag::kMeta,
+                            attributes);
+  TreeBuilder()->ConstructTree(&fake_meta);
+  attributes.clear();
+
+  // Wrap the actual contents of the text file in <pre>.
+  attributes.push_back(Attribute(
+      html_names::kStyleAttr, "word-wrap: break-word; white-space: pre-wrap;"));
+  AtomicHTMLToken fake_pre(HTMLToken::kStartTag, html_names::HTMLTag::kPre,
                            attributes);
   TreeBuilder()->ConstructTree(&fake_pre);
 

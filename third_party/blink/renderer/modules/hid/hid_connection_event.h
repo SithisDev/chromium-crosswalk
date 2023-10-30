@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_HID_HID_CONNECTION_EVENT_H_
 
 #include "third_party/blink/renderer/modules/event_modules.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -24,9 +24,12 @@ class HIDConnectionEvent final : public Event {
   HIDConnectionEvent(const AtomicString& type, const HIDConnectionEventInit*);
   HIDConnectionEvent(const AtomicString& type, HIDDevice*);
 
-  HIDDevice* device() const { return nullptr; }
+  HIDDevice* device() const { return device_; }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
+
+ private:
+  Member<HIDDevice> device_;
 };
 
 }  // namespace blink

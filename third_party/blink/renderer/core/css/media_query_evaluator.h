@@ -28,21 +28,31 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_MEDIA_QUERY_EVALUATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_MEDIA_QUERY_EVALUATOR_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
+
 class LocalFrame;
 class MediaQuery;
-class MediaQueryExp;
-class MediaQueryResult;
+class MediaQueryExpNode;
+class MediaQueryFeatureExpNode;
 class MediaQuerySet;
+class MediaQuerySetResult;
 class MediaValues;
-class MediaValuesInitialViewport;
+struct MediaQueryResultFlags;
 
-using MediaQueryResultList = Vector<MediaQueryResult>;
+// See Kleene 3-valued logic
+//
+// https://drafts.csswg.org/mediaqueries-4/#evaluating
+enum class KleeneValue {
+  kTrue,
+  kFalse,
+  kUnknown,
+};
 
 // Class that evaluates css media queries as defined in
 // CSS3 Module "Media Queries" (http://www.w3.org/TR/css3-mediaqueries/)
@@ -56,54 +66,68 @@ using MediaQueryResultList = Vector<MediaQueryResult>;
 // loading of stylesheets to only those which are probable to match.
 
 class CORE_EXPORT MediaQueryEvaluator final
-    : public GarbageCollectedFinalized<MediaQueryEvaluator> {
-
+    : public GarbageCollected<MediaQueryEvaluator> {
  public:
   static void Init();
 
-  // Creates evaluator which evaluates to true for all media queries.
-  MediaQueryEvaluator() = default;
+  MediaQueryEvaluator() = delete;
 
-  // Creates evaluator which evaluates only simple media queries
-  // Evaluator returns true for acceptedMediaType and returns true for any media
-  // features.
-  MediaQueryEvaluator(const char* accepted_media_type);
+  // Creates evaluator to evaluate media types only. Evaluator returns true for
+  // accepted_media_type and triggers a NOTREACHED returning false for any media
+  // features. Should only be used for UA stylesheets.
+  explicit MediaQueryEvaluator(const char* accepted_media_type);
 
   // Creates evaluator which evaluates full media queries.
   explicit MediaQueryEvaluator(LocalFrame*);
 
-  // Creates evaluator which evaluates in a thread-safe manner a subset of media
-  // values.
-  explicit MediaQueryEvaluator(const MediaValues&);
+  // Create an evaluator for container queries and preload scanning.
+  explicit MediaQueryEvaluator(const MediaValues*);
 
-  explicit MediaQueryEvaluator(MediaValuesInitialViewport*);
+  MediaQueryEvaluator(const MediaQueryEvaluator&) = delete;
+  MediaQueryEvaluator& operator=(const MediaQueryEvaluator&) = delete;
 
   ~MediaQueryEvaluator();
+
+  const MediaValues& GetMediaValues() const { return *media_values_; }
 
   bool MediaTypeMatch(const String& media_type_to_match) const;
 
   // Evaluates a list of media queries.
-  bool Eval(const MediaQuerySet&,
-            MediaQueryResultList* viewport_dependent = nullptr,
-            MediaQueryResultList* device_dependent = nullptr) const;
+  bool Eval(const MediaQuerySet&) const;
+  bool Eval(const MediaQuerySet&, MediaQueryResultFlags*) const;
 
   // Evaluates media query.
-  bool Eval(const MediaQuery&,
-            MediaQueryResultList* viewport_dependent = nullptr,
-            MediaQueryResultList* device_dependent = nullptr) const;
+  bool Eval(const MediaQuery&) const;
+  bool Eval(const MediaQuery&, MediaQueryResultFlags*) const;
 
-  // Evaluates media query subexpression, ie "and (media-feature: value)" part.
-  bool Eval(const MediaQueryExp&) const;
+  // https://drafts.csswg.org/mediaqueries-4/#evaluating
+  KleeneValue Eval(const MediaQueryExpNode&) const;
+  KleeneValue Eval(const MediaQueryExpNode&, MediaQueryResultFlags*) const;
 
-  void Trace(blink::Visitor*);
+  // Returns true if any of the media queries in the results lists changed its
+  // evaluation.
+  bool DidResultsChange(const HeapVector<MediaQuerySetResult>& results) const;
+
+  void Trace(Visitor*) const;
 
  private:
+  KleeneValue EvalNot(const MediaQueryExpNode&, MediaQueryResultFlags*) const;
+  KleeneValue EvalAnd(const MediaQueryExpNode&,
+                      const MediaQueryExpNode&,
+                      MediaQueryResultFlags*) const;
+  KleeneValue EvalOr(const MediaQueryExpNode&,
+                     const MediaQueryExpNode&,
+                     MediaQueryResultFlags*) const;
+  KleeneValue EvalFeature(const MediaQueryFeatureExpNode&,
+                          MediaQueryResultFlags*) const;
+  KleeneValue EvalStyleFeature(const MediaQueryFeatureExpNode&,
+                               MediaQueryResultFlags*) const;
+
   const String MediaType() const;
 
   String media_type_;
-  Member<MediaValues> media_values_;
-  DISALLOW_COPY_AND_ASSIGN(MediaQueryEvaluator);
+  Member<const MediaValues> media_values_;
 };
 
 }  // namespace blink
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_CSS_MEDIA_QUERY_EVALUATOR_H_

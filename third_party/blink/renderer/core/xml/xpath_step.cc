@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
+#include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/xml/xpath_parser.h"
 #include "third_party/blink/renderer/core/xml/xpath_util.h"
 #include "third_party/blink/renderer/core/xmlns_names.h"
@@ -50,7 +51,7 @@ Step::Step(Axis axis,
 
 Step::~Step() = default;
 
-void Step::Trace(blink::Visitor* visitor) {
+void Step::Trace(Visitor* visitor) const {
   visitor->Trace(node_test_);
   visitor->Trace(predicates_);
   ParseNode::Trace(visitor);
@@ -192,6 +193,11 @@ static inline bool NodeMatchesBasicTest(Node* node,
           return namespace_uri.IsEmpty() ||
                  attr->namespaceURI() == namespace_uri;
 
+        if (attr->GetDocument().IsHTMLDocument() && attr->ownerElement() &&
+            attr->ownerElement()->IsHTMLElement() && namespace_uri.IsNull() &&
+            attr->namespaceURI().IsNull())
+          return EqualIgnoringASCIICase(attr->localName(), name);
+
         return attr->localName() == name &&
                attr->namespaceURI() == namespace_uri;
       }
@@ -213,7 +219,7 @@ static inline bool NodeMatchesBasicTest(Node* node,
                namespace_uri == element->namespaceURI();
       }
 
-      if (element->GetDocument().IsHTMLDocument()) {
+      if (IsA<HTMLDocument>(element->GetDocument())) {
         if (element->IsHTMLElement()) {
           // Paths without namespaces should match HTML elements in HTML
           // documents despite those having an XHTML namespace. Names are
@@ -289,7 +295,7 @@ void Step::NodesInAxis(EvaluationContext& evaluation_context,
     case kParentAxis:
       if (auto* attr = DynamicTo<Attr>(context)) {
         Element* n = attr->ownerElement();
-        if (NodeMatches(evaluation_context, n, kParentAxis, GetNodeTest()))
+        if (n && NodeMatches(evaluation_context, n, kParentAxis, GetNodeTest()))
           nodes.Append(n);
       } else {
         ContainerNode* n = context->parentNode();
@@ -300,7 +306,8 @@ void Step::NodesInAxis(EvaluationContext& evaluation_context,
 
     case kAncestorAxis: {
       Node* n = context;
-      if (auto* attr = DynamicTo<Attr>(context)) {
+      auto* attr = DynamicTo<Attr>(context);
+      if (attr && attr->ownerElement()) {
         n = attr->ownerElement();
         if (NodeMatches(evaluation_context, n, kAncestorAxis, GetNodeTest()))
           nodes.Append(n);
@@ -336,8 +343,9 @@ void Step::NodesInAxis(EvaluationContext& evaluation_context,
       nodes.MarkSorted(false);
       return;
 
-    case kFollowingAxis:
-      if (auto* attr = DynamicTo<Attr>(context)) {
+    case kFollowingAxis: {
+      auto* attr = DynamicTo<Attr>(context);
+      if (attr && attr->ownerElement()) {
         for (Node& p : NodeTraversal::StartsAfter(*attr->ownerElement())) {
           if (NodeMatches(evaluation_context, &p, kFollowingAxis,
                           GetNodeTest()))
@@ -358,9 +366,11 @@ void Step::NodesInAxis(EvaluationContext& evaluation_context,
         }
       }
       return;
+    }
 
     case kPrecedingAxis: {
-      if (auto* attr = DynamicTo<Attr>(context))
+      auto* attr = DynamicTo<Attr>(context);
+      if (attr && attr->ownerElement())
         context = attr->ownerElement();
 
       Node* n = context;
@@ -385,8 +395,15 @@ void Step::NodesInAxis(EvaluationContext& evaluation_context,
       // need anyway.
       if (GetNodeTest().GetKind() == NodeTest::kNameTest &&
           GetNodeTest().Data() != g_star_atom) {
-        Attr* attr = context_element->getAttributeNodeNS(
-            GetNodeTest().NamespaceURI(), GetNodeTest().Data());
+        Attr* attr;
+        // We need this branch because getAttributeNodeNS() doesn't do
+        // ignore-case matching even for an HTML element in an HTML document.
+        if (GetNodeTest().NamespaceURI().IsNull()) {
+          attr = context_element->getAttributeNode(GetNodeTest().Data());
+        } else {
+          attr = context_element->getAttributeNodeNS(
+              GetNodeTest().NamespaceURI(), GetNodeTest().Data());
+        }
         // In XPath land, namespace nodes are not accessible on the attribute
         // axis.
         if (attr && attr->namespaceURI() != xmlns_names::kNamespaceURI) {
@@ -437,7 +454,8 @@ void Step::NodesInAxis(EvaluationContext& evaluation_context,
                       GetNodeTest()))
         nodes.Append(context);
       Node* n = context;
-      if (auto* attr = DynamicTo<Attr>(context)) {
+      auto* attr = DynamicTo<Attr>(context);
+      if (attr && attr->ownerElement()) {
         n = attr->ownerElement();
         if (NodeMatches(evaluation_context, n, kAncestorOrSelfAxis,
                         GetNodeTest()))

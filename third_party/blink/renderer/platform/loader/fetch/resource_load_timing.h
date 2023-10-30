@@ -27,9 +27,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_RESOURCE_LOAD_TIMING_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "base/time/time.h"
+#include "services/network/public/mojom/load_timing_info.mojom-blink-forward.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -38,19 +39,24 @@ class PLATFORM_EXPORT ResourceLoadTiming
  public:
   static scoped_refptr<ResourceLoadTiming> Create();
 
-  scoped_refptr<ResourceLoadTiming> DeepCopy();
   bool operator==(const ResourceLoadTiming&) const;
   bool operator!=(const ResourceLoadTiming&) const;
 
-  void SetDnsStart(base::TimeTicks);
+  static scoped_refptr<ResourceLoadTiming> FromMojo(
+      const network::mojom::blink::LoadTimingInfo*);
+  network::mojom::blink::LoadTimingInfoPtr ToMojo() const;
+
+  void SetDomainLookupStart(base::TimeTicks);
   void SetRequestTime(base::TimeTicks);
   void SetProxyStart(base::TimeTicks);
   void SetProxyEnd(base::TimeTicks);
-  void SetDnsEnd(base::TimeTicks);
+  void SetDomainLookupEnd(base::TimeTicks);
   void SetConnectStart(base::TimeTicks);
   void SetConnectEnd(base::TimeTicks);
   void SetWorkerStart(base::TimeTicks);
   void SetWorkerReady(base::TimeTicks);
+  void SetWorkerFetchStart(base::TimeTicks);
+  void SetWorkerRespondWithSettled(base::TimeTicks);
   void SetSendStart(base::TimeTicks);
   void SetSendEnd(base::TimeTicks);
   void SetReceiveHeadersStart(base::TimeTicks);
@@ -60,15 +66,19 @@ class PLATFORM_EXPORT ResourceLoadTiming
   void SetPushStart(base::TimeTicks);
   void SetPushEnd(base::TimeTicks);
 
-  base::TimeTicks DnsStart() const { return dns_start_; }
+  base::TimeTicks DomainLookupStart() const { return domain_lookup_start_; }
   base::TimeTicks RequestTime() const { return request_time_; }
   base::TimeTicks ProxyStart() const { return proxy_start_; }
   base::TimeTicks ProxyEnd() const { return proxy_end_; }
-  base::TimeTicks DnsEnd() const { return dns_end_; }
+  base::TimeTicks DomainLookupEnd() const { return domain_lookup_end_; }
   base::TimeTicks ConnectStart() const { return connect_start_; }
   base::TimeTicks ConnectEnd() const { return connect_end_; }
   base::TimeTicks WorkerStart() const { return worker_start_; }
   base::TimeTicks WorkerReady() const { return worker_ready_; }
+  base::TimeTicks WorkerFetchStart() const { return worker_fetch_start_; }
+  base::TimeTicks WorkerRespondWithSettled() const {
+    return worker_respond_with_settled_;
+  }
   base::TimeTicks SendStart() const { return send_start_; }
   base::TimeTicks SendEnd() const { return send_end_; }
   base::TimeTicks ReceiveHeadersStart() const { return receive_headers_start_; }
@@ -82,6 +92,25 @@ class PLATFORM_EXPORT ResourceLoadTiming
 
  private:
   ResourceLoadTiming();
+  ResourceLoadTiming(base::TimeTicks request_time,
+                     base::TimeTicks proxy_start,
+                     base::TimeTicks proxy_end,
+                     base::TimeTicks domain_lookup_start,
+                     base::TimeTicks domain_lookup_end,
+                     base::TimeTicks connect_start,
+                     base::TimeTicks connect_end,
+                     base::TimeTicks worker_start,
+                     base::TimeTicks worker_ready,
+                     base::TimeTicks worker_fetch_start,
+                     base::TimeTicks worker_respond_with_settled,
+                     base::TimeTicks send_start,
+                     base::TimeTicks send_end,
+                     base::TimeTicks receive_headers_start,
+                     base::TimeTicks receive_headers_end,
+                     base::TimeTicks ssl_start,
+                     base::TimeTicks ssl_end,
+                     base::TimeTicks push_start,
+                     base::TimeTicks push_end);
 
   // We want to present a unified timeline to Javascript. Using walltime is
   // problematic, because the clock may skew while resources load. To prevent
@@ -97,12 +126,14 @@ class PLATFORM_EXPORT ResourceLoadTiming
   base::TimeTicks request_time_;
   base::TimeTicks proxy_start_;
   base::TimeTicks proxy_end_;
-  base::TimeTicks dns_start_;
-  base::TimeTicks dns_end_;
+  base::TimeTicks domain_lookup_start_;
+  base::TimeTicks domain_lookup_end_;
   base::TimeTicks connect_start_;
   base::TimeTicks connect_end_;
   base::TimeTicks worker_start_;
   base::TimeTicks worker_ready_;
+  base::TimeTicks worker_fetch_start_;
+  base::TimeTicks worker_respond_with_settled_;
   base::TimeTicks send_start_;
   base::TimeTicks send_end_;
   base::TimeTicks receive_headers_start_;
@@ -115,4 +146,4 @@ class PLATFORM_EXPORT ResourceLoadTiming
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_RESOURCE_LOAD_TIMING_H_

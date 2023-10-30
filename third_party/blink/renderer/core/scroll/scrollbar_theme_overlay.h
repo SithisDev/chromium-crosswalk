@@ -26,8 +26,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SCROLL_SCROLLBAR_THEME_OVERLAY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SCROLL_SCROLLBAR_THEME_OVERLAY_H_
 
+#include "base/gtest_prod_util.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
-#include "third_party/blink/renderer/platform/graphics/color.h"
 
 namespace blink {
 
@@ -35,69 +36,64 @@ namespace blink {
 // than Mac. Mac's overlay scrollbars are in ScrollbarThemeMac*.
 class CORE_EXPORT ScrollbarThemeOverlay : public ScrollbarTheme {
  public:
-  enum HitTestBehavior { kAllowHitTest, kDisallowHitTest };
+  static ScrollbarThemeOverlay& GetInstance();
 
-  ScrollbarThemeOverlay(int thumb_thickness,
-                        int scrollbar_margin,
-                        HitTestBehavior);
-  ScrollbarThemeOverlay(int thumb_thickness,
-                        int scrollbar_margin,
-                        HitTestBehavior,
-                        Color);
   ~ScrollbarThemeOverlay() override = default;
 
   bool ShouldRepaintAllPartsOnInvalidation() const override;
 
-  ScrollbarPart InvalidateOnThumbPositionChange(
+  ScrollbarPart PartsToInvalidateOnThumbPositionChange(
       const Scrollbar&,
       float old_position,
       float new_position) const override;
 
-  int ScrollbarThickness(ScrollbarControlSize) override;
-  int ScrollbarMargin() const override;
+  int ScrollbarThickness(float scale_from_dip,
+                         EScrollbarWidth scrollbar_width) override;
+  int ScrollbarMargin(float scale_from_dip,
+                      EScrollbarWidth scrollbar_width) const override;
   bool UsesOverlayScrollbars() const override;
   base::TimeDelta OverlayScrollbarFadeOutDelay() const override;
   base::TimeDelta OverlayScrollbarFadeOutDuration() const override;
 
   int ThumbLength(const Scrollbar&) override;
+  int ThumbThickness(float scale_from_dip,
+                     EScrollbarWidth scrollbar_width) const;
 
-  bool HasButtons(const Scrollbar&) override { return false; }
+  bool NativeThemeHasButtons() override { return false; }
   bool HasThumb(const Scrollbar&) override;
 
-  IntRect BackButtonRect(const Scrollbar&,
-                         ScrollbarPart,
-                         bool painting = false) override;
-  IntRect ForwardButtonRect(const Scrollbar&,
-                            ScrollbarPart,
-                            bool painting = false) override;
-  IntRect TrackRect(const Scrollbar&, bool painting = false) override;
-  int ThumbThickness(const Scrollbar&) override;
-  int ThumbThickness() { return thumb_thickness_; }
+  gfx::Rect BackButtonRect(const Scrollbar&) override;
+  gfx::Rect ForwardButtonRect(const Scrollbar&) override;
+  gfx::Rect TrackRect(const Scrollbar&) override;
+  gfx::Rect ThumbRect(const Scrollbar&) override;
 
-  void PaintThumb(GraphicsContext&, const Scrollbar&, const IntRect&) override;
-  ScrollbarPart HitTest(const Scrollbar&, const IntPoint&) override;
+  void PaintThumb(GraphicsContext&,
+                  const Scrollbar&,
+                  const gfx::Rect&) override;
 
   bool UsesNinePatchThumbResource() const override;
-  IntSize NinePatchThumbCanvasSize(const Scrollbar&) const override;
-  IntRect NinePatchThumbAperture(const Scrollbar&) const override;
+  gfx::Size NinePatchThumbCanvasSize(const Scrollbar&) const override;
+  gfx::Rect NinePatchThumbAperture(const Scrollbar&) const override;
 
   int MinimumThumbLength(const Scrollbar&) override;
 
-  bool IsMobileTheme() const;
+ protected:
+  FRIEND_TEST_ALL_PREFIXES(ScrollbarThemeOverlayTest, PaintInvalidation);
 
-  bool AllowsHitTest() const override;
+  ScrollbarThemeOverlay(int thumb_thickness_default_dip,
+                        int scrollbar_margin_default_dip,
+                        int thumb_thickness_thin_dip,
+                        int scrollbar_margin_thin_dip);
 
-  static ScrollbarThemeOverlay& MobileTheme();
+  ScrollbarPart HitTest(const Scrollbar&, const gfx::Point&) override;
 
  private:
-  int thumb_thickness_;
-  int scrollbar_margin_;
-  HitTestBehavior allow_hit_test_;
-  Color color_;
-  bool is_mobile_theme_;
-  const bool use_solid_color_;
+  int thumb_thickness_default_dip_;
+  int scrollbar_margin_default_dip_;
+  int thumb_thickness_thin_dip_;
+  int scrollbar_margin_thin_dip_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_SCROLL_SCROLLBAR_THEME_OVERLAY_H_

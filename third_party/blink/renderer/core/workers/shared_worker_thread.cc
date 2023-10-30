@@ -39,10 +39,12 @@
 namespace blink {
 
 SharedWorkerThread::SharedWorkerThread(
-    WorkerReportingProxy& worker_reporting_proxy)
+    WorkerReportingProxy& worker_reporting_proxy,
+    const SharedWorkerToken& token)
     : WorkerThread(worker_reporting_proxy),
       worker_backing_thread_(std::make_unique<WorkerBackingThread>(
-          ThreadCreationParams(GetThreadType()))) {}
+          ThreadCreationParams(GetThreadType()))),
+      token_(token) {}
 
 SharedWorkerThread::~SharedWorkerThread() = default;
 
@@ -50,23 +52,11 @@ void SharedWorkerThread::ClearWorkerBackingThread() {
   worker_backing_thread_ = nullptr;
 }
 
-void SharedWorkerThread::OnAppCacheSelected() {
-  DCHECK(IsMainThread());
-  PostCrossThreadTask(
-      *GetTaskRunner(TaskType::kDOMManipulation), FROM_HERE,
-      CrossThreadBindOnce(&SharedWorkerThread::OnAppCacheSelectedOnWorkerThread,
-                          WTF::CrossThreadUnretained(this)));
-}
-
 WorkerOrWorkletGlobalScope* SharedWorkerThread::CreateWorkerGlobalScope(
     std::unique_ptr<GlobalScopeCreationParams> creation_params) {
-  return SharedWorkerGlobalScope::Create(std::move(creation_params), this,
-                                         time_origin_);
-}
-
-void SharedWorkerThread::OnAppCacheSelectedOnWorkerThread() {
-  DCHECK(IsCurrentThread());
-  To<SharedWorkerGlobalScope>(GlobalScope())->OnAppCacheSelected();
+  return MakeGarbageCollected<SharedWorkerGlobalScope>(
+      std::move(creation_params), is_constructor_origin_secure_, this,
+      time_origin_, token_);
 }
 
 }  // namespace blink

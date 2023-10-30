@@ -2,14 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NGConstraintSpaceBuilder_h
-#define NGConstraintSpaceBuilder_h
+#ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_CONSTRAINT_SPACE_BUILDER_H_
+#define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_CONSTRAINT_SPACE_BUILDER_H_
 
-#include "base/optional.h"
+#include "base/check_op.h"
+#include "base/dcheck_is_on.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/geometry/logical_size.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_bfc_offset.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_floats_utils.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_space_utils.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -24,14 +28,19 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
  public:
   // The setters on this builder are in the writing mode of parent_space.
   NGConstraintSpaceBuilder(const NGConstraintSpace& parent_space,
-                           WritingMode out_writing_mode,
-                           bool is_new_fc)
+                           WritingDirectionMode writing_direction,
+                           bool is_new_fc,
+                           bool adjust_inline_size_if_needed = true)
       : NGConstraintSpaceBuilder(parent_space.GetWritingMode(),
-                                 out_writing_mode,
-                                 is_new_fc) {
-    // Propagate the intermediate layout bit to the child constraint space.
-    if (parent_space.IsIntermediateLayout())
-      space_.bitfields_.flags |= NGConstraintSpace::kIntermediateLayout;
+                                 writing_direction,
+                                 is_new_fc,
+                                 /* force_orthogonal_writing_mode_root */ false,
+                                 adjust_inline_size_if_needed) {
+    if (parent_space.ShouldPropagateChildBreakValues())
+      SetShouldPropagateChildBreakValues();
+    if (parent_space.ShouldRepeat())
+      SetShouldRepeat(true);
+    SetIsInsideRepeatableContent(parent_space.IsInsideRepeatableContent());
   }
 
   // The setters on this builder are in the writing mode of parent_writing_mode.
@@ -42,20 +51,20 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   // When this occurs we would miss setting the kOrthogonalWritingModeRoot flag
   // unless we force it.
   NGConstraintSpaceBuilder(WritingMode parent_writing_mode,
-                           WritingMode out_writing_mode,
+                           WritingDirectionMode writing_direction,
                            bool is_new_fc,
-                           bool force_orthogonal_writing_mode_root = false)
-      : space_(out_writing_mode),
+                           bool force_orthogonal_writing_mode_root = false,
+                           bool adjust_inline_size_if_needed = true)
+      : space_(writing_direction),
         is_in_parallel_flow_(
-            IsParallelWritingMode(parent_writing_mode, out_writing_mode)),
+            IsParallelWritingMode(parent_writing_mode,
+                                  writing_direction.GetWritingMode())),
         is_new_fc_(is_new_fc),
-        force_orthogonal_writing_mode_root_(
-            force_orthogonal_writing_mode_root) {
-    if (is_new_fc_)
-      space_.bitfields_.flags |= NGConstraintSpace::kNewFormattingContext;
-
-    if (!is_in_parallel_flow_ || force_orthogonal_writing_mode_root_)
-      space_.bitfields_.flags |= NGConstraintSpace::kOrthogonalWritingModeRoot;
+        force_orthogonal_writing_mode_root_(force_orthogonal_writing_mode_root),
+        adjust_inline_size_if_needed_(adjust_inline_size_if_needed) {
+    space_.bitfields_.is_new_formatting_context = is_new_fc_;
+    space_.bitfields_.is_orthogonal_writing_mode_root =
+        !is_in_parallel_flow_ || force_orthogonal_writing_mode_root_;
   }
 
   // If inline size is indefinite, use the fallback size for available inline
@@ -63,32 +72,33 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   // https://www.w3.org/TR/css-writing-modes-3/#orthogonal-auto
   void AdjustInlineSizeIfNeeded(LayoutUnit* inline_size) const {
     DCHECK(!is_in_parallel_flow_);
+    DCHECK(adjust_inline_size_if_needed_);
     if (*inline_size != kIndefiniteSize)
       return;
     DCHECK_NE(orthogonal_fallback_inline_size_, kIndefiniteSize);
     *inline_size = orthogonal_fallback_inline_size_;
   }
 
-  NGConstraintSpaceBuilder& SetAvailableSize(LogicalSize available_size) {
+  void SetAvailableSize(LogicalSize available_size) {
 #if DCHECK_IS_ON()
     is_available_size_set_ = true;
 #endif
-    space_.available_size_ = available_size;
 
-    if (UNLIKELY(!is_in_parallel_flow_)) {
-      space_.available_size_.Transpose();
-      AdjustInlineSizeIfNeeded(&space_.available_size_.inline_size);
+    if (LIKELY(is_in_parallel_flow_)) {
+      space_.available_size_ = available_size;
+    } else {
+      space_.available_size_ = {available_size.block_size,
+                                available_size.inline_size};
+      if (adjust_inline_size_if_needed_)
+        AdjustInlineSizeIfNeeded(&space_.available_size_.inline_size);
     }
-
-    return *this;
   }
 
   // Set percentage resolution size. Prior to calling this method,
   // SetAvailableSize() must have been called, since we'll compare the input
   // against the available size set, because if they are equal in either
   // dimension, we won't have to store the values separately.
-  NGConstraintSpaceBuilder& SetPercentageResolutionSize(
-      LogicalSize percentage_resolution_size);
+  void SetPercentageResolutionSize(LogicalSize percentage_resolution_size);
 
   // Set percentage resolution size for replaced content (a special quirk inside
   // tables). Only honored if the writing modes (container vs. child) are
@@ -99,78 +109,110 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   // dimension, we won't have to store the values separately. Additionally,
   // SetPercentageResolutionSize() must have been called, since we'll override
   // with that value on orthogonal writing mode roots.
-  NGConstraintSpaceBuilder& SetReplacedPercentageResolutionSize(
+  void SetReplacedPercentageResolutionSize(
       LogicalSize replaced_percentage_resolution_size);
 
   // Set the fallback available inline-size for an orthogonal child. The size is
   // the inline size in the writing mode of the orthogonal child.
-  NGConstraintSpaceBuilder& SetOrthogonalFallbackInlineSize(LayoutUnit size) {
+  void SetOrthogonalFallbackInlineSize(LayoutUnit size) {
     orthogonal_fallback_inline_size_ = size;
-    return *this;
   }
 
-  NGConstraintSpaceBuilder& SetFragmentainerBlockSize(LayoutUnit size) {
+  void SetPageName(const AtomicString& name) {
+    if (!name && !space_.rare_data_)
+      return;
+    space_.EnsureRareData()->page_name = name;
+  }
+
+  void SetFragmentainerBlockSize(LayoutUnit size) {
 #if DCHECK_IS_ON()
     DCHECK(!is_fragmentainer_block_size_set_);
     is_fragmentainer_block_size_set_ = true;
 #endif
     if (size != kIndefiniteSize)
       space_.EnsureRareData()->fragmentainer_block_size = size;
-    return *this;
   }
 
-  NGConstraintSpaceBuilder& SetFragmentainerSpaceAtBfcStart(LayoutUnit space) {
+  // Shrink the fragmentainer block-size, to reserve space at the end. This is
+  // needed for repeated table footers.
+  void ReserveSpaceAtFragmentainerEnd(LayoutUnit space) {
 #if DCHECK_IS_ON()
-    DCHECK(!is_fragmentainer_space_at_bfc_start_set_);
-    is_fragmentainer_space_at_bfc_start_set_ = true;
+    DCHECK(is_fragmentainer_block_size_set_);
 #endif
-    if (space != kIndefiniteSize)
-      space_.EnsureRareData()->fragmentainer_space_at_bfc_start = space;
-    return *this;
+    DCHECK_GE(space_.rare_data_->fragmentainer_block_size, space);
+    space_.rare_data_->fragmentainer_block_size -= space;
   }
 
-  NGConstraintSpaceBuilder& SetTextDirection(TextDirection direction) {
-    space_.bitfields_.direction = static_cast<unsigned>(direction);
-    return *this;
+  void SetFragmentainerOffsetAtBfc(LayoutUnit offset) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_fragmentainer_offset_at_bfc_set_);
+    is_fragmentainer_offset_at_bfc_set_ = true;
+#endif
+    if (offset != LayoutUnit())
+      space_.EnsureRareData()->fragmentainer_offset_at_bfc = offset;
   }
 
-  NGConstraintSpaceBuilder& SetIsFixedSizeInline(bool b) {
+  void SetIsAtFragmentainerStart() {
+    space_.EnsureRareData()->is_at_fragmentainer_start = true;
+  }
+
+  void SetShouldRepeat(bool b) { space_.EnsureRareData()->should_repeat = b; }
+
+  void SetIsInsideRepeatableContent(bool b) {
+    if (!b && !space_.rare_data_)
+      return;
+    space_.EnsureRareData()->is_inside_repeatable_content = b;
+  }
+
+  void SetIsFixedInlineSize(bool b) {
     if (LIKELY(is_in_parallel_flow_))
-      space_.bitfields_.is_fixed_size_inline = b;
+      space_.bitfields_.is_fixed_inline_size = b;
     else
-      space_.bitfields_.is_fixed_size_block = b;
-
-    return *this;
+      space_.bitfields_.is_fixed_block_size = b;
   }
 
-  NGConstraintSpaceBuilder& SetIsFixedSizeBlock(bool b) {
+  void SetIsFixedBlockSize(bool b) {
     if (LIKELY(is_in_parallel_flow_))
-      space_.bitfields_.is_fixed_size_block = b;
+      space_.bitfields_.is_fixed_block_size = b;
     else
-      space_.bitfields_.is_fixed_size_inline = b;
-
-    return *this;
+      space_.bitfields_.is_fixed_inline_size = b;
   }
 
-  NGConstraintSpaceBuilder& SetFixedSizeBlockIsDefinite(bool b) {
+  void SetIsInitialBlockSizeIndefinite(bool b) {
     if (LIKELY(is_in_parallel_flow_ || !force_orthogonal_writing_mode_root_))
-      SetFlag(NGConstraintSpace::kFixedSizeBlockIsDefinite, b);
-
-    return *this;
+      space_.bitfields_.is_initial_block_size_indefinite = b;
   }
 
-  NGConstraintSpaceBuilder& SetIsShrinkToFit(bool b) {
-    space_.bitfields_.is_shrink_to_fit = b;
-    return *this;
+  void SetInlineAutoBehavior(NGAutoBehavior auto_behavior) {
+    if (LIKELY(is_in_parallel_flow_)) {
+      space_.bitfields_.inline_auto_behavior =
+          static_cast<unsigned>(auto_behavior);
+    } else {
+      space_.bitfields_.block_auto_behavior =
+          static_cast<unsigned>(auto_behavior);
+    }
   }
 
-  NGConstraintSpaceBuilder& SetIsIntermediateLayout(bool b) {
-    SetFlag(NGConstraintSpace::kIntermediateLayout, b);
-    return *this;
+  void SetBlockAutoBehavior(NGAutoBehavior auto_behavior) {
+    if (LIKELY(is_in_parallel_flow_)) {
+      space_.bitfields_.block_auto_behavior =
+          static_cast<unsigned>(auto_behavior);
+    } else {
+      space_.bitfields_.inline_auto_behavior =
+          static_cast<unsigned>(auto_behavior);
+    }
   }
 
-  NGConstraintSpaceBuilder& SetFragmentationType(
-      NGFragmentationType fragmentation_type) {
+  void SetOverrideMinMaxBlockSizes(const MinMaxSizes& min_max_sizes) {
+    if (!min_max_sizes.IsEmpty() || space_.HasRareData())
+      space_.EnsureRareData()->SetOverrideMinMaxBlockSizes(min_max_sizes);
+  }
+
+  void SetIsPaintedAtomically(bool b) {
+    space_.bitfields_.is_painted_atomically = b;
+  }
+
+  void SetFragmentationType(NGFragmentationType fragmentation_type) {
 #if DCHECK_IS_ON()
     DCHECK(!is_block_direction_fragmentation_type_set_);
     is_block_direction_fragmentation_type_set_ = true;
@@ -179,128 +221,306 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
       space_.EnsureRareData()->block_direction_fragmentation_type =
           fragmentation_type;
     }
-    return *this;
   }
 
-  NGConstraintSpaceBuilder& SetSeparateLeadingFragmentainerMargins(bool b) {
-    SetFlag(NGConstraintSpace::kSeparateLeadingFragmentainerMargins, b);
-    return *this;
+  void SetRequiresContentBeforeBreaking(bool b) {
+    if (!b && !space_.HasRareData())
+      return;
+    space_.EnsureRareData()->requires_content_before_breaking = b;
   }
 
-  NGConstraintSpaceBuilder& SetIsAnonymous(bool b) {
-    SetFlag(NGConstraintSpace::kAnonymous, b);
-    return *this;
+  void SetIsInsideBalancedColumns() {
+    space_.EnsureRareData()->is_inside_balanced_columns = true;
   }
 
-  NGConstraintSpaceBuilder& SetUseFirstLineStyle(bool b) {
-    SetFlag(NGConstraintSpace::kUseFirstLineStyle, b);
-    return *this;
+  void SetShouldIgnoreForcedBreaks() {
+    space_.EnsureRareData()->should_ignore_forced_breaks = true;
   }
 
-  NGConstraintSpaceBuilder& SetAncestorHasClearancePastAdjoiningFloats() {
-    SetFlag(NGConstraintSpace::kAncestorHasClearancePastAdjoiningFloats, true);
-    return *this;
+  void SetIsInColumnBfc() { space_.EnsureRareData()->is_in_column_bfc = true; }
+
+  void SetMinBlockSizeShouldEncompassIntrinsicSize() {
+    space_.EnsureRareData()->min_block_size_should_encompass_intrinsic_size =
+        true;
   }
 
-  NGConstraintSpaceBuilder& SetAdjoiningObjectTypes(
-      NGAdjoiningObjectTypes adjoining_object_types) {
+  void SetMinBreakAppeal(NGBreakAppeal min_break_appeal) {
+    if (!space_.HasRareData() && min_break_appeal == kBreakAppealLastResort)
+      return;
+    space_.EnsureRareData()->min_break_appeal = min_break_appeal;
+  }
+
+  void SetShouldPropagateChildBreakValues() {
+    space_.EnsureRareData()->propagate_child_break_values = true;
+  }
+
+  void SetIsTableCell(bool is_table_cell) {
+    space_.bitfields_.is_table_cell = is_table_cell;
+  }
+
+  void SetIsRestrictedBlockSizeTableCell(bool b) {
+    DCHECK(space_.bitfields_.is_table_cell);
+    if (!b && !space_.rare_data_)
+      return;
+    space_.EnsureRareData()->is_restricted_block_size_table_cell = b;
+  }
+
+  void SetHideTableCellIfEmpty(bool b) {
+    if (!b && !space_.rare_data_)
+      return;
+    space_.EnsureRareData()->hide_table_cell_if_empty = b;
+  }
+
+  void SetIsAnonymous(bool b) { space_.bitfields_.is_anonymous = b; }
+
+  void SetUseFirstLineStyle(bool b) {
+    space_.bitfields_.use_first_line_style = b;
+  }
+
+  void SetAdjoiningObjectTypes(NGAdjoiningObjectTypes adjoining_object_types) {
     if (!is_new_fc_) {
       space_.bitfields_.adjoining_object_types =
           static_cast<unsigned>(adjoining_object_types);
     }
-
-    return *this;
   }
 
-  NGConstraintSpaceBuilder& SetMarginStrut(const NGMarginStrut& margin_strut) {
+  void SetAncestorHasClearancePastAdjoiningFloats() {
+    space_.bitfields_.ancestor_has_clearance_past_adjoining_floats = true;
+  }
+
+  void SetBaselineAlgorithmType(NGBaselineAlgorithmType type) {
+    space_.bitfields_.baseline_algorithm_type = static_cast<unsigned>(type);
+  }
+
+  void SetCacheSlot(NGCacheSlot slot) {
+    space_.bitfields_.cache_slot = static_cast<unsigned>(slot);
+  }
+
+  void SetBlockStartAnnotationSpace(LayoutUnit space) {
+    if (space)
+      space_.EnsureRareData()->SetBlockStartAnnotationSpace(space);
+  }
+
+  void SetMarginStrut(const NGMarginStrut& margin_strut) {
 #if DCHECK_IS_ON()
     DCHECK(!is_margin_strut_set_);
     is_margin_strut_set_ = true;
 #endif
     if (!is_new_fc_ && margin_strut != NGMarginStrut())
-      space_.EnsureRareData()->margin_strut = margin_strut;
-
-    return *this;
+      space_.EnsureRareData()->SetMarginStrut(margin_strut);
   }
 
-  NGConstraintSpaceBuilder& SetBfcOffset(const NGBfcOffset& bfc_offset) {
+  // Set up a margin strut that discards all adjoining margins. This is used to
+  // discard block-start margins after fragmentainer breaks.
+  void SetDiscardingMarginStrut() {
+#if DCHECK_IS_ON()
+    DCHECK(!is_margin_strut_set_);
+    is_margin_strut_set_ = true;
+#endif
+    NGMarginStrut discarding_margin_strut;
+    discarding_margin_strut.discard_margins = true;
+    space_.EnsureRareData()->SetMarginStrut(discarding_margin_strut);
+  }
+
+  void SetBfcOffset(const NGBfcOffset& bfc_offset) {
     if (!is_new_fc_) {
       if (space_.HasRareData())
         space_.rare_data_->bfc_offset = bfc_offset;
       else
         space_.bfc_offset_ = bfc_offset;
     }
-
-    return *this;
   }
 
-  NGConstraintSpaceBuilder& SetOptimisticBfcBlockOffset(
-      LayoutUnit optimistic_bfc_block_offset) {
+  void SetOptimisticBfcBlockOffset(LayoutUnit optimistic_bfc_block_offset) {
 #if DCHECK_IS_ON()
     DCHECK(!is_optimistic_bfc_block_offset_set_);
     is_optimistic_bfc_block_offset_set_ = true;
 #endif
     if (LIKELY(!is_new_fc_)) {
-      space_.EnsureRareData()->optimistic_bfc_block_offset =
-          optimistic_bfc_block_offset;
+      space_.EnsureRareData()->SetOptimisticBfcBlockOffset(
+          optimistic_bfc_block_offset);
     }
-
-    return *this;
   }
 
-  NGConstraintSpaceBuilder& SetForcedBfcBlockOffset(
-      LayoutUnit forced_bfc_block_offset) {
+  void SetForcedBfcBlockOffset(LayoutUnit forced_bfc_block_offset) {
 #if DCHECK_IS_ON()
     DCHECK(!is_forced_bfc_block_offset_set_);
     is_forced_bfc_block_offset_set_ = true;
 #endif
-    if (LIKELY(!is_new_fc_)) {
-      space_.EnsureRareData()->forced_bfc_block_offset =
-          forced_bfc_block_offset;
-    }
-
-    return *this;
+    DCHECK(!is_new_fc_);
+    space_.EnsureRareData()->SetForcedBfcBlockOffset(forced_bfc_block_offset);
   }
 
-  NGConstraintSpaceBuilder& SetClearanceOffset(LayoutUnit clearance_offset) {
+  void SetClearanceOffset(LayoutUnit clearance_offset) {
 #if DCHECK_IS_ON()
     DCHECK(!is_clearance_offset_set_);
     is_clearance_offset_set_ = true;
 #endif
     if (!is_new_fc_ && clearance_offset != LayoutUnit::Min())
-      space_.EnsureRareData()->clearance_offset = clearance_offset;
-
-    return *this;
+      space_.EnsureRareData()->SetClearanceOffset(clearance_offset);
   }
 
-  NGConstraintSpaceBuilder& SetTableCellChildLayoutPhase(
-      NGTableCellChildLayoutPhase table_cell_child_layout_phase) {
-    space_.bitfields_.table_cell_child_layout_phase =
-        static_cast<unsigned>(table_cell_child_layout_phase);
-    return *this;
+  void SetTableCellBorders(const NGBoxStrut& table_cell_borders,
+                           WritingDirectionMode cell_writing_direction,
+                           WritingDirectionMode table_writing_direction) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_table_cell_borders_set_);
+    is_table_cell_borders_set_ = true;
+#endif
+    if (table_cell_borders != NGBoxStrut()) {
+      space_.EnsureRareData()->SetTableCellBorders(
+          table_cell_borders.ConvertToPhysical(table_writing_direction)
+              .ConvertToLogical(cell_writing_direction));
+    }
   }
 
-  NGConstraintSpaceBuilder& SetIsInRestrictedBlockSizeTableCell() {
-    space_.bitfields_.is_in_restricted_block_size_table_cell = true;
-    return *this;
+  void SetTableCellAlignmentBaseline(
+      const absl::optional<LayoutUnit>& table_cell_alignment_baseline) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_table_cell_alignment_baseline_set_);
+    is_table_cell_alignment_baseline_set_ = true;
+#endif
+    if (is_in_parallel_flow_ && table_cell_alignment_baseline) {
+      space_.EnsureRareData()->SetTableCellAlignmentBaseline(
+          *table_cell_alignment_baseline);
+    }
   }
 
-  NGConstraintSpaceBuilder& SetExclusionSpace(
-      const NGExclusionSpace& exclusion_space) {
+  void SetTableCellColumnIndex(wtf_size_t column_index) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_table_cell_column_index_set_);
+    is_table_cell_column_index_set_ = true;
+#endif
+    space_.EnsureRareData()->SetTableCellColumnIndex(column_index);
+  }
+
+  void SetIsTableCellHiddenForPaint(bool is_hidden_for_paint) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_table_cell_hidden_for_paint_set_);
+    is_table_cell_hidden_for_paint_set_ = true;
+#endif
+    if (is_hidden_for_paint) {
+      space_.EnsureRareData()->SetIsTableCellHiddenForPaint(
+          is_hidden_for_paint);
+    }
+  }
+
+  void SetIsTableCellWithCollapsedBorders(bool has_collapsed_borders) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_table_cell_with_collapsed_borders_set_);
+    is_table_cell_with_collapsed_borders_set_ = true;
+#endif
+    if (has_collapsed_borders) {
+      space_.EnsureRareData()->SetIsTableCellWithCollapsedBorders(
+          has_collapsed_borders);
+    }
+  }
+
+  void SetIsTableCellWithEffectiveRowspan(bool has_effective_rowspan) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_table_cell_with_effective_rowspan_set_);
+    is_table_cell_with_effective_rowspan_set_ = true;
+#endif
+    if (has_effective_rowspan) {
+      space_.EnsureRareData()->SetIsTableCellWithEffectiveRowspan(
+          has_effective_rowspan);
+    }
+  }
+
+  void SetIsTableCellChild(bool b) {
+    space_.bitfields_.is_table_cell_child = b;
+  }
+
+  void SetIsRestrictedBlockSizeTableCellChild() {
+    space_.bitfields_.is_restricted_block_size_table_cell_child = true;
+  }
+
+  void SetExclusionSpace(const NGExclusionSpace& exclusion_space) {
     if (!is_new_fc_)
       space_.exclusion_space_ = exclusion_space;
-
-    return *this;
   }
 
-  void AddBaselineRequests(const NGBaselineRequestList requests) {
-    DCHECK(baseline_requests_.IsEmpty());
-    baseline_requests_.AppendVector(requests);
+  void SetCustomLayoutData(
+      scoped_refptr<SerializedScriptValue> custom_layout_data) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_custom_layout_data_set_);
+    is_custom_layout_data_set_ = true;
+#endif
+    if (custom_layout_data) {
+      space_.EnsureRareData()->SetCustomLayoutData(
+          std::move(custom_layout_data));
+    }
   }
-  NGConstraintSpaceBuilder& AddBaselineRequest(
-      const NGBaselineRequest request) {
-    baseline_requests_.push_back(request);
-    return *this;
+
+  void SetTableRowData(const NGTableConstraintSpaceData* table_data,
+                       wtf_size_t row_index) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_table_row_data_set_);
+    is_table_row_data_set_ = true;
+#endif
+    space_.EnsureRareData()->SetTableRowData(std::move(table_data), row_index);
+  }
+
+  void SetTableSectionData(
+      scoped_refptr<const NGTableConstraintSpaceData> table_data,
+      wtf_size_t section_index) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_table_section_data_set_);
+    is_table_section_data_set_ = true;
+#endif
+    space_.EnsureRareData()->SetTableSectionData(std::move(table_data),
+                                                 section_index);
+  }
+
+  void SetIsLineClampContext(bool is_line_clamp_context) {
+    DCHECK(!is_new_fc_);
+#if DCHECK_IS_ON()
+    DCHECK(!is_line_clamp_context_set_);
+    is_line_clamp_context_set_ = true;
+#endif
+    if (is_line_clamp_context)
+      space_.EnsureRareData()->is_line_clamp_context = true;
+  }
+
+  void SetLinesUntilClamp(const absl::optional<int>& clamp) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_lines_until_clamp_set_);
+    is_lines_until_clamp_set_ = true;
+#endif
+    DCHECK(!is_new_fc_);
+    if (clamp)
+      space_.EnsureRareData()->SetLinesUntilClamp(*clamp);
+  }
+
+  void SetTargetStretchInlineSize(LayoutUnit target_stretch_inline_size) {
+    DCHECK_GE(target_stretch_inline_size, LayoutUnit());
+    space_.EnsureRareData()->SetTargetStretchInlineSize(
+        target_stretch_inline_size);
+  }
+
+  void SetTargetStretchBlockSizes(NGConstraintSpace::MathTargetStretchBlockSizes
+                                      target_stretch_block_sizes) {
+    DCHECK_GE(target_stretch_block_sizes.ascent, LayoutUnit());
+    DCHECK_GE(target_stretch_block_sizes.descent, LayoutUnit());
+    space_.EnsureRareData()->SetTargetStretchBlockSizes(
+        target_stretch_block_sizes);
+  }
+
+  void SetSubgriddedColumns(
+      std::unique_ptr<NGGridLayoutTrackCollection> columns) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_subgridded_columns_set_);
+    is_subgridded_columns_set_ = true;
+#endif
+    space_.EnsureRareData()->SetSubgriddedColumns(std::move(columns));
+  }
+
+  void SetSubgriddedRows(std::unique_ptr<NGGridLayoutTrackCollection> rows) {
+#if DCHECK_IS_ON()
+    DCHECK(!is_subgridded_rows_set_);
+    is_subgridded_rows_set_ = true;
+#endif
+    space_.EnsureRareData()->SetSubgriddedRows(std::move(rows));
   }
 
   // Creates a new constraint space.
@@ -312,7 +532,7 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
 #endif
 
     DCHECK(!is_new_fc_ || !space_.bitfields_.adjoining_object_types);
-    DCHECK_EQ(space_.HasFlag(NGConstraintSpace::kOrthogonalWritingModeRoot),
+    DCHECK_EQ(space_.bitfields_.is_orthogonal_writing_mode_root,
               !is_in_parallel_flow_ || force_orthogonal_writing_mode_root_);
 
     DCHECK(!force_orthogonal_writing_mode_root_ || is_in_parallel_flow_)
@@ -320,17 +540,10 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
            "simultaneously. Inferred means the constraints are in parent "
            "writing mode, forced means they are in child writing mode.";
 
-    space_.bitfields_.baseline_requests = baseline_requests_.Serialize();
     return std::move(space_);
   }
 
  private:
-  void SetFlag(NGConstraintSpace::ConstraintSpaceFlags mask, bool value) {
-    space_.bitfields_.flags =
-        (space_.bitfields_.flags & ~static_cast<unsigned>(mask)) |
-        (-(int32_t)value & static_cast<unsigned>(mask));
-  }
-
   NGConstraintSpace space_;
 
   // Orthogonal writing mode roots may need a fallback, to prevent available
@@ -341,24 +554,81 @@ class CORE_EXPORT NGConstraintSpaceBuilder final {
   bool is_in_parallel_flow_;
   bool is_new_fc_;
   bool force_orthogonal_writing_mode_root_;
+  bool adjust_inline_size_if_needed_;
 
 #if DCHECK_IS_ON()
   bool is_available_size_set_ = false;
   bool is_percentage_resolution_size_set_ = false;
   bool is_fragmentainer_block_size_set_ = false;
-  bool is_fragmentainer_space_at_bfc_start_set_ = false;
+  bool is_fragmentainer_offset_at_bfc_set_ = false;
   bool is_block_direction_fragmentation_type_set_ = false;
   bool is_margin_strut_set_ = false;
   bool is_optimistic_bfc_block_offset_set_ = false;
   bool is_forced_bfc_block_offset_set_ = false;
   bool is_clearance_offset_set_ = false;
+  bool is_table_cell_borders_set_ = false;
+  bool is_table_cell_alignment_baseline_set_ = false;
+  bool is_table_cell_column_index_set_ = false;
+  bool is_table_cell_hidden_for_paint_set_ = false;
+  bool is_table_cell_with_collapsed_borders_set_ = false;
+  bool is_table_cell_with_effective_rowspan_set_ = false;
+  bool is_custom_layout_data_set_ = false;
+  bool is_lines_until_clamp_set_ = false;
+  bool is_table_row_data_set_ = false;
+  bool is_table_section_data_set_ = false;
+  bool is_line_clamp_context_set_ = false;
+  bool is_subgridded_columns_set_ = false;
+  bool is_subgridded_rows_set_ = false;
 
   bool to_constraint_space_called_ = false;
 #endif
+};
 
-  NGBaselineRequestList baseline_requests_;
+// This is a helper class for use in |NGLayoutAlgorithm::ComputeMinMaxSizes|.
+// It exposes a subset of the |NGonstraintSpace| builder methods. Additionally
+// it sets the orthogonal fallback inline-size if needed.
+class CORE_EXPORT NGMinMaxConstraintSpaceBuilder final {
+  STACK_ALLOCATED();
+
+ public:
+  NGMinMaxConstraintSpaceBuilder(const NGConstraintSpace& parent_space,
+                                 const ComputedStyle& parent_style,
+                                 const NGLayoutInputNode& child,
+                                 bool is_new_fc)
+      : delegate_(parent_space,
+                  child.Style().GetWritingDirection(),
+                  is_new_fc) {
+    SetOrthogonalFallbackInlineSizeIfNeeded(parent_style, child, &delegate_);
+    delegate_.SetCacheSlot(NGCacheSlot::kMeasure);
+    if (parent_space.IsInColumnBfc() && !child.CreatesNewFormattingContext())
+      delegate_.SetIsInColumnBfc();
+  }
+
+  void SetAvailableBlockSize(LayoutUnit block_size) {
+    delegate_.SetAvailableSize({kIndefiniteSize, block_size});
+  }
+
+  void SetPercentageResolutionBlockSize(LayoutUnit block_size) {
+    delegate_.SetPercentageResolutionSize({kIndefiniteSize, block_size});
+  }
+
+  void SetReplacedPercentageResolutionBlockSize(LayoutUnit block_size) {
+    delegate_.SetReplacedPercentageResolutionSize(
+        {kIndefiniteSize, block_size});
+  }
+
+  void SetBlockAutoBehavior(NGAutoBehavior auto_behavior) {
+    delegate_.SetBlockAutoBehavior(auto_behavior);
+  }
+
+  const NGConstraintSpace ToConstraintSpace() {
+    return delegate_.ToConstraintSpace();
+  }
+
+ private:
+  NGConstraintSpaceBuilder delegate_;
 };
 
 }  // namespace blink
 
-#endif  // NGConstraintSpaceBuilder
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_CONSTRAINT_SPACE_BUILDER_H_

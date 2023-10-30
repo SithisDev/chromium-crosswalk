@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_INSTALLED_SERVICE_WORKER_MODULE_SCRIPT_FETCHER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_INSTALLED_SERVICE_WORKER_MODULE_SCRIPT_FETCHER_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetcher.h"
 
 namespace blink {
@@ -15,22 +16,20 @@ class WorkerGlobalScope;
 // ModuleScriptFetcher for retrieving an installed ServiceWorker script
 // from ServiceWorker's script storage.
 class CORE_EXPORT InstalledServiceWorkerModuleScriptFetcher final
-    : public GarbageCollectedFinalized<
-          InstalledServiceWorkerModuleScriptFetcher>,
+    : public GarbageCollected<InstalledServiceWorkerModuleScriptFetcher>,
       public ModuleScriptFetcher {
-  USING_GARBAGE_COLLECTED_MIXIN(InstalledServiceWorkerModuleScriptFetcher);
-
  public:
-  explicit InstalledServiceWorkerModuleScriptFetcher(WorkerGlobalScope*);
+  InstalledServiceWorkerModuleScriptFetcher(WorkerGlobalScope*,
+                                            base::PassKey<ModuleScriptLoader>);
 
   // Implements ModuleScriptFetcher.
   void Fetch(FetchParameters&,
+             ModuleType,
              ResourceFetcher*,
-             const Modulator* modulator_for_built_in_modules,
              ModuleGraphLevel,
              ModuleScriptFetcher::Client*) override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   String DebugName() const override {
@@ -38,8 +37,9 @@ class CORE_EXPORT InstalledServiceWorkerModuleScriptFetcher final
   }
 
   const Member<WorkerGlobalScope> global_scope_;
+  ModuleType expected_module_type_;
 };
 
 }  // namespace blink
 
-#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_WORKER_MODULE_SCRIPT_FETCHER_H_
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_INSTALLED_SERVICE_WORKER_MODULE_SCRIPT_FETCHER_H_

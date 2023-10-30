@@ -38,19 +38,13 @@
 
 namespace blink {
 
-void CharacterData::MakeParkableOrAtomize() {
+void CharacterData::MakeParkable() {
   if (is_parkable_)
     return;
 
-  // ParkableStrings have some overhead, don't pay it if we're not going to
-  // park a string at all.
-  if (ParkableStringManager::ShouldPark(*data_.Impl())) {
-    parkable_data_ = ParkableString(data_.ReleaseImpl());
-    data_ = String();
-    is_parkable_ = true;
-  } else {
-    data_ = AtomicString(data_);
-  }
+  parkable_data_ = ParkableString(data_.ReleaseImpl());
+  data_ = String();
+  is_parkable_ = true;
 }
 
 void CharacterData::setData(const String& data) {
@@ -110,7 +104,7 @@ void CharacterData::insertData(unsigned offset,
   new_str.Append(data);
   new_str.Append(StringView(current_data, offset));
 
-  SetDataAndUpdate(new_str.ToString(), offset, 0, data.length(),
+  SetDataAndUpdate(new_str.ReleaseString(), offset, 0, data.length(),
                    kUpdateFromNonParser);
 
   GetDocument().DidInsertText(*this, offset, data.length());
@@ -154,7 +148,7 @@ void CharacterData::deleteData(unsigned offset,
   new_str.ReserveCapacity(current_data.length() - real_count);
   new_str.Append(StringView(current_data, 0, offset));
   new_str.Append(StringView(current_data, offset + real_count));
-  SetDataAndUpdate(new_str.ToString(), offset, real_count, 0,
+  SetDataAndUpdate(new_str.ReleaseString(), offset, real_count, 0,
                    kUpdateFromNonParser);
 
   GetDocument().DidRemoveText(*this, offset, real_count);
@@ -176,7 +170,7 @@ void CharacterData::replaceData(unsigned offset,
   new_str.Append(data);
   new_str.Append(StringView(current_data, offset + real_count));
 
-  SetDataAndUpdate(new_str.ToString(), offset, real_count, data.length(),
+  SetDataAndUpdate(new_str.ReleaseString(), offset, real_count, data.length(),
                    kUpdateFromNonParser);
 
   // update DOM ranges
@@ -192,7 +186,7 @@ bool CharacterData::ContainsOnlyWhitespaceOrEmpty() const {
   return data().ContainsOnlyWhitespaceOrEmpty();
 }
 
-void CharacterData::setNodeValue(const String& node_value) {
+void CharacterData::setNodeValue(const String& node_value, ExceptionState&) {
   setData(!node_value.IsNull() ? node_value : g_empty_string);
 }
 
@@ -233,8 +227,15 @@ void CharacterData::DidModifyData(const String& old_data, UpdateSource source) {
 
   if (parentNode()) {
     ContainerNode::ChildrenChange change = {
-        ContainerNode::kTextChanged, this, previousSibling(), nextSibling(),
-        ContainerNode::kChildrenChangeSourceAPI};
+        ContainerNode::ChildrenChangeType::kTextChanged,
+        source == kUpdateFromParser
+            ? ContainerNode::ChildrenChangeSource::kParser
+            : ContainerNode::ChildrenChangeSource::kAPI,
+        this,
+        previousSibling(),
+        nextSibling(),
+        {},
+        old_data};
     parentNode()->ChildrenChanged(change);
   }
 

@@ -6,12 +6,13 @@
 
 #include "third_party/blink/renderer/modules/push_messaging/push_manager.h"
 #include "third_party/blink/renderer/modules/service_worker/service_worker_registration.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 ServiceWorkerRegistrationPush::ServiceWorkerRegistrationPush(
     ServiceWorkerRegistration* registration)
-    : registration_(registration) {}
+    : Supplement(*registration) {}
 
 ServiceWorkerRegistrationPush::~ServiceWorkerRegistrationPush() = default;
 
@@ -38,12 +39,11 @@ PushManager* ServiceWorkerRegistrationPush::pushManager(
 
 PushManager* ServiceWorkerRegistrationPush::pushManager() {
   if (!push_manager_)
-    push_manager_ = PushManager::Create(registration_);
+    push_manager_ = MakeGarbageCollected<PushManager>(GetSupplementable());
   return push_manager_.Get();
 }
 
-void ServiceWorkerRegistrationPush::Trace(blink::Visitor* visitor) {
-  visitor->Trace(registration_);
+void ServiceWorkerRegistrationPush::Trace(Visitor* visitor) const {
   visitor->Trace(push_manager_);
   Supplement<ServiceWorkerRegistration>::Trace(visitor);
 }

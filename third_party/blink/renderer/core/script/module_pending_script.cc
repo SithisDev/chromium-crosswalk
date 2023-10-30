@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/script/module_pending_script.h"
 
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
 
 namespace blink {
@@ -31,7 +30,7 @@ void ModulePendingScriptTreeClient::NotifyModuleTreeLoadFinished(
     pending_script_->NotifyModuleTreeLoadFinished();
 }
 
-void ModulePendingScriptTreeClient::Trace(Visitor* visitor) {
+void ModulePendingScriptTreeClient::Trace(Visitor* visitor) const {
   visitor->Trace(module_script_);
   visitor->Trace(pending_script_);
   ModuleTreeClient::Trace(visitor);
@@ -40,7 +39,7 @@ void ModulePendingScriptTreeClient::Trace(Visitor* visitor) {
 ModulePendingScript::ModulePendingScript(ScriptElementBase* element,
                                          ModulePendingScriptTreeClient* client,
                                          bool is_external)
-    : PendingScript(element, TextPosition()),
+    : PendingScript(element, TextPosition::MinimumPosition()),
       module_tree_client_(client),
       is_external_(is_external) {
   CHECK(GetElement());
@@ -54,7 +53,7 @@ void ModulePendingScript::DisposeInternal() {
   module_tree_client_ = nullptr;
 }
 
-void ModulePendingScript::Trace(Visitor* visitor) {
+void ModulePendingScript::Trace(Visitor* visitor) const {
   visitor->Trace(module_tree_client_);
   PendingScript::Trace(visitor);
 }
@@ -65,7 +64,7 @@ void ModulePendingScript::NotifyModuleTreeLoadFinished() {
   PendingScriptFinished();
 }
 
-Script* ModulePendingScript::GetSource(const KURL& document_url) const {
+Script* ModulePendingScript::GetSource() const {
   CHECK(IsReady());
   return GetModuleScript();
 }

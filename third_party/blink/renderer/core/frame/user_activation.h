@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_USER_ACTIVATION_H_
 
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -19,14 +20,11 @@ class UserActivation final : public ScriptWrappable {
   // LocalDOMWindow.
   static UserActivation* CreateSnapshot(LocalDOMWindow* window);
 
-  // Creates an instance that represents the live state of this LocalDOMWindow.
-  static UserActivation* CreateLive(LocalDOMWindow* window);
-
   explicit UserActivation(LocalDOMWindow* window);
   UserActivation(bool has_been_active, bool is_active);
   ~UserActivation() override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   bool hasBeenActive() const;
   bool isActive() const;

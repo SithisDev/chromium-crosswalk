@@ -31,20 +31,20 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_PEERCONNECTION_RTC_VOID_REQUEST_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_PEERCONNECTION_RTC_VOID_REQUEST_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/webrtc/api/rtc_error.h"
 
 namespace blink {
 
-class RTCVoidRequest : public GarbageCollectedFinalized<RTCVoidRequest> {
+class RTCVoidRequest : public GarbageCollected<RTCVoidRequest> {
  public:
   virtual ~RTCVoidRequest() = default;
 
   virtual void RequestSucceeded() = 0;
   virtual void RequestFailed(const webrtc::RTCError&) = 0;
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 
  protected:
   RTCVoidRequest() = default;

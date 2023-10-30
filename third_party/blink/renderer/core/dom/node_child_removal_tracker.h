@@ -27,9 +27,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_CHILD_REMOVAL_TRACKER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_CHILD_REMOVAL_TRACKER_H_
 
-#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/node.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -46,15 +45,15 @@ class NodeChildRemovalTracker {
   const Node& GetNode() const { return *node_; }
   NodeChildRemovalTracker* Previous() { return previous_; }
 
-  Member<const Node> node_;
+  const Node* node_;
   // Using raw pointers are safe because these NodeChildRemovalTrackers are
   // guaranteed to be on a stack.
   NodeChildRemovalTracker* previous_;
-  CORE_EXPORT static NodeChildRemovalTracker* last_;
+  static NodeChildRemovalTracker* last_;
 };
 
 inline NodeChildRemovalTracker::NodeChildRemovalTracker(const Node& node)
-    : node_(node), previous_(last_) {
+    : node_(&node), previous_(last_) {
   last_ = this;
 }
 
@@ -74,4 +73,4 @@ inline bool NodeChildRemovalTracker::IsBeingRemoved(const Node& node) {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_CHILD_REMOVAL_TRACKER_H_

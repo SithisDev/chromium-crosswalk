@@ -4,20 +4,20 @@
 
 #include "third_party/blink/renderer/core/style/style_inherited_variables.h"
 
-#include "third_party/blink/renderer/core/style/data_equivalency.h"
+#include "base/memory/values_equivalent.h"
 
 namespace blink {
 
 bool StyleInheritedVariables::operator==(
     const StyleInheritedVariables& other) const {
-  return DataEquivalent(root_, other.root_) && variables_ == other.variables_;
+  return base::ValuesEquivalent(root_, other.root_) &&
+         variables_ == other.variables_;
 }
 
-StyleInheritedVariables::StyleInheritedVariables()
-    : root_(nullptr), needs_resolution_(false) {}
+StyleInheritedVariables::StyleInheritedVariables() : root_(nullptr) {}
 
-StyleInheritedVariables::StyleInheritedVariables(StyleInheritedVariables& other)
-    : needs_resolution_(other.needs_resolution_) {
+StyleInheritedVariables::StyleInheritedVariables(
+    StyleInheritedVariables& other) {
   if (!other.root_) {
     root_ = &other;
   } else {
@@ -32,7 +32,7 @@ StyleVariables::OptionalData StyleInheritedVariables::GetData(
     return *data;
   if (root_)
     return root_->variables_.GetData(name);
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 StyleVariables::OptionalValue StyleInheritedVariables::GetValue(
@@ -41,18 +41,16 @@ StyleVariables::OptionalValue StyleInheritedVariables::GetValue(
     return *data;
   if (root_)
     return root_->variables_.GetValue(name);
-  return base::nullopt;
+  return absl::nullopt;
 }
 
-HashSet<AtomicString> StyleInheritedVariables::GetCustomPropertyNames() const {
-  HashSet<AtomicString> names;
+void StyleInheritedVariables::CollectNames(HashSet<AtomicString>& names) const {
   if (root_) {
     for (const auto& pair : root_->Data())
       names.insert(pair.key);
   }
   for (const auto& pair : Data())
     names.insert(pair.key);
-  return names;
 }
 
 }  // namespace blink

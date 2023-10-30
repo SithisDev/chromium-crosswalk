@@ -17,7 +17,7 @@
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/drawing_buffer.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/extensions_3d_util.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "ui/gl/gpu_preference.h"
 
 namespace blink {
 
@@ -42,8 +42,11 @@ class WebGraphicsContext3DProviderForTests
       std::unique_ptr<gpu::webgpu::WebGPUInterface> webgpu)
       : webgpu_(std::move(webgpu)) {}
 
+  gpu::InterfaceBase* InterfaceBase() override { return gl_.get(); }
   gpu::gles2::GLES2Interface* ContextGL() override { return gl_.get(); }
-  GrContext* GetGrContext() override { return nullptr; }
+  gpu::raster::RasterInterface* RasterInterface() override { return nullptr; }
+  bool IsContextLost() override { return false; }
+  GrDirectContext* GetGrContext() override { return nullptr; }
   gpu::webgpu::WebGPUInterface* WebGPUInterface() override {
     return webgpu_.get();
   }
@@ -57,8 +60,8 @@ class WebGraphicsContext3DProviderForTests
   const WebglPreferences& GetWebglPreferences() const override {
     return webgl_preferences_;
   }
-  viz::GLHelper* GetGLHelper() override { return nullptr; }
-  void SetLostContextCallback(base::Closure) override {}
+  gpu::GLHelper* GetGLHelper() override { return nullptr; }
+  void SetLostContextCallback(base::RepeatingClosure) override {}
   void SetErrorMessageCallback(
       base::RepeatingCallback<void(const char*, int32_t id)>) override {}
   cc::ImageDecodeCache* ImageDecodeCache(SkColorType color_type) override {
@@ -70,6 +73,9 @@ class WebGraphicsContext3DProviderForTests
   void CopyVideoFrame(media::PaintCanvasVideoRenderer* video_render,
                       media::VideoFrame* video_frame,
                       cc::PaintCanvas* canvas) override {}
+  viz::RasterContextProvider* RasterContextProvider() const override {
+    return nullptr;
+  }
 
  private:
   cc::StubDecodeCache image_decode_cache_;
@@ -88,6 +94,8 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
   void BindTexture(GLenum target, GLuint texture) override {
     if (target == GL_TEXTURE_2D)
       state_.active_texture2d_binding = texture;
+    if (target == GL_TEXTURE_CUBE_MAP)
+      state_.active_texturecubemap_binding = texture;
     bound_textures_.insert(target, texture);
   }
 
@@ -196,10 +204,8 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
   void ProduceTextureDirectCHROMIUM(GLuint texture, GLbyte* mailbox) override {
     ++current_mailbox_byte_;
     memset(mailbox, current_mailbox_byte_, GL_MAILBOX_SIZE_CHROMIUM);
-    if (!create_image_chromium_fail_) {
-      ASSERT_TRUE(texture_sizes_.Contains(texture));
-      most_recently_produced_size_ = texture_sizes_.at(texture);
-    }
+    ASSERT_TRUE(texture_sizes_.Contains(texture));
+    most_recently_produced_size_ = texture_sizes_.at(texture);
   }
 
   void TexImage2D(GLenum target,
@@ -213,45 +219,7 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
                   const void* pixels) override {
     if (target == GL_TEXTURE_2D && !level) {
       texture_sizes_.Set(bound_textures_.find(target)->value,
-                         IntSize(width, height));
-    }
-  }
-
-  GLuint CreateImageCHROMIUM(ClientBuffer buffer,
-                             GLsizei width,
-                             GLsizei height,
-                             GLenum internalformat) override {
-    if (create_image_chromium_fail_)
-      return 0;
-    image_sizes_.Set(current_image_id_, IntSize(width, height));
-    return current_image_id_++;
-  }
-
-  MOCK_METHOD1(DestroyImageMock, void(GLuint imageId));
-  void DestroyImageCHROMIUM(GLuint image_id) override {
-    image_sizes_.erase(image_id);
-    // No textures should be bound to this.
-    CHECK(image_to_texture_map_.find(image_id) == image_to_texture_map_.end());
-    image_sizes_.erase(image_id);
-    DestroyImageMock(image_id);
-  }
-
-  MOCK_METHOD1(BindTexImage2DMock, void(GLint imageId));
-  void BindTexImage2DCHROMIUM(GLenum target, GLint image_id) override {
-    if (target == kImageCHROMIUMTarget) {
-      GLuint value = bound_textures_.find(target)->value;
-      texture_sizes_.Set(value, image_sizes_.find(image_id)->value);
-      image_to_texture_map_.Set(image_id, value);
-      BindTexImage2DMock(image_id);
-    }
-  }
-
-  MOCK_METHOD1(ReleaseTexImage2DMock, void(GLint imageId));
-  void ReleaseTexImage2DCHROMIUM(GLenum target, GLint image_id) override {
-    if (target == kImageCHROMIUMTarget) {
-      image_sizes_.Set(current_image_id_, IntSize());
-      image_to_texture_map_.erase(image_id);
-      ReleaseTexImage2DMock(image_id);
+                         gfx::Size(width, height));
     }
   }
 
@@ -276,9 +244,9 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
 
   // ImplementationBase implementation
   void GenSyncTokenCHROMIUM(GLbyte* sync_token) override {
-    static uint64_t unique_id = 1;
-    gpu::SyncToken source(
-        gpu::GPU_IO, gpu::CommandBufferId::FromUnsafeValue(unique_id++), 2);
+    static gpu::CommandBufferId::Generator command_buffer_id_generator;
+    gpu::SyncToken source(gpu::GPU_IO,
+                          command_buffer_id_generator.GenerateNextId(), 2);
     memcpy(sync_token, &source, sizeof(source));
   }
 
@@ -314,6 +282,10 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
   void DrawingBufferClientRestoreTexture2DBinding() override {
     state_.active_texture2d_binding = saved_state_.active_texture2d_binding;
   }
+  void DrawingBufferClientRestoreTextureCubeMapBinding() override {
+    state_.active_texturecubemap_binding =
+        saved_state_.active_texturecubemap_binding;
+  }
   void DrawingBufferClientRestoreRenderbufferBinding() override {
     state_.renderbuffer_binding = saved_state_.renderbuffer_binding;
   }
@@ -328,18 +300,21 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
   void DrawingBufferClientRestorePixelPackBufferBinding() override {
     state_.pixel_pack_buffer_binding = saved_state_.pixel_pack_buffer_binding;
   }
+  bool DrawingBufferClientUserAllocatedMultisampledRenderbuffers() override {
+    // Not unit tested yet. Tested with end-to-end tests.
+    return false;
+  }
+  void DrawingBufferClientForceLostContextWithAutoRecovery() override {
+    // Not unit tested yet. Tested with end-to-end tests.
+  }
 
   // Testing methods.
   gpu::SyncToken MostRecentlyWaitedSyncToken() const {
     return most_recently_waited_sync_token_;
   }
   GLuint NextImageIdToBeCreated() const { return current_image_id_; }
-  IntSize MostRecentlyProducedSize() const {
+  gfx::Size MostRecentlyProducedSize() const {
     return most_recently_produced_size_;
-  }
-
-  void SetCreateImageChromiumFail(bool fail) {
-    create_image_chromium_fail_ = fail;
   }
 
   // Saves current GL state for later verification.
@@ -356,6 +331,8 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
     EXPECT_EQ(state_.pack_alignment, saved_state_.pack_alignment);
     EXPECT_EQ(state_.active_texture2d_binding,
               saved_state_.active_texture2d_binding);
+    EXPECT_EQ(state_.active_texturecubemap_binding,
+              saved_state_.active_texturecubemap_binding);
     EXPECT_EQ(state_.renderbuffer_binding, saved_state_.renderbuffer_binding);
     EXPECT_EQ(state_.draw_framebuffer_binding,
               saved_state_.draw_framebuffer_binding);
@@ -373,7 +350,7 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
 
  private:
   // The target to use when binding a texture to a Chromium image.
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
   static constexpr GLuint kImageCHROMIUMTarget = GC3D_TEXTURE_RECTANGLE_ARB;
 #else
   static constexpr GLuint kImageCHROMIUMTarget = GL_TEXTURE_2D;
@@ -397,6 +374,8 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
 
     // The bound 2D texture for the active texture unit.
     GLuint active_texture2d_binding = 0;
+    // The bound cube map texture for the active texture unit.
+    GLuint active_texturecubemap_binding = 0;
     GLuint renderbuffer_binding = 0;
     GLuint draw_framebuffer_binding = 0;
     GLuint read_framebuffer_binding = 0;
@@ -408,11 +387,10 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
 
   gpu::SyncToken most_recently_waited_sync_token_;
   GLbyte current_mailbox_byte_ = 0;
-  IntSize most_recently_produced_size_;
-  bool create_image_chromium_fail_ = false;
+  gfx::Size most_recently_produced_size_;
   GLuint current_image_id_ = 1;
-  HashMap<GLuint, IntSize> texture_sizes_;
-  HashMap<GLuint, IntSize> image_sizes_;
+  HashMap<GLuint, gfx::Size> texture_sizes_;
+  HashMap<GLuint, gfx::Size> image_sizes_;
   HashMap<GLuint, GLuint> image_to_texture_map_;
   gpu::Mailbox last_imported_shared_image_;
 };
@@ -421,16 +399,16 @@ class DrawingBufferForTests : public DrawingBuffer {
  public:
   static scoped_refptr<DrawingBufferForTests> Create(
       std::unique_ptr<WebGraphicsContext3DProvider> context_provider,
-      bool using_gpu_compositing,
+      const Platform::GraphicsInfo& graphics_info,
       DrawingBuffer::Client* client,
-      const IntSize& size,
+      const gfx::Size& size,
       PreserveDrawingBuffer preserve,
       UseMultisampling use_multisampling) {
     std::unique_ptr<Extensions3DUtil> extensions_util =
         Extensions3DUtil::Create(context_provider->ContextGL());
     scoped_refptr<DrawingBufferForTests> drawing_buffer =
         base::AdoptRef(new DrawingBufferForTests(
-            std::move(context_provider), using_gpu_compositing,
+            std::move(context_provider), graphics_info,
             std::move(extensions_util), client, preserve));
     if (!drawing_buffer->Initialize(
             size, use_multisampling != kDisableMultisampling)) {
@@ -442,13 +420,13 @@ class DrawingBufferForTests : public DrawingBuffer {
 
   DrawingBufferForTests(
       std::unique_ptr<WebGraphicsContext3DProvider> context_provider,
-      bool using_gpu_compositing,
+      const Platform::GraphicsInfo& graphics_info,
       std::unique_ptr<Extensions3DUtil> extensions_util,
       DrawingBuffer::Client* client,
       PreserveDrawingBuffer preserve)
       : DrawingBuffer(
             std::move(context_provider),
-            using_gpu_compositing,
+            graphics_info,
             false /* usingSwapChain */,
             std::move(extensions_util),
             client,
@@ -460,7 +438,10 @@ class DrawingBufferForTests : public DrawingBuffer {
             false /* wantDepth */,
             false /* wantStencil */,
             DrawingBuffer::kAllowChromiumImage /* ChromiumImageUsage */,
-            CanvasColorParams()),
+            cc::PaintFlags::FilterQuality::kLow,
+            PredefinedColorSpace::kSRGB,
+            CanvasPixelFormat::kUint8,
+            gl::GpuPreference::kHighPerformance),
         live_(nullptr) {}
 
   ~DrawingBufferForTests() override {

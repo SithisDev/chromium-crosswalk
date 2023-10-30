@@ -6,29 +6,47 @@
 
 #include <utility>
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/core/event_target_names.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/navigator.h"
 #include "third_party/blink/renderer/modules/clipboard/clipboard_promise.h"
+#include "ui/base/clipboard/clipboard_constants.h"
 
 namespace blink {
 
-Clipboard::Clipboard(ExecutionContext* context)
-    : ContextLifecycleObserver(context) {}
+// static
+const char Clipboard::kSupplementName[] = "Clipboard";
+
+Clipboard* Clipboard::clipboard(Navigator& navigator) {
+  Clipboard* clipboard = Supplement<Navigator>::From<Clipboard>(navigator);
+  if (!clipboard) {
+    clipboard = MakeGarbageCollected<Clipboard>(navigator);
+    ProvideTo(navigator, clipboard);
+  }
+  return clipboard;
+}
+
+Clipboard::Clipboard(Navigator& navigator) : Supplement<Navigator>(navigator) {}
 
 ScriptPromise Clipboard::read(ScriptState* script_state) {
-  return ClipboardPromise::CreateForRead(script_state);
+  return ClipboardPromise::CreateForRead(GetExecutionContext(), script_state);
 }
 
 ScriptPromise Clipboard::readText(ScriptState* script_state) {
-  return ClipboardPromise::CreateForReadText(script_state);
+  return ClipboardPromise::CreateForReadText(GetExecutionContext(),
+                                             script_state);
 }
 
 ScriptPromise Clipboard::write(ScriptState* script_state,
                                const HeapVector<Member<ClipboardItem>>& data) {
-  return ClipboardPromise::CreateForWrite(script_state, std::move(data));
+  return ClipboardPromise::CreateForWrite(GetExecutionContext(), script_state,
+                                          std::move(data));
 }
 
 ScriptPromise Clipboard::writeText(ScriptState* script_state,
                                    const String& data) {
-  return ClipboardPromise::CreateForWriteText(script_state, data);
+  return ClipboardPromise::CreateForWriteText(GetExecutionContext(),
+                                              script_state, data);
 }
 
 const AtomicString& Clipboard::InterfaceName() const {
@@ -36,12 +54,22 @@ const AtomicString& Clipboard::InterfaceName() const {
 }
 
 ExecutionContext* Clipboard::GetExecutionContext() const {
-  return ContextLifecycleObserver::GetExecutionContext();
+  return GetSupplementable()->DomWindow();
 }
 
-void Clipboard::Trace(blink::Visitor* visitor) {
+// static
+String Clipboard::ParseWebCustomFormat(const String& format) {
+  String web_custom_format;
+  if (format.StartsWith(ui::kWebClipboardFormatPrefix)) {
+    web_custom_format = format.Substring(
+        static_cast<unsigned>(std::strlen(ui::kWebClipboardFormatPrefix)));
+  }
+  return web_custom_format;
+}
+
+void Clipboard::Trace(Visitor* visitor) const {
   EventTargetWithInlineData::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  Supplement<Navigator>::Trace(visitor);
 }
 
 }  // namespace blink

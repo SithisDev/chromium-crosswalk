@@ -4,15 +4,17 @@
 
 #include "third_party/blink/renderer/core/svg/svg_animated_href.h"
 
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/core/xlink_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
 
-void SVGAnimatedHref::Trace(blink::Visitor* visitor) {
+void SVGAnimatedHref::Trace(Visitor* visitor) const {
   visitor->Trace(xlink_href_);
   SVGAnimatedString::Trace(visitor);
 }
@@ -41,17 +43,17 @@ const SVGString* SVGAnimatedHref::CurrentValue() const {
   return BackingString()->SVGAnimatedString::CurrentValue();
 }
 
-String SVGAnimatedHref::baseVal() {
+V8UnionStringOrTrustedScriptURL* SVGAnimatedHref::baseVal() {
   UseCounter::Count(ContextElement()->GetDocument(),
                     WebFeature::kSVGHrefBaseVal);
   return BackingString()->SVGAnimatedString::baseVal();
 }
 
-void SVGAnimatedHref::setBaseVal(const String& value,
+void SVGAnimatedHref::setBaseVal(const V8UnionStringOrTrustedScriptURL* value,
                                  ExceptionState& exception_state) {
   UseCounter::Count(ContextElement()->GetDocument(),
                     WebFeature::kSVGHrefBaseVal);
-  return BackingString()->SVGAnimatedString::setBaseVal(value, exception_state);
+  BackingString()->SVGAnimatedString::setBaseVal(value, exception_state);
 }
 
 String SVGAnimatedHref::animVal() {

@@ -31,9 +31,10 @@
 #include "third_party/blink/renderer/modules/filesystem/dom_file_system.h"
 
 #include <memory>
+#include <utility>
 
-#include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_security_origin.h"
+#include "storage/common/database/database_identifier.h"
+#include "third_party/blink/renderer/core/probe/async_task_context.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/modules/filesystem/directory_entry.h"
 #include "third_party/blink/renderer/modules/filesystem/dom_file_path.h"
@@ -52,11 +53,11 @@ namespace {
 
 void RunCallback(ExecutionContext* execution_context,
                  base::OnceClosure task,
-                 std::unique_ptr<int> identifier) {
+                 std::unique_ptr<probe::AsyncTaskContext> async_task_context) {
   if (!execution_context)
     return;
   DCHECK(execution_context->IsContextThread());
-  probe::AsyncTask async_task(execution_context, identifier.get());
+  probe::AsyncTask async_task(execution_context, async_task_context.get());
   std::move(task).Run();
 }
 
@@ -69,8 +70,8 @@ DOMFileSystem* DOMFileSystem::CreateIsolatedFileSystem(
     return nullptr;
 
   StringBuilder filesystem_name;
-  filesystem_name.Append(Platform::Current()->FileSystemCreateOriginIdentifier(
-      WebSecurityOrigin(context->GetSecurityOrigin())));
+  filesystem_name.Append(String::FromUTF8(storage::GetIdentifierFromOrigin(
+      context->GetSecurityOrigin()->ToUrlOrigin())));
   filesystem_name.Append(":Isolated_");
   filesystem_name.Append(filesystem_id);
 
@@ -95,7 +96,7 @@ DOMFileSystem::DOMFileSystem(ExecutionContext* context,
                              mojom::blink::FileSystemType type,
                              const KURL& root_url)
     : DOMFileSystemBase(context, name, type, root_url),
-      ContextClient(context),
+      ExecutionContextClient(context),
       number_of_pending_callbacks_(0),
       root_entry_(
           MakeGarbageCollected<DirectoryEntry>(this, DOMFilePath::kRoot)) {}
@@ -166,20 +167,18 @@ void DOMFileSystem::ScheduleCallback(ExecutionContext* execution_context,
 
   DCHECK(execution_context->IsContextThread());
 
-  std::unique_ptr<int> identifier = std::make_unique<int>(0);
-  probe::AsyncTaskScheduled(execution_context, TaskNameForInstrumentation(),
-                            identifier.get());
+  auto async_task_context = std::make_unique<probe::AsyncTaskContext>();
+  async_task_context->Schedule(execution_context, TaskNameForInstrumentation());
   execution_context->GetTaskRunner(TaskType::kFileReading)
       ->PostTask(FROM_HERE,
                  WTF::Bind(&RunCallback, WrapWeakPersistent(execution_context),
-                           WTF::Passed(std::move(task)),
-                           WTF::Passed(std::move(identifier))));
+                           std::move(task), std::move(async_task_context)));
 }
 
-void DOMFileSystem::Trace(blink::Visitor* visitor) {
+void DOMFileSystem::Trace(Visitor* visitor) const {
   visitor->Trace(root_entry_);
   DOMFileSystemBase::Trace(visitor);
-  ContextClient::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
 }
 
 }  // namespace blink

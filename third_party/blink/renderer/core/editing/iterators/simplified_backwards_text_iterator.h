@@ -26,11 +26,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_ITERATORS_SIMPLIFIED_BACKWARDS_TEXT_ITERATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_ITERATORS_SIMPLIFIED_BACKWARDS_TEXT_ITERATOR_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/editing/iterators/fully_clipped_state_stack.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator_behavior.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator_text_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -104,17 +105,17 @@ class SimplifiedBackwardsTextIteratorAlgorithm {
 
   // Current position, not necessarily of the text being returned, but position
   // as we walk through the DOM tree.
-  Member<const Node> node_;
+  const Node* node_;
   int offset_;
   bool handled_node_;
   bool handled_children_;
   FullyClippedStateStackAlgorithm<Strategy> fully_clipped_stack_;
 
   // End of the range.
-  Member<const Node> start_node_;
+  const Node* start_node_;
   int start_offset_;
   // Start of the range.
-  Member<const Node> end_node_;
+  const Node* end_node_;
   int end_offset_;
 
   // Whether |node_| has advanced beyond the iteration range (i.e. start_node_).
@@ -135,6 +136,8 @@ extern template class CORE_EXTERN_TEMPLATE_EXPORT
 
 using SimplifiedBackwardsTextIterator =
     SimplifiedBackwardsTextIteratorAlgorithm<EditingStrategy>;
+using SimplifiedBackwardsTextIteratorInFlatTree =
+    SimplifiedBackwardsTextIteratorAlgorithm<EditingInFlatTreeStrategy>;
 
 }  // namespace blink
 

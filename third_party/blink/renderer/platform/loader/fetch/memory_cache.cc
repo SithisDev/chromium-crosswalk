@@ -26,14 +26,15 @@
 
 #include "base/auto_reset.h"
 #include "base/bind.h"
+#include "base/logging.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -41,9 +42,8 @@ static Persistent<MemoryCache>* g_memory_cache;
 
 static const unsigned kCDefaultCacheCapacity = 8192 * 1024;
 static const base::TimeDelta kCMinDelayBeforeLiveDecodedPrune =
-    base::TimeDelta::FromSeconds(1);
-static const base::TimeDelta kCMaxPruneDeferralDelay =
-    base::TimeDelta::FromMilliseconds(500);
+    base::Seconds(1);
+static const base::TimeDelta kCMaxPruneDeferralDelay = base::Milliseconds(500);
 
 // Percentage of capacity toward which we prune, to avoid immediately pruning
 // again.
@@ -54,7 +54,7 @@ MemoryCache* GetMemoryCache() {
   if (!g_memory_cache) {
     g_memory_cache =
         new Persistent<MemoryCache>(MakeGarbageCollected<MemoryCache>(
-            Thread::MainThread()->GetTaskRunner()));
+            Thread::MainThread()->GetDeprecatedTaskRunner()));
   }
   return g_memory_cache->Get();
 }
@@ -67,14 +67,13 @@ MemoryCache* ReplaceMemoryCacheForTesting(MemoryCache* cache) {
   return old_cache;
 }
 
-void MemoryCacheEntry::Trace(blink::Visitor* visitor) {
-  visitor->template RegisterWeakMembers<MemoryCacheEntry,
-                                        &MemoryCacheEntry::ClearResourceWeak>(
-      this);
+void MemoryCacheEntry::Trace(Visitor* visitor) const {
+  visitor->template RegisterWeakCallbackMethod<
+      MemoryCacheEntry, &MemoryCacheEntry::ClearResourceWeak>(this);
 }
 
-void MemoryCacheEntry::ClearResourceWeak(Visitor* visitor) {
-  if (!resource_ || ThreadHeap::IsHeapObjectAlive(resource_))
+void MemoryCacheEntry::ClearResourceWeak(const LivenessBroker& info) {
+  if (!resource_ || info.IsHeapObjectAlive(resource_))
     return;
   GetMemoryCache()->Remove(resource_.Get());
   resource_.Clear();
@@ -95,7 +94,7 @@ MemoryCache::MemoryCache(
 
 MemoryCache::~MemoryCache() = default;
 
-void MemoryCache::Trace(blink::Visitor* visitor) {
+void MemoryCache::Trace(Visitor* visitor) const {
   visitor->Trace(resource_maps_);
   MemoryCacheDumpClient::Trace(visitor);
   MemoryPressureListener::Trace(visitor);
@@ -172,9 +171,11 @@ void MemoryCache::Remove(Resource* resource) {
   TRACE_EVENT1("blink", "MemoryCache::evict", "resource",
                resource->Url().GetString().Utf8());
 
-  ResourceMap* resources = resource_maps_.at(resource->CacheIdentifier());
-  if (!resources)
+  const auto resource_maps_it =
+      resource_maps_.find(resource->CacheIdentifier());
+  if (resource_maps_it == resource_maps_.end())
     return;
+  ResourceMap* resources = resource_maps_it->value.Get();
 
   KURL url = RemoveFragmentIdentifierIfNeeded(resource->Url());
   ResourceMap::iterator it = resources->find(url);
@@ -198,12 +199,18 @@ void MemoryCache::RemoveInternal(ResourceMap* resource_map,
 bool MemoryCache::Contains(const Resource* resource) const {
   if (!resource || resource->Url().IsEmpty())
     return false;
-  const ResourceMap* resources = resource_maps_.at(resource->CacheIdentifier());
-  if (!resources)
+
+  const auto resource_maps_it =
+      resource_maps_.find(resource->CacheIdentifier());
+  if (resource_maps_it == resource_maps_.end())
     return false;
+  const ResourceMap* resources = resource_maps_it->value.Get();
+
   KURL url = RemoveFragmentIdentifierIfNeeded(resource->Url());
-  MemoryCacheEntry* entry = resources->at(url);
-  return entry && resource == entry->GetResource();
+  const auto resources_it = resources->find(url);
+  if (resources_it == resources->end())
+    return false;
+  return resource == resources_it->value->GetResource();
 }
 
 Resource* MemoryCache::ResourceForURL(const KURL& resource_url) const {
@@ -216,14 +223,17 @@ Resource* MemoryCache::ResourceForURL(const KURL& resource_url,
   if (!resource_url.IsValid() || resource_url.IsNull())
     return nullptr;
   DCHECK(!cache_identifier.IsNull());
-  const ResourceMap* resources = resource_maps_.at(cache_identifier);
-  if (!resources)
+
+  const auto resource_maps_it = resource_maps_.find(cache_identifier);
+  if (resource_maps_it == resource_maps_.end())
     return nullptr;
-  MemoryCacheEntry* entry =
-      resources->at(RemoveFragmentIdentifierIfNeeded(resource_url));
-  if (!entry)
+  const ResourceMap* resources = resource_maps_it->value.Get();
+
+  KURL url = RemoveFragmentIdentifierIfNeeded(resource_url);
+  const auto resources_it = resources->find(url);
+  if (resources_it == resources->end())
     return nullptr;
-  return entry->GetResource();
+  return resources_it->value->GetResource();
 }
 
 HeapVector<Member<Resource>> MemoryCache::ResourcesForURL(
@@ -231,12 +241,13 @@ HeapVector<Member<Resource>> MemoryCache::ResourcesForURL(
   DCHECK(WTF::IsMainThread());
   KURL url = RemoveFragmentIdentifierIfNeeded(resource_url);
   HeapVector<Member<Resource>> results;
-  for (const auto& resource_map_iter : resource_maps_) {
-    if (MemoryCacheEntry* entry = resource_map_iter.value->at(url)) {
-      Resource* resource = entry->GetResource();
-      DCHECK(resource);
-      results.push_back(resource);
-    }
+  for (const auto& resource_maps_it : resource_maps_) {
+    const auto resources_it = resource_maps_it.value->find(url);
+    if (resources_it == resource_maps_it.value->end())
+      continue;
+    Resource* resource = resources_it->value->GetResource();
+    DCHECK(resource);
+    results.push_back(resource);
   }
   return results;
 }
@@ -449,7 +460,8 @@ bool MemoryCache::OnMemoryDump(WebMemoryDumpLevelOfDetail level_of_detail,
   return true;
 }
 
-void MemoryCache::OnMemoryPressure(WebMemoryPressureLevel level) {
+void MemoryCache::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel level) {
   PruneAll();
 }
 

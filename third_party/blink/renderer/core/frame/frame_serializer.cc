@@ -56,8 +56,6 @@
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
 #include "third_party/blink/renderer/core/html/html_style_element.h"
 #include "third_party/blink/renderer/core/html/image_document.h"
-#include "third_party/blink/renderer/core/html/imports/html_import_loader.h"
-#include "third_party/blink/renderer/core/html/imports/html_imports_controller.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/loader/resource/font_resource.h"
@@ -65,8 +63,7 @@
 #include "third_party/blink/renderer/core/style/style_fetched_image.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/instrumentation/histogram.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/mhtml/serialized_resource.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
@@ -74,13 +71,6 @@
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/uuid.h"
-
-namespace {
-
-const int32_t secondsToMicroseconds = 1000 * 1000;
-const int32_t maxSerializationTimeUmaMicroseconds = 10 * secondsToMicroseconds;
-
-}  // namespace
 
 namespace blink {
 
@@ -111,7 +101,7 @@ class SerializerMarkupAccumulator : public MarkupAccumulator {
 
   FrameSerializer::Delegate& delegate_;
   FrameSerializerResourceDelegate& resource_delegate_;
-  Member<Document> document_;
+  Document* document_;
 
   // Elements with links rewritten via appendAttribute method.
   HeapHashSet<Member<const Element>> elements_with_rewritten_links_;
@@ -122,8 +112,9 @@ SerializerMarkupAccumulator::SerializerMarkupAccumulator(
     FrameSerializerResourceDelegate& resource_delegate,
     Document& document)
     : MarkupAccumulator(kResolveAllURLs,
-                        document.IsHTMLDocument() ? SerializationType::kHTML
-                                                  : SerializationType::kXML),
+                        IsA<HTMLDocument>(document) ? SerializationType::kHTML
+                                                    : SerializationType::kXML,
+                        kNoShadowRoots),
       delegate_(delegate),
       resource_delegate_(resource_delegate),
       document_(&document) {}
@@ -145,16 +136,16 @@ bool SerializerMarkupAccumulator::ShouldIgnoreAttribute(
 
 bool SerializerMarkupAccumulator::ShouldIgnoreElement(
     const Element& element) const {
-  if (IsHTMLScriptElement(element))
+  if (IsA<HTMLScriptElement>(element))
     return true;
-  if (IsHTMLNoScriptElement(element))
+  if (IsA<HTMLNoScriptElement>(element))
     return true;
-  if (IsHTMLMetaElement(element) &&
-      ToHTMLMetaElement(element).ComputeEncoding().IsValid()) {
+  auto* meta = DynamicTo<HTMLMetaElement>(element);
+  if (meta && meta->ComputeEncoding().IsValid()) {
     return true;
   }
   // This is done in serializing document.StyleSheets.
-  if (IsHTMLStyleElement(element))
+  if (IsA<HTMLStyleElement>(element))
     return true;
   return delegate_.ShouldIgnoreElement(element);
 }
@@ -163,7 +154,7 @@ AtomicString SerializerMarkupAccumulator::AppendElement(
     const Element& element) {
   AtomicString prefix = MarkupAccumulator::AppendElement(element);
 
-  if (IsHTMLHeadElement(element))
+  if (IsA<HTMLHeadElement>(element))
     AppendExtraForHeadElement(element);
 
   resource_delegate_.AddResourceForElement(*document_, element);
@@ -176,7 +167,7 @@ AtomicString SerializerMarkupAccumulator::AppendElement(
 
 void SerializerMarkupAccumulator::AppendExtraForHeadElement(
     const Element& element) {
-  DCHECK(IsHTMLHeadElement(element));
+  DCHECK(IsA<HTMLHeadElement>(element));
 
   // TODO(tiger): Refactor MarkupAccumulator so it is easier to append an
   // element like this, without special cases for XHTML
@@ -194,17 +185,6 @@ void SerializerMarkupAccumulator::AppendExtraForHeadElement(
   // CSS text defined in the style element. To solve this, we serialize the
   // working CSS rules in document.stylesheets and wrap them in link elements.
   AppendStylesheets(document_, true /*style_element_only*/);
-
-  // The stylesheets defined in imported documents are not incorporated into
-  // master document. So we need to scan all of them.
-  if (HTMLImportsController* controller = document_->ImportsController()) {
-    for (wtf_size_t i = 0; i < controller->LoaderCount(); ++i) {
-      if (Document* imported_document =
-              controller->LoaderAt(i)->GetDocument()) {
-        AppendStylesheets(imported_document, false /*style_element_only*/);
-      }
-    }
-  }
 }
 
 void SerializerMarkupAccumulator::AppendStylesheets(Document* document,
@@ -214,7 +194,7 @@ void SerializerMarkupAccumulator::AppendStylesheets(Document* document,
     StyleSheet* sheet = sheets.item(i);
     if (!sheet->IsCSSStyleSheet() || sheet->disabled())
       continue;
-    if (style_element_only && !IsHTMLStyleElement(sheet->ownerNode()))
+    if (style_element_only && !IsA<HTMLStyleElement>(sheet->ownerNode()))
       continue;
 
     StringBuilder pseudo_sheet_url_builder;
@@ -236,7 +216,7 @@ void SerializerMarkupAccumulator::AppendAttribute(const Element& element,
                                                   const Attribute& attribute) {
   // Check if link rewriting can affect the attribute.
   bool is_link_attribute = element.HasLegalLinkAttribute(attribute.GetName());
-  bool is_src_doc_attribute = IsHTMLFrameElementBase(element) &&
+  bool is_src_doc_attribute = IsA<HTMLFrameElementBase>(element) &&
                               attribute.GetName() == html_names::kSrcdocAttr;
   if (is_link_attribute || is_src_doc_attribute) {
     // Check if the delegate wants to do link rewriting for the element.
@@ -271,7 +251,7 @@ std::pair<Node*, Element*> SerializerMarkupAccumulator::GetAuxiliaryDOMTree(
 void SerializerMarkupAccumulator::AppendAttributeValue(
     const String& attribute_value) {
   MarkupFormatter::AppendAttributeValue(markup_, attribute_value,
-                                        document_->IsHTMLDocument());
+                                        IsA<HTMLDocument>(document_));
 }
 
 void SerializerMarkupAccumulator::AppendRewrittenAttribute(
@@ -301,14 +281,7 @@ void SerializerMarkupAccumulator::AppendRewrittenAttribute(
 
 FrameSerializer::FrameSerializer(Deque<SerializedResource>& resources,
                                  Delegate& delegate)
-    : resources_(&resources),
-      is_serializing_css_(false),
-      delegate_(delegate),
-      total_image_count_(0),
-      loaded_image_count_(0),
-      total_css_count_(0),
-      loaded_css_count_(0),
-      should_collect_problem_metric_(false) {}
+    : resources_(&resources), delegate_(delegate) {}
 
 void FrameSerializer::SerializeFrame(const LocalFrame& frame) {
   TRACE_EVENT0("page-serialization", "FrameSerializer::serializeFrame");
@@ -317,18 +290,13 @@ void FrameSerializer::SerializeFrame(const LocalFrame& frame) {
   KURL url = document.Url();
 
   // If frame is an image document, add the image and don't continue
-  if (document.IsImageDocument()) {
-    ImageDocument& image_document = ToImageDocument(document);
-    AddImageToResources(image_document.CachedImage(), url);
+  if (auto* image_document = DynamicTo<ImageDocument>(document)) {
+    AddImageToResources(image_document->CachedImage(), url);
     return;
   }
 
-  should_collect_problem_metric_ =
-      delegate_.ShouldCollectProblemMetric() && frame.IsMainFrame();
   {
     TRACE_EVENT0("page-serialization", "FrameSerializer::serializeFrame HTML");
-    SCOPED_BLINK_UMA_HISTOGRAM_TIMER(
-        "PageSerialization.SerializationTime.Html");
     SerializerMarkupAccumulator accumulator(delegate_, *this, document);
     String text =
         accumulator.SerializeNodes<EditingStrategy>(document, kIncludeNode);
@@ -339,35 +307,6 @@ void FrameSerializer::SerializeFrame(const LocalFrame& frame) {
     resources_->push_front(SerializedResource(
         url, document.SuggestedMIMEType(),
         SharedBuffer::Create(frame_html.c_str(), frame_html.length())));
-  }
-
-  if (should_collect_problem_metric_) {
-    // Report detectors through UMA.
-    // We're having exact 21 buckets for percentage because we want to have 5%
-    // in each bucket to avoid potential spikes in the distribution.
-    UMA_HISTOGRAM_COUNTS_100(
-        "PageSerialization.ProblemDetection.TotalImageCount",
-        total_image_count_);
-    if (total_image_count_ > 0) {
-      DCHECK_LE(loaded_image_count_, total_image_count_);
-      DEFINE_STATIC_LOCAL(
-          LinearHistogram, image_histogram,
-          ("PageSerialization.ProblemDetection.LoadedImagePercentage", 1, 100,
-           21));
-      image_histogram.Count(loaded_image_count_ * 100 / total_image_count_);
-    }
-
-    UMA_HISTOGRAM_COUNTS_100("PageSerialization.ProblemDetection.TotalCSSCount",
-                             total_css_count_);
-    if (total_css_count_ > 0) {
-      DCHECK_LE(loaded_css_count_, total_css_count_);
-      DEFINE_STATIC_LOCAL(
-          LinearHistogram, css_histogram,
-          ("PageSerialization.ProblemDetection.LoadedCSSPercentage", 1, 100,
-           21));
-      css_histogram.Count(loaded_css_count_ * 100 / total_css_count_);
-    }
-    should_collect_problem_metric_ = false;
   }
 }
 
@@ -381,10 +320,10 @@ void FrameSerializer::AddResourceForElement(Document& document,
         const_cast<Element&>(element).PresentationAttributeStyle(), document);
   }
 
-  if (const auto* image = ToHTMLImageElementOrNull(element)) {
+  if (const auto* image = DynamicTo<HTMLImageElement>(element)) {
     AtomicString image_url_value;
     const Element* parent = element.parentElement();
-    if (parent && IsHTMLPictureElement(parent)) {
+    if (parent && IsA<HTMLPictureElement>(parent)) {
       // If parent element is <picture>, use ImageSourceURL() to get best fit
       // image URL from sibling source.
       image_url_value = image->ImageSourceURL();
@@ -392,27 +331,26 @@ void FrameSerializer::AddResourceForElement(Document& document,
       // Otherwise, it is single <img> element. We should get image url
       // contained in href attribute. ImageSourceURL() may return a different
       // URL from srcset attribute.
-      image_url_value = image->getAttribute(html_names::kSrcAttr);
+      image_url_value = image->FastGetAttribute(html_names::kSrcAttr);
     }
     ImageResourceContent* cached_image = image->CachedImage();
     AddImageToResources(cached_image, document.CompleteURL(image_url_value));
-  } else if (const auto* input = ToHTMLInputElementOrNull(element)) {
+  } else if (const auto* input = DynamicTo<HTMLInputElement>(element)) {
     if (input->type() == input_type_names::kImage && input->ImageLoader()) {
       KURL image_url = input->Src();
       ImageResourceContent* cached_image = input->ImageLoader()->GetContent();
       AddImageToResources(cached_image, image_url);
     }
-  } else if (const auto* link = ToHTMLLinkElementOrNull(element)) {
+  } else if (const auto* link = DynamicTo<HTMLLinkElement>(element)) {
     if (CSSStyleSheet* sheet = link->sheet()) {
       KURL sheet_url =
-          document.CompleteURL(link->getAttribute(html_names::kHrefAttr));
+          document.CompleteURL(link->FastGetAttribute(html_names::kHrefAttr));
       SerializeCSSStyleSheet(*sheet, sheet_url);
     }
-  } else if (const auto* style = ToHTMLStyleElementOrNull(element)) {
+  } else if (const auto* style = DynamicTo<HTMLStyleElement>(element)) {
     if (CSSStyleSheet* sheet = style->sheet())
       SerializeCSSStyleSheet(*sheet, NullURL());
-  } else if (IsHTMLPlugInElement(element)) {
-    const auto* plugin = ToHTMLPlugInElement(&element);
+  } else if (const auto* plugin = DynamicTo<HTMLPlugInElement>(&element)) {
     if (plugin->IsImageType() && plugin->ImageLoader()) {
       KURL image_url = document.CompleteURL(plugin->Url());
       ImageResourceContent* cached_image = plugin->ImageLoader()->GetContent();
@@ -434,20 +372,9 @@ void FrameSerializer::SerializeCSSStyleSheet(CSSStyleSheet& style_sheet,
   }
   if (!is_inline_css)
     resource_urls_.insert(url);
-  if (should_collect_problem_metric_ && !is_inline_css) {
-    total_css_count_++;
-    if (style_sheet.LoadCompleted())
-      loaded_css_count_++;
-  }
 
   TRACE_EVENT2("page-serialization", "FrameSerializer::serializeCSSStyleSheet",
                "type", "CSS", "url", url.ElidedString().Utf8());
-  // Only report UMA metric if this is not a reentrant CSS serialization call.
-  base::TimeTicks css_start_time;
-  if (!is_serializing_css_) {
-    is_serializing_css_ = true;
-    css_start_time = base::TimeTicks::Now();
-  }
 
   // If this CSS is inlined its definition was already serialized with the frame
   // HTML code that was previously generated. No need to regenerate it here.
@@ -482,21 +409,13 @@ void FrameSerializer::SerializeCSSStyleSheet(CSSStyleSheet& style_sheet,
   // need to be.
   for (unsigned i = 0; i < style_sheet.length(); ++i)
     SerializeCSSRule(style_sheet.item(i));
-
-  if (css_start_time != base::TimeTicks()) {
-    is_serializing_css_ = false;
-    DEFINE_STATIC_LOCAL(CustomCountHistogram, css_histogram,
-                        ("PageSerialization.SerializationTime.CSSElement", 0,
-                         maxSerializationTimeUmaMicroseconds, 50));
-    css_histogram.CountMicroseconds(base::TimeTicks::Now() - css_start_time);
-  }
 }
 
 void FrameSerializer::SerializeCSSRule(CSSRule* rule) {
   DCHECK(rule->parentStyleSheet()->OwnerDocument());
   Document& document = *rule->parentStyleSheet()->OwnerDocument();
 
-  switch (rule->type()) {
+  switch (rule->GetType()) {
     case CSSRule::kStyleRule:
       RetrieveResourcesForProperties(
           &To<CSSStyleRule>(rule)->GetStyleRule()->Properties(), document);
@@ -514,7 +433,10 @@ void FrameSerializer::SerializeCSSRule(CSSRule* rule) {
 
     // Rules inheriting CSSGroupingRule
     case CSSRule::kMediaRule:
-    case CSSRule::kSupportsRule: {
+    case CSSRule::kSupportsRule:
+    case CSSRule::kContainerRule:
+    case CSSRule::kLayerBlockRule:
+    case CSSRule::kScopeRule: {
       CSSRuleList* rule_list = rule->cssRules();
       for (unsigned i = 0; i < rule_list->length(); ++i)
         SerializeCSSRule(rule_list->item(i));
@@ -526,15 +448,23 @@ void FrameSerializer::SerializeCSSRule(CSSRule* rule) {
           &To<CSSFontFaceRule>(rule)->StyleRule()->Properties(), document);
       break;
 
+    case CSSRule::kCounterStyleRule:
+      // TODO(crbug.com/1176323): Handle image symbols in @counter-style rules
+      // when we implement it.
+      break;
+
     // Rules in which no external resources can be referenced
     case CSSRule::kCharsetRule:
+    case CSSRule::kFontPaletteValuesRule:
     case CSSRule::kPageRule:
     case CSSRule::kPropertyRule:
     case CSSRule::kKeyframesRule:
     case CSSRule::kKeyframeRule:
     case CSSRule::kNamespaceRule:
     case CSSRule::kViewportRule:
-    case CSSRule::kFontFeatureValuesRule:
+    case CSSRule::kLayerStatementRule:
+    case CSSRule::kPositionFallbackRule:
+    case CSSRule::kTryRule:
       break;
   }
 }
@@ -561,30 +491,13 @@ void FrameSerializer::AddImageToResources(ImageResourceContent* image,
   if (!ShouldAddURL(url))
     return;
   resource_urls_.insert(url);
-  if (should_collect_problem_metric_)
-    total_image_count_++;
   if (!image || !image->HasImage() || image->ErrorOccurred())
     return;
-  if (should_collect_problem_metric_ && image->IsLoaded())
-    loaded_image_count_++;
 
   TRACE_EVENT2("page-serialization", "FrameSerializer::addImageToResources",
                "type", "image", "url", url.ElidedString().Utf8());
-  base::TimeTicks image_start_time = base::TimeTicks::Now();
-
   scoped_refptr<const SharedBuffer> data = image->GetImage()->Data();
-  AddToResources(image->GetResponse().MimeType(),
-                 data, url);
-
-  // If we're already reporting time for CSS serialization don't report it for
-  // this image to avoid reporting the same time twice.
-  if (!is_serializing_css_) {
-    DEFINE_STATIC_LOCAL(CustomCountHistogram, image_histogram,
-                        ("PageSerialization.SerializationTime.ImageElement", 0,
-                         maxSerializationTimeUmaMicroseconds, 50));
-    image_histogram.CountMicroseconds(base::TimeTicks::Now() -
-                                      image_start_time);
-  }
+  AddToResources(image->GetResponse().MimeType(), data, url);
 }
 
 void FrameSerializer::AddFontToResources(FontResource& font) {
@@ -631,7 +544,8 @@ void FrameSerializer::RetrieveResourcesForCSSValue(const CSSValue& css_value,
     if (font_face_src_value->IsLocal())
       return;
 
-    AddFontToResources(font_face_src_value->Fetch(&document, nullptr));
+    AddFontToResources(
+        font_face_src_value->Fetch(document.GetExecutionContext(), nullptr));
   } else if (const auto* css_value_list = DynamicTo<CSSValueList>(css_value)) {
     for (unsigned i = 0; i < css_value_list->length(); i++)
       RetrieveResourcesForCSSValue(css_value_list->Item(i), document);

@@ -9,17 +9,17 @@
 
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/decimal.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/inspector_protocol/crdtp/maybe.h"
+#include "third_party/inspector_protocol/crdtp/protocol_core.h"
+#include "third_party/inspector_protocol/crdtp/serializable.h"
 #include "v8/include/v8-inspector.h"
+#include "v8/include/v8-script.h"
 
 namespace blink {
 
@@ -33,59 +33,12 @@ CORE_EXPORT String ToCoreString(const v8_inspector::StringView&);
 CORE_EXPORT String ToCoreString(std::unique_ptr<v8_inspector::StringBuffer>);
 
 namespace protocol {
-
-class Value;
-
 using String = WTF::String;
-using StringBuilder = WTF::StringBuilder;
-
-struct ProtocolMessage {
-  String json;
-  WebVector<uint8_t> binary;
-};
 
 class CORE_EXPORT StringUtil {
   STATIC_ONLY(StringUtil);
 
  public:
-  static String substring(const String& s, size_t pos, size_t len) {
-    return s.Substring(static_cast<wtf_size_t>(pos),
-                       static_cast<wtf_size_t>(len));
-  }
-  static String fromInteger(int64_t number) { return String::Number(number); }
-  static String fromDouble(double number) {
-    return Decimal::FromDouble(number).ToString();
-  }
-  static double toDouble(const char* s, size_t len, bool* ok) {
-    return WTF::CharactersToDouble(reinterpret_cast<const LChar*>(s), len, ok);
-  }
-  static size_t find(const String& s, const char* needle) {
-    return s.Find(needle);
-  }
-  static size_t find(const String& s, const String& needle) {
-    return s.Find(needle);
-  }
-  static const size_t kNotFound = WTF::kNotFound;
-  static void builderAppend(StringBuilder& builder, const String& s) {
-    builder.Append(s);
-  }
-  static void builderAppend(StringBuilder& builder, UChar c) {
-    builder.Append(c);
-  }
-  static void builderAppend(StringBuilder& builder, const char* s, size_t len) {
-    builder.Append(s, static_cast<wtf_size_t>(len));
-  }
-  static void builderAppendQuotedString(StringBuilder&, const String&);
-  static void builderReserve(StringBuilder& builder, uint64_t capacity) {
-    builder.ReserveCapacity(static_cast<wtf_size_t>(capacity));
-  }
-  static String builderToString(StringBuilder& builder) {
-    return builder.ToString();
-  }
-  static std::unique_ptr<protocol::Value> parseJSON(const String&);
-  static ProtocolMessage jsonToMessage(const String& message);
-  static ProtocolMessage binaryToMessage(WebVector<uint8_t> message);
-
   static String fromUTF8(const uint8_t* data, size_t length) {
     return String::FromUTF8(reinterpret_cast<const char*>(data), length);
   }
@@ -107,7 +60,7 @@ class CORE_EXPORT StringUtil {
 };
 
 // A read-only sequence of uninterpreted bytes with reference-counted storage.
-class CORE_EXPORT Binary {
+class CORE_EXPORT Binary : public crdtp::Serializable {
  public:
   class Impl : public RefCounted<Impl> {
    public:
@@ -119,8 +72,11 @@ class CORE_EXPORT Binary {
 
   Binary() = default;
 
-  const uint8_t* data() const { return impl_->data(); }
-  size_t size() const { return impl_->size(); }
+  // Implements Serializable.
+  void AppendSerialized(std::vector<uint8_t>* out) const override;
+
+  const uint8_t* data() const { return impl_ ? impl_->data() : nullptr; }
+  size_t size() const { return impl_ ? impl_->size() : 0; }
 
   String toBase64() const;
   static Binary fromBase64(const String& base64, bool* success);
@@ -142,13 +98,37 @@ class CORE_EXPORT Binary {
 }  // namespace blink
 
 // TODO(dgozman): migrate core/inspector/protocol to wtf::HashMap.
-namespace std {
+
+// See third_party/inspector_protocol/crdtp/serializer_traits.h.
+namespace crdtp {
+
 template <>
-struct hash<WTF::String> {
-  std::size_t operator()(const WTF::String& string) const {
-    return StringHash::GetHash(string);
-  }
+struct ProtocolTypeTraits<WTF::String> {
+  static bool Deserialize(DeserializerState* state, String* value);
+  static void Serialize(const String& value, std::vector<uint8_t>* bytes);
 };
-}  // namespace std
+
+template <>
+struct ProtocolTypeTraits<blink::protocol::Binary> {
+  static bool Deserialize(DeserializerState* state,
+                          blink::protocol::Binary* value);
+  static void Serialize(const blink::protocol::Binary& value,
+                        std::vector<uint8_t>* bytes);
+};
+
+namespace detail {
+template <>
+struct MaybeTypedef<WTF::String> {
+  typedef ValueMaybe<WTF::String> type;
+};
+
+template <>
+struct MaybeTypedef<blink::protocol::Binary> {
+  typedef ValueMaybe<blink::protocol::Binary> type;
+};
+
+}  // namespace detail
+
+}  // namespace crdtp
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_V8_INSPECTOR_STRING_H_

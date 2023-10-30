@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/editing/commands/insert_paragraph_separator_command.h"
 
+#include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
@@ -31,7 +32,7 @@ TEST_F(InsertParagraphSeparatorCommandTest,
 
   EXPECT_EQ(
       "<table contenteditable>"
-      "    <colgroup style=\"-webkit-appearance:radio;\">|<br></colgroup>"
+      "|    <colgroup style=\"-webkit-appearance:radio;\"></colgroup>"
       "</table>",
       GetSelectionTextFromBody());
 }
@@ -53,8 +54,8 @@ TEST_F(InsertParagraphSeparatorCommandTest,
   command->Apply();
   EXPECT_EQ(
       "<table contenteditable>"
-      "    <colgroup style=\"-webkit-appearance:radio;\">|<br>"
-      "        <col>"
+      "    <colgroup style=\"-webkit-appearance:radio;\">"
+      "        <col>|"
       "    </colgroup>"
       "</table>",
       GetSelectionTextFromBody());
@@ -69,7 +70,7 @@ TEST_F(InsertParagraphSeparatorCommandTest, CrashWithCaptionBeforeBody) {
 
   // Insert <caption> between head and body
   Element* caption = GetDocument().CreateElementForBinding("caption");
-  caption->SetInnerHTMLFromString("AxBxC");
+  caption->setInnerHTML("AxBxC");
   GetDocument().documentElement()->insertBefore(caption, GetDocument().body());
 
   Selection().SetSelection(
@@ -86,6 +87,46 @@ TEST_F(InsertParagraphSeparatorCommandTest, CrashWithCaptionBeforeBody) {
       "<body><style><br>|*{max-width:inherit;display:initial;}</style></body>",
       SelectionSample::GetSelectionText(*GetDocument().documentElement(),
                                         Selection().GetSelectionInDOMTree()));
+}
+
+// http://crbug.com/1345989
+TEST_F(InsertParagraphSeparatorCommandTest, CrashWithObject) {
+  GetDocument().setDesignMode("on");
+  Selection().SetSelection(
+      SetSelectionTextToBody("<object><b>|ABC</b></object>"),
+      SetSelectionOptions());
+  base::RunLoop().RunUntilIdle();  // prepare <object> fallback content
+
+  auto* command =
+      MakeGarbageCollected<InsertParagraphSeparatorCommand>(GetDocument());
+
+  EXPECT_TRUE(command->Apply());
+  EXPECT_EQ(
+      "<div><object><b><br></b></object></div>"
+      "<object><b>|ABC</b></object>",
+      GetSelectionTextFromBody());
+}
+
+// http://crbug.com/1357082
+TEST_F(InsertParagraphSeparatorCommandTest, CrashWithObjectWithFloat) {
+  InsertStyleElement("object { float: right; }");
+  GetDocument().setDesignMode("on");
+  Selection().SetSelection(
+      SetSelectionTextToBody("<object><b>|ABC</b></object>"),
+      SetSelectionOptions());
+  base::RunLoop().RunUntilIdle();  // prepare <object> fallback content
+
+  Element& object_element = *GetDocument().QuerySelector("object");
+  object_element.appendChild(Text::Create(GetDocument(), "XYZ"));
+
+  auto* command =
+      MakeGarbageCollected<InsertParagraphSeparatorCommand>(GetDocument());
+
+  EXPECT_TRUE(command->Apply());
+  EXPECT_EQ(
+      "<object><b><br></b></object>"
+      "<object><b>|ABC</b>XYZ</object>",
+      GetSelectionTextFromBody());
 }
 
 }  // namespace blink

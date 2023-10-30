@@ -6,7 +6,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_REFERENCE_SPACE_H_
 
 #include <memory>
+#include <string>
 
+#include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "third_party/blink/renderer/modules/xr/xr_space.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
 
@@ -18,55 +20,59 @@ class XRReferenceSpace : public XRSpace {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  // Used for metrics, don't remove or change values.
-  enum class Type : int {
-    kTypeViewer = 0,
-    kTypeLocal = 1,
-    kTypeLocalFloor = 2,
-    kTypeBoundedFloor = 3,
-    kTypeUnbounded = 4,
-    kMaxValue = kTypeUnbounded,
-  };
+  static device::mojom::blink::XRReferenceSpaceType StringToReferenceSpaceType(
+      const String& reference_space_type);
 
-  static Type StringToReferenceSpaceType(const String& reference_space_type);
-
-  XRReferenceSpace(XRSession*, Type);
-  XRReferenceSpace(XRSession*, XRRigidTransform*, Type);
+  XRReferenceSpace(XRSession* session,
+                   device::mojom::blink::XRReferenceSpaceType type);
+  XRReferenceSpace(XRSession* session,
+                   XRRigidTransform* origin_offset,
+                   device::mojom::blink::XRReferenceSpaceType type);
   ~XRReferenceSpace() override;
 
-  XRPose* getPose(XRSpace* other_space,
-                  const TransformationMatrix* base_pose_matrix) override;
-  std::unique_ptr<TransformationMatrix> DefaultPose() override;
-  std::unique_ptr<TransformationMatrix> TransformBasePose(
-      const TransformationMatrix& base_pose) override;
-  std::unique_ptr<TransformationMatrix> TransformBaseInputPose(
-      const TransformationMatrix& base_input_pose,
-      const TransformationMatrix& base_pose) override;
+  absl::optional<TransformationMatrix> NativeFromViewer(
+      const absl::optional<TransformationMatrix>& mojo_from_viewer)
+      const override;
 
-  std::unique_ptr<TransformationMatrix> GetTransformToMojoSpace() override;
+  absl::optional<TransformationMatrix> MojoFromNative() const override;
 
-  TransformationMatrix OriginOffsetMatrix() override;
-  TransformationMatrix InverseOriginOffsetMatrix() override;
+  bool IsStationary() const override;
 
-  XRReferenceSpace* getOffsetReferenceSpace(XRRigidTransform* transform);
+  TransformationMatrix NativeFromOffsetMatrix() const override;
+  TransformationMatrix OffsetFromNativeMatrix() const override;
+
+  // We override getPose to ensure that the viewer pose in viewer space returns
+  // the identity pose instead of the result of multiplying inverse matrices.
+  XRPose* getPose(const XRSpace* other_space) const override;
+
+  device::mojom::blink::XRReferenceSpaceType GetType() const;
+
+  XRReferenceSpace* getOffsetReferenceSpace(XRRigidTransform* transform) const;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(reset, kReset)
 
-  void Trace(blink::Visitor*) override;
+  device::mojom::blink::XRNativeOriginInformationPtr NativeOrigin() const final;
+
+  std::string ToString() const override;
+
+  void Trace(Visitor*) const override;
 
   virtual void OnReset();
 
  private:
   virtual XRReferenceSpace* cloneWithOriginOffset(
-      XRRigidTransform* origin_offset);
+      XRRigidTransform* origin_offset) const;
 
-  void UpdateFloorLevelTransform();
+  // Updates the mojo_from_floor_ transform to match the one present in the
+  // latest display parameters of a session.
+  void SetMojoFromFloor() const;
 
-  unsigned int display_info_id_ = 0;
+  mutable uint32_t stage_parameters_id_ = 0;
 
-  std::unique_ptr<TransformationMatrix> floor_level_transform_;
+  // Floor from mojo (aka local-floor_from_mojo) transform.
+  mutable std::unique_ptr<TransformationMatrix> mojo_from_floor_;
   Member<XRRigidTransform> origin_offset_;
-  Type type_;
+  device::mojom::blink::XRReferenceSpaceType type_;
 };
 
 }  // namespace blink

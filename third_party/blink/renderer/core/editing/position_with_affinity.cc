@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/text_affinity.h"
 
 namespace blink {
@@ -28,7 +29,7 @@ PositionWithAffinityTemplate<Strategy>::~PositionWithAffinityTemplate() =
     default;
 
 template <typename Strategy>
-void PositionWithAffinityTemplate<Strategy>::Trace(Visitor* visitor) {
+void PositionWithAffinityTemplate<Strategy>::Trace(Visitor* visitor) const {
   visitor->Trace(position_);
 }
 

@@ -1,6 +1,7 @@
 {
+    "use_snake_file_names": true,
     "protocol": {
-        "path": "browser_protocol.pdl",
+        "path": "../../../public/devtools_protocol/browser_protocol.pdl",
         "package": "third_party/blink/renderer/core/inspector/protocol",
         "output": "inspector/protocol",
         "namespace": ["blink", "protocol"],
@@ -14,9 +15,6 @@
                 "domain": "Animation"
             },
             {
-                "domain": "ApplicationCache"
-            },
-            {
                 "domain": "Audits"
             },
             {
@@ -25,7 +23,7 @@
             },
             {
                 "domain": "CSS",
-                "async": ["enable"]
+                "async": ["enable", "takeComputedStyleUpdates"]
             },
             {
                 "domain": "Database",
@@ -74,29 +72,35 @@
             {
                 "domain": "Page",
                 "exclude": ["getNavigationHistory", "navigateToHistoryEntry", "resetNavigationHistory", "captureScreenshot", "screencastFrameAck", "handleJavaScriptDialog", "setColorPickerEnabled",
-                            "getAppManifest", "setControlNavigations", "processNavigation", "printToPDF", "bringToFront", "setDownloadBehavior", "navigate", "crash", "close", "setWebLifecycleState", "captureSnapshot", "getInstallabilityErrors", "setInterceptFileChooserDialog", "handleFileChooser"],
-                "async": ["getResourceContent", "searchInResource"],
+                            "getAppManifest", "setControlNavigations", "processNavigation", "printToPDF", "bringToFront", "setDownloadBehavior", "navigate", "crash", "close", "setWebLifecycleState", "captureSnapshot", "getInstallabilityErrors", "getManifestIcons", "getAppId", "setSPCTransactionMode"],
+                "async": ["getResourceContent", "searchInResource", "createIsolatedWorld"],
                 "exclude_events": ["screencastFrame", "screencastVisibilityChanged", "colorPicked", "interstitialShown", "interstitialHidden", "javascriptDialogOpening", "javascriptDialogClosed", "navigationRequested"]
             },
             {
                 "domain": "Performance"
             },
             {
+                "domain": "PerformanceTimeline"
+            },
+            {
                 "domain": "Emulation",
                 "include": ["forceViewport", "resetViewport", "resetPageScaleFactor", "setPageScaleFactor", "setScriptExecutionDisabled", "setTouchEmulationEnabled",
-                            "setEmulatedMedia", "setCPUThrottlingRate", "setVirtualTimePolicy", "setTimezoneOverride", "setNavigatorOverrides", "setDefaultBackgroundColorOverride", "setDeviceMetricsOverride", "clearDeviceMetricsOverride",
-                            "setUserAgentOverride", "setScrollbarsHidden", "setDocumentCookieDisabled", "setFocusEmulationEnabled"],
+                            "setEmulatedMedia", "setEmulatedVisionDeficiency", "setCPUThrottlingRate", "setVirtualTimePolicy", "setTimezoneOverride", "setNavigatorOverrides", "setDefaultBackgroundColorOverride", "setDeviceMetricsOverride", "clearDeviceMetricsOverride",
+                            "setHardwareConcurrencyOverride", "setUserAgentOverride", "setScrollbarsHidden", "setDocumentCookieDisabled", "setFocusEmulationEnabled", "setAutoDarkModeOverride", "setLocaleOverride", "setDisabledImageTypes", "setAutomationOverride"],
                 "include_events": ["virtualTimeBudgetExpired", "virtualTimeAdvanced", "virtualTimePaused"]
             },
             {
                 "domain": "Network",
                 "exclude": ["clearBrowserCache", "clearBrowserCookies", "getCookies", "getAllCookies", "deleteCookies", "setCookie", "setCookies", "canEmulateNetworkConditions",
                             "setRequestInterception", "continueInterceptedRequest", "getResponseBodyForInterception",
-                            "takeResponseBodyForInterceptionAsStream"],
+                            "takeResponseBodyForInterceptionAsStream", "getSecurityIsolationStatus", "loadNetworkResource", "enableReportingApi"],
                 "async": ["getResponseBody", "getRequestPostData"]
             },
             {
                 "domain": "WebAudio"
+            },
+            {
+                "domain": "Media"
             }
         ]
     },
@@ -126,11 +130,7 @@
         "export_header": "third_party/blink/renderer/core/core_export.h"
     },
 
-    "encoding_lib": {
-        "namespace": "inspector_protocol_encoding"
-    },
-
-    "bindings_lib": {
-        "namespace": "inspector_protocol_bindings"
+    "crdtp": {
+        "namespace": "crdtp"
     }
 }

@@ -31,6 +31,7 @@ TEST(CooperativeSchedulingManager, AllowedStackScope) {
 class MockCooperativeSchedulingManager : public CooperativeSchedulingManager {
  public:
   MockCooperativeSchedulingManager() : CooperativeSchedulingManager() {
+    set_feature_enabled(true);
     ON_CALL(*this, RunNestedLoop())
         .WillByDefault(testing::Invoke(
             this, &MockCooperativeSchedulingManager::RealRunNestedLoop));
@@ -58,10 +59,10 @@ TEST(CooperativeSchedulingManager, SafePoint) {
     EXPECT_CALL(*manager, RunNestedLoop()).Times(2);
     // Should run nested loop
     manager->Safepoint();
-    test_task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(14));
+    test_task_runner->FastForwardBy(base::Milliseconds(14));
     // Should not run nested loop because called too soon
     manager->Safepoint();
-    test_task_runner->FastForwardBy(base::TimeDelta::FromMilliseconds(2));
+    test_task_runner->FastForwardBy(base::Milliseconds(2));
     // Should run nested loop
     manager->Safepoint();
   }

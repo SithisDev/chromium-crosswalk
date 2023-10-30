@@ -23,25 +23,29 @@
 
 #include "third_party/blink/renderer/core/page/plugin_data.h"
 
+#include "base/metrics/histogram_macros.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/plugins/plugin_registry.mojom-blink.h"
 #include "third_party/blink/public/platform/file_path_conversion.h"
-#include "third_party/blink/public/platform/interface_provider.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_security_origin.h"
-#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 
-void MimeClassInfo::Trace(blink::Visitor* visitor) {
+void MimeClassInfo::Trace(Visitor* visitor) const {
   visitor->Trace(plugin_);
 }
 
 MimeClassInfo::MimeClassInfo(const String& type,
                              const String& description,
-                             PluginInfo& plugin)
-    : type_(type), description_(description), plugin_(&plugin) {}
+                             PluginInfo& plugin,
+                             const Vector<String> extensions)
+    : type_(type),
+      description_(description),
+      extensions_(std::move(extensions)),
+      plugin_(&plugin) {}
 
-void PluginInfo::Trace(blink::Visitor* visitor) {
+void PluginInfo::Trace(Visitor* visitor) const {
   visitor->Trace(mimes_);
 }
 
@@ -79,39 +83,44 @@ wtf_size_t PluginInfo::GetMimeClassInfoSize() const {
   return mimes_.size();
 }
 
-void PluginData::Trace(blink::Visitor* visitor) {
+void PluginData::Trace(Visitor* visitor) const {
   visitor->Trace(plugins_);
   visitor->Trace(mimes_);
 }
 
 // static
 void PluginData::RefreshBrowserSidePluginCache() {
-  mojom::blink::PluginRegistryPtr registry;
-  Platform::Current()->GetInterfaceProvider()->GetInterface(
-      mojo::MakeRequest(&registry));
+  mojo::Remote<mojom::blink::PluginRegistry> registry;
+  Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
+      registry.BindNewPipeAndPassReceiver());
   Vector<mojom::blink::PluginInfoPtr> plugins;
-  registry->GetPlugins(true, SecurityOrigin::CreateUniqueOpaque(), &plugins);
+  registry->GetPlugins(true, &plugins);
 }
 
-void PluginData::UpdatePluginList(const SecurityOrigin* main_frame_origin) {
-  ResetPluginData();
-  main_frame_origin_ = main_frame_origin;
+void PluginData::UpdatePluginList() {
+  if (updated_)
+    return;
 
-  mojom::blink::PluginRegistryPtr registry;
-  Platform::Current()->GetInterfaceProvider()->GetInterface(
-      mojo::MakeRequest(&registry));
+  SCOPED_UMA_HISTOGRAM_TIMER("Blink.Plugin.UpdateTime");
+  ResetPluginData();
+  updated_ = true;
+
+  mojo::Remote<mojom::blink::PluginRegistry> registry;
+  Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
+      registry.BindNewPipeAndPassReceiver());
   Vector<mojom::blink::PluginInfoPtr> plugins;
-  registry->GetPlugins(false, main_frame_origin_, &plugins);
+  registry->GetPlugins(false, &plugins);
   for (const auto& plugin : plugins) {
     auto* plugin_info = MakeGarbageCollected<PluginInfo>(
-        plugin->name, FilePathToWebString(plugin->filename),
-        plugin->description, plugin->background_color,
+        std::move(plugin->name), FilePathToWebString(plugin->filename),
+        std::move(plugin->description),
+        Color::FromRGBA32(plugin->background_color),
         plugin->may_use_external_handler);
     plugins_.push_back(plugin_info);
     for (const auto& mime : plugin->mime_types) {
       auto* mime_info = MakeGarbageCollected<MimeClassInfo>(
-          mime->mime_type, mime->description, *plugin_info);
-      mime_info->extensions_ = mime->file_extensions;
+          std::move(mime->mime_type), std::move(mime->description),
+          *plugin_info, std::move(mime->file_extensions));
       plugin_info->AddMimeType(mime_info);
       mimes_.push_back(mime_info);
     }
@@ -132,7 +141,7 @@ void PluginData::UpdatePluginList(const SecurityOrigin* main_frame_origin) {
 void PluginData::ResetPluginData() {
   plugins_.clear();
   mimes_.clear();
-  main_frame_origin_ = nullptr;
+  updated_ = false;
 }
 
 bool PluginData::SupportsMimeType(const String& mime_type) const {

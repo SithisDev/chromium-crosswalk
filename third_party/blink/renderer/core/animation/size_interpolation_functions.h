@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_SIZE_INTERPOLATION_FUNCTIONS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_SIZE_INTERPOLATION_FUNCTIONS_H_
 
-#include <memory>
 #include "third_party/blink/renderer/core/animation/interpolation_value.h"
 #include "third_party/blink/renderer/core/animation/pairwise_interpolation_value.h"
 #include "third_party/blink/renderer/core/style/fill_layer.h"
@@ -14,6 +13,7 @@ namespace blink {
 
 class CSSToLengthConversionData;
 class CSSValue;
+class UnderlyingValue;
 
 class SizeInterpolationFunctions {
   STATIC_ONLY(SizeInterpolationFunctions);
@@ -30,8 +30,7 @@ class SizeInterpolationFunctions {
   static InterpolationValue CreateNeutralValue(const NonInterpolableValue*);
   static bool NonInterpolableValuesAreCompatible(const NonInterpolableValue*,
                                                  const NonInterpolableValue*);
-  static void Composite(std::unique_ptr<InterpolableValue>&,
-                        scoped_refptr<NonInterpolableValue>&,
+  static void Composite(UnderlyingValue&,
                         double underlying_fraction,
                         const InterpolableValue&,
                         const NonInterpolableValue*);

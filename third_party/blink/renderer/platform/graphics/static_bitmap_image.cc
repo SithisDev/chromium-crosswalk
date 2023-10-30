@@ -11,156 +11,108 @@
 #include "third_party/blink/renderer/platform/graphics/image_observer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_image.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
-#include "third_party/blink/renderer/platform/wtf/typed_arrays/array_buffer_contents.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkSurface.h"
-#include "third_party/skia/include/gpu/GrContext.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
 scoped_refptr<StaticBitmapImage> StaticBitmapImage::Create(
-    sk_sp<SkImage> image,
-    base::WeakPtr<WebGraphicsContext3DProviderWrapper>
-        context_provider_wrapper) {
-  if (!image)
-    return nullptr;
-  if (image->isTextureBacked()) {
-    CHECK(context_provider_wrapper);
-    return AcceleratedStaticBitmapImage::CreateFromSkImage(
-        image, std::move(context_provider_wrapper));
-  }
-  return UnacceleratedStaticBitmapImage::Create(image);
-}
-
-scoped_refptr<StaticBitmapImage> StaticBitmapImage::Create(PaintImage image) {
-  DCHECK(!image.GetSkImage()->isTextureBacked());
-  return UnacceleratedStaticBitmapImage::Create(std::move(image));
+    PaintImage image,
+    ImageOrientation orientation) {
+  DCHECK(!image.IsTextureBacked());
+  return UnacceleratedStaticBitmapImage::Create(std::move(image), orientation);
 }
 
 scoped_refptr<StaticBitmapImage> StaticBitmapImage::Create(
-    scoped_refptr<Uint8Array>&& image_pixels,
-    const SkImageInfo& info) {
-  SkPixmap pixmap(info, image_pixels->Data(), info.minRowBytes());
-
-  Uint8Array* pixels = image_pixels.get();
-  if (pixels) {
-    pixels->AddRef();
-    image_pixels = nullptr;
-  }
-
-  return Create(SkImage::MakeFromRaster(
-      pixmap,
-      [](const void*, void* p) { static_cast<Uint8Array*>(p)->Release(); },
-      pixels));
+    sk_sp<SkData> data,
+    const SkImageInfo& info,
+    ImageOrientation orientation) {
+  return UnacceleratedStaticBitmapImage::Create(
+      SkImage::MakeRasterData(info, std::move(data), info.minRowBytes()),
+      orientation);
 }
 
-scoped_refptr<StaticBitmapImage> StaticBitmapImage::Create(
-    WTF::ArrayBufferContents& contents,
-    const SkImageInfo& info) {
-  SkPixmap pixmap(info, contents.Data(), info.minRowBytes());
-  return Create(SkImage::MakeFromRaster(pixmap, nullptr, nullptr));
+gfx::Size StaticBitmapImage::SizeWithConfig(SizeConfig config) const {
+  auto info = GetSkImageInfoInternal();
+  gfx::Size size(info.width(), info.height());
+  if (config.apply_orientation && orientation_.UsesWidthAsHeight())
+    size.Transpose();
+  return size;
+}
+
+Vector<uint8_t> StaticBitmapImage::CopyImageData(const SkImageInfo& info,
+                                                 bool apply_orientation) {
+  if (info.isEmpty())
+    return {};
+  PaintImage paint_image = PaintImageForCurrentFrame();
+  if (paint_image.GetSkImageInfo().isEmpty())
+    return {};
+
+  wtf_size_t byte_length =
+      base::checked_cast<wtf_size_t>(info.computeMinByteSize());
+  if (byte_length > partition_alloc::MaxDirectMapped())
+    return {};
+  Vector<uint8_t> dst_buffer(byte_length);
+
+  bool read_pixels_successful =
+      paint_image.readPixels(info, dst_buffer.data(), info.minRowBytes(), 0, 0);
+  DCHECK(read_pixels_successful);
+  if (!read_pixels_successful)
+    return {};
+
+  // Orient the data, and re-read the pixels.
+  if (apply_orientation && !HasDefaultOrientation()) {
+    paint_image = Image::ResizeAndOrientImage(
+        paint_image, CurrentFrameOrientation(), gfx::Vector2dF(1, 1), 1,
+        kInterpolationNone);
+    read_pixels_successful = paint_image.readPixels(info, dst_buffer.data(),
+                                                    info.minRowBytes(), 0, 0);
+    DCHECK(read_pixels_successful);
+    if (!read_pixels_successful)
+      return {};
+  }
+
+  return dst_buffer;
 }
 
 void StaticBitmapImage::DrawHelper(cc::PaintCanvas* canvas,
-                                   const PaintFlags& flags,
-                                   const FloatRect& dst_rect,
-                                   const FloatRect& src_rect,
-                                   ImageClampingMode clamp_mode,
+                                   const cc::PaintFlags& flags,
+                                   const gfx::RectF& dst_rect,
+                                   const gfx::RectF& src_rect,
+                                   const ImageDrawOptions& draw_options,
                                    const PaintImage& image) {
-  FloatRect adjusted_src_rect = src_rect;
-  adjusted_src_rect.Intersect(SkRect::MakeWH(image.width(), image.height()));
+  gfx::RectF adjusted_src_rect = src_rect;
+  adjusted_src_rect.Intersect(gfx::RectF(image.width(), image.height()));
 
   if (dst_rect.IsEmpty() || adjusted_src_rect.IsEmpty())
     return;  // Nothing to draw.
 
-  canvas->drawImageRect(image, adjusted_src_rect, dst_rect, &flags,
-                        WebCoreClampingModeToSkiaRectConstraint(clamp_mode));
-}
+  cc::PaintCanvasAutoRestore auto_restore(canvas, false);
+  gfx::RectF adjusted_dst_rect = dst_rect;
+  if (draw_options.respect_orientation &&
+      orientation_ != ImageOrientationEnum::kDefault) {
+    canvas->save();
 
-scoped_refptr<StaticBitmapImage> StaticBitmapImage::ConvertToColorSpace(
-    sk_sp<SkColorSpace> color_space,
-    SkColorType color_type) {
-  DCHECK(color_space);
-  sk_sp<SkImage> skia_image = PaintImageForCurrentFrame().GetSkImage();
+    // ImageOrientation expects the origin to be at (0, 0)
+    canvas->translate(adjusted_dst_rect.x(), adjusted_dst_rect.y());
+    adjusted_dst_rect.set_origin(gfx::PointF());
 
-  // If we don't need to change the color type, use SkImage::makeColorSpace()
-  if (skia_image->colorType() == color_type) {
-    skia_image = skia_image->makeColorSpace(color_space);
-  } else {
-    skia_image =
-        skia_image->makeColorTypeAndColorSpace(color_type, color_space);
+    canvas->concat(AffineTransformToSkMatrix(
+        orientation_.TransformFromDefault(adjusted_dst_rect.size())));
+
+    if (orientation_.UsesWidthAsHeight())
+      adjusted_dst_rect.set_size(gfx::TransposeSize(adjusted_dst_rect.size()));
   }
 
-  return StaticBitmapImage::Create(skia_image, skia_image->isTextureBacked()
-                                                   ? ContextProviderWrapper()
-                                                   : nullptr);
-}
-
-bool StaticBitmapImage::ConvertToArrayBufferContents(
-    scoped_refptr<StaticBitmapImage> src_image,
-    WTF::ArrayBufferContents& dest_contents,
-    const IntRect& rect,
-    const CanvasColorParams& color_params,
-    bool is_accelerated) {
-  uint8_t bytes_per_pixel = color_params.BytesPerPixel();
-  base::CheckedNumeric<int> data_size = bytes_per_pixel;
-  data_size *= rect.Size().Area();
-  if (!data_size.IsValid() ||
-      data_size.ValueOrDie() > v8::TypedArray::kMaxLength)
-    return false;
-
-  int alloc_size_in_bytes = data_size.ValueOrDie();
-  if (!src_image) {
-    auto data = WTF::ArrayBufferContents::CreateDataHandle(
-        alloc_size_in_bytes, WTF::ArrayBufferContents::kZeroInitialize);
-    if (!data)
-      return false;
-    WTF::ArrayBufferContents result(std::move(data),
-                                    WTF::ArrayBufferContents::kNotShared);
-    result.Transfer(dest_contents);
-    return true;
-  }
-
-  const bool may_have_stray_area =
-      is_accelerated  // GPU readback may fail silently
-      || rect.X() < 0 || rect.Y() < 0 ||
-      rect.MaxX() > src_image->Size().Width() ||
-      rect.MaxY() > src_image->Size().Height();
-  WTF::ArrayBufferContents::InitializationPolicy initialization_policy =
-      may_have_stray_area ? WTF::ArrayBufferContents::kZeroInitialize
-                          : WTF::ArrayBufferContents::kDontInitialize;
-  auto data = WTF::ArrayBufferContents::CreateDataHandle(alloc_size_in_bytes,
-                                                         initialization_policy);
-  if (!data)
-    return false;
-  WTF::ArrayBufferContents result(std::move(data),
-                                  WTF::ArrayBufferContents::kNotShared);
-
-  SkColorType color_type =
-      (color_params.GetSkColorType() == kRGBA_F16_SkColorType)
-          ? kRGBA_F16_SkColorType
-          : kRGBA_8888_SkColorType;
-  SkImageInfo info = SkImageInfo::Make(
-      rect.Width(), rect.Height(), color_type, kUnpremul_SkAlphaType,
-      color_params.GetSkColorSpaceForSkSurfaces());
-  sk_sp<SkImage> sk_image = src_image->PaintImageForCurrentFrame().GetSkImage();
-  if (!sk_image)
-    return false;
-  bool read_pixels_successful = sk_image->readPixels(
-      info, result.Data(), info.minRowBytes(), rect.X(), rect.Y());
-  DCHECK(read_pixels_successful ||
-         !sk_image->bounds().intersect(SkIRect::MakeXYWH(
-             rect.X(), rect.Y(), info.width(), info.height())));
-  result.Transfer(dest_contents);
-  return true;
-}
-
-const gpu::SyncToken& StaticBitmapImage::GetSyncToken() const {
-  static const gpu::SyncToken sync_token;
-  return sync_token;
+  canvas->drawImageRect(
+      image, gfx::RectFToSkRect(adjusted_src_rect),
+      gfx::RectFToSkRect(adjusted_dst_rect), draw_options.sampling_options,
+      &flags,
+      WebCoreClampingModeToSkiaRectConstraint(draw_options.clamping_mode));
 }
 
 }  // namespace blink

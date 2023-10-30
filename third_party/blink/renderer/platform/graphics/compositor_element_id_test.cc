@@ -11,7 +11,7 @@ namespace blink {
 class CompositorElementIdTest : public testing::Test {};
 
 uint64_t IdFromCompositorElementId(CompositorElementId element_id) {
-  return element_id.GetInternalValue() >> kCompositorNamespaceBitCount;
+  return element_id.GetStableId() >> kCompositorNamespaceBitCount;
 }
 
 TEST_F(CompositorElementIdTest, EncodeDecode) {
@@ -30,8 +30,23 @@ TEST_F(CompositorElementIdTest, EncodeDecode) {
 TEST_F(CompositorElementIdTest, FromDOMNodeId) {
   auto element_id = CompositorElementIdFromDOMNodeId(1);
   EXPECT_EQ(1u, IdFromCompositorElementId(element_id));
-  EXPECT_EQ(CompositorElementIdNamespace::kUniqueObjectId,
+  EXPECT_EQ(CompositorElementIdNamespace::kDOMNodeId,
             NamespaceFromCompositorElementId(element_id));
+}
+
+TEST_F(CompositorElementIdTest, ToDOMNodeId) {
+  auto element_id = CompositorElementIdFromUniqueObjectId(
+      1, CompositorElementIdNamespace::kDOMNodeId);
+  EXPECT_EQ(CompositorElementIdNamespace::kDOMNodeId,
+            NamespaceFromCompositorElementId(element_id));
+  EXPECT_EQ(1, DOMNodeIdFromCompositorElementId(element_id));
+}
+
+TEST_F(CompositorElementIdTest, EncodeDecodeDOMNodeId) {
+  auto element_id = CompositorElementIdFromDOMNodeId(1);
+  EXPECT_EQ(CompositorElementIdNamespace::kDOMNodeId,
+            NamespaceFromCompositorElementId(element_id));
+  EXPECT_EQ(1, DOMNodeIdFromCompositorElementId(element_id));
 }
 
 }  // namespace blink

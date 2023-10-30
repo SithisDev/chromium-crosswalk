@@ -29,7 +29,6 @@ class SVGPathElement;
 
 class SVGMPathElement final : public SVGElement, public SVGURIReference {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SVGMPathElement);
 
  public:
   explicit SVGMPathElement(Document&);
@@ -39,11 +38,7 @@ class SVGMPathElement final : public SVGElement, public SVGURIReference {
 
   void TargetPathChanged();
 
-  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override {
-    return SVGURIReference::GetCheckedAttributeTypes();
-  }
-
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void BuildPendingResource() override;
@@ -51,7 +46,7 @@ class SVGMPathElement final : public SVGElement, public SVGURIReference {
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
 
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
 
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override {
     return false;

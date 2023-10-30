@@ -11,10 +11,12 @@ namespace blink {
 
 class BlinkInitializer : public ModulesInitializer {
  public:
-  void RegisterInterfaces(service_manager::BinderRegistry&) override;
+  void RegisterInterfaces(mojo::BinderMap&) override;
   void OnClearWindowObjectInMainWorld(Document&,
                                       const Settings&) const override;
   void InitLocalFrame(LocalFrame&) const override;
+
+  void InitServiceWorkerGlobalScope(ServiceWorkerGlobalScope&) const override;
 };
 
 }  // namespace blink

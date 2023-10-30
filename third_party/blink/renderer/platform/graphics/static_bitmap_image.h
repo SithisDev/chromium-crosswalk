@@ -6,20 +6,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_STATIC_BITMAP_IMAGE_H_
 
 #include "base/memory/weak_ptr.h"
-#include "gpu/command_buffer/common/mailbox.h"
-#include "gpu/command_buffer/common/sync_token.h"
+#include "base/notreached.h"
+#include "gpu/command_buffer/common/mailbox_holder.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
-#include "third_party/blink/renderer/platform/wtf/typed_arrays/uint8_array.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-
-namespace WTF {
-
-class ArrayBufferContents;
-
-}  // namespace WTF
 
 namespace gpu {
 namespace gles2 {
@@ -28,33 +22,31 @@ class GLES2Interface;
 }  // namespace gpu
 
 namespace blink {
-
-class WebGraphicsContext3DProviderWrapper;
+class CanvasResourceProvider;
 
 class PLATFORM_EXPORT StaticBitmapImage : public Image {
  public:
-  // WebGraphicsContext3DProviderWrapper argument only needs to be provided if
-  // The SkImage is texture backed, in which case it must be a reference to the
-  // context provider that owns the GrContext with which the SkImage is
-  // associated.
+  // The ImageOrientation should be derived from the source of the image data.
   static scoped_refptr<StaticBitmapImage> Create(
-      sk_sp<SkImage>,
-      base::WeakPtr<WebGraphicsContext3DProviderWrapper> = nullptr);
-  static scoped_refptr<StaticBitmapImage> Create(PaintImage);
-  static scoped_refptr<StaticBitmapImage> Create(scoped_refptr<Uint8Array>&&,
-                                                 const SkImageInfo&);
-  static scoped_refptr<StaticBitmapImage> Create(WTF::ArrayBufferContents&,
-                                                 const SkImageInfo&);
+      PaintImage,
+      ImageOrientation = ImageOrientationEnum::kDefault);
+  static scoped_refptr<StaticBitmapImage> Create(
+      sk_sp<SkData> data,
+      const SkImageInfo&,
+      ImageOrientation = ImageOrientationEnum::kDefault);
+
+  StaticBitmapImage(ImageOrientation orientation) : orientation_(orientation) {}
 
   bool IsStaticBitmapImage() const override { return true; }
 
   // Methods overridden by all sub-classes
   ~StaticBitmapImage() override = default;
-  // Creates a gpu copy of the image using the given ContextProvider. Should
-  // not be called if IsTextureBacked() is already true. May return null if the
-  // conversion failed (for instance if the context had an error).
-  virtual scoped_refptr<StaticBitmapImage> MakeAccelerated(
-      base::WeakPtr<WebGraphicsContext3DProviderWrapper> context_wrapper) = 0;
+
+  gfx::Size SizeWithConfig(SizeConfig) const final;
+
+  virtual scoped_refptr<StaticBitmapImage> ConvertToColorSpace(
+      sk_sp<SkColorSpace>,
+      SkColorType = kN32_SkColorType) = 0;
 
   // Methods have common implementation for all sub-classes
   bool CurrentFrameIsComplete() override { return true; }
@@ -62,9 +54,11 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
 
   // Methods that have a default implementation, and overridden by only one
   // sub-class
-  virtual bool HasMailbox() const { return false; }
   virtual bool IsValid() const { return true; }
   virtual void Transfer() {}
+  virtual bool IsOriginTopLeft() const { return true; }
+  virtual bool SupportsDisplayCompositing() const { return true; }
+  virtual bool IsOverlayCandidate() const { return false; }
 
   // Creates a non-gpu copy of the image, or returns this if image is already
   // non-gpu.
@@ -78,59 +72,71 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
                              GLint,
                              bool,
                              bool,
-                             const IntPoint&,
-                             const IntRect&) {
+                             const gfx::Point&,
+                             const gfx::Rect&) {
     NOTREACHED();
     return false;
   }
 
-  // EnsureMailbox modifies the internal state of an accelerated static bitmap
-  // image to make sure that it is represented by a Mailbox.  This must be
-  // called whenever the image is intende to be used in a differen GPU context.
-  // It is important to use the correct MailboxSyncMode in order to achieve
-  // optimal performance without compromising security or causeing graphics
-  // glitches.  Here is how to select the aprropriate mode:
-  //
-  // Case 1: Passing to a gpu context that is on a separate channel.
-  //   Note: a context in a separate process is necessarily on another channel.
-  //   Use kVerifiedSyncToken.  Or use kUnverifiedSyncToken with a later call
-  //   to VerifySyncTokensCHROMIUM()
-  // Case 2: Passing to a gpu context that is on the same channel but not the
-  //     same stream.
-  //   Use kUnverifiedSyncToken
-  // Case 3: Passing to a gpu context on the same stream.
-  //   Use kOrderingBarrier
-  virtual void EnsureMailbox(MailboxSyncMode, GLenum filter) { NOTREACHED(); }
-  virtual const gpu::Mailbox& GetMailbox() const {
+  virtual bool CopyToResourceProvider(CanvasResourceProvider*) {
     NOTREACHED();
-    static const gpu::Mailbox mailbox;
-    return mailbox;
+    return false;
   }
-  virtual const gpu::SyncToken& GetSyncToken() const;
-  virtual bool IsPremultiplied() const { return true; }
+
+  virtual void EnsureSyncTokenVerified() { NOTREACHED(); }
+  virtual gpu::MailboxHolder GetMailboxHolder() const {
+    NOTREACHED();
+    return gpu::MailboxHolder();
+  }
+  virtual void UpdateSyncToken(const gpu::SyncToken&) { NOTREACHED(); }
+  bool IsPremultiplied() const {
+    return GetSkImageInfoInternal().alphaType() ==
+           SkAlphaType::kPremul_SkAlphaType;
+  }
+  SkColorInfo GetSkColorInfo() const {
+    return GetSkImageInfoInternal().colorInfo();
+  }
 
   // Methods have exactly the same implementation for all sub-classes
   bool OriginClean() const { return is_origin_clean_; }
   void SetOriginClean(bool flag) { is_origin_clean_ = flag; }
-  scoped_refptr<StaticBitmapImage> ConvertToColorSpace(
-      sk_sp<SkColorSpace>,
-      SkColorType = kN32_SkColorType);
 
-  static bool ConvertToArrayBufferContents(
-      scoped_refptr<StaticBitmapImage> src_image,
-      WTF::ArrayBufferContents& dest_contents,
-      const IntRect&,
-      const CanvasColorParams&,
-      bool is_accelerated = false);
+  // StaticBitmapImage needs to store the orientation of the image itself,
+  // because the underlying representations do not. If the bitmap represents
+  // a non-default orientation it must be explicitly given in the constructor.
+  ImageOrientation CurrentFrameOrientation() const override {
+    return orientation_;
+  }
+
+  void SetOrientation(ImageOrientation orientation) {
+    orientation_ = orientation;
+  }
+
+  // This function results in a readback due to using SkImage::readPixels().
+  // Returns transparent black pixels if the input SkImageInfo.bounds() does
+  // not intersect with the input image boundaries. When `apply_orientation`
+  // is true this method will orient the data according to the source's EXIF
+  // information.
+  Vector<uint8_t> CopyImageData(const SkImageInfo& info,
+                                bool apply_orientation);
 
  protected:
   // Helper for sub-classes
   void DrawHelper(cc::PaintCanvas*,
                   const cc::PaintFlags&,
-                  const FloatRect&,
-                  const FloatRect&,
-                  ImageClampingMode,
+                  const gfx::RectF&,
+                  const gfx::RectF&,
+                  const ImageDrawOptions&,
                   const PaintImage&);
+
+  // Return the SkImageInfo of the internal representation of this image.
+  virtual SkImageInfo GetSkImageInfoInternal() const = 0;
+
+  // The image orientation is stored here because it is only available when the
+  // static image is created and the underlying representations do not store
+  // the information. The property is set at construction based on the source of
+  // the image data.
+  ImageOrientation orientation_ = ImageOrientationEnum::kDefault;
 
   // The following property is here because the SkImage API doesn't expose the
   // info. It is applied to both UnacceleratedStaticBitmapImage and
@@ -139,8 +145,13 @@ class PLATFORM_EXPORT StaticBitmapImage : public Image {
   bool is_origin_clean_ = true;
 };
 
-DEFINE_IMAGE_TYPE_CASTS(StaticBitmapImage);
+template <>
+struct DowncastTraits<StaticBitmapImage> {
+  static bool AllowFrom(const Image& image) {
+    return image.IsStaticBitmapImage();
+  }
+};
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_STATIC_BITMAP_IMAGE_H_

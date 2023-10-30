@@ -7,8 +7,9 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/animation/typed_interpolation_value.h"
+#include "third_party/blink/renderer/core/animation/underlying_value.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
@@ -18,17 +19,25 @@ namespace blink {
 // Ensures we perform copy on write if we are not the owner of an underlying
 // InterpolationValue. This functions similar to a DataRef except on
 // std::unique_ptr'd objects.
-class CORE_EXPORT UnderlyingValueOwner {
+class CORE_EXPORT UnderlyingValueOwner : public UnderlyingValue {
   STACK_ALLOCATED();
 
  public:
   UnderlyingValueOwner()
       : type_(nullptr), value_owner_(nullptr), value_(nullptr) {}
+  UnderlyingValueOwner(const UnderlyingValueOwner&) = delete;
+  UnderlyingValueOwner& operator=(const UnderlyingValueOwner&) = delete;
 
   operator bool() const {
     DCHECK_EQ(static_cast<bool>(type_), static_cast<bool>(value_));
     return type_;
   }
+
+  // UnderlyingValue
+  InterpolableValue& MutableInterpolableValue() final;
+  void SetInterpolableValue(std::unique_ptr<InterpolableValue>) final;
+  const NonInterpolableValue* GetNonInterpolableValue() const final;
+  void SetNonInterpolableValue(scoped_refptr<const NonInterpolableValue>) final;
 
   const InterpolationType& GetType() const {
     DCHECK(type_);
@@ -49,7 +58,6 @@ class CORE_EXPORT UnderlyingValueOwner {
   const InterpolationType* type_;
   InterpolationValue value_owner_;
   const InterpolationValue* value_;
-  DISALLOW_COPY_AND_ASSIGN(UnderlyingValueOwner);
 };
 
 }  // namespace blink

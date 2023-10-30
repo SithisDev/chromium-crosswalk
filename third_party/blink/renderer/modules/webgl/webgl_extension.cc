@@ -25,18 +25,18 @@
 
 #include "third_party/blink/renderer/modules/webgl/webgl_extension.h"
 
+#include "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.h"
+
 namespace blink {
 
 WebGLExtensionScopedContext::WebGLExtensionScopedContext(
     WebGLExtension* extension)
     : context_(extension->context_) {}
 
-WebGLExtensionScopedContext::~WebGLExtensionScopedContext() = default;
-
 WebGLExtension::WebGLExtension(WebGLRenderingContextBase* context)
     : context_(context) {}
 
-void WebGLExtension::Trace(blink::Visitor* visitor) {
+void WebGLExtension::Trace(Visitor* visitor) const {
   visitor->Trace(context_);
   ScriptWrappable::Trace(visitor);
 }

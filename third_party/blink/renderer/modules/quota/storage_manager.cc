@@ -5,20 +5,24 @@
 #include "third_party/blink/renderer/modules/quota/storage_manager.h"
 
 #include "mojo/public/cpp/bindings/callback_helpers.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_storage_estimate.h"
-#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_storage_usage_details.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
+#include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/modules/permissions/permission_utils.h"
 #include "third_party/blink/renderer/modules/quota/quota_utils.h"
-#include "third_party/blink/renderer/modules/quota/storage_estimate.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -34,19 +38,19 @@ namespace {
 const char kUniqueOriginErrorMessage[] =
     "The operation is not supported in this context.";
 
-void QueryStorageUsageAndQuotaCallback(ScriptPromiseResolver* resolver,
-                                       mojom::QuotaStatusCode status_code,
-                                       int64_t usage_in_bytes,
-                                       int64_t quota_in_bytes,
-                                       UsageBreakdownPtr usage_breakdown) {
-  // Avoid crash on shutdown. crbug.com/971594
-  if (!resolver)
-    return;
-  if (status_code != mojom::QuotaStatusCode::kOk) {
+void QueryStorageUsageAndQuotaCallback(
+    ScriptPromiseResolver* resolver,
+    mojom::blink::QuotaStatusCode status_code,
+    int64_t usage_in_bytes,
+    int64_t quota_in_bytes,
+    UsageBreakdownPtr usage_breakdown) {
+  if (status_code != mojom::blink::QuotaStatusCode::kOk) {
     // TODO(sashab): Replace this with a switch statement, and remove the enum
     // values from QuotaStatusCode.
-    resolver->Reject(MakeGarbageCollected<DOMException>(
-        static_cast<DOMExceptionCode>(status_code)));
+    // TODO(crbug.com/1293949): Add an error message.
+    resolver->Reject(V8ThrowDOMException::CreateOrDie(
+        resolver->GetScriptState()->GetIsolate(),
+        static_cast<DOMExceptionCode>(status_code), ""));
     return;
   }
 
@@ -59,9 +63,6 @@ void QueryStorageUsageAndQuotaCallback(ScriptPromiseResolver* resolver,
   // exposing obsoleted/proprietary storage systems, but also report when
   // those systems are in use.
   StorageUsageDetails* details = StorageUsageDetails::Create();
-  if (usage_breakdown->appcache) {
-    details->setApplicationCache(usage_breakdown->appcache);
-  }
   if (usage_breakdown->indexedDatabase) {
     details->setIndexedDB(usage_breakdown->indexedDatabase);
   }
@@ -82,87 +83,145 @@ void QueryStorageUsageAndQuotaCallback(ScriptPromiseResolver* resolver,
 
 }  // namespace
 
-ScriptPromise StorageManager::persist(ScriptState* script_state) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
-  ExecutionContext* execution_context = ExecutionContext::From(script_state);
-  DCHECK(execution_context->IsSecureContext());  // [SecureContext] in IDL
-  const SecurityOrigin* security_origin =
-      execution_context->GetSecurityOrigin();
-  if (security_origin->IsOpaque()) {
-    resolver->Reject(V8ThrowException::CreateTypeError(
-        script_state->GetIsolate(), kUniqueOriginErrorMessage));
-    return promise;
+StorageManager::StorageManager(ExecutionContext* execution_context)
+    : ExecutionContextClient(execution_context),
+      permission_service_(execution_context),
+      quota_host_(execution_context),
+      change_listener_receiver_(this, execution_context) {}
+
+StorageManager::~StorageManager() = default;
+
+ScriptPromise StorageManager::persist(ScriptState* script_state,
+                                      ExceptionState& exception_state) {
+  LocalDOMWindow* window = LocalDOMWindow::From(script_state);
+  DCHECK(window->IsSecureContext());  // [SecureContext] in IDL
+  if (window->GetSecurityOrigin()->IsOpaque()) {
+    exception_state.ThrowTypeError(kUniqueOriginErrorMessage);
+    return ScriptPromise();
   }
 
-  Document* doc = To<Document>(execution_context);
-  GetPermissionService(ExecutionContext::From(script_state))
-      .RequestPermission(
-          CreatePermissionDescriptor(PermissionName::DURABLE_STORAGE),
-          LocalFrame::HasTransientUserActivation(doc->GetFrame()),
-          WTF::Bind(&StorageManager::PermissionRequestComplete,
-                    WrapPersistent(this), WrapPersistent(resolver)));
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
+
+  GetPermissionService(window)->RequestPermission(
+      CreatePermissionDescriptor(PermissionName::DURABLE_STORAGE),
+      LocalFrame::HasTransientUserActivation(window->GetFrame()),
+      WTF::Bind(&StorageManager::PermissionRequestComplete,
+                WrapPersistent(this), WrapPersistent(resolver)));
 
   return promise;
 }
 
-ScriptPromise StorageManager::persisted(ScriptState* script_state) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
+ScriptPromise StorageManager::persisted(ScriptState* script_state,
+                                        ExceptionState& exception_state) {
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context->IsSecureContext());  // [SecureContext] in IDL
   const SecurityOrigin* security_origin =
       execution_context->GetSecurityOrigin();
   if (security_origin->IsOpaque()) {
-    resolver->Reject(V8ThrowException::CreateTypeError(
-        script_state->GetIsolate(), kUniqueOriginErrorMessage));
-    return promise;
+    exception_state.ThrowTypeError(kUniqueOriginErrorMessage);
+    return ScriptPromise();
   }
 
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
+
   GetPermissionService(ExecutionContext::From(script_state))
-      .HasPermission(
+      ->HasPermission(
           CreatePermissionDescriptor(PermissionName::DURABLE_STORAGE),
           WTF::Bind(&StorageManager::PermissionRequestComplete,
                     WrapPersistent(this), WrapPersistent(resolver)));
   return promise;
 }
 
-ScriptPromise StorageManager::estimate(ScriptState* script_state) {
-  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
-  ScriptPromise promise = resolver->Promise();
+ScriptPromise StorageManager::estimate(ScriptState* script_state,
+                                       ExceptionState& exception_state) {
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   DCHECK(execution_context->IsSecureContext());  // [SecureContext] in IDL
+
+  // The BlinkIDL definition for estimate() already has a [MeasureAs] attribute,
+  // so the kQuotaRead use counter must be explicitly updated.
+  UseCounter::Count(execution_context, WebFeature::kQuotaRead);
+
   const SecurityOrigin* security_origin =
       execution_context->GetSecurityOrigin();
   if (security_origin->IsOpaque()) {
-    resolver->Reject(V8ThrowException::CreateTypeError(
-        script_state->GetIsolate(), kUniqueOriginErrorMessage));
-    return promise;
+    exception_state.ThrowTypeError(kUniqueOriginErrorMessage);
+    return ScriptPromise();
   }
 
-  auto callback =
-      WTF::Bind(&QueryStorageUsageAndQuotaCallback, WrapPersistent(resolver));
+  auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
+  ScriptPromise promise = resolver->Promise();
+
+  auto callback = resolver->WrapCallbackInScriptScope(
+      WTF::Bind(&QueryStorageUsageAndQuotaCallback));
   GetQuotaHost(execution_context)
-      .QueryStorageUsageAndQuota(
-          WrapRefCounted(security_origin), mojom::StorageType::kTemporary,
+      ->QueryStorageUsageAndQuota(
+          mojom::blink::StorageType::kTemporary,
           mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-              std::move(callback), mojom::QuotaStatusCode::kErrorAbort, 0, 0,
-              nullptr));
+              std::move(callback), mojom::blink::QuotaStatusCode::kErrorAbort,
+              0, 0, nullptr));
   return promise;
 }
 
-PermissionService& StorageManager::GetPermissionService(
+void StorageManager::Trace(Visitor* visitor) const {
+  visitor->Trace(change_listener_receiver_);
+  visitor->Trace(permission_service_);
+  visitor->Trace(quota_host_);
+  EventTargetWithInlineData::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
+  ScriptWrappable::Trace(visitor);
+}
+
+const AtomicString& StorageManager::InterfaceName() const {
+  return event_type_names::kQuotachange;
+}
+
+ExecutionContext* StorageManager::GetExecutionContext() const {
+  return ExecutionContextClient::GetExecutionContext();
+}
+
+void StorageManager::OnQuotaChange() {
+  DispatchEvent(*Event::Create(event_type_names::kQuotachange));
+}
+
+void StorageManager::AddedEventListener(
+    const AtomicString& event_type,
+    RegisteredEventListener& registered_listener) {
+  if (!quota_host_.is_bound()) {
+    ExecutionContext* execution_context = GetExecutionContext();
+    if (!execution_context)
+      return;
+
+    // This method will bind quota_host_.
+    GetQuotaHost(execution_context);
+  }
+  EventTargetWithInlineData::AddedEventListener(event_type,
+                                                registered_listener);
+  StartObserving();
+}
+
+void StorageManager::RemovedEventListener(
+    const AtomicString& event_type,
+    const RegisteredEventListener& registered_listener) {
+  EventTargetWithInlineData::RemovedEventListener(event_type,
+                                                  registered_listener);
+  if (!HasEventListeners())
+    StopObserving();
+}
+
+PermissionService* StorageManager::GetPermissionService(
     ExecutionContext* execution_context) {
-  if (!permission_service_) {
+  if (!permission_service_.is_bound()) {
     ConnectToPermissionService(
-        execution_context, mojo::MakeRequest(&permission_service_,
-                                             execution_context->GetTaskRunner(
-                                                 TaskType::kMiscPlatformAPI)));
-    permission_service_.set_connection_error_handler(
+        execution_context,
+        permission_service_.BindNewPipeAndPassReceiver(
+            execution_context->GetTaskRunner(TaskType::kMiscPlatformAPI)));
+    permission_service_.set_disconnect_handler(
         WTF::Bind(&StorageManager::PermissionServiceConnectionError,
                   WrapWeakPersistent(this)));
   }
-  return *permission_service_;
+  return permission_service_.get();
 }
 
 void StorageManager::PermissionServiceConnectionError() {
@@ -177,24 +236,46 @@ void StorageManager::PermissionRequestComplete(ScriptPromiseResolver* resolver,
   resolver->Resolve(status == PermissionStatus::GRANTED);
 }
 
-mojom::blink::QuotaDispatcherHost& StorageManager::GetQuotaHost(
-    ExecutionContext* execution_context) {
-  if (!quota_host_) {
-    ConnectToQuotaDispatcherHost(
-        execution_context,
-        mojo::MakeRequest(&quota_host_, execution_context->GetTaskRunner(
-                                            TaskType::kMiscPlatformAPI)));
-  }
-  return *quota_host_;
+void StorageManager::StartObserving() {
+  if (change_listener_receiver_.is_bound() || !quota_host_.is_bound())
+    return;
+
+  ExecutionContext* execution_context = GetExecutionContext();
+  if (!execution_context)
+    return;
+
+  // Using kMiscPlatformAPI because the Storage specification does not
+  // specify a dedicated task queue yet.
+  auto task_runner =
+      execution_context->GetTaskRunner(TaskType::kMiscPlatformAPI);
+  quota_host_->AddChangeListener(
+      change_listener_receiver_.BindNewPipeAndPassRemote(task_runner), {});
 }
 
-STATIC_ASSERT_ENUM(mojom::QuotaStatusCode::kErrorNotSupported,
+void StorageManager::StopObserving() {
+  if (!change_listener_receiver_.is_bound())
+    return;
+  change_listener_receiver_.reset();
+}
+
+mojom::blink::QuotaManagerHost* StorageManager::GetQuotaHost(
+    ExecutionContext* execution_context) {
+  if (!quota_host_.is_bound()) {
+    ConnectToQuotaManagerHost(
+        execution_context,
+        quota_host_.BindNewPipeAndPassReceiver(
+            execution_context->GetTaskRunner(TaskType::kMiscPlatformAPI)));
+  }
+  return quota_host_.get();
+}
+
+STATIC_ASSERT_ENUM(mojom::blink::QuotaStatusCode::kErrorNotSupported,
                    DOMExceptionCode::kNotSupportedError);
-STATIC_ASSERT_ENUM(mojom::QuotaStatusCode::kErrorInvalidModification,
+STATIC_ASSERT_ENUM(mojom::blink::QuotaStatusCode::kErrorInvalidModification,
                    DOMExceptionCode::kInvalidModificationError);
-STATIC_ASSERT_ENUM(mojom::QuotaStatusCode::kErrorInvalidAccess,
+STATIC_ASSERT_ENUM(mojom::blink::QuotaStatusCode::kErrorInvalidAccess,
                    DOMExceptionCode::kInvalidAccessError);
-STATIC_ASSERT_ENUM(mojom::QuotaStatusCode::kErrorAbort,
+STATIC_ASSERT_ENUM(mojom::blink::QuotaStatusCode::kErrorAbort,
                    DOMExceptionCode::kAbortError);
 
 }  // namespace blink

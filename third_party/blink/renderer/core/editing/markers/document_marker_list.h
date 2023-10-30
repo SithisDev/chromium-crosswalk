@@ -7,7 +7,8 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -19,8 +20,10 @@ class DocumentMarker;
 // MarkerTypes with different insertion/retrieval patterns, or to provide
 // different behavior for certain MarkerTypes).
 class CORE_EXPORT DocumentMarkerList
-    : public GarbageCollectedFinalized<DocumentMarkerList> {
+    : public GarbageCollected<DocumentMarkerList> {
  public:
+  DocumentMarkerList(const DocumentMarkerList&) = delete;
+  DocumentMarkerList& operator=(const DocumentMarkerList&) = delete;
   virtual ~DocumentMarkerList();
 
   // Returns the single marker type supported by the list implementation.
@@ -61,13 +64,10 @@ class CORE_EXPORT DocumentMarkerList
                             unsigned old_length,
                             unsigned new_length) = 0;
 
-  virtual void Trace(Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 
  protected:
   DocumentMarkerList();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DocumentMarkerList);
 };
 
 }  // namespace blink

@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_LENGTH_INTERPOLATION_TYPE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_CSS_LENGTH_INTERPOLATION_TYPE_H_
 
-#include <memory>
 #include "third_party/blink/renderer/core/animation/css_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/length_property_functions.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -21,10 +20,6 @@ class CORE_EXPORT CSSLengthInterpolationType : public CSSInterpolationType {
 
   InterpolationValue MaybeConvertStandardPropertyUnderlyingValue(
       const ComputedStyle&) const final;
-  void Composite(UnderlyingValueOwner&,
-                 double underlying_fraction,
-                 const InterpolationValue&,
-                 double interpolation_fraction) const final;
   void ApplyStandardPropertyValue(const InterpolableValue&,
                                   const NonInterpolableValue*,
                                   StyleResolverState&) const final;
@@ -50,7 +45,7 @@ class CORE_EXPORT CSSLengthInterpolationType : public CSSInterpolationType {
                                  const NonInterpolableValue*,
                                  const StyleResolverState&) const final;
 
-  const ValueRange value_range_;
+  const Length::ValueRange value_range_;
 };
 
 }  // namespace blink

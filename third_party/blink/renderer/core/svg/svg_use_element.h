@@ -22,27 +22,30 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_USE_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_USE_ELEMENT_H_
 
-#include "third_party/blink/renderer/core/loader/resource/document_resource.h"
-#include "third_party/blink/renderer/core/svg/svg_animated_length.h"
+#include "base/gtest_prod_util.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/svg/svg_geometry_element.h"
 #include "third_party/blink/renderer/core/svg/svg_graphics_element.h"
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_client.h"
 
 namespace blink {
+
+class SVGAnimatedLength;
+class SVGResourceDocumentContent;
 
 class SVGUseElement final : public SVGGraphicsElement,
                             public SVGURIReference,
                             public ResourceClient {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(SVGUseElement);
-  USING_PRE_FINALIZER(SVGUseElement, Dispose);
 
  public:
   explicit SVGUseElement(Document&);
   ~SVGUseElement() override;
 
   void InvalidateShadowTree();
+  void InvalidateTargetReference();
 
   // Return the element that should be used for clipping,
   // or null if a valid clip element is not directly referenced.
@@ -59,16 +62,10 @@ class SVGUseElement final : public SVGGraphicsElement,
   void DispatchPendingEvent();
   Path ToClipPath() const;
 
-  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override {
-    return SVGURIReference::GetCheckedAttributeTypes();
-  }
-
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
-  void Dispose();
-
-  FloatRect GetBBox() override;
+  gfx::RectF GetBBox() override;
 
   void CollectStyleForPresentationAttribute(
       const QualifiedName&,
@@ -79,8 +76,9 @@ class SVGUseElement final : public SVGGraphicsElement,
 
   InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void RemovedFrom(ContainerNode&) override;
+  void DidMoveToNewDocument(Document&) override;
 
-  void SvgAttributeChanged(const QualifiedName&) override;
+  void SvgAttributeChanged(const SvgAttributeChangedParams&) override;
 
   LayoutObject* CreateLayoutObject(const ComputedStyle&, LegacyLayout) override;
 
@@ -89,38 +87,29 @@ class SVGUseElement final : public SVGGraphicsElement,
   bool HaveLoadedRequiredResources() override {
     return !IsStructurallyExternal() || have_fired_load_event_;
   }
+  bool ShadowTreeRebuildPending() const;
 
   bool SelfHasRelativeLengths() const override;
 
   ShadowRoot& UseShadowRoot() const {
-    CHECK(ClosedShadowRoot());
-    return *ClosedShadowRoot();
+    CHECK(UserAgentShadowRoot());
+    return *UserAgentShadowRoot();
   }
 
-  // Instance tree handling
-  enum ObserveBehavior {
-    kAddObserver,
-    kDontAddObserver,
-  };
-  Element* ResolveTargetElement(ObserveBehavior);
-  void BuildShadowAndInstanceTree(SVGElement& target);
-  void ClearInstanceRoot();
-  Element* CreateInstanceTree(SVGElement& target_root) const;
+  Element* ResolveTargetElement();
+  void AttachShadowTree(SVGElement& target);
+  void DetachShadowTree();
+  CORE_EXPORT SVGElement* InstanceRoot() const;
+  SVGElement* CreateInstanceTree(SVGElement& target_root) const;
   void ClearResourceReference();
   bool HasCycleUseReferencing(const ContainerNode& target_instance,
                               const SVGElement& new_target) const;
-  void ExpandUseElementsInShadowTree();
-  void CloneNonMarkupEventListeners();
-  void AddReferencesToFirstDegreeNestedUseElements(SVGElement& target);
 
-  void InvalidateDependentShadowTrees();
-
-  bool ResourceIsStillLoading() const;
-  bool ResourceIsValid() const;
-  bool InstanceTreeIsLoading() const;
   void NotifyFinished(Resource*) override;
-  String DebugName() const override { return "SVGUseElement"; }
+  String DebugName() const override;
   void UpdateTargetReference();
+
+  Member<SVGResourceDocumentContent> document_content_;
 
   Member<SVGAnimatedLength> x_;
   Member<SVGAnimatedLength> y_;
@@ -131,8 +120,14 @@ class SVGUseElement final : public SVGGraphicsElement,
   bool element_url_is_local_;
   bool have_fired_load_event_;
   bool needs_shadow_tree_recreation_;
-  Member<SVGElement> target_element_instance_;
   Member<IdTargetObserver> target_id_observer_;
+
+  FRIEND_TEST_ALL_PREFIXES(SVGUseElementTest,
+                           NullInstanceRootWhenNotConnectedToDocument);
+  FRIEND_TEST_ALL_PREFIXES(SVGUseElementTest,
+                           NullInstanceRootWhenConnectedToInactiveDocument);
+  FRIEND_TEST_ALL_PREFIXES(SVGUseElementTest,
+                           NullInstanceRootWhenShadowTreePendingRebuild);
 };
 
 }  // namespace blink

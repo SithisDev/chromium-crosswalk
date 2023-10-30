@@ -22,7 +22,7 @@
 
 #include "third_party/blink/renderer/core/svg/gradient_attributes.h"
 #include "third_party/blink/renderer/core/svg/svg_length.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 struct RadialGradientAttributes final : GradientAttributes {
@@ -86,7 +86,7 @@ struct RadialGradientAttributes final : GradientAttributes {
   bool HasFy() const { return fy_set_; }
   bool HasFr() const { return fr_set_; }
 
-  void Trace(blink::Visitor* visitor) {
+  void Trace(Visitor* visitor) const {
     visitor->Trace(cx_);
     visitor->Trace(cy_);
     visitor->Trace(r_);
@@ -114,8 +114,8 @@ struct RadialGradientAttributes final : GradientAttributes {
 };
 
 // Wrapper object for the RadialGradientAttributes part object.
-class RadialGradientAttributesWrapper
-    : public GarbageCollectedFinalized<RadialGradientAttributesWrapper> {
+class RadialGradientAttributesWrapper final
+    : public GarbageCollected<RadialGradientAttributesWrapper> {
  public:
   RadialGradientAttributesWrapper() = default;
 
@@ -123,7 +123,7 @@ class RadialGradientAttributesWrapper
   void Set(const RadialGradientAttributes& attributes) {
     attributes_ = attributes;
   }
-  void Trace(blink::Visitor* visitor) { visitor->Trace(attributes_); }
+  void Trace(Visitor* visitor) const { visitor->Trace(attributes_); }
 
  private:
   RadialGradientAttributes attributes_;
@@ -131,4 +131,4 @@ class RadialGradientAttributesWrapper
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_SVG_RADIAL_GRADIENT_ATTRIBUTES_H_

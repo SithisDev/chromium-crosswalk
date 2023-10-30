@@ -4,22 +4,21 @@
 
 #include "third_party/blink/renderer/core/inspector/inspector_session_state.h"
 
-#include "third_party/blink/renderer/core/inspector/protocol/Protocol.h"
-#include "third_party/inspector_protocol/encoding/encoding.h"
+#include "third_party/inspector_protocol/crdtp/cbor.h"
 
 namespace blink {
 namespace {
-using ::inspector_protocol_encoding::span;
-using ::inspector_protocol_encoding::SpanFrom;
-using ::inspector_protocol_encoding::cbor::CBORTokenizer;
-using ::inspector_protocol_encoding::cbor::CBORTokenTag;
-using ::inspector_protocol_encoding::cbor::EncodeDouble;
-using ::inspector_protocol_encoding::cbor::EncodeFalse;
-using ::inspector_protocol_encoding::cbor::EncodeFromLatin1;
-using ::inspector_protocol_encoding::cbor::EncodeFromUTF16;
-using ::inspector_protocol_encoding::cbor::EncodeInt32;
-using ::inspector_protocol_encoding::cbor::EncodeNull;
-using ::inspector_protocol_encoding::cbor::EncodeTrue;
+using crdtp::span;
+using crdtp::SpanFrom;
+using crdtp::cbor::CBORTokenizer;
+using crdtp::cbor::CBORTokenTag;
+using crdtp::cbor::EncodeDouble;
+using crdtp::cbor::EncodeFalse;
+using crdtp::cbor::EncodeFromLatin1;
+using crdtp::cbor::EncodeFromUTF16;
+using crdtp::cbor::EncodeInt32;
+using crdtp::cbor::EncodeNull;
+using crdtp::cbor::EncodeTrue;
 }  // namespace
 
 //
@@ -37,7 +36,7 @@ const mojom::blink::DevToolsSessionState* InspectorSessionState::ReattachState()
 
 void InspectorSessionState::EnqueueUpdate(const WTF::String& key,
                                           const WebVector<uint8_t>* value) {
-  base::Optional<WTF::Vector<uint8_t>> updated_value;
+  absl::optional<WTF::Vector<uint8_t>> updated_value;
   if (value) {
     WTF::Vector<uint8_t> payload;
     payload.AppendRange(value->begin(), value->end());
@@ -77,7 +76,7 @@ bool InspectorAgentState::Deserialize(span<uint8_t> in, bool* v) {
 /*static*/
 void InspectorAgentState::Serialize(int32_t v, WebVector<uint8_t>* out) {
   auto encode = out->ReleaseVector();
-  ::inspector_protocol_encoding::cbor::EncodeInt32(v, &encode);
+  EncodeInt32(v, &encode);
   *out = std::move(encode);
 }
 
@@ -94,7 +93,7 @@ bool InspectorAgentState::Deserialize(span<uint8_t> in, int32_t* v) {
 /*static*/
 void InspectorAgentState::Serialize(double v, WebVector<uint8_t>* out) {
   auto encode = out->ReleaseVector();
-  ::inspector_protocol_encoding::cbor::EncodeDouble(v, &encode);
+  EncodeDouble(v, &encode);
   *out = std::move(encode);
 }
 
@@ -129,7 +128,7 @@ void InspectorAgentState::Serialize(const WTF::String& v,
 bool InspectorAgentState::Deserialize(span<uint8_t> in, WTF::String* v) {
   CBORTokenizer tokenizer(in);
   if (tokenizer.TokenTag() == CBORTokenTag::STRING8) {
-    *v = WTF::String(
+    *v = WTF::String::FromUTF8(
         reinterpret_cast<const char*>(tokenizer.GetString8().data()),
         static_cast<size_t>(tokenizer.GetString8().size()));
     return true;

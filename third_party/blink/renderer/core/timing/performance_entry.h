@@ -32,10 +32,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_TIMING_PERFORMANCE_ENTRY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TIMING_PERFORMANCE_ENTRY_H_
 
+#include "third_party/blink/public/mojom/timing/performance_mark_or_measure.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/dom_high_res_time_stamp.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -43,9 +44,12 @@ namespace blink {
 class ScriptState;
 class ScriptValue;
 class V8ObjectBuilder;
+class ExecutionContext;
 
 using PerformanceEntryType = unsigned;
 using PerformanceEntryTypeMask = unsigned;
+
+constexpr uint32_t kNavigationIdDefaultValue = 1;
 
 class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
@@ -67,10 +71,13 @@ class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
     kElement = 1 << 9,
     kLayoutShift = 1 << 10,
     kLargestContentfulPaint = 1 << 11,
+    kVisibilityState = 1 << 12,
+    kBackForwardCacheRestoration = 1 << 13,
   };
 
   const AtomicString& name() const { return name_; }
   DOMHighResTimeStamp startTime() const;
+  uint32_t navigationId() const;
   virtual AtomicString entryType() const = 0;
   virtual PerformanceEntryType EntryTypeEnum() const = 0;
   // PerformanceNavigationTiming will override this due to
@@ -104,17 +111,33 @@ class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
     if (entry_type == kInvalid) {
       return true;
     }
-    DEFINE_THREAD_SAFE_STATIC_LOCAL(HashSet<PerformanceEntryType>,
-                                    valid_timeline_entry_types,
-                                    ({kNavigation, kMark, kMeasure, kResource,
-                                      kTaskAttribution, kPaint, kFirstInput}));
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(
+        HashSet<PerformanceEntryType>, valid_timeline_entry_types,
+        ({kNavigation, kMark, kMeasure, kResource, kTaskAttribution, kPaint,
+          kFirstInput, kBackForwardCacheRestoration}));
     return valid_timeline_entry_types.Contains(entry_type);
   }
+
+  static uint32_t GetNavigationId(ScriptState* script_state);
+  static uint32_t GetNavigationId(ExecutionContext* context);
+
+  // PerformanceMark/Measure override this and it returns Mojo structure pointer
+  // which has all members of PerformanceMark/Measure. Common data members are
+  // set by PerformanceMark/Measure calling
+  // PerformanceEntry::ToMojoPerformanceMarkOrMeasure().
+  virtual mojom::blink::PerformanceMarkOrMeasurePtr
+  ToMojoPerformanceMarkOrMeasure();
 
  protected:
   PerformanceEntry(const AtomicString& name,
                    double start_time,
-                   double finish_time);
+                   double finish_time,
+                   uint32_t navigation_id);
+  PerformanceEntry(double duration,
+                   const AtomicString& name,
+                   double start_time,
+                   uint32_t navigation_id);
+
   virtual void BuildJSONValue(V8ObjectBuilder&) const;
 
   // Protected and not const because PerformanceEventTiming needs to modify it.
@@ -124,6 +147,7 @@ class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
   const AtomicString name_;
   const double start_time_;
   const int index_;
+  const uint32_t navigation_id_;
 };
 
 }  // namespace blink

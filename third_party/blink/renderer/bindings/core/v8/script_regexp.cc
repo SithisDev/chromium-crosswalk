@@ -28,13 +28,17 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/script_regexp.h"
 
-#include "base/stl_util.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
+#include "third_party/blink/renderer/platform/bindings/string_resource.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 
 namespace blink {
+
+namespace {
+const uint32_t kBacktrackLimit = 1'000'000;
+}  // namespace
 
 ScriptRegexp::ScriptRegexp(const String& pattern,
                            TextCaseSensitivity case_sensitivity,
@@ -56,18 +60,20 @@ ScriptRegexp::ScriptRegexp(const String& pattern,
     flags |= v8::RegExp::kUnicode;
 
   v8::Local<v8::RegExp> regex;
-  if (v8::RegExp::New(context, V8String(isolate, pattern),
-                      static_cast<v8::RegExp::Flags>(flags))
+  if (v8::RegExp::NewWithBacktrackLimit(context, V8String(isolate, pattern),
+                                        static_cast<v8::RegExp::Flags>(flags),
+                                        kBacktrackLimit)
           .ToLocal(&regex))
-    regex_.Set(isolate, regex);
+    regex_.Reset(isolate, regex);
   if (try_catch.HasCaught() && !try_catch.Message().IsEmpty())
     exception_message_ =
         ToCoreStringWithUndefinedOrNullCheck(try_catch.Message()->Get());
 }
 
-int ScriptRegexp::Match(const String& string,
+int ScriptRegexp::Match(StringView string,
                         int start_from,
-                        int* match_length) const {
+                        int* match_length,
+                        WTF::Vector<String>* group_list) const {
   if (match_length)
     *match_length = 0;
 
@@ -87,17 +93,11 @@ int ScriptRegexp::Match(const String& string,
   v8::Context::Scope context_scope(context);
   v8::TryCatch try_catch(isolate);
 
-  v8::Local<v8::RegExp> regex = regex_.NewLocal(isolate);
-  v8::Local<v8::Value> exec;
-  if (!regex->Get(context, V8AtomicString(isolate, "exec")).ToLocal(&exec))
-    return -1;
-  v8::Local<v8::Value> argv[] = {
-      V8String(isolate, string.Substring(start_from))};
+  v8::Local<v8::RegExp> regex = regex_.Get(isolate);
+  v8::Local<v8::String> subject =
+      V8String(isolate, StringView(string, start_from));
   v8::Local<v8::Value> return_value;
-  if (!V8ScriptRunner::CallInternalFunction(isolate, nullptr,
-                                            exec.As<v8::Function>(), regex,
-                                            base::size(argv), argv)
-           .ToLocal(&return_value))
+  if (!regex->Exec(context, subject).ToLocal(&return_value))
     return -1;
 
   // RegExp#exec returns null if there's no match, otherwise it returns an
@@ -123,7 +123,26 @@ int ScriptRegexp::Match(const String& string,
     *match_length = match.As<v8::String>()->Length();
   }
 
+  if (group_list) {
+    DCHECK(group_list->IsEmpty());
+    for (uint32_t i = 1; i < result->Length(); ++i) {
+      v8::Local<v8::Value> group;
+      if (!result->Get(context, i).ToLocal(&group))
+        return -1;
+      String group_string;
+      if (group->IsString()) {
+        group_string =
+            ToBlinkString<String>(group.As<v8::String>(), kExternalize);
+      }
+      group_list->push_back(group_string);
+    }
+  }
+
   return match_offset.As<v8::Int32>()->Value() + start_from;
+}
+
+void ScriptRegexp::Trace(Visitor* visitor) const {
+  visitor->Trace(regex_);
 }
 
 }  // namespace blink

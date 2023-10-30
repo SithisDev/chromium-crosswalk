@@ -25,6 +25,7 @@
 
 #include "third_party/blink/renderer/modules/gamepad/gamepad.h"
 
+#include "base/trace_event/trace_event.h"
 #include "third_party/blink/renderer/core/timing/performance.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad_comparisons.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
@@ -34,7 +35,7 @@
 namespace blink {
 
 Gamepad::Gamepad(Client* client,
-                 unsigned index,
+                 int index,
                  base::TimeTicks time_origin,
                  base::TimeTicks time_floor)
     : client_(client),
@@ -42,7 +43,6 @@ Gamepad::Gamepad(Client* client,
       timestamp_(0.0),
       has_vibration_actuator_(false),
       vibration_actuator_type_(device::GamepadHapticActuatorType::kDualRumble),
-      display_id_(0),
       is_axis_data_dirty_(true),
       is_button_data_dirty_(true),
       time_origin_(time_origin),
@@ -54,7 +54,8 @@ Gamepad::Gamepad(Client* client,
 
 Gamepad::~Gamepad() = default;
 
-void Gamepad::UpdateFromDeviceState(const device::Gamepad& device_gamepad) {
+void Gamepad::UpdateFromDeviceState(const device::Gamepad& device_gamepad,
+                                    bool cross_origin_isolated_capability) {
   bool newly_connected;
   GamepadComparisons::HasGamepadConnectionChanged(
       connected(),                            // Old connected.
@@ -63,7 +64,7 @@ void Gamepad::UpdateFromDeviceState(const device::Gamepad& device_gamepad) {
       &newly_connected, nullptr);
 
   SetConnected(device_gamepad.connected);
-  SetTimestamp(device_gamepad);
+  SetTimestamp(device_gamepad, cross_origin_isolated_capability);
   SetAxes(device_gamepad.axes_length, device_gamepad.axes);
   SetButtons(device_gamepad.buttons_length, device_gamepad.buttons);
   // Always called as gamepads require additional steps to determine haptics
@@ -71,21 +72,11 @@ void Gamepad::UpdateFromDeviceState(const device::Gamepad& device_gamepad) {
   // also simpler than logic to conditionally call.
   SetVibrationActuatorInfo(device_gamepad.vibration_actuator);
 
-  if (device_gamepad.is_xr) {
-    SetPose(device_gamepad.pose);
-    SetHand(device_gamepad.hand);
-  }
-
   // These fields are not expected to change and will only be written when the
   // gamepad is newly connected.
   if (newly_connected) {
     SetId(device_gamepad.id);
     SetMapping(device_gamepad.mapping);
-
-    if (device_gamepad.is_xr && device_gamepad.display_id) {
-      // Re-map display ids, since we will hand out at most one VRDisplay.
-      SetDisplayId(1);
-    }
   }
 }
 
@@ -157,46 +148,18 @@ void Gamepad::SetVibrationActuatorInfo(
   vibration_actuator_type_ = actuator.type;
 }
 
-void Gamepad::SetPose(const device::GamepadPose& pose) {
-  if (!pose.not_null) {
-    if (pose_)
-      pose_ = nullptr;
-    return;
-  }
-
-  if (!pose_)
-    pose_ = MakeGarbageCollected<GamepadPose>();
-
-  pose_->SetPose(pose);
-}
-
-void Gamepad::SetHand(const device::GamepadHand& hand) {
-  switch (hand) {
-    case device::GamepadHand::kNone:
-      hand_ = "";
-      break;
-    case device::GamepadHand::kLeft:
-      hand_ = "left";
-      break;
-    case device::GamepadHand::kRight:
-      hand_ = "right";
-      break;
-    default:
-      NOTREACHED();
-  }
-}
-
 // Convert the raw timestamp from the device to a relative one and apply the
 // floor.
-void Gamepad::SetTimestamp(const device::Gamepad& device_gamepad) {
+void Gamepad::SetTimestamp(const device::Gamepad& device_gamepad,
+                           bool cross_origin_isolated_capability) {
   base::TimeTicks last_updated =
-      base::TimeTicks() +
-      base::TimeDelta::FromMicroseconds(device_gamepad.timestamp);
+      base::TimeTicks() + base::Microseconds(device_gamepad.timestamp);
   if (last_updated < time_floor_)
     last_updated = time_floor_;
 
   timestamp_ = Performance::MonotonicTimeToDOMHighResTimeStamp(
-      time_origin_, last_updated, false);
+      time_origin_, last_updated, /*allow_negative_value=*/false,
+      cross_origin_isolated_capability);
 
   if (device_gamepad.is_xr) {
     base::TimeTicks now = base::TimeTicks::Now();
@@ -205,10 +168,9 @@ void Gamepad::SetTimestamp(const device::Gamepad& device_gamepad) {
   }
 }
 
-void Gamepad::Trace(blink::Visitor* visitor) {
+void Gamepad::Trace(Visitor* visitor) const {
   visitor->Trace(client_);
   visitor->Trace(buttons_);
-  visitor->Trace(pose_);
   ScriptWrappable::Trace(visitor);
 }
 

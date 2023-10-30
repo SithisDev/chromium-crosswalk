@@ -5,19 +5,35 @@
 #include "third_party/blink/renderer/core/css/properties/longhands/custom_property.h"
 
 #include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_local_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
 #include "third_party/blink/renderer/core/css/property_registration.h"
 #include "third_party/blink/renderer/core/css/property_registry.h"
 #include "third_party/blink/renderer/core/css/resolver/style_builder_converter.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
-CustomProperty::CustomProperty(const AtomicString& name,
-                               const Document& document)
-    : CustomProperty(name, PropertyRegistration::From(&document, name)) {}
+namespace {
+
+CSSProperty::Flags InheritedFlag(const PropertyRegistration* registration) {
+  if (!registration || registration->Inherits())
+    return CSSProperty::kInherited;
+  return 0;
+}
+
+}  // namespace
+
+CustomProperty::CustomProperty(AtomicString name, const Document& document)
+    : CustomProperty(
+          PropertyRegistration::From(document.GetExecutionContext(), name)) {
+  // Initializing `name_` on the body prevents `name` to be used after the
+  // std::move call.
+  name_ = std::move(name);
+  DCHECK_EQ(IsShorthand(), CSSProperty::IsShorthand(GetCSSPropertyName()));
+  DCHECK_EQ(IsRepeated(), CSSProperty::IsRepeated(GetCSSPropertyName()));
+}
 
 CustomProperty::CustomProperty(const AtomicString& name,
                                const PropertyRegistry* registry)
@@ -25,9 +41,15 @@ CustomProperty::CustomProperty(const AtomicString& name,
 
 CustomProperty::CustomProperty(const AtomicString& name,
                                const PropertyRegistration* registration)
-    : Variable(!registration || registration->Inherits()),
+    : Variable(InheritedFlag(registration)),
       name_(name),
-      registration_(registration) {}
+      registration_(registration) {
+  DCHECK_EQ(IsShorthand(), CSSProperty::IsShorthand(GetCSSPropertyName()));
+  DCHECK_EQ(IsRepeated(), CSSProperty::IsRepeated(GetCSSPropertyName()));
+}
+
+CustomProperty::CustomProperty(const PropertyRegistration* registration)
+    : Variable(InheritedFlag(registration)), registration_(registration) {}
 
 const AtomicString& CustomProperty::GetPropertyNameAtomicString() const {
   return name_;
@@ -35,6 +57,12 @@ const AtomicString& CustomProperty::GetPropertyNameAtomicString() const {
 
 CSSPropertyName CustomProperty::GetCSSPropertyName() const {
   return CSSPropertyName(name_);
+}
+
+bool CustomProperty::HasEqualCSSPropertyName(const CSSProperty& other) const {
+  if (PropertyID() != other.PropertyID())
+    return false;
+  return name_ == other.GetPropertyNameAtomicString();
 }
 
 void CustomProperty::ApplyInitial(StyleResolverState& state) const {
@@ -45,10 +73,22 @@ void CustomProperty::ApplyInitial(StyleResolverState& state) const {
     return;
   }
 
-  state.Style()->SetVariableData(name_, registration_->InitialVariableData(),
+  // TODO(crbug.com/831568): The ComputedStyle of elements outside the flat
+  // tree is not guaranteed to be up-to-date. This means that the
+  // StyleInitialData may also be missing. We just disable initial values in
+  // this case, since we shouldn't really be returning a style for those
+  // elements anyway.
+  if (state.StyleRef().IsEnsuredOutsideFlatTree())
+    return;
+
+  const StyleInitialData* initial_data = state.StyleRef().InitialData().get();
+  DCHECK(initial_data);
+  CSSVariableData* initial_variable_data = initial_data->GetVariableData(name_);
+  const CSSValue* initial_value = initial_data->GetVariableValue(name_);
+
+  state.Style()->SetVariableData(name_, initial_variable_data,
                                  is_inherited_property);
-  state.Style()->SetVariableValue(name_, registration_->Initial(),
-                                  is_inherited_property);
+  state.Style()->SetVariableValue(name_, initial_value, is_inherited_property);
 }
 
 void CustomProperty::ApplyInherit(StyleResolverState& state) const {
@@ -68,7 +108,10 @@ void CustomProperty::ApplyInherit(StyleResolverState& state) const {
 void CustomProperty::ApplyValue(StyleResolverState& state,
                                 const CSSValue& value) const {
   if (value.IsInvalidVariableValue()) {
-    DCHECK(RuntimeEnabledFeatures::CSSCascadeEnabled());
+    if (!SupportsGuaranteedInvalid()) {
+      ApplyUnset(state);
+      return;
+    }
     state.Style()->SetVariableData(name_, nullptr, IsInherited());
     if (registration_)
       state.Style()->SetVariableValue(name_, nullptr, IsInherited());
@@ -77,6 +120,7 @@ void CustomProperty::ApplyValue(StyleResolverState& state,
 
   const auto& declaration = To<CSSCustomPropertyDeclaration>(value);
 
+  DCHECK(!value.IsRevertValue());
   bool is_inherited_property = IsInherited();
   bool initial = declaration.IsInitial(is_inherited_property);
   bool inherit = declaration.IsInherit(is_inherited_property);
@@ -89,14 +133,6 @@ void CustomProperty::ApplyValue(StyleResolverState& state,
   } else if (inherit) {
     ApplyInherit(state);
   } else {
-    if (!RuntimeEnabledFeatures::CSSCascadeEnabled()) {
-      state.Style()->SetVariableData(name_, declaration.Value(),
-                                     is_inherited_property);
-      if (registration_)
-        state.Style()->SetVariableValue(name_, nullptr, is_inherited_property);
-      return;
-    }
-
     scoped_refptr<CSSVariableData> data = declaration.Value();
     DCHECK(!data->NeedsVariableResolution());
 
@@ -105,8 +141,8 @@ void CustomProperty::ApplyValue(StyleResolverState& state,
     if (registration_) {
       // TODO(andruud): Store CSSParserContext on CSSCustomPropertyDeclaration
       // and use that.
-      const CSSParserContext* context =
-          StrictCSSParserContext(state.GetDocument().GetSecureContextMode());
+      const CSSParserContext* context = StrictCSSParserContext(
+          state.GetDocument().GetExecutionContext()->GetSecureContextMode());
       auto mode = CSSParserLocalContext::VariableMode::kTyped;
       auto local_context = CSSParserLocalContext().WithVariableMode(mode);
       CSSParserTokenRange range = data->TokenRange();
@@ -152,9 +188,7 @@ const CSSValue* CustomProperty::ParseSingleValue(
 
 const CSSValue* CustomProperty::CSSValueFromComputedStyleInternal(
     const ComputedStyle& style,
-    const SVGComputedStyle&,
     const LayoutObject*,
-    const Node*,
     bool allow_visited_style) const {
   if (registration_) {
     const CSSValue* value = style.GetVariableValue(name_, IsInherited());
@@ -170,15 +204,16 @@ const CSSValue* CustomProperty::CSSValueFromComputedStyleInternal(
   if (!data)
     return nullptr;
 
-  return MakeGarbageCollected<CSSCustomPropertyDeclaration>(name_, data);
+  return MakeGarbageCollected<CSSCustomPropertyDeclaration>(data);
 }
 
 const CSSValue* CustomProperty::ParseUntyped(
     CSSParserTokenRange range,
     const CSSParserContext& context,
     const CSSParserLocalContext& local_context) const {
+  // TODO(crbug.com/661854): Pass through the original string when we have it.
   return CSSVariableParser::ParseDeclarationValue(
-      name_, range, local_context.IsAnimationTainted(), context);
+      {range, StringView()}, local_context.IsAnimationTainted(), context);
 }
 
 const CSSValue* CustomProperty::ParseTyped(
@@ -187,8 +222,18 @@ const CSSValue* CustomProperty::ParseTyped(
     const CSSParserLocalContext& local_context) const {
   if (!registration_)
     return ParseUntyped(range, context, local_context);
-  return registration_->Syntax().Parse(range, &context,
+  return registration_->Syntax().Parse(range, context,
                                        local_context.IsAnimationTainted());
+}
+
+bool CustomProperty::HasInitialValue() const {
+  if (!registration_)
+    return false;
+  return registration_->Initial();
+}
+
+bool CustomProperty::SupportsGuaranteedInvalid() const {
+  return !registration_ || registration_->Syntax().IsUniversal();
 }
 
 }  // namespace blink

@@ -32,26 +32,28 @@
 
 #include "third_party/blink/renderer/core/dom/events/event_listener_map.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_event_listener_options.h"
+#include "third_party/blink/renderer/core/dom/events/add_event_listener_options_resolved.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 #if DCHECK_IS_ON()
+#include "base/synchronization/lock.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
-#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 #endif
 
 namespace blink {
 
 #if DCHECK_IS_ON()
-static Mutex& ActiveIteratorCountMutex() {
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, mutex, ());
-  return mutex;
+static base::Lock& ActiveIteratorCountLock() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(base::Lock, lock, ());
+  return lock;
 }
 
 void EventListenerMap::CheckNoActiveIterators() {
-  MutexLocker locker(ActiveIteratorCountMutex());
+  base::AutoLock locker(ActiveIteratorCountLock());
   DCHECK(!active_iterator_count_);
 }
 #endif
@@ -71,6 +73,21 @@ bool EventListenerMap::ContainsCapturing(const AtomicString& event_type) const {
     if (entry.first == event_type) {
       for (const auto& event_listener : *entry.second) {
         if (event_listener.Capture())
+          return true;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
+bool EventListenerMap::ContainsJSBasedEventListeners(
+    const AtomicString& event_type) const {
+  for (const auto& entry : entries_) {
+    if (entry.first == event_type) {
+      for (const auto& event_listener : *entry.second) {
+        const EventListener* callback = event_listener.Callback();
+        if (callback && callback->IsJSBasedEventListener())
           return true;
       }
       return false;
@@ -207,7 +224,7 @@ void EventListenerMap::CopyEventListenersNotCreatedFromMarkupToTarget(
   }
 }
 
-void EventListenerMap::Trace(Visitor* visitor) {
+void EventListenerMap::Trace(Visitor* visitor) const {
   visitor->Trace(entries_);
 }
 

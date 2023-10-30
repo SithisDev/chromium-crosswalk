@@ -5,12 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_LONG_TASK_DETECTOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_LONG_TASK_DETECTOR_H_
 
-#include "base/macros.h"
 #include "base/task/sequence_manager/task_time_observer.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
-#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -28,20 +28,21 @@ class CORE_EXPORT LongTaskObserver : public GarbageCollectedMixin {
 // of LongTaskObservers drop to zero it automatically removes itself as a
 // TaskTimeObserver.
 class CORE_EXPORT LongTaskDetector final
-    : public GarbageCollectedFinalized<LongTaskDetector>,
+    : public GarbageCollected<LongTaskDetector>,
       public base::sequence_manager::TaskTimeObserver {
  public:
   static LongTaskDetector& Instance();
 
   LongTaskDetector();
+  LongTaskDetector(const LongTaskDetector&) = delete;
+  LongTaskDetector& operator=(const LongTaskDetector&) = delete;
 
   void RegisterObserver(LongTaskObserver*);
   void UnregisterObserver(LongTaskObserver*);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
-  static constexpr base::TimeDelta kLongTaskThreshold =
-      base::TimeDelta::FromMilliseconds(50);
+  static constexpr base::TimeDelta kLongTaskThreshold = base::Milliseconds(50);
 
  private:
   // scheduler::TaskTimeObserver implementation
@@ -50,8 +51,8 @@ class CORE_EXPORT LongTaskDetector final
                       base::TimeTicks end_time) override;
 
   HeapHashSet<Member<LongTaskObserver>> observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(LongTaskDetector);
+  HeapVector<Member<LongTaskObserver>> observers_to_be_removed_;
+  bool iterating_ = false;
 };
 
 }  // namespace blink

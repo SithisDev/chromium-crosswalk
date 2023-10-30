@@ -33,7 +33,8 @@
 
 #include "third_party/blink/renderer/core/svg/properties/svg_property.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -61,9 +62,10 @@ class SVGPropertyTearOffBase : public ScriptWrappable {
 
   void Bind(SVGAnimatedPropertyBase* binding);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   static void ThrowReadOnly(ExceptionState&);
+  static void ThrowIndexSize(ExceptionState&, uint32_t, uint32_t);
 
  protected:
   SVGPropertyTearOffBase(SVGAnimatedPropertyBase* binding,
@@ -90,7 +92,7 @@ class SVGPropertyTearOff : public SVGPropertyTearOffBase {
 
   void SetTarget(Property* target) { target_ = target; }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(target_);
     SVGPropertyTearOffBase::Trace(visitor);
   }

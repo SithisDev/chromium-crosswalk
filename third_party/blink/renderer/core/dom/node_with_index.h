@@ -26,8 +26,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_WITH_INDEX_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_WITH_INDEX_H_
 
+#include "base/check_op.h"
 #include "third_party/blink/renderer/core/dom/node.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -37,7 +38,7 @@ class NodeWithIndex {
   STACK_ALLOCATED();
 
  public:
-  explicit NodeWithIndex(Node& node) : node_(node), index_(-1) {}
+  explicit NodeWithIndex(Node& node) : node_(&node), index_(-1) {}
 
   Node& GetNode() const { return *node_; }
 
@@ -53,10 +54,10 @@ class NodeWithIndex {
  private:
   bool HasIndex() const { return index_ >= 0; }
 
-  Member<Node> node_;
+  Node* node_;
   mutable int index_;
 };
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_DOM_NODE_WITH_INDEX_H_

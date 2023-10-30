@@ -43,17 +43,19 @@ class LayoutThemeMobile : public LayoutThemeDefault {
     return LayoutThemeMobile::kDefaultTapHighlightColor;
   }
 
-  Color PlatformActiveSelectionBackgroundColor() const override {
+  Color PlatformActiveSelectionBackgroundColor(
+      mojom::blink::ColorScheme color_scheme) const override {
     return LayoutThemeMobile::kDefaultActiveSelectionBackgroundColor;
   }
 
  protected:
   ~LayoutThemeMobile() override;
-  bool ShouldUseFallbackTheme(const ComputedStyle&) const override;
 
  private:
-  static const RGBA32 kDefaultTapHighlightColor = 0x6633b5e5;
-  static const RGBA32 kDefaultActiveSelectionBackgroundColor = 0x6633b5e5;
+  static constexpr Color kDefaultTapHighlightColor =
+      Color::FromRGBA32(0x6633b5e5);
+  static constexpr Color kDefaultActiveSelectionBackgroundColor =
+      Color::FromRGBA32(0x6633b5e5);
 };
 
 }  // namespace blink

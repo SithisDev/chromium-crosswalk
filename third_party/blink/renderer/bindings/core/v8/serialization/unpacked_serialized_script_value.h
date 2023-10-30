@@ -8,10 +8,8 @@
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
-#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
@@ -35,14 +33,14 @@ class ImageBitmap;
 // but (for security reasons) separate JavaScript wrappers must exist. For this
 // reason, a SerializedScriptValue can only be unpacked once, but thereafter it
 // can be deserialized multiple times.
-class CORE_EXPORT UnpackedSerializedScriptValue
-    : public GarbageCollectedFinalized<UnpackedSerializedScriptValue> {
+class CORE_EXPORT UnpackedSerializedScriptValue final
+    : public GarbageCollected<UnpackedSerializedScriptValue> {
  public:
   // Callers should use SerializedScriptValue::Unpack.
   explicit UnpackedSerializedScriptValue(scoped_refptr<SerializedScriptValue>);
   ~UnpackedSerializedScriptValue();
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
   SerializedScriptValue* Value() { return value_.get(); }
   const SerializedScriptValue* Value() const { return value_.get(); }

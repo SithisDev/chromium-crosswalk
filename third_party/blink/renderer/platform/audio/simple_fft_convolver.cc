@@ -8,7 +8,7 @@
 namespace blink {
 
 SimpleFFTConvolver::SimpleFFTConvolver(
-    size_t input_block_size,
+    unsigned input_block_size,
     const std::unique_ptr<AudioFloatArray>& convolution_kernel)
     : convolution_kernel_size_(convolution_kernel->size()),
       fft_kernel_(2 * input_block_size),
@@ -27,14 +27,12 @@ SimpleFFTConvolver::SimpleFFTConvolver(
 void SimpleFFTConvolver::Process(const float* source_p,
                                  float* dest_p,
                                  uint32_t frames_to_process) {
-  size_t half_size = FftSize() / 2;
+  unsigned half_size = FftSize() / 2;
 
   // frames_to_process must be exactly half_size.
   DCHECK(source_p);
   DCHECK(dest_p);
   DCHECK_EQ(frames_to_process, half_size);
-  if (!(source_p && dest_p && frames_to_process == half_size))
-    return;
 
   // Do padded FFT (get frequency-domain version) by copying samples to the 1st
   // half of the input buffer (the second half is always zero), multiply in

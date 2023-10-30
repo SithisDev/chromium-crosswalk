@@ -5,11 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_INVALIDATION_STYLE_INVALIDATOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_INVALIDATION_STYLE_INVALIDATOR_H_
 
-#include <memory>
-
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/invalidation/invalidation_flags.h"
 #include "third_party/blink/renderer/core/css/invalidation/pending_invalidations.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -53,7 +52,8 @@ class CORE_EXPORT StyleInvalidator {
   bool MatchesCurrentInvalidationSetsAsParts(Element&) const;
 
   bool HasInvalidationSets() const {
-    return !WholeSubtreeInvalid() && invalidation_sets_.size();
+    return !WholeSubtreeInvalid() &&
+           (invalidation_sets_.size() || pending_nth_sets_.size());
   }
 
   void SetWholeSubtreeInvalid() {
@@ -73,9 +73,24 @@ class CORE_EXPORT StyleInvalidator {
     return invalidation_flags_.InvalidatesParts();
   }
 
+  void AddPendingNthSiblingInvalidationSet(
+      const NthSiblingInvalidationSet& nth_set) {
+    pending_nth_sets_.push_back(&nth_set);
+  }
+  void PushNthSiblingInvalidationSets(SiblingData& sibling_data) {
+    for (const auto* invalidation_set : pending_nth_sets_)
+      sibling_data.PushInvalidationSet(*invalidation_set);
+    ClearPendingNthSiblingInvalidationSets();
+  }
+  void ClearPendingNthSiblingInvalidationSets() { pending_nth_sets_.resize(0); }
+
   PendingInvalidationMap& pending_invalidation_map_;
   using DescendantInvalidationSets = Vector<const InvalidationSet*, 16>;
   DescendantInvalidationSets invalidation_sets_;
+  // NthSiblingInvalidationSets are added here from the parent node on which it
+  // is scheduled, and pushed to SiblingData before invalidating the children.
+  // See the NthSiblingInvalidationSet documentation.
+  Vector<const NthSiblingInvalidationSet*> pending_nth_sets_;
   InvalidationFlags invalidation_flags_;
 
   class SiblingData {

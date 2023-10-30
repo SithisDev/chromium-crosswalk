@@ -2,18 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-typedef (WebGLRenderingContext or WebGL2RenderingContext) XRWebGLRenderingContext;
-
 // https://immersive-web.github.io/webxr/#xrwebgllayer-interface
 [
     SecureContext,
     Exposed=Window,
-    RuntimeEnabled=WebXR,
-    Constructor(XRSession session, XRWebGLRenderingContext context, optional XRWebGLLayerInit layerInit),
-    RaisesException=Constructor,
-    Measure
+    RuntimeEnabled=WebXR
 ] interface XRWebGLLayer : XRLayer {
-  [SameObject, SaveSameObject, ImplementedAs=getXRWebGLRenderingContext] readonly attribute XRWebGLRenderingContext context;
+  [RaisesException, Measure] constructor(XRSession session, XRWebGLRenderingContext context, optional XRWebGLLayerInit layerInit = {});
   readonly attribute boolean antialias;
   readonly attribute boolean ignoreDepthValues;
 

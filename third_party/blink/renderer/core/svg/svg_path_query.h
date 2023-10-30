@@ -21,21 +21,25 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_PATH_QUERY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_SVG_PATH_QUERY_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+
+namespace gfx {
+class PointF;
+}
 
 namespace blink {
 
-class FloatPoint;
 class SVGPathByteStream;
 
-class SVGPathQuery {
+class CORE_EXPORT SVGPathQuery {
   STACK_ALLOCATED();
 
  public:
   explicit SVGPathQuery(const SVGPathByteStream&);
 
   float GetTotalLength() const;
-  FloatPoint GetPointAtLength(float length) const;
+  gfx::PointF GetPointAtLength(float length) const;
 
  private:
   const SVGPathByteStream& path_byte_stream_;

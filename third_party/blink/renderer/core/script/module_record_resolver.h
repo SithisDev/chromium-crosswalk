@@ -7,7 +7,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -23,10 +23,10 @@ class ModuleScript;
 // ModuleRecordResolver, given a referrer and specifier, can look up the
 // descendant.
 class CORE_EXPORT ModuleRecordResolver
-    : public GarbageCollectedFinalized<ModuleRecordResolver> {
+    : public GarbageCollected<ModuleRecordResolver> {
  public:
   virtual ~ModuleRecordResolver() = default;
-  virtual void Trace(Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 
   // Notifies the ModuleRecordResolver that a ModuleScript exists.
   // This hook gives a chance for the resolver impl to populate module record
@@ -37,14 +37,14 @@ class CORE_EXPORT ModuleRecordResolver
   virtual void UnregisterModuleScript(const ModuleScript*) = 0;
 
   virtual const ModuleScript* GetModuleScriptFromModuleRecord(
-      const ModuleRecord&) const = 0;
+      v8::Local<v8::Module>) const = 0;
 
   // Implements "Runtime Semantics: HostResolveImportedModule"
   // https://tc39.github.io/ecma262/#sec-hostresolveimportedmodule
   // This returns a null ModuleRecord when an exception is thrown.
-  virtual ModuleRecord Resolve(const String& specifier,
-                               const ModuleRecord& referrer,
-                               ExceptionState&) = 0;
+  virtual v8::Local<v8::Module> Resolve(const ModuleRequest& module_request,
+                                        v8::Local<v8::Module> referrer,
+                                        ExceptionState&) = 0;
 };
 
 }  // namespace blink

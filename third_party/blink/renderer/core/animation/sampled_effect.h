@@ -5,7 +5,6 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_SAMPLED_EFFECT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_SAMPLED_EFFECT_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/animation/animation.h"
 #include "third_party/blink/renderer/core/animation/interpolation.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect.h"
@@ -16,9 +15,11 @@ namespace blink {
 
 // Associates the results of sampling an EffectModel with metadata used for
 // effect ordering and managing composited animations.
-class SampledEffect : public GarbageCollectedFinalized<SampledEffect> {
+class SampledEffect final : public GarbageCollected<SampledEffect> {
  public:
   SampledEffect(KeyframeEffect*, unsigned sequence_number);
+  SampledEffect(const SampledEffect&) = delete;
+  SampledEffect& operator=(const SampledEffect&) = delete;
 
   void Clear();
 
@@ -36,14 +37,13 @@ class SampledEffect : public GarbageCollectedFinalized<SampledEffect> {
   void RemoveReplacedInterpolations(const HashSet<PropertyHandle>&);
   void UpdateReplacedProperties(HashSet<PropertyHandle>&);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   WeakMember<KeyframeEffect> effect_;
   HeapVector<Member<Interpolation>> interpolations_;
   const unsigned sequence_number_;
   KeyframeEffect::Priority priority_;
-  DISALLOW_COPY_AND_ASSIGN(SampledEffect);
 };
 
 }  // namespace blink

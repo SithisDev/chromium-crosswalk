@@ -7,7 +7,8 @@
 
 #include <memory>
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_codec.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -16,7 +17,7 @@
 namespace blink {
 
 class MODULES_EXPORT EventSourceParser final
-    : public GarbageCollectedFinalized<EventSourceParser> {
+    : public GarbageCollected<EventSourceParser> {
  public:
   class MODULES_EXPORT Client : public GarbageCollectedMixin {
    public:
@@ -25,7 +26,7 @@ class MODULES_EXPORT EventSourceParser final
                                 const String& data,
                                 const AtomicString& last_event_id) = 0;
     virtual void OnReconnectionTimeSet(uint64_t reconnection_time) = 0;
-    void Trace(blink::Visitor* visitor) override {}
+    void Trace(Visitor* visitor) const override {}
   };
 
   EventSourceParser(const AtomicString& last_event_id, Client*);
@@ -34,7 +35,7 @@ class MODULES_EXPORT EventSourceParser final
   const AtomicString& LastEventId() const { return last_event_id_; }
   // Stop parsing. This can be called from Client::onMessageEvent.
   void Stop() { is_stopped_ = true; }
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   void ParseLine();

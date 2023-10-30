@@ -4,8 +4,10 @@
 
 #include "third_party/blink/renderer/core/script/fetch_client_settings_object_impl.h"
 
+#include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -48,7 +50,7 @@ HttpsState FetchClientSettingsObjectImpl::GetHttpsState() const {
 
 AllowedByNosniff::MimeTypeCheck
 FetchClientSettingsObjectImpl::MimeTypeCheckForClassicWorkerScript() const {
-  if (execution_context_->IsDocument()) {
+  if (execution_context_->IsWindow()) {
     // For worker creation on a document, don't impose strict MIME-type checks
     // on the top-level worker script for backward compatibility. Note that
     // there is a plan to deprecate legacy mime types for workers. See
@@ -57,7 +59,7 @@ FetchClientSettingsObjectImpl::MimeTypeCheckForClassicWorkerScript() const {
     // For worker creation on a document with off-the-main-thread top-level
     // worker classic script loading, this value is propagated to
     // outsideSettings FCSO.
-    return AllowedByNosniff::MimeTypeCheck::kLax;
+    return AllowedByNosniff::MimeTypeCheck::kLaxForWorker;
   }
 
   // For importScripts() and nested worker top-level scripts impose the strict
@@ -67,11 +69,7 @@ FetchClientSettingsObjectImpl::MimeTypeCheckForClassicWorkerScript() const {
   return AllowedByNosniff::MimeTypeCheck::kStrict;
 }
 
-mojom::IPAddressSpace FetchClientSettingsObjectImpl::GetAddressSpace() const {
-  return execution_context_->GetSecurityContext().AddressSpace();
-}
-
-WebInsecureRequestPolicy
+mojom::blink::InsecureRequestPolicy
 FetchClientSettingsObjectImpl::GetInsecureRequestsPolicy() const {
   return execution_context_->GetSecurityContext().GetInsecureRequestPolicy();
 }
@@ -82,11 +80,7 @@ FetchClientSettingsObjectImpl::GetUpgradeInsecureNavigationsSet() const {
       .InsecureNavigationsToUpgrade();
 }
 
-bool FetchClientSettingsObjectImpl::GetMixedAutoUpgradeOptOut() const {
-  return execution_context_->GetSecurityContext().GetMixedAutoUpgradeOptOut();
-}
-
-void FetchClientSettingsObjectImpl::Trace(Visitor* visitor) {
+void FetchClientSettingsObjectImpl::Trace(Visitor* visitor) const {
   visitor->Trace(execution_context_);
   FetchClientSettingsObject::Trace(visitor);
 }

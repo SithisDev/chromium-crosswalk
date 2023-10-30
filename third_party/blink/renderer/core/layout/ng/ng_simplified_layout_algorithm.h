@@ -5,6 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_SIMPLIFIED_LAYOUT_ALGORITHM_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_NG_SIMPLIFIED_LAYOUT_ALGORITHM_H_
 
+#include "base/notreached.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_algorithm.h"
 
 #include "third_party/blink/renderer/core/layout/ng/ng_block_break_token.h"
@@ -14,7 +16,7 @@ namespace blink {
 
 class NGBlockBreakToken;
 struct NGLink;
-class NGPhysicalContainerFragment;
+class NGPhysicalFragment;
 
 // The "simplified" layout algorithm will run in the following circumstances:
 //  - An OOF-positioned descendant of this node (this node is its containing
@@ -40,27 +42,42 @@ class CORE_EXPORT NGSimplifiedLayoutAlgorithm
                                NGBlockBreakToken> {
  public:
   NGSimplifiedLayoutAlgorithm(const NGLayoutAlgorithmParams&,
-                              const NGLayoutResult&);
+                              const NGLayoutResult&,
+                              bool keep_old_size = false);
 
-  scoped_refptr<const NGLayoutResult> Layout() override;
+  // Perform a simple copy of all children of the old fragment.
+  void CloneOldChildren();
+
+  void AppendNewChildFragment(const NGPhysicalFragment&, LogicalOffset);
+
+  // Just create a new layout result based on the current builder state. To be
+  // used after CloneOldChildren() / AppendNewChildFragment().
+  const NGLayoutResult* CreateResultAfterManualChildLayout();
+
+  // Attempt to perform simplified layout on all children and return a new
+  // result. If nullptr is returned, it means that simplified layout isn't
+  // possible.
+  const NGLayoutResult* Layout() override;
+
+  MinMaxSizesResult ComputeMinMaxSizes(const MinMaxSizesFloatInput&) override {
+    NOTREACHED();
+    return MinMaxSizesResult();
+  }
+
+  NOINLINE const NGLayoutResult* LayoutWithItemsBuilder();
 
  private:
-  void HandleOutOfFlowPositioned(const NGBlockNode&);
-
   void AddChildFragment(const NGLink& old_fragment,
-                        const NGPhysicalContainerFragment& new_fragment);
+                        const NGPhysicalFragment& new_fragment,
+                        const NGMarginStrut* margin_strut = nullptr,
+                        bool is_self_collapsing = false);
 
   const NGLayoutResult& previous_result_;
-  const NGBoxStrut border_scrollbar_padding_;
+  NGBoxStrut border_scrollbar_padding_;
 
-  const WritingMode writing_mode_;
-  const TextDirection direction_;
+  const WritingDirectionMode writing_direction_;
 
-  LayoutUnit child_available_inline_size_;
   PhysicalSize previous_physical_container_size_;
-
-  LayoutUnit static_block_offset_;
-  NGExclusionSpace exclusion_space_;
 };
 
 }  // namespace blink

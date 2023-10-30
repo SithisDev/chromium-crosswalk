@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_internals.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_test_sequence_callback.h"
+#include "third_party/blink/renderer/core/testing/internals.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -44,17 +45,6 @@ TEST(NativeValueTraitsImplTest, IDLInterface) {
   EXPECT_EQ("Failed to convert value to 'Internals'.",
             exception_state.Message());
   EXPECT_EQ(nullptr, internals);
-}
-
-TEST(NativeValueTraitsImplTest, IDLCallbackFunction) {
-  V8TestingScope scope;
-  DummyExceptionStateForTesting exception_state;
-  v8::Local<v8::Function> function =
-      v8::Function::New(scope.GetContext(), nullptr).ToLocalChecked();
-  ASSERT_DEATH_IF_SUPPORTED(
-      NativeValueTraits<V8TestSequenceCallback>::NativeValue(
-          scope.GetIsolate(), function, exception_state),
-      "");
 }
 
 TEST(NativeValueTraitsImplTest, IDLRecord) {
@@ -98,7 +88,7 @@ TEST(NativeValueTraitsImplTest, IDLRecord) {
   }
   {
     // Exceptions are being thrown in this test, so we need another scope.
-    V8TestingScope scope;
+    V8TestingScope scope2;
     v8::Local<v8::Object> original_object = EvaluateScriptForObject(
         scope, "(self.originalObject = {foo: 34, bar: 42})");
 
@@ -259,8 +249,8 @@ TEST(NativeValueTraitsImplTest, IDLSequence) {
         EvaluateScriptForArray(scope, "['Vini, vidi, vici.', 65535, 0.125]");
 
     NonThrowableExceptionState exception_state;
-    Vector<ScriptValue> script_value_vector =
-        NativeValueTraits<IDLSequence<ScriptValue>>::NativeValue(
+    HeapVector<ScriptValue> script_value_vector =
+        NativeValueTraits<IDLSequence<IDLAny>>::NativeValue(
             scope.GetIsolate(), v8_array, exception_state);
     EXPECT_EQ(3U, script_value_vector.size());
     String report_on_zela;

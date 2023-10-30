@@ -5,11 +5,12 @@
 #include "third_party/blink/renderer/core/streams/readable_stream_default_controller.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/core/streams/miscellaneous_operations.h"
 #include "third_party/blink/renderer/core/streams/promise_handler.h"
 #include "third_party/blink/renderer/core/streams/queue_with_sizes.h"
-#include "third_party/blink/renderer/core/streams/readable_stream_native.h"
-#include "third_party/blink/renderer/core/streams/readable_stream_reader.h"
+#include "third_party/blink/renderer/core/streams/readable_stream.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_default_reader.h"
 #include "third_party/blink/renderer/core/streams/stream_algorithms.h"
 #include "third_party/blink/renderer/core/streams/stream_promise_resolver.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
@@ -23,14 +24,6 @@ namespace blink {
 ReadableStreamDefaultController::ReadableStreamDefaultController()
     : queue_(MakeGarbageCollected<QueueWithSizes>()) {}
 
-double ReadableStreamDefaultController::desiredSize(bool& is_null) const {
-  // https://streams.spec.whatwg.org/#rs-default-controller-desired-size
-  // 2. Return ! ReadableStreamDefaultControllerGetDesiredSize(this).
-  base::Optional<double> desired_size = GetDesiredSize();
-  is_null = !desired_size.has_value();
-  return is_null ? 0.0 : desired_size.value();
-}
-
 void ReadableStreamDefaultController::close(ScriptState* script_state,
                                             ExceptionState& exception_state) {
   // https://streams.spec.whatwg.org/#rs-default-controller-close
@@ -39,18 +32,18 @@ void ReadableStreamDefaultController::close(ScriptState* script_state,
   if (!CanCloseOrEnqueue(this)) {
     // The following code is just to provide a nice exception message.
     const char* errorDescription = nullptr;
-    if (this->is_close_requested_) {
+    if (is_close_requested_) {
       errorDescription =
           "Cannot close a readable stream that has already been requested to "
           "be closed";
     } else {
-      const ReadableStreamNative* stream = this->controlled_readable_stream_;
+      const ReadableStream* stream = controlled_readable_stream_;
       switch (stream->state_) {
-        case ReadableStreamNative::kErrored:
+        case ReadableStream::kErrored:
           errorDescription = "Cannot close an errored readable stream";
           break;
 
-        case ReadableStreamNative::kClosed:
+        case ReadableStream::kClosed:
           errorDescription = "Cannot close an errored readable stream";
           break;
 
@@ -70,7 +63,8 @@ void ReadableStreamDefaultController::close(ScriptState* script_state,
 void ReadableStreamDefaultController::enqueue(ScriptState* script_state,
                                               ExceptionState& exception_state) {
   enqueue(script_state,
-          ScriptValue(script_state, v8::Undefined(script_state->GetIsolate())),
+          ScriptValue(script_state->GetIsolate(),
+                      v8::Undefined(script_state->GetIsolate())),
           exception_state);
 }
 
@@ -90,8 +84,8 @@ void ReadableStreamDefaultController::enqueue(ScriptState* script_state,
 }
 
 void ReadableStreamDefaultController::error(ScriptState* script_state) {
-  error(script_state,
-        ScriptValue(script_state, v8::Undefined(script_state->GetIsolate())));
+  error(script_state, ScriptValue(script_state->GetIsolate(),
+                                  v8::Undefined(script_state->GetIsolate())));
 }
 
 void ReadableStreamDefaultController::error(ScriptState* script_state,
@@ -106,11 +100,11 @@ void ReadableStreamDefaultController::Close(
     ReadableStreamDefaultController* controller) {
   // https://streams.spec.whatwg.org/#readable-stream-default-controller-close
   // 1. Let stream be controller.[[controlledReadableStream]].
-  ReadableStreamNative* stream = controller->controlled_readable_stream_;
+  ReadableStream* stream = controller->controlled_readable_stream_;
 
   // 2. Assert: ! ReadableStreamDefaultControllerCanCloseOrEnqueue(controller)
   //    is true.
-  DCHECK(CanCloseOrEnqueue(controller));
+  CHECK(CanCloseOrEnqueue(controller));
 
   // 3. Set controller.[[closeRequested]] to true.
   controller->is_close_requested_ = true;
@@ -121,7 +115,7 @@ void ReadableStreamDefaultController::Close(
     ClearAlgorithms(controller);
 
     // b. Perform ! ReadableStreamClose(stream).
-    ReadableStreamNative::Close(script_state, stream);
+    ReadableStream::Close(script_state, stream);
   }
 }
 
@@ -136,21 +130,20 @@ void ReadableStreamDefaultController::Enqueue(
 
   // 2. Assert: ! ReadableStreamDefaultControllerCanCloseOrEnqueue(controller)
   //    is true.
-  DCHECK(CanCloseOrEnqueue(controller));
+  CHECK(CanCloseOrEnqueue(controller));
 
   // 3. If ! IsReadableStreamLocked(stream) is true and !
   //    ReadableStreamGetNumReadRequests(stream) > 0, perform !
   //    ReadableStreamFulfillReadRequest(stream, chunk, false).
-  if (ReadableStreamNative::IsLocked(stream) &&
-      ReadableStreamNative::GetNumReadRequests(stream) > 0) {
-    ReadableStreamNative::FulfillReadRequest(script_state, stream, chunk,
-                                             false);
+  if (ReadableStream::IsLocked(stream) &&
+      ReadableStream::GetNumReadRequests(stream) > 0) {
+    ReadableStream::FulfillReadRequest(script_state, stream, chunk, false);
   } else {
     // 4. Otherwise,
     //   a. Let result be the result of performing controller.
     //      [[strategySizeAlgorithm]], passing in chunk, and interpreting the
     //      result as an ECMAScript completion value.
-    base::Optional<double> chunk_size =
+    absl::optional<double> chunk_size =
         controller->strategy_size_algorithm_->Run(script_state, chunk,
                                                   exception_state);
 
@@ -190,10 +183,10 @@ void ReadableStreamDefaultController::Error(
     v8::Local<v8::Value> e) {
   // https://streams.spec.whatwg.org/#readable-stream-default-controller-error
   // 1. Let stream be controller.[[controlledReadableStream]].
-  ReadableStreamNative* stream = controller->controlled_readable_stream_;
+  ReadableStream* stream = controller->controlled_readable_stream_;
 
   // 2. If stream.[[state]] is not "readable", return.
-  if (stream->state_ != ReadableStreamNative::kReadable) {
+  if (stream->state_ != ReadableStream::kReadable) {
     return;
   }
 
@@ -204,23 +197,23 @@ void ReadableStreamDefaultController::Error(
   ClearAlgorithms(controller);
 
   // 5. Perform ! ReadableStreamError(stream, e).
-  ReadableStreamNative::Error(script_state, stream, e);
+  ReadableStream::Error(script_state, stream, e);
 }
 
 // This is an instance method rather than the static function in the standard,
 // so |this| is |controller|.
-base::Optional<double> ReadableStreamDefaultController::GetDesiredSize() const {
+absl::optional<double> ReadableStreamDefaultController::GetDesiredSize() const {
   // https://streams.spec.whatwg.org/#readable-stream-default-controller-get-desired-size
   switch (controlled_readable_stream_->state_) {
     // 3. If state is "errored", return null.
-    case ReadableStreamNative::kErrored:
-      return base::nullopt;
+    case ReadableStream::kErrored:
+      return absl::nullopt;
 
     // 4. If state is "closed", return 0.
-    case ReadableStreamNative::kClosed:
+    case ReadableStream::kClosed:
       return 0.0;
 
-    case ReadableStreamNative::kReadable:
+    case ReadableStream::kReadable:
       // 5. Return controller.[[strategyHWM]] − controller.[[queueTotalSize]].
       return strategy_high_water_mark_ - queue_->TotalSize();
   }
@@ -235,8 +228,7 @@ bool ReadableStreamDefaultController::CanCloseOrEnqueue(
   // 2. If controller.[[closeRequested]] is false and state is "readable",
   //    return true.
   // 3. Otherwise, return false.
-  return !controller->is_close_requested_ &&
-         state == ReadableStreamNative::kReadable;
+  return !controller->is_close_requested_ && state == ReadableStream::kReadable;
 }
 
 bool ReadableStreamDefaultController::HasBackpressure(
@@ -256,16 +248,16 @@ const char* ReadableStreamDefaultController::EnqueueExceptionMessage(
            "has been requested to be closed";
   }
 
-  const ReadableStreamNative* stream = controller->controlled_readable_stream_;
+  const ReadableStream* stream = controller->controlled_readable_stream_;
   const auto state = stream->state_;
-  if (state == ReadableStreamNative::kErrored) {
+  if (state == ReadableStream::kErrored) {
     return "Cannot enqueue a chunk into an errored readable stream";
   }
-  DCHECK(state == ReadableStreamNative::kClosed);
+  CHECK(state == ReadableStream::kClosed);
   return "Cannot enqueue a chunk into a closed readable stream";
 }
 
-void ReadableStreamDefaultController::Trace(Visitor* visitor) {
+void ReadableStreamDefaultController::Trace(Visitor* visitor) const {
   visitor->Trace(cancel_algorithm_);
   visitor->Trace(controlled_readable_stream_);
   visitor->Trace(pull_algorithm_);
@@ -299,8 +291,8 @@ v8::Local<v8::Promise> ReadableStreamDefaultController::CancelSteps(
 StreamPromiseResolver* ReadableStreamDefaultController::PullSteps(
     ScriptState* script_state) {
   // https://streams.spec.whatwg.org/#rs-default-controller-private-pull
-  // 1. Let stream be this.[[controlledReadableStream]].
-  ReadableStreamNative* stream = controlled_readable_stream_;
+  // 1. Let stream be this.[[stream]].
+  ReadableStream* stream = controlled_readable_stream_;
 
   // 2. If this.[[queue]] is not empty,
   if (!queue_->IsEmpty()) {
@@ -313,7 +305,7 @@ StreamPromiseResolver* ReadableStreamDefaultController::PullSteps(
       ClearAlgorithms(this);
 
       //   ii. Perform ! ReadableStreamClose(stream).
-      ReadableStreamNative::Close(script_state, stream);
+      ReadableStream::Close(script_state, stream);
     } else {
       // c. Otherwise, perform !
       //    ReadableStreamDefaultControllerCallPullIfNeeded(this).
@@ -323,21 +315,29 @@ StreamPromiseResolver* ReadableStreamDefaultController::PullSteps(
     // d. Return a promise resolved with !
     //    ReadableStreamCreateReadResult(chunk, false,
     //    stream.[[reader]].[[forAuthorCode]]).
+    ReadableStreamGenericReader* reader = stream->reader_;
     return StreamPromiseResolver::CreateResolved(
         script_state,
-        ReadableStreamNative::CreateReadResult(
-            script_state, chunk, false, stream->reader_->for_author_code_));
+        ReadableStream::CreateReadResult(
+            script_state, chunk, false,
+            To<ReadableStreamDefaultReader>(reader)->for_author_code_));
   }
 
   // 3. Let pendingPromise be ! ReadableStreamAddReadRequest(stream).
   StreamPromiseResolver* pendingPromise =
-      ReadableStreamNative::AddReadRequest(script_state, stream);
+      ReadableStream::AddReadRequest(script_state, stream);
 
   // 4. Perform ! ReadableStreamDefaultControllerCallPullIfNeeded(this).
   CallPullIfNeeded(script_state, this);
 
   // 5. Return pendingPromise.
   return pendingPromise;
+}
+
+void ReadableStreamDefaultController::ReleaseSteps() {
+  // https://streams.spec.whatwg.org/#abstract-opdef-readablestreamdefaultcontroller-releasesteps
+  // 1. Return.
+  return;
 }
 
 //
@@ -379,11 +379,11 @@ void ReadableStreamDefaultController::CallPullIfNeeded(
 
   class ResolveFunction final : public PromiseHandler {
    public:
-    ResolveFunction(ScriptState* script_state,
-                    ReadableStreamDefaultController* controller)
-        : PromiseHandler(script_state), controller_(controller) {}
+    explicit ResolveFunction(ReadableStreamDefaultController* controller)
+        : controller_(controller) {}
 
-    void CallWithLocal(v8::Local<v8::Value>) override {
+    void CallWithLocal(ScriptState* script_state,
+                       v8::Local<v8::Value>) override {
       // 7. Upon fulfillment of pullPromise,
       //   a. Set controller.[[pulling]] to false.
       controller_->is_pulling_ = false;
@@ -395,11 +395,11 @@ void ReadableStreamDefaultController::CallPullIfNeeded(
 
         //  ii. Perform ! ReadableStreamDefaultControllerCallPullIfNeeded(
         //      controller).
-        CallPullIfNeeded(GetScriptState(), controller_);
+        CallPullIfNeeded(script_state, controller_);
       }
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(controller_);
       PromiseHandler::Trace(visitor);
     }
@@ -410,17 +410,17 @@ void ReadableStreamDefaultController::CallPullIfNeeded(
 
   class RejectFunction final : public PromiseHandler {
    public:
-    RejectFunction(ScriptState* script_state,
-                   ReadableStreamDefaultController* controller)
-        : PromiseHandler(script_state), controller_(controller) {}
+    explicit RejectFunction(ReadableStreamDefaultController* controller)
+        : controller_(controller) {}
 
-    void CallWithLocal(v8::Local<v8::Value> e) override {
+    void CallWithLocal(ScriptState* script_state,
+                       v8::Local<v8::Value> e) override {
       // 8. Upon rejection of pullPromise with reason e,
       //   a. Perform ! ReadableStreamDefaultControllerError(controller, e).
-      Error(GetScriptState(), controller_, e);
+      Error(script_state, controller_, e);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(controller_);
       PromiseHandler::Trace(visitor);
     }
@@ -431,15 +431,18 @@ void ReadableStreamDefaultController::CallPullIfNeeded(
 
   StreamThenPromise(
       script_state->GetContext(), pull_promise,
-      MakeGarbageCollected<ResolveFunction>(script_state, controller),
-      MakeGarbageCollected<RejectFunction>(script_state, controller));
+      MakeGarbageCollected<ScriptFunction>(
+          script_state, MakeGarbageCollected<ResolveFunction>(controller)),
+
+      MakeGarbageCollected<ScriptFunction>(
+          script_state, MakeGarbageCollected<RejectFunction>(controller)));
 }
 
 bool ReadableStreamDefaultController::ShouldCallPull(
     const ReadableStreamDefaultController* controller) {
   // https://streams.spec.whatwg.org/#readable-stream-default-controller-should-call-pull
   // 1. Let stream be controller.[[controlledReadableStream]].
-  const ReadableStreamNative* stream = controller->controlled_readable_stream_;
+  const ReadableStream* stream = controller->controlled_readable_stream_;
 
   // 2. If ! ReadableStreamDefaultControllerCanCloseOrEnqueue(controller) is
   //    false, return false.
@@ -454,14 +457,14 @@ bool ReadableStreamDefaultController::ShouldCallPull(
 
   // 4. If ! IsReadableStreamLocked(stream) is true and !
   //    ReadableStreamGetNumReadRequests(stream) > 0, return true.
-  if (ReadableStreamNative::IsLocked(stream) &&
-      ReadableStreamNative::GetNumReadRequests(stream) > 0) {
+  if (ReadableStream::IsLocked(stream) &&
+      ReadableStream::GetNumReadRequests(stream) > 0) {
     return true;
   }
 
   // 5. Let desiredSize be ! ReadableStreamDefaultControllerGetDesiredSize
   //    (controller).
-  base::Optional<double> desired_size = controller->GetDesiredSize();
+  absl::optional<double> desired_size = controller->GetDesiredSize();
 
   // 6. Assert: desiredSize is not null.
   DCHECK(desired_size.has_value());
@@ -486,7 +489,7 @@ void ReadableStreamDefaultController::ClearAlgorithms(
 
 void ReadableStreamDefaultController::SetUp(
     ScriptState* script_state,
-    ReadableStreamNative* stream,
+    ReadableStream* stream,
     ReadableStreamDefaultController* controller,
     StreamStartAlgorithm* start_algorithm,
     StreamAlgorithm* pull_algorithm,
@@ -542,11 +545,11 @@ void ReadableStreamDefaultController::SetUp(
 
   class ResolveFunction final : public PromiseHandler {
    public:
-    ResolveFunction(ScriptState* script_state,
-                    ReadableStreamDefaultController* controller)
-        : PromiseHandler(script_state), controller_(controller) {}
+    explicit ResolveFunction(ReadableStreamDefaultController* controller)
+        : controller_(controller) {}
 
-    void CallWithLocal(v8::Local<v8::Value>) override {
+    void CallWithLocal(ScriptState* script_state,
+                       v8::Local<v8::Value>) override {
       //  11. Upon fulfillment of startPromise,
       //    a. Set controller.[[started]] to true.
       controller_->is_started_ = true;
@@ -559,10 +562,10 @@ void ReadableStreamDefaultController::SetUp(
 
       //    d. Perform ! ReadableStreamDefaultControllerCallPullIfNeeded(
       //       controller).
-      CallPullIfNeeded(GetScriptState(), controller_);
+      CallPullIfNeeded(script_state, controller_);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(controller_);
       PromiseHandler::Trace(visitor);
     }
@@ -573,17 +576,17 @@ void ReadableStreamDefaultController::SetUp(
 
   class RejectFunction final : public PromiseHandler {
    public:
-    RejectFunction(ScriptState* script_state,
-                   ReadableStreamDefaultController* controller)
-        : PromiseHandler(script_state), controller_(controller) {}
+    explicit RejectFunction(ReadableStreamDefaultController* controller)
+        : controller_(controller) {}
 
-    void CallWithLocal(v8::Local<v8::Value> r) override {
+    void CallWithLocal(ScriptState* script_state,
+                       v8::Local<v8::Value> r) override {
       //  12. Upon rejection of startPromise with reason r,
       //    a. Perform ! ReadableStreamDefaultControllerError(controller, r).
-      Error(GetScriptState(), controller_, r);
+      Error(script_state, controller_, r);
     }
 
-    void Trace(Visitor* visitor) override {
+    void Trace(Visitor* visitor) const override {
       visitor->Trace(controller_);
       PromiseHandler::Trace(visitor);
     }
@@ -594,13 +597,16 @@ void ReadableStreamDefaultController::SetUp(
 
   StreamThenPromise(
       script_state->GetContext(), start_promise,
-      MakeGarbageCollected<ResolveFunction>(script_state, controller),
-      MakeGarbageCollected<RejectFunction>(script_state, controller));
+      MakeGarbageCollected<ScriptFunction>(
+          script_state, MakeGarbageCollected<ResolveFunction>(controller)),
+
+      MakeGarbageCollected<ScriptFunction>(
+          script_state, MakeGarbageCollected<RejectFunction>(controller)));
 }
 
 void ReadableStreamDefaultController::SetUpFromUnderlyingSource(
     ScriptState* script_state,
-    ReadableStreamNative* stream,
+    ReadableStream* stream,
     v8::Local<v8::Object> underlying_source,
     double high_water_mark,
     StrategySizeAlgorithm* size_algorithm,
@@ -613,7 +619,9 @@ void ReadableStreamDefaultController::SetUpFromUnderlyingSource(
   // This method is only called when a WritableStream is being constructed by
   // JavaScript. So the execution context should be valid and this call should
   // not crash.
-  auto controller_value = ToV8(controller, script_state);
+  auto controller_value = ToV8Traits<ReadableStreamDefaultController>::ToV8(
+                              script_state, controller)
+                              .ToLocalChecked();
 
   // 3. Let startAlgorithm be the following steps:
   //   a. Return ? InvokeOrNoop(underlyingSource, "start", « controller »).

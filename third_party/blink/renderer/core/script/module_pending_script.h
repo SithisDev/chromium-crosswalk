@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_MODULE_PENDING_SCRIPT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SCRIPT_MODULE_PENDING_SCRIPT_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/core/script/module_script.h"
 #include "third_party/blink/renderer/core/script/pending_script.h"
@@ -29,7 +30,7 @@ class ModulePendingScriptTreeClient final : public ModuleTreeClient {
 
   ModuleScript* GetModuleScript() const { return module_script_; }
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   // Implements ModuleTreeClient
@@ -55,19 +56,17 @@ class CORE_EXPORT ModulePendingScript : public PendingScript {
     return module_tree_client_->GetModuleScript();
   }
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   // PendingScript
-  mojom::ScriptType GetScriptType() const override {
-    return mojom::ScriptType::kModule;
+  mojom::blink::ScriptType GetScriptType() const override {
+    return mojom::blink::ScriptType::kModule;
   }
-  Script* GetSource(const KURL& document_url) const override;
+  Script* GetSource() const override;
   bool IsReady() const override { return ready_; }
   bool IsExternal() const override { return is_external_; }
   bool WasCanceled() const override { return false; }
-
-  void StartStreamingIfPossible() override {}
 
   KURL UrlForTracing() const override { return NullURL(); }
 

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_DOCUMENT_MODULE_SCRIPT_FETCHER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_DOCUMENT_MODULE_SCRIPT_FETCHER_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 
@@ -16,18 +17,15 @@ namespace blink {
 // workers. We should rename this to something like ModuleScriptFetcherImpl that
 // doesn't relate to Document.
 class CORE_EXPORT DocumentModuleScriptFetcher final
-    : public GarbageCollectedFinalized<DocumentModuleScriptFetcher>,
+    : public GarbageCollected<DocumentModuleScriptFetcher>,
       public ModuleScriptFetcher {
-  USING_GARBAGE_COLLECTED_MIXIN(DocumentModuleScriptFetcher);
-
  public:
-  DocumentModuleScriptFetcher() = default;
-  ~DocumentModuleScriptFetcher() override = default;
+  explicit DocumentModuleScriptFetcher(base::PassKey<ModuleScriptLoader>);
 
   // Implements ModuleScriptFetcher.
   void Fetch(FetchParameters&,
+             ModuleType,
              ResourceFetcher*,
-             const Modulator* modulator_for_built_in_modules,
              ModuleGraphLevel,
              Client*) override;
 
@@ -35,13 +33,11 @@ class CORE_EXPORT DocumentModuleScriptFetcher final
   void NotifyFinished(Resource*) override;
   String DebugName() const override { return "DocumentModuleScriptFetcher"; }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
-  bool FetchIfLayeredAPI(const Modulator& modulator_for_built_in_modules,
-                         FetchParameters&);
-
   Member<Client> client_;
+  ModuleType expected_module_type_;
 };
 
 }  // namespace blink

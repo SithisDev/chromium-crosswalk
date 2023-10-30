@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/testing/sim/sim_compositor.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
 
@@ -60,10 +61,12 @@ TEST_F(DocumentLoadingRenderingTest,
 
   // Sheet finished, but no body yet, so don't resume.
   css_resource.Finish();
+  test::RunPendingTasks();
   EXPECT_TRUE(Compositor().DeferMainFrameUpdate());
 
   // Body inserted and sheet is loaded so resume commits.
   main_resource.Write("<body>");
+  test::RunPendingTasks();
   EXPECT_FALSE(Compositor().DeferMainFrameUpdate());
 
   // Finish the load, should stay resumed.
@@ -93,6 +96,7 @@ TEST_F(DocumentLoadingRenderingTest, ShouldResumeCommitsAfterSheetsLoaded) {
 
   // Sheet finished and there's a body so resume.
   css_resource.Finish();
+  test::RunPendingTasks();
   EXPECT_FALSE(Compositor().DeferMainFrameUpdate());
 
   // Finish the load, should stay resumed.
@@ -114,6 +118,7 @@ TEST_F(DocumentLoadingRenderingTest,
 
   // Sheet finishes loading, but no documentElement yet so don't resume.
   css_resource.Complete("a { color: red; }");
+  test::RunPendingTasks();
   EXPECT_TRUE(Compositor().DeferMainFrameUpdate());
 
   // Root inserted so resume.
@@ -151,6 +156,7 @@ TEST_F(DocumentLoadingRenderingTest, ShouldResumeCommitsAfterSheetsLoadForXml) {
 
   // Sheet finished, so resume commits.
   css_resource.Finish();
+  test::RunPendingTasks();
   EXPECT_FALSE(Compositor().DeferMainFrameUpdate());
 }
 
@@ -198,6 +204,7 @@ TEST_F(DocumentLoadingRenderingTest, ShouldScheduleFrameAfterSheetsLoaded) {
   first_css_resource.Write("body { color: red; }");
   main_resource.Write("<body>");
   first_css_resource.Finish();
+  test::RunPendingTasks();
 
   // Sheet finished and there's a body so resume.
   EXPECT_FALSE(Compositor().DeferMainFrameUpdate());
@@ -224,7 +231,7 @@ TEST_F(DocumentLoadingRenderingTest,
 
   LoadURL("https://example.com/test.html");
 
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
 
   main_resource.Complete(R"HTML(
     <!DOCTYPE html>
@@ -251,24 +258,25 @@ TEST_F(DocumentLoadingRenderingTest,
     </div>
   )HTML");
 
-  // Trigger a layout with pending sheets. For example a page could trigger
-  // this by doing offsetTop in a setTimeout, or by a parent frame executing
-  // script that touched offsetTop in the child frame.
+  // Trigger a layout with a blocking sheet. For example, a parent frame
+  // executing a script that reads offsetTop in the child frame could do this.
   auto* child_frame =
-      ToHTMLIFrameElement(GetDocument().getElementById("frame"));
-  child_frame->contentDocument()->UpdateStyleAndLayout();
+      To<HTMLIFrameElement>(GetDocument().getElementById("frame"));
+  child_frame->contentDocument()->UpdateStyleAndLayout(
+      DocumentUpdateReason::kTest);
 
   auto frame2 = Compositor().BeginFrame();
 
-  // The child frame still has pending sheets, so we should not paint it.
+  // The child frame still has a sheet blocking in head, so nothing is painted.
   // Still only paint the main frame.
   EXPECT_EQ(2u, frame2.DrawCount());
   EXPECT_TRUE(frame2.Contains(SimCanvas::kText, "black"));
   EXPECT_TRUE(frame2.Contains(SimCanvas::kRect, "white"));
 
-  // Finish loading the sheets in the child frame. After it should issue a
-  // paint invalidation for every layer when the frame becomes unthrottled.
+  // Finish loading the sheets in the child frame. After it we should continue
+  // parsing and paint the frame contents.
   css_resource.Complete();
+  test::RunPendingTasks();
 
   // First frame where all frames are loaded, should paint the text in the
   // child frame.
@@ -288,8 +296,7 @@ TEST_F(DocumentLoadingRenderingTest,
 
 namespace {
 
-class CheckRafCallback final
-    : public FrameRequestCallbackCollection::FrameCallback {
+class CheckRafCallback final : public FrameCallback {
  public:
   void Invoke(double high_res_time_ms) override { was_called_ = true; }
   bool WasCalled() const { return was_called_; }
@@ -309,7 +316,7 @@ TEST_F(DocumentLoadingRenderingTest,
 
   LoadURL("https://example.com/main.html");
 
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
 
   main_resource.Complete(R"HTML(
     <!DOCTYPE html>
@@ -324,7 +331,7 @@ TEST_F(DocumentLoadingRenderingTest,
   )HTML");
 
   auto* child_frame =
-      ToHTMLIFrameElement(GetDocument().getElementById("frame"));
+      To<HTMLIFrameElement>(GetDocument().getElementById("frame"));
 
   // Frame while the child frame still has pending sheets.
   auto* frame1_callback = MakeGarbageCollected<CheckRafCallback>();
@@ -337,6 +344,7 @@ TEST_F(DocumentLoadingRenderingTest,
   // Finish loading the sheets in the child frame. Should enable lifecycle
   // updates and raf callbacks.
   css_resource.Complete();
+  test::RunPendingTasks();
 
   // Frame with all lifecycle updates enabled.
   auto* frame2_callback = MakeGarbageCollected<CheckRafCallback>();
@@ -386,94 +394,6 @@ TEST_F(DocumentLoadingRenderingTest,
   // Finish the load, painting should stay enabled.
   main_resource.Finish();
   EXPECT_TRUE(GetDocument().HaveRenderBlockingResourcesLoaded());
-}
-
-TEST_F(DocumentLoadingRenderingTest,
-       returnBoundingClientRectCorrectlyWhileLoadingImport) {
-  SimRequest main_resource("https://example.com/test.html", "text/html");
-  SimSubresourceRequest import_resource("https://example.com/import.css",
-                                        "text/css");
-
-  LoadURL("https://example.com/test.html");
-
-  WebView().MainFrameWidget()->Resize(WebSize(800, 600));
-
-  main_resource.Write(R"HTML(
-    <html><body>
-      <div id='test' style='font-size: 16px'>test</div>
-      <script>
-        var link = document.createElement('link');
-        link.rel = 'import';
-        link.href = 'import.css';
-        document.head.appendChild(link);
-      </script>
-  )HTML");
-  import_resource.Start();
-
-  // Import loader isn't finish, shoudn't paint.
-  EXPECT_FALSE(GetDocument().HaveRenderBlockingResourcesLoaded());
-
-  // Pending imports should not block layout
-  Element* element = GetDocument().getElementById("test");
-  DOMRect* rect = element->getBoundingClientRect();
-  EXPECT_TRUE(rect->width() > 0.f);
-  EXPECT_TRUE(rect->height() > 0.f);
-  EXPECT_FALSE(GetDocument().HaveRenderBlockingResourcesLoaded());
-
-  import_resource.Write("div { color: red; }");
-  import_resource.Finish();
-  main_resource.Finish();
-}
-
-TEST_F(DocumentLoadingRenderingTest, StableSVGStopStylingWhileLoadingImport) {
-  SimRequest main_resource("https://example.com/test.html", "text/html");
-  SimSubresourceRequest import_resource("https://example.com/import.css",
-                                        "text/css");
-
-  LoadURL("https://example.com/test.html");
-
-  main_resource.Write(R"HTML(
-    <html><body>
-      <svg>
-        <linearGradient>
-          <stop id='test' stop-color='green' stop-opacity='0.5' />
-        </linearGradient>
-      </svg>
-  )HTML");
-
-  // Verify that SVG <stop> styling is stable/accurate when recalculated
-  // during import loading.
-  const auto recalc_and_check = [this]() {
-    GetDocument().SetNeedsStyleRecalc(
-        kSubtreeStyleChange,
-        StyleChangeReasonForTracing::Create("test reason"));
-    GetDocument().UpdateStyleAndLayout();
-
-    Element* element = GetDocument().getElementById("test");
-    ASSERT_NE(nullptr, element);
-    const SVGComputedStyle& svg_style = element->ComputedStyleRef().SvgStyle();
-    EXPECT_EQ(0xff008000, svg_style.StopColor().GetColor());
-    EXPECT_EQ(.5f, svg_style.StopOpacity());
-  };
-
-  EXPECT_TRUE(GetDocument().HaveRenderBlockingResourcesLoaded());
-  recalc_and_check();
-
-  main_resource.Write(
-      "<script>"
-      "var link = document.createElement('link');"
-      "link.rel = 'import';"
-      "link.href = 'import.css';"
-      "document.head.appendChild(link);"
-      "</script>");
-
-  EXPECT_FALSE(GetDocument().HaveRenderBlockingResourcesLoaded());
-  recalc_and_check();
-
-  import_resource.Complete();
-  main_resource.Finish();
-
-  recalc_and_check();
 }
 
 }  // namespace blink

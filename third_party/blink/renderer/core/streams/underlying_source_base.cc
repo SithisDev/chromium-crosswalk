@@ -6,7 +6,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
-#include "third_party/blink/renderer/core/streams/readable_stream_default_controller_interface.h"
+#include "third_party/blink/renderer/core/streams/readable_stream_default_controller_with_script_scope.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "v8/include/v8.h"
 
@@ -18,7 +18,9 @@ ScriptPromise UnderlyingSourceBase::startWrapper(ScriptState* script_state,
   // construct multiple streams).
   DCHECK(!controller_);
 
-  controller_ = ReadableStreamDefaultControllerInterface::Create(js_controller);
+  controller_ =
+      MakeGarbageCollected<ReadableStreamDefaultControllerWithScriptScope>(
+          script_state, js_controller);
 
   return Start(script_state);
 }
@@ -31,10 +33,16 @@ ScriptPromise UnderlyingSourceBase::pull(ScriptState* script_state) {
   return ScriptPromise::CastUndefined(script_state);
 }
 
+ScriptPromise UnderlyingSourceBase::cancelWrapper(ScriptState* script_state) {
+  v8::Isolate* isolate = script_state->GetIsolate();
+  return cancelWrapper(script_state,
+                       ScriptValue(isolate, v8::Undefined(isolate)));
+}
+
 ScriptPromise UnderlyingSourceBase::cancelWrapper(ScriptState* script_state,
                                                   ScriptValue reason) {
-  if (controller_)
-    controller_->NoteHasBeenCanceled();
+  DCHECK(controller_);  // startWrapper() must have been called
+  controller_->Deactivate();
   return Cancel(script_state, reason);
 }
 
@@ -44,20 +52,25 @@ ScriptPromise UnderlyingSourceBase::Cancel(ScriptState* script_state,
 }
 
 ScriptValue UnderlyingSourceBase::type(ScriptState* script_state) const {
-  return ScriptValue(script_state, v8::Undefined(script_state->GetIsolate()));
+  return ScriptValue(script_state->GetIsolate(),
+                     v8::Undefined(script_state->GetIsolate()));
 }
 
-void UnderlyingSourceBase::ContextDestroyed(ExecutionContext*) {
-  if (controller_) {
-    controller_->NoteHasBeenCanceled();
-    controller_.Clear();
-  }
+void UnderlyingSourceBase::ContextDestroyed() {
+  // `controller_` can be unset in two cases:
+  // 1. The UnderlyingSourceBase is never used to create a ReadableStream. For
+  //    example, BodyStreamBuffer inherits from UnderlyingSourceBase but if an
+  //    existing stream is passed to the constructor it won't create a new one.
+  // 2. ContextDestroyed() is called re-entrantly during construction. This can
+  //    happen when a worker is terminated.
+  if (controller_)
+    controller_->Deactivate();
 }
 
-void UnderlyingSourceBase::Trace(blink::Visitor* visitor) {
+void UnderlyingSourceBase::Trace(Visitor* visitor) const {
   visitor->Trace(controller_);
   ScriptWrappable::Trace(visitor);
-  ContextLifecycleObserver::Trace(visitor);
+  ExecutionContextLifecycleObserver::Trace(visitor);
 }
 
 }  // namespace blink

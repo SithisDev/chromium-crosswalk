@@ -5,9 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_LAYOUT_FUNCTION_VALUE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_LAYOUT_FUNCTION_VALUE_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
@@ -19,14 +18,13 @@ namespace cssvalue {
 class CSSLayoutFunctionValue : public CSSValue {
  public:
   CSSLayoutFunctionValue(CSSCustomIdentValue* name, bool is_inline);
-  ~CSSLayoutFunctionValue();
 
   String CustomCSSText() const;
   AtomicString GetName() const;
   bool IsInline() const { return is_inline_; }
 
   bool Equals(const CSSLayoutFunctionValue&) const;
-  void TraceAfterDispatch(blink::Visitor*);
+  void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   Member<CSSCustomIdentValue> name_;

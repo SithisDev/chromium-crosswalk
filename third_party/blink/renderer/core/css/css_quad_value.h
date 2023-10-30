@@ -32,12 +32,6 @@ class CORE_EXPORT CSSQuadValue : public CSSValue {
  public:
   enum TypeForSerialization { kSerializeAsRect, kSerializeAsQuad };
 
-  static CSSQuadValue* Create(CSSValue* value,
-                              TypeForSerialization serialization_type) {
-    return MakeGarbageCollected<CSSQuadValue>(value, value, value, value,
-                                              serialization_type);
-  }
-
   CSSQuadValue(CSSValue* top,
                CSSValue* right,
                CSSValue* bottom,
@@ -50,6 +44,14 @@ class CORE_EXPORT CSSQuadValue : public CSSValue {
         bottom_(bottom),
         left_(left) {}
 
+  CSSQuadValue(CSSValue* value, TypeForSerialization serialization_type)
+      : CSSValue(kQuadClass),
+        serialization_type_(serialization_type),
+        top_(value),
+        right_(value),
+        bottom_(value),
+        left_(value) {}
+
   CSSValue* Top() const { return top_.Get(); }
   CSSValue* Right() const { return right_.Get(); }
   CSSValue* Bottom() const { return bottom_.Get(); }
@@ -60,13 +62,13 @@ class CORE_EXPORT CSSQuadValue : public CSSValue {
   String CustomCSSText() const;
 
   bool Equals(const CSSQuadValue& other) const {
-    return DataEquivalent(top_, other.top_) &&
-           DataEquivalent(right_, other.right_) &&
-           DataEquivalent(left_, other.left_) &&
-           DataEquivalent(bottom_, other.bottom_);
+    return base::ValuesEquivalent(top_, other.top_) &&
+           base::ValuesEquivalent(right_, other.right_) &&
+           base::ValuesEquivalent(left_, other.left_) &&
+           base::ValuesEquivalent(bottom_, other.bottom_);
   }
 
-  void TraceAfterDispatch(blink::Visitor*);
+  void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   TypeForSerialization serialization_type_;

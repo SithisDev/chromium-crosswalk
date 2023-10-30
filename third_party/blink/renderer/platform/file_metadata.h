@@ -31,50 +31,52 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_FILE_METADATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_FILE_METADATA_H_
 
-#include <time.h>
 #include "base/files/file.h"
+#include "base/time/time.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
-inline double InvalidFileTime() {
-  return std::numeric_limits<double>::quiet_NaN();
-}
-inline bool IsValidFileTime(double time) {
-  return std::isfinite(time);
-}
+class MojoBindingContext;
 
 class FileMetadata {
   DISALLOW_NEW();
 
  public:
-  FileMetadata()
-      : modification_time(InvalidFileTime()), length(-1), type(kTypeUnknown) {}
+  FileMetadata() = default;
 
   PLATFORM_EXPORT static FileMetadata From(const base::File::Info& file_info);
 
-  // The last modification time of the file, in milliseconds.
-  // The value NaN means that the time is not known.
-  double modification_time;
+  // The last modification time of the file.
+  absl::optional<base::Time> modification_time = absl::nullopt;
 
   // The length of the file in bytes.
   // The value -1 means that the length is not set.
-  int64_t length;
+  int64_t length = -1;
 
   enum Type { kTypeUnknown = 0, kTypeFile, kTypeDirectory };
 
-  Type type;
+  Type type = kTypeUnknown;
   String platform_path;
 };
 
-PLATFORM_EXPORT bool GetFileSize(const String&, int64_t& result);
-PLATFORM_EXPORT bool GetFileModificationTime(const String&, double& result);
-PLATFORM_EXPORT bool GetFileMetadata(const String&, FileMetadata&);
+PLATFORM_EXPORT bool GetFileSize(const String&,
+                                 const MojoBindingContext&,
+                                 int64_t& result);
+PLATFORM_EXPORT bool GetFileMetadata(const String&,
+                                     const MojoBindingContext&,
+                                     FileMetadata& result);
 PLATFORM_EXPORT KURL FilePathToURL(const String&);
+
+inline absl::optional<base::Time> NullableTimeToOptionalTime(base::Time time) {
+  if (time.is_null())
+    return absl::nullopt;
+  return time;
+}
 
 }  // namespace blink
 

@@ -6,19 +6,17 @@
 
 #include <utility>
 
-#include "base/single_thread_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/task_traits.h"
+#include "base/task/thread_pool.h"
+#include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/webdatabase/web_database.mojom-blink.h"
-#include "third_party/blink/public/platform/interface_provider.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/main_thread.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/sqlite/sqlite3.h"
 
 namespace blink {
-
-WebDatabaseHost* WebDatabaseHost::instance_ = nullptr;
 
 // static
 WebDatabaseHost& WebDatabaseHost::GetInstance() {
@@ -27,18 +25,19 @@ WebDatabaseHost& WebDatabaseHost::GetInstance() {
 }
 
 void WebDatabaseHost::Init() {
-  Platform::Current()->GetInterfaceProvider()->GetInterface(
+  Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
       pending_remote_.InitWithNewPipeAndPassReceiver());
 }
 
 WebDatabaseHost::WebDatabaseHost()
-    : main_thread_task_runner_(Thread::MainThread()->GetTaskRunner()) {}
+    : main_thread_task_runner_(
+          Thread::MainThread()->GetDeprecatedTaskRunner()) {}
 
 mojom::blink::WebDatabaseHost& WebDatabaseHost::GetWebDatabaseHost() {
   if (!shared_remote_) {
     DCHECK(pending_remote_);
     shared_remote_ = mojo::SharedRemote<mojom::blink::WebDatabaseHost>(
-        std::move(pending_remote_), base::CreateSequencedTaskRunnerWithTraits(
+        std::move(pending_remote_), base::ThreadPool::CreateSequencedTaskRunner(
                                         {base::WithBaseSyncPrimitives()}));
   }
 
@@ -64,12 +63,6 @@ int32_t WebDatabaseHost::GetFileAttributes(const String& vfs_file_name) {
   return rv;
 }
 
-int64_t WebDatabaseHost::GetFileSize(const String& vfs_file_name) {
-  int64_t rv = 0LL;
-  GetWebDatabaseHost().GetFileSize(vfs_file_name, &rv);
-  return rv;
-}
-
 bool WebDatabaseHost::SetFileSize(const String& vfs_file_name, int64_t size) {
   bool rv = false;
   GetWebDatabaseHost().SetFileSize(vfs_file_name, size, &rv);
@@ -85,11 +78,9 @@ int64_t WebDatabaseHost::GetSpaceAvailableForOrigin(
 
 void WebDatabaseHost::DatabaseOpened(const SecurityOrigin& origin,
                                      const String& database_name,
-                                     const String& database_display_name,
-                                     uint32_t estimated_size) {
+                                     const String& database_display_name) {
   DCHECK(main_thread_task_runner_->RunsTasksInCurrentSequence());
-  GetWebDatabaseHost().Opened(&origin, database_name, database_display_name,
-                              estimated_size);
+  GetWebDatabaseHost().Opened(&origin, database_name, database_display_name);
 }
 
 void WebDatabaseHost::DatabaseModified(const SecurityOrigin& origin,

@@ -22,7 +22,6 @@
 
 #include "third_party/blink/renderer/core/style/shadow_data.h"
 
-#include "third_party/blink/renderer/platform/animation/animation_utilities.h"
 #include "third_party/blink/renderer/platform/graphics/color_blend.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 
@@ -33,31 +32,22 @@ bool ShadowData::operator==(const ShadowData& o) const {
          style_ == o.style_ && color_ == o.color_;
 }
 
-ShadowData ShadowData::Blend(const ShadowData& from,
-                             double progress,
-                             const Color& current_color) const {
-  DCHECK_EQ(Style(), from.Style());
-  return ShadowData(blink::Blend(from.Location(), Location(), progress),
-                    clampTo(blink::Blend(from.Blur(), Blur(), progress), 0.0f),
-                    blink::Blend(from.Spread(), Spread(), progress), Style(),
-                    blink::Blend(from.GetColor().Resolve(current_color),
-                                 GetColor().Resolve(current_color), progress));
-}
-
 ShadowData ShadowData::NeutralValue() {
-  return ShadowData(FloatPoint(0, 0), 0, 0, kNormal,
+  return ShadowData(gfx::PointF(0, 0), 0, 0, ShadowStyle::kNormal,
                     StyleColor(Color::kTransparent));
 }
 
-FloatRectOutsets ShadowData::RectOutsets() const {
+gfx::OutsetsF ShadowData::RectOutsets() const {
   // 3 * sigma is how Skia computes the box blur extent.
   // See also https://crbug.com/624175.
   // TODO(fmalita): since the blur extent must reflect rasterization bounds,
   // its value should be queried from Skia (pending API availability).
   float blur_and_spread = ceil(3 * BlurRadiusToStdDev(Blur())) + Spread();
-  return FloatRectOutsets(
-      blur_and_spread - Y() /* top */, blur_and_spread + X() /* right */,
-      blur_and_spread + Y() /* bottom */, blur_and_spread - X() /* left */);
+  return gfx::OutsetsF()
+      .set_left(blur_and_spread - X())
+      .set_right(blur_and_spread + X())
+      .set_top(blur_and_spread - Y())
+      .set_bottom(blur_and_spread + Y());
 }
 
 }  // namespace blink

@@ -33,7 +33,10 @@
 
 #include "base/time/time.h"
 #include "mojo/public/cpp/system/data_pipe.h"
-#include "mojo/public/cpp/system/message_pipe.h"
+#include "third_party/blink/public/mojom/service_worker/controller_service_worker.mojom-shared.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker.mojom-shared.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_fetch_handler_type.mojom-shared.h"
+#include "third_party/blink/public/platform/cross_variant_mojo_util.h"
 
 #include <memory>
 
@@ -49,11 +52,10 @@ class WebServiceWorkerContextProxy {
   virtual ~WebServiceWorkerContextProxy() = default;
 
   virtual void BindServiceWorker(
-      // A handle for mojom::ServiceWorkerRequest.
-      mojo::ScopedMessagePipeHandle request) = 0;
+      CrossVariantMojoReceiver<mojom::ServiceWorkerInterfaceBase> receiver) = 0;
   virtual void BindControllerServiceWorker(
-      // A handle for mojo::PendingReceiver<mojom::ControllerServiceWorker>.
-      mojo::ScopedMessagePipeHandle request) = 0;
+      CrossVariantMojoReceiver<mojom::ControllerServiceWorkerInterfaceBase>
+          receiver) = 0;
 
   virtual void OnNavigationPreloadResponse(
       int fetch_event_id,
@@ -69,6 +71,9 @@ class WebServiceWorkerContextProxy {
                                            int64_t decoded_body_length) = 0;
 
   virtual bool IsWindowInteractionAllowed() = 0;
+  virtual void PauseEvaluation() = 0;
+  virtual void ResumeEvaluation() = 0;
+  virtual mojom::ServiceWorkerFetchHandlerType FetchHandlerType() = 0;
 };
 
 }  // namespace blink

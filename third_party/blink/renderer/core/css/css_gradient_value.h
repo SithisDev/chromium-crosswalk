@@ -27,6 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_GRADIENT_VALUE_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_image_generator_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
@@ -63,8 +64,8 @@ struct CSSGradientColorStop {
   DISALLOW_NEW();
 
   bool operator==(const CSSGradientColorStop& other) const {
-    return DataEquivalent(color_, other.color_) &&
-           DataEquivalent(offset_, other.offset_);
+    return base::ValuesEquivalent(color_, other.color_) &&
+           base::ValuesEquivalent(offset_, other.offset_);
   }
 
   bool IsHint() const {
@@ -74,7 +75,7 @@ struct CSSGradientColorStop {
 
   bool IsCacheable() const;
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
   Member<const CSSPrimitiveValue> offset_;  // percentage | length | angle
   Member<const CSSValue> color_;
@@ -93,10 +94,13 @@ namespace cssvalue {
 
 class CSSGradientValue : public CSSImageGeneratorValue {
  public:
+  using ContainerSizes = CSSToLengthConversionData::ContainerSizes;
+
   scoped_refptr<Image> GetImage(const ImageResourceObserver&,
                                 const Document&,
                                 const ComputedStyle&,
-                                const FloatSize&) const;
+                                const ContainerSizes&,
+                                const gfx::SizeF&) const;
 
   void AddStop(const CSSGradientColorStop& stop) {
     stops_.push_back(stop);
@@ -109,17 +113,21 @@ class CSSGradientValue : public CSSImageGeneratorValue {
 
   CSSGradientType GradientType() const { return gradient_type_; }
 
-  bool IsFixedSize() const { return false; }
-  FloatSize FixedSize(const Document&) const { return FloatSize(); }
-
-  bool IsPending() const { return false; }
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const;
-
-  void LoadSubimages(const Document&) {}
+  CSSGradientValue* ComputedCSSValue(const ComputedStyle&,
+                                     bool allow_visited_style) const;
 
   Vector<Color> GetStopColors(const Document&, const ComputedStyle&) const;
 
-  void TraceAfterDispatch(blink::Visitor*);
+  void TraceAfterDispatch(blink::Visitor*) const;
+
+  void SetColorInterpolationSpace(
+      Color::ColorInterpolationSpace color_interpolation_space,
+      Color::HueInterpolationMethod hue_interpolation_method) {
+    color_interpolation_space_ = color_interpolation_space;
+    hue_interpolation_method_ = hue_interpolation_method;
+  }
+  bool ShouldSerializeColorSpace() const;
 
   struct GradientDesc;
 
@@ -139,6 +147,9 @@ class CSSGradientValue : public CSSImageGeneratorValue {
   void AddDeprecatedStops(GradientDesc&,
                           const Document&,
                           const ComputedStyle&) const;
+  void AddComputedStops(const ComputedStyle&,
+                        bool allow_visited_style,
+                        const HeapVector<CSSGradientColorStop, 2>& stops);
 
   void AppendCSSTextForColorStops(StringBuilder&,
                                   bool requires_separator) const;
@@ -149,6 +160,10 @@ class CSSGradientValue : public CSSImageGeneratorValue {
   CSSGradientType gradient_type_;
   bool repeating_ : 1;
   bool is_cacheable_ : 1;
+  Color::ColorInterpolationSpace color_interpolation_space_ =
+      Color::ColorInterpolationSpace::kNone;
+  Color::HueInterpolationMethod hue_interpolation_method_ =
+      Color::HueInterpolationMethod::kShorter;
 };
 
 class CSSLinearGradientValue final : public CSSGradientValue {
@@ -171,13 +186,19 @@ class CSSLinearGradientValue final : public CSSGradientValue {
 
   // Create the gradient for a given size.
   scoped_refptr<Gradient> CreateGradient(const CSSToLengthConversionData&,
-                                         const FloatSize&,
+                                         const gfx::SizeF&,
                                          const Document&,
                                          const ComputedStyle&) const;
 
   bool Equals(const CSSLinearGradientValue&) const;
 
-  void TraceAfterDispatch(blink::Visitor*);
+  CSSLinearGradientValue* ComputedCSSValue(const ComputedStyle&,
+                                           bool allow_visited_style) const;
+
+  bool IsUsingCurrentColor() const;
+  bool IsUsingContainerRelativeUnits() const;
+
+  void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   // Any of these may be null.
@@ -188,35 +209,8 @@ class CSSLinearGradientValue final : public CSSGradientValue {
   Member<const CSSPrimitiveValue> angle_;
 };
 
-class CSSRadialGradientValue final : public CSSGradientValue {
+class CORE_EXPORT CSSRadialGradientValue final : public CSSGradientValue {
  public:
-  static CSSGradientValue* Create(
-      const CSSValue* first_x,
-      const CSSValue* first_y,
-      const CSSPrimitiveValue* first_radius,
-      const CSSValue* second_x,
-      const CSSValue* second_y,
-      const CSSPrimitiveValue* second_radius,
-      CSSGradientRepeat repeat,
-      CSSGradientType gradient_type = kCSSRadialGradient) {
-    return MakeGarbageCollected<CSSRadialGradientValue>(
-        first_x, first_y, first_radius, second_x, second_y, second_radius,
-        nullptr, nullptr, nullptr, nullptr, repeat, gradient_type);
-  }
-
-  static CSSGradientValue* Create(const CSSValue* center_x,
-                                  const CSSValue* center_y,
-                                  const CSSIdentifierValue* shape,
-                                  const CSSIdentifierValue* sizing_behavior,
-                                  const CSSPrimitiveValue* horizontal_size,
-                                  const CSSPrimitiveValue* vertical_size,
-                                  CSSGradientRepeat repeat,
-                                  CSSGradientType gradient_type) {
-    return MakeGarbageCollected<CSSRadialGradientValue>(
-        center_x, center_y, nullptr, center_x, center_y, nullptr, shape,
-        sizing_behavior, horizontal_size, vertical_size, repeat, gradient_type);
-  }
-
   CSSRadialGradientValue(const CSSValue* first_x,
                          const CSSValue* first_y,
                          const CSSPrimitiveValue* first_radius,
@@ -241,6 +235,46 @@ class CSSRadialGradientValue final : public CSSGradientValue {
         end_horizontal_size_(horizontal_size),
         end_vertical_size_(vertical_size) {}
 
+  CSSRadialGradientValue(const CSSValue* first_x,
+                         const CSSValue* first_y,
+                         const CSSPrimitiveValue* first_radius,
+                         const CSSValue* second_x,
+                         const CSSValue* second_y,
+                         const CSSPrimitiveValue* second_radius,
+                         CSSGradientRepeat repeat,
+                         CSSGradientType gradient_type = kCSSRadialGradient)
+      : CSSGradientValue(kRadialGradientClass, repeat, gradient_type),
+        first_x_(first_x),
+        first_y_(first_y),
+        second_x_(second_x),
+        second_y_(second_y),
+        first_radius_(first_radius),
+        second_radius_(second_radius),
+        shape_(nullptr),
+        sizing_behavior_(nullptr),
+        end_horizontal_size_(nullptr),
+        end_vertical_size_(nullptr) {}
+
+  CSSRadialGradientValue(const CSSValue* center_x,
+                         const CSSValue* center_y,
+                         const CSSIdentifierValue* shape,
+                         const CSSIdentifierValue* sizing_behavior,
+                         const CSSPrimitiveValue* horizontal_size,
+                         const CSSPrimitiveValue* vertical_size,
+                         CSSGradientRepeat repeat,
+                         CSSGradientType gradient_type)
+      : CSSGradientValue(kRadialGradientClass, repeat, gradient_type),
+        first_x_(center_x),
+        first_y_(center_y),
+        second_x_(center_x),
+        second_y_(center_y),
+        first_radius_(nullptr),
+        second_radius_(nullptr),
+        shape_(shape),
+        sizing_behavior_(sizing_behavior),
+        end_horizontal_size_(horizontal_size),
+        end_vertical_size_(vertical_size) {}
+
   String CustomCSSText() const;
 
   void SetShape(CSSIdentifierValue* val) { shape_ = val; }
@@ -253,13 +287,19 @@ class CSSRadialGradientValue final : public CSSGradientValue {
 
   // Create the gradient for a given size.
   scoped_refptr<Gradient> CreateGradient(const CSSToLengthConversionData&,
-                                         const FloatSize&,
+                                         const gfx::SizeF&,
                                          const Document&,
                                          const ComputedStyle&) const;
 
   bool Equals(const CSSRadialGradientValue&) const;
 
-  void TraceAfterDispatch(blink::Visitor*);
+  CSSRadialGradientValue* ComputedCSSValue(const ComputedStyle&,
+                                           bool allow_visited_style) const;
+
+  bool IsUsingCurrentColor() const;
+  bool IsUsingContainerRelativeUnits() const;
+
+  void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   // Any of these may be null.
@@ -283,14 +323,6 @@ class CSSRadialGradientValue final : public CSSGradientValue {
 
 class CSSConicGradientValue final : public CSSGradientValue {
  public:
-  static CSSGradientValue* Create(const CSSValue* x,
-                                  const CSSValue* y,
-                                  const CSSPrimitiveValue* from_angle,
-                                  CSSGradientRepeat repeat) {
-    return MakeGarbageCollected<CSSConicGradientValue>(x, y, from_angle,
-                                                       repeat);
-  }
-
   CSSConicGradientValue(const CSSValue* x,
                         const CSSValue* y,
                         const CSSPrimitiveValue* from_angle,
@@ -304,13 +336,19 @@ class CSSConicGradientValue final : public CSSGradientValue {
 
   // Create the gradient for a given size.
   scoped_refptr<Gradient> CreateGradient(const CSSToLengthConversionData&,
-                                         const FloatSize&,
+                                         const gfx::SizeF&,
                                          const Document&,
                                          const ComputedStyle&) const;
 
   bool Equals(const CSSConicGradientValue&) const;
 
-  void TraceAfterDispatch(blink::Visitor*);
+  CSSConicGradientValue* ComputedCSSValue(const ComputedStyle&,
+                                          bool allow_visited_style) const;
+
+  bool IsUsingCurrentColor() const;
+  bool IsUsingContainerRelativeUnits() const;
+
+  void TraceAfterDispatch(blink::Visitor*) const;
 
  private:
   // Any of these may be null.

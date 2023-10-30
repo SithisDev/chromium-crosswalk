@@ -5,10 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SPATIAL_NAVIGATION_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SPATIAL_NAVIGATION_CONTROLLER_H_
 
-#include "third_party/blink/public/mojom/page/spatial_navigation.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -23,8 +22,8 @@ struct PhysicalRect;
 // Navigation is used to move and interact with a page in a purely directional
 // way, e.g. keyboard arrows. We use the term "interest" to specify which
 // element the user is currently on.
-class CORE_EXPORT SpatialNavigationController
-    : public GarbageCollectedFinalized<SpatialNavigationController> {
+class CORE_EXPORT SpatialNavigationController final
+    : public GarbageCollected<SpatialNavigationController> {
  public:
   explicit SpatialNavigationController(Page& page);
 
@@ -47,7 +46,7 @@ class CORE_EXPORT SpatialNavigationController
   void FocusedNodeChanged(Document*);
   void FullscreenStateChanged(Element* element);
 
-  void Trace(blink::Visitor*);
+  void Trace(Visitor*) const;
 
  private:
   // Entry-point into SpatialNavigation advancement. Will return true if an
@@ -97,17 +96,6 @@ class CORE_EXPORT SpatialNavigationController
 
   Element* GetFocusedElement() const;
 
-  void UpdateSpatialNavigationState(Element* element);
-  void OnSpatialNavigationStateChanged();
-  bool UpdateCanExitFocus(Element* element);
-  bool UpdateCanSelectInterestedElement(Element* element);
-  bool UpdateHasNextFormElement(Element* element);
-  bool UpdateIsFormFocused(Element* element);
-  bool UpdateHasDefaultVideoControls(Element* element);
-
-  const mojom::blink::SpatialNavigationHostPtr& GetSpatialNavigationHost();
-  void ResetMojoBindings();
-
   // The currently indicated element or nullptr if no node is indicated by
   // spatial navigation.
   WeakMember<Element> interest_element_;
@@ -117,9 +105,6 @@ class CORE_EXPORT SpatialNavigationController
   // know whether to generate a click on the up.
   bool enter_key_down_seen_ = false;
   bool enter_key_press_seen_ = false;
-
-  mojom::blink::SpatialNavigationStatePtr spatial_navigation_state_;
-  mojom::blink::SpatialNavigationHostPtr spatial_navigation_host_;
 };
 
 }  // namespace blink

@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -40,13 +41,13 @@ class MODULES_EXPORT MediaControlAnimationEventListener final
     // This is the element to watch for animation events.
     virtual Element& WatchedAnimationElement() const = 0;
 
-    void Trace(blink::Visitor*) override;
+    void Trace(Visitor*) const override;
   };
 
   explicit MediaControlAnimationEventListener(Observer*);
   void Detach();
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   void Invoke(ExecutionContext*, Event*) override;
 

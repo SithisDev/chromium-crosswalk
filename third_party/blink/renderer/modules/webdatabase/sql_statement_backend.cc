@@ -86,7 +86,7 @@ SQLStatementBackend::SQLStatementBackend(SQLStatement* frontend,
                                          const Vector<SQLValue>& arguments,
                                          int permissions)
     : frontend_(frontend),
-      statement_(statement.IsolatedCopy()),
+      statement_(statement),
       arguments_(arguments),
       has_callback_(frontend_->HasCallback()),
       has_error_callback_(frontend_->HasErrorCallback()),
@@ -97,7 +97,7 @@ SQLStatementBackend::SQLStatementBackend(SQLStatement* frontend,
   frontend_->SetBackend(this);
 }
 
-void SQLStatementBackend::Trace(blink::Visitor* visitor) {
+void SQLStatementBackend::Trace(Visitor* visitor) const {
   visitor->Trace(frontend_);
   visitor->Trace(result_set_);
 }

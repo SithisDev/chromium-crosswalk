@@ -33,8 +33,8 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_prescient_networking.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
@@ -44,18 +44,18 @@ namespace blink {
 HTMLResourcePreloader::HTMLResourcePreloader(Document& document)
     : document_(document) {}
 
-void HTMLResourcePreloader::Trace(Visitor* visitor) {
+void HTMLResourcePreloader::Trace(Visitor* visitor) const {
   visitor->Trace(document_);
 }
 
-static void PreconnectHost(PreloadRequest* request) {
+static void PreconnectHost(LocalFrame* local_frame, PreloadRequest* request) {
   DCHECK(request);
   DCHECK(request->IsPreconnect());
   KURL host(request->BaseURL(), request->ResourceURL());
   if (!host.IsValid() || !host.ProtocolIsInHTTPFamily())
     return;
   WebPrescientNetworking* web_prescient_networking =
-      Platform::Current()->PrescientNetworking();
+      local_frame->PrescientNetworking();
   if (web_prescient_networking) {
     web_prescient_networking->Preconnect(
         host, request->CrossOrigin() != kCrossOriginAttributeAnonymous);
@@ -64,14 +64,13 @@ static void PreconnectHost(PreloadRequest* request) {
 
 void HTMLResourcePreloader::Preload(std::unique_ptr<PreloadRequest> preload) {
   if (preload->IsPreconnect()) {
-    PreconnectHost(preload.get());
+    PreconnectHost(document_->GetFrame(), preload.get());
     return;
   }
 
   if (!AllowPreloadRequest(preload.get())) {
     return;
   }
-  // TODO(yoichio): Should preload if document is imported.
   if (!document_->Loader())
     return;
 
@@ -92,11 +91,11 @@ bool HTMLResourcePreloader::AllowPreloadRequest(PreloadRequest* preload) const {
     return false;
   }
 
-  switch (preload->Importance()) {
-    case mojom::FetchImportanceMode::kImportanceHigh:
+  switch (preload->FetchPriorityHint()) {
+    case mojom::blink::FetchPriorityHint::kHigh:
       return true;
-    case mojom::FetchImportanceMode::kImportanceLow:
-    case mojom::FetchImportanceMode::kImportanceAuto:
+    case mojom::blink::FetchPriorityHint::kLow:
+    case mojom::blink::FetchPriorityHint::kAuto:
       break;
   }
 
@@ -104,23 +103,23 @@ bool HTMLResourcePreloader::AllowPreloadRequest(PreloadRequest* preload) const {
   // resources are either classified into CSS (always fetched when not in the
   // HTML only arm), JS (skip_script param), or other.
   switch (preload->GetResourceType()) {
-    case ResourceType::kFont:
     case ResourceType::kRaw:
     case ResourceType::kSVGDocument:
     case ResourceType::kXSLStyleSheet:
     case ResourceType::kLinkPrefetch:
     case ResourceType::kTextTrack:
-    case ResourceType::kImportResource:
     case ResourceType::kAudio:
     case ResourceType::kVideo:
     case ResourceType::kManifest:
     case ResourceType::kMock:
       return !GetFieldTrialParamByFeatureAsBool(
-          features::kLightweightNoStatePrefetch, "skip_other", false);
+          features::kLightweightNoStatePrefetch, "skip_other", true);
     case ResourceType::kImage:
       return false;
     case ResourceType::kCSSStyleSheet:
       return true;
+    case ResourceType::kFont:
+      return false;
     case ResourceType::kScript:
       // We might skip all script.
       if (GetFieldTrialParamByFeatureAsBool(
@@ -131,7 +130,7 @@ bool HTMLResourcePreloader::AllowPreloadRequest(PreloadRequest* preload) const {
       // Otherwise, we might skip async/deferred script.
       return !GetFieldTrialParamByFeatureAsBool(
                  features::kLightweightNoStatePrefetch, "skip_async_script",
-                 false) ||
+                 true) ||
              preload->DeferOption() == FetchParameters::DeferOption::kNoDefer;
   }
 }

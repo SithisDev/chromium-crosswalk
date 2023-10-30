@@ -42,6 +42,7 @@ namespace blink {
 
 class WebURL;
 class WebServiceWorkerProviderClient;
+struct WebFetchClientSettingsObject;
 struct WebServiceWorkerError;
 
 // WebServiceWorkerProvider attaches to a Document
@@ -86,6 +87,7 @@ class WebServiceWorkerProvider {
       const WebURL& script_url,
       blink::mojom::ScriptType script_type,
       blink::mojom::ServiceWorkerUpdateViaCache update_via_cache,
+      const WebFetchClientSettingsObject& fetch_client_settings_object,
       std::unique_ptr<WebServiceWorkerRegistrationCallbacks>) {}
   // For ServiceWorkerContainer#getRegistration(). Requests the embedder to
   // return a registration.
@@ -113,4 +115,4 @@ class WebServiceWorkerProvider {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_PUBLIC_PLATFORM_MODULES_SERVICE_WORKER_WEB_SERVICE_WORKER_PROVIDER_H_

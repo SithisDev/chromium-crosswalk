@@ -32,10 +32,10 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_LIFECYCLE_H_
 
 #include "base/auto_reset.h"
-#include "base/macros.h"
+#include "base/check_op.h"
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 #if DCHECK_IS_ON()
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -58,17 +58,17 @@ class CORE_EXPORT DocumentLifecycle {
     kInStyleRecalc,
     kStyleClean,
 
-    kInLayoutSubtreeChange,
-    kLayoutSubtreeChangeClean,
-
-    kInPreLayout,
     kInPerformLayout,
     kAfterPerformLayout,
     kLayoutClean,
 
-    kInCompositingUpdate,
+    // In InAccessibility step, fire deferred accessibility events which
+    // require layout to be in a clean state.
+    kInAccessibility,
+    kAccessibilityClean,
+
+    kInCompositingInputsUpdate,
     kCompositingInputsClean,
-    kCompositingClean,
 
     // In InPrePaint step, any data needed by painting are prepared.
     // Paint property trees are built and paint invalidations are issued.
@@ -87,20 +87,18 @@ class CORE_EXPORT DocumentLifecycle {
     kStopped,
   };
 
-  // This must be kept coordinated with WebWidget::LifecycleUpdateReason
-  enum LifecycleUpdateReason { kBeginMainFrame, kTest, kOther };
-
   class Scope {
     STACK_ALLOCATED();
 
    public:
     Scope(DocumentLifecycle&, LifecycleState final_state);
+    Scope(const Scope&) = delete;
+    Scope& operator=(const Scope&) = delete;
     ~Scope();
 
    private:
     DocumentLifecycle& lifecycle_;
     LifecycleState final_state_;
-    DISALLOW_COPY_AND_ASSIGN(Scope);
   };
 
   class DeprecatedTransition {
@@ -108,6 +106,8 @@ class CORE_EXPORT DocumentLifecycle {
 
    public:
     DeprecatedTransition(LifecycleState from, LifecycleState to);
+    DeprecatedTransition(const DeprecatedTransition&) = delete;
+    DeprecatedTransition& operator=(const DeprecatedTransition&) = delete;
     ~DeprecatedTransition();
 
     LifecycleState From() const { return from_; }
@@ -117,7 +117,6 @@ class CORE_EXPORT DocumentLifecycle {
     DeprecatedTransition* previous_;
     LifecycleState from_;
     LifecycleState to_;
-    DISALLOW_COPY_AND_ASSIGN(DeprecatedTransition);
   };
 
   // Within this scope, state transitions are not allowed.
@@ -130,6 +129,8 @@ class CORE_EXPORT DocumentLifecycle {
         : document_lifecycle_(document_lifecycle) {
       document_lifecycle_.IncrementNoTransitionCount();
     }
+    DisallowTransitionScope(const DisallowTransitionScope&) = delete;
+    DisallowTransitionScope& operator=(const DisallowTransitionScope&) = delete;
 
     ~DisallowTransitionScope() {
       document_lifecycle_.DecrementNoTransitionCount();
@@ -137,7 +138,6 @@ class CORE_EXPORT DocumentLifecycle {
 
    private:
     DocumentLifecycle& document_lifecycle_;
-    DISALLOW_COPY_AND_ASSIGN(DisallowTransitionScope);
   };
 
   class DetachScope {
@@ -148,37 +148,13 @@ class CORE_EXPORT DocumentLifecycle {
         : document_lifecycle_(document_lifecycle) {
       document_lifecycle_.IncrementDetachCount();
     }
+    DetachScope(const DetachScope&) = delete;
+    DetachScope& operator=(const DetachScope&) = delete;
 
     ~DetachScope() { document_lifecycle_.DecrementDetachCount(); }
 
    private:
     DocumentLifecycle& document_lifecycle_;
-    DISALLOW_COPY_AND_ASSIGN(DetachScope);
-  };
-
-  // Throttling is disabled by default. Instantiating this class allows
-  // throttling (e.g., during BeginMainFrame). If a script needs to run inside
-  // this scope, DisallowThrottlingScope should be used to let the script
-  // perform a synchronous layout if necessary.
-  class CORE_EXPORT AllowThrottlingScope {
-    STACK_ALLOCATED();
-
-   public:
-    AllowThrottlingScope(DocumentLifecycle&);
-    ~AllowThrottlingScope();
-    DISALLOW_COPY_AND_ASSIGN(AllowThrottlingScope);
-  };
-
-  class CORE_EXPORT DisallowThrottlingScope {
-    STACK_ALLOCATED();
-
-   public:
-    DisallowThrottlingScope(DocumentLifecycle&);
-    ~DisallowThrottlingScope();
-
-   private:
-    int saved_count_;
-    DISALLOW_COPY_AND_ASSIGN(DisallowThrottlingScope);
   };
 
   // If we hit a devtool break point in the middle of document lifecycle, for
@@ -213,7 +189,8 @@ class CORE_EXPORT DocumentLifecycle {
   };
 
   DocumentLifecycle();
-  ~DocumentLifecycle();
+  DocumentLifecycle(const DocumentLifecycle&) = delete;
+  DocumentLifecycle& operator=(const DocumentLifecycle&) = delete;
 
   bool IsActive() const { return state_ > kInactive && state_ < kStopping; }
   LifecycleState GetState() const { return state_; }
@@ -221,8 +198,6 @@ class CORE_EXPORT DocumentLifecycle {
   bool StateAllowsTreeMutations() const;
   bool StateAllowsLayoutTreeMutations() const;
   bool StateAllowsDetach() const;
-  bool StateAllowsLayoutInvalidation() const;
-  bool StateAllowsLayoutTreeNotifications() const;
 
   void AdvanceTo(LifecycleState);
   void EnsureStateAtMost(LifecycleState);
@@ -241,7 +216,6 @@ class CORE_EXPORT DocumentLifecycle {
     detach_count_--;
   }
 
-  bool ThrottlingAllowed() const;
   bool LifecyclePostponed() const { return life_cycle_postponed_; }
 
 #if DCHECK_IS_ON()
@@ -263,40 +237,27 @@ class CORE_EXPORT DocumentLifecycle {
   int disallow_transition_count_;
   bool life_cycle_postponed_;
   bool check_no_transition_;
-  DISALLOW_COPY_AND_ASSIGN(DocumentLifecycle);
 };
 
 inline bool DocumentLifecycle::StateAllowsTreeMutations() const {
-  // FIXME: We should not allow mutations in InPreLayout or AfterPerformLayout
+  // TODO: We should not allow mutations in AfterPerformLayout
   // either, but we need to fix MediaList listeners and plugins first.
   return state_ != kInStyleRecalc && state_ != kInPerformLayout &&
-         state_ != kInCompositingUpdate && state_ != kInPrePaint &&
+         state_ != kInCompositingInputsUpdate && state_ != kInPrePaint &&
          state_ != kInPaint;
 }
 
 inline bool DocumentLifecycle::StateAllowsLayoutTreeMutations() const {
-  return detach_count_ || state_ == kInStyleRecalc ||
-         state_ == kInLayoutSubtreeChange;
-}
-
-inline bool DocumentLifecycle::StateAllowsLayoutTreeNotifications() const {
-  return state_ == kInLayoutSubtreeChange;
+  return detach_count_ || state_ == kInStyleRecalc;
 }
 
 inline bool DocumentLifecycle::StateAllowsDetach() const {
   return state_ == kVisualUpdatePending || state_ == kInStyleRecalc ||
-         state_ == kStyleClean || state_ == kLayoutSubtreeChangeClean ||
-         state_ == kInPreLayout || state_ == kLayoutClean ||
-         state_ == kCompositingInputsClean || state_ == kCompositingClean ||
-         state_ == kPrePaintClean || state_ == kPaintClean ||
-         state_ == kStopping || state_ == kInactive;
-}
-
-inline bool DocumentLifecycle::StateAllowsLayoutInvalidation() const {
-  return state_ != kInPerformLayout && state_ != kInCompositingUpdate &&
-         state_ != kInPrePaint && state_ != kInPaint;
+         state_ == kStyleClean || state_ == kLayoutClean ||
+         state_ == kCompositingInputsClean || state_ == kPrePaintClean ||
+         state_ == kPaintClean || state_ == kStopping || state_ == kInactive;
 }
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_LIFECYCLE_H_

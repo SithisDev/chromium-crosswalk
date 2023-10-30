@@ -6,10 +6,11 @@
 // https://wicg.github.io/webhid/index.html#events
 
 [
-    Constructor(DOMString type, HIDConnectionEventInit eventInitDict),
-    Exposed(Window WebHID),
+    Exposed(ServiceWorker WebHIDOnServiceWorkers,
+            Window WebHID),
     SecureContext
 ] interface HIDConnectionEvent : Event {
+    constructor(DOMString type, HIDConnectionEventInit eventInitDict);
     // The connected or disconnected device.
     [SameObject] readonly attribute HIDDevice device;
 };

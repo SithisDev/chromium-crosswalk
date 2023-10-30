@@ -26,13 +26,23 @@ blink_modules_sources("webgl") {
     "ext_shader_texture_lod.h",
     "ext_srgb.cc",
     "ext_srgb.h",
+    "ext_texture_compression_bptc.cc",
+    "ext_texture_compression_bptc.h",
+    "ext_texture_compression_rgtc.cc",
+    "ext_texture_compression_rgtc.h",
     "ext_texture_filter_anisotropic.cc",
     "ext_texture_filter_anisotropic.h",
+    "ext_texture_norm_16.cc",
+    "ext_texture_norm_16.h",
     "gl_string_query.h",
     "khr_parallel_shader_compile.cc",
     "khr_parallel_shader_compile.h",
+    "oes_draw_buffers_indexed.cc",
+    "oes_draw_buffers_indexed.h",
     "oes_element_index_uint.cc",
     "oes_element_index_uint.h",
+    "oes_fbo_render_mipmap.cc",
+    "oes_fbo_render_mipmap.h",
     "oes_standard_derivatives.cc",
     "oes_standard_derivatives.h",
     "oes_texture_float.cc",
@@ -84,6 +94,8 @@ blink_modules_sources("webgl") {
     "webgl_depth_texture.h",
     "webgl_draw_buffers.cc",
     "webgl_draw_buffers.h",
+    "webgl_draw_instanced_base_vertex_base_instance.cc",
+    "webgl_draw_instanced_base_vertex_base_instance.h",
     "webgl_extension.cc",
     "webgl_extension.h",
     "webgl_extension_name.h",
@@ -97,8 +109,8 @@ blink_modules_sources("webgl") {
     "webgl_multi_draw.h",
     "webgl_multi_draw_common.cc",
     "webgl_multi_draw_common.h",
-    "webgl_multi_draw_instanced.cc",
-    "webgl_multi_draw_instanced.h",
+    "webgl_multi_draw_instanced_base_vertex_base_instance.cc",
+    "webgl_multi_draw_instanced_base_vertex_base_instance.h",
     "webgl_object.cc",
     "webgl_object.h",
     "webgl_program.cc",
@@ -131,30 +143,31 @@ blink_modules_sources("webgl") {
     "webgl_transform_feedback.h",
     "webgl_uniform_location.cc",
     "webgl_uniform_location.h",
+    "webgl_unowned_texture.cc",
+    "webgl_unowned_texture.h",
     "webgl_vertex_array_object.cc",
     "webgl_vertex_array_object.h",
     "webgl_vertex_array_object_base.cc",
     "webgl_vertex_array_object_base.h",
     "webgl_vertex_array_object_oes.cc",
     "webgl_vertex_array_object_oes.h",
-    "webgl_video_frame_info.cc",
-    "webgl_video_frame_info.h",
     "webgl_video_texture.cc",
     "webgl_video_texture.h",
     "webgl_video_texture_enum.h",
+    "webgl_webcodecs_video_frame.cc",
+    "webgl_webcodecs_video_frame.h",
   ]
-
-  if (support_webgl2_compute_context) {
-    sources += [
-      "webgl2_compute_rendering_context.cc",
-      "webgl2_compute_rendering_context.h",
-      "webgl2_compute_rendering_context_base.cc",
-      "webgl2_compute_rendering_context_base.h",
-    ]
-  }
 
   # The modules/webgl/ directly is a larger module, and
   # the implementation depends on a fair chunk of core/ --
   # include the core pch for faster Windows compilation times.
   configs += [ "//third_party/blink/renderer/core:blink_core_pch" ]
+
+  public_deps = [ "//device/vr/public/mojom:vr_service_blink" ]
+  deps = [
+    "//build:chromeos_buildflags",
+    "//third_party/blink/renderer/modules/xr:xr",
+  ]
+  deps += [ "//third_party/blink/renderer/modules/webcodecs:webcodecs" ]
+  allow_circular_includes_from = deps
 }

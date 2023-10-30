@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/fetch/place_holder_bytes_consumer.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 
 namespace blink {
 
@@ -91,7 +92,7 @@ void PlaceHolderBytesConsumer::Update(BytesConsumer* consumer) {
   }
 }
 
-void PlaceHolderBytesConsumer::Trace(blink::Visitor* visitor) {
+void PlaceHolderBytesConsumer::Trace(Visitor* visitor) const {
   visitor->Trace(underlying_);
   visitor->Trace(client_);
   BytesConsumer::Trace(visitor);

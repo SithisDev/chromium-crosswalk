@@ -4,8 +4,8 @@
 
 module blink.mojom;
 
-import "mojo/public/mojom/base/file.mojom";
 import "mojo/public/mojom/base/file_path.mojom";
+import "mojo/public/mojom/base/read_only_file.mojom";
 import "mojo/public/mojom/base/shared_memory.mojom";
 import "mojo/public/mojom/base/string16.mojom";
 
@@ -18,6 +18,13 @@ struct DWriteFontStyle {
   uint16 font_weight;
   uint8 font_slant;
   uint8 font_stretch;
+};
+
+struct FallbackFamilyAndStyle {
+  string fallback_family_name;
+  uint16 weight;
+  uint8 width;
+  uint8 slant;
 };
 
 struct MapCharactersResult {
@@ -54,7 +61,7 @@ interface DWriteFontProxy {
   [Sync]
   GetFontFiles(uint32 family_index)
      => (array<mojo_base.mojom.FilePath> file_paths,
-         array<mojo_base.mojom.File> file_handles);
+         array<mojo_base.mojom.ReadOnlyFile> file_handles);
 
   // Returns which font unique name matching lookup mode is to be used on the
   // current machine. On DirectWrite 10 and above, single lookups can be
@@ -120,8 +127,8 @@ interface DWriteFontProxy {
   // Use only on Windows 8.0 and earlier - otherwise better fallback API is
   // available through using a proxies IDWriteFontFallback.
   [Sync]
-  FallbackFamilyNameForCodepoint(string base_family_name,
-                                 string bcp47_language_tag,
-                                 uint32 codepoint)
-      => (string fallback_family_name);
+  FallbackFamilyAndStyleForCodepoint(string base_family_name,
+                                     string bcp47_language_tag,
+                                     uint32 codepoint)
+      => (FallbackFamilyAndStyle fallback_result);
 };

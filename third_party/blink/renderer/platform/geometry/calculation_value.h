@@ -39,36 +39,80 @@
 
 namespace blink {
 
+class CalculationExpressionNode;
+
 class PLATFORM_EXPORT CalculationValue : public RefCounted<CalculationValue> {
   USING_FAST_MALLOC(CalculationValue);
 
  public:
-  static scoped_refptr<CalculationValue> Create(PixelsAndPercent value,
-                                                ValueRange range) {
+  static scoped_refptr<const CalculationValue> Create(
+      PixelsAndPercent value,
+      Length::ValueRange range) {
     return base::AdoptRef(new CalculationValue(value, range));
   }
 
-  float Evaluate(float max_value) const {
-    float value = Pixels() + Percent() / 100 * max_value;
-    return (IsNonNegative() && value < 0) ? 0 : value;
-  }
-  bool operator==(const CalculationValue& o) const {
-    return Pixels() == o.Pixels() && Percent() == o.Percent();
-  }
+  // If |expression| simply wraps a |PixelsAndPercent| value, this function
+  // takes that value directly and discards |expression|.
+  static scoped_refptr<const CalculationValue> CreateSimplified(
+      scoped_refptr<const CalculationExpressionNode> expression,
+      Length::ValueRange range);
+
+  ~CalculationValue();
+
+  float Evaluate(float max_value,
+                 const Length::AnchorEvaluator* = nullptr) const;
+  bool operator==(const CalculationValue& o) const;
+  bool IsExpression() const { return is_expression_; }
   bool IsNonNegative() const { return is_non_negative_; }
-  ValueRange GetValueRange() const {
-    return is_non_negative_ ? kValueRangeNonNegative : kValueRangeAll;
+  Length::ValueRange GetValueRange() const {
+    return is_non_negative_ ? Length::ValueRange::kNonNegative
+                            : Length::ValueRange::kAll;
   }
-  float Pixels() const { return value_.pixels; }
-  float Percent() const { return value_.percent; }
-  PixelsAndPercent GetPixelsAndPercent() const { return value_; }
+  bool HasAnchorQueries() const;
+
+  float Pixels() const {
+    DCHECK(!IsExpression());
+    return data_.value.pixels;
+  }
+  float Percent() const {
+    DCHECK(!IsExpression());
+    return data_.value.percent;
+  }
+  PixelsAndPercent GetPixelsAndPercent() const {
+    DCHECK(!IsExpression());
+    return data_.value;
+  }
+
+  // If |this| is an expression, returns the underlying expression. Otherwise,
+  // creates one from the underlying |PixelsAndPercent| value.
+  scoped_refptr<const CalculationExpressionNode> GetOrCreateExpression() const;
+
+  scoped_refptr<const CalculationValue> Blend(const CalculationValue& from,
+                                              double progress,
+                                              Length::ValueRange) const;
+  scoped_refptr<const CalculationValue> SubtractFromOneHundredPercent() const;
+  scoped_refptr<const CalculationValue> Zoom(double factor) const;
 
  private:
-  CalculationValue(PixelsAndPercent value, ValueRange range)
-      : value_(value), is_non_negative_(range == kValueRangeNonNegative) {}
+  CalculationValue(PixelsAndPercent value, Length::ValueRange range)
+      : data_(value),
+        is_expression_(false),
+        is_non_negative_(range == Length::ValueRange::kNonNegative) {}
 
-  PixelsAndPercent value_;
-  bool is_non_negative_;
+  CalculationValue(scoped_refptr<const CalculationExpressionNode> expression,
+                   Length::ValueRange range);
+
+  union DataUnion {
+    explicit DataUnion(PixelsAndPercent value) : value(value) {}
+    explicit DataUnion(
+        scoped_refptr<const CalculationExpressionNode> expression);
+    ~DataUnion();
+
+    PixelsAndPercent value;
+    scoped_refptr<const CalculationExpressionNode> expression;
+  } data_;
+  unsigned is_expression_ : 1;
+  unsigned is_non_negative_ : 1;
 };
 
 }  // namespace blink

@@ -7,109 +7,63 @@
 #include <utility>
 
 #include "cc/layers/layer.h"
+#include "cc/layers/picture_layer.h"
+#include "third_party/blink/renderer/platform/graphics/compositing/layers_as_json.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
-#include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
 
-namespace {
-
-class ForeignLayerDisplayItemClient final : public DisplayItemClient {
- public:
-  ForeignLayerDisplayItemClient(scoped_refptr<cc::Layer> layer,
-                                const FloatPoint& offset)
-      : layer_(std::move(layer)), offset_(offset) {
-    Invalidate(PaintInvalidationReason::kUncacheable);
-  }
-
-  String DebugName() const final {
-#if DCHECK_IS_ON()
-    return String("ForeignLayer for ") + layer_->DebugName().c_str();
-#else
-    return "ForeignLayer";
-#endif
-  }
-
-  DOMNodeId OwnerNodeId() const final { return layer_->owner_node_id(); }
-
-  IntRect VisualRect() const final {
-    const auto& bounds = layer_->bounds();
-    return EnclosingIntRect(
-        FloatRect(offset_.X(), offset_.Y(), bounds.width(), bounds.height()));
-  }
-
-  cc::Layer* GetLayer() const { return layer_.get(); }
-
- private:
-  scoped_refptr<cc::Layer> layer_;
-  FloatPoint offset_;
-};
-
-}  // anonymous namespace
-
-ForeignLayerDisplayItem::ForeignLayerDisplayItem(Type type,
-                                                 scoped_refptr<cc::Layer> layer,
-                                                 const FloatPoint& offset)
-    : DisplayItem(*new ForeignLayerDisplayItemClient(std::move(layer), offset),
+ForeignLayerDisplayItem::ForeignLayerDisplayItem(
+    DisplayItemClientId client_id,
+    Type type,
+    scoped_refptr<cc::Layer> layer,
+    const gfx::Point& origin,
+    RasterEffectOutset outset,
+    PaintInvalidationReason paint_invalidation_reason)
+    : DisplayItem(client_id,
                   type,
-                  sizeof(*this)),
-      offset_(offset) {
-  DCHECK(RuntimeEnabledFeatures::CompositeAfterPaintEnabled() ||
-         RuntimeEnabledFeatures::BlinkGenPropertyTreesEnabled());
+                  gfx::Rect(origin, layer->bounds()),
+                  outset,
+                  paint_invalidation_reason,
+                  /*draws_content*/ true),
+      layer_(std::move(layer)) {
   DCHECK(IsForeignLayerType(type));
-  DCHECK(GetLayer());
-  DCHECK(!IsCacheable());
-  // TODO(959734): This CHECK is intended to find stack traces that are causing
-  // a segfault.
-  CHECK(GetLayer());
 }
 
-ForeignLayerDisplayItem::~ForeignLayerDisplayItem() {
-  delete &Client();
-}
-
-cc::Layer* ForeignLayerDisplayItem::GetLayer() const {
-  return static_cast<const ForeignLayerDisplayItemClient&>(Client()).GetLayer();
-}
-
-bool ForeignLayerDisplayItem::Equals(const DisplayItem& other) const {
-  return GetType() == other.GetType() &&
-         GetLayer() ==
-             static_cast<const ForeignLayerDisplayItem&>(other).GetLayer();
+bool ForeignLayerDisplayItem::EqualsForUnderInvalidationImpl(
+    const ForeignLayerDisplayItem& other) const {
+  DCHECK(RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled());
+  return GetLayer() == other.GetLayer();
 }
 
 #if DCHECK_IS_ON()
-void ForeignLayerDisplayItem::PropertiesAsJSON(JSONObject& json) const {
-  DisplayItem::PropertiesAsJSON(json);
+void ForeignLayerDisplayItem::PropertiesAsJSONImpl(JSONObject& json) const {
   json.SetInteger("layer", GetLayer()->id());
-  json.SetDouble("offset_x", Offset().X());
-  json.SetDouble("offset_y", Offset().Y());
 }
 #endif
 
 void RecordForeignLayer(GraphicsContext& context,
+                        const DisplayItemClient& client,
                         DisplayItem::Type type,
                         scoped_refptr<cc::Layer> layer,
-                        const FloatPoint& offset,
-                        const base::Optional<PropertyTreeState>& properties) {
+                        const gfx::Point& origin,
+                        const PropertyTreeStateOrAlias* properties) {
   PaintController& paint_controller = context.GetPaintController();
-  if (paint_controller.DisplayItemConstructionIsDisabled())
-    return;
-
   // This is like ScopedPaintChunkProperties but uses null id because foreign
   // layer chunk doesn't need an id nor a client.
-  base::Optional<PropertyTreeState> previous_properties;
+  absl::optional<PropertyTreeStateOrAlias> previous_properties;
   if (properties) {
     previous_properties.emplace(paint_controller.CurrentPaintChunkProperties());
-    paint_controller.UpdateCurrentPaintChunkProperties(base::nullopt,
-                                                       *properties);
+    paint_controller.UpdateCurrentPaintChunkProperties(*properties);
   }
   paint_controller.CreateAndAppend<ForeignLayerDisplayItem>(
-      type, std::move(layer), offset);
+      client, type, std::move(layer), origin,
+      client.VisualRectOutsetForRasterEffects(),
+      client.GetPaintInvalidationReason());
+  paint_controller.RecordDebugInfo(client);
   if (properties) {
-    paint_controller.UpdateCurrentPaintChunkProperties(base::nullopt,
-                                                       *previous_properties);
+    paint_controller.UpdateCurrentPaintChunkProperties(*previous_properties);
   }
 }
 

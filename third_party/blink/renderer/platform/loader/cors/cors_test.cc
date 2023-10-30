@@ -5,8 +5,8 @@
 #include "third_party/blink/renderer/platform/loader/cors/cors.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
-#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 
@@ -16,8 +16,8 @@ class CorsExposedHeadersTest : public testing::Test {
  public:
   using CredentialsMode = network::mojom::CredentialsMode;
 
-  WebHTTPHeaderSet Parse(CredentialsMode credentials_mode,
-                         const AtomicString& header) const {
+  HTTPHeaderSet Parse(CredentialsMode credentials_mode,
+                      const AtomicString& header) const {
     ResourceResponse response;
     response.AddHttpHeaderField("access-control-expose-headers", header);
 
@@ -26,25 +26,25 @@ class CorsExposedHeadersTest : public testing::Test {
 };
 
 TEST_F(CorsExposedHeadersTest, ValidInput) {
-  EXPECT_EQ(Parse(CredentialsMode::kOmit, "valid"),
-            WebHTTPHeaderSet({"valid"}));
+  EXPECT_EQ(Parse(CredentialsMode::kOmit, "valid"), HTTPHeaderSet({"valid"}));
 
-  EXPECT_EQ(Parse(CredentialsMode::kOmit, "a,b"), WebHTTPHeaderSet({"a", "b"}));
+  EXPECT_EQ(Parse(CredentialsMode::kOmit, "a,b"), HTTPHeaderSet({"a", "b"}));
 
   EXPECT_EQ(Parse(CredentialsMode::kOmit, "   a ,  b "),
-            WebHTTPHeaderSet({"a", "b"}));
+            HTTPHeaderSet({"a", "b"}));
 
   EXPECT_EQ(Parse(CredentialsMode::kOmit, " \t   \t\t a"),
-            WebHTTPHeaderSet({"a"}));
+            HTTPHeaderSet({"a"}));
 
-  EXPECT_EQ(Parse(CredentialsMode::kOmit, "a , "), WebHTTPHeaderSet({"a", ""}));
+  EXPECT_EQ(Parse(CredentialsMode::kOmit, "a , "), HTTPHeaderSet({"a"}));
+  EXPECT_EQ(Parse(CredentialsMode::kOmit, " , a"), HTTPHeaderSet({"a"}));
 }
 
 TEST_F(CorsExposedHeadersTest, DuplicatedEntries) {
-  EXPECT_EQ(Parse(CredentialsMode::kOmit, "a, a"), WebHTTPHeaderSet{"a"});
+  EXPECT_EQ(Parse(CredentialsMode::kOmit, "a, a"), HTTPHeaderSet{"a"});
 
   EXPECT_EQ(Parse(CredentialsMode::kOmit, "a, a, b"),
-            WebHTTPHeaderSet({"a", "b"}));
+            HTTPHeaderSet({"a", "b"}));
 }
 
 TEST_F(CorsExposedHeadersTest, InvalidInput) {
@@ -58,8 +58,6 @@ TEST_F(CorsExposedHeadersTest, InvalidInput) {
 
   EXPECT_TRUE(Parse(CredentialsMode::kOmit, " , ").empty());
 
-  EXPECT_TRUE(Parse(CredentialsMode::kOmit, " , a").empty());
-
   EXPECT_TRUE(Parse(CredentialsMode::kOmit, "").empty());
 
   EXPECT_TRUE(Parse(CredentialsMode::kOmit, " ").empty());
@@ -68,6 +66,16 @@ TEST_F(CorsExposedHeadersTest, InvalidInput) {
   EXPECT_TRUE(
       Parse(CredentialsMode::kOmit, AtomicString(String::FromUTF8("\xC5\x81")))
           .empty());
+}
+
+TEST_F(CorsExposedHeadersTest, WithEmptyElements) {
+  EXPECT_EQ(Parse(CredentialsMode::kOmit, ", bb-8"), HTTPHeaderSet({"bb-8"}));
+
+  EXPECT_EQ(Parse(CredentialsMode::kOmit, ", , , bb-8"),
+            HTTPHeaderSet({"bb-8"}));
+
+  EXPECT_EQ(Parse(CredentialsMode::kOmit, ", , , bb-8,"),
+            HTTPHeaderSet({"bb-8"}));
 }
 
 TEST_F(CorsExposedHeadersTest, Wildcard) {
@@ -80,12 +88,12 @@ TEST_F(CorsExposedHeadersTest, Wildcard) {
 
   EXPECT_EQ(
       cors::ExtractCorsExposedHeaderNamesList(CredentialsMode::kOmit, response),
-      WebHTTPHeaderSet({"access-control-expose-headers", "b", "c", "d", "*"}));
+      HTTPHeaderSet({"access-control-expose-headers", "b", "c", "d", "*"}));
 
   EXPECT_EQ(
       cors::ExtractCorsExposedHeaderNamesList(CredentialsMode::kSameOrigin,
                                               response),
-      WebHTTPHeaderSet({"access-control-expose-headers", "b", "c", "d", "*"}));
+      HTTPHeaderSet({"access-control-expose-headers", "b", "c", "d", "*"}));
 }
 
 TEST_F(CorsExposedHeadersTest, Asterisk) {
@@ -98,88 +106,7 @@ TEST_F(CorsExposedHeadersTest, Asterisk) {
 
   EXPECT_EQ(cors::ExtractCorsExposedHeaderNamesList(CredentialsMode::kInclude,
                                                     response),
-            WebHTTPHeaderSet({"a", "b", "*"}));
-}
-
-// Keep this in sync with the CalculateResponseTainting test in
-// services/network/cors/cors_url_loader_unittest.cc.
-TEST(CorsTest, CalculateResponseTainting) {
-  using network::mojom::FetchResponseType;
-  using network::mojom::RequestMode;
-
-  const KURL same_origin_url("https://example.com/");
-  const KURL cross_origin_url("https://example2.com/");
-  scoped_refptr<SecurityOrigin> origin_refptr =
-      SecurityOrigin::Create(same_origin_url);
-  const SecurityOrigin* origin = origin_refptr.get();
-  const SecurityOrigin* no_origin = nullptr;
-
-  // CORS flag is false, same-origin request
-  EXPECT_EQ(
-      FetchResponseType::kBasic,
-      cors::CalculateResponseTainting(same_origin_url, RequestMode::kSameOrigin,
-                                      origin, CorsFlag::Unset));
-  EXPECT_EQ(
-      FetchResponseType::kBasic,
-      cors::CalculateResponseTainting(same_origin_url, RequestMode::kNoCors,
-                                      origin, CorsFlag::Unset));
-  EXPECT_EQ(FetchResponseType::kBasic,
-            cors::CalculateResponseTainting(same_origin_url, RequestMode::kCors,
-                                            origin, CorsFlag::Unset));
-  EXPECT_EQ(FetchResponseType::kBasic,
-            cors::CalculateResponseTainting(
-                same_origin_url, RequestMode::kCorsWithForcedPreflight, origin,
-                CorsFlag::Unset));
-  EXPECT_EQ(
-      FetchResponseType::kBasic,
-      cors::CalculateResponseTainting(same_origin_url, RequestMode::kNavigate,
-                                      origin, CorsFlag::Unset));
-
-  // CORS flag is false, cross-origin request
-  EXPECT_EQ(
-      FetchResponseType::kOpaque,
-      cors::CalculateResponseTainting(cross_origin_url, RequestMode::kNoCors,
-                                      origin, CorsFlag::Unset));
-  EXPECT_EQ(
-      FetchResponseType::kBasic,
-      cors::CalculateResponseTainting(cross_origin_url, RequestMode::kNavigate,
-                                      origin, CorsFlag::Unset));
-
-  // CORS flag is true, same-origin request
-  EXPECT_EQ(FetchResponseType::kCors,
-            cors::CalculateResponseTainting(same_origin_url, RequestMode::kCors,
-                                            origin, CorsFlag::Set));
-  EXPECT_EQ(FetchResponseType::kCors,
-            cors::CalculateResponseTainting(
-                same_origin_url, RequestMode::kCorsWithForcedPreflight, origin,
-                CorsFlag::Set));
-
-  // CORS flag is true, cross-origin request
-  EXPECT_EQ(FetchResponseType::kCors,
-            cors::CalculateResponseTainting(
-                cross_origin_url, RequestMode::kCors, origin, CorsFlag::Set));
-  EXPECT_EQ(FetchResponseType::kCors,
-            cors::CalculateResponseTainting(
-                cross_origin_url, RequestMode::kCorsWithForcedPreflight, origin,
-                CorsFlag::Set));
-
-  // Origin is not provided.
-  EXPECT_EQ(
-      FetchResponseType::kBasic,
-      cors::CalculateResponseTainting(same_origin_url, RequestMode::kNoCors,
-                                      no_origin, CorsFlag::Unset));
-  EXPECT_EQ(
-      FetchResponseType::kBasic,
-      cors::CalculateResponseTainting(same_origin_url, RequestMode::kNavigate,
-                                      no_origin, CorsFlag::Unset));
-  EXPECT_EQ(
-      FetchResponseType::kBasic,
-      cors::CalculateResponseTainting(cross_origin_url, RequestMode::kNoCors,
-                                      no_origin, CorsFlag::Unset));
-  EXPECT_EQ(
-      FetchResponseType::kBasic,
-      cors::CalculateResponseTainting(cross_origin_url, RequestMode::kNavigate,
-                                      no_origin, CorsFlag::Unset));
+            HTTPHeaderSet({"a", "b", "*"}));
 }
 
 }  // namespace

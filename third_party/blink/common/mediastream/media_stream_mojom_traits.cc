@@ -4,10 +4,12 @@
 
 #include "third_party/blink/public/common/mediastream/media_stream_mojom_traits.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "media/base/ipc/media_param_traits.h"
+#include "media/capture/mojom/video_capture_types.mojom.h"
 #include "media/capture/mojom/video_capture_types_mojom_traits.h"
-#include "media/mojo/interfaces/display_media_information.mojom.h"
+#include "media/mojo/mojom/display_media_information.mojom.h"
+#include "mojo/public/cpp/base/unguessable_token_mojom_traits.h"
 
 namespace mojo {
 
@@ -30,7 +32,12 @@ bool StructTraits<blink::mojom::MediaStreamDeviceDataView,
     return false;
   if (!input.ReadInput(&out->input))
     return false;
-  out->session_id = input.session_id();
+  absl::optional<base::UnguessableToken> session_id;
+  if (input.ReadSessionId(&session_id)) {
+    out->set_session_id(session_id ? *session_id : base::UnguessableToken());
+  } else {
+    return false;
+  }
   if (!input.ReadDisplayMediaInfo(&out->display_media_info))
     return false;
   return true;
@@ -61,6 +68,14 @@ bool StructTraits<blink::mojom::StreamControlsDataView, blink::StreamControls>::
 #endif
   out->hotword_enabled = input.hotword_enabled();
   out->disable_local_echo = input.disable_local_echo();
+  out->exclude_system_audio = input.exclude_system_audio();
+  out->exclude_self_browser_surface = input.exclude_self_browser_surface();
+  out->request_pan_tilt_zoom_permission =
+      input.request_pan_tilt_zoom_permission();
+  out->request_all_screens = input.request_all_screens();
+  out->preferred_display_surface = input.preferred_display_surface();
+  out->dynamic_surface_switching_requested =
+      input.dynamic_surface_switching_requested();
   return true;
 }
 

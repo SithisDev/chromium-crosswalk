@@ -6,19 +6,39 @@
 #define THIRD_PARTY_BLINK_PUBLIC_COMMON_CLIENT_HINTS_CLIENT_HINTS_H_
 
 #include <stddef.h>
+#include <set>
 #include <string>
 
+#include "base/containers/flat_map.h"
+#include "services/network/public/mojom/web_client_hints_types.mojom-shared.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/common_export.h"
+#include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
+
+class GURL;
 
 namespace blink {
 
-// Mapping from WebClientHintsType to the hint's name in header values (e.g.
-// kLang => "lang"), and to the hint's outgoing header (e.g. kLang =>
-// "sec-ch-lang"). The ordering matches the ordering of enums in
-// third_party/blink/public/platform/web_client_hints_type.h.
-BLINK_COMMON_EXPORT extern const char* const kClientHintsNameMapping[];
-BLINK_COMMON_EXPORT extern const char* const kClientHintsHeaderMapping[];
-BLINK_COMMON_EXPORT extern const size_t kClientHintsMappingsCount;
+class PermissionsPolicy;
+
+using ClientHintToPolicyFeatureMap =
+    base::flat_map<network::mojom::WebClientHintsType,
+                   mojom::PermissionsPolicyFeature>;
+
+using PolicyFeatureToClientHintMap =
+    base::flat_map<mojom::PermissionsPolicyFeature,
+                   std::set<network::mojom::WebClientHintsType>>;
+
+// Mapping from WebClientHintsType to the corresponding Permissions-Policy (e.g.
+// kDpr => kClientHintsDPR). The order matches the header mapping and the enum
+// order in services/network/public/mojom/web_client_hints_types.mojom
+BLINK_COMMON_EXPORT const ClientHintToPolicyFeatureMap&
+GetClientHintToPolicyFeatureMap();
+
+// Mapping from Permissions-Policy to the corresponding WebClientHintsType(s)
+// (e.g. kClientHintsDPR => {kDpr, kDpr_DEPRECATED}).
+BLINK_COMMON_EXPORT const PolicyFeatureToClientHintMap&
+GetPolicyFeatureToClientHintMap();
 
 // Mapping from WebEffectiveConnectionType to the header value. This value is
 // sent to the origins and is returned by the JavaScript API. The ordering
@@ -31,11 +51,16 @@ BLINK_COMMON_EXPORT extern const char* const
 
 BLINK_COMMON_EXPORT extern const size_t kWebEffectiveConnectionTypeMappingCount;
 
-// Given a comma-separated, ordered list of language codes, return the list
-// formatted as a structured header, as described in
-// https://tools.ietf.org/html/draft-west-lang-client-hint-00#section-2.1
-std::string BLINK_COMMON_EXPORT
-SerializeLangClientHint(const std::string& raw_language_list);
+// Indicates that a hint is sent by default, regardless of an opt-in.
+BLINK_COMMON_EXPORT
+bool IsClientHintSentByDefault(network::mojom::WebClientHintsType type);
+
+// Add a list of Client Hints headers to be removed to the output vector, based
+// on Permissions Policy and the url's origin.
+BLINK_COMMON_EXPORT void FindClientHintsToRemove(
+    const PermissionsPolicy* permissions_policy,
+    const GURL& url,
+    std::vector<std::string>* removed_headers);
 
 }  // namespace blink
 

@@ -26,13 +26,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_DEVICE_ORIENTATION_DEVICE_ORIENTATION_EVENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_DEVICE_ORIENTATION_DEVICE_ORIENTATION_EVENT_H_
 
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
 class DeviceOrientationEventInit;
 class DeviceOrientationData;
+class ScriptState;
 
 class DeviceOrientationEvent final : public Event {
   DEFINE_WRAPPERTYPEINFO();
@@ -62,26 +66,28 @@ class DeviceOrientationEvent final : public Event {
 
   DeviceOrientationData* Orientation() const { return orientation_.Get(); }
 
-  double alpha(bool& is_null) const;
-  double beta(bool& is_null) const;
-  double gamma(bool& is_null) const;
+  absl::optional<double> alpha() const;
+  absl::optional<double> beta() const;
+  absl::optional<double> gamma() const;
   bool absolute() const;
+
+  static ScriptPromise requestPermission(ScriptState*);
 
   const AtomicString& InterfaceName() const override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   Member<DeviceOrientationData> orientation_;
 };
 
-DEFINE_TYPE_CASTS(DeviceOrientationEvent,
-                  Event,
-                  event,
-                  event->InterfaceName() ==
-                      event_interface_names::kDeviceOrientationEvent,
-                  event.InterfaceName() ==
-                      event_interface_names::kDeviceOrientationEvent);
+template <>
+struct DowncastTraits<DeviceOrientationEvent> {
+  static bool AllowFrom(const Event& event) {
+    return event.InterfaceName() ==
+           event_interface_names::kDeviceOrientationEvent;
+  }
+};
 
 }  // namespace blink
 

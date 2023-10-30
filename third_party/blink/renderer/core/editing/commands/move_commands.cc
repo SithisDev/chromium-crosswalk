@@ -31,6 +31,8 @@
 
 #include "third_party/blink/renderer/core/editing/commands/move_commands.h"
 
+#include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
+#include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/editing/editing_behavior.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
@@ -47,7 +49,7 @@ namespace blink {
 unsigned MoveCommands::VerticalScrollDistance(LocalFrame& frame) {
   const Element* focused_element = frame.GetDocument()->FocusedElement();
   if (!focused_element) {
-    if (frame.GetSettings()->GetCaretBrowsingEnabled()) {
+    if (frame.IsCaretBrowsingEnabled()) {
       focused_element = frame.GetDocument()->ActiveElement();
     }
 
@@ -57,14 +59,13 @@ unsigned MoveCommands::VerticalScrollDistance(LocalFrame& frame) {
   LayoutObject* const layout_object = focused_element->GetLayoutObject();
   if (!layout_object || !layout_object->IsBox())
     return 0;
-  LayoutBox& layout_box = ToLayoutBox(*layout_object);
+  auto& layout_box = To<LayoutBox>(*layout_object);
   const ComputedStyle* const style = layout_box.Style();
   if (!style)
     return 0;
   if (!(style->OverflowY() == EOverflow::kScroll ||
         style->OverflowY() == EOverflow::kAuto ||
-        HasEditableStyle(*focused_element) ||
-        frame.GetSettings()->GetCaretBrowsingEnabled()))
+        IsEditable(*focused_element) || frame.IsCaretBrowsingEnabled()))
     return 0;
   const ScrollableArea& scrollable_area = *frame.View()->LayoutViewport();
   const int height = std::min<int>(layout_box.ClientHeight().ToInt(),
@@ -126,7 +127,7 @@ bool MoveCommands::MoveSelection(LocalFrame& frame,
 }
 
 void MoveCommands::UpdateFocusForCaretBrowsing(LocalFrame& frame) {
-  if (!frame.GetSettings()->GetCaretBrowsingEnabled())
+  if (!frame.IsCaretBrowsingEnabled())
     return;
 
   SelectionInDOMTree selection = frame.Selection().GetSelectionInDOMTree();
@@ -138,14 +139,14 @@ void MoveCommands::UpdateFocusForCaretBrowsing(LocalFrame& frame) {
     return;
 
   const ComputedStyle* style = node->GetComputedStyle();
-  if (!style || style->UserModify() != EUserModify::kReadOnly)
+  if (!style || style->UsedUserModify() != EUserModify::kReadOnly)
     return;
 
   Element* new_focused_element = nullptr;
 
   while (node) {
-    if (node->IsElementNode() && ToElement(node)->IsFocusable()) {
-      new_focused_element = ToElement(node);
+    if (node->IsElementNode() && To<Element>(node)->IsFocusable()) {
+      new_focused_element = To<Element>(node);
       break;
     }
     node = node->ParentOrShadowHostNode();
@@ -156,11 +157,12 @@ void MoveCommands::UpdateFocusForCaretBrowsing(LocalFrame& frame) {
 
   frame.GetDocument()->SetFocusedElement(
       new_focused_element,
-      FocusParams(SelectionBehaviorOnFocus::kNone, kWebFocusTypeNone, nullptr));
+      FocusParams(SelectionBehaviorOnFocus::kNone,
+                  mojom::blink::FocusType::kNone, nullptr));
 }
 
 void MoveCommands::UpdateSelectionForCaretBrowsing(LocalFrame& frame) {
-  if (!frame.GetSettings()->GetCaretBrowsingEnabled())
+  if (!frame.IsCaretBrowsingEnabled())
     return;
 
   if (frame.Selection().SelectionHasFocus())

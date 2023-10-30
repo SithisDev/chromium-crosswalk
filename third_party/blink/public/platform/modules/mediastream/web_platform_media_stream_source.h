@@ -6,10 +6,11 @@
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_MODULES_MEDIASTREAM_WEB_PLATFORM_MEDIA_STREAM_SOURCE_H_
 
 #include "base/callback.h"
+#include "third_party/blink/public/common/mediastream/media_stream_controls.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
+#include "third_party/blink/public/platform/modules/mediastream/web_media_stream_source.h"
 #include "third_party/blink/public/platform/web_common.h"
-#include "third_party/blink/public/platform/web_media_stream_source.h"
 #include "third_party/blink/public/platform/web_private_ptr.h"
 
 namespace blink {
@@ -17,24 +18,11 @@ namespace blink {
 class MediaStreamSource;
 class WebMediaStreamSource;
 
-// Names for media stream source capture types.
-// These are values set via the "chromeMediaSource" constraint.
-BLINK_PLATFORM_EXPORT extern const char kMediaStreamSourceTab[];
-BLINK_PLATFORM_EXPORT extern const char
-    kMediaStreamSourceScreen[]; /* video only */
-BLINK_PLATFORM_EXPORT extern const char kMediaStreamSourceDesktop[];
-BLINK_PLATFORM_EXPORT extern const char
-    kMediaStreamSourceSystem[]; /* audio only */
-
 class BLINK_PLATFORM_EXPORT WebPlatformMediaStreamSource {
  public:
   using SourceStoppedCallback =
-      base::Callback<void(const WebMediaStreamSource& source)>;
+      base::OnceCallback<void(const WebMediaStreamSource& source)>;
 
-  using ConstraintsCallback =
-      base::Callback<void(WebPlatformMediaStreamSource* source,
-                          mojom::MediaStreamRequestResult result,
-                          const WebString& result_name)>;
   using ConstraintsRepeatingCallback =
       base::RepeatingCallback<void(WebPlatformMediaStreamSource* source,
                                    mojom::MediaStreamRequestResult result,
@@ -48,7 +36,11 @@ class BLINK_PLATFORM_EXPORT WebPlatformMediaStreamSource {
   // https://dev.w3.org/2011/webrtc/editor/getusermedia.html.
   static const char kSourceId[];
 
-  WebPlatformMediaStreamSource();
+  explicit WebPlatformMediaStreamSource(
+      scoped_refptr<base::SingleThreadTaskRunner>);
+  WebPlatformMediaStreamSource(const WebPlatformMediaStreamSource&) = delete;
+  WebPlatformMediaStreamSource& operator=(const WebPlatformMediaStreamSource&) =
+      delete;
   virtual ~WebPlatformMediaStreamSource();
 
   // Returns device information about a source that has been created by a
@@ -65,8 +57,12 @@ class BLINK_PLATFORM_EXPORT WebPlatformMediaStreamSource {
   // JavaScript call to GetUserMedia. F.E a camera or microphone.
   void SetDevice(const MediaStreamDevice& device);
 
+  // Sets the capture-handle for a source that has been created by a
+  // JavaScript call to one of the display-capture APIs (e.g. getDisplayMedia).
+  void SetCaptureHandle(media::mojom::CaptureHandlePtr capture_handle);
+
   // Sets a callback that will be triggered when StopSource is called.
-  void SetStopCallback(const SourceStoppedCallback& stop_callback);
+  void SetStopCallback(SourceStoppedCallback stop_callback);
 
   // Clears the previously-set SourceStoppedCallback so that it will not be run
   // in the future.
@@ -94,6 +90,9 @@ class BLINK_PLATFORM_EXPORT WebPlatformMediaStreamSource {
   // implementations to implement custom stop methods.
   void FinalizeStopSource();
 
+  // Gets the TaskRunner for the main thread, for subclasses that need it.
+  base::SingleThreadTaskRunner* GetTaskRunner() const;
+
  private:
   MediaStreamDevice device_;
   SourceStoppedCallback stop_callback_;
@@ -102,7 +101,10 @@ class BLINK_PLATFORM_EXPORT WebPlatformMediaStreamSource {
                 WebPrivatePtrStrength::kWeak>
       owner_;
 
-  DISALLOW_COPY_AND_ASSIGN(WebPlatformMediaStreamSource);
+  // Task runner for the main thread. Also used to check that all methods that
+  // could cause object graph or data flow changes are being called on the main
+  // thread.
+  const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 };
 
 }  // namespace blink

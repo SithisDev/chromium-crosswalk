@@ -19,7 +19,9 @@ class DummyFontFaceSource : public CSSFontFaceSource {
       const FontDescription&,
       const FontSelectionCapabilities&) override {
     return SimpleFontData::Create(FontPlatformData(
-        SkTypeface::MakeDefault(), std::string(), 0, false, false));
+        SkTypeface::MakeDefault(), /* name */ std::string(),
+        /* text_size */ 0, /* synthetic_bold */ false,
+        /* synthetic_italic */ false, TextRenderingMode::kAutoTextRendering));
   }
 
   DummyFontFaceSource() = default;
@@ -51,10 +53,10 @@ unsigned SimulateHashCalculation(float size) {
 TEST(CSSFontFaceSourceTest, HashCollision) {
   DummyFontFaceSource font_face_source;
   // Even if the hash value collide, fontface cache should return different
-  // value for different fonts.
-  EXPECT_EQ(SimulateHashCalculation(6009), SimulateHashCalculation(8634));
-  EXPECT_NE(font_face_source.GetFontDataForSize(6009),
-            font_face_source.GetFontDataForSize(8634));
+  // value for different fonts, values determined experimentally.
+  EXPECT_EQ(SimulateHashCalculation(13717), SimulateHashCalculation(5613));
+  EXPECT_NE(font_face_source.GetFontDataForSize(13717),
+            font_face_source.GetFontDataForSize(5613));
 }
 
 // Exercises the size font_data_table_ assertions in CSSFontFaceSource.

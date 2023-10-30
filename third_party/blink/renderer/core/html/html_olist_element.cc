@@ -22,8 +22,8 @@
 
 #include "third_party/blink/renderer/core/html/html_olist_element.h"
 
+#include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
-#include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/html/list_item_ordinal.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -32,10 +32,8 @@
 
 namespace blink {
 
-using namespace html_names;
-
 HTMLOListElement::HTMLOListElement(Document& document)
-    : HTMLElement(kOlTag, document),
+    : HTMLElement(html_names::kOlTag, document),
       start_(0xBADBEEF),
       item_count_(0),
       has_explicit_start_(false),
@@ -44,7 +42,7 @@ HTMLOListElement::HTMLOListElement(Document& document)
 
 bool HTMLOListElement::IsPresentationAttribute(
     const QualifiedName& name) const {
-  if (name == kTypeAttr)
+  if (name == html_names::kTypeAttr)
     return true;
   return HTMLElement::IsPresentationAttribute(name);
 }
@@ -53,22 +51,27 @@ void HTMLOListElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
     MutableCSSPropertyValueSet* style) {
-  if (name == kTypeAttr) {
+  if (name == html_names::kTypeAttr) {
     if (value == "a") {
       AddPropertyToPresentationAttributeStyle(
-          style, CSSPropertyID::kListStyleType, CSSValueID::kLowerAlpha);
+          style, CSSPropertyID::kListStyleType,
+          *MakeGarbageCollected<CSSCustomIdentValue>("lower-alpha"));
     } else if (value == "A") {
       AddPropertyToPresentationAttributeStyle(
-          style, CSSPropertyID::kListStyleType, CSSValueID::kUpperAlpha);
+          style, CSSPropertyID::kListStyleType,
+          *MakeGarbageCollected<CSSCustomIdentValue>("upper-alpha"));
     } else if (value == "i") {
       AddPropertyToPresentationAttributeStyle(
-          style, CSSPropertyID::kListStyleType, CSSValueID::kLowerRoman);
+          style, CSSPropertyID::kListStyleType,
+          *MakeGarbageCollected<CSSCustomIdentValue>("lower-roman"));
     } else if (value == "I") {
       AddPropertyToPresentationAttributeStyle(
-          style, CSSPropertyID::kListStyleType, CSSValueID::kUpperRoman);
+          style, CSSPropertyID::kListStyleType,
+          *MakeGarbageCollected<CSSCustomIdentValue>("upper-roman"));
     } else if (value == "1") {
       AddPropertyToPresentationAttributeStyle(
-          style, CSSPropertyID::kListStyleType, CSSValueID::kDecimal);
+          style, CSSPropertyID::kListStyleType,
+          *MakeGarbageCollected<CSSCustomIdentValue>("decimal"));
     }
   } else {
     HTMLElement::CollectStyleForPresentationAttribute(name, value, style);
@@ -77,7 +80,7 @@ void HTMLOListElement::CollectStyleForPresentationAttribute(
 
 void HTMLOListElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == kStartAttr) {
+  if (params.name == html_names::kStartAttr) {
     int old_start = StartConsideringItemCount();
     int parsed_start = 0;
     bool can_parse = ParseHTMLInteger(params.new_value, parsed_start);
@@ -86,7 +89,7 @@ void HTMLOListElement::ParseAttribute(
     if (old_start == StartConsideringItemCount())
       return;
     UpdateItemValues();
-  } else if (params.name == kReversedAttr) {
+  } else if (params.name == html_names::kReversedAttr) {
     bool reversed = !params.new_value.IsNull();
     if (reversed == is_reversed_)
       return;
@@ -98,13 +101,12 @@ void HTMLOListElement::ParseAttribute(
 }
 
 void HTMLOListElement::setStart(int start) {
-  SetIntegralAttribute(kStartAttr, start);
+  SetIntegralAttribute(html_names::kStartAttr, start);
 }
 
 void HTMLOListElement::UpdateItemValues() {
   if (!GetLayoutObject())
     return;
-  UpdateDistributionForFlatTreeTraversal();
   ListItemOrdinal::InvalidateAllItemsForOrderedList(this);
 }
 

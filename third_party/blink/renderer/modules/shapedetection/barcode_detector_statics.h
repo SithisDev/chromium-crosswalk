@@ -7,8 +7,10 @@
 
 #include "services/shape_detection/public/mojom/barcodedetection_provider.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
+#include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -20,10 +22,8 @@ class ScriptPromiseResolver;
 // This class owns the BarcodeDetectionProvider connection used to create the
 // BarcodeDetector instances for this ExecutionContext.
 class BarcodeDetectorStatics final
-    : public GarbageCollectedFinalized<BarcodeDetectorStatics>,
+    : public GarbageCollected<BarcodeDetectorStatics>,
       public Supplement<ExecutionContext> {
-  USING_GARBAGE_COLLECTED_MIXIN(BarcodeDetectorStatics);
-
  public:
   static const char kSupplementName[];
 
@@ -33,11 +33,11 @@ class BarcodeDetectorStatics final
   ~BarcodeDetectorStatics();
 
   void CreateBarcodeDetection(
-      shape_detection::mojom::blink::BarcodeDetectionRequest,
+      mojo::PendingReceiver<shape_detection::mojom::blink::BarcodeDetection>,
       shape_detection::mojom::blink::BarcodeDetectorOptionsPtr);
   ScriptPromise EnumerateSupportedFormats(ScriptState*);
 
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   void EnsureServiceConnection();
@@ -46,7 +46,8 @@ class BarcodeDetectorStatics final
       const Vector<shape_detection::mojom::blink::BarcodeFormat>&);
   void OnConnectionError();
 
-  shape_detection::mojom::blink::BarcodeDetectionProviderPtr service_;
+  HeapMojoRemote<shape_detection::mojom::blink::BarcodeDetectionProvider>
+      service_;
 
   // Holds Promises returned by EnumerateSupportedFormats() so that they can be
   // resolve in the case of a Mojo connection error.

@@ -27,6 +27,7 @@
 
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
@@ -39,19 +40,16 @@ LayoutHTMLCanvas::LayoutHTMLCanvas(HTMLCanvasElement* element)
   View()->GetFrameView()->SetIsVisuallyNonEmpty();
 }
 
-PaintLayerType LayoutHTMLCanvas::LayerTypeRequired() const {
-  return kNormalPaintLayer;
-}
-
 void LayoutHTMLCanvas::PaintReplaced(const PaintInfo& paint_info,
                                      const PhysicalOffset& paint_offset) const {
+  NOT_DESTROYED();
   HTMLCanvasPainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
 void LayoutHTMLCanvas::CanvasSizeChanged() {
-  IntSize canvas_size = ToHTMLCanvasElement(GetNode())->Size();
-  LayoutSize zoomed_size(canvas_size.Width() * StyleRef().EffectiveZoom(),
-                         canvas_size.Height() * StyleRef().EffectiveZoom());
+  NOT_DESTROYED();
+  gfx::Size canvas_size = To<HTMLCanvasElement>(GetNode())->Size();
+  LayoutSize zoomed_size = LayoutSize(canvas_size) * StyleRef().EffectiveZoom();
 
   if (zoomed_size == IntrinsicSize())
     return;
@@ -61,44 +59,48 @@ void LayoutHTMLCanvas::CanvasSizeChanged() {
   if (!Parent())
     return;
 
-  if (!PreferredLogicalWidthsDirty())
-    SetPreferredLogicalWidthsDirty();
+  SetIntrinsicLogicalWidthsDirty();
+  SetNeedsLayout(layout_invalidation_reason::kSizeChanged);
+}
 
-  LayoutSize old_size = Size();
-  UpdateLogicalWidth();
-  UpdateLogicalHeight();
-  if (old_size == Size() && !HasOverrideLogicalWidth() &&
-      !HasOverrideLogicalHeight()) {
-    // If we have an override size, then we're probably a flex item, and the
-    // check above is insufficient because updateLogical{Width,Height} just
-    // used the override size. We actually have to mark ourselves as needing
-    // layout so the flex algorithm can run and compute our size correctly.
-    return;
-  }
-
-  if (!SelfNeedsLayout())
-    SetNeedsLayout(layout_invalidation_reason::kSizeChanged);
+bool LayoutHTMLCanvas::DrawsBackgroundOntoContentLayer() const {
+  auto* canvas = To<HTMLCanvasElement>(GetNode());
+  if (canvas->SurfaceLayerBridge())
+    return false;
+  CanvasRenderingContext* context = canvas->RenderingContext();
+  if (!context || !context->IsComposited() || !context->CcLayer())
+    return false;
+  if (StyleRef().HasBoxDecorations() || StyleRef().HasBackgroundImage())
+    return false;
+  // If there is no background, there is nothing to support.
+  if (!StyleRef().HasBackground())
+    return true;
+  // Simple background that is contained within the contents rect.
+  return ReplacedContentRect().Contains(
+      PhysicalBackgroundRect(kBackgroundPaintedExtent));
 }
 
 void LayoutHTMLCanvas::InvalidatePaint(
     const PaintInvalidatorContext& context) const {
-  auto* element = ToHTMLCanvasElement(GetNode());
+  NOT_DESTROYED();
+  auto* element = To<HTMLCanvasElement>(GetNode());
   if (element->IsDirty())
     element->DoDeferredPaintInvalidation();
 
   LayoutReplaced::InvalidatePaint(context);
 }
 
-CompositingReasons LayoutHTMLCanvas::AdditionalCompositingReasons() const {
-  if (ToHTMLCanvasElement(GetNode())->ShouldBeDirectComposited())
-    return CompositingReason::kCanvas;
-  return CompositingReason::kNone;
-}
-
 void LayoutHTMLCanvas::StyleDidChange(StyleDifference diff,
                                       const ComputedStyle* old_style) {
+  NOT_DESTROYED();
   LayoutReplaced::StyleDidChange(diff, old_style);
-  ToHTMLCanvasElement(GetNode())->StyleDidChange(old_style, StyleRef());
+  To<HTMLCanvasElement>(GetNode())->StyleDidChange(old_style, StyleRef());
+}
+
+void LayoutHTMLCanvas::WillBeDestroyed() {
+  NOT_DESTROYED();
+  LayoutReplaced::WillBeDestroyed();
+  To<HTMLCanvasElement>(GetNode())->LayoutObjectDestroyed();
 }
 
 }  // namespace blink

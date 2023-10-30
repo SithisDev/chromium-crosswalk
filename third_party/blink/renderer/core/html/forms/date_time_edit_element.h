@@ -26,8 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_DATE_TIME_EDIT_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_DATE_TIME_EDIT_ELEMENT_H_
 
-#include "base/macros.h"
-#include "third_party/blink/public/platform/web_focus_type.h"
+#include "third_party/blink/public/mojom/input/focus_type.mojom-blink-forward.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_field_element.h"
 #include "third_party/blink/renderer/core/html/forms/step_range.h"
 #include "third_party/blink/renderer/platform/text/date_components.h"
@@ -38,6 +37,7 @@ namespace blink {
 class DateTimeFieldsState;
 class Locale;
 class StepRange;
+enum class DateTimeField;
 
 // DateTimeEditElement class contains numberic field and symbolc field for
 // representing date and time, such as
@@ -45,16 +45,14 @@ class StepRange;
 //  - Hour, Minute, Second, Millisecond, AM/PM
 class DateTimeEditElement final : public HTMLDivElement,
                                   public DateTimeFieldElement::FieldOwner {
-  USING_GARBAGE_COLLECTED_MIXIN(DateTimeEditElement);
-
  public:
   // EditControlOwner implementer must call removeEditControlOwner when
   // it doesn't handle event, e.g. at destruction.
   class EditControlOwner : public GarbageCollectedMixin {
    public:
     virtual ~EditControlOwner();
-    virtual void DidBlurFromControl(WebFocusType) = 0;
-    virtual void DidFocusOnControl(WebFocusType) = 0;
+    virtual void DidBlurFromControl(mojom::blink::FocusType) = 0;
+    virtual void DidFocusOnControl(mojom::blink::FocusType) = 0;
     virtual void EditControlValueChanged() = 0;
     virtual String FormatDateTimeFieldsState(
         const DateTimeFieldsState&) const = 0;
@@ -83,8 +81,10 @@ class DateTimeEditElement final : public HTMLDivElement,
   };
 
   DateTimeEditElement(Document&, EditControlOwner&);
+  DateTimeEditElement(const DateTimeEditElement&) = delete;
+  DateTimeEditElement& operator=(const DateTimeEditElement&) = delete;
   ~DateTimeEditElement() override;
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   void AddField(DateTimeFieldElement*);
   bool AnyEditableFieldsHaveValues() const;
@@ -105,10 +105,15 @@ class DateTimeEditElement final : public HTMLDivElement,
   void SetValueAsDate(const LayoutParameters&, const DateComponents&);
   void SetValueAsDateTimeFieldsState(const DateTimeFieldsState&);
   void SetOnlyYearMonthDay(const DateComponents&);
+  void SetOnlyTime(const DateComponents&);
+  void SetDateTimeLocal(const DateComponents&);
   void StepDown();
   void StepUp();
   String Value() const;
   DateTimeFieldsState ValueAsDateTimeFieldsState() const;
+  bool HasField(DateTimeField) const;
+  bool IsFirstFieldAMPM() const;
+  wtf_size_t FocusedFieldIndex() const;
 
  private:
   static const wtf_size_t kInvalidFieldIndex = UINT_MAX;
@@ -124,10 +129,10 @@ class DateTimeEditElement final : public HTMLDivElement,
   //  8. AM/PM
   static const int kMaximumNumberOfFields = 8;
 
+  DateTimeFieldElement* GetField(DateTimeField) const;
   DateTimeFieldElement* FieldAt(wtf_size_t) const;
   wtf_size_t FieldIndexOf(const DateTimeFieldElement&) const;
   DateTimeFieldElement* FocusedField() const;
-  wtf_size_t FocusedFieldIndex() const;
   bool FocusOnNextFocusableField(wtf_size_t start_index);
   bool IsDisabled() const;
   bool IsReadOnly() const;
@@ -135,15 +140,17 @@ class DateTimeEditElement final : public HTMLDivElement,
   void UpdateUIState();
 
   // Element function.
-  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() override;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject(
+      const StyleRecalcContext&) override;
   bool IsDateTimeEditElement() const override;
 
   // DateTimeFieldElement::FieldOwner functions.
-  void DidBlurFromField(WebFocusType) override;
-  void DidFocusOnField(WebFocusType) override;
+  void DidBlurFromField(mojom::blink::FocusType) override;
+  void DidFocusOnField(mojom::blink::FocusType) override;
   void FieldValueChanged() override;
   bool FocusOnNextField(const DateTimeFieldElement&) override;
   bool FocusOnPreviousField(const DateTimeFieldElement&) override;
+  void HandleAmPmRollover(DateTimeFieldElement::FieldRolloverType) override;
   bool IsFieldOwnerDisabled() const override;
   bool IsFieldOwnerReadOnly() const override;
   AtomicString LocaleIdentifier() const override;
@@ -151,15 +158,7 @@ class DateTimeEditElement final : public HTMLDivElement,
 
   HeapVector<Member<DateTimeFieldElement>, kMaximumNumberOfFields> fields_;
   Member<EditControlOwner> edit_control_owner_;
-
-  DISALLOW_COPY_AND_ASSIGN(DateTimeEditElement);
 };
-
-DEFINE_TYPE_CASTS(DateTimeEditElement,
-                  Element,
-                  element,
-                  element->IsDateTimeEditElement(),
-                  element.IsDateTimeEditElement());
 
 template <>
 struct DowncastTraits<DateTimeEditElement> {
@@ -170,4 +169,4 @@ struct DowncastTraits<DateTimeEditElement> {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_DATE_TIME_EDIT_ELEMENT_H_

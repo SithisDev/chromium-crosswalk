@@ -32,6 +32,7 @@
 
 #include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -39,10 +40,8 @@
 namespace blink {
 
 class ContextFeaturesCache final
-    : public GarbageCollectedFinalized<ContextFeaturesCache>,
+    : public GarbageCollected<ContextFeaturesCache>,
       public Supplement<Document> {
-  USING_GARBAGE_COLLECTED_MIXIN(ContextFeaturesCache);
-
  public:
   static const char kSupplementName[];
 
@@ -87,7 +86,7 @@ class ContextFeaturesCache final
 
   void ValidateAgainst(Document*);
 
-  void Trace(Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     Supplement<Document>::Trace(visitor);
   }
 
@@ -110,7 +109,8 @@ ContextFeaturesCache& ContextFeaturesCache::From(Document& document) {
 }
 
 void ContextFeaturesCache::ValidateAgainst(Document* document) {
-  String current_domain = document->GetSecurityOrigin()->Domain();
+  String current_domain =
+      document->GetExecutionContext()->GetSecurityOrigin()->Domain();
   if (current_domain == domain_)
     return;
   domain_ = current_domain;

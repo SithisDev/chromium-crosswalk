@@ -7,7 +7,7 @@
 
 #include <memory>
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -107,12 +107,6 @@ void TestUpdateRequiredPreviousFrameAfterFirstDecode(DecoderCreator,
                                                      const char* file);
 void TestUpdateRequiredPreviousFrameAfterFirstDecode(DecoderCreator,
                                                      const char* file);
-
-void TestResumePartialDecodeAfterClearFrameBufferCache(DecoderCreator,
-                                                       const char* dir,
-                                                       const char* file);
-void TestResumePartialDecodeAfterClearFrameBufferCache(DecoderCreator,
-                                                       const char* file);
 
 // Verifies that result of alpha blending is similar for AlphaPremultiplied and
 // AlphaNotPremultiplied cases.

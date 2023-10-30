@@ -31,7 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_QUOTA_DOM_WINDOW_QUOTA_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_QUOTA_DOM_WINDOW_QUOTA_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
 namespace blink {
@@ -41,8 +41,6 @@ class LocalDOMWindow;
 
 class DOMWindowQuota final : public GarbageCollected<DOMWindowQuota>,
                              public Supplement<LocalDOMWindow> {
-  USING_GARBAGE_COLLECTED_MIXIN(DOMWindowQuota);
-
  public:
   static const char kSupplementName[];
 
@@ -52,7 +50,7 @@ class DOMWindowQuota final : public GarbageCollected<DOMWindowQuota>,
   static DeprecatedStorageInfo* webkitStorageInfo(LocalDOMWindow&);
   DeprecatedStorageInfo* webkitStorageInfo() const;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  private:
   mutable Member<DeprecatedStorageInfo> storage_info_;

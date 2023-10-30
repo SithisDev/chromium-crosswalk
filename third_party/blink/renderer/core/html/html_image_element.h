@@ -34,17 +34,18 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_image_loader.h"
 #include "third_party/blink/renderer/core/html/lazy_load_image_observer.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/graphics/image_orientation.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace blink {
 
+class ExceptionState;
 class HTMLFormElement;
 class ImageCandidate;
-class ExceptionState;
+class LayoutSize;
 class ShadowRoot;
 
 class CORE_EXPORT HTMLImageElement final
@@ -53,13 +54,9 @@ class CORE_EXPORT HTMLImageElement final
       public ActiveScriptWrappable<HTMLImageElement>,
       public FormAssociated {
   DEFINE_WRAPPERTYPEINFO();
-  USING_GARBAGE_COLLECTED_MIXIN(HTMLImageElement);
 
  public:
   class ViewportChangeListener;
-
-  // Returns attributes that should be checked against Trusted Types
-  const AttrNameToTrustedType& GetCheckedAttributeTypes() const override;
 
   static HTMLImageElement* CreateForJSConstructor(Document&);
   static HTMLImageElement* CreateForJSConstructor(Document&, unsigned width);
@@ -83,7 +80,7 @@ class CORE_EXPORT HTMLImageElement final
   HTMLImageElement(Document&, const CreateElementFlags);
   explicit HTMLImageElement(Document&, bool created_by_parser = false);
   ~HTMLImageElement() override;
-  void Trace(Visitor*) override;
+  void Trace(Visitor*) const override;
 
   unsigned width();
   unsigned height();
@@ -103,22 +100,21 @@ class CORE_EXPORT HTMLImageElement final
   ImageResourceContent* CachedImage() const {
     return GetImageLoader().GetContent();
   }
-  ImageResource* CachedImageResourceForImageDocument() const {
-    return GetImageLoader().ImageResourceForImageDocument();
-  }
   void LoadDeferredImage() {
     GetImageLoader().LoadDeferredImage(referrer_policy_);
+  }
+  void LoadDeferredImageBlockingLoad() {
+    GetImageLoader().LoadDeferredImage(referrer_policy_, true);
   }
   void SetImageForTest(ImageResourceContent* content) {
     GetImageLoader().SetImageForTest(content);
   }
 
-  void SetLoadingImageDocument() { GetImageLoader().SetLoadingImageDocument(); }
+  void StartLoadingImageDocument(ImageResourceContent* image_content);
 
   void setHeight(unsigned);
   void setWidth(unsigned);
 
-  IntSize GetOverriddenIntrinsicSize() const;
   bool IsDefaultIntrinsicSize() const {
     return is_default_overridden_intrinsic_size_;
   }
@@ -146,7 +142,9 @@ class CORE_EXPORT HTMLImageElement final
   bool IsCollapsed() const;
 
   // CanvasImageSource interface implementation.
-  FloatSize DefaultDestinationSize(const FloatSize&) const override;
+  gfx::SizeF DefaultDestinationSize(
+      const gfx::SizeF&,
+      const RespectImageOrientationEnum) const override;
 
   // public so that HTMLPictureElement can call this as well.
   void SelectSourceURL(ImageLoader::UpdateFromElementBehavior);
@@ -181,6 +179,25 @@ class CORE_EXPORT HTMLImageElement final
     return is_legacy_format_or_unoptimized_image_;
   }
 
+  // Keeps track of whether the image comes from an ad.
+  void SetIsAdRelated() { is_ad_related_ = true; }
+  bool IsAdRelated() const override { return is_ad_related_; }
+
+  // Keeps track whether this image is an LCP element.
+  void SetIsLCPElement() { is_lcp_element_ = true; }
+  bool IsLCPElement() const { return is_lcp_element_; }
+
+  bool IsChangedShortlyAfterMouseover() const {
+    return is_changed_shortly_after_mouseover_;
+  }
+
+  void InvalidateAttributeMapping();
+
+  bool IsRichlyEditableForAccessibility() const override { return false; }
+
+  static bool SupportedImageType(const String& type,
+                                 const HashSet<String>* disabled_image_types);
+
  protected:
   // Controls how an image element appears in the layout. See:
   // https://html.spec.whatwg.org/C/#image-request
@@ -201,7 +218,8 @@ class CORE_EXPORT HTMLImageElement final
   void DidMoveToNewDocument(Document& old_document) override;
 
   void DidAddUserAgentShadowRoot(ShadowRoot&) override;
-  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() override;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject(
+      const StyleRecalcContext&) override;
 
  private:
   bool AreAuthorShadowsAllowed() const override { return false; }
@@ -211,6 +229,12 @@ class CORE_EXPORT HTMLImageElement final
   void CollectStyleForPresentationAttribute(
       const QualifiedName&,
       const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
+  // For mapping attributes from the <source> element, if any.
+  bool HasExtraStyleForPresentationAttribute() const override {
+    return source_;
+  }
+  void CollectExtraStyleForPresentationAttribute(
       MutableCSSPropertyValueSet*) override;
   void SetLayoutDisposition(LayoutDisposition, bool force_reattach = false);
 
@@ -248,19 +272,21 @@ class CORE_EXPORT HTMLImageElement final
   float image_device_pixel_ratio_;
   Member<HTMLSourceElement> source_;
   LayoutDisposition layout_disposition_;
-  unsigned form_was_set_by_parser_ : 1;
-  unsigned element_created_by_parser_ : 1;
-  unsigned is_fallback_image_ : 1;
-  bool sizes_set_width_;
-  bool is_default_overridden_intrinsic_size_;
+  bool form_was_set_by_parser_ : 1;
+  bool element_created_by_parser_ : 1;
+  bool is_fallback_image_ : 1;
+  bool is_default_overridden_intrinsic_size_ : 1;
   // This flag indicates if the image violates one or more optimized image
   // policies. When any policy is violated, the image should be rendered as a
   // placeholder image.
-  bool is_legacy_format_or_unoptimized_image_;
+  bool is_legacy_format_or_unoptimized_image_ : 1;
+  bool is_ad_related_ : 1;
+  bool is_lcp_element_ : 1;
+  bool is_changed_shortly_after_mouseover_ : 1;
+  bool has_sizes_attribute_ : 1;
+  bool is_lazy_loaded_ : 1;
 
   network::mojom::ReferrerPolicy referrer_policy_;
-
-  IntSize overridden_intrinsic_size_;
 
   std::unique_ptr<LazyLoadImageObserver::VisibleLoadTimeMetrics>
       visible_load_time_metrics_;

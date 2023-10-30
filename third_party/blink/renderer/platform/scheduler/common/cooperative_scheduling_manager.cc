@@ -5,8 +5,10 @@
 #include "third_party/blink/renderer/platform/scheduler/public/cooperative_scheduling_manager.h"
 
 #include "base/auto_reset.h"
+#include "base/run_loop.h"
 #include "base/time/default_tick_clock.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -17,8 +19,7 @@ namespace scheduler {
 
 namespace {
 // Minimum time interval between nested loop runs.
-constexpr base::TimeDelta kNestedLoopMinimumInterval =
-    base::TimeDelta::FromMilliseconds(15);
+constexpr base::TimeDelta kNestedLoopMinimumInterval = base::Milliseconds(15);
 }  // namespace
 
 // static
@@ -40,18 +41,22 @@ CooperativeSchedulingManager::AllowedStackScope::~AllowedStackScope() {
 }
 
 CooperativeSchedulingManager::CooperativeSchedulingManager()
-    : clock_(base::DefaultTickClock::GetInstance()) {}
+    : clock_(base::DefaultTickClock::GetInstance()),
+      feature_enabled_(RuntimeEnabledFeatures::CooperativeSchedulingEnabled()) {
+}
 
 void CooperativeSchedulingManager::EnterAllowedStackScope() {
-  TRACE_EVENT_ASYNC_BEGIN0("renderer.scheduler", "PreemptionAllowedStackScope",
-                           this);
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0("renderer.scheduler",
+                                    "PreemptionAllowedStackScope",
+                                    TRACE_ID_LOCAL(this));
 
   allowed_stack_scope_depth_++;
 }
 
 void CooperativeSchedulingManager::LeaveAllowedStackScope() {
-  TRACE_EVENT_ASYNC_END0("renderer.scheduler", "PreemptionAllowedStackScope",
-                         this);
+  TRACE_EVENT_NESTABLE_ASYNC_END0("renderer.scheduler",
+                                  "PreemptionAllowedStackScope",
+                                  TRACE_ID_LOCAL(this));
   allowed_stack_scope_depth_--;
   DCHECK_GE(allowed_stack_scope_depth_, 0);
 }
@@ -61,14 +66,12 @@ void CooperativeSchedulingManager::SafepointSlow() {
   if (running_nested_loop_ || base::RunLoop::IsNestedOnCurrentThread())
     return;
 
+  if (!feature_enabled_)
+    return;
+
   // TODO(keishi): Also bail if V8 EnteredContextCount is more than 1
-  // This task slice completes here.
-  Thread::MainThread()->Scheduler()->OnSafepointEntered();
 
   RunNestedLoop();
-
-  // A new task slice starts here.
-  Thread::MainThread()->Scheduler()->OnSafepointExited();
 }
 
 void CooperativeSchedulingManager::RunNestedLoop() {

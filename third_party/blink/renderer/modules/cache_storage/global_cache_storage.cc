@@ -9,7 +9,7 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/modules/cache_storage/cache_storage.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
@@ -19,15 +19,12 @@ namespace {
 
 template <typename T>
 class GlobalCacheStorageImpl final
-    : public GarbageCollectedFinalized<GlobalCacheStorageImpl<T>>,
+    : public GarbageCollected<GlobalCacheStorageImpl<T>>,
       public Supplement<T> {
-  USING_GARBAGE_COLLECTED_MIXIN(GlobalCacheStorageImpl);
-
  public:
   static const char kSupplementName[];
 
-  static GlobalCacheStorageImpl& From(T& supplementable,
-                                      ExecutionContext* execution_context) {
+  static GlobalCacheStorageImpl& From(T& supplementable) {
     GlobalCacheStorageImpl* supplement =
         Supplement<T>::template From<GlobalCacheStorageImpl>(supplementable);
     if (!supplement) {
@@ -37,23 +34,12 @@ class GlobalCacheStorageImpl final
     return *supplement;
   }
 
-  GlobalCacheStorageImpl() = default;
-  ~GlobalCacheStorageImpl() {}
+  GlobalCacheStorageImpl() : Supplement<T>(nullptr) {}
+  ~GlobalCacheStorageImpl() = default;
 
   CacheStorage* Caches(T& fetching_scope, ExceptionState& exception_state) {
     ExecutionContext* context = fetching_scope.GetExecutionContext();
-    if (!context->GetSecurityOrigin()->CanAccessCacheStorage()) {
-      if (context->GetSecurityContext().IsSandboxed(WebSandboxFlags::kOrigin)) {
-        exception_state.ThrowSecurityError(
-            "Cache storage is disabled because the context is sandboxed and "
-            "lacks the 'allow-same-origin' flag.");
-      } else if (context->Url().ProtocolIs("data")) {
-        exception_state.ThrowSecurityError(
-            "Cache storage is disabled inside 'data:' URLs.");
-      } else {
-        exception_state.ThrowSecurityError(
-            "Access to cache storage is denied.");
-      }
+    if (!GlobalCacheStorage::CanCreateCacheStorage(context, exception_state)) {
       return nullptr;
     }
 
@@ -62,10 +48,11 @@ class GlobalCacheStorageImpl final
     }
 
     if (!caches_) {
-      if (!context->GetInterfaceProvider()) {
+      if (&context->GetBrowserInterfaceBroker() ==
+          &GetEmptyBrowserInterfaceBroker()) {
         exception_state.ThrowSecurityError(
-            "Cache storage isn't available on detached context. No interface "
-            "provider.");
+            "Cache storage isn't available on detached context. No browser "
+            "interface broker.");
         return nullptr;
       }
       caches_ = MakeGarbageCollected<CacheStorage>(
@@ -74,7 +61,7 @@ class GlobalCacheStorageImpl final
     return caches_;
   }
 
-  void Trace(blink::Visitor* visitor) override {
+  void Trace(Visitor* visitor) const override {
     visitor->Trace(caches_);
     Supplement<T>::Trace(visitor);
   }
@@ -90,18 +77,36 @@ const char GlobalCacheStorageImpl<T>::kSupplementName[] =
 
 }  // namespace
 
+bool GlobalCacheStorage::CanCreateCacheStorage(
+    ExecutionContext* context,
+    ExceptionState& exception_state) {
+  if (context->GetSecurityOrigin()->CanAccessCacheStorage()) {
+    return true;
+  }
+
+  if (context->IsSandboxed(network::mojom::blink::WebSandboxFlags::kOrigin)) {
+    exception_state.ThrowSecurityError(
+        "Cache storage is disabled because the context is sandboxed and "
+        "lacks the 'allow-same-origin' flag.");
+  } else if (context->Url().ProtocolIs("data")) {
+    exception_state.ThrowSecurityError(
+        "Cache storage is disabled inside 'data:' URLs.");
+  } else {
+    exception_state.ThrowSecurityError("Access to cache storage is denied.");
+  }
+  return false;
+}
+
 CacheStorage* GlobalCacheStorage::caches(LocalDOMWindow& window,
                                          ExceptionState& exception_state) {
-  return GlobalCacheStorageImpl<LocalDOMWindow>::From(
-             window, window.GetExecutionContext())
-      .Caches(window, exception_state);
+  return GlobalCacheStorageImpl<LocalDOMWindow>::From(window).Caches(
+      window, exception_state);
 }
 
 CacheStorage* GlobalCacheStorage::caches(WorkerGlobalScope& worker,
                                          ExceptionState& exception_state) {
-  return GlobalCacheStorageImpl<WorkerGlobalScope>::From(
-             worker, worker.GetExecutionContext())
-      .Caches(worker, exception_state);
+  return GlobalCacheStorageImpl<WorkerGlobalScope>::From(worker).Caches(
+      worker, exception_state);
 }
 
 }  // namespace blink

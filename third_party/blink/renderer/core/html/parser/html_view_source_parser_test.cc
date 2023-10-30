@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/core/dom/document_parser.h"
 #include "third_party/blink/renderer/core/html/html_view_source_document.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -17,7 +17,7 @@ namespace blink {
 TEST(HTMLViewSourceParserTest, DetachThenFinish_ShouldNotCrash) {
   String mime_type("text/html");
   auto* document = MakeGarbageCollected<HTMLViewSourceDocument>(
-      DocumentInit::Create(), mime_type);
+      DocumentInit::Create().ForTest().WithTypeFrom(mime_type));
   auto* parser =
       MakeGarbageCollected<HTMLViewSourceParser>(*document, mime_type);
   // A client may detach the parser from the document.

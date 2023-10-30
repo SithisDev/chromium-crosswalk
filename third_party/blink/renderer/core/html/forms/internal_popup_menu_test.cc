@@ -8,45 +8,46 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 
 namespace blink {
 
 // InternalPopupMenuTest is not used on Android, and its Platform implementation
 // does not provide the resources (as in GetDataResource) needed by
 // InternalPopupMenu::WriteDocument.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
-TEST(InternalPopupMenuTest, WriteDocumentInStyleDirtyTree) {
+TEST(InternalPopupMenuTest, ShowSelectDisplayNone) {
   auto dummy_page_holder_ =
-      std::make_unique<DummyPageHolder>(IntSize(800, 600));
+      std::make_unique<DummyPageHolder>(gfx::Size(800, 600));
   Document& document = dummy_page_holder_->GetDocument();
-  document.body()->SetInnerHTMLFromString(R"HTML(
-    <select id="select">
-        <option value="foo">Foo</option>
-        <option value="bar" style="display:none">Bar</option>
-    </select>
+  document.body()->setInnerHTML(R"HTML(
+    <div id="container">
+      <select id="select">
+        <option>1</option>
+        <option>2</option>
+      </select>
+    </div>
   )HTML");
-  document.View()->UpdateAllLifecyclePhases(
-      DocumentLifecycle::LifecycleUpdateReason::kTest);
-  HTMLSelectElement* select =
-      ToHTMLSelectElement(document.getElementById("select"));
+  document.View()->UpdateAllLifecyclePhasesForTest();
+
+  auto* div = document.getElementById("container");
+  auto* select = To<HTMLSelectElement>(document.getElementById("select"));
   ASSERT_TRUE(select);
   auto* menu = MakeGarbageCollected<InternalPopupMenu>(
       MakeGarbageCollected<EmptyChromeClient>(), *select);
 
-  document.body()->SetInlineStyleProperty(CSSPropertyID::kColor, "blue");
+  div->SetInlineStyleProperty(CSSPropertyID::kDisplay, "none");
 
-  scoped_refptr<SharedBuffer> buffer = SharedBuffer::Create();
-
-  // Don't DCHECK in Element::EnsureComputedStyle.
-  static_cast<PagePopupClient*>(menu)->WriteDocument(buffer.get());
+  // This call should not cause a crash.
+  menu->Show(PopupMenu::kOther);
 }
 
-#endif  // defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace blink

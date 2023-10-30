@@ -30,19 +30,19 @@
 
 #include "third_party/blink/renderer/core/html/forms/picker_indicator_element.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
-#include "third_party/blink/renderer/core/layout/layout_details_marker.h"
+#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "third_party/blink/renderer/platform/web_test_support.h"
+#include "ui/base/ui_base_features.h"
 
 namespace blink {
-
-using namespace html_names;
 
 PickerIndicatorElement::PickerIndicatorElement(
     Document& document,
@@ -50,16 +50,11 @@ PickerIndicatorElement::PickerIndicatorElement(
     : HTMLDivElement(document),
       picker_indicator_owner_(&picker_indicator_owner) {
   SetShadowPseudoId(AtomicString("-webkit-calendar-picker-indicator"));
-  setAttribute(kIdAttr, shadow_element_names::PickerIndicator());
+  setAttribute(html_names::kIdAttr, shadow_element_names::kIdPickerIndicator);
 }
 
 PickerIndicatorElement::~PickerIndicatorElement() {
   DCHECK(!chooser_);
-}
-
-LayoutObject* PickerIndicatorElement::CreateLayoutObject(const ComputedStyle&,
-                                                         LegacyLayout) {
-  return new LayoutDetailsMarker(this);
 }
 
 void PickerIndicatorElement::DefaultEventHandler(Event& event) {
@@ -69,12 +64,12 @@ void PickerIndicatorElement::DefaultEventHandler(Event& event) {
       picker_indicator_owner_->IsPickerIndicatorOwnerDisabledOrReadOnly())
     return;
 
+  auto* keyboard_event = DynamicTo<KeyboardEvent>(event);
   if (event.type() == event_type_names::kClick) {
     OpenPopup();
     event.SetDefaultHandled();
-  } else if (event.type() == event_type_names::kKeypress &&
-             event.IsKeyboardEvent()) {
-    int char_code = ToKeyboardEvent(event).charCode();
+  } else if (event.type() == event_type_names::kKeypress && keyboard_event) {
+    int char_code = keyboard_event->charCode();
     if (char_code == ' ' || char_code == '\r') {
       OpenPopup();
       event.SetDefaultHandled();
@@ -106,10 +101,15 @@ void PickerIndicatorElement::DidChooseValue(double value) {
 
 void PickerIndicatorElement::DidEndChooser() {
   chooser_.Clear();
+  picker_indicator_owner_->DidEndChooser();
+  if (OwnerElement().GetLayoutObject()) {
+    // Invalidate paint to ensure that the focus ring is shown.
+    OwnerElement().GetLayoutObject()->SetShouldDoFullPaintInvalidation();
+  }
 }
 
 void PickerIndicatorElement::OpenPopup() {
-  if (chooser_)
+  if (HasOpenedPopup())
     return;
   if (!GetDocument().GetPage())
     return;
@@ -120,6 +120,10 @@ void PickerIndicatorElement::OpenPopup() {
     return;
   chooser_ = GetDocument().GetPage()->GetChromeClient().OpenDateTimeChooser(
       GetDocument().GetFrame(), this, parameters);
+  if (OwnerElement().GetLayoutObject()) {
+    // Invalidate paint to ensure that the focus ring is removed.
+    OwnerElement().GetLayoutObject()->SetShouldDoFullPaintInvalidation();
+  }
 }
 
 Element& PickerIndicatorElement::OwnerElement() const {
@@ -131,6 +135,10 @@ void PickerIndicatorElement::ClosePopup() {
   if (!chooser_)
     return;
   chooser_->EndChooser();
+}
+
+bool PickerIndicatorElement::HasOpenedPopup() const {
+  return chooser_;
 }
 
 void PickerIndicatorElement::DetachLayoutTree(bool performing_reattach) {
@@ -157,18 +165,20 @@ void PickerIndicatorElement::DidNotifySubtreeInsertionsToDocument() {
     return;
   // Don't make this focusable if we are in web tests in order to avoid
   // breaking existing tests.
-  // FIXME: We should have a way to disable accessibility in web tests.
+  // TODO(crbug.com/1054048): We should have a way to disable accessibility in
+  // web tests.  Once we do have it, this early return should be removed.
   if (WebTestSupport::IsRunningWebTest())
     return;
-  setAttribute(kTabindexAttr, "0");
-  setAttribute(kAriaHaspopupAttr, "menu");
-  setAttribute(kRoleAttr, "button");
-  setAttribute(kAriaLabelAttr,
-               AtomicString(GetLocale().QueryString(
-                   WebLocalizedString::kAXCalendarShowDatePicker)));
+  setAttribute(html_names::kTabindexAttr, "0");
+  setAttribute(html_names::kAriaHaspopupAttr, "menu");
+  setAttribute(html_names::kRoleAttr, "button");
+  setAttribute(
+      html_names::kAriaLabelAttr,
+      AtomicString(
+          this->picker_indicator_owner_->AriaLabelForPickerIndicator()));
 }
 
-void PickerIndicatorElement::Trace(Visitor* visitor) {
+void PickerIndicatorElement::Trace(Visitor* visitor) const {
   visitor->Trace(picker_indicator_owner_);
   visitor->Trace(chooser_);
   HTMLDivElement::Trace(visitor);

@@ -26,21 +26,23 @@
 #include "third_party/blink/renderer/modules/gamepad/navigator_gamepad.h"
 
 #include "base/auto_reset.h"
+#include "device/gamepad/public/cpp/gamepad_features.h"
 #include "device/gamepad/public/cpp/gamepads.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_metric_builder.h"
+#include "third_party/blink/public/common/privacy_budget/identifiability_study_settings.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
-#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad_comparisons.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad_dispatcher.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad_event.h"
-#include "third_party/blink/renderer/modules/gamepad/gamepad_list.h"
-#include "third_party/blink/renderer/modules/vr/navigator_vr.h"
+#include "third_party/blink/renderer/platform/privacy_budget/identifiability_digest_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -57,31 +59,14 @@ bool HasConnectionEventListeners(LocalDOMWindow* window) {
          window->HasEventListeners(event_type_names::kGamepaddisconnected);
 }
 
-// XR-backed controllers are only exposed via this path for WebVR (not
-// WebXR). Controllers are only exposed during VR presentation, so we can
-// just check if WebVR has been used. WebXR cannot be used once WebVR has been.
-bool ShouldIncludeXrGamepads(LocalFrame* frame) {
-  if (!frame)
-    return false;
-
-  Document* document = frame->GetDocument();
-  if (!document)
-    return false;
-
-  return NavigatorVR::HasWebVrBeenUsed(*document);
-}
-
 }  // namespace
 
 // static
 const char NavigatorGamepad::kSupplementName[] = "NavigatorGamepad";
-
-NavigatorGamepad* NavigatorGamepad::From(Document& document) {
-  if (!document.GetFrame() || !document.GetFrame()->DomWindow())
-    return nullptr;
-  Navigator& navigator = *document.GetFrame()->DomWindow()->navigator();
-  return &From(navigator);
-}
+const char kSecureContextBlocked[] =
+    "Access to the feature \"gamepad\" requires a secure context";
+const char kFeaturePolicyBlocked[] =
+    "Access to the feature \"gamepad\" is disallowed by permissions policy.";
 
 NavigatorGamepad& NavigatorGamepad::From(Navigator& navigator) {
   NavigatorGamepad* supplement =
@@ -93,52 +78,140 @@ NavigatorGamepad& NavigatorGamepad::From(Navigator& navigator) {
   return *supplement;
 }
 
-// static
-GamepadList* NavigatorGamepad::getGamepads(Navigator& navigator) {
-  return NavigatorGamepad::From(navigator).Gamepads();
+namespace {
+
+void RecordGamepadsForIdentifiabilityStudy(
+    ExecutionContext* context,
+    HeapVector<Member<Gamepad>> gamepads) {
+  if (!context || !IdentifiabilityStudySettings::Get()->ShouldSampleSurface(
+                      IdentifiableSurface::FromTypeAndToken(
+                          IdentifiableSurface::Type::kWebFeature,
+                          WebFeature::kGetGamepads)))
+    return;
+  IdentifiableTokenBuilder builder;
+  for (Gamepad* gp : gamepads) {
+    if (gp) {
+      builder.AddValue(gp->axes().size())
+          .AddValue(gp->buttons().size())
+          .AddValue(gp->connected())
+          .AddToken(IdentifiabilityBenignStringToken(gp->id()))
+          .AddToken(IdentifiabilityBenignStringToken(gp->mapping()))
+          .AddValue(gp->timestamp());
+      if (auto* vb = gp->vibrationActuator()) {
+        builder.AddToken(IdentifiabilityBenignStringToken(vb->type()));
+      }
+    }
+  }
+  IdentifiabilityMetricBuilder(context->UkmSourceID())
+      .AddWebFeature(WebFeature::kGetGamepads, builder.GetToken())
+      .Record(context->UkmRecorder());
 }
 
-GamepadList* NavigatorGamepad::Gamepads() {
+}  // namespace
+
+// static
+HeapVector<Member<Gamepad>> NavigatorGamepad::getGamepads(
+    Navigator& navigator,
+    ExceptionState& exception_state) {
+  if (!navigator.DomWindow()) {
+    // Using an existing NavigatorGamepad if one exists, but don't create one
+    // for a detached window, as its subclasses depend on a non-null window.
+    auto* gamepad = Supplement<Navigator>::From<NavigatorGamepad>(navigator);
+    if (gamepad) {
+      HeapVector<Member<Gamepad>> result = gamepad->Gamepads();
+      RecordGamepadsForIdentifiabilityStudy(gamepad->GetExecutionContext(),
+                                            result);
+      return result;
+    }
+    return HeapVector<Member<Gamepad>>();
+  }
+
+  auto* navigator_gamepad = &NavigatorGamepad::From(navigator);
+
+  ExecutionContext* context = navigator_gamepad->GetExecutionContext();
+  if (!context || !context->IsSecureContext()) {
+    if (base::FeatureList::IsEnabled(::features::kRestrictGamepadAccess)) {
+      exception_state.ThrowSecurityError(kSecureContextBlocked);
+      return HeapVector<Member<Gamepad>>();
+    } else {
+      context->AddConsoleMessage(
+          MakeGarbageCollected<ConsoleMessage>(
+              mojom::blink::ConsoleMessageSource::kJavaScript,
+              mojom::blink::ConsoleMessageLevel::kWarning,
+              "getGamepad will now require Secure Context. "
+              "Please update your application accordingly. "
+              "For more information see "
+              "https://github.com/w3c/gamepad/pull/120"),
+          /*discard_duplicates=*/true);
+    }
+  }
+
+  if (!context || !context->IsFeatureEnabled(
+                      mojom::blink::PermissionsPolicyFeature::kGamepad)) {
+    exception_state.ThrowSecurityError(kFeaturePolicyBlocked);
+    return HeapVector<Member<Gamepad>>();
+  }
+
+  HeapVector<Member<Gamepad>> result =
+      NavigatorGamepad::From(navigator).Gamepads();
+  RecordGamepadsForIdentifiabilityStudy(context, result);
+  return result;
+}
+
+HeapVector<Member<Gamepad>> NavigatorGamepad::Gamepads() {
   SampleAndCompareGamepadState();
 
   // Ensure |gamepads_| is not null.
-  if (!gamepads_)
-    gamepads_ = MakeGarbageCollected<GamepadList>();
+  if (gamepads_.size() == 0)
+    gamepads_.resize(device::Gamepads::kItemsLengthCap);
 
   // Allow gamepad button presses to qualify as user activations if the page is
   // visible.
-  if (RuntimeEnabledFeatures::UserActivationV2Enabled() && GetFrame() &&
-      GetPage() && GetPage()->IsPageVisible() &&
+  if (DomWindow() && DomWindow()->GetFrame()->GetPage()->IsPageVisible() &&
       GamepadComparisons::HasUserActivation(gamepads_)) {
-    LocalFrame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
+    LocalFrame::NotifyUserActivation(
+        DomWindow()->GetFrame(),
+        mojom::blink::UserActivationNotificationType::kInteraction);
   }
   is_gamepads_exposed_ = true;
 
-  return gamepads_.Get();
+  ExecutionContext* context = DomWindow();
+
+  if (DomWindow() &&
+      DomWindow()->GetFrame()->IsCrossOriginToOutermostMainFrame()) {
+    UseCounter::Count(context, WebFeature::kGetGamepadsFromCrossOriginSubframe);
+  }
+
+  if (context && !context->IsSecureContext()) {
+    UseCounter::Count(context, WebFeature::kGetGamepadsFromInsecureContext);
+  }
+
+  return gamepads_;
 }
 
 void NavigatorGamepad::SampleGamepads() {
   device::Gamepads gamepads;
   gamepad_dispatcher_->SampleGamepads(gamepads);
 
-  bool include_xr_gamepads = ShouldIncludeXrGamepads(GetFrame());
-
   for (uint32_t i = 0; i < device::Gamepads::kItemsLengthCap; ++i) {
     device::Gamepad& device_gamepad = gamepads.items[i];
 
-    bool hide_xr_gamepad = device_gamepad.is_xr && !include_xr_gamepads;
-    if (hide_xr_gamepad) {
-      gamepads_back_->Set(i, nullptr);
+    // All WebXR gamepads should be hidden
+    if (device_gamepad.is_xr) {
+      gamepads_back_[i] = nullptr;
     } else if (device_gamepad.connected) {
-      Gamepad* gamepad = gamepads_back_->item(i);
+      Gamepad* gamepad = gamepads_back_[i];
       if (!gamepad) {
         gamepad = MakeGarbageCollected<Gamepad>(this, i, navigation_start_,
                                                 gamepads_start_);
       }
-      gamepad->UpdateFromDeviceState(device_gamepad);
-      gamepads_back_->Set(i, gamepad);
+      bool cross_origin_isolated_capability =
+          DomWindow() ? DomWindow()->CrossOriginIsolatedCapability() : false;
+      gamepad->UpdateFromDeviceState(device_gamepad,
+                                     cross_origin_isolated_capability);
+      gamepads_back_[i] = gamepad;
     } else {
-      gamepads_back_->Set(i, nullptr);
+      gamepads_back_[i] = nullptr;
     }
   }
 }
@@ -149,44 +222,49 @@ GamepadHapticActuator* NavigatorGamepad::GetVibrationActuatorForGamepad(
     return nullptr;
   }
 
-  uint32_t pad_index = gamepad.index();
   if (!gamepad.HasVibrationActuator()) {
     return nullptr;
   }
 
+  int pad_index = gamepad.index();
+  DCHECK_GE(pad_index, 0);
   if (!vibration_actuators_[pad_index]) {
-    ExecutionContext* context =
-        DomWindow() ? DomWindow()->GetExecutionContext() : nullptr;
-    auto* actuator = GamepadHapticActuator::Create(context, pad_index);
-    actuator->SetType(gamepad.GetVibrationActuatorType());
+    auto* actuator = MakeGarbageCollected<GamepadHapticActuator>(
+        *DomWindow(), pad_index, gamepad.GetVibrationActuatorType());
     vibration_actuators_[pad_index] = actuator;
   }
   return vibration_actuators_[pad_index].Get();
 }
 
-void NavigatorGamepad::Trace(blink::Visitor* visitor) {
+void NavigatorGamepad::Trace(Visitor* visitor) const {
   visitor->Trace(gamepads_);
   visitor->Trace(gamepads_back_);
   visitor->Trace(vibration_actuators_);
   visitor->Trace(gamepad_dispatcher_);
   Supplement<Navigator>::Trace(visitor);
-  DOMWindowClient::Trace(visitor);
+  ExecutionContextClient::Trace(visitor);
   PlatformEventController::Trace(visitor);
   Gamepad::Client::Trace(visitor);
 }
 
 bool NavigatorGamepad::StartUpdatingIfAttached() {
   // The frame must be attached to start updating.
-  if (GetFrame()) {
-    StartUpdating();
-    return true;
+  if (!DomWindow()) {
+    return false;
   }
-  return false;
+
+  // TODO(https://crbug.com/1011006): Remove fenced frame specific code when
+  // permission policy implements the Gamepad API support.
+  if (DomWindow()->GetFrame()->IsInFencedFrameTree()) {
+    return false;
+  }
+
+  StartUpdating();
+  return true;
 }
 
 void NavigatorGamepad::DidUpdateData() {
   // We should stop listening once we detached.
-  DCHECK(GetFrame());
   DCHECK(DomWindow());
 
   // Record when gamepad data was first made available to the page.
@@ -200,24 +278,16 @@ void NavigatorGamepad::DidUpdateData() {
 
 NavigatorGamepad::NavigatorGamepad(Navigator& navigator)
     : Supplement<Navigator>(navigator),
-      DOMWindowClient(navigator.DomWindow()),
-      PlatformEventController(
-          navigator.GetFrame() ? navigator.GetFrame()->GetDocument() : nullptr),
-      // See https://bit.ly/2S0zRAS for task types
-      gamepad_dispatcher_(MakeGarbageCollected<GamepadDispatcher>(
-          navigator.GetFrame() ? navigator.GetFrame()->GetTaskRunner(
-                                     blink::TaskType::kMiscPlatformAPI)
-                               : nullptr)) {
-  if (navigator.DomWindow())
-    navigator.DomWindow()->RegisterEventListenerObserver(this);
+      ExecutionContextClient(navigator.DomWindow()),
+      PlatformEventController(*navigator.DomWindow()),
+      gamepad_dispatcher_(
+          MakeGarbageCollected<GamepadDispatcher>(*navigator.DomWindow())) {
+  navigator.DomWindow()->RegisterEventListenerObserver(this);
 
   // Fetch |window.performance.timing.navigationStart|. Gamepad timestamps are
   // reported relative to this value.
-  if (GetFrame()) {
-    DocumentLoader* loader = GetFrame()->Loader().GetDocumentLoader();
-    if (loader)
-      navigation_start_ = loader->GetTiming().NavigationStart();
-  }
+  auto& timing = DomWindow()->document()->Loader()->GetTiming();
+  navigation_start_ = timing.NavigationStart();
 
   vibration_actuators_.resize(device::Gamepads::kItemsLengthCap);
 }
@@ -225,7 +295,7 @@ NavigatorGamepad::NavigatorGamepad(Navigator& navigator)
 NavigatorGamepad::~NavigatorGamepad() = default;
 
 void NavigatorGamepad::RegisterWithDispatcher() {
-  gamepad_dispatcher_->AddController(this, GetFrame());
+  gamepad_dispatcher_->AddController(this, DomWindow());
 }
 
 void NavigatorGamepad::UnregisterWithDispatcher() {
@@ -280,8 +350,8 @@ void NavigatorGamepad::SampleAndCompareGamepadState() {
   if (StartUpdatingIfAttached()) {
     if (GetPage()->IsPageVisible()) {
       // Allocate a buffer to hold the new gamepad state, if needed.
-      if (!gamepads_back_)
-        gamepads_back_ = MakeGarbageCollected<GamepadList>();
+      if (gamepads_back_.size() == 0)
+        gamepads_back_.resize(device::Gamepads::kItemsLengthCap);
       SampleGamepads();
 
       // Compare the new sample with the previous sample and record which
@@ -289,10 +359,10 @@ void NavigatorGamepad::SampleAndCompareGamepadState() {
       // state changed. We must swap buffers before dispatching events to
       // ensure |gamepads_| holds the correct data when getGamepads is called
       // from inside a gamepad event listener.
-      auto compare_result = GamepadComparisons::Compare(
-          gamepads_.Get(), gamepads_back_.Get(), false, false);
+      auto compare_result =
+          GamepadComparisons::Compare(gamepads_, gamepads_back_, false, false);
       if (compare_result.IsDifferent()) {
-        gamepads_.Swap(gamepads_back_);
+        std::swap(gamepads_, gamepads_back_);
         bool is_gamepads_back_exposed = is_gamepads_exposed_;
         is_gamepads_exposed_ = false;
 
@@ -316,14 +386,14 @@ void NavigatorGamepad::SampleAndCompareGamepadState() {
             // newly-connected gamepad at the same index.
             vibration_actuators_[i] = nullptr;
 
-            Gamepad* pad = gamepads_back_->item(i);
+            Gamepad* pad = gamepads_back_[i];
             DCHECK(pad);
             pad->SetConnected(false);
             is_gamepads_back_exposed = true;
             DispatchGamepadEvent(event_type_names::kGamepaddisconnected, pad);
           }
           if (has_connection_event_listener_ && is_connected) {
-            Gamepad* pad = gamepads_->item(i);
+            Gamepad* pad = gamepads_[i];
             DCHECK(pad);
             is_gamepads_exposed_ = true;
             DispatchGamepadEvent(event_type_names::kGamepadconnected, pad);
@@ -334,7 +404,7 @@ void NavigatorGamepad::SampleAndCompareGamepadState() {
         // be garbage collected when no active references remain. If it was
         // never exposed, retain the buffer so it can be reused.
         if (is_gamepads_back_exposed)
-          gamepads_back_.Clear();
+          gamepads_back_.clear();
       }
     }
   }
@@ -353,7 +423,7 @@ void NavigatorGamepad::DispatchGamepadEvent(const AtomicString& event_name,
 void NavigatorGamepad::PageVisibilityChanged() {
   // Inform the embedder whether it needs to provide gamepad data for us.
   bool visible = GetPage()->IsPageVisible();
-  if (visible && (has_event_listener_ || gamepads_)) {
+  if (visible && (has_event_listener_ || gamepads_.size())) {
     StartUpdatingIfAttached();
   } else {
     StopUpdating();

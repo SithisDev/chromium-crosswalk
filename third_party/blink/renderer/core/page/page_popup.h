@@ -33,22 +33,26 @@
 
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
+namespace gfx {
+class Rect;
+}
+
 namespace blink {
 
 class AXObject;
-class IntRect;
 
 // A PagePopup object is created by ChromeClient::openPagePopup(), and deleted
 // by ChromeClient::closePagePopup().
 class PagePopup {
  public:
   virtual AXObject* RootAXObject() = 0;
-  virtual void SetWindowRect(const IntRect&) = 0;
+  virtual void SetWindowRect(const gfx::Rect&) = 0;
   virtual void PostMessageToPopup(const String& message) = 0;
+  virtual void Update() = 0;
 
  protected:
   virtual ~PagePopup() = default;
 };
 
 }  // namespace blink
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_PAGE_POPUP_H_

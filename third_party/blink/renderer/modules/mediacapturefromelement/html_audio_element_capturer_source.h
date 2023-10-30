@@ -9,8 +9,8 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
-#include "third_party/blink/public/platform/modules/mediastream/media_stream_audio_source.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/mediastream/media_stream_audio_source.h"
 
 namespace blink {
 class WebMediaPlayer;
@@ -37,6 +37,12 @@ class MODULES_EXPORT HtmlAudioElementCapturerSource final
   HtmlAudioElementCapturerSource(
       scoped_refptr<blink::WebAudioSourceProviderImpl> audio_source,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+
+  HtmlAudioElementCapturerSource(const HtmlAudioElementCapturerSource&) =
+      delete;
+  HtmlAudioElementCapturerSource& operator=(
+      const HtmlAudioElementCapturerSource&) = delete;
+
   ~HtmlAudioElementCapturerSource() override;
 
  private:
@@ -60,8 +66,6 @@ class MODULES_EXPORT HtmlAudioElementCapturerSource final
   THREAD_CHECKER(thread_checker_);
 
   base::WeakPtrFactory<HtmlAudioElementCapturerSource> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(HtmlAudioElementCapturerSource);
 };
 
 }  // namespace blink

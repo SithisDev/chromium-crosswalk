@@ -28,23 +28,16 @@
 
 #include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
-#include "third_party/blink/renderer/modules/webaudio/audio_basic_processor_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
-#include "third_party/blink/renderer/modules/webaudio/wave_shaper_processor.h"
+#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class BaseAudioContext;
 class ExceptionState;
 class WaveShaperOptions;
-
-class WaveShaperHandler : public AudioBasicProcessorHandler {
- public:
-  static scoped_refptr<WaveShaperHandler> Create(AudioNode&, float sample_rate);
-
- private:
-  WaveShaperHandler(AudioNode& iirfilter_node, float sample_rate);
-};
+class WaveShaperProcessor;
 
 class WaveShaperNode final : public AudioNode {
   DEFINE_WRAPPERTYPEINFO();
@@ -65,9 +58,13 @@ class WaveShaperNode final : public AudioNode {
   void setOversample(const String&);
   String oversample() const;
 
+  // InspectorHelperMixin
+  void ReportDidCreate() final;
+  void ReportWillBeDestroyed() final;
+
  private:
   void SetCurveImpl(const float* curve_data,
-                    unsigned curve_length,
+                    size_t curve_length,
                     ExceptionState&);
   WaveShaperProcessor* GetWaveShaperProcessor() const;
 };

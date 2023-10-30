@@ -10,8 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/logging.h"
-#include "base/strings/string16.h"
+#include "base/check_op.h"
 #include "third_party/blink/public/common/common_export.h"
 #include "third_party/blink/public/common/indexeddb/web_idb_types.h"
 
@@ -21,11 +20,16 @@ class BLINK_COMMON_EXPORT IndexedDBKey {
  public:
   typedef std::vector<IndexedDBKey> KeyArray;
 
+  // Non-standard limits, selected to avoid breaking real-world use of the API
+  // while also preventing buggy (or malicious) code from causing crashes.
+  static constexpr size_t kMaximumDepth = 2000;
+  static constexpr size_t kMaximumArraySize = 1000000;
+
   IndexedDBKey();  // Defaults to mojom::IDBKeyType::Invalid.
   explicit IndexedDBKey(mojom::IDBKeyType);  // must be Null or Invalid
   explicit IndexedDBKey(KeyArray array);
   explicit IndexedDBKey(std::string binary);
-  explicit IndexedDBKey(base::string16 string);
+  explicit IndexedDBKey(std::u16string string);
   IndexedDBKey(double number,
                mojom::IDBKeyType type);  // must be date or number
   IndexedDBKey(const IndexedDBKey& other);
@@ -46,7 +50,7 @@ class BLINK_COMMON_EXPORT IndexedDBKey {
     DCHECK_EQ(type_, mojom::IDBKeyType::Binary);
     return binary_;
   }
-  const base::string16& string() const {
+  const std::u16string& string() const {
     DCHECK_EQ(type_, mojom::IDBKeyType::String);
     return string_;
   }
@@ -61,13 +65,24 @@ class BLINK_COMMON_EXPORT IndexedDBKey {
 
   size_t size_estimate() const { return size_estimate_; }
 
+  // Tests if this array-type key has "holes". Used in cases where a compound
+  // key references an auto-generated primary key.
+  bool HasHoles() const;
+
+  // Returns a copy of this array-type key, but with "holes" replaced by the
+  // given primary key. Used in cases where a compound key references an
+  // auto-generated primary key.
+  [[nodiscard]] IndexedDBKey FillHoles(const IndexedDBKey&) const;
+
+  std::string DebugString() const;
+
  private:
   int CompareTo(const IndexedDBKey& other) const;
 
   mojom::IDBKeyType type_;
   std::vector<IndexedDBKey> array_;
   std::string binary_;
-  base::string16 string_;
+  std::u16string string_;
   double number_ = 0;
 
   size_t size_estimate_;

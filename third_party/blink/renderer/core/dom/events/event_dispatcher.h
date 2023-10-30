@@ -28,10 +28,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_DISPATCHER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_DISPATCHER_H_
 
+#include "base/dcheck_is_on.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_result.h"
 #include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -39,11 +40,12 @@ class Event;
 class EventDispatchHandlingState;
 class LocalFrameView;
 class Node;
+class HTMLInputElement;
 
 class EventDispatchHandlingState
     : public GarbageCollected<EventDispatchHandlingState> {
  public:
-  virtual void Trace(Visitor* visitor) {}
+  virtual void Trace(Visitor* visitor) const {}
 };
 
 enum EventDispatchContinuation { kContinueDispatching, kDoneDispatching };
@@ -56,9 +58,9 @@ class EventDispatcher {
   static void DispatchScopedEvent(Node&, Event&);
 
   static void DispatchSimulatedClick(Node&,
-                                     Event* underlying_event,
-                                     SimulatedClickMouseEventOptions,
+                                     const Event* underlying_event,
                                      SimulatedClickCreationScope);
+  static void DispatchSimulatedEnterEvent(HTMLInputElement& input_element);
 
   DispatchEventResult Dispatch();
   Node& GetNode() const { return *node_; }
@@ -71,14 +73,13 @@ class EventDispatcher {
       Node* activation_target,
       EventDispatchHandlingState*&);
   EventDispatchContinuation DispatchEventAtCapturing();
-  EventDispatchContinuation DispatchEventAtTarget();
   void DispatchEventAtBubbling();
   void DispatchEventPostProcess(Node* activation_target,
                                 EventDispatchHandlingState*);
 
-  Member<Node> node_;
-  Member<Event> event_;
-  Member<LocalFrameView> view_;
+  Node* node_;
+  Event* event_;
+  LocalFrameView* view_;
 #if DCHECK_IS_ON()
   bool event_dispatched_ = false;
 #endif
@@ -86,4 +87,4 @@ class EventDispatcher {
 
 }  // namespace blink
 
-#endif
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_EVENT_DISPATCHER_H_

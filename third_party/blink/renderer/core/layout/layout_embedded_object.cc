@@ -24,13 +24,13 @@
 
 #include "third_party/blink/renderer/core/layout/layout_embedded_object.h"
 
+#include "third_party/blink/public/strings/grit/blink_strings.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
 #include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
-#include "third_party/blink/renderer/core/layout/layout_analyzer.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/embedded_object_painter.h"
@@ -38,7 +38,7 @@
 
 namespace blink {
 
-LayoutEmbeddedObject::LayoutEmbeddedObject(Element* element)
+LayoutEmbeddedObject::LayoutEmbeddedObject(HTMLFrameOwnerElement* element)
     : LayoutEmbeddedContent(element) {
   View()->GetFrameView()->SetIsVisuallyNonEmpty();
 }
@@ -54,9 +54,12 @@ static String LocalizedUnavailablePluginReplacementText(
     case LayoutEmbeddedObject::kPluginAvailable:
       break;
     case LayoutEmbeddedObject::kPluginMissing:
-      return locale.QueryString(WebLocalizedString::kMissingPluginText);
+      return locale.QueryString(IDS_PLUGIN_INITIALIZATION_ERROR);
     case LayoutEmbeddedObject::kPluginBlockedByContentSecurityPolicy:
-      return locale.QueryString(WebLocalizedString::kBlockedPluginText);
+      return String();  // There is no matched resource_id for
+                        // kPluginBlockedByContentSecurityPolicy yet. Return an
+                        // empty String(). See crbug.com/302130 for more
+                        // details.
   }
   NOTREACHED();
   return String();
@@ -64,6 +67,7 @@ static String LocalizedUnavailablePluginReplacementText(
 
 void LayoutEmbeddedObject::SetPluginAvailability(
     PluginAvailability availability) {
+  NOT_DESTROYED();
   DCHECK_EQ(kPluginAvailable, plugin_availability_);
   plugin_availability_ = availability;
 
@@ -76,18 +80,20 @@ void LayoutEmbeddedObject::SetPluginAvailability(
 }
 
 bool LayoutEmbeddedObject::ShowsUnavailablePluginIndicator() const {
+  NOT_DESTROYED();
   return plugin_availability_ != kPluginAvailable;
 }
 
 void LayoutEmbeddedObject::PaintReplaced(
     const PaintInfo& paint_info,
     const PhysicalOffset& paint_offset) const {
+  NOT_DESTROYED();
   EmbeddedObjectPainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
 void LayoutEmbeddedObject::UpdateLayout() {
+  NOT_DESTROYED();
   DCHECK(NeedsLayout());
-  LayoutAnalyzer::Scope analyzer(*this);
 
   UpdateLogicalWidth();
   UpdateLogicalHeight();
@@ -103,20 +109,26 @@ void LayoutEmbeddedObject::UpdateLayout() {
   ClearNeedsLayout();
 }
 
-CompositingReasons LayoutEmbeddedObject::AdditionalCompositingReasons() const {
-  if (RequiresAcceleratedCompositing())
-    return CompositingReason::kPlugin;
-  return CompositingReason::kNone;
-}
-
 void LayoutEmbeddedObject::ComputeIntrinsicSizingInfo(
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
-  DCHECK(!ShouldApplySizeContainment() && !DisplayLockInducesSizeContainment());
+  NOT_DESTROYED();
+  DCHECK(!ShouldApplySizeContainment());
   FrameView* frame_view = ChildFrameView();
   if (frame_view && frame_view->GetIntrinsicSizingInfo(intrinsic_sizing_info)) {
     // Handle zoom & vertical writing modes here, as the embedded document
     // doesn't know about them.
     intrinsic_sizing_info.size.Scale(StyleRef().EffectiveZoom());
+
+    // Handle an overridden aspect ratio
+    const StyleAspectRatio& aspect_ratio = StyleRef().AspectRatio();
+    if (aspect_ratio.GetType() == EAspectRatioType::kRatio ||
+        (aspect_ratio.GetType() == EAspectRatioType::kAutoAndRatio &&
+         intrinsic_sizing_info.aspect_ratio.IsEmpty())) {
+      intrinsic_sizing_info.aspect_ratio.set_width(
+          aspect_ratio.GetRatio().width());
+      intrinsic_sizing_info.aspect_ratio.set_height(
+          aspect_ratio.GetRatio().height());
+    }
 
     if (!IsHorizontalWritingMode())
       intrinsic_sizing_info.Transpose();
@@ -127,6 +139,7 @@ void LayoutEmbeddedObject::ComputeIntrinsicSizingInfo(
 }
 
 bool LayoutEmbeddedObject::NeedsPreferredWidthsRecalculation() const {
+  NOT_DESTROYED();
   if (LayoutEmbeddedContent::NeedsPreferredWidthsRecalculation())
     return true;
   FrameView* frame_view = ChildFrameView();

@@ -6,14 +6,20 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/numerics/safe_conversions.h"
 #include "media/base/eme_constants.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 #include "third_party/blink/public/platform/web_content_decryption_module.h"
 #include "third_party/blink/public/platform/web_encrypted_media_types.h"
 #include "third_party/blink/public/platform/web_media_key_system_configuration.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_media_key_system_media_capability.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/encryptedmedia/content_decryption_module_result_promise.h"
 #include "third_party/blink/renderer/modules/encryptedmedia/encrypted_media_utils.h"
 #include "third_party/blink/renderer/modules/encryptedmedia/media_key_session.h"
@@ -21,7 +27,6 @@
 #include "third_party/blink/renderer/modules/encryptedmedia/media_keys_controller.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/timer.h"
-#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
 
@@ -37,13 +42,16 @@ class NewCdmResultPromise : public ContentDecryptionModuleResultPromise {
  public:
   NewCdmResultPromise(
       ScriptState* script_state,
-      const WebVector<WebEncryptedMediaSessionType>& supported_session_types,
-      const char* interface_name,
-      const char* property_name)
+      const MediaKeysConfig& config,
+      const WebVector<WebEncryptedMediaSessionType>& supported_session_types)
       : ContentDecryptionModuleResultPromise(script_state,
-                                             interface_name,
-                                             property_name),
+                                             config,
+                                             EmeApiType::kCreateMediaKeys),
+        config_(config),
         supported_session_types_(supported_session_types) {}
+
+  NewCdmResultPromise(const NewCdmResultPromise&) = delete;
+  NewCdmResultPromise& operator=(const NewCdmResultPromise&) = delete;
 
   ~NewCdmResultPromise() override = default;
 
@@ -57,33 +65,33 @@ class NewCdmResultPromise : public ContentDecryptionModuleResultPromise {
 
     // 2.9. Let media keys be a new MediaKeys object.
     auto* media_keys = MakeGarbageCollected<MediaKeys>(
-        GetExecutionContext(), supported_session_types_, base::WrapUnique(cdm));
+        GetExecutionContext(), supported_session_types_, base::WrapUnique(cdm),
+        config_);
 
     // 2.10. Resolve promise with media keys.
     Resolve(media_keys);
   }
 
  private:
+  MediaKeysConfig config_;
   WebVector<WebEncryptedMediaSessionType> supported_session_types_;
-
-  DISALLOW_COPY_AND_ASSIGN(NewCdmResultPromise);
 };
 
 // These methods are the inverses of those with the same names in
 // NavigatorRequestMediaKeySystemAccess.
-static Vector<String> ConvertInitDataTypes(
+Vector<String> ConvertInitDataTypes(
     const WebVector<media::EmeInitDataType>& init_data_types) {
-  Vector<String> result(SafeCast<wtf_size_t>(init_data_types.size()));
+  Vector<String> result(base::checked_cast<wtf_size_t>(init_data_types.size()));
   for (wtf_size_t i = 0; i < result.size(); i++)
     result[i] =
         EncryptedMediaUtils::ConvertFromInitDataType(init_data_types[i]);
   return result;
 }
 
-static HeapVector<Member<MediaKeySystemMediaCapability>> ConvertCapabilities(
+HeapVector<Member<MediaKeySystemMediaCapability>> ConvertCapabilities(
     const WebVector<WebMediaKeySystemMediaCapability>& capabilities) {
   HeapVector<Member<MediaKeySystemMediaCapability>> result(
-      SafeCast<wtf_size_t>(capabilities.size()));
+      base::checked_cast<wtf_size_t>(capabilities.size()));
   for (wtf_size_t i = 0; i < result.size(); i++) {
     MediaKeySystemMediaCapability* capability =
         MediaKeySystemMediaCapability::Create();
@@ -92,13 +100,25 @@ static HeapVector<Member<MediaKeySystemMediaCapability>> ConvertCapabilities(
 
     switch (capabilities[i].encryption_scheme) {
       case WebMediaKeySystemMediaCapability::EncryptionScheme::kNotSpecified:
-        capability->setEncryptionSchemeToNull();
+        // https://w3c.github.io/encrypted-media/#dom-mediakeysystemaccess-getconfiguration
+        // "If encryptionScheme was not given by the application, the
+        // accumulated configuration MUST still contain a encryptionScheme
+        // field with a value of null, so that polyfills can detect the user
+        // agent's support for the field without specifying specific values."
+        capability->setEncryptionScheme(String());
         break;
       case WebMediaKeySystemMediaCapability::EncryptionScheme::kCenc:
         capability->setEncryptionScheme("cenc");
         break;
       case WebMediaKeySystemMediaCapability::EncryptionScheme::kCbcs:
         capability->setEncryptionScheme("cbcs");
+        break;
+      case WebMediaKeySystemMediaCapability::EncryptionScheme::kCbcs_1_9:
+        capability->setEncryptionScheme("cbcs-1-9");
+        break;
+      case WebMediaKeySystemMediaCapability::EncryptionScheme::kUnrecognized:
+        NOTREACHED()
+            << "Unrecognized encryption scheme should never be returned.";
         break;
     }
 
@@ -107,12 +127,41 @@ static HeapVector<Member<MediaKeySystemMediaCapability>> ConvertCapabilities(
   return result;
 }
 
-static Vector<String> ConvertSessionTypes(
+Vector<String> ConvertSessionTypes(
     const WebVector<WebEncryptedMediaSessionType>& session_types) {
-  Vector<String> result(SafeCast<wtf_size_t>(session_types.size()));
+  Vector<String> result(base::checked_cast<wtf_size_t>(session_types.size()));
   for (wtf_size_t i = 0; i < result.size(); i++)
     result[i] = EncryptedMediaUtils::ConvertFromSessionType(session_types[i]);
   return result;
+}
+
+void ReportMetrics(ExecutionContext* execution_context,
+                   const String& key_system) {
+  // TODO(xhwang): Report other key systems here and for
+  // requestMediaKeySystemAccess().
+  const char kWidevineKeySystem[] = "com.widevine.alpha";
+  if (key_system != kWidevineKeySystem)
+    return;
+
+  auto* local_dom_window = To<LocalDOMWindow>(execution_context);
+  if (!local_dom_window)
+    return;
+
+  Document* document = local_dom_window->document();
+  if (!document)
+    return;
+
+  LocalFrame* frame = document->GetFrame();
+  if (!frame)
+    return;
+
+  ukm::builders::Media_EME_CreateMediaKeys builder(document->UkmSourceID());
+  builder.SetKeySystem(KeySystemForUkmLegacy::kWidevine);
+  builder.SetIsAdFrame(static_cast<int>(frame->IsAdFrame()));
+  builder.SetIsCrossOrigin(
+      static_cast<int>(frame->IsCrossOriginToOutermostMainFrame()));
+  builder.SetIsTopFrame(static_cast<int>(frame->IsOutermostMainFrame()));
+  builder.Record(document->UkmRecorder());
 }
 
 }  // namespace
@@ -162,9 +211,9 @@ ScriptPromise MediaKeySystemAccess::createMediaKeys(ScriptState* script_state) {
   WebMediaKeySystemConfiguration configuration = access_->GetConfiguration();
 
   // 1. Let promise be a new promise.
+  MediaKeysConfig config = {keySystem(), UseHardwareSecureCodecs()};
   NewCdmResultPromise* helper = MakeGarbageCollected<NewCdmResultPromise>(
-      script_state, configuration.session_types, "MediaKeySystemAccess",
-      "createMediaKeys");
+      script_state, config, configuration.session_types);
   ScriptPromise promise = helper->Promise();
 
   // 2. Asynchronously create and initialize the MediaKeys object.
@@ -173,9 +222,12 @@ ScriptPromise MediaKeySystemAccess::createMediaKeys(ScriptState* script_state) {
   // 2.3 If cdm fails to load or initialize, reject promise with a new
   //     DOMException whose name is the appropriate error name.
   //     (Done if completeWithException() called).
+  auto* execution_context = ExecutionContext::From(script_state);
   access_->CreateContentDecryptionModule(
-      helper->Result(), ExecutionContext::From(script_state)
-                            ->GetTaskRunner(TaskType::kInternalMedia));
+      helper->Result(),
+      execution_context->GetTaskRunner(TaskType::kInternalMedia));
+
+  ReportMetrics(execution_context, keySystem());
 
   // 3. Return promise.
   return promise;

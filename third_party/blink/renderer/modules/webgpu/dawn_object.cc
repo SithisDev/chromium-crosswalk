@@ -4,7 +4,9 @@
 
 #include "third_party/blink/renderer/modules/webgpu/dawn_object.h"
 
+#include "gpu/command_buffer/client/webgpu_interface.h"
 #include "third_party/blink/renderer/modules/webgpu/gpu_device.h"
+#include "third_party/blink/renderer/platform/bindings/microtask.h"
 
 namespace blink {
 
@@ -12,29 +14,35 @@ DawnObjectBase::DawnObjectBase(
     scoped_refptr<DawnControlClientHolder> dawn_control_client)
     : dawn_control_client_(std::move(dawn_control_client)) {}
 
-DawnObjectBase::~DawnObjectBase() = default;
-
 const scoped_refptr<DawnControlClientHolder>&
 DawnObjectBase::GetDawnControlClient() const {
   return dawn_control_client_;
 }
 
-bool DawnObjectBase::IsDawnControlClientDestroyed() const {
-  return dawn_control_client_->IsDestroyed();
+void DawnObjectBase::setLabel(const String& value) {
+  // TODO: Relay label changes to Dawn
+  label_ = value;
+  setLabelImpl(value);
 }
 
-gpu::webgpu::WebGPUInterface* DawnObjectBase::GetInterface() const {
-  return dawn_control_client_->GetInterface();
+void DawnObjectBase::EnsureFlush() {
+  dawn_control_client_->EnsureFlush();
 }
 
-const DawnProcTable& DawnObjectBase::GetProcs() const {
-  return dawn_control_client_->GetProcs();
+void DawnObjectBase::FlushNow() {
+  dawn_control_client_->Flush();
 }
 
 DawnObjectImpl::DawnObjectImpl(GPUDevice* device)
     : DawnObjectBase(device->GetDawnControlClient()), device_(device) {}
 
-void DawnObjectImpl::Trace(blink::Visitor* visitor) {
+DawnObjectImpl::~DawnObjectImpl() = default;
+
+WGPUDevice DawnObjectImpl::GetDeviceHandle() {
+  return device_->GetHandle();
+}
+
+void DawnObjectImpl::Trace(Visitor* visitor) const {
   visitor->Trace(device_);
   ScriptWrappable::Trace(visitor);
 }

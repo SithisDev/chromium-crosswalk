@@ -2,17 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// https://w3c.github.io/screen-wake-lock/#the-wakelocktype-enum
 enum WakeLockType {
   "screen",
   "system"
 };
 
-// https://w3c.github.io/wake-lock/#the-wakelock-interface
+// https://w3c.github.io/screen-wake-lock/#the-wakelock-interface
 [
   SecureContext,
-  Exposed=(DedicatedWorker,Window),
-  RuntimeEnabled=WakeLock
+  Exposed(DedicatedWorker SystemWakeLock, Window WakeLock)
 ] interface WakeLock {
-  [CallWith=ScriptState, Exposed=Window] static Promise<PermissionState> requestPermission(WakeLockType type);
-  [CallWith=ScriptState] static Promise<void> request(WakeLockType type, optional WakeLockRequestOptions options);
+  [CallWith=ScriptState, RaisesException] Promise<WakeLockSentinel> request(optional WakeLockType type = "screen");
 };

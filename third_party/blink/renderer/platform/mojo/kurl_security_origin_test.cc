@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/macros.h"
-#include "base/test/scoped_task_environment.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "base/test/task_environment.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/mojom/url_test.mojom-blink.h"
 #include "url/url_constants.h"
@@ -14,8 +15,9 @@ namespace {
 
 class UrlTestImpl : public url::mojom::blink::UrlTest {
  public:
-  explicit UrlTestImpl(url::mojom::blink::UrlTestRequest request)
-      : binding_(this, std::move(request)) {}
+  explicit UrlTestImpl(
+      mojo::PendingReceiver<url::mojom::blink::UrlTest> receiver)
+      : receiver_(this, std::move(receiver)) {}
 
   // UrlTest:
   void BounceUrl(const KURL& in, BounceUrlCallback callback) override {
@@ -28,17 +30,17 @@ class UrlTestImpl : public url::mojom::blink::UrlTest {
   }
 
  private:
-  mojo::Binding<UrlTest> binding_;
+  mojo::Receiver<UrlTest> receiver_;
 };
 
 }  // namespace
 
 // Mojo version of chrome IPC test in url/ipc/url_param_traits_unittest.cc.
 TEST(KURLSecurityOriginStructTraitsTest, Basic) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+  base::test::TaskEnvironment task_environment;
 
-  url::mojom::blink::UrlTestPtr proxy;
-  UrlTestImpl impl(MakeRequest(&proxy));
+  mojo::Remote<url::mojom::blink::UrlTest> remote;
+  UrlTestImpl impl(remote.BindNewPipeAndPassReceiver());
 
   const char* serialize_cases[] = {
       "http://www.google.com/", "http://user:pass@host.com:888/foo;bar?baz#nop",
@@ -47,7 +49,7 @@ TEST(KURLSecurityOriginStructTraitsTest, Basic) {
   for (const char* test_case : serialize_cases) {
     KURL input(NullURL(), test_case);
     KURL output;
-    EXPECT_TRUE(proxy->BounceUrl(input, &output));
+    EXPECT_TRUE(remote->BounceUrl(input, &output));
 
     // We want to test each component individually to make sure its range was
     // correctly serialized and deserialized, not just the spec.
@@ -69,21 +71,21 @@ TEST(KURLSecurityOriginStructTraitsTest, Basic) {
         std::string("http://example.org/").append(url::kMaxURLChars + 1, 'a');
     KURL input(NullURL(), url.c_str());
     KURL output;
-    EXPECT_TRUE(proxy->BounceUrl(input, &output));
+    EXPECT_TRUE(remote->BounceUrl(input, &output));
     EXPECT_TRUE(output.IsEmpty());
   }
 
   // Test basic Origin serialization.
   scoped_refptr<const SecurityOrigin> non_unique =
-      SecurityOrigin::Create("http", "www.google.com", 80);
+      SecurityOrigin::CreateFromValidTuple("http", "www.google.com", 80);
   scoped_refptr<const SecurityOrigin> output;
-  EXPECT_TRUE(proxy->BounceOrigin(non_unique, &output));
-  EXPECT_TRUE(non_unique->IsSameSchemeHostPort(output.get()));
+  EXPECT_TRUE(remote->BounceOrigin(non_unique, &output));
+  EXPECT_TRUE(non_unique->IsSameOriginWith(output.get()));
   EXPECT_FALSE(output->IsOpaque());
 
   scoped_refptr<const SecurityOrigin> unique =
       SecurityOrigin::CreateUniqueOpaque();
-  EXPECT_TRUE(proxy->BounceOrigin(unique, &output));
+  EXPECT_TRUE(remote->BounceOrigin(unique, &output));
   EXPECT_TRUE(output->IsOpaque());
 }
 

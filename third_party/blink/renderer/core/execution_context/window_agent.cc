@@ -4,20 +4,25 @@
 
 #include "third_party/blink/renderer/core/execution_context/window_agent.h"
 
-#include "third_party/blink/renderer/core/dom/mutation_observer_notifier.h"
 
 namespace blink {
 
 WindowAgent::WindowAgent(v8::Isolate* isolate)
-    : Agent(isolate),
-      mutation_observer_notifier_(
-          MakeGarbageCollected<MutationObserverNotifier>()) {}
+    : Agent(isolate, base::UnguessableToken::Create()) {}
+
+WindowAgent::WindowAgent(v8::Isolate* isolate,
+                         bool is_origin_agent_cluster,
+                         bool origin_agent_cluster_left_as_default)
+    : Agent(isolate,
+            base::UnguessableToken::Create(),
+            nullptr,
+            is_origin_agent_cluster,
+            origin_agent_cluster_left_as_default) {}
 
 WindowAgent::~WindowAgent() = default;
 
-void WindowAgent::Trace(Visitor* visitor) {
+void WindowAgent::Trace(Visitor* visitor) const {
   Agent::Trace(visitor);
-  visitor->Trace(mutation_observer_notifier_);
 }
 
 }  // namespace blink

@@ -21,23 +21,23 @@
 #include "third_party/blink/renderer/core/html/html_progress_element.h"
 
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html/shadow/progress_shadow_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/core/layout/layout_progress.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 
 namespace blink {
-
-using namespace html_names;
 
 const double HTMLProgressElement::kIndeterminatePosition = -1;
 const double HTMLProgressElement::kInvalidPosition = -2;
 
 HTMLProgressElement::HTMLProgressElement(Document& document)
-    : HTMLElement(kProgressTag, document), value_(nullptr) {
+    : HTMLElement(html_names::kProgressTag, document), value_(nullptr) {
   UseCounter::Count(document, WebFeature::kProgressElement);
   EnsureUserAgentShadowRoot();
 }
@@ -47,29 +47,27 @@ HTMLProgressElement::~HTMLProgressElement() = default;
 LayoutObject* HTMLProgressElement::CreateLayoutObject(
     const ComputedStyle& style,
     LegacyLayout legacy) {
-  if (!style.HasAppearance()) {
+  if (!style.HasEffectiveAppearance()) {
     UseCounter::Count(GetDocument(),
                       WebFeature::kProgressElementWithNoneAppearance);
     return LayoutObject::CreateObject(this, style, legacy);
   }
   UseCounter::Count(GetDocument(),
                     WebFeature::kProgressElementWithProgressBarAppearance);
-  return new LayoutProgress(this);
+  return LayoutObjectFactory::CreateProgress(this, style, legacy);
 }
 
 LayoutProgress* HTMLProgressElement::GetLayoutProgress() const {
-  if (GetLayoutObject() && GetLayoutObject()->IsProgress())
-    return ToLayoutProgress(GetLayoutObject());
-  return nullptr;
+  return DynamicTo<LayoutProgress>(GetLayoutObject());
 }
 
 void HTMLProgressElement::ParseAttribute(
     const AttributeModificationParams& params) {
-  if (params.name == kValueAttr) {
+  if (params.name == html_names::kValueAttr) {
     if (params.old_value.IsNull() != params.new_value.IsNull())
       PseudoStateChanged(CSSSelector::kPseudoIndeterminate);
     DidElementStateChange();
-  } else if (params.name == kMaxAttr) {
+  } else if (params.name == html_names::kMaxAttr) {
     DidElementStateChange();
   } else {
     HTMLElement::ParseAttribute(params);
@@ -83,7 +81,7 @@ void HTMLProgressElement::AttachLayoutTree(AttachContext& context) {
 }
 
 double HTMLProgressElement::value() const {
-  double value = GetFloatingPointAttribute(kValueAttr);
+  double value = GetFloatingPointAttribute(html_names::kValueAttr);
   // Otherwise, if the parsed value was greater than or equal to the maximum
   // value, then the current value of the progress bar is the maximum value
   // of the progress bar. Otherwise, if parsing the value attribute's value
@@ -93,11 +91,11 @@ double HTMLProgressElement::value() const {
 }
 
 void HTMLProgressElement::setValue(double value) {
-  SetFloatingPointAttribute(kValueAttr, std::max(value, 0.));
+  SetFloatingPointAttribute(html_names::kValueAttr, std::max(value, 0.));
 }
 
 double HTMLProgressElement::max() const {
-  double max = GetFloatingPointAttribute(kMaxAttr);
+  double max = GetFloatingPointAttribute(html_names::kMaxAttr);
   // Otherwise, if the element has no max attribute, or if it has one but
   // parsing it resulted in an error, or if the parsed value was less than or
   // equal to zero, then the maximum value of the progress bar is 1.0.
@@ -107,7 +105,7 @@ double HTMLProgressElement::max() const {
 void HTMLProgressElement::setMax(double max) {
   // FIXME: The specification says we should ignore the input value if it is
   // inferior or equal to 0.
-  SetFloatingPointAttribute(kMaxAttr, max > 0 ? max : 1);
+  SetFloatingPointAttribute(html_names::kMaxAttr, max > 0 ? max : 1);
 }
 
 double HTMLProgressElement::position() const {
@@ -117,7 +115,7 @@ double HTMLProgressElement::position() const {
 }
 
 bool HTMLProgressElement::IsDeterminate() const {
-  return FastHasAttribute(kValueAttr);
+  return FastHasAttribute(html_names::kValueAttr);
 }
 
 void HTMLProgressElement::DidElementStateChange() {
@@ -147,7 +145,7 @@ bool HTMLProgressElement::ShouldAppearIndeterminate() const {
   return !IsDeterminate();
 }
 
-void HTMLProgressElement::Trace(Visitor* visitor) {
+void HTMLProgressElement::Trace(Visitor* visitor) const {
   visitor->Trace(value_);
   HTMLElement::Trace(visitor);
 }

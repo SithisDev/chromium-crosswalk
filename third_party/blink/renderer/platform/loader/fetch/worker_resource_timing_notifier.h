@@ -5,18 +5,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_WORKER_RESOURCE_TIMING_NOTIFIER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_WORKER_RESOURCE_TIMING_NOTIFIER_H_
 
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink-forward.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 
 namespace blink {
-
-struct WebResourceTimingInfo;
 
 // This class is used by WorkerFetchContext to add a resource timing to an
 // appropriate Performance Timeline.
 // https://w3c.github.io/performance-timeline/#performance-timeline
 class WorkerResourceTimingNotifier
-    : public GarbageCollectedFinalized<WorkerResourceTimingNotifier> {
+    : public GarbageCollected<WorkerResourceTimingNotifier> {
  public:
   WorkerResourceTimingNotifier() = default;
   virtual ~WorkerResourceTimingNotifier() = default;
@@ -25,10 +24,10 @@ class WorkerResourceTimingNotifier
   // Implementations should route the info to an appropriate Performance
   // Timeline which may be associated with a different thread from the current
   // running thread.
-  virtual void AddResourceTiming(const WebResourceTimingInfo&,
+  virtual void AddResourceTiming(mojom::blink::ResourceTimingInfoPtr,
                                  const AtomicString& initiator_type) = 0;
 
-  virtual void Trace(Visitor*) {}
+  virtual void Trace(Visitor*) const {}
 };
 
 }  // namespace blink

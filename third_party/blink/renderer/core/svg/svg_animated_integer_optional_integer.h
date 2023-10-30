@@ -33,7 +33,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_animated_integer.h"
 #include "third_party/blink/renderer/core/svg/svg_integer_optional_integer.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -44,10 +44,8 @@ namespace blink {
 // |secondInteger| are used.
 // For example, see SVGFEDropShadowElement::stdDeviation{X,Y}()
 class SVGAnimatedIntegerOptionalInteger
-    : public GarbageCollectedFinalized<SVGAnimatedIntegerOptionalInteger>,
+    : public GarbageCollected<SVGAnimatedIntegerOptionalInteger>,
       public SVGAnimatedPropertyCommon<SVGIntegerOptionalInteger> {
-  USING_GARBAGE_COLLECTED_MIXIN(SVGAnimatedIntegerOptionalInteger);
-
  public:
   SVGAnimatedIntegerOptionalInteger(SVGElement* context_element,
                                     const QualifiedName& attribute_name,
@@ -60,7 +58,7 @@ class SVGAnimatedIntegerOptionalInteger
   SVGAnimatedInteger* FirstInteger() { return first_integer_.Get(); }
   SVGAnimatedInteger* SecondInteger() { return second_integer_.Get(); }
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
  protected:
   Member<SVGAnimatedInteger> first_integer_;

@@ -28,12 +28,13 @@
 
 #include <memory>
 
+#include "base/dcheck_is_on.h"
 #include "third_party/blink/public/common/indexeddb/web_idb_types.h"
-#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/dom/dom_string_list.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
-#include "third_party/blink/renderer/core/execution_context/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context_lifecycle_observer.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_metadata.h"
@@ -41,7 +42,9 @@
 #include "third_party/blink/renderer/modules/indexeddb/web_idb_database.h"
 #include "third_party/blink/renderer/modules/indexeddb/web_idb_transaction.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
@@ -64,8 +67,7 @@ class ScriptState;
 class MODULES_EXPORT IDBTransaction final
     : public EventTargetWithInlineData,
       public ActiveScriptWrappable<IDBTransaction>,
-      public ContextLifecycleObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(IDBTransaction);
+      public ExecutionContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -75,6 +77,7 @@ class MODULES_EXPORT IDBTransaction final
       int64_t transaction_id,
       const HashSet<String>& scope,
       mojom::IDBTransactionMode,
+      mojom::IDBTransactionDurability,
       IDBDatabase* database);
   static IDBTransaction* CreateVersionChange(
       ExecutionContext*,
@@ -90,6 +93,7 @@ class MODULES_EXPORT IDBTransaction final
                  int64_t,
                  const HashSet<String>& scope,
                  mojom::IDBTransactionMode,
+                 mojom::IDBTransactionDurability,
                  IDBDatabase*);
   // For upgrade transactions.
   IDBTransaction(ExecutionContext*,
@@ -100,7 +104,7 @@ class MODULES_EXPORT IDBTransaction final
                  const IDBDatabaseMetadata&);
   ~IDBTransaction() override;
 
-  void Trace(blink::Visitor*) override;
+  void Trace(Visitor*) const override;
 
   static mojom::IDBTransactionMode StringToMode(const String&);
 
@@ -110,7 +114,9 @@ class MODULES_EXPORT IDBTransaction final
   int64_t Id() const { return id_; }
   bool IsActive() const { return state_ == kActive; }
   bool IsFinished() const { return state_ == kFinished; }
-  bool IsFinishing() const { return state_ == kFinishing; }
+  bool IsFinishing() const {
+    return state_ == kCommitting || state_ == kAborting;
+  }
   bool IsReadOnly() const {
     return mode_ == mojom::IDBTransactionMode::ReadOnly;
   }
@@ -122,6 +128,7 @@ class MODULES_EXPORT IDBTransaction final
 
   // Implement the IDBTransaction IDL
   const String& mode() const;
+  const String& durability() const;
   DOMStringList* objectStoreNames() const;
   IDBDatabase* db() const { return database_.Get(); }
   DOMException* error() const { return error_; }
@@ -152,7 +159,14 @@ class MODULES_EXPORT IDBTransaction final
   // Called when deleting an index whose IDBIndex had been created.
   void IndexDeleted(IDBIndex*);
 
-  void SetActive(bool);
+  // Called during event dispatch.
+  //
+  // This can trigger transaction auto-commit.
+  void SetActive(bool new_is_active);
+
+  // Called right before and after structured serialization.
+  void SetActiveDuringSerialization(bool new_is_active);
+
   void SetError(DOMException*);
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(abort, kAbort)
@@ -185,6 +199,8 @@ class MODULES_EXPORT IDBTransaction final
     return transaction_backend_.get();
   }
 
+  void ContextDestroyed() override {}
+
  protected:
   // EventTarget
   DispatchEventResult DispatchEventInternal(Event&) override;
@@ -202,10 +218,11 @@ class MODULES_EXPORT IDBTransaction final
   void Finished();
 
   enum State {
-    kInactive,   // Created or started, but not in an event callback
-    kActive,     // Created or started, in creation scope or an event callback
-    kFinishing,  // In the process of aborting or completing.
-    kFinished,   // No more events will fire and no new requests may be filed.
+    kInactive,    // Created or started, but not in an event callback.
+    kActive,      // Created or started, in creation scope or an event callback.
+    kCommitting,  // In the process of completing.
+    kAborting,    // In the process of aborting.
+    kFinished,    // No more events will fire and no new requests may be filed.
   };
 
   std::unique_ptr<WebIDBTransaction> transaction_backend_;
@@ -213,6 +230,7 @@ class MODULES_EXPORT IDBTransaction final
   Member<IDBDatabase> database_;
   Member<IDBOpenDBRequest> open_db_request_;
   const mojom::IDBTransactionMode mode_;
+  const mojom::IDBTransactionDurability durability_;
 
   // The names of the object stores that make up this transaction's scope.
   //

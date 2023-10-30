@@ -30,8 +30,9 @@
 
 #include "third_party/blink/renderer/platform/mhtml/shared_buffer_chunk_reader.h"
 
-#include "third_party/blink/renderer/platform/shared_buffer.h"
-#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
+#include "base/notreached.h"
+#include "base/numerics/safe_conversions.h"
+#include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 
 namespace blink {
 
@@ -66,7 +67,8 @@ void SharedBufferChunkReader::SetSeparator(const Vector<char>& separator) {
 
 void SharedBufferChunkReader::SetSeparator(const char* separator) {
   separator_.clear();
-  separator_.Append(separator, SafeCast<wtf_size_t>(strlen(separator)));
+  separator_.Append(separator,
+                    base::checked_cast<wtf_size_t>(strlen(separator)));
 }
 
 bool SharedBufferChunkReader::NextChunk(Vector<char>& chunk,
@@ -109,7 +111,7 @@ bool SharedBufferChunkReader::NextChunk(Vector<char>& chunk,
       return !chunk.IsEmpty();
     }
     segment_ = it->data();
-    segment_length_ = SafeCast<uint32_t>(it->size());
+    segment_length_ = base::checked_cast<uint32_t>(it->size());
   }
   NOTREACHED();
   return false;
@@ -144,7 +146,7 @@ uint32_t SharedBufferChunkReader::Peek(Vector<char>& data,
       read_bytes_count += (requested_size - read_bytes_count);
       break;
     }
-    data.Append(it->data(), SafeCast<wtf_size_t>(it->size()));
+    data.Append(it->data(), base::checked_cast<wtf_size_t>(it->size()));
     read_bytes_count += it->size();
   }
   return read_bytes_count;

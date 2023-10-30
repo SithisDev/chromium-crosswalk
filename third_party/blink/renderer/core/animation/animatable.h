@@ -31,20 +31,23 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ANIMATABLE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ANIMATABLE_H_
 
-#include "third_party/blink/renderer/bindings/core/v8/unrestricted_double_or_keyframe_animation_options.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
-#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
 class Animation;
-class ExceptionState;
 class Element;
-class KeyframeEffectModelBase;
+class ExceptionState;
+class GetAnimationsOptions;
 class ScriptState;
-struct Timing;
+class ScriptValue;
+class V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble;
+
+struct GetAnimationsOptionsResolved {
+  bool use_subtree;
+};
 
 // https://drafts.csswg.org/web-animations-1/#the-animatable-interface-mixin
 class CORE_EXPORT Animatable {
@@ -53,21 +56,19 @@ class CORE_EXPORT Animatable {
   // called on.
   virtual Element* GetAnimationTarget() = 0;
 
-  Animation* animate(ScriptState*,
-                     const ScriptValue&,
-                     UnrestrictedDoubleOrKeyframeAnimationOptions,
-                     ExceptionState&);
+  Animation* animate(
+      ScriptState* script_state,
+      const ScriptValue& keyframes,
+      const V8UnionKeyframeAnimationOptionsOrUnrestrictedDouble* options,
+      ExceptionState& exception_state);
 
   Animation* animate(ScriptState*, const ScriptValue&, ExceptionState&);
 
-  HeapVector<Member<Animation>> getAnimations();
+  HeapVector<Member<Animation>> getAnimations(
+      GetAnimationsOptions* options = nullptr);
 
- private:
-  FRIEND_TEST_ALL_PREFIXES(AnimationSimTest, CustomPropertyBaseComputedStyle);
-
-  static Animation* animateInternal(Element&,
-                                    KeyframeEffectModelBase*,
-                                    const Timing&);
+  HeapVector<Member<Animation>> GetAnimationsInternal(
+      GetAnimationsOptionsResolved options);
 };
 
 }  // namespace blink

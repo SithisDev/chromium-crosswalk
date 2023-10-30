@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/css/cssom/css_math_sum.h"
 
+#include "base/ranges/algorithm.h"
 #include "third_party/blink/renderer/core/css/css_math_expression_node.h"
 #include "third_party/blink/renderer/core/css/cssom/css_math_negate.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -29,14 +30,13 @@ bool CanCreateNumericTypeFromSumValue(const CSSNumericSumValue& sum) {
   DCHECK(!sum.terms.IsEmpty());
 
   const auto first_type = NumericTypeFromUnitMap(sum.terms[0].units);
-  return std::all_of(sum.terms.begin(), sum.terms.end(),
-                     [&first_type](const CSSNumericSumValue::Term& term) {
-                       bool error = false;
-                       CSSNumericValueType::Add(
-                           first_type, NumericTypeFromUnitMap(term.units),
-                           error);
-                       return !error;
-                     });
+  return base::ranges::all_of(
+      sum.terms, [&first_type](const CSSNumericSumValue::Term& term) {
+        bool error = false;
+        CSSNumericValueType::Add(first_type, NumericTypeFromUnitMap(term.units),
+                                 error);
+        return !error;
+      });
 }
 
 struct UnitMapComparator {
@@ -49,7 +49,7 @@ bool operator==(const CSSNumericSumValue::Term& a, const UnitMapComparator& b) {
 
 }  // namespace
 
-CSSMathSum* CSSMathSum::Create(const HeapVector<CSSNumberish>& args,
+CSSMathSum* CSSMathSum::Create(const HeapVector<Member<V8CSSNumberish>>& args,
                                ExceptionState& exception_state) {
   if (args.IsEmpty()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
@@ -57,7 +57,8 @@ CSSMathSum* CSSMathSum::Create(const HeapVector<CSSNumberish>& args,
     return nullptr;
   }
 
-  CSSMathSum* result = Create(CSSNumberishesToNumericValues(args));
+  CSSMathSum* result =
+      Create(CSSNumberishesToNumericValues(args), exception_state);
   if (!result) {
     exception_state.ThrowTypeError("Incompatible types");
     return nullptr;
@@ -66,22 +67,28 @@ CSSMathSum* CSSMathSum::Create(const HeapVector<CSSNumberish>& args,
   return result;
 }
 
-CSSMathSum* CSSMathSum::Create(CSSNumericValueVector values) {
+CSSMathSum* CSSMathSum::Create(CSSNumericValueVector values,
+                               ExceptionState& exception_state) {
   bool error = false;
   CSSNumericValueType final_type =
       CSSMathVariadic::TypeCheck(values, CSSNumericValueType::Add, error);
-  return error ? nullptr
-               : MakeGarbageCollected<CSSMathSum>(
-                     MakeGarbageCollected<CSSNumericArray>(std::move(values)),
-                     final_type);
+  CSSMathSum* result =
+      error ? nullptr
+            : MakeGarbageCollected<CSSMathSum>(
+                  MakeGarbageCollected<CSSNumericArray>(std::move(values)),
+                  final_type);
+  if (!result)
+    exception_state.ThrowTypeError("Incompatible types");
+
+  return result;
 }
 
-base::Optional<CSSNumericSumValue> CSSMathSum::SumValue() const {
+absl::optional<CSSNumericSumValue> CSSMathSum::SumValue() const {
   CSSNumericSumValue sum;
   for (const auto& value : NumericValues()) {
     const auto child_sum = value->SumValue();
-    if (!child_sum)
-      return base::nullopt;
+    if (!child_sum.has_value())
+      return absl::nullopt;
 
     // Collect like-terms
     for (const auto& term : child_sum->terms) {
@@ -94,27 +101,13 @@ base::Optional<CSSNumericSumValue> CSSMathSum::SumValue() const {
   }
 
   if (!CanCreateNumericTypeFromSumValue(sum))
-    return base::nullopt;
+    return absl::nullopt;
 
   return sum;
 }
 
 CSSMathExpressionNode* CSSMathSum::ToCalcExpressionNode() const {
-  // TODO(crbug.com/782103): Handle the single value case correctly.
-  if (NumericValues().size() == 1)
-    return NumericValues()[0]->ToCalcExpressionNode();
-
-  CSSMathExpressionNode* node = CSSMathExpressionBinaryOperation::Create(
-      NumericValues()[0]->ToCalcExpressionNode(),
-      NumericValues()[1]->ToCalcExpressionNode(), CSSMathOperator::kAdd);
-
-  for (wtf_size_t i = 2; i < NumericValues().size(); i++) {
-    node = CSSMathExpressionBinaryOperation::Create(
-        node, NumericValues()[i]->ToCalcExpressionNode(),
-        CSSMathOperator::kAdd);
-  }
-
-  return node;
+  return ToCalcExporessionNodeForVariadic(CSSMathOperator::kAdd);
 }
 
 void CSSMathSum::BuildCSSText(Nested nested,
