@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,22 +6,26 @@
 #define EXTENSIONS_BROWSER_API_MESSAGING_EXTENSION_MESSAGE_PORT_H_
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/callback_forward.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/types/pass_key.h"
 #include "extensions/browser/api/messaging/message_port.h"
 #include "extensions/browser/service_worker/worker_id.h"
 #include "extensions/common/api/messaging/port_id.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "url/origin.h"
 
 class GURL;
 
 namespace content {
 class BrowserContext;
 class RenderFrameHost;
-class RenderProcessHost;
 }  // namespace content
 
 namespace IPC {
@@ -44,12 +48,14 @@ class ExtensionMessagePort : public MessagePort {
                        const std::string& extension_id,
                        content::RenderFrameHost* rfh,
                        bool include_child_frames);
-  // Create a port that is tied to all frames of an extension, possibly spanning
-  // multiple tabs, including the invisible background page, popups, etc.
-  ExtensionMessagePort(base::WeakPtr<ChannelDelegate> channel_delegate,
-                       const PortId& port_id,
-                       const std::string& extension_id,
-                       content::RenderProcessHost* extension_process);
+
+  // Create a port that is tied to all frames and service workers of an
+  // extension. Should only be used for a receiver port.
+  static std::unique_ptr<ExtensionMessagePort> CreateForExtension(
+      base::WeakPtr<ChannelDelegate> channel_delegate,
+      const PortId& port_id,
+      const std::string& extension_id,
+      content::BrowserContext* browser_context);
 
   // Creates a port for any ChannelEndpoint which can be for a render frame or
   // Service Worker.
@@ -57,10 +63,18 @@ class ExtensionMessagePort : public MessagePort {
       base::WeakPtr<ChannelDelegate> channel_delegate,
       const PortId& port_id,
       const std::string& extension_id,
-      const ChannelEndpoint& endpoint,
-      bool include_child_frames);
+      const ChannelEndpoint& endpoint);
 
+  ExtensionMessagePort(base::WeakPtr<ChannelDelegate> channel_delegate,
+                       const PortId& port_id,
+                       const ExtensionId& extension_id,
+                       content::BrowserContext* browser_context,
+                       base::PassKey<ExtensionMessagePort>);
+
+  ExtensionMessagePort(const ExtensionMessagePort&) = delete;
   ~ExtensionMessagePort() override;
+
+  ExtensionMessagePort& operator=(const ExtensionMessagePort&) = delete;
 
   // MessagePort:
   void RemoveCommonFrames(const MessagePort& port) override;
@@ -68,27 +82,25 @@ class ExtensionMessagePort : public MessagePort {
   bool IsValidPort() override;
   void RevalidatePort() override;
   void DispatchOnConnect(const std::string& channel_name,
-                         std::unique_ptr<base::DictionaryValue> source_tab,
-                         int source_frame_id,
+                         absl::optional<base::Value::Dict> source_tab,
+                         const ExtensionApiFrameIdMap::FrameData& source_frame,
                          int guest_process_id,
                          int guest_render_frame_routing_id,
                          const MessagingEndpoint& source_endpoint,
                          const std::string& target_extension_id,
-                         const GURL& source_url) override;
+                         const GURL& source_url,
+                         absl::optional<url::Origin> source_origin) override;
   void DispatchOnDisconnect(const std::string& error_message) override;
   void DispatchOnMessage(const Message& message) override;
-  void IncrementLazyKeepaliveCount() override;
+  void IncrementLazyKeepaliveCount(bool is_for_native_message_connect) override;
   void DecrementLazyKeepaliveCount() override;
   void OpenPort(int process_id, const PortContext& port_context) override;
   void ClosePort(int process_id, int routing_id, int worker_thread_id) override;
+  void NotifyResponsePending() override;
 
  private:
   class FrameTracker;
   struct IPCTarget;
-
-  ExtensionMessagePort(base::WeakPtr<ChannelDelegate> channel_delegate,
-                       const PortId& port_id,
-                       content::BrowserContext* browser_context);
 
   // Registers a frame as a receiver / sender.
   void RegisterFrame(content::RenderFrameHost* rfh);
@@ -121,13 +133,14 @@ class ExtensionMessagePort : public MessagePort {
   // Builds specific IPCs for a port, with correct frame or worker identifiers.
   std::unique_ptr<IPC::Message> BuildDispatchOnConnectIPC(
       const std::string& channel_name,
-      const base::DictionaryValue* source_tab,
-      int source_frame_id,
+      const base::Value::Dict* source_tab,
+      const ExtensionApiFrameIdMap::FrameData& source_frame,
       int guest_process_id,
       int guest_render_frame_routing_id,
       const MessagingEndpoint& source_endpoint,
       const std::string& target_extension_id,
       const GURL& source_url,
+      absl::optional<url::Origin> source_origin,
       const IPCTarget& target);
   std::unique_ptr<IPC::Message> BuildDispatchOnDisconnectIPC(
       const std::string& error_message,
@@ -139,9 +152,11 @@ class ExtensionMessagePort : public MessagePort {
 
   const PortId port_id_;
   std::string extension_id_;
-  content::BrowserContext* browser_context_ = nullptr;
-  // Only for receivers in an extension process.
-  content::RenderProcessHost* extension_process_ = nullptr;
+  raw_ptr<content::BrowserContext> browser_context_ = nullptr;
+
+  // Whether this port corresponds to *all* extension contexts. Should only be
+  // true for a receiver port.
+  bool for_all_extension_contexts_ = false;
 
   // When the port is used as a sender, this set contains only one element.
   // If used as a receiver, it may contain any number of frames.
@@ -159,13 +174,21 @@ class ExtensionMessagePort : public MessagePort {
   // Whether the renderer acknowledged creation of the port. This is used to
   // distinguish abnormal port closure (e.g. no receivers) from explicit port
   // closure (e.g. by the port.disconnect() JavaScript method in the renderer).
-  bool did_create_port_ = false;
+  bool port_was_created_ = false;
+
+  // Whether one of the receivers has indicated that it will respond later and
+  // the opener should be expecting that response. Used to determine if we
+  // should notify the opener of a message port being closed before an expected
+  // response was received. By default this is assumed to be false until one of
+  // the receivers notifies us otherwise.
+  // Note: this is currently only relevant for messaging using
+  // OneTimeMessageHandlers, where the receivers are able to indicate they are
+  // going to respond asynchronously.
+  bool asynchronous_reply_pending_ = false;
 
   // Used in IncrementLazyKeepaliveCount
-  ExtensionHost* background_host_ptr_ = nullptr;
+  raw_ptr<ExtensionHost> background_host_ptr_ = nullptr;
   std::unique_ptr<FrameTracker> frame_tracker_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionMessagePort);
 };
 
 }  // namespace extensions

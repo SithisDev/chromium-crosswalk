@@ -3,14 +3,29 @@ The video decoder performance tests are a set of tests used to measure the
 performance of various video decoder implementations. These tests run directly
 on top of the video decoder implementation, and don't require the full Chrome
 browser stack. They are build on top of the
-[GoogleTest](https://github.com/google/googletest/blob/master/README.md)
+[GoogleTest](https://github.com/google/googletest/blob/main/README.md)
 framework.
 
 [TOC]
 
 ## Running from Tast
-__Note:__ The video decoder performance tests are in the progress of being added
-to the Tast framework. This section will be updated once this is done.
+The Tast framework provides an easy way to run the video decoder performance
+tests from a ChromeOS chroot. Test data is automatically deployed to the device
+being tested. To run all video decoder performance tests use:
+
+    tast run $HOST video.DecodeAccelPerf*
+
+Wildcards can be used to run specific sets of tests:
+* Run all VP8 performance tests: `tast run $HOST video.DecodeAccelPerfVP8*`
+* Run all 1080p 60fps performance tests:
+`tast run $HOST video.DecodeAccelPerf*1080P60FPS`
+
+Check the
+[tast video folder](https://chromium.googlesource.com/chromiumos/platform/tast-tests/+/refs/heads/main/src/chromiumos/tast/local/bundles/cros/video/)
+for a list of all available tests.
+See the
+[Tast quickstart guide](https://chromium.googlesource.com/chromiumos/platform/tast/+/HEAD/docs/quickstart.md)
+for more information about the Tast framework.
 
 ## Running manually
 To run the video decoder performance tests manually the
@@ -41,29 +56,60 @@ on the device (e.g. _scaling_governor_, _intel_pstate_). As these can influence
 test results it's advised to disable them.
 
 ## Performance metrics
-Currently uncapped decoder performance is measured by playing the specified test
-video from start to finish. Various performance metrics (e.g. the number of
-frames decoded per second) are collected, and written to a file called
-_perf_metrics/<test_name>.txt_. Individual frame decode times can be found in
-_perf_metrics/<test_name>.frame_times.txt_.
+To measure decoder performance two different test scenarios are used.
 
-__Note:__ A capped performance test is in the process of being added. This test
-will simulate a more realistic real-time decoding environment.
+__Uncapped decoder performance:__ In this scenario the specified test video is
+decoded from start to finish as fast as possible. This test scenario provides an
+estimate of the decoder's maximum performance (e.g. the maximum FPS).
+
+__Capped decoder performance:__ This scenario simulates a more realistic
+environment by decoding a video from start to finish at its actual frame rate,
+while simulating real-time rendering. Frames that are not decoded by the time
+they should be rendered will be dropped.
+
+Various performance metrics are collected by these tests:
+* FPS: The average number of frames the decoder was able to decode per second.
+* Frames Dropped: The number of frames that were dropped during playback, only
+relevant for the capped performance test.
+* Dropped frame percentage: The percentage of frames dropped, only relevant for
+the capped performance test.
+* Frame delivery time: The time between subsequent frame deliveries. The average
+frame delivery time and 25/50/75 percentiles are calculated.
+* Frame decode time: The time between scheduling a frame to be decoded and
+getting the decoded frame. This metric provides a measure of the decoder's
+latency. The average decode time and 25/50/75 percentiles are calculated.
+
+All performance metrics are written to _perf_metrics/<test_name>.json_.
 
 ## Command line options
 Multiple command line arguments can be given to the command:
 
-     -v                  enable verbose mode, e.g. -v=2.
-    --vmodule            enable verbose mode for the specified module,
-                         e.g. --vmodule=*media/gpu*=2.
-    --output_folder      overwrite the output folder used to store
-                         performance metrics, if not specified results
-                         will be stored in the current working directory.
-    --use_vd             use the new VD-based video decoders, instead of
-                         the default VDA-based video decoders.
-    --gtest_help         display the gtest help and exit.
-    --help               display this help and exit.
+     -v                   enable verbose mode, e.g. -v=2.
+    --vmodule             enable verbose mode for the specified module,
+                          e.g. --vmodule=*media/gpu*=2.
+
+    --output_folder       overwrite the output folder used to store
+                          performance metrics, if not specified results
+                          will be stored in the current working directory.
+    --use-legacy          use the legacy VDA-based video decoders.
+    --use_vd_vda          use the new VD-based video decoders with a
+                          wrapper that translates to the VDA interface,
+                          used to test interaction with older components
+                          expecting the VDA interface.
+    --linear_output       use linear buffers as the final output of the
+                          decoder which may require the use of an image
+                          processor internally. This flag only works in
+                          conjunction with --use_vd_vda.
+                          Disabled by default.
+    --disable_vaapi_lock  disable the global VA-API lock if applicable,
+                          i.e., only on devices that use the VA-API with a libva
+                          backend that's known to be thread-safe and only in
+                          portions of the Chrome stack that should be able to
+                          deal with the absence of the lock
+                          (not the VaapiVideoDecodeAccelerator).
+
+    --gtest_help          display the gtest help and exit.
+    --help                display this help and exit.
 
 ## Source code
 See the video decoder performance tests [source code](https://cs.chromium.org/chromium/src/media/gpu/video_decode_accelerator_perf_tests.cc).
-

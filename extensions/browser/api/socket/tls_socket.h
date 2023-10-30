@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,8 @@
 #include "extensions/browser/api/socket/socket.h"
 #include "extensions/browser/api/socket/socket_api.h"
 #include "extensions/browser/api/socket/tcp_socket.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "services/network/public/mojom/tls_socket.mojom.h"
 
@@ -33,12 +35,15 @@ class MojoDataPump;
 // touch any socket state.
 class TLSSocket : public ResumableTCPSocket {
  public:
-  TLSSocket(network::mojom::TLSClientSocketPtr tls_socket,
+  TLSSocket(mojo::PendingRemote<network::mojom::TLSClientSocket> tls_socket,
             const net::IPEndPoint& local_addr,
             const net::IPEndPoint& peer_addr,
             mojo::ScopedDataPipeConsumerHandle receive_stream,
             mojo::ScopedDataPipeProducerHandle send_stream,
             const std::string& owner_extension_id);
+
+  TLSSocket(const TLSSocket&) = delete;
+  TLSSocket& operator=(const TLSSocket&) = delete;
 
   ~TLSSocket() override;
 
@@ -75,13 +80,11 @@ class TLSSocket : public ResumableTCPSocket {
   void OnWriteComplete(net::CompletionOnceCallback callback, int result);
   void OnReadComplete(int result, scoped_refptr<net::IOBuffer> io_buffer);
 
-  network::mojom::TLSClientSocketPtr tls_socket_;
-  base::Optional<net::IPEndPoint> local_addr_;
-  base::Optional<net::IPEndPoint> peer_addr_;
+  mojo::Remote<network::mojom::TLSClientSocket> tls_socket_;
+  absl::optional<net::IPEndPoint> local_addr_;
+  absl::optional<net::IPEndPoint> peer_addr_;
   std::unique_ptr<MojoDataPump> mojo_data_pump_;
   ReadCompletionCallback read_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(TLSSocket);
 };
 
 }  // namespace extensions

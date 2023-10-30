@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -70,7 +70,6 @@ void APIBindingJSUtil::SendRequest(
   const APISignature* signature = type_refs_->GetAPIMethodSignature(name);
   DCHECK(signature);
 
-  binding::RequestThread thread = binding::RequestThread::UI;
   v8::Local<v8::Function> custom_callback;
   if (!options.IsEmpty() && !options->IsUndefined() && !options->IsNull()) {
     if (!options->IsObject()) {
@@ -83,11 +82,8 @@ void APIBindingJSUtil::SendRequest(
       return;
     }
     gin::Dictionary options_dict(isolate, options_obj);
-    // NOTE: We don't throw any errors here if forIOThread or customCallback are
-    // of invalid types. We could, if we wanted to be a bit more verbose.
-    bool for_io_thread = false;
-    if (options_dict.Get("forIOThread", &for_io_thread) && for_io_thread)
-      thread = binding::RequestThread::IO;
+    // NOTE: We don't throw any errors here if customCallback is of an invalid
+    // type. We could, if we wanted to be a bit more verbose.
     options_dict.Get("customCallback", &custom_callback);
   }
 
@@ -100,13 +96,22 @@ void APIBindingJSUtil::SendRequest(
   // TODO(devlin): We should ideally always be able to validate these, meaning
   // that we either need to make the APIs give us the expected signature, or
   // need to have a way of indicating an internal signature.
+  // TODO(tjudkins): This call into ConvertArgumentsIgnoringSchema can hit a
+  // CHECK or DCHECK if the caller leaves off an optional callback. Since all
+  // the callers are only internally defined JS hooks we know none of them do at
+  // the moment, but this should be fixed and will need to be resolved for
+  // supporting promises through this codepath.
   APISignature::JSONParseResult parse_result =
       signature->ConvertArgumentsIgnoringSchema(context, request_args);
   CHECK(parse_result.succeeded());
+  // We don't currently support promise based requests through SendRequest here.
+  // See the above comment for more details.
+  DCHECK_NE(binding::AsyncResponseType::kPromise, parse_result.async_type);
 
   request_handler_->StartRequest(
-      context, name, std::move(parse_result.arguments), parse_result.callback,
-      custom_callback, thread);
+      context, name, std::move(parse_result.arguments_list),
+      parse_result.async_type, parse_result.callback, custom_callback,
+      binding::ResultModifierFunction());
 }
 
 void APIBindingJSUtil::RegisterEventArgumentMassager(
@@ -299,8 +304,10 @@ void APIBindingJSUtil::AddCustomSignature(
 
   type_refs_->AddCustomSignature(
       custom_signature_name,
-      std::make_unique<APISignature>(
-          *base::ListValue::From(std::move(base_signature))));
+      APISignature::CreateFromValues(*base_signature, nullptr /*returns_async*/,
+                                     nullptr /*access_checker*/,
+                                     custom_signature_name,
+                                     false /*is_event_signature*/));
 }
 
 void APIBindingJSUtil::ValidateCustomSignature(

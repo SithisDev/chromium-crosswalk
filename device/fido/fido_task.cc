@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/stl_util.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "device/fido/fido_constants.h"
 
 namespace device {
 
-FidoTask::FidoTask(FidoDevice* device) : device_(device), weak_factory_(this) {
+FidoTask::FidoTask(FidoDevice* device) : device_(device) {
   DCHECK(device_);
   DCHECK(device_->SupportedProtocolIsInitialized());
   base::SequencedTaskRunnerHandle::Get()->PostTask(

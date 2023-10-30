@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,15 @@ namespace content {
 class BrowserContext;
 }
 
+namespace apps {
+struct FileHandler;
+struct FileHandlerInfo;
+using FileHandlers = std::vector<FileHandler>;
+}
+
 namespace extensions {
 
 struct EntryInfo;
-struct FileHandlerInfo;
 struct FileHandlerMatch;
 struct GrantedFileEntry;
 
@@ -32,10 +37,34 @@ namespace app_file_handler_util {
 extern const char kInvalidParameters[];
 extern const char kSecurityError[];
 
+class WebAppFileHandlerMatch {
+ public:
+  explicit WebAppFileHandlerMatch(const apps::FileHandler* file_handler);
+  ~WebAppFileHandlerMatch();
+
+  const apps::FileHandler& file_handler() const;
+
+  // Returns true if |file_handler_| matched an entry on MIME type.
+  bool matched_mime_type() const;
+
+  // Returns true if |file_handler_| matched an entry on file extension.
+  bool matched_file_extension() const;
+
+  // Returns whether |file_handler_| can handle |entry| on either MIME type or
+  // file extension, and sets the values of |matched_mime_type_| and
+  // |matched_file_extension_|.
+  bool DoMatch(const EntryInfo& entry);
+
+ private:
+  const apps::FileHandler* const file_handler_;
+  bool matched_mime_type_ = false;
+  bool matched_file_extension_ = false;
+};
+
 // Returns the file handler with the specified |handler_id|, or NULL if there
 // is no such handler.
-const FileHandlerInfo* FileHandlerForId(const Extension& app,
-                                        const std::string& handler_id);
+const apps::FileHandlerInfo* FileHandlerForId(const Extension& app,
+                                              const std::string& handler_id);
 
 // Returns the handlers that can handle all files in |entries|
 // along with metadata about how the handler matched (MIME or file extension)
@@ -43,8 +72,32 @@ std::vector<FileHandlerMatch> FindFileHandlerMatchesForEntries(
     const Extension& extension,
     const std::vector<EntryInfo>& entries);
 
-bool FileHandlerCanHandleEntry(const FileHandlerInfo& handler,
+// Returns the handlers that can handle all files in |entries|
+// along with metadata about how the handler matched (MIME or file)
+std::vector<FileHandlerMatch> MatchesFromFileHandlersForEntries(
+    const FileHandlersInfo& file_handlers,
+    const std::vector<EntryInfo>& entries);
+
+// Returns the apps::FileHandlers that can handle all files in |entries", along
+// with metadata about how the handler matched (MIME type or file extension).
+std::vector<WebAppFileHandlerMatch> MatchesFromWebAppFileHandlersForEntries(
+    const apps::FileHandlers& file_handlers,
+    const std::vector<EntryInfo>& entries);
+
+bool FileHandlerCanHandleEntry(const apps::FileHandlerInfo& handler,
                                const EntryInfo& entry);
+
+bool WebAppFileHandlerCanHandleEntry(const apps::FileHandler& handler,
+                                     const EntryInfo& entry);
+
+// Creates a new file entry and allows |renderer_id| to access |path|, with
+// specified permissions. This registers a new file system for |path|. Note
+// that |can_create| and |can_delete| both require |can_write|.
+GrantedFileEntry CreateFileEntryWithPermissions(int renderer_id,
+                                                const base::FilePath& path,
+                                                bool can_write,
+                                                bool can_create,
+                                                bool can_delete);
 
 // Creates a new file entry and allows |renderer_id| to access |path|. This
 // registers a new file system for |path|.
@@ -63,8 +116,8 @@ void PrepareFilesForWritableApp(
     const std::vector<base::FilePath>& paths,
     content::BrowserContext* context,
     const std::set<base::FilePath>& directory_paths,
-    const base::Closure& on_success,
-    const base::Callback<void(const base::FilePath&)>& on_failure);
+    base::OnceClosure on_success,
+    base::OnceCallback<void(const base::FilePath&)> on_failure);
 
 // Returns whether |extension| has the fileSystem.write permission.
 bool HasFileSystemWritePermission(const Extension* extension);
@@ -76,6 +129,16 @@ bool ValidateFileEntryAndGetPath(const std::string& filesystem_name,
                                  int render_process_id,
                                  base::FilePath* file_path,
                                  std::string* error);
+
+// Returns a vector of EntryInfo with:
+// * |path| fields populated by |entry_paths|.
+// * |mime_type| fields populated by |mime_types| (must have same size as
+//   |entry_paths|), with empty elements replaced by a fallback.
+// * |is_directory| fields decided by whether |path| is in |directory_paths|.
+std::vector<extensions::EntryInfo> CreateEntryInfos(
+    const std::vector<base::FilePath>& entry_paths,
+    const std::vector<std::string>& mime_types,
+    const std::set<base::FilePath>& directory_paths);
 
 }  // namespace app_file_handler_util
 

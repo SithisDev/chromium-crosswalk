@@ -1,13 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/shell/browser/root_window_controller.h"
+#include "base/memory/raw_ptr.h"
 
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/shell/browser/shell_app_delegate.h"
-#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tracker.h"
@@ -26,6 +26,10 @@ namespace {
 class FillLayout : public aura::LayoutManager {
  public:
   FillLayout(aura::Window* owner) : owner_(owner) { DCHECK(owner_); }
+
+  FillLayout(const FillLayout&) = delete;
+  FillLayout& operator=(const FillLayout&) = delete;
+
   ~FillLayout() override = default;
 
  private:
@@ -59,16 +63,18 @@ class FillLayout : public aura::LayoutManager {
     SetChildBoundsDirect(child, requested_bounds);
   }
 
-  aura::Window* owner_;  // Not owned.
-
-  DISALLOW_COPY_AND_ASSIGN(FillLayout);
+  raw_ptr<aura::Window> owner_;  // Not owned.
 };
 
 // A simple screen positioning client that translates bounds to screen
 // coordinates using the offset of the root window in screen coordinates.
 class ScreenPositionClient : public wm::DefaultScreenPositionClient {
  public:
-  ScreenPositionClient() = default;
+  using DefaultScreenPositionClient::DefaultScreenPositionClient;
+
+  ScreenPositionClient(const ScreenPositionClient&) = delete;
+  ScreenPositionClient& operator=(const ScreenPositionClient&) = delete;
+
   ~ScreenPositionClient() override = default;
 
   // wm::DefaultScreenPositionClient:
@@ -83,13 +89,10 @@ class ScreenPositionClient : public wm::DefaultScreenPositionClient {
     aura::Window::ConvertPointToTarget(window->parent(), root_window, &origin);
 
     // Translate the origin by the root window's offset in screen coordinates.
-    gfx::Point host_origin = GetOriginInScreen(root_window);
+    gfx::Point host_origin = GetRootWindowOriginInScreen(root_window);
     origin.Offset(-host_origin.x(), -host_origin.y());
     window->SetBounds(gfx::Rect(origin, bounds.size()));
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScreenPositionClient);
 };
 
 }  // namespace
@@ -98,9 +101,7 @@ RootWindowController::RootWindowController(
     DesktopDelegate* desktop_delegate,
     const gfx::Rect& bounds,
     content::BrowserContext* browser_context)
-    : desktop_delegate_(desktop_delegate),
-      browser_context_(browser_context),
-      screen_position_client_(std::make_unique<ScreenPositionClient>()) {
+    : desktop_delegate_(desktop_delegate), browser_context_(browser_context) {
   DCHECK(desktop_delegate_);
   DCHECK(browser_context_);
 
@@ -110,8 +111,8 @@ RootWindowController::RootWindowController(
   host_->window()->Show();
 
   aura::client::SetWindowParentingClient(host_->window(), this);
-  aura::client::SetScreenPositionClient(host_->window(),
-                                        screen_position_client_.get());
+  screen_position_client_ =
+      std::make_unique<ScreenPositionClient>(host_->window());
 
   // Ensure the window fills the display.
   host_->window()->SetLayoutManager(new FillLayout(host_->window()));
@@ -122,6 +123,9 @@ RootWindowController::RootWindowController(
 
 RootWindowController::~RootWindowController() {
   CloseAppWindows();
+  // The screen position client holds a pointer to the root window, so free it
+  // before destroying the window tree host.
+  screen_position_client_.reset();
   DestroyWindowTreeHost();
 }
 

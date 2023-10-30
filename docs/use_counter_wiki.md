@@ -20,7 +20,8 @@ break-downs.
 
 UseCounter measures feature usage via UMA histogram and UKM. To add your
 feature to UseCounter, simply:
-+ Add your feature to the blink::WebFeature enum;
++ Add your feature to the
+  [blink::mojom::WebFeature enum](https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom);
 + Usage can be measured via:
     * MeasureAs=\<enum value\> in the feature's IDL definition; Or
     * blink::UseCounter::Count() for blink side features; Or
@@ -46,7 +47,7 @@ OR
 ```c++
   MyInterface::MyBlinkSideFunction() {
     ...
-    UseCounter::Count(context, WebFeature::MyFeature);
+    UseCounter::Count(context, WebFeature::kMyFeature);
     ...
   }
 ```
@@ -55,14 +56,14 @@ OR
   MyBrowserSideFunction() {
     ...
     page_load_metrics::MetricsWebContentObserver::RecordFeatureUsage(
-      render_frame_host, blink::mojom::WebFeature::MyFeature);
+      render_frame_host, blink::mojom::WebFeature::kMyFeature);
     ...
   }
 ```
 
 Not all features collect URL-keyed metrics. To opt in your feature to UKM,
 simply add your feature to
-[UseCounterPageLoadMetricsObserver::GetAllowedUkmFeatures()](https://cs.chromium.org/chromium/src/chrome/browser/page_load_metrics/observers/use_counter/ukm_features.cc)
+[UseCounterPageLoadMetricsObserver::GetAllowedUkmFeatures()](https://cs.chromium.org/chromium/src/components/page_load_metrics/browser/observers/use_counter/ukm_features.cc)
 and get approval from one of the privacy owners.
 
 You can quickly verify that your feature is added to UMA histograms and UKM by

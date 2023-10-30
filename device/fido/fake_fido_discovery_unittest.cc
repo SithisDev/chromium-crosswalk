@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 
 #include <utility>
 
-#include "base/macros.h"
-#include "base/test/bind_test_util.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "device/fido/fido_discovery_factory.h"
@@ -26,23 +25,20 @@ using ::testing::_;
 class FakeFidoDiscoveryTest : public ::testing::Test {
  public:
   FakeFidoDiscoveryTest() = default;
+
+  FakeFidoDiscoveryTest(const FakeFidoDiscoveryTest&) = delete;
+  FakeFidoDiscoveryTest& operator=(const FakeFidoDiscoveryTest&) = delete;
+
   ~FakeFidoDiscoveryTest() override = default;
 
  protected:
   FakeFidoDiscoveryFactory fake_fido_discovery_factory_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FakeFidoDiscoveryTest);
+  base::test::TaskEnvironment task_environment_;
 };
 
 using FakeFidoDiscoveryFactoryTest = FakeFidoDiscoveryTest;
 
 TEST_F(FakeFidoDiscoveryTest, Transport) {
-  FakeFidoDiscovery discovery_ble(FidoTransportProtocol::kBluetoothLowEnergy);
-  EXPECT_EQ(FidoTransportProtocol::kBluetoothLowEnergy,
-            discovery_ble.transport());
-
   FakeFidoDiscovery discovery_hid(
       FidoTransportProtocol::kUsbHumanInterfaceDevice);
   EXPECT_EQ(FidoTransportProtocol::kUsbHumanInterfaceDevice,
@@ -50,14 +46,14 @@ TEST_F(FakeFidoDiscoveryTest, Transport) {
 }
 
 TEST_F(FakeFidoDiscoveryTest, InitialState) {
-  FakeFidoDiscovery discovery(FidoTransportProtocol::kBluetoothLowEnergy);
+  FakeFidoDiscovery discovery(FidoTransportProtocol::kUsbHumanInterfaceDevice);
 
   ASSERT_FALSE(discovery.is_running());
   ASSERT_FALSE(discovery.is_start_requested());
 }
 
 TEST_F(FakeFidoDiscoveryTest, StartDiscovery) {
-  FakeFidoDiscovery discovery(FidoTransportProtocol::kBluetoothLowEnergy);
+  FakeFidoDiscovery discovery(FidoTransportProtocol::kUsbHumanInterfaceDevice);
 
   MockFidoDiscoveryObserver observer;
   discovery.set_observer(&observer);
@@ -67,14 +63,15 @@ TEST_F(FakeFidoDiscoveryTest, StartDiscovery) {
   ASSERT_TRUE(discovery.is_start_requested());
   ASSERT_FALSE(discovery.is_running());
 
-  EXPECT_CALL(observer, DiscoveryStarted(&discovery, true));
+  EXPECT_CALL(observer, DiscoveryStarted(&discovery, true,
+                                         std::vector<FidoAuthenticator*>()));
   discovery.WaitForCallToStartAndSimulateSuccess();
   ASSERT_TRUE(discovery.is_running());
   ASSERT_TRUE(discovery.is_start_requested());
 }
 
 TEST_F(FakeFidoDiscoveryTest, WaitThenStartStopDiscovery) {
-  FakeFidoDiscovery discovery(FidoTransportProtocol::kBluetoothLowEnergy);
+  FakeFidoDiscovery discovery(FidoTransportProtocol::kUsbHumanInterfaceDevice);
 
   MockFidoDiscoveryObserver observer;
   discovery.set_observer(&observer);
@@ -87,7 +84,8 @@ TEST_F(FakeFidoDiscoveryTest, WaitThenStartStopDiscovery) {
   ASSERT_FALSE(discovery.is_running());
   ASSERT_TRUE(discovery.is_start_requested());
 
-  EXPECT_CALL(observer, DiscoveryStarted(&discovery, true));
+  EXPECT_CALL(observer, DiscoveryStarted(&discovery, true,
+                                         std::vector<FidoAuthenticator*>()));
   discovery.SimulateStarted(true);
   ASSERT_TRUE(discovery.is_running());
   ASSERT_TRUE(discovery.is_start_requested());
@@ -95,7 +93,7 @@ TEST_F(FakeFidoDiscoveryTest, WaitThenStartStopDiscovery) {
 
 // Starting discovery and failing: instance stays in "not running" state
 TEST_F(FakeFidoDiscoveryTest, StartFail) {
-  FakeFidoDiscovery discovery(FidoTransportProtocol::kBluetoothLowEnergy);
+  FakeFidoDiscovery discovery(FidoTransportProtocol::kUsbHumanInterfaceDevice);
 
   MockFidoDiscoveryObserver observer;
   discovery.set_observer(&observer);
@@ -105,7 +103,8 @@ TEST_F(FakeFidoDiscoveryTest, StartFail) {
   ASSERT_FALSE(discovery.is_running());
   ASSERT_TRUE(discovery.is_start_requested());
 
-  EXPECT_CALL(observer, DiscoveryStarted(&discovery, false));
+  EXPECT_CALL(observer, DiscoveryStarted(&discovery, false,
+                                         std::vector<FidoAuthenticator*>()));
   discovery.SimulateStarted(false);
   ASSERT_FALSE(discovery.is_running());
   ASSERT_TRUE(discovery.is_start_requested());
@@ -113,25 +112,22 @@ TEST_F(FakeFidoDiscoveryTest, StartFail) {
 
 // Adding device is possible both before and after discovery actually starts.
 TEST_F(FakeFidoDiscoveryTest, AddDevice) {
-  FakeFidoDiscovery discovery(FidoTransportProtocol::kBluetoothLowEnergy);
+  FakeFidoDiscovery discovery(FidoTransportProtocol::kUsbHumanInterfaceDevice);
 
   MockFidoDiscoveryObserver observer;
   discovery.set_observer(&observer);
 
   discovery.Start();
-
   auto device0 = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device0, GetId()).WillOnce(::testing::Return("device0"));
   base::RunLoop device0_done;
-  EXPECT_CALL(observer, AuthenticatorAdded(&discovery, _))
+  discovery.AddDevice(std::move(device0));
+
+  EXPECT_CALL(observer, DiscoveryStarted(&discovery, true, testing::SizeIs(1)))
       .WillOnce(testing::InvokeWithoutArgs(
           [&device0_done]() { device0_done.Quit(); }));
-  discovery.AddDevice(std::move(device0));
-  device0_done.Run();
-  ::testing::Mock::VerifyAndClearExpectations(&observer);
-
-  EXPECT_CALL(observer, DiscoveryStarted(&discovery, true));
   discovery.SimulateStarted(true);
+  device0_done.Run();
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 
   auto device1 = std::make_unique<MockFidoDevice>();
@@ -145,36 +141,19 @@ TEST_F(FakeFidoDiscoveryTest, AddDevice) {
   ::testing::Mock::VerifyAndClearExpectations(&observer);
 }
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 TEST_F(FakeFidoDiscoveryFactoryTest, ForgesUsbFactoryFunction) {
   auto* injected_fake_discovery =
       fake_fido_discovery_factory_.ForgeNextHidDiscovery();
   ASSERT_EQ(FidoTransportProtocol::kUsbHumanInterfaceDevice,
             injected_fake_discovery->transport());
-  auto produced_discovery = fake_fido_discovery_factory_.Create(
-      FidoTransportProtocol::kUsbHumanInterfaceDevice, nullptr);
-  EXPECT_TRUE(produced_discovery);
-  EXPECT_EQ(injected_fake_discovery, produced_discovery.get());
+  std::vector<std::unique_ptr<FidoDiscoveryBase>> produced_discoveries =
+      fake_fido_discovery_factory_.Create(
+          FidoTransportProtocol::kUsbHumanInterfaceDevice);
+  ASSERT_EQ(produced_discoveries.size(), 1u);
+  EXPECT_EQ(injected_fake_discovery, produced_discoveries[0].get());
 }
 #endif
-
-TEST_F(FakeFidoDiscoveryFactoryTest, ForgesBleFactoryFunction) {
-  auto* injected_fake_discovery_1 =
-      fake_fido_discovery_factory_.ForgeNextBleDiscovery();
-  ASSERT_EQ(FidoTransportProtocol::kBluetoothLowEnergy,
-            injected_fake_discovery_1->transport());
-  auto produced_discovery_1 = fake_fido_discovery_factory_.Create(
-      FidoTransportProtocol::kBluetoothLowEnergy, nullptr);
-  EXPECT_EQ(injected_fake_discovery_1, produced_discovery_1.get());
-
-  auto* injected_fake_discovery_2 =
-      fake_fido_discovery_factory_.ForgeNextBleDiscovery();
-  ASSERT_EQ(FidoTransportProtocol::kBluetoothLowEnergy,
-            injected_fake_discovery_2->transport());
-  auto produced_discovery_2 = fake_fido_discovery_factory_.Create(
-      FidoTransportProtocol::kBluetoothLowEnergy, nullptr);
-  EXPECT_EQ(injected_fake_discovery_2, produced_discovery_2.get());
-}
 
 }  // namespace test
 }  // namespace device

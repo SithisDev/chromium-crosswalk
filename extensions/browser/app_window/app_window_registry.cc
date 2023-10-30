@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "base/stl_util.h"
+#include "base/containers/contains.h"
+#include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "content/public/browser/browser_context.h"
@@ -107,13 +108,6 @@ AppWindowRegistry::AppWindowList AppWindowRegistry::GetAppWindowsForApp(
   return app_windows;
 }
 
-void AppWindowRegistry::CloseAllAppWindowsForApp(const std::string& app_id) {
-  const AppWindowList windows = GetAppWindowsForApp(app_id);
-  for (auto it = windows.cbegin(); it != windows.cend(); ++it) {
-    (*it)->GetBaseWindow()->Close();
-  }
-}
-
 AppWindow* AppWindowRegistry::GetAppWindowForWebContents(
     const content::WebContents* web_contents) const {
   for (AppWindow* window : app_windows_) {
@@ -130,12 +124,12 @@ AppWindow* AppWindowRegistry::GetAppWindowForNativeWindow(
       return *i;
   }
 
-  return NULL;
+  return nullptr;
 }
 
 AppWindow* AppWindowRegistry::GetCurrentAppWindowForApp(
     const std::string& app_id) const {
-  AppWindow* result = NULL;
+  AppWindow* result = nullptr;
   for (auto i = app_windows_.cbegin(); i != app_windows_.cend(); ++i) {
     if ((*i)->extension_id() == app_id) {
       result = *i;
@@ -150,7 +144,7 @@ AppWindow* AppWindowRegistry::GetCurrentAppWindowForApp(
 AppWindow* AppWindowRegistry::GetAppWindowForAppAndKey(
     const std::string& app_id,
     const std::string& window_key) const {
-  AppWindow* result = NULL;
+  AppWindow* result = nullptr;
   for (auto i = app_windows_.cbegin(); i != app_windows_.cend(); ++i) {
     if ((*i)->extension_id() == app_id && (*i)->window_key() == window_key) {
       result = *i;
@@ -245,10 +239,6 @@ KeyedService* AppWindowRegistry::Factory::BuildServiceInstanceFor(
 
 bool AppWindowRegistry::Factory::ServiceIsCreatedWithBrowserContext() const {
   return true;
-}
-
-bool AppWindowRegistry::Factory::ServiceIsNULLWhileTesting() const {
-  return false;
 }
 
 content::BrowserContext* AppWindowRegistry::Factory::GetBrowserContextToUse(

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #ifndef DEVICE_BLUETOOTH_TEST_FAKE_PERIPHERAL_H_
@@ -7,12 +7,16 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
+#include "build/build_config.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/test/fake_central.h"
 #include "device/bluetooth/test/fake_remote_gatt_service.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+namespace device {
+class BluetoothUUID;
+}
 
 namespace bluetooth {
 
@@ -23,10 +27,14 @@ namespace bluetooth {
 class FakePeripheral : public device::BluetoothDevice {
  public:
   FakePeripheral(FakeCentral* fake_central, const std::string& address);
+
+  FakePeripheral(const FakePeripheral&) = delete;
+  FakePeripheral& operator=(const FakePeripheral&) = delete;
+
   ~FakePeripheral() override;
 
   // Changes the name of the device.
-  void SetName(base::Optional<std::string> name);
+  void SetName(absl::optional<std::string> name);
 
   // Set it to indicate if the system has connected to the Peripheral outside of
   // the Bluetooth interface e.g. the user connected to the device through
@@ -36,6 +44,10 @@ class FakePeripheral : public device::BluetoothDevice {
   // Updates the peripheral's UUIDs that are returned by
   // BluetoothDevice::GetUUIDs().
   void SetServiceUUIDs(UUIDSet service_uuids);
+
+  // Updates the peripheral's Manufacturer Data that are returned by
+  // BluetoothDevice::GetManufacturerData().
+  void SetManufacturerData(ManufacturerDataMap manufacturer_data);
 
   // If |code| is kHCISuccess calls a pending success callback for
   // CreateGattConnection. Otherwise calls a pending error callback
@@ -64,19 +76,23 @@ class FakePeripheral : public device::BluetoothDevice {
 
   // BluetoothDevice overrides:
   uint32_t GetBluetoothClass() const override;
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
   device::BluetoothTransport GetType() const override;
 #endif
   std::string GetIdentifier() const override;
   std::string GetAddress() const override;
+  AddressType GetAddressType() const override;
   VendorIDSource GetVendorIDSource() const override;
   uint16_t GetVendorID() const override;
   uint16_t GetProductID() const override;
   uint16_t GetDeviceID() const override;
   uint16_t GetAppearance() const override;
-  base::Optional<std::string> GetName() const override;
-  base::string16 GetNameForDisplay() const override;
+  absl::optional<std::string> GetName() const override;
+  std::u16string GetNameForDisplay() const override;
   bool IsPaired() const override;
+#if BUILDFLAG(IS_CHROMEOS)
+  bool IsBonded() const override;
+#endif  // BUILDFLAG(IS_CHROMEOS)
   bool IsConnected() const override;
   bool IsGattConnected() const override;
   bool IsConnectable() const override;
@@ -84,43 +100,45 @@ class FakePeripheral : public device::BluetoothDevice {
   bool ExpectingPinCode() const override;
   bool ExpectingPasskey() const override;
   bool ExpectingConfirmation() const override;
-  void GetConnectionInfo(const ConnectionInfoCallback& callback) override;
+  void GetConnectionInfo(ConnectionInfoCallback callback) override;
   void SetConnectionLatency(ConnectionLatency connection_latency,
-                            const base::Closure& callback,
-                            const ErrorCallback& error_callback) override;
+                            base::OnceClosure callback,
+                            ErrorCallback error_callback) override;
   void Connect(PairingDelegate* pairing_delegate,
-               const base::Closure& callback,
-               const ConnectErrorCallback& error_callback) override;
+               ConnectCallback callback) override;
+#if BUILDFLAG(IS_CHROMEOS)
+  void ConnectClassic(PairingDelegate* pairing_delegate,
+                      ConnectCallback callback) override;
+#endif  // BUILDFLAG(IS_CHROMEOS)
   void SetPinCode(const std::string& pincode) override;
   void SetPasskey(uint32_t passkey) override;
   void ConfirmPairing() override;
   void RejectPairing() override;
   void CancelPairing() override;
-  void Disconnect(const base::Closure& callback,
-                  const ErrorCallback& error_callback) override;
-  void Forget(const base::Closure& callback,
-              const ErrorCallback& error_callback) override;
-  void ConnectToService(
-      const device::BluetoothUUID& uuid,
-      const ConnectToServiceCallback& callback,
-      const ConnectToServiceErrorCallback& error_callback) override;
+  void Disconnect(base::OnceClosure callback,
+                  ErrorCallback error_callback) override;
+  void Forget(base::OnceClosure callback,
+              ErrorCallback error_callback) override;
+  void ConnectToService(const device::BluetoothUUID& uuid,
+                        ConnectToServiceCallback callback,
+                        ConnectToServiceErrorCallback error_callback) override;
   void ConnectToServiceInsecurely(
       const device::BluetoothUUID& uuid,
-      const ConnectToServiceCallback& callback,
-      const ConnectToServiceErrorCallback& error_callback) override;
+      ConnectToServiceCallback callback,
+      ConnectToServiceErrorCallback error_callback) override;
   void CreateGattConnection(
-      const GattConnectionCallback& callback,
-      const ConnectErrorCallback& error_callback) override;
+      GattConnectionCallback callback,
+      absl::optional<device::BluetoothUUID> service_uuid) override;
   bool IsGattServicesDiscoveryComplete() const override;
-#if defined(OS_CHROMEOS)
-  void ExecuteWrite(const base::Closure& callback,
-                    const ExecuteWriteErrorCallback& error_callback) override;
-  void AbortWrite(const base::Closure& callback,
-                  const AbortWriteErrorCallback& error_callback) override;
-#endif
+#if BUILDFLAG(IS_CHROMEOS)
+  void ExecuteWrite(base::OnceClosure callback,
+                    ExecuteWriteErrorCallback error_callback) override;
+  void AbortWrite(base::OnceClosure callback,
+                  AbortWriteErrorCallback error_callback) override;
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
  protected:
-  void CreateGattConnectionImpl() override;
+  void CreateGattConnectionImpl(absl::optional<device::BluetoothUUID>) override;
   void DisconnectGatt() override;
 
  private:
@@ -128,7 +146,7 @@ class FakePeripheral : public device::BluetoothDevice {
   void DispatchDiscoveryResponse();
 
   const std::string address_;
-  base::Optional<std::string> name_;
+  absl::optional<std::string> name_;
   // True when the system has connected to the device outside of the Bluetooth
   // interface e.g. the user connected to the device through system settings.
   bool system_connected_;
@@ -146,16 +164,14 @@ class FakePeripheral : public device::BluetoothDevice {
 
   // Used to decide which callback should be called when
   // CreateGattConnection is called.
-  base::Optional<uint16_t> next_connection_response_;
+  absl::optional<uint16_t> next_connection_response_;
 
   // Used to decide if the GattServicesDiscovered method is called.
-  base::Optional<uint16_t> next_discovery_response_;
+  absl::optional<uint16_t> next_discovery_response_;
 
   // Mutable because IsGattServicesDiscoveryComplete needs to post a task but
   // is const.
-  mutable base::WeakPtrFactory<FakePeripheral> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakePeripheral);
+  mutable base::WeakPtrFactory<FakePeripheral> weak_ptr_factory_{this};
 };
 
 }  // namespace bluetooth

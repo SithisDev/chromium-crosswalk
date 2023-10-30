@@ -1,11 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef DEVICE_BLUETOOTH_TEST_MOCK_BLUETOOTH_CBSERVICE_MAC_H_
 #define DEVICE_BLUETOOTH_TEST_MOCK_BLUETOOTH_CBSERVICE_MAC_H_
 
-#include "base/mac/sdk_forward_declarations.h"
 #include "build/build_config.h"
 
 #import <CoreBluetooth/CoreBluetooth.h>

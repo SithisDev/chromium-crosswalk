@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,8 +85,6 @@ function makeUnreached() {
     'viewInstanceId',
     'viewType',
     'webview',
-    'webviewBrowserPlugin',
-    'webviewbrowserplugin',
   ];
   // For objects that don't inherit directly from Object, we'll need to taint
   // existing properties on prototypes earlier in the prototype chain.

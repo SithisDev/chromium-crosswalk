@@ -12,14 +12,13 @@
 
 # Creating WebUI Interfaces in `components/`
 
-To create a WebUI interface in `components/` you need to follow different steps from [Creating WebUI Interfaces in `chrome/`](https://www.chromium.org/developers/webui). This guide is specific to creating a WebUI interface in `src/components/`. It is based on the steps I went through to create the WebUI infrastructure for chrome://safe-browsing in 'src/components/safe_browsing/web_ui/'.
+To create a WebUI interface in `components/` you need to follow different steps from [Creating WebUI Interfaces in `chrome/`](https://www.chromium.org/developers/webui). This guide is specific to creating a WebUI interface in `src/components/`. It is based on the steps I went through to create the WebUI infrastructure for chrome://safe-browsing in 'src/components/safe_browsing/content/browser/web_ui/'.
 
 [TOC]
 
-<a name="creating_webui_page"></a>
 ## Creating the WebUI page
 
-WebUI resources in `components/` will be added in your specific project folder. Create a project folder `src/components/hello_world/`. When creating WebUI resources, follow the [Web Development Style Guide](https://chromium.googlesource.com/chromium/src/+/master/styleguide/web/web.md). For a sample WebUI page you could start with the following files:
+WebUI resources in `components/` will be added in your specific project folder. Create a project folder `src/components/hello_world/`. When creating WebUI resources, follow the [Web Development Style Guide](https://chromium.googlesource.com/chromium/src/+/main/styleguide/web/web.md). For a sample WebUI page you could start with the following files:
 
 `src/components/hello_world/hello_world.html:`
 ```html
@@ -31,6 +30,7 @@ WebUI resources in `components/` will be added in your specific project folder. 
  <link rel="stylesheet" href="hello_world.css">
  <script src="chrome://resources/js/cr.js"></script>
  <script src="chrome://resources/js/load_time_data.js"></script>
+ <script src="chrome://resources/js/assert.js"></script>
  <script src="chrome://resources/js/util.js"></script>
  <script src="strings.js"></script>
  <script src="hello_world.js"></script>
@@ -85,6 +85,12 @@ Resource files are specified in a `.grdp` file. Here's our
 </grit-part>
 ```
 
+Add the created file in `components/resources/dev_ui_components_resources.grd`:
+
+```xml
++<part file="hello_world_resources.grdp" />
+```
+
 ## Adding URL constants for the new chrome URL
 
 Create the `constants.cc` and `constants.h` files to add the URL constants. This is where you will add the URL or URL's which will be directed to your new resources.
@@ -129,16 +135,16 @@ Next we need a class to handle requests to this new resource URL. Typically this
 #define COMPONENTS_HELLO_WORLD_HELLO_WORLD_UI_H_
 #pragma once
 
-#include "base/macros.h"
 #include "content/public/browser/web_ui_controller.h"
 
 // The WebUI for chrome://hello-world
 class HelloWorldUI : public content::WebUIController {
  public:
   explicit HelloWorldUI(content::WebUI* web_ui);
+  HelloWorldUI(const HelloWorldUI&) = delete;
+  HelloWorldUI& operator=(const HelloWorldUI&) = delete;
   ~HelloWorldUI() override;
  private:
-  DISALLOW_COPY_AND_ASSIGN(HelloWorldUI);
 };
 
 #endif  // COMPONENTS_HELLO_WORLD_HELLO_WORLD_UI_H_
@@ -148,8 +154,8 @@ class HelloWorldUI : public content::WebUIController {
 ```c++
 #include "components/hello_world/hello_world_ui.h"
 
-#include "components/grit/components_resources.h"
 #include "components/grit/components_scaled_resources.h"
+#include "components/grit/dev_ui_components_resources.h"
 #include "components/hello_world/constants.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_context.h"
@@ -164,16 +170,23 @@ HelloWorldUI::HelloWorldUI(content::WebUI* web_ui)
       content::WebUIDataSource::Create(chrome::kChromeUIHelloWorldHost);
 
   // Localized strings.
-  html_source->AddLocalizedString("helloWorldTitle", IDS_HELLO_WORLD_TITLE);
-  html_source->AddLocalizedString("welcomeMessage", IDS_HELLO_WORLD_WELCOME_TEXT);
+  static constexpr webui::LocalizedString kStrings[] = {
+      {"helloWorldTitle", IDS_HELLO_WORLD_TITLE},
+      {"welcomeMessage", IDS_HELLO_WORLD_WELCOME_TEXT},
+  };
+  html_source->AddLocalizedStrings(kStrings);
 
   // As a demonstration of passing a variable for JS to use we pass in the name "Bob".
   html_source->AddString("userName", "Bob");
-  html_source->SetJsonPath("strings.js");
+  html_source->UseStringsJs();
 
   // Add required resources.
-  html_source->AddResourcePath("hello_world.css", IDR_HELLO_WORLD_CSS);
-  html_source->AddResourcePath("hello_world.js", IDR_HELLO_WORLD_JS);
+  static constexpr webui::ResourcePath kResources[] = {
+      {"hello_world.html", IDR_HELLO_WORLD_HTML},
+      {"hello_world.css", IDR_HELLO_WORLD_CSS},
+      {"hello_world.js", IDR_HELLO_WORLD_JS},
+  };
+  source->AddResourcePaths(kResources);
   html_source->SetDefaultResource(IDR_HELLO_WORLD_HTML);
 
   content::BrowserContext* browser_context =
@@ -199,9 +212,9 @@ sources = [
 and `src/components/hello_world/DEPS:`
 ```
 include_rules = [
-  "+components/grit/components_resources.h",
   "+components/strings/grit/components_strings.h",
   "+components/grit/components_scaled_resources.h"
+  "+components/grit/dev_ui_components_resources.h",
 ]
 ```
 
@@ -228,11 +241,8 @@ You probably want your new WebUI page to be able to do something or get informat
 
 `src/components/hello_world/hello_world_ui.h:`
 ```c++
+#include "base/values.h"
 #include "content/public/browser/web_ui.h"
-+
-+ namespace base {
-+   class ListValue;
-+ }  // namespace base
 
 // The WebUI for chrome://hello-world
 ...
@@ -241,7 +251,7 @@ You probably want your new WebUI page to be able to do something or get informat
 +
 +   // Register callback handler.
 +   RegisterMessageCallback("addNumbers",
-+       base::BindRepeating(&HelloWorldUI::AddNumbers,
++       base::BindRepeating(&HelloWorldUI::AddPositiveNumbers,
 +                           base::Unretained(this)));
 
     // Localized strings.
@@ -249,10 +259,8 @@ You probably want your new WebUI page to be able to do something or get informat
     virtual ~HelloWorldUI();
 +
 +  private:
-+   // Add two numbers together using integer arithmetic.
-+   void AddNumbers(const base::ListValue* args);
-
-    DISALLOW_COPY_AND_ASSIGN(HelloWorldUI);
++   // Add two positive numbers together using integer arithmetic.
++   void AddPositiveNumbers(base::Value::ConstListView args);
   };
 ```
 
@@ -266,14 +274,16 @@ You probably want your new WebUI page to be able to do something or get informat
   HelloWorldUI::~HelloWorldUI() {
   }
 +
-+ void HelloWorldUI::AddNumbers(const base::ListValue* args) {
-+   int term1, term2;
-+   if (!args->GetInteger(0, &term1) || !args->GetInteger(1, &term2))
-+     return;
++ void HelloWorldUI::AddPositiveNumbers(base::Value::ConstListView args) {
++   // IMPORTANT: Fully validate `args`.
++   CHECK_EQ(3u, args.size());
++   int term1 = args[1].GetInt();
++   CHECK_GT(term1, 0);
++   int term2 = args[2].GetInt();
++   CHECK_GT(term2, 0);
 +   base::FundamentalValue result(term1 + term2);
 +   AllowJavascript();
-+   std::string callback_id;
-+   args->GetString(0, &callback_id);
++   std::string callback_id = args[0].GetString();
 +   ResolveJavascriptCallback(base::Value(callback_id), result);
 + }
 ```
@@ -298,8 +308,13 @@ You'll notice that the call is asynchronous. We must wait for the C++ side to ca
 
 ## Creating a WebUI Dialog
 
-Some pages have many messages or share code that sends messages. To make possible message handling and/or to create a WebUI dialogue `c++->js` and `js->c++`, follow the guide in [WebUI Explainer](https://chromium.googlesource.com/chromium/src/+/master/docs/webui_explainer.md).
+Some pages have many messages or share code that sends messages. To make possible message handling and/or to create a WebUI dialogue `c++->js` and `js->c++`, follow the guide in [WebUI Explainer](https://chromium.googlesource.com/chromium/src/+/main/docs/webui_explainer.md).
 
+## DevUI Pages
+
+DevUI pages are WebUI pages intended for developers, and unlikely used by most users. An example is `chrome://bluetooth-internals`. On Android Chrome, these pages are moved to a separate [Dynamic Feature Module (DFM)](https://chromium.googlesource.com/chromium/src/+/main/docs/android_dynamic_feature_modules.md) to reduce binary size. Most WebUI pages are DevUI. This is why in this doc uses `dev_ui_components_resources.{grd, h}` in its examples.
+
+`components/` resources that are intended for end users are associated with `components_resources.{grd, h}` and `components_scaled_resorces.{grd, h}`. Use these in place of or inadditional to `dev_ui_components_resources.{grd, h}` if needed.
 
 <script>
 let nameEls = Array.from(document.querySelectorAll('[id], a[name]'));

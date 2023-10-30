@@ -1,15 +1,18 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <math.h>
 
 #include "base/bind.h"
+#include "base/containers/cxx20_erase.h"
 #include "base/memory/ptr_util.h"
+#include "base/no_destructor.h"
 #include "base/numerics/math_constants.h"
 #include "base/time/time.h"
 #include "device/vr/orientation/orientation_device.h"
 #include "device/vr/orientation/orientation_session.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading_shared_buffer_reader.h"
 #include "services/device/public/mojom/sensor_provider.mojom.h"
@@ -26,20 +29,6 @@ using gfx::Vector3dF;
 namespace {
 static constexpr int kDefaultPumpFrequencyHz = 60;
 
-mojom::VRDisplayInfoPtr CreateVRDisplayInfo(mojom::XRDeviceId id) {
-  static const char DEVICE_NAME[] = "VR Orientation Device";
-
-  mojom::VRDisplayInfoPtr display_info = mojom::VRDisplayInfo::New();
-  display_info->id = id;
-  display_info->display_name = DEVICE_NAME;
-  display_info->capabilities = mojom::VRDisplayCapabilities::New();
-  display_info->capabilities->has_position = false;
-  display_info->capabilities->has_external_display = false;
-  display_info->capabilities->can_present = false;
-
-  return display_info;
-}
-
 display::Display::Rotation GetRotation() {
   display::Screen* screen = display::Screen::GetScreen();
   if (!screen) {
@@ -50,23 +39,34 @@ display::Display::Rotation GetRotation() {
   return screen->GetPrimaryDisplay().rotation();
 }
 
-}  // namespace
+const std::vector<mojom::XRSessionFeature>& GetSupportedFeatures() {
+  static base::NoDestructor<std::vector<mojom::XRSessionFeature>>
+      kSupportedFeatures{{
+    mojom::XRSessionFeature::REF_SPACE_VIEWER,
+    mojom::XRSessionFeature::REF_SPACE_LOCAL,
+    mojom::XRSessionFeature::REF_SPACE_LOCAL_FLOOR,
+  }};
 
-VROrientationDevice::VROrientationDevice(
-    mojom::SensorProviderPtr* sensor_provider,
-    base::OnceClosure ready_callback)
-    : VRDeviceBase(mojom::XRDeviceId::ORIENTATION_DEVICE_ID),
-      ready_callback_(std::move(ready_callback)),
-      binding_(this) {
-  (*sensor_provider)
-      ->GetSensor(kOrientationSensorType,
-                  base::BindOnce(&VROrientationDevice::SensorReady,
-                                 base::Unretained(this)));
-
-  SetVRDisplayInfo(CreateVRDisplayInfo(GetId()));
+  return *kSupportedFeatures;
 }
 
-VROrientationDevice::~VROrientationDevice() = default;
+}  // namespace
+
+VROrientationDevice::VROrientationDevice(mojom::SensorProvider* sensor_provider,
+                                         base::OnceClosure ready_callback)
+    : VRDeviceBase(mojom::XRDeviceId::ORIENTATION_DEVICE_ID),
+      ready_callback_(std::move(ready_callback)) {
+  DVLOG(2) << __func__;
+  sensor_provider->GetSensor(kOrientationSensorType,
+                             base::BindOnce(&VROrientationDevice::SensorReady,
+                                            base::Unretained(this)));
+
+  SetSupportedFeatures(GetSupportedFeatures());
+}
+
+VROrientationDevice::~VROrientationDevice() {
+  DVLOG(2) << __func__;
+}
 
 void VROrientationDevice::SensorReady(
     device::mojom::SensorCreationResult,
@@ -78,6 +78,7 @@ void VROrientationDevice::SensorReady(
     return;
   }
 
+  DVLOG(2) << __func__;
   constexpr size_t kReadBufferSize = sizeof(device::SensorReadingSharedBuffer);
 
   DCHECK_EQ(0u, params->buffer_offset % kReadBufferSize);
@@ -87,7 +88,7 @@ void VROrientationDevice::SensorReady(
 
   sensor_.Bind(std::move(params->sensor));
 
-  binding_.Bind(std::move(params->client_request));
+  receiver_.Bind(std::move(params->client_receiver));
 
   shared_buffer_reader_ = device::SensorReadingSharedBufferReader::Create(
       std::move(params->memory), params->buffer_offset);
@@ -99,7 +100,7 @@ void VROrientationDevice::SensorReady(
   }
 
   default_config.set_frequency(kDefaultPumpFrequencyHz);
-  sensor_.set_connection_error_handler(base::BindOnce(
+  sensor_.set_disconnect_handler(base::BindOnce(
       &VROrientationDevice::HandleSensorError, base::Unretained(this)));
   sensor_->ConfigureReadingChangeNotifications(false /* disabled */);
   sensor_->AddConfiguration(
@@ -128,44 +129,72 @@ void VROrientationDevice::RaiseError() {
 void VROrientationDevice::HandleSensorError() {
   sensor_.reset();
   shared_buffer_reader_.reset();
-  binding_.Close();
+  receiver_.reset();
 }
 
 void VROrientationDevice::RequestSession(
     mojom::XRRuntimeSessionOptionsPtr options,
     mojom::XRRuntime::RequestSessionCallback callback) {
-  DCHECK(!options->immersive);
+  DVLOG(2) << __func__;
+  DCHECK_EQ(options->mode, mojom::XRSessionMode::kInline);
 
   // TODO(http://crbug.com/695937): Perform a check to see if sensors are
   // available when RequestSession is called for non-immersive sessions.
 
-  mojom::XRFrameDataProviderPtr data_provider;
-  mojom::XRSessionControllerPtr controller;
+  mojo::PendingRemote<mojom::XRFrameDataProvider> data_provider;
+  mojo::PendingRemote<mojom::XRSessionController> controller;
   magic_window_sessions_.push_back(std::make_unique<VROrientationSession>(
-      this, mojo::MakeRequest(&data_provider), mojo::MakeRequest(&controller)));
+      this, data_provider.InitWithNewPipeAndPassReceiver(),
+      controller.InitWithNewPipeAndPassReceiver()));
 
-  auto session = mojom::XRSession::New();
-  session->data_provider = data_provider.PassInterface();
-  if (display_info_) {
-    session->display_info = display_info_.Clone();
-  }
+  auto session_result = mojom::XRRuntimeSessionResult::New();
+  session_result->controller = std::move(controller);
 
-  std::move(callback).Run(std::move(session), std::move(controller));
+  session_result->session = mojom::XRSession::New();
+  auto* session = session_result->session.get();
+
+  session->data_provider = std::move(data_provider);
+  session->device_config = device::mojom::XRSessionDeviceConfig::New();
+  session->enviroment_blend_mode =
+      device::mojom::XREnvironmentBlendMode::kOpaque;
+  session->interaction_mode = device::mojom::XRInteractionMode::kScreenSpace;
+
+  // Currently, the initial filtering of supported devices happens on the
+  // browser side (BrowserXRRuntimeImpl::SupportsFeature()), so if we have
+  // reached this point, it is safe to assume that all requested features are
+  // enabled.
+  // TODO(https://crbug.com/995377): revisit the approach when the bug is fixed.
+  session->enabled_features.insert(session->enabled_features.end(),
+                                   options->required_features.begin(),
+                                   options->required_features.end());
+  session->enabled_features.insert(session->enabled_features.end(),
+                                   options->optional_features.begin(),
+                                   options->optional_features.end());
+
+  std::move(callback).Run(std::move(session_result));
+
+  // The sensor may have been suspended, so resume it now.
+  sensor_->Resume();
 }
 
 void VROrientationDevice::EndMagicWindowSession(VROrientationSession* session) {
+  DVLOG(2) << __func__;
   base::EraseIf(magic_window_sessions_,
                 [session](const std::unique_ptr<VROrientationSession>& item) {
                   return item.get() == session;
                 });
+
+  // If there are no more magic window sessions, suspend the sensor until we get
+  // a new one.
+  if (magic_window_sessions_.empty()) {
+    sensor_->Suspend();
+  }
 }
 
 void VROrientationDevice::GetInlineFrameData(
     mojom::XRFrameDataProvider::GetFrameDataCallback callback) {
-  if (!inline_poses_enabled_) {
-    std::move(callback).Run(nullptr);
-    return;
-  }
+  // Orientation sessions should never be exclusive or presenting.
+  DCHECK(!HasExclusiveSession());
 
   mojom::VRPosePtr pose = mojom::VRPose::New();
 
@@ -184,7 +213,7 @@ void VROrientationDevice::GetInlineFrameData(
   pose->orientation = latest_pose_;
 
   mojom::XRFrameDataPtr frame_data = mojom::XRFrameData::New();
-  frame_data->pose = std::move(pose);
+  frame_data->mojo_from_viewer = std::move(pose);
 
   std::move(callback).Run(std::move(frame_data));
 }

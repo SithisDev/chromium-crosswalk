@@ -1,8 +1,6 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-#include "device/fido/mac/get_assertion_operation.h"
 
 #include <array>
 
@@ -11,9 +9,12 @@
 
 #include "base/strings/string_number_conversions.h"
 
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_test_data.h"
+#include "device/fido/mac/authenticator_config.h"
+#include "device/fido/mac/credential_store.h"
+#include "device/fido/mac/get_assertion_operation.h"
 #include "device/fido/mac/make_credential_operation.h"
 #include "device/fido/test_callback_receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -35,9 +36,9 @@ CtapGetAssertionRequest MakeTestRequest() {
   return CtapGetAssertionRequest(kRpId, test_data::kClientDataJson);
 }
 
-bool MakeCredential() API_AVAILABLE(macos(10.12.2)) {
+bool MakeCredential() {
   TestCallbackReceiver<CtapDeviceResponseCode,
-                       base::Optional<AuthenticatorMakeCredentialResponse>>
+                       absl::optional<AuthenticatorMakeCredentialResponse>>
       callback_receiver;
   auto request = CtapMakeCredentialRequest(
       test_data::kClientDataJson, PublicKeyCredentialRpEntity(kRpId),
@@ -45,7 +46,9 @@ bool MakeCredential() API_AVAILABLE(macos(10.12.2)) {
       PublicKeyCredentialParams(
           {{PublicKeyCredentialParams::
                 CredentialInfo() /* defaults to ES-256 */}}));
-  MakeCredentialOperation op(request, "test-profile", kKeychainAccessGroup,
+  TouchIdCredentialStore credential_store(
+      AuthenticatorConfig{"test-profile", kKeychainAccessGroup});
+  MakeCredentialOperation op(request, &credential_store,
                              callback_receiver.callback());
 
   op.Run();
@@ -59,16 +62,17 @@ bool MakeCredential() API_AVAILABLE(macos(10.12.2)) {
 // For demo purposes only. This test does a Touch ID user prompt. It will fail
 // on incompatible hardware and crash if not code signed or lacking the
 // keychain-access-group entitlement.
-TEST(GetAssertionOperationTest, DISABLED_TestRun)
-API_AVAILABLE(macos(10.12.2)) {
-  base::test::ScopedTaskEnvironment scoped_task_environment;
+TEST(GetAssertionOperationTest, DISABLED_TestRun) {
+  base::test::TaskEnvironment task_environment;
   ASSERT_TRUE(MakeCredential());
 
   TestCallbackReceiver<CtapDeviceResponseCode,
-                       base::Optional<AuthenticatorGetAssertionResponse>>
+                       absl::optional<AuthenticatorGetAssertionResponse>>
       callback_receiver;
   auto request = MakeTestRequest();
-  GetAssertionOperation op(request, "test-profile", kKeychainAccessGroup,
+  TouchIdCredentialStore credential_store(
+      AuthenticatorConfig{"test-profile", kKeychainAccessGroup});
+  GetAssertionOperation op(request, &credential_store,
                            callback_receiver.callback());
 
   op.Run();
@@ -78,8 +82,8 @@ API_AVAILABLE(macos(10.12.2)) {
   EXPECT_EQ(CtapDeviceResponseCode::kSuccess, error);
   auto opt_response = std::move(std::get<1>(result));
   ASSERT_TRUE(opt_response);
-  ASSERT_TRUE(opt_response->credential());
-  EXPECT_FALSE(opt_response->credential()->id().empty());
+  ASSERT_TRUE(opt_response->credential);
+  EXPECT_FALSE(opt_response->credential->id.empty());
 }
 }  // namespace
 }  // namespace mac

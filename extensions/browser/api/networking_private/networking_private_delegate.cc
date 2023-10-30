@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,9 @@ void NetworkingPrivateDelegate::RemoveObserver(
 void NetworkingPrivateDelegate::StartActivate(
     const std::string& guid,
     const std::string& carrier,
-    const VoidCallback& success_callback,
-    const FailureCallback& failure_callback) {
-  failure_callback.Run(networking_private::kErrorNotSupported);
+    VoidCallback success_callback,
+    FailureCallback failure_callback) {
+  std::move(failure_callback).Run(networking_private::kErrorNotSupported);
 }
 
 }  // namespace extensions

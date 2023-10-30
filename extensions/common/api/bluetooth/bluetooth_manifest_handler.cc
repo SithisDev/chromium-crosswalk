@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,10 @@ BluetoothManifestHandler::BluetoothManifestHandler() {}
 BluetoothManifestHandler::~BluetoothManifestHandler() {}
 
 bool BluetoothManifestHandler::Parse(Extension* extension,
-                                     base::string16* error) {
-  const base::Value* bluetooth = NULL;
-  CHECK(extension->manifest()->Get(manifest_keys::kBluetooth, &bluetooth));
+                                     std::u16string* error) {
+  const base::Value* bluetooth =
+      extension->manifest()->FindPath(manifest_keys::kBluetooth);
+  CHECK(bluetooth != nullptr);
   std::unique_ptr<BluetoothManifestData> data =
       BluetoothManifestData::FromValue(*bluetooth, error);
   if (!data)
@@ -37,7 +38,7 @@ ManifestPermission* BluetoothManifestHandler::CreateInitialRequiredPermission(
   BluetoothManifestData* data = BluetoothManifestData::Get(extension);
   if (data)
     return data->permission()->Clone().release();
-  return NULL;
+  return nullptr;
 }
 
 base::span<const char* const> BluetoothManifestHandler::Keys() const {

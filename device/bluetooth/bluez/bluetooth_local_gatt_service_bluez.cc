@@ -1,8 +1,8 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <device/bluetooth/bluez/bluetooth_local_gatt_service_bluez.h>
+#include "device/bluetooth/bluez/bluetooth_local_gatt_service_bluez.h"
 
 #include "base/guid.h"
 #include "base/logging.h"
@@ -43,9 +43,9 @@ BluetoothLocalGattServiceBlueZ::BluetoothLocalGattServiceBlueZ(
                               "/service")),
       uuid_(uuid),
       is_primary_(is_primary),
-      delegate_(delegate),
-      weak_ptr_factory_(this) {
-  VLOG(1) << "Creating local GATT service with identifier: " << GetIdentifier();
+      delegate_(delegate) {
+  DVLOG(1) << "Creating local GATT service with identifier: "
+           << GetIdentifier();
   adapter->AddLocalGattService(base::WrapUnique(this));
 }
 
@@ -59,17 +59,17 @@ bool BluetoothLocalGattServiceBlueZ::IsPrimary() const {
   return is_primary_;
 }
 
-void BluetoothLocalGattServiceBlueZ::Register(
-    const base::Closure& callback,
-    const ErrorCallback& error_callback) {
-  GetAdapter()->RegisterGattService(this, callback, error_callback);
+void BluetoothLocalGattServiceBlueZ::Register(base::OnceClosure callback,
+                                              ErrorCallback error_callback) {
+  GetAdapter()->RegisterGattService(this, std::move(callback),
+                                    std::move(error_callback));
 }
 
-void BluetoothLocalGattServiceBlueZ::Unregister(
-    const base::Closure& callback,
-    const ErrorCallback& error_callback) {
+void BluetoothLocalGattServiceBlueZ::Unregister(base::OnceClosure callback,
+                                                ErrorCallback error_callback) {
   DCHECK(GetAdapter());
-  GetAdapter()->UnregisterGattService(this, callback, error_callback);
+  GetAdapter()->UnregisterGattService(this, std::move(callback),
+                                      std::move(error_callback));
 }
 
 bool BluetoothLocalGattServiceBlueZ::IsRegistered() {

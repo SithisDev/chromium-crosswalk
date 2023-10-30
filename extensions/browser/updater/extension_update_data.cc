@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@ ExtensionUpdateData::ExtensionUpdateData() : is_corrupt_reinstall(false) {}
 ExtensionUpdateData::ExtensionUpdateData(const ExtensionUpdateData& other) =
     default;
 
-ExtensionUpdateData::~ExtensionUpdateData() {}
+ExtensionUpdateData::~ExtensionUpdateData() = default;
 
 ExtensionUpdateCheckParams::ExtensionUpdateCheckParams()
     : priority(BACKGROUND), install_immediately(false) {}
@@ -19,6 +19,6 @@ ExtensionUpdateCheckParams::ExtensionUpdateCheckParams()
 ExtensionUpdateCheckParams::ExtensionUpdateCheckParams(
     const ExtensionUpdateCheckParams& other) = default;
 
-ExtensionUpdateCheckParams::~ExtensionUpdateCheckParams() {}
+ExtensionUpdateCheckParams::~ExtensionUpdateCheckParams() = default;
 
 }  // namespace extensions

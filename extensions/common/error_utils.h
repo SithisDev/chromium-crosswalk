@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 
 namespace extensions {
@@ -27,14 +26,14 @@ class ErrorUtils {
                                         base::StringPiece s2,
                                         base::StringPiece s3);
 
-  static base::string16 FormatErrorMessageUTF16(base::StringPiece format,
+  static std::u16string FormatErrorMessageUTF16(base::StringPiece format,
                                                 base::StringPiece s1);
 
-  static base::string16 FormatErrorMessageUTF16(base::StringPiece format,
+  static std::u16string FormatErrorMessageUTF16(base::StringPiece format,
                                                 base::StringPiece s1,
                                                 base::StringPiece s2);
 
-  static base::string16 FormatErrorMessageUTF16(base::StringPiece format,
+  static std::u16string FormatErrorMessageUTF16(base::StringPiece format,
                                                 base::StringPiece s1,
                                                 base::StringPiece s2,
                                                 base::StringPiece s3);

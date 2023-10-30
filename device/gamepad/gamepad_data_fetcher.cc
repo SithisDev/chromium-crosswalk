@@ -1,15 +1,17 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/gamepad/gamepad_data_fetcher.h"
 
 #include "base/bind.h"
+#include "base/no_destructor.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 
 namespace device {
+
 namespace {
 
 void RunCallbackOnCallbackThread(
@@ -17,17 +19,35 @@ void RunCallbackOnCallbackThread(
     mojom::GamepadHapticsResult result) {
   std::move(callback).Run(result);
 }
+
+GamepadDataFetcher::HidManagerBinder& GetHidManagerBinder() {
+  static base::NoDestructor<GamepadDataFetcher::HidManagerBinder> binder;
+  return *binder;
+}
+
 }  // namespace
 
-GamepadDataFetcher::GamepadDataFetcher() : provider_(nullptr) {}
+GamepadDataFetcher::GamepadDataFetcher() = default;
 
 GamepadDataFetcher::~GamepadDataFetcher() = default;
+
+// static
+void GamepadDataFetcher::SetHidManagerBinder(HidManagerBinder binder) {
+  GetHidManagerBinder() = std::move(binder);
+}
 
 void GamepadDataFetcher::InitializeProvider(GamepadPadStateProvider* provider) {
   DCHECK(provider);
 
   provider_ = provider;
   OnAddedToProvider();
+}
+
+void GamepadDataFetcher::BindHidManager(
+    mojo::PendingReceiver<mojom::HidManager> receiver) {
+  const auto& binder = GetHidManagerBinder();
+  if (binder)
+    binder.Run(std::move(receiver));
 }
 
 void GamepadDataFetcher::PlayEffect(
@@ -48,6 +68,10 @@ void GamepadDataFetcher::ResetVibration(
                        mojom::GamepadHapticsResult::GamepadHapticsResultError);
 }
 
+bool GamepadDataFetcher::DisconnectUnrecognizedGamepad(int source_id) {
+  return false;
+}
+
 // static
 int64_t GamepadDataFetcher::TimeInMicroseconds(base::TimeTicks update_time) {
   return update_time.since_origin().InMicroseconds();
@@ -59,7 +83,7 @@ int64_t GamepadDataFetcher::CurrentTimeInMicroseconds() {
 }
 
 // static
-void GamepadDataFetcher::UpdateGamepadStrings(const std::string& name,
+void GamepadDataFetcher::UpdateGamepadStrings(const std::string& product_name,
                                               uint16_t vendor_id,
                                               uint16_t product_id,
                                               bool has_standard_mapping,
@@ -67,7 +91,7 @@ void GamepadDataFetcher::UpdateGamepadStrings(const std::string& name,
   // The ID contains the device name, vendor and product IDs,
   // and an indication of whether the standard mapping is in use.
   std::string id = base::StringPrintf(
-      "%s (%sVendor: %04x Product: %04x)", name.c_str(),
+      "%s (%sVendor: %04x Product: %04x)", product_name.c_str(),
       has_standard_mapping ? "STANDARD GAMEPAD " : "", vendor_id, product_id);
   pad.SetID(base::UTF8ToUTF16(id));
 

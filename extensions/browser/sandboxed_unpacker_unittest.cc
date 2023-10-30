@@ -1,27 +1,33 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/browser/sandboxed_unpacker.h"
+#include "build/build_config.h"
+
+#include <memory>
+#include <tuple>
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "components/crx_file/id_util.h"
-#include "components/services/unzip/public/cpp/test_unzip_service.h"
-#include "components/services/unzip/public/mojom/constants.mojom.h"
-#include "components/services/unzip/unzip_service.h"
+#include "components/services/unzip/content/unzip_service.h"
+#include "components/services/unzip/in_process_unzipper.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extensions_test.h"
 #include "extensions/browser/install/crx_install_error.h"
@@ -29,16 +35,14 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_paths.h"
+#include "extensions/common/file_util.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/switches.h"
+#include "extensions/common/value_builder.h"
 #include "extensions/common/verifier_formats.h"
 #include "extensions/strings/grit/extensions_strings.h"
 #include "extensions/test/test_extensions_client.h"
-#include "services/data_decoder/data_decoder_service.h"
-#include "services/data_decoder/public/cpp/test_data_decoder_service.h"
-#include "services/data_decoder/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
-#include "services/service_manager/public/cpp/test/test_connector_factory.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -72,25 +76,22 @@ class IllegalImagePathInserter
   }
 
  private:
-  TestExtensionsClient* client_;
+  raw_ptr<TestExtensionsClient> client_;
 };
 
 }  // namespace
 
 class MockSandboxedUnpackerClient : public SandboxedUnpackerClient {
  public:
-  void WaitForUnpack() {
-    scoped_refptr<content::MessageLoopRunner> runner =
-        new content::MessageLoopRunner;
-    quit_closure_ = runner->QuitClosure();
-    runner->Run();
-  }
+  explicit MockSandboxedUnpackerClient(
+      scoped_refptr<base::SequencedTaskRunner> callback_runner)
+      : callback_runner_(callback_runner) {}
 
   base::FilePath temp_dir() const { return temp_dir_; }
-  base::string16 unpack_error_message() const {
+  std::u16string unpack_error_message() const {
     if (error_)
       return error_->message();
-    return base::string16();
+    return std::u16string();
   }
   CrxInstallErrorType unpack_error_type() const {
     if (error_)
@@ -110,95 +111,96 @@ class MockSandboxedUnpackerClient : public SandboxedUnpackerClient {
     deleted_tracker_ = deleted_tracker;
   }
 
+  void set_should_compute_hashes(bool should_compute_hashes) {
+    should_compute_hashes_ = should_compute_hashes;
+  }
+
+  void SetQuitClosure(base::OnceClosure quit_closure) {
+    quit_closure_ = std::move(quit_closure);
+  }
+
  private:
   ~MockSandboxedUnpackerClient() override {
     if (deleted_tracker_)
       *deleted_tracker_ = true;
+    if (quit_closure_)
+      std::move(quit_closure_).Run();
   }
 
-  void OnUnpackSuccess(
-      const base::FilePath& temp_dir,
-      const base::FilePath& extension_root,
-      std::unique_ptr<base::DictionaryValue> original_manifest,
-      const Extension* extension,
-      const SkBitmap& install_icon,
-      const base::Optional<int>& dnr_ruleset_checksum) override {
+  void ShouldComputeHashesForOffWebstoreExtension(
+      scoped_refptr<const Extension> extension,
+      base::OnceCallback<void(bool)> callback) override {
+    std::move(callback).Run(should_compute_hashes_);
+  }
+
+  void OnUnpackSuccess(const base::FilePath& temp_dir,
+                       const base::FilePath& extension_root,
+                       std::unique_ptr<base::DictionaryValue> original_manifest,
+                       const Extension* extension,
+                       const SkBitmap& install_icon,
+                       declarative_net_request::RulesetInstallPrefs
+                           ruleset_install_prefs) override {
     temp_dir_ = temp_dir;
-    quit_closure_.Run();
+    callback_runner_->PostTask(FROM_HERE, std::move(quit_closure_));
   }
 
   void OnUnpackFailure(const CrxInstallError& error) override {
     error_ = error;
-    quit_closure_.Run();
+    callback_runner_->PostTask(FROM_HERE, std::move(quit_closure_));
   }
 
-  base::Optional<CrxInstallError> error_;
-  base::Closure quit_closure_;
+  scoped_refptr<base::SequencedTaskRunner> callback_runner_;
+  absl::optional<CrxInstallError> error_;
+  base::OnceClosure quit_closure_;
   base::FilePath temp_dir_;
-  bool* deleted_tracker_ = nullptr;
+  raw_ptr<bool> deleted_tracker_ = nullptr;
+  bool should_compute_hashes_ = false;
 };
 
 class SandboxedUnpackerTest : public ExtensionsTest {
  public:
   SandboxedUnpackerTest()
-      : ExtensionsTest(content::TestBrowserThreadBundle::IO_MAINLOOP) {
-    test_connector_factory_.set_ignore_quit_requests(true);
-  }
+      : ExtensionsTest(content::BrowserTaskEnvironment::IO_MAINLOOP),
+        unpacker_thread_("Unpacker Thread") {}
 
   void SetUp() override {
     ExtensionsTest::SetUp();
+
+    unpacker_thread_.Start();
+    unpacker_task_runner_ = unpacker_thread_.task_runner();
+
     ASSERT_TRUE(extensions_dir_.CreateUniqueTempDir());
-    in_process_utility_thread_helper_.reset(
-        new content::InProcessUtilityThreadHelper);
+    in_process_utility_thread_helper_ =
+        std::make_unique<content::InProcessUtilityThreadHelper>();
     // It will delete itself.
-    client_ = new MockSandboxedUnpackerClient;
+    client_ = new MockSandboxedUnpackerClient(
+        task_environment()->GetMainThreadTaskRunner());
 
-    InitSanboxedUnpacker(/*data_decode_service=*/nullptr,
-                         /*unzip_service=*/nullptr);
+    InitSandboxedUnpacker();
+
+    // By default, we host an in-process UnzipperImpl to support any service
+    // clients. Tests may explicitly override the launch callback to prevent
+    // this.
+    unzip::SetUnzipperLaunchOverrideForTesting(
+        base::BindRepeating(&unzip::LaunchInProcessUnzipper));
   }
 
-  void InitSanboxedUnpacker(
-      std::unique_ptr<service_manager::Service> data_decoder_service,
-      std::unique_ptr<service_manager::Service> unzip_service) {
-    if (data_decoder_service) {
-      data_decoder_service_ = std::move(data_decoder_service);
-    } else {
-      data_decoder_service_ =
-          std::make_unique<data_decoder::DataDecoderService>(
-              RegisterDataDecoder());
-    }
-
-    if (unzip_service) {
-      unzip_service_ = std::move(unzip_service);
-    } else {
-      unzip_service_ =
-          std::make_unique<unzip::UnzipService>(RegisterUnzipService());
-    }
-
-    connector_ = test_connector_factory_.CreateConnector();
-
-    sandboxed_unpacker_ =
-        new SandboxedUnpacker(connector_->Clone(), Manifest::INTERNAL,
-                              Extension::NO_FLAGS, extensions_dir_.GetPath(),
-                              base::ThreadTaskRunnerHandle::Get(), client_);
-  }
-
-  service_manager::mojom::ServiceRequest RegisterDataDecoder() {
-    return test_connector_factory_.RegisterInstance(
-        data_decoder::mojom::kServiceName);
-  }
-
-  service_manager::mojom::ServiceRequest RegisterUnzipService() {
-    return test_connector_factory_.RegisterInstance(unzip::mojom::kServiceName);
+  void InitSandboxedUnpacker() {
+    sandboxed_unpacker_ = new SandboxedUnpacker(
+        mojom::ManifestLocation::kInternal, Extension::NO_FLAGS,
+        extensions_dir_.GetPath(), unpacker_task_runner_, client_);
   }
 
   void TearDown() override {
+    unzip::SetUnzipperLaunchOverrideForTesting(base::NullCallback());
     // Need to destruct SandboxedUnpacker before the message loop since
     // it posts a task to it.
     sandboxed_unpacker_ = nullptr;
     base::RunLoop().RunUntilIdle();
     ExtensionsTest::TearDown();
     in_process_utility_thread_helper_.reset();
+
+    unpacker_thread_.Stop();
   }
 
   base::FilePath GetCrxFullPath(const std::string& crx_name) {
@@ -212,13 +214,17 @@ class SandboxedUnpackerTest : public ExtensionsTest {
   void SetupUnpacker(const std::string& crx_name,
                      const std::string& package_hash) {
     base::FilePath crx_path = GetCrxFullPath(crx_name);
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::BindOnce(
-            &SandboxedUnpacker::StartWithCrx, sandboxed_unpacker_,
-            extensions::CRXFileInfo(std::string(), crx_path, package_hash,
-                                    GetTestVerifierFormat())));
-    client_->WaitForUnpack();
+    extensions::CRXFileInfo crx_info(crx_path, GetTestVerifierFormat());
+    crx_info.expected_hash = package_hash;
+
+    base::RunLoop run_loop;
+    client_->SetQuitClosure(run_loop.QuitClosure());
+
+    unpacker_task_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&SandboxedUnpacker::StartWithCrx,
+                                  sandboxed_unpacker_, crx_info));
+    // Wait for unpack
+    run_loop.Run();
   }
 
   void SetupUnpackerWithDirectory(const std::string& crx_name) {
@@ -230,11 +236,17 @@ class SandboxedUnpackerTest : public ExtensionsTest {
     std::string fake_id = crx_file::id_util::GenerateId(crx_name);
     std::string fake_public_key;
     base::Base64Encode(std::string(2048, 'k'), &fake_public_key);
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
+
+    base::RunLoop run_loop;
+    client_->SetQuitClosure(run_loop.QuitClosure());
+
+    unpacker_task_runner_->PostTask(
         FROM_HERE, base::BindOnce(&SandboxedUnpacker::StartWithDirectory,
                                   sandboxed_unpacker_, fake_id, fake_public_key,
                                   temp_dir.Take()));
-    client_->WaitForUnpack();
+
+    // Wait for unpack
+    run_loop.Run();
   }
 
   bool InstallSucceeded() const { return !client_->temp_dir().empty(); }
@@ -243,7 +255,7 @@ class SandboxedUnpackerTest : public ExtensionsTest {
     return client_->temp_dir().AppendASCII(kTempExtensionName);
   }
 
-  base::string16 GetInstallErrorMessage() const {
+  std::u16string GetInstallErrorMessage() const {
     return client_->unpack_error_message();
   }
 
@@ -267,25 +279,52 @@ class SandboxedUnpackerTest : public ExtensionsTest {
     client_->set_deleted_tracker(&client_deleted);
     SetupUnpacker(package_name, "");
     EXPECT_EQ(GetInstallErrorMessage().empty(), expect_success);
+
+    base::RunLoop run_loop;
+    client_->SetQuitClosure(run_loop.QuitClosure());
+
     // Remove our reference to |sandboxed_unpacker_|, it should get deleted
     // since/ it's the last reference.
     sandboxed_unpacker_ = nullptr;
+
+    // Wait for |client_| dtor.
+    run_loop.Run();
+
     // The SandboxedUnpacker should have been deleted and deleted the client.
     EXPECT_TRUE(client_deleted);
   }
 
+  void SetPublicKey(const std::string& key) {
+    sandboxed_unpacker_->public_key_ = key;
+  }
+
+  void SetExtensionRoot(const base::FilePath& path) {
+    sandboxed_unpacker_->extension_root_ = path;
+  }
+
+  absl::optional<base::Value> RewriteManifestFile(const base::Value& manifest) {
+    return sandboxed_unpacker_->RewriteManifestFile(manifest);
+  }
+
+  data_decoder::test::InProcessDataDecoder& in_process_data_decoder() {
+    return in_process_data_decoder_;
+  }
+
  protected:
   base::ScopedTempDir extensions_dir_;
-  MockSandboxedUnpackerClient* client_;
+  raw_ptr<MockSandboxedUnpackerClient> client_;
   scoped_refptr<SandboxedUnpacker> sandboxed_unpacker_;
   std::unique_ptr<content::InProcessUtilityThreadHelper>
       in_process_utility_thread_helper_;
 
-  service_manager::TestConnectorFactory test_connector_factory_;
-  std::unique_ptr<service_manager::Connector> connector_;
+  data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
 
-  std::unique_ptr<service_manager::Service> data_decoder_service_;
-  std::unique_ptr<service_manager::Service> unzip_service_;
+ private:
+  // The thread where the sandboxed unpacker runs. This provides test coverage
+  // in an environment similar to what we use in production.
+  base::Thread unpacker_thread_;
+
+  scoped_refptr<base::SequencedTaskRunner> unpacker_task_runner_;
 };
 
 TEST_F(SandboxedUnpackerTest, EmptyDefaultLocale) {
@@ -343,9 +382,8 @@ TEST_F(SandboxedUnpackerTest, MissingMessagesFile) {
   SetupUnpacker("missing_messages_file.crx", "");
   EXPECT_TRUE(base::MatchPattern(
       GetInstallErrorMessage(),
-      base::ASCIIToUTF16("*") +
-          base::ASCIIToUTF16(manifest_errors::kLocalesMessagesFileMissing) +
-          base::ASCIIToUTF16("*_locales?en_US?messages.json'.")))
+      u"*" + std::u16string(manifest_errors::kLocalesMessagesFileMissing) +
+          u"*_locales?en_US?messages.json'."))
       << GetInstallErrorMessage();
   ASSERT_EQ(CrxInstallErrorType::SANDBOXED_UNPACKER_FAILURE,
             GetInstallErrorType());
@@ -365,10 +403,9 @@ TEST_F(SandboxedUnpackerTest, NoLocaleData) {
 }
 
 TEST_F(SandboxedUnpackerTest, ImageDecodingError) {
-  const char kExpected[] = "Could not decode image: ";
+  const char16_t kExpected[] = u"Could not decode image: ";
   SetupUnpacker("bad_image.crx", "");
-  EXPECT_TRUE(base::StartsWith(GetInstallErrorMessage(),
-                               base::ASCIIToUTF16(kExpected),
+  EXPECT_TRUE(base::StartsWith(GetInstallErrorMessage(), kExpected,
                                base::CompareCase::INSENSITIVE_ASCII))
       << "Expected prefix: \"" << kExpected << "\", actual error: \""
       << GetInstallErrorMessage() << "\"";
@@ -438,6 +475,31 @@ TEST_F(SandboxedUnpackerTest, FailHashCheck) {
             GetInstallErrorDetail());
 }
 
+TEST_F(SandboxedUnpackerTest, TestRewriteManifestInjections) {
+  constexpr char kTestKey[] = "test_key";
+  constexpr char kTestVersion[] = "1.2.3";
+  constexpr char kVersionStr[] = "version";
+  SetPublicKey(kTestKey);
+  SetExtensionRoot(extensions_dir_.GetPath());
+  std::string fingerprint = "1.0123456789abcdef";
+  base::WriteFile(extensions_dir_.GetPath().Append(
+                      FILE_PATH_LITERAL("manifest.fingerprint")),
+                  fingerprint.c_str(),
+                  base::checked_cast<int>(fingerprint.size()));
+  absl::optional<base::Value> manifest(RewriteManifestFile(
+      *DictionaryBuilder().Set(kVersionStr, kTestVersion).Build()));
+  auto* key = manifest->FindStringKey("key");
+  auto* version = manifest->FindStringKey(kVersionStr);
+  auto* differential_fingerprint =
+      manifest->FindStringKey("differential_fingerprint");
+  ASSERT_NE(nullptr, key);
+  ASSERT_NE(nullptr, version);
+  ASSERT_NE(nullptr, differential_fingerprint);
+  EXPECT_EQ(kTestKey, *key);
+  EXPECT_EQ(kTestVersion, *version);
+  EXPECT_EQ(fingerprint, *differential_fingerprint);
+}
+
 TEST_F(SandboxedUnpackerTest, InvalidMessagesFile) {
   SetupUnpackerWithDirectory("invalid_messages_file.crx");
   // Check that there is no _locales folder.
@@ -445,8 +507,7 @@ TEST_F(SandboxedUnpackerTest, InvalidMessagesFile) {
   EXPECT_FALSE(base::PathExists(install_path));
   EXPECT_TRUE(base::MatchPattern(
       GetInstallErrorMessage(),
-      base::ASCIIToUTF16("*_locales?en_US?messages.json': Line: 2, column: 10,"
-                         " Syntax error.'.")))
+      u"*_locales?en_US?messages.json': Line: 4, column: 1,*"))
       << GetInstallErrorMessage();
   ASSERT_EQ(CrxInstallErrorType::SANDBOXED_UNPACKER_FAILURE,
             GetInstallErrorType());
@@ -475,9 +536,15 @@ TEST_F(SandboxedUnpackerTest, SkipHashCheck) {
 
 // The following tests simulate the utility services failling.
 TEST_F(SandboxedUnpackerTest, UnzipperServiceFails) {
-  InitSanboxedUnpacker(
-      /*data_decoder_service=*/nullptr,
-      std::make_unique<unzip::CrashyUnzipService>(RegisterUnzipService()));
+  // We override the Unzipper's launching behavior to drop the interface
+  // receiver, effectively simulating a crashy service process.
+  unzip::SetUnzipperLaunchOverrideForTesting(base::BindRepeating([]() -> auto {
+    mojo::PendingRemote<unzip::mojom::Unzipper> remote;
+    std::ignore = remote.InitWithNewPipeAndPassReceiver();
+    return remote;
+  }));
+
+  InitSandboxedUnpacker();
   SetupUnpacker("good_package.crx", "");
   EXPECT_FALSE(InstallSucceeded());
   EXPECT_FALSE(GetInstallErrorMessage().empty());
@@ -488,10 +555,9 @@ TEST_F(SandboxedUnpackerTest, UnzipperServiceFails) {
 }
 
 TEST_F(SandboxedUnpackerTest, JsonParserFails) {
-  InitSanboxedUnpacker(
-      std::make_unique<data_decoder::CrashyDataDecoderService>(
-          RegisterDataDecoder(), /*crash_json=*/true, /*crash_image=*/false),
-      /*unzip_service=*/nullptr);
+  in_process_data_decoder().service().SimulateJsonParserCrashForTesting(true);
+  InitSandboxedUnpacker();
+
   SetupUnpacker("good_package.crx", "");
   EXPECT_FALSE(InstallSucceeded());
   EXPECT_FALSE(GetInstallErrorMessage().empty());
@@ -500,19 +566,34 @@ TEST_F(SandboxedUnpackerTest, JsonParserFails) {
 }
 
 TEST_F(SandboxedUnpackerTest, ImageDecoderFails) {
-  InitSanboxedUnpacker(
-      std::make_unique<data_decoder::CrashyDataDecoderService>(
-          RegisterDataDecoder(), /*crash_json=*/false, /*crash_image=*/true),
-      /*unzip_service=*/nullptr);
+  in_process_data_decoder().service().SimulateImageDecoderCrashForTesting(true);
+  InitSandboxedUnpacker();
   SetupUnpacker("good_package.crx", "");
   EXPECT_FALSE(InstallSucceeded());
   EXPECT_FALSE(GetInstallErrorMessage().empty());
   ASSERT_EQ(CrxInstallErrorType::SANDBOXED_UNPACKER_FAILURE,
             GetInstallErrorType());
   EXPECT_EQ(
-      static_cast<int>(SandboxedUnpackerFailureReason::
-                           UTILITY_PROCESS_CRASHED_WHILE_TRYING_TO_INSTALL),
+      static_cast<int>(SandboxedUnpackerFailureReason::UNPACKER_CLIENT_FAILED),
       GetInstallErrorDetail());
+}
+
+TEST_F(SandboxedUnpackerTest, NoComputeHashes) {
+  client_->set_should_compute_hashes(false);
+  SetupUnpacker("good_package.crx", "");
+  EXPECT_TRUE(InstallSucceeded());
+  EXPECT_TRUE(GetInstallErrorMessage().empty());
+  EXPECT_FALSE(
+      base::PathExists(file_util::GetComputedHashesPath(GetInstallPath())));
+}
+
+TEST_F(SandboxedUnpackerTest, ComputeHashes) {
+  client_->set_should_compute_hashes(true);
+  SetupUnpacker("good_package.crx", "");
+  EXPECT_TRUE(InstallSucceeded());
+  EXPECT_TRUE(GetInstallErrorMessage().empty());
+  EXPECT_TRUE(
+      base::PathExists(file_util::GetComputedHashesPath(GetInstallPath())));
 }
 
 // SandboxedUnpacker is ref counted and is reference by callbacks and

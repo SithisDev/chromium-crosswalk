@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,16 +44,10 @@ enum class EventListenersChanged {
   kLastListenerWithFilterForContextOwnerRemoved,
 };
 
-// The browser thread that the request should be sent to.
-enum class RequestThread {
-  UI,
-  IO,
-};
-
 // Whether promises are supported in a given API function.
-enum class PromiseSupport {
-  kAllowed,
-  kDisallowed,
+enum class APIPromiseSupport {
+  kSupported,
+  kUnsupported,
 };
 
 // The type of async response handler an API caller can have.
@@ -66,6 +60,13 @@ enum class AsyncResponseType {
 // Adds an error message to the context's console.
 using AddConsoleError = base::RepeatingCallback<void(v8::Local<v8::Context>,
                                                      const std::string& error)>;
+
+using V8ArgumentList = std::vector<v8::Local<v8::Value>>;
+
+using ResultModifierFunction =
+    base::OnceCallback<V8ArgumentList(const V8ArgumentList&,
+                                      v8::Local<v8::Context>,
+                                      AsyncResponseType)>;
 
 }  // namespace binding
 }  // namespace extensions

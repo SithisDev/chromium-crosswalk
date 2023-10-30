@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 namespace content {
 class BrowserContext;
 class WebContents;
-}
+}  // namespace content
 
 namespace extensions {
 
@@ -41,13 +41,13 @@ class AppWindowClient {
       api::app_runtime::ActionType action) = 0;
 
   // Creates a new extensions::NativeAppWindow for |window|.
-  virtual NativeAppWindow* CreateNativeAppWindow(
+  virtual std::unique_ptr<NativeAppWindow> CreateNativeAppWindow(
       AppWindow* window,
       AppWindow::CreateParams* params) = 0;
 
   // Opens DevTools window and runs the callback.
   virtual void OpenDevToolsWindow(content::WebContents* web_contents,
-                                  const base::Closure& callback) = 0;
+                                  base::OnceClosure callback) = 0;
 
   // Returns true if the current channel is older than dev.
   virtual bool IsCurrentChannelOlderThanDev() = 0;

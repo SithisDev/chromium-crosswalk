@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,8 @@
 #include "extensions/common/url_pattern.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_utils.h"
+
+using extensions::mojom::APIPermissionID;
 
 namespace extensions {
 
@@ -64,6 +66,8 @@ class AutomationManifestPermission : public ManifestPermission {
   std::unique_ptr<ManifestPermission> Intersect(
       const ManifestPermission* rhs) const override;
 
+  bool RequiresManagementUIWarning() const override;
+
  private:
   std::unique_ptr<const AutomationInfo> automation_info_;
 };
@@ -80,12 +84,12 @@ PermissionIDSet AutomationManifestPermission::GetPermissions() const {
   // Meant to mimic the behavior of GetMessages().
   PermissionIDSet permissions;
   if (automation_info_->desktop) {
-    permissions.insert(APIPermission::kFullAccess);
+    permissions.insert(APIPermissionID::kFullAccess);
   } else if (automation_info_->matches.MatchesAllURLs()) {
     if (automation_info_->interact) {
-      permissions.insert(APIPermission::kHostsAll);
+      permissions.insert(APIPermissionID::kHostsAll);
     } else {
-      permissions.insert(APIPermission::kHostsAllReadOnly);
+      permissions.insert(APIPermissionID::kHostsAllReadOnly);
     }
   } else {
     // Check if we get any additional permissions from FilterHostPermissions.
@@ -94,9 +98,9 @@ PermissionIDSet AutomationManifestPermission::GetPermissions() const {
         automation_info_->matches, &regular_hosts, &permissions);
     std::set<std::string> hosts =
         permission_message_util::GetDistinctHosts(regular_hosts, true, true);
-    APIPermission::ID permission_id = automation_info_->interact
-                                          ? APIPermission::kHostReadWrite
-                                          : APIPermission::kHostReadOnly;
+    APIPermissionID permission_id = automation_info_->interact
+                                        ? APIPermissionID::kHostReadWrite
+                                        : APIPermissionID::kHostReadOnly;
     for (const auto& host : hosts)
       permissions.insert(permission_id, base::UTF8ToUTF16(host));
   }
@@ -104,9 +108,9 @@ PermissionIDSet AutomationManifestPermission::GetPermissions() const {
 }
 
 bool AutomationManifestPermission::FromValue(const base::Value* value) {
-  base::string16 error;
+  std::u16string error;
   automation_info_.reset(
-      AutomationInfo::FromValue(*value, NULL /* install_warnings */, &error)
+      AutomationInfo::FromValue(*value, nullptr /* install_warnings */, &error)
           .release());
   return error.empty();
 }
@@ -158,13 +162,18 @@ std::unique_ptr<ManifestPermission> AutomationManifestPermission::Intersect(
       base::WrapUnique(new const AutomationInfo(desktop, matches, interact)));
 }
 
-AutomationHandler::AutomationHandler() {}
+bool AutomationManifestPermission::RequiresManagementUIWarning() const {
+  return automation_info_->desktop || !automation_info_->matches.is_empty();
+}
 
-AutomationHandler::~AutomationHandler() {}
+AutomationHandler::AutomationHandler() = default;
 
-bool AutomationHandler::Parse(Extension* extension, base::string16* error) {
-  const base::Value* automation = NULL;
-  CHECK(extension->manifest()->Get(keys::kAutomation, &automation));
+AutomationHandler::~AutomationHandler() = default;
+
+bool AutomationHandler::Parse(Extension* extension, std::u16string* error) {
+  const base::Value* automation =
+      extension->manifest()->FindPath(keys::kAutomation);
+  CHECK(automation != nullptr);
   std::vector<InstallWarning> install_warnings;
   std::unique_ptr<AutomationInfo> info =
       AutomationInfo::FromValue(*automation, &install_warnings, error);
@@ -198,7 +207,7 @@ ManifestPermission* AutomationHandler::CreateInitialRequiredPermission(
         base::WrapUnique(new const AutomationInfo(info->desktop, info->matches,
                                                   info->interact)));
   }
-  return NULL;
+  return nullptr;
 }
 
 // static
@@ -211,7 +220,7 @@ const AutomationInfo* AutomationInfo::Get(const Extension* extension) {
 std::unique_ptr<AutomationInfo> AutomationInfo::FromValue(
     const base::Value& value,
     std::vector<InstallWarning>* install_warnings,
-    base::string16* error) {
+    std::u16string* error) {
   std::unique_ptr<Automation> automation = Automation::FromValue(value, error);
   if (!automation)
     return nullptr;
@@ -278,7 +287,7 @@ std::unique_ptr<AutomationInfo> AutomationInfo::FromValue(
 // static
 std::unique_ptr<base::Value> AutomationInfo::ToValue(
     const AutomationInfo& info) {
-  return AsManifestType(info)->ToValue();
+  return base::Value::ToUniquePtrValue(AsManifestType(info)->ToValue());
 }
 
 // static
@@ -286,16 +295,16 @@ std::unique_ptr<Automation> AutomationInfo::AsManifestType(
     const AutomationInfo& info) {
   std::unique_ptr<Automation> automation(new Automation);
   if (!info.desktop && !info.interact && info.matches.size() == 0) {
-    automation->as_boolean.reset(new bool(true));
+    automation->as_boolean = true;
     return automation;
   }
 
-  Automation::Object* as_object = new Automation::Object;
-  as_object->desktop.reset(new bool(info.desktop));
-  as_object->interact.reset(new bool(info.interact));
+  automation->as_object.emplace();
+  automation->as_object->desktop = info.desktop;
+  automation->as_object->interact = info.interact;
   if (info.matches.size() > 0)
-    as_object->matches = info.matches.ToStringVector();
-  automation->as_object.reset(as_object);
+    automation->as_object->matches = info.matches.ToStringVector();
+
   return automation;
 }
 

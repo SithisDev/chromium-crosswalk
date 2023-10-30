@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/lazy_instance.h"
-#include "base/stl_util.h"
 #include "extensions/browser/api/api_resource.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
@@ -31,15 +31,15 @@ ApiResourceManager<ResumableUDPSocket>::GetFactoryInstance() {
   return g_factory.Pointer();
 }
 
-UDPSocket::UDPSocket(network::mojom::UDPSocketPtrInfo socket,
-                     network::mojom::UDPSocketReceiverRequest receiver_request,
-                     const std::string& owner_extension_id)
+UDPSocket::UDPSocket(
+    mojo::PendingRemote<network::mojom::UDPSocket> socket,
+    mojo::PendingReceiver<network::mojom::UDPSocketListener> listener_receiver,
+    const std::string& owner_extension_id)
     : Socket(owner_extension_id),
       socket_(std::move(socket)),
       socket_options_(network::mojom::UDPSocketOptions::New()),
-      is_bound_(false),
-      receiver_binding_(this) {
-  receiver_binding_.Bind(std::move(receiver_request));
+      is_bound_(false) {
+  listener_receiver_.Bind(std::move(listener_receiver));
 }
 
 UDPSocket::~UDPSocket() {
@@ -83,8 +83,8 @@ void UDPSocket::Disconnect(bool socket_destroying) {
   is_connected_ = false;
   is_bound_ = false;
   socket_->Close();
-  local_addr_ = base::nullopt;
-  peer_addr_ = base::nullopt;
+  local_addr_ = absl::nullopt;
+  peer_addr_ = absl::nullopt;
   read_callback_.Reset();
   // TODO(devlin): Should we do this for all callbacks?
   if (!recv_from_callback_.is_null()) {
@@ -214,8 +214,8 @@ bool UDPSocket::IsConnectedOrBound() const {
 }
 
 void UDPSocket::OnReceived(int32_t result,
-                           const base::Optional<net::IPEndPoint>& src_addr,
-                           base::Optional<base::span<const uint8_t>> data) {
+                           const absl::optional<net::IPEndPoint>& src_addr,
+                           absl::optional<base::span<const uint8_t>> data) {
   DCHECK(!recv_from_callback_.is_null() || !read_callback_.is_null());
 
   std::string ip;
@@ -250,7 +250,7 @@ void UDPSocket::OnConnectCompleted(
     net::CompletionOnceCallback callback,
     const net::IPEndPoint& remote_addr,
     int result,
-    const base::Optional<net::IPEndPoint>& local_addr) {
+    const absl::optional<net::IPEndPoint>& local_addr) {
   if (result != net::OK) {
     std::move(callback).Run(result);
     return;
@@ -264,7 +264,7 @@ void UDPSocket::OnConnectCompleted(
 void UDPSocket::OnBindCompleted(
     net::CompletionOnceCallback callback,
     int result,
-    const base::Optional<net::IPEndPoint>& local_addr) {
+    const absl::optional<net::IPEndPoint>& local_addr) {
   if (result != net::OK) {
     std::move(callback).Run(result);
     return;
@@ -386,11 +386,11 @@ const std::vector<std::string>& UDPSocket::GetJoinedGroups() const {
 }
 
 ResumableUDPSocket::ResumableUDPSocket(
-    network::mojom::UDPSocketPtrInfo socket,
-    network::mojom::UDPSocketReceiverRequest receiver_request,
+    mojo::PendingRemote<network::mojom::UDPSocket> socket,
+    mojo::PendingReceiver<network::mojom::UDPSocketListener> listener_receiver,
     const std::string& owner_extension_id)
     : UDPSocket(std::move(socket),
-                std::move(receiver_request),
+                std::move(listener_receiver),
                 owner_extension_id),
       persistent_(false),
       buffer_size_(0),

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,18 +8,18 @@
 #include <map>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "extensions/browser/extension_function_histogram_value.h"
 
 class ExtensionFunction;
 
 // A factory function for creating new ExtensionFunction instances.
-using ExtensionFunctionFactory = ExtensionFunction* (*)();
+using ExtensionFunctionFactory = scoped_refptr<ExtensionFunction> (*)();
 
 // Template for defining ExtensionFunctionFactory.
 template <class T>
-ExtensionFunction* NewExtensionFunction() {
-  return new T();
+scoped_refptr<ExtensionFunction> NewExtensionFunction() {
+  return base::MakeRefCounted<T>();
 }
 
 // Contains a list of all known extension functions and allows clients to
@@ -46,6 +46,11 @@ class ExtensionFunctionRegistry {
 
   static ExtensionFunctionRegistry& GetInstance();
   ExtensionFunctionRegistry();
+
+  ExtensionFunctionRegistry(const ExtensionFunctionRegistry&) = delete;
+  ExtensionFunctionRegistry& operator=(const ExtensionFunctionRegistry&) =
+      delete;
+
   ~ExtensionFunctionRegistry();
 
   // Allows overriding of specific functions for testing.  Functions must be
@@ -54,22 +59,20 @@ class ExtensionFunctionRegistry {
                                   ExtensionFunctionFactory factory);
 
   // Factory method for the ExtensionFunction registered as 'name'.
-  ExtensionFunction* NewFunction(const std::string& name);
+  scoped_refptr<ExtensionFunction> NewFunction(const std::string& name);
 
   // Registers a new extension function. This will override any existing entry.
   void Register(const FactoryEntry& entry);
   template <class T>
   void RegisterFunction() {
-    Register(FactoryEntry(&NewExtensionFunction<T>, T::function_name(),
-                          T::histogram_value()));
+    Register(FactoryEntry(&NewExtensionFunction<T>, T::static_function_name(),
+                          T::static_histogram_value()));
   }
 
   const FactoryMap& GetFactoriesForTesting() const { return factories_; }
 
  private:
   FactoryMap factories_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionFunctionRegistry);
 };
 
 #endif  // EXTENSIONS_BROWSER_EXTENSION_FUNCTION_REGISTRY_H_

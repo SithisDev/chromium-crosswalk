@@ -1,7 +1,9 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "device/bluetooth/test/bluetooth_test_mac.h"
 
@@ -22,8 +24,8 @@ class BluetoothAdapterMacMetricsTest : public BluetoothTest {
   void FakeServiceBoilerPlate() {
     ASSERT_NO_FATAL_FAILURE(FakeDeviceBoilerPlate());
 
-    device_->CreateGattConnection(GetGattConnectionCallback(Call::EXPECTED),
-                                  GetConnectErrorCallback(Call::NOT_EXPECTED));
+    device_->CreateGattConnection(
+        GetGattConnectionCallback(Call::EXPECTED, Result::SUCCESS));
     SimulateGattConnection(device_);
     base::RunLoop().RunUntilIdle();
     SimulateGattServicesDiscovered(
@@ -42,9 +44,9 @@ class BluetoothAdapterMacMetricsTest : public BluetoothTest {
     characteristic_ = service_->GetCharacteristics()[0];
   }
 
-  BluetoothDevice* device_ = nullptr;
-  BluetoothRemoteGattService* service_ = nullptr;
-  BluetoothRemoteGattCharacteristic* characteristic_ = nullptr;
+  raw_ptr<BluetoothDevice> device_ = nullptr;
+  raw_ptr<BluetoothRemoteGattService> service_ = nullptr;
+  raw_ptr<BluetoothRemoteGattCharacteristic> characteristic_ = nullptr;
 };
 
 TEST_F(BluetoothAdapterMacMetricsTest, DidFailToConnectToPeripheralError) {
@@ -85,8 +87,8 @@ TEST_F(BluetoothAdapterMacMetricsTest, DidUpdateValueError) {
   ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
       BluetoothRemoteGattCharacteristic::PROPERTY_WRITE));
 
-  SimulateGattCharacteristicReadError(
-      characteristic_, BluetoothRemoteGattService::GATT_ERROR_FAILED);
+  SimulateGattCharacteristicReadError(characteristic_,
+                                      BluetoothGattService::GATT_ERROR_FAILED);
   histogram_tester.ExpectTotalCount("Bluetooth.MacOS.Errors.DidUpdateValue", 1);
 }
 
@@ -95,8 +97,8 @@ TEST_F(BluetoothAdapterMacMetricsTest, DidWriteValueError) {
   ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
       BluetoothRemoteGattCharacteristic::PROPERTY_WRITE));
 
-  SimulateGattCharacteristicWriteError(
-      characteristic_, BluetoothRemoteGattService::GATT_ERROR_FAILED);
+  SimulateGattCharacteristicWriteError(characteristic_,
+                                       BluetoothGattService::GATT_ERROR_FAILED);
   histogram_tester.ExpectTotalCount("Bluetooth.MacOS.Errors.DidWriteValue", 1);
 }
 
@@ -114,8 +116,8 @@ TEST_F(BluetoothAdapterMacMetricsTest, DidUpdateNotificationStateError) {
                                       GetGattErrorCallback(Call::EXPECTED));
   ExpectedChangeNotifyValueAttempts(1);
   ExpectedNotifyValue(NotifyValueState::NOTIFY);
-  SimulateGattNotifySessionStartError(
-      characteristic_, BluetoothRemoteGattService::GATT_ERROR_FAILED);
+  SimulateGattNotifySessionStartError(characteristic_,
+                                      BluetoothGattService::GATT_ERROR_FAILED);
   histogram_tester.ExpectTotalCount(
       "Bluetooth.MacOS.Errors.DidUpdateNotificationState", 1);
 }
@@ -140,10 +142,10 @@ TEST_F(BluetoothAdapterMacMetricsTest, DidUpdateValueForDescriptorError) {
   EXPECT_EQ(1u, characteristic_->GetDescriptors().size());
   BluetoothRemoteGattDescriptor* descriptor =
       characteristic_->GetDescriptors()[0];
-  descriptor->ReadRemoteDescriptor(GetReadValueCallback(Call::NOT_EXPECTED),
-                                   GetGattErrorCallback(Call::EXPECTED));
-  SimulateGattDescriptorUpdateError(
-      descriptor, BluetoothRemoteGattService::GATT_ERROR_FAILED);
+  descriptor->ReadRemoteDescriptor(
+      GetReadValueCallback(Call::EXPECTED, Result::FAILURE));
+  SimulateGattDescriptorUpdateError(descriptor,
+                                    BluetoothGattService::GATT_ERROR_FAILED);
   base::RunLoop().RunUntilIdle();
   histogram_tester.ExpectTotalCount(
       "Bluetooth.MacOS.Errors.DidUpdateValueForDescriptor", 1);
@@ -164,10 +166,10 @@ TEST_F(BluetoothAdapterMacMetricsTest, DidWriteValueForDescriptorError) {
   descriptor->WriteRemoteDescriptor(empty_vector,
                                     GetCallback(Call::NOT_EXPECTED),
                                     GetGattErrorCallback(Call::EXPECTED));
-  SimulateGattDescriptorWriteError(
-      descriptor, BluetoothRemoteGattService::GATT_ERROR_FAILED);
+  SimulateGattDescriptorWriteError(descriptor,
+                                   BluetoothGattService::GATT_ERROR_FAILED);
   histogram_tester.ExpectTotalCount(
       "Bluetooth.MacOS.Errors.DidWriteValueForDescriptor", 1);
 }
 
-}
+}  // namespace device

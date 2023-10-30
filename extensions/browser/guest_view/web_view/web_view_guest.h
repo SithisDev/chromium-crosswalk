@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/values.h"
 #include "components/guest_view/browser/guest_view.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "extensions/browser/guest_view/web_view/javascript_dialog_helper.h"
@@ -21,6 +21,7 @@
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_types.h"
 #include "extensions/browser/script_executor.h"
+#include "extensions/common/mojom/frame.mojom.h"
 #include "third_party/blink/public/mojom/frame/find_in_page.mojom.h"
 
 namespace extensions {
@@ -35,41 +36,25 @@ class WebViewInternalFindFunction;
 // a particular <webview>.
 class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
  public:
-  // Clean up state when this GuestView is being destroyed. See
-  // GuestViewBase::CleanUp().
+  WebViewGuest(const WebViewGuest&) = delete;
+  WebViewGuest& operator=(const WebViewGuest&) = delete;
+
+  static GuestViewBase* Create(content::WebContents* owner_web_contents);
+  // Cleans up state when this GuestView is being destroyed.
+  // Note that this cannot be done in the destructor since a GuestView could
+  // potentially be created and destroyed in JavaScript before getting a
+  // GuestViewBase instance.
   static void CleanUp(content::BrowserContext* browser_context,
                       int embedder_process_id,
                       int view_instance_id);
 
-  static GuestViewBase* Create(content::WebContents* owner_web_contents);
-
-  // For WebViewGuest, we create special guest processes, which host the
-  // tag content separately from the main application that embeds the tag.
-  // A <webview> can specify both the partition name and whether the storage
-  // for that partition should be persisted. Each tag gets a SiteInstance with
-  // a specially formatted URL, based on the application it is hosted by and
-  // the partition requested by it. The format for that URL is:
-  // chrome-guest://partition_domain/persist?partition_name
-  static bool GetGuestPartitionConfigForSite(const GURL& site,
-                                             std::string* partition_domain,
-                                             std::string* partition_name,
-                                             bool* in_memory);
-
-  // Opposite of GetGuestPartitionConfigForSite: Creates a specially formatted
-  // URL used by the SiteInstance associated with the WebViewGuest. See
-  // GetGuestPartitionConfigForSite for the URL format.
-  static GURL GetSiteForGuestPartitionConfig(
-      const std::string& partition_domain,
-      const std::string& partition_name,
-      bool in_memory);
+  static const char Type[];
 
   // Returns the WebView partition ID associated with the render process
   // represented by |render_process_host|, if any. Otherwise, an empty string is
   // returned.
   static std::string GetPartitionID(
       content::RenderProcessHost* render_process_host);
-
-  static const char Type[];
 
   // Returns the stored rules registry ID of the given webview. Will generate
   // an ID for the first query.
@@ -109,13 +94,13 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   bool allow_transparency() const { return allow_transparency_; }
 
   // Loads a data URL with a specified base URL and virtual URL.
-  bool LoadDataWithBaseURL(const std::string& data_url,
-                           const std::string& base_url,
-                           const std::string& virtual_url,
+  bool LoadDataWithBaseURL(const GURL& data_url,
+                           const GURL& base_url,
+                           const GURL& virtual_url,
                            std::string* error);
 
   // Begin or continue a find request.
-  void StartFind(const base::string16& search_text,
+  void StartFind(const std::u16string& search_text,
                  blink::mojom::FindOptionsPtr options,
                  scoped_refptr<WebViewInternalFindFunction> find_function);
 
@@ -145,9 +130,12 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   // |removal_mask| corresponds to bitmask in StoragePartition::RemoveDataMask.
   bool ClearData(const base::Time remove_since,
                  uint32_t removal_mask,
-                 const base::Closure& callback);
+                 base::OnceClosure callback);
 
   ScriptExecutor* script_executor() { return script_executor_.get(); }
+  WebViewPermissionHelper* web_view_permission_helper() {
+    return web_view_permission_helper_.get();
+  }
 
   // Enables or disables spatial navigation.
   void SetSpatialNavigationEnabled(bool enabled);
@@ -156,18 +144,16 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   bool IsSpatialNavigationEnabled() const;
 
  private:
-  friend class WebViewPermissionHelper;
-
   explicit WebViewGuest(content::WebContents* owner_web_contents);
 
   ~WebViewGuest() override;
 
   void ClearCodeCache(base::Time remove_since,
                       uint32_t removal_mask,
-                      const base::Closure& callback);
+                      base::OnceClosure callback);
   void ClearDataInternal(const base::Time remove_since,
                          uint32_t removal_mask,
-                         const base::Closure& callback);
+                         base::OnceClosure callback);
 
   void OnWebViewNewWindowResponse(int new_window_instance_id,
                                   bool allow,
@@ -178,12 +164,15 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   bool GuestMadeEmbedderFullscreen() const;
   void SetFullscreenState(bool is_fullscreen);
 
+  void RequestPointerLockPermission(bool user_gesture,
+                                    bool last_unlocked_by_target,
+                                    base::OnceCallback<void(bool)> callback);
+
   // GuestViewBase implementation.
-  void CreateWebContents(const base::DictionaryValue& create_params,
+  void CreateWebContents(const base::Value::Dict& create_params,
                          WebContentsCreatedCallback callback) final;
   void DidAttachToEmbedder() final;
-  void DidDropLink(const GURL& url) final;
-  void DidInitialize(const base::DictionaryValue& create_params) final;
+  void DidInitialize(const base::Value::Dict& create_params) final;
   void EmbedderFullscreenToggled(bool entered_fullscreen) final;
   void FindReply(content::WebContents* source,
                  int request_id,
@@ -206,17 +195,11 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   void WillDestroy() final;
 
   // WebContentsDelegate implementation.
-  bool DidAddMessageToConsole(content::WebContents* source,
-                              blink::mojom::ConsoleMessageLevel log_level,
-                              const base::string16& message,
-                              int32_t line_no,
-                              const base::string16& source_id) final;
   void CloseContents(content::WebContents* source) final;
-  bool HandleContextMenu(content::RenderFrameHost* render_frame_host,
+  bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
                          const content::ContextMenuParams& params) final;
   bool HandleKeyboardEvent(content::WebContents* source,
                            const content::NativeWebKeyboardEvent& event) final;
-  void LoadProgressChanged(content::WebContents* source, double progress) final;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) final;
   void RendererResponsive(content::WebContents* source,
@@ -229,10 +212,6 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
       content::WebContents* source,
       const content::MediaStreamRequest& request,
       content::MediaResponseCallback callback) final;
-  void RequestPointerLockPermission(
-      bool user_gesture,
-      bool last_unlocked_by_target,
-      const base::Callback<void(bool)>& callback) final;
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
                                   blink::mojom::MediaStreamType type) final;
@@ -243,8 +222,9 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
       content::WebContents* source) final;
   void AddNewContents(content::WebContents* source,
                       std::unique_ptr<content::WebContents> new_contents,
+                      const GURL& target_url,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_rect,
+                      const blink::mojom::WindowFeatures& window_features,
                       bool user_gesture,
                       bool* was_blocked) final;
   content::WebContents* OpenURLFromTab(
@@ -257,9 +237,8 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
                           const GURL& target_url,
                           content::WebContents* new_contents) final;
   void EnterFullscreenModeForTab(
-      content::WebContents* web_contents,
-      const GURL& origin,
-      const blink::WebFullscreenOptions& options) final;
+      content::RenderFrameHost* requesting_frame,
+      const blink::mojom::FullscreenOptions& options) final;
   void ExitFullscreenModeForTab(content::WebContents* web_contents) final;
   bool IsFullscreenForTabOrPending(
       const content::WebContents* web_contents) final;
@@ -271,20 +250,30 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   void DidStartNavigation(content::NavigationHandle* navigation_handle) final;
   void DidRedirectNavigation(
       content::NavigationHandle* navigation_handle) final;
-  void ReadyToCommitNavigation(
-      content::NavigationHandle* navigation_handle) final;
   void DidFinishNavigation(content::NavigationHandle* navigation_handle) final;
-  void DocumentOnLoadCompletedInMainFrame() final;
-  void RenderProcessGone(base::TerminationStatus status) final;
-  void UserAgentOverrideSet(const std::string& user_agent) final;
+  void LoadProgressChanged(double progress) final;
+  void DocumentOnLoadCompletedInPrimaryMainFrame() final;
+  void PrimaryMainFrameRenderProcessGone(base::TerminationStatus status) final;
+  void UserAgentOverrideSet(const blink::UserAgentOverride& ua_override) final;
   void FrameNameChanged(content::RenderFrameHost* render_frame_host,
                         const std::string& name) final;
   void OnAudioStateChanged(bool audible) final;
+  void OnDidAddMessageToConsole(
+      content::RenderFrameHost* source_frame,
+      blink::mojom::ConsoleMessageLevel log_level,
+      const std::u16string& message,
+      int32_t line_no,
+      const std::u16string& source_id,
+      const absl::optional<std::u16string>& untrusted_stack_trace) final;
+  void RenderFrameCreated(content::RenderFrameHost* render_frame_host) final;
+  void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) final;
+  void RenderFrameHostChanged(content::RenderFrameHost* old_host,
+                              content::RenderFrameHost* new_host) final;
 
   // Informs the embedder of a frame name change.
   void ReportFrameNameChange(const std::string& name);
 
-  void PushWebViewStateToIOThread();
+  void PushWebViewStateToIOThread(content::RenderFrameHost* guest_host);
 
   // Loads the |url| provided. |force_navigation| indicates whether to reload
   // the content if the provided |url| matches the current page of the guest.
@@ -297,7 +286,6 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   void RequestNewWindowPermission(
       WindowOpenDisposition disposition,
       const gfx::Rect& initial_bounds,
-      bool user_gesture,
       content::WebContents* new_contents);
 
   // Requests resolution of a potentially relative URL.
@@ -315,9 +303,11 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
 
   bool HandleKeyboardShortcuts(const content::NativeWebKeyboardEvent& event);
 
-  void ApplyAttributes(const base::DictionaryValue& params);
+  void ApplyAttributes(const base::Value::Dict& params);
 
   void SetTransparency();
+
+  extensions::mojom::LocalFrame* GetLocalFrame();
 
   // Identifies the set of rules registries belonging to this guest.
   int rules_registry_id_;
@@ -327,16 +317,13 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   std::unique_ptr<ScriptExecutor> script_executor_;
 
   // True if the user agent is overridden.
-  bool is_overriding_user_agent_;
+  bool is_overriding_user_agent_ = false;
 
   // Stores the window name of the main frame of the guest.
   std::string name_;
 
   // Stores whether the contents of the guest can be transparent.
-  bool allow_transparency_;
-
-  // Stores the src URL of the WebView.
-  GURL src_;
+  bool allow_transparency_ = false;
 
   // Handles the JavaScript dialog requests.
   JavaScriptDialogHelper javascript_dialog_helper_;
@@ -358,35 +345,33 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
     // Whether OpenURL navigation from the newly created GuestView has changed
     // |url|. The pending OpenURL navigation needs to be applied after attaching
     // the GuestView.
-    bool url_changed_via_open_url;
+    bool url_changed_via_open_url = false;
 
     // Whether the newly created GuestView begun navigating away from the
     // initial URL.  Used to suppress the initial navigation when attaching the
     // GuestView and applying its attributes.
-    bool did_start_navigating_away_from_initial_url;
+    bool did_start_navigating_away_from_initial_url = false;
 
-    NewWindowInfo(const GURL& url, const std::string& name)
-        : name(name),
-          url(url),
-          url_changed_via_open_url(false),
-          did_start_navigating_away_from_initial_url(false) {}
+    NewWindowInfo(const GURL& url, const std::string& name);
+    NewWindowInfo(const NewWindowInfo&);
+    ~NewWindowInfo();
   };
 
   using PendingWindowMap = std::map<WebViewGuest*, NewWindowInfo>;
   PendingWindowMap pending_new_windows_;
 
   // Determines if this guest accepts pinch-zoom gestures.
-  bool allow_scaling_;
-  bool is_guest_fullscreen_;
-  bool is_embedder_fullscreen_;
-  bool last_fullscreen_permission_was_allowed_by_embedder_;
+  bool allow_scaling_ = false;
+  bool is_guest_fullscreen_ = false;
+  bool is_embedder_fullscreen_ = false;
+  bool last_fullscreen_permission_was_allowed_by_embedder_ = false;
 
   // Tracks whether the webview has a pending zoom from before the first
   // navigation. This will be equal to 0 when there is no pending zoom.
-  double pending_zoom_factor_;
+  double pending_zoom_factor_ = 0.0;
 
   // Whether the GuestView set an explicit zoom level.
-  bool did_set_explicit_zoom_;
+  bool did_set_explicit_zoom_ = false;
 
   // Store spatial navigation status.
   bool is_spatial_navigation_enabled_;
@@ -394,8 +379,6 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.
   base::WeakPtrFactory<WebViewGuest> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WebViewGuest);
 };
 
 }  // namespace extensions

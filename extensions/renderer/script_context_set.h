@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,15 +11,14 @@
 #include <set>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "extensions/common/extension.h"
+#include "extensions/common/extension_id.h"
 #include "extensions/common/features/feature.h"
+#include "extensions/common/mojom/view_type.mojom.h"
 #include "extensions/renderer/renderer_extension_registry.h"
 #include "extensions/renderer/script_context_set_iterable.h"
 #include "url/gurl.h"
-#include "v8/include/v8.h"
-
+#include "v8/include/v8-forward.h"
 class GURL;
 
 namespace blink {
@@ -32,6 +31,7 @@ class RenderFrame;
 }
 
 namespace extensions {
+class Extension;
 class ScriptContext;
 
 // A container of ScriptContexts, responsible for both creating and managing
@@ -47,6 +47,9 @@ class ScriptContextSet : public ScriptContextSetIterable {
       // Must outlive this. TODO(kalman): Combine this and |extensions|.
       ExtensionIdSet* active_extension_ids);
 
+  ScriptContextSet(const ScriptContextSet&) = delete;
+  ScriptContextSet& operator=(const ScriptContextSet&) = delete;
+
   ~ScriptContextSet() override;
 
   // Returns the number of contexts being tracked by this set.
@@ -57,7 +60,7 @@ class ScriptContextSet : public ScriptContextSetIterable {
   // Returns a weak reference to the new ScriptContext.
   ScriptContext* Register(blink::WebLocalFrame* frame,
                           const v8::Local<v8::Context>& v8_context,
-                          int world_id);
+                          int32_t world_id);
 
   // If the specified context is contained in this set, remove it, then delete
   // it asynchronously. After this call returns the context object will still
@@ -112,15 +115,16 @@ class ScriptContextSet : public ScriptContextSetIterable {
   // extension ID associated with the main world's JavaScript context. If the
   // JavaScript context isn't from an extension, returns empty string.
   const Extension* GetExtensionFromFrameAndWorld(blink::WebLocalFrame* frame,
-                                                 int world_id,
+                                                 int32_t world_id,
                                                  bool use_effective_url);
 
   // Returns the Feature::Context type of context for a JavaScript context.
   Feature::Context ClassifyJavaScriptContext(
       const Extension* extension,
-      int world_id,
+      int32_t world_id,
       const GURL& url,
-      const blink::WebSecurityOrigin& origin);
+      const blink::WebSecurityOrigin& origin,
+      mojom::ViewType view_type);
 
   // Weak reference to all installed Extensions that are also active in this
   // process.
@@ -132,8 +136,6 @@ class ScriptContextSet : public ScriptContextSetIterable {
   // Whether the script context set is associated with the renderer active on
   // the Chrome OS lock screen.
   bool is_lock_screen_context_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ScriptContextSet);
 };
 
 }  // namespace extensions

@@ -1,39 +1,33 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/shell/browser/shell_extension_host_delegate.h"
 
-#include "base/lazy_instance.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "extensions/browser/media_capture_util.h"
-#include "extensions/browser/serial_extension_host_queue.h"
 #include "extensions/shell/browser/shell_extension_web_contents_observer.h"
 
 namespace extensions {
 
-ShellExtensionHostDelegate::ShellExtensionHostDelegate() {
-}
-
-ShellExtensionHostDelegate::~ShellExtensionHostDelegate() {
-}
+ShellExtensionHostDelegate::ShellExtensionHostDelegate() = default;
+ShellExtensionHostDelegate::~ShellExtensionHostDelegate() = default;
 
 void ShellExtensionHostDelegate::OnExtensionHostCreated(
     content::WebContents* web_contents) {
   ShellExtensionWebContentsObserver::CreateForWebContents(web_contents);
 }
 
-void ShellExtensionHostDelegate::OnRenderViewCreatedForBackgroundPage(
-    ExtensionHost* host) {
-}
+void ShellExtensionHostDelegate::OnMainFrameCreatedForBackgroundPage(
+    ExtensionHost* host) {}
 
 content::JavaScriptDialogManager*
 ShellExtensionHostDelegate::GetJavaScriptDialogManager() {
   // TODO(jamescook): Create a JavaScriptDialogManager or reuse the one from
   // content_shell.
   NOTREACHED();
-  return NULL;
+  return nullptr;
 }
 
 void ShellExtensionHostDelegate::CreateTab(
@@ -65,18 +59,9 @@ bool ShellExtensionHostDelegate::CheckMediaAccessPermission(
   return true;
 }
 
-static base::LazyInstance<SerialExtensionHostQueue>::DestructorAtExit g_queue =
-    LAZY_INSTANCE_INITIALIZER;
-
-ExtensionHostQueue* ShellExtensionHostDelegate::GetExtensionHostQueue() const {
-  return g_queue.Pointer();
-}
-
 content::PictureInPictureResult
 ShellExtensionHostDelegate::EnterPictureInPicture(
-    content::WebContents* web_contents,
-    const viz::SurfaceId& surface_id,
-    const gfx::Size& natural_size) {
+    content::WebContents* web_contents) {
   NOTREACHED();
   return content::PictureInPictureResult::kNotSupported;
 }

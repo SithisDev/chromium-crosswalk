@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "crypto/ec_private_key.h"
 #include "device/fido/authenticator_get_assertion_response.h"
 #include "device/fido/ctap_get_assertion_request.h"
@@ -29,7 +29,7 @@ namespace {
 
 using TestSignCallback = ::device::test::StatusAndValueCallbackReceiver<
     CtapDeviceResponseCode,
-    base::Optional<AuthenticatorGetAssertionResponse>>;
+    absl::optional<AuthenticatorGetAssertionResponse>>;
 
 }  // namespace
 
@@ -50,7 +50,7 @@ class U2fSignOperationTest : public ::testing::Test {
   TestSignCallback& sign_callback_receiver() { return sign_callback_receiver_; }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   TestSignCallback sign_callback_receiver_;
 };
 
@@ -60,6 +60,7 @@ TEST_F(U2fSignOperationTest, SignSuccess) {
 
   auto device = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device, GetId()).WillRepeatedly(testing::Return("device"));
+  device->ExpectWinkedAtLeastOnce();
   InSequence s;
   device->ExpectRequestAndRespondWith(
       test_data::kU2fSignCommandApdu,
@@ -72,25 +73,20 @@ TEST_F(U2fSignOperationTest, SignSuccess) {
   sign_callback_receiver().WaitForCallback();
   EXPECT_EQ(CtapDeviceResponseCode::kSuccess,
             sign_callback_receiver().status());
-  EXPECT_THAT(sign_callback_receiver().value()->signature(),
+  EXPECT_THAT(sign_callback_receiver().value()->signature,
               ::testing::ElementsAreArray(test_data::kU2fSignature));
-  EXPECT_THAT(sign_callback_receiver().value()->raw_credential_id(),
+  EXPECT_THAT(sign_callback_receiver().value()->credential->id,
               ::testing::ElementsAreArray(test_data::kU2fSignKeyHandle));
 }
 
 TEST_F(U2fSignOperationTest, SignSuccessWithFakeDevice) {
-  auto private_key = crypto::ECPrivateKey::Create();
-  std::string public_key;
-  private_key->ExportRawPublicKey(&public_key);
-  auto hash = fido_parsing_utils::CreateSHA256Hash(public_key);
-  std::vector<uint8_t> key_handle(hash.begin(), hash.end());
-  auto request = CreateSignRequest({key_handle});
+  static const uint8_t kCredentialId[] = {1, 2, 3, 4};
+  auto request =
+      CreateSignRequest({fido_parsing_utils::Materialize(kCredentialId)});
 
   auto device = std::make_unique<VirtualU2fDevice>();
-  device->mutable_state()->registrations.emplace(
-      key_handle, VirtualFidoDevice::RegistrationData(
-                      std::move(private_key), test_data::kApplicationParameter,
-                      42 /* counter */));
+  ASSERT_TRUE(device->mutable_state()->InjectRegistration(
+      kCredentialId, test_data::kRelyingPartyId));
 
   auto u2f_sign = std::make_unique<U2fSignOperation>(
       device.get(), std::move(request), sign_callback_receiver().callback());
@@ -104,20 +100,16 @@ TEST_F(U2fSignOperationTest, SignSuccessWithFakeDevice) {
   ASSERT_GE(32u + 1u + 4u + 8u,  // Minimal ECDSA signature is 8 bytes
             sign_callback_receiver()
                 .value()
-                ->auth_data()
-                .SerializeToByteArray()
+                ->authenticator_data.SerializeToByteArray()
                 .size());
   EXPECT_EQ(0x01,
             sign_callback_receiver()
                 .value()
-                ->auth_data()
-                .SerializeToByteArray()[32]);  // UP flag
-  // Counter is incremented for every sign request so this counter should have
-  // been incremented once.
-  EXPECT_EQ(43, sign_callback_receiver()
-                    .value()
-                    ->auth_data()
-                    .SerializeToByteArray()[36]);  // counter
+                ->authenticator_data.SerializeToByteArray()[32]);  // UP flag
+  // Counter starts at zero and is incremented for every sign request.
+  EXPECT_EQ(1, sign_callback_receiver()
+                   .value()
+                   ->authenticator_data.SerializeToByteArray()[36]);  // counter
 }
 
 TEST_F(U2fSignOperationTest, DelayedSuccess) {
@@ -128,6 +120,7 @@ TEST_F(U2fSignOperationTest, DelayedSuccess) {
   // responding successfully.
   auto device = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device, GetId()).WillRepeatedly(::testing::Return("device"));
+  device->ExpectWinkedAtLeastOnce();
 
   InSequence s;
   device->ExpectRequestAndRespondWith(
@@ -144,9 +137,9 @@ TEST_F(U2fSignOperationTest, DelayedSuccess) {
   sign_callback_receiver().WaitForCallback();
   EXPECT_EQ(CtapDeviceResponseCode::kSuccess,
             sign_callback_receiver().status());
-  EXPECT_THAT(sign_callback_receiver().value()->signature(),
+  EXPECT_THAT(sign_callback_receiver().value()->signature,
               ::testing::ElementsAreArray(test_data::kU2fSignature));
-  EXPECT_THAT(sign_callback_receiver().value()->raw_credential_id(),
+  EXPECT_THAT(sign_callback_receiver().value()->credential->id,
               ::testing::ElementsAreArray(test_data::kU2fSignKeyHandle));
 }
 
@@ -160,6 +153,7 @@ TEST_F(U2fSignOperationTest, MultipleHandles) {
 
   auto device = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device, GetId()).WillRepeatedly(::testing::Return("device"));
+  device->ExpectWinkedAtLeastOnce();
   InSequence s;
   // Wrong key would respond with SW_WRONG_DATA.
   device->ExpectRequestAndRespondWith(
@@ -178,9 +172,9 @@ TEST_F(U2fSignOperationTest, MultipleHandles) {
   sign_callback_receiver().WaitForCallback();
   EXPECT_EQ(CtapDeviceResponseCode::kSuccess,
             sign_callback_receiver().status());
-  EXPECT_THAT(sign_callback_receiver().value()->signature(),
+  EXPECT_THAT(sign_callback_receiver().value()->signature,
               ::testing::ElementsAreArray(test_data::kU2fSignature));
-  EXPECT_THAT(sign_callback_receiver().value()->raw_credential_id(),
+  EXPECT_THAT(sign_callback_receiver().value()->credential->id,
               ::testing::ElementsAreArray(test_data::kU2fSignKeyHandle));
 }
 
@@ -193,6 +187,7 @@ TEST_F(U2fSignOperationTest, MultipleHandlesLengthError) {
 
   auto device = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device, GetId()).WillRepeatedly(::testing::Return("device"));
+  device->ExpectWinkedAtLeastOnce();
   InSequence s;
 
   // Wrong key would respond with the key handle length.
@@ -210,9 +205,9 @@ TEST_F(U2fSignOperationTest, MultipleHandlesLengthError) {
   sign_callback_receiver().WaitForCallback();
   EXPECT_EQ(CtapDeviceResponseCode::kSuccess,
             sign_callback_receiver().status());
-  EXPECT_THAT(sign_callback_receiver().value()->signature(),
+  EXPECT_THAT(sign_callback_receiver().value()->signature,
               ::testing::ElementsAreArray(test_data::kU2fSignature));
-  EXPECT_THAT(sign_callback_receiver().value()->raw_credential_id(),
+  EXPECT_THAT(sign_callback_receiver().value()->credential->id,
               ::testing::ElementsAreArray(test_data::kU2fSignKeyHandle));
 }
 
@@ -224,6 +219,7 @@ TEST_F(U2fSignOperationTest, FakeEnroll) {
        fido_parsing_utils::Materialize(test_data::kKeyHandleBeta)});
 
   auto device = std::make_unique<MockFidoDevice>();
+  device->ExpectWinkedAtLeastOnce();
   InSequence s;
   device->ExpectRequestAndRespondWith(
       test_data::kU2fSignCommandApduWithKeyAlpha,
@@ -255,6 +251,7 @@ TEST_F(U2fSignOperationTest, DelayedFakeEnrollment) {
   // enrollment.
   auto device = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device, GetId()).WillRepeatedly(::testing::Return("device0"));
+  device->ExpectWinkedAtLeastOnce();
   InSequence s;
   device->ExpectRequestAndRespondWith(test_data::kU2fSignCommandApdu,
                                       test_data::kU2fWrongDataApduResponse);
@@ -286,6 +283,7 @@ TEST_F(U2fSignOperationTest, FakeEnrollErroringOut) {
   // to prevent the test from crashing or timing out.
   auto device = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device, GetId()).WillRepeatedly(::testing::Return("device0"));
+  device->ExpectWinkedAtLeastOnce();
   InSequence s;
   device->ExpectRequestAndRespondWith(test_data::kU2fSignCommandApdu,
                                       test_data::kU2fWrongDataApduResponse);
@@ -310,6 +308,7 @@ TEST_F(U2fSignOperationTest, SignWithCorruptedResponse) {
 
   auto device = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device, GetId()).WillRepeatedly(::testing::Return("device"));
+  device->ExpectWinkedAtLeastOnce();
   InSequence s;
   device->ExpectRequestAndRespondWith(test_data::kU2fSignCommandApdu,
                                       test_data::kTestCorruptedU2fSignResponse);
@@ -334,6 +333,7 @@ TEST_F(U2fSignOperationTest, AlternativeApplicationParameter) {
 
   auto device = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device, GetId()).WillRepeatedly(::testing::Return("device"));
+  device->ExpectWinkedAtLeastOnce();
   InSequence s;
   // The first request will use the alternative app_param.
   device->ExpectRequestAndRespondWith(
@@ -348,11 +348,11 @@ TEST_F(U2fSignOperationTest, AlternativeApplicationParameter) {
   EXPECT_EQ(CtapDeviceResponseCode::kSuccess,
             sign_callback_receiver().status());
   const auto& response_value = sign_callback_receiver().value();
-  EXPECT_THAT(response_value->signature(),
+  EXPECT_THAT(response_value->signature,
               ::testing::ElementsAreArray(test_data::kU2fSignature));
-  EXPECT_THAT(response_value->raw_credential_id(),
+  EXPECT_THAT(response_value->credential->id,
               ::testing::ElementsAreArray(test_data::kU2fSignKeyHandle));
-  EXPECT_THAT(response_value->GetRpIdHash(),
+  EXPECT_THAT(response_value->authenticator_data.application_parameter(),
               ::testing::ElementsAreArray(base::span<const uint8_t, 32>(
                   test_data::kAlternativeApplicationParameter)));
 }
@@ -368,6 +368,7 @@ TEST_F(U2fSignOperationTest, AlternativeApplicationParameterRejection) {
 
   auto device = std::make_unique<MockFidoDevice>();
   EXPECT_CALL(*device, GetId()).WillRepeatedly(::testing::Return("device"));
+  device->ExpectWinkedAtLeastOnce();
   InSequence s;
   // The first request will use the alternative app_param, which will be
   // rejected.

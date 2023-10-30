@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
@@ -39,11 +40,11 @@ namespace extensions {
 namespace subtle {
 
 void AppendKeyValuePair(const char* key,
-                        std::unique_ptr<base::Value> value,
+                        base::Value value,
                         base::ListValue* list) {
-  std::unique_ptr<base::DictionaryValue> dictionary(new base::DictionaryValue);
-  dictionary->SetWithoutPathExpansion(key, std::move(value));
-  list->Append(std::move(dictionary));
+  base::Value::Dict dictionary;
+  dictionary.Set(key, std::move(value));
+  list->Append(base::Value(std::move(dictionary)));
 }
 
 }  // namespace subtle
@@ -82,16 +83,15 @@ std::unique_ptr<base::Value> RawDataPresenter::Result() {
 }
 
 void RawDataPresenter::FeedNextBytes(const char* bytes, size_t size) {
-  subtle::AppendKeyValuePair(keys::kRequestBodyRawBytesKey,
-                             Value::CreateWithCopiedBuffer(bytes, size),
-                             list_.get());
+  subtle::AppendKeyValuePair(
+      keys::kRequestBodyRawBytesKey,
+      base::Value(base::as_bytes(base::make_span(bytes, size))), list_.get());
 }
 
 void RawDataPresenter::FeedNextFile(const std::string& filename) {
   // Insert the file path instead of the contents, which may be too large.
   subtle::AppendKeyValuePair(keys::kRequestBodyRawFileKey,
-                             std::make_unique<base::Value>(filename),
-                             list_.get());
+                             base::Value(filename), list_.get());
 }
 
 ParsedDataPresenter::ParsedDataPresenter(
@@ -114,7 +114,7 @@ void ParsedDataPresenter::FeedBytes(base::StringPiece bytes) {
   FormDataParser::Result result;
   while (parser_->GetNextNameValue(&result)) {
     base::Value* list = GetOrCreateList(dictionary_.get(), result.name());
-    list->GetList().emplace_back(result.take_value());
+    list->Append(result.take_value());
   }
 }
 
@@ -135,15 +135,14 @@ std::unique_ptr<base::Value> ParsedDataPresenter::Result() {
 
 // static
 std::unique_ptr<ParsedDataPresenter> ParsedDataPresenter::CreateForTests() {
-  static const std::string form_type("application/x-www-form-urlencoded");
-  return base::WrapUnique(new ParsedDataPresenter(form_type));
+  return base::WrapUnique(
+      new ParsedDataPresenter("application/x-www-form-urlencoded"));
 }
 
 ParsedDataPresenter::ParsedDataPresenter(const std::string& form_type)
-  : parser_(FormDataParser::CreateFromContentTypeHeader(&form_type)),
-    success_(parser_.get() != NULL),
-    dictionary_(success_ ? new base::DictionaryValue() : NULL) {
-}
+    : parser_(FormDataParser::CreateFromContentTypeHeader(&form_type)),
+      success_(parser_.get() != nullptr),
+      dictionary_(success_ ? new base::DictionaryValue() : nullptr) {}
 
 void ParsedDataPresenter::Abort() {
   success_ = false;

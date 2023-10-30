@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "crypto/ec_private_key.h"
 #include "device/base/features.h"
 #include "device/fido/authenticator_get_assertion_response.h"
@@ -34,7 +34,7 @@ namespace {
 using TestGetAssertionTaskCallbackReceiver =
     ::device::test::StatusAndValueCallbackReceiver<
         CtapDeviceResponseCode,
-        base::Optional<AuthenticatorGetAssertionResponse>>;
+        absl::optional<AuthenticatorGetAssertionResponse>>;
 
 class FidoGetAssertionTaskTest : public testing::Test {
  public:
@@ -45,7 +45,7 @@ class FidoGetAssertionTaskTest : public testing::Test {
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
   TestGetAssertionTaskCallbackReceiver cb_;
 };
 
@@ -63,7 +63,7 @@ TEST_F(FidoGetAssertionTaskTest, TestGetAssertionSuccess) {
           test_data::kTestGetAssertionCredentialId)));
 
   auto task = std::make_unique<GetAssertionTask>(
-      device.get(), std::move(request_param),
+      device.get(), std::move(request_param), CtapGetAssertionOptions(),
       get_assertion_callback_receiver().callback());
 
   get_assertion_callback_receiver().WaitForCallback();
@@ -74,6 +74,7 @@ TEST_F(FidoGetAssertionTaskTest, TestGetAssertionSuccess) {
 
 TEST_F(FidoGetAssertionTaskTest, TestU2fSignSuccess) {
   auto device = MockFidoDevice::MakeU2f();
+  device->ExpectWinkedAtLeastOnce();
   device->ExpectRequestAndRespondWith(
       test_data::kU2fSignCommandApdu,
       test_data::kApduEncodedNoErrorSignResponse);
@@ -85,7 +86,7 @@ TEST_F(FidoGetAssertionTaskTest, TestU2fSignSuccess) {
       fido_parsing_utils::Materialize(test_data::kU2fSignKeyHandle)));
 
   auto task = std::make_unique<GetAssertionTask>(
-      device.get(), std::move(request_param),
+      device.get(), std::move(request_param), CtapGetAssertionOptions(),
       get_assertion_callback_receiver().callback());
 
   get_assertion_callback_receiver().WaitForCallback();
@@ -95,30 +96,22 @@ TEST_F(FidoGetAssertionTaskTest, TestU2fSignSuccess) {
 }
 
 TEST_F(FidoGetAssertionTaskTest, TestSignSuccessWithFake) {
-  auto private_key = crypto::ECPrivateKey::Create();
-  std::string public_key;
-  private_key->ExportRawPublicKey(&public_key);
-  auto hash = fido_parsing_utils::CreateSHA256Hash(public_key);
-  std::vector<uint8_t> key_handle(hash.begin(), hash.end());
+  static const uint8_t kCredentialId[] = {1, 2, 3, 4};
   CtapGetAssertionRequest request_param(test_data::kRelyingPartyId,
                                         test_data::kClientDataJson);
-  request_param.allow_list.emplace_back(
-      PublicKeyCredentialDescriptor(CredentialType::kPublicKey, key_handle));
-  ;
+  request_param.allow_list.emplace_back(PublicKeyCredentialDescriptor(
+      CredentialType::kPublicKey,
+      fido_parsing_utils::Materialize(kCredentialId)));
 
   auto device = std::make_unique<VirtualCtap2Device>();
-  device->mutable_state()->registrations.emplace(
-      key_handle,
-      VirtualFidoDevice::RegistrationData(
-          std::move(private_key),
-          fido_parsing_utils::CreateSHA256Hash(test_data::kRelyingPartyId),
-          42 /* counter */));
+  ASSERT_TRUE(device->mutable_state()->InjectRegistration(
+      kCredentialId, test_data::kRelyingPartyId));
   test::TestCallbackReceiver<> done;
   device->DiscoverSupportedProtocolAndDeviceInfo(done.callback());
   done.WaitForCallback();
 
   auto task = std::make_unique<GetAssertionTask>(
-      device.get(), std::move(request_param),
+      device.get(), std::move(request_param), CtapGetAssertionOptions(),
       get_assertion_callback_receiver().callback());
 
   get_assertion_callback_receiver().WaitForCallback();
@@ -129,31 +122,28 @@ TEST_F(FidoGetAssertionTaskTest, TestSignSuccessWithFake) {
   ASSERT_GE(32u + 1u + 4u + 8u,  // Minimal ECDSA signature is 8 bytes
             get_assertion_callback_receiver()
                 .value()
-                ->auth_data()
-                .SerializeToByteArray()
+                ->authenticator_data.SerializeToByteArray()
                 .size());
   EXPECT_EQ(0x01,
             get_assertion_callback_receiver()
                 .value()
-                ->auth_data()
-                .SerializeToByteArray()[32]);  // UP flag
-  // Counter is incremented for every sign request.
-  EXPECT_EQ(43, get_assertion_callback_receiver()
-                    .value()
-                    ->auth_data()
-                    .SerializeToByteArray()[36]);  // counter
+                ->authenticator_data.SerializeToByteArray()[32]);  // UP flag
+  // Counter starts at zero and is incremented for every sign request.
+  EXPECT_EQ(1, get_assertion_callback_receiver()
+                   .value()
+                   ->authenticator_data.SerializeToByteArray()[36]);  // counter
 }
 
 TEST_F(FidoGetAssertionTaskTest, TestIncorrectGetAssertionResponse) {
   auto device = MockFidoDevice::MakeCtap();
   device->ExpectCtap2CommandAndRespondWith(
-      CtapRequestCommand::kAuthenticatorGetAssertion, base::nullopt);
+      CtapRequestCommand::kAuthenticatorGetAssertion, absl::nullopt);
 
   auto task = std::make_unique<GetAssertionTask>(
       device.get(),
       CtapGetAssertionRequest(test_data::kRelyingPartyId,
                               test_data::kClientDataJson),
-      get_assertion_callback_receiver().callback());
+      CtapGetAssertionOptions(), get_assertion_callback_receiver().callback());
 
   get_assertion_callback_receiver().WaitForCallback();
   EXPECT_EQ(CtapDeviceResponseCode::kCtap2ErrOther,
@@ -166,12 +156,13 @@ TEST_F(FidoGetAssertionTaskTest, TestU2fSignRequestWithEmptyAllowedList) {
                                          test_data::kClientDataJson);
 
   auto device = MockFidoDevice::MakeU2f();
+  device->ExpectWinkedAtLeastOnce();
   device->ExpectRequestAndRespondWith(
       test_data::kU2fFakeRegisterCommand,
       test_data::kApduEncodedNoErrorSignResponse);
 
   auto task = std::make_unique<GetAssertionTask>(
-      device.get(), std::move(request),
+      device.get(), std::move(request), CtapGetAssertionOptions(),
       get_assertion_callback_receiver().callback());
 
   get_assertion_callback_receiver().WaitForCallback();
@@ -204,7 +195,7 @@ TEST_F(FidoGetAssertionTaskTest, TestSilentSignInWhenAppIdExtensionPresent) {
                                       test_data::kTestGetAssertionResponse);
 
   auto task = std::make_unique<GetAssertionTask>(
-      device.get(), std::move(request),
+      device.get(), std::move(request), CtapGetAssertionOptions(),
       get_assertion_callback_receiver().callback());
 
   get_assertion_callback_receiver().WaitForCallback();
@@ -236,17 +227,19 @@ TEST_F(FidoGetAssertionTaskTest, TestU2fFallbackForAppIdExtension) {
                                       error);
   // After falling back to U2F the request will use the alternative app_param,
   // which will be rejected.
+  device->ExpectWinkedAtLeastOnce();
   device->ExpectRequestAndRespondWith(
       test_data::kU2fSignCommandApduWithAlternativeApplicationParameter,
       test_data::kU2fWrongDataApduResponse);
   // After the rejection, the U2F sign request with the primary application
   // parameter should be tried.
+  device->ExpectWinkedAtLeastOnce();
   device->ExpectRequestAndRespondWith(
       test_data::kU2fSignCommandApdu,
       test_data::kApduEncodedNoErrorSignResponse);
 
   auto task = std::make_unique<GetAssertionTask>(
-      device.get(), std::move(request),
+      device.get(), std::move(request), CtapGetAssertionOptions(),
       get_assertion_callback_receiver().callback());
   get_assertion_callback_receiver().WaitForCallback();
   EXPECT_EQ(CtapDeviceResponseCode::kSuccess,
@@ -276,7 +269,7 @@ TEST_F(FidoGetAssertionTaskTest, TestAvoidSilentSignInForCtapOnlyDevice) {
                                       error);
 
   auto task = std::make_unique<GetAssertionTask>(
-      device.get(), std::move(request),
+      device.get(), std::move(request), CtapGetAssertionOptions(),
       get_assertion_callback_receiver().callback());
   get_assertion_callback_receiver().WaitForCallback();
   EXPECT_EQ(CtapDeviceResponseCode::kCtap2ErrOther,

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,11 +28,9 @@ UpdateServiceFactory* UpdateServiceFactory::GetInstance() {
 UpdateServiceFactory::UpdateServiceFactory()
     : BrowserContextKeyedServiceFactory(
           "UpdateService",
-          BrowserContextDependencyManager::GetInstance()) {
-}
+          BrowserContextDependencyManager::GetInstance()) {}
 
-UpdateServiceFactory::~UpdateServiceFactory() {
-}
+UpdateServiceFactory::~UpdateServiceFactory() = default;
 
 KeyedService* UpdateServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {

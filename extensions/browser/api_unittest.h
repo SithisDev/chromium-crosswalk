@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,14 +15,13 @@
 namespace base {
 class Value;
 class DictionaryValue;
-class ListValue;
 }
 
 namespace content {
 class WebContents;
 }
 
-class UIThreadExtensionFunction;
+class ExtensionFunction;
 
 namespace extensions {
 
@@ -60,29 +59,28 @@ class ApiUnitTest : public ExtensionsTest {
 
   // Return the function result as a base::Value.
   std::unique_ptr<base::Value> RunFunctionAndReturnValue(
-      UIThreadExtensionFunction* function,
+      ExtensionFunction* function,
       const std::string& args);
 
   // Return the function result as a base::DictionaryValue, or NULL.
   // This will EXPECT-fail if the result is not a DictionaryValue.
   std::unique_ptr<base::DictionaryValue> RunFunctionAndReturnDictionary(
-      UIThreadExtensionFunction* function,
+      ExtensionFunction* function,
       const std::string& args);
 
-  // Return the function result as a base::ListValue, or NULL.
-  // This will EXPECT-fail if the result is not a ListValue.
-  std::unique_ptr<base::ListValue> RunFunctionAndReturnList(
-      UIThreadExtensionFunction* function,
+  // Return the function result as a base::Value, or NULL.
+  // This will EXPECT-fail if the result Value is not a list.
+  std::unique_ptr<base::Value> RunFunctionAndReturnList(
+      ExtensionFunction* function,
       const std::string& args);
 
   // Return an error thrown from the function, if one exists.
   // This will EXPECT-fail if any result is returned from the function.
-  std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
+  std::string RunFunctionAndReturnError(ExtensionFunction* function,
                                         const std::string& args);
 
   // Run the function and ignore any result.
-  void RunFunction(UIThreadExtensionFunction* function,
-                   const std::string& args);
+  void RunFunction(ExtensionFunction* function, const std::string& args);
 
  private:
   sync_preferences::TestingPrefServiceSyncable testing_pref_service_;

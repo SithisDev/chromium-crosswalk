@@ -1,12 +1,13 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/renderer/renderer_extension_registry.h"
 
+#include "base/check.h"
 #include "base/lazy_instance.h"
-#include "base/logging.h"
 #include "content/public/renderer/render_thread.h"
+#include "extensions/common/manifest_handlers/background_info.h"
 
 namespace extensions {
 
@@ -74,9 +75,10 @@ std::string RendererExtensionRegistry::GetExtensionOrAppIDByURL(
 }
 
 const Extension* RendererExtensionRegistry::GetExtensionOrAppByURL(
-    const GURL& url) const {
+    const GURL& url,
+    bool include_guid) const {
   base::AutoLock lock(lock_);
-  return extensions_.GetExtensionOrAppByURL(url);
+  return extensions_.GetExtensionOrAppByURL(url, include_guid);
 }
 
 const Extension* RendererExtensionRegistry::GetHostedAppByURL(
@@ -100,6 +102,27 @@ bool RendererExtensionRegistry::ExtensionBindingsAllowed(
     const GURL& url) const {
   base::AutoLock lock(lock_);
   return extensions_.ExtensionBindingsAllowed(url);
+}
+
+void RendererExtensionRegistry::SetWorkerActivationSequence(
+    const scoped_refptr<const Extension>& extension,
+    ActivationSequence worker_activation_sequence) {
+  DCHECK(content::RenderThread::Get());
+  DCHECK(Contains(extension->id()));
+  DCHECK(BackgroundInfo::IsServiceWorkerBased(extension.get()));
+
+  base::AutoLock lock(lock_);
+  worker_activation_sequences_[extension->id()] = worker_activation_sequence;
+}
+
+absl::optional<ActivationSequence>
+RendererExtensionRegistry::GetWorkerActivationSequence(
+    const ExtensionId& extension_id) const {
+  base::AutoLock lock(lock_);
+  auto iter = worker_activation_sequences_.find(extension_id);
+  if (iter == worker_activation_sequences_.end())
+    return absl::nullopt;
+  return iter->second;
 }
 
 }  // namespace extensions

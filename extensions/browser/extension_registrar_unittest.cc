@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,29 @@
 #include <memory>
 
 #include "base/location.h"
-#include "base/macros.h"
-#include "base/optional.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/test/test_notification_tracker.h"
+#include "extensions/browser/blocklist_extension_prefs.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extensions_test.h"
-#include "extensions/browser/notification_types.h"
-#include "extensions/browser/runtime_data.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/browser/test_extensions_browser_client.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/constants/ash_features.h"
+#include "base/test/scoped_feature_list.h"
+#include "chrome/browser/ash/crosapi/browser_util.h"
+#include "chrome/common/pref_names.h"  // nogncheck
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/testing_pref_service.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace extensions {
 
@@ -36,27 +43,31 @@ using LoadErrorBehavior = ExtensionRegistrar::LoadErrorBehavior;
 class TestExtensionSystem : public MockExtensionSystem {
  public:
   explicit TestExtensionSystem(content::BrowserContext* context)
-      : MockExtensionSystem(context),
-        runtime_data_(ExtensionRegistry::Get(context)) {}
+      : MockExtensionSystem(context) {}
+
+  TestExtensionSystem(const TestExtensionSystem&) = delete;
+  TestExtensionSystem& operator=(const TestExtensionSystem&) = delete;
 
   ~TestExtensionSystem() override {}
 
   // MockExtensionSystem:
   void RegisterExtensionWithRequestContexts(
       const Extension* extension,
-      const base::Closure& callback) override {
-    base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
+      base::OnceClosure callback) override {
+    base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                     std::move(callback));
   }
-  RuntimeData* runtime_data() override { return &runtime_data_; }
-
- private:
-  RuntimeData runtime_data_;
-  DISALLOW_COPY_AND_ASSIGN(TestExtensionSystem);
 };
 
 class TestExtensionRegistrarDelegate : public ExtensionRegistrar::Delegate {
  public:
   TestExtensionRegistrarDelegate() = default;
+
+  TestExtensionRegistrarDelegate(const TestExtensionRegistrarDelegate&) =
+      delete;
+  TestExtensionRegistrarDelegate& operator=(
+      const TestExtensionRegistrarDelegate&) = delete;
+
   ~TestExtensionRegistrarDelegate() override = default;
 
   // ExtensionRegistrar::Delegate:
@@ -74,9 +85,6 @@ class TestExtensionRegistrarDelegate : public ExtensionRegistrar::Delegate {
   MOCK_METHOD1(CanEnableExtension, bool(const Extension* extension));
   MOCK_METHOD1(CanDisableExtension, bool(const Extension* extension));
   MOCK_METHOD1(ShouldBlockExtension, bool(const Extension* extension));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestExtensionRegistrarDelegate);
 };
 
 }  // namespace
@@ -84,6 +92,10 @@ class TestExtensionRegistrarDelegate : public ExtensionRegistrar::Delegate {
 class ExtensionRegistrarTest : public ExtensionsTest {
  public:
   ExtensionRegistrarTest() = default;
+
+  ExtensionRegistrarTest(const ExtensionRegistrarTest&) = delete;
+  ExtensionRegistrarTest& operator=(const ExtensionRegistrarTest&) = delete;
+
   ~ExtensionRegistrarTest() override = default;
 
   void SetUp() override {
@@ -91,13 +103,6 @@ class ExtensionRegistrarTest : public ExtensionsTest {
     extensions_browser_client()->set_extension_system_factory(&factory_);
     extension_ = ExtensionBuilder("extension").Build();
     registrar_.emplace(browser_context(), delegate());
-
-    notification_tracker_.ListenFor(
-        extensions::NOTIFICATION_EXTENSION_UPDATE_DISABLED,
-        content::Source<content::BrowserContext>(browser_context()));
-    notification_tracker_.ListenFor(
-        extensions::NOTIFICATION_EXTENSION_REMOVED,
-        content::Source<content::BrowserContext>(browser_context()));
 
     // Mock defaults.
     ON_CALL(delegate_, CanEnableExtension(extension_.get()))
@@ -108,6 +113,11 @@ class ExtensionRegistrarTest : public ExtensionsTest {
         .WillByDefault(Return(false));
     EXPECT_CALL(delegate_, PostActivateExtension(_)).Times(0);
     EXPECT_CALL(delegate_, PostDeactivateExtension(_)).Times(0);
+  }
+
+  void TearDown() override {
+    registrar_.reset();
+    ExtensionsTest::TearDown();
   }
 
  protected:
@@ -153,19 +163,17 @@ class ExtensionRegistrarTest : public ExtensionsTest {
     registrar_->AddExtension(extension_);
     ExpectInSet(ExtensionRegistry::DISABLED);
     EXPECT_FALSE(IsExtensionReady());
-    EXPECT_TRUE(notification_tracker_.Check1AndReset(
-        extensions::NOTIFICATION_EXTENSION_UPDATE_DISABLED));
   }
 
-  // Adds the extension as blacklisted and verifies the result.
-  void AddBlacklistedExtension() {
-    SCOPED_TRACE("AddBlacklistedExtension");
-    ExtensionPrefs::Get(browser_context())
-        ->SetExtensionBlacklistState(extension_->id(), BLACKLISTED_MALWARE);
+  // Adds the extension as blocklisted and verifies the result.
+  void AddBlocklistedExtension() {
+    SCOPED_TRACE("AddBlocklistedExtension");
+    blocklist_prefs::SetSafeBrowsingExtensionBlocklistState(
+        extension_->id(), BitMapBlocklistState::BLOCKLISTED_MALWARE,
+        ExtensionPrefs::Get(browser_context()));
     registrar_->AddExtension(extension_);
-    ExpectInSet(ExtensionRegistry::BLACKLISTED);
+    ExpectInSet(ExtensionRegistry::BLOCKLISTED);
     EXPECT_FALSE(IsExtensionReady());
-    EXPECT_EQ(0u, notification_tracker_.size());
   }
 
   // Adds the extension as blocked and verifies the result.
@@ -174,7 +182,6 @@ class ExtensionRegistrarTest : public ExtensionsTest {
     registrar_->AddExtension(extension_);
     ExpectInSet(ExtensionRegistry::BLOCKED);
     EXPECT_FALSE(IsExtensionReady());
-    EXPECT_EQ(0u, notification_tracker_.size());
   }
 
   // Removes an enabled extension and verifies the result.
@@ -186,10 +193,6 @@ class ExtensionRegistrarTest : public ExtensionsTest {
     registrar_->RemoveExtension(extension_->id(),
                                 UnloadedExtensionReason::UNINSTALL);
     ExpectInSet(ExtensionRegistry::NONE);
-
-    // Removing an enabled extension should trigger a notification.
-    EXPECT_TRUE(notification_tracker_.Check1AndReset(
-        extensions::NOTIFICATION_EXTENSION_REMOVED));
 
     VerifyMock();
   }
@@ -203,27 +206,19 @@ class ExtensionRegistrarTest : public ExtensionsTest {
                                 UnloadedExtensionReason::UNINSTALL);
     ExpectInSet(ExtensionRegistry::NONE);
 
-    // Removing a disabled extension should trigger a notification.
-    EXPECT_TRUE(notification_tracker_.Check1AndReset(
-        extensions::NOTIFICATION_EXTENSION_REMOVED));
+    ExtensionPrefs::Get(browser_context())
+        ->DeleteExtensionPrefs(extension_->id());
   }
 
-  // Removes a blacklisted extension and verifies the result.
-  void RemoveBlacklistedExtension() {
-    SCOPED_TRACE("RemoveBlacklistedExtension");
-    // Calling RemoveExtension removes the extension.
-    // TODO(michaelpg): Blacklisted extensions shouldn't need to be
-    // "deactivated". See crbug.com/708230.
-    EXPECT_CALL(delegate_, PostDeactivateExtension(extension_));
+  // Removes a blocklisted extension and verifies the result.
+  void RemoveBlocklistedExtension() {
+    SCOPED_TRACE("RemoveBlocklistedExtension");
+    EXPECT_CALL(delegate_, PostDeactivateExtension(extension_)).Times(0);
     registrar_->RemoveExtension(extension_->id(),
                                 UnloadedExtensionReason::UNINSTALL);
 
-    // RemoveExtension does not un-blacklist the extension.
-    ExpectInSet(ExtensionRegistry::BLACKLISTED);
-
-    // Removing a blacklisted extension should trigger a notification.
-    EXPECT_TRUE(notification_tracker_.Check1AndReset(
-        extensions::NOTIFICATION_EXTENSION_REMOVED));
+    // RemoveExtension does not un-blocklist the extension.
+    ExpectInSet(ExtensionRegistry::BLOCKLISTED);
 
     VerifyMock();
   }
@@ -231,19 +226,12 @@ class ExtensionRegistrarTest : public ExtensionsTest {
   // Removes a blocked extension and verifies the result.
   void RemoveBlockedExtension() {
     SCOPED_TRACE("RemoveBlockedExtension");
-    // Calling RemoveExtension removes the extension.
-    // TODO(michaelpg): Blocked extensions shouldn't need to be
-    // "deactivated". See crbug.com/708230.
-    EXPECT_CALL(delegate_, PostDeactivateExtension(extension_));
+    EXPECT_CALL(delegate_, PostDeactivateExtension(extension_)).Times(0);
     registrar_->RemoveExtension(extension_->id(),
                                 UnloadedExtensionReason::UNINSTALL);
 
     // RemoveExtension does not un-block the extension.
     ExpectInSet(ExtensionRegistry::BLOCKED);
-
-    // Removing a blocked extension should trigger a notification.
-    EXPECT_TRUE(notification_tracker_.Check1AndReset(
-        extensions::NOTIFICATION_EXTENSION_REMOVED));
 
     VerifyMock();
   }
@@ -285,6 +273,23 @@ class ExtensionRegistrarTest : public ExtensionsTest {
     EXPECT_FALSE(IsExtensionReady());
   }
 
+  void TryDisablingNotAshKeeplistedExtension(bool expect_extension_disabled) {
+    if (expect_extension_disabled)
+      EXPECT_CALL(delegate_, PostDeactivateExtension(extension_));
+
+    // Disable extension because it is not in the ash keep list.
+    registrar_->DisableExtension(extension_->id(),
+                                 disable_reason::DISABLE_NOT_ASH_KEEPLISTED);
+
+    ExtensionRegistry::IncludeFlag include_flag =
+        expect_extension_disabled ? ExtensionRegistry::DISABLED
+                                  : ExtensionRegistry::ENABLED;
+    ExpectInSet(include_flag);
+    EXPECT_NE(IsExtensionReady(), expect_extension_disabled);
+
+    VerifyMock();
+  }
+
   void TerminateExtension() {
     SCOPED_TRACE("TerminateExtension");
     EXPECT_CALL(delegate_, PostDeactivateExtension(extension_));
@@ -298,8 +303,6 @@ class ExtensionRegistrarTest : public ExtensionsTest {
     SCOPED_TRACE("UntrackTerminatedExtension");
     registrar()->UntrackTerminatedExtension(extension()->id());
     ExpectInSet(ExtensionRegistry::NONE);
-    EXPECT_TRUE(notification_tracker_.Check1AndReset(
-        extensions::NOTIFICATION_EXTENSION_REMOVED));
   }
 
   // Directs ExtensionRegistrar to reload the extension and verifies the
@@ -355,8 +358,8 @@ class ExtensionRegistrarTest : public ExtensionsTest {
     EXPECT_EQ(set_id == ExtensionRegistry::TERMINATED,
               registry->terminated_extensions().Contains(extension_->id()));
 
-    EXPECT_EQ(set_id == ExtensionRegistry::BLACKLISTED,
-              registry->blacklisted_extensions().Contains(extension_->id()));
+    EXPECT_EQ(set_id == ExtensionRegistry::BLOCKLISTED,
+              registry->blocklisted_extensions().Contains(extension_->id()));
 
     EXPECT_EQ(set_id == ExtensionRegistry::BLOCKED,
               registry->blocked_extensions().Contains(extension_->id()));
@@ -381,12 +384,8 @@ class ExtensionRegistrarTest : public ExtensionsTest {
   testing::NiceMock<TestExtensionRegistrarDelegate> delegate_;
   scoped_refptr<const Extension> extension_;
 
-  content::TestNotificationTracker notification_tracker_;
-
   // Initialized in SetUp().
-  base::Optional<ExtensionRegistrar> registrar_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionRegistrarTest);
+  absl::optional<ExtensionRegistrar> registrar_;
 };
 
 TEST_F(ExtensionRegistrarTest, Basic) {
@@ -457,19 +456,19 @@ TEST_F(ExtensionRegistrarTest, AddForceDisabled) {
   ExpectInSet(ExtensionRegistry::DISABLED);
 }
 
-TEST_F(ExtensionRegistrarTest, AddBlacklisted) {
-  AddBlacklistedExtension();
+TEST_F(ExtensionRegistrarTest, AddBlocklisted) {
+  AddBlocklistedExtension();
 
-  // A blacklisted extension cannot be enabled/disabled/reloaded.
+  // A blocklisted extension cannot be enabled/disabled/reloaded.
   registrar()->EnableExtension(extension()->id());
-  ExpectInSet(ExtensionRegistry::BLACKLISTED);
+  ExpectInSet(ExtensionRegistry::BLOCKLISTED);
   registrar()->DisableExtension(extension()->id(),
                                 disable_reason::DISABLE_USER_ACTION);
-  ExpectInSet(ExtensionRegistry::BLACKLISTED);
+  ExpectInSet(ExtensionRegistry::BLOCKLISTED);
   registrar()->ReloadExtension(extension()->id(), LoadErrorBehavior::kQuiet);
-  ExpectInSet(ExtensionRegistry::BLACKLISTED);
+  ExpectInSet(ExtensionRegistry::BLOCKLISTED);
 
-  RemoveBlacklistedExtension();
+  RemoveBlocklistedExtension();
 }
 
 TEST_F(ExtensionRegistrarTest, AddBlocked) {
@@ -494,12 +493,10 @@ TEST_F(ExtensionRegistrarTest, TerminateExtension) {
   AddEnabledExtension();
   TerminateExtension();
 
-  // RemoveExtension only handles enabled or disabled extensions.
+  // Calling RemoveExtension removes its entry from the terminated list.
   registrar()->RemoveExtension(extension()->id(),
                                UnloadedExtensionReason::UNINSTALL);
-  ExpectInSet(ExtensionRegistry::TERMINATED);
-
-  UntrackTerminatedExtension();
+  ExpectInSet(ExtensionRegistry::NONE);
 }
 
 TEST_F(ExtensionRegistrarTest, DisableTerminatedExtension) {
@@ -553,5 +550,62 @@ TEST_F(ExtensionRegistrarTest, ReloadTerminatedExtension) {
   // it's disabled.
   AddEnabledExtension();
 }
+
+// Test that an extension which is not controlled (e.g. by policy) and which is
+// not on the ash keep-list can be disabled.
+TEST_F(ExtensionRegistrarTest, DisableNotAshKeeplistedExtension) {
+  ON_CALL(*delegate(), CanDisableExtension(extension().get()))
+      .WillByDefault(Return(true));
+  AddEnabledExtension();
+
+  TryDisablingNotAshKeeplistedExtension(/* expect_extension_disabled= */ true);
+}
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+// Test that a controlled extension that is not on the ash keep-list can be
+// disabled if ash is disabled.
+TEST_F(ExtensionRegistrarTest,
+       DisableNotAshKeeplistedForceInstalledExtensionIfAshDisabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(chromeos::features::kLacrosOnly);
+
+  crosapi::browser_util::SetLacrosPrimaryBrowserForTest(true);
+  static_cast<TestingPrefServiceSimple*>(pref_service())
+      ->registry()
+      ->RegisterIntegerPref(
+          prefs::kLacrosLaunchSwitch,
+          static_cast<int>(
+              crosapi::browser_util::LacrosAvailability::kLacrosOnly));
+  EXPECT_FALSE(crosapi::browser_util::IsAshWebBrowserEnabled());
+
+  // Prevent the extension from being disabled (by the user).
+  ON_CALL(*delegate(), CanDisableExtension(extension().get()))
+      .WillByDefault(Return(false));
+  AddEnabledExtension();
+
+  TryDisablingNotAshKeeplistedExtension(/* expect_extension_disabled= */ true);
+}
+
+// Test that a controlled extension that is not on the ash keep-list cannot be
+// disabled if ash is still enabled.
+TEST_F(ExtensionRegistrarTest,
+       NotDisableNotAshKeeplistedForceInstalledExtensionIfAshEnabled) {
+  crosapi::browser_util::SetLacrosPrimaryBrowserForTest(true);
+  static_cast<TestingPrefServiceSimple*>(pref_service())
+      ->registry()
+      ->RegisterIntegerPref(
+          prefs::kLacrosLaunchSwitch,
+          static_cast<int>(
+              crosapi::browser_util::LacrosAvailability::kLacrosPrimary));
+  EXPECT_TRUE(crosapi::browser_util::IsAshWebBrowserEnabled());
+
+  // Prevent the extension from being disabled (by the user).
+  ON_CALL(*delegate(), CanDisableExtension(extension().get()))
+      .WillByDefault(Return(false));
+  AddEnabledExtension();
+
+  TryDisablingNotAshKeeplistedExtension(/* expect_extension_disabled= */ false);
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace extensions

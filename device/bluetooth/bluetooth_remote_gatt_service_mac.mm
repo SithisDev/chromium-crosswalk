@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/sys_string_conversions.h"
 #include "device/bluetooth/bluetooth_adapter_mac.h"
 #include "device/bluetooth/bluetooth_low_energy_device_mac.h"
@@ -56,7 +57,7 @@ BluetoothRemoteGattServiceMac::GetIncludedServices() const {
 }
 
 void BluetoothRemoteGattServiceMac::DiscoverCharacteristics() {
-  VLOG(1) << *this << ": DiscoverCharacteristics.";
+  DVLOG(1) << *this << ": DiscoverCharacteristics.";
   SetDiscoveryComplete(false);
   ++discovery_pending_count_;
   [GetCBPeripheral() discoverCharacteristics:nil forService:GetService()];
@@ -66,12 +67,12 @@ void BluetoothRemoteGattServiceMac::DidDiscoverCharacteristics() {
   if (IsDiscoveryComplete() || discovery_pending_count_ == 0) {
     // This should never happen, just in case it happens with a device, this
     // notification should be ignored.
-    VLOG(1)
+    DVLOG(1)
         << *this
         << ": Unmatch DiscoverCharacteristics and DidDiscoverCharacteristics.";
     return;
   }
-  VLOG(1) << *this << ": DidDiscoverCharacteristics.";
+  DVLOG(1) << *this << ": DidDiscoverCharacteristics.";
   --discovery_pending_count_;
   std::unordered_set<std::string> characteristic_identifier_to_remove;
   for (const auto& iter : characteristics_) {
@@ -82,9 +83,9 @@ void BluetoothRemoteGattServiceMac::DidDiscoverCharacteristics() {
     BluetoothRemoteGattCharacteristicMac* gatt_characteristic_mac =
         GetBluetoothRemoteGattCharacteristicMac(cb_characteristic);
     if (gatt_characteristic_mac) {
-      VLOG(1) << *gatt_characteristic_mac
-              << ": Known characteristic, properties "
-              << gatt_characteristic_mac->GetProperties();
+      DVLOG(1) << *gatt_characteristic_mac
+               << ": Known characteristic, properties "
+               << gatt_characteristic_mac->GetProperties();
       const std::string& identifier = gatt_characteristic_mac->GetIdentifier();
       characteristic_identifier_to_remove.erase(identifier);
       gatt_characteristic_mac->DiscoverDescriptors();
@@ -94,8 +95,8 @@ void BluetoothRemoteGattServiceMac::DidDiscoverCharacteristics() {
         new BluetoothRemoteGattCharacteristicMac(this, cb_characteristic);
     bool result = AddCharacteristic(base::WrapUnique(gatt_characteristic_mac));
     DCHECK(result);
-    VLOG(1) << *gatt_characteristic_mac << ": New characteristic, properties "
-            << gatt_characteristic_mac->GetProperties();
+    DVLOG(1) << *gatt_characteristic_mac << ": New characteristic, properties "
+             << gatt_characteristic_mac->GetProperties();
     if (discovery_pending_count_ == 0) {
       gatt_characteristic_mac->DiscoverDescriptors();
     }
@@ -105,9 +106,9 @@ void BluetoothRemoteGattServiceMac::DidDiscoverCharacteristics() {
   for (const std::string& identifier : characteristic_identifier_to_remove) {
     auto pair_to_remove = characteristics_.find(identifier);
     auto characteristic_to_remove = std::move(pair_to_remove->second);
-    VLOG(1) << static_cast<BluetoothRemoteGattCharacteristicMac&>(
-                   *characteristic_to_remove)
-            << ": Removed characteristic.";
+    DVLOG(1) << static_cast<BluetoothRemoteGattCharacteristicMac&>(
+                    *characteristic_to_remove)
+             << ": Removed characteristic.";
     characteristics_.erase(pair_to_remove);
     GetMacAdapter()->NotifyGattCharacteristicRemoved(
         characteristic_to_remove.get());
@@ -120,8 +121,8 @@ void BluetoothRemoteGattServiceMac::DidDiscoverDescriptors(
   if (IsDiscoveryComplete()) {
     // This should never happen, just in case it happens with a device, this
     // notification should be ignored.
-    VLOG(1) << *this
-            << ": Discovery complete, ignoring DidDiscoverDescriptors.";
+    DVLOG(1) << *this
+             << ": Discovery complete, ignoring DidDiscoverDescriptors.";
     return;
   }
   BluetoothRemoteGattCharacteristicMac* gatt_characteristic =
@@ -136,14 +137,13 @@ void BluetoothRemoteGattServiceMac::SendNotificationIfComplete() {
   // Notify when all characteristics have been fully discovered.
   SetDiscoveryComplete(
       discovery_pending_count_ == 0 &&
-      std::all_of(characteristics_.begin(), characteristics_.end(),
-                  [](const auto& pair) {
-                    return static_cast<BluetoothRemoteGattCharacteristicMac*>(
-                               pair.second.get())
-                        ->IsDiscoveryComplete();
-                  }));
+      base::ranges::all_of(characteristics_, [](const auto& pair) {
+        return static_cast<BluetoothRemoteGattCharacteristicMac*>(
+                   pair.second.get())
+            ->IsDiscoveryComplete();
+      }));
   if (IsDiscoveryComplete()) {
-    VLOG(1) << *this << ": Discovery complete.";
+    DVLOG(1) << *this << ": Discovery complete.";
     GetMacAdapter()->NotifyGattServiceChanged(this);
   }
 }

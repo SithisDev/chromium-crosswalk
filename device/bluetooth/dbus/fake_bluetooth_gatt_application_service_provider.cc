@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@ FakeBluetoothGattApplicationServiceProvider::
         const std::map<dbus::ObjectPath, BluetoothLocalGattServiceBlueZ*>&
             services)
     : object_path_(object_path) {
-  VLOG(1) << "Creating Bluetooth GATT application: " << object_path_.value();
+  DVLOG(1) << "Creating Bluetooth GATT application: " << object_path_.value();
 
   FakeBluetoothGattManagerClient* fake_bluetooth_gatt_manager_client =
       static_cast<FakeBluetoothGattManagerClient*>(
@@ -31,7 +31,8 @@ FakeBluetoothGattApplicationServiceProvider::
 
 FakeBluetoothGattApplicationServiceProvider::
     ~FakeBluetoothGattApplicationServiceProvider() {
-  VLOG(1) << "Cleaning up Bluetooth GATT application: " << object_path_.value();
+  DVLOG(1) << "Cleaning up Bluetooth GATT application: "
+           << object_path_.value();
 
   FakeBluetoothGattManagerClient* fake_bluetooth_gatt_manager_client =
       static_cast<FakeBluetoothGattManagerClient*>(

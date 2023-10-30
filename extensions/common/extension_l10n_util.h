@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -11,18 +11,44 @@
 #include <string>
 #include <vector>
 
+#include "base/auto_reset.h"
 #include "base/strings/string_piece.h"
+#include "base/values.h"
+#include "extensions/common/manifest.h"
+#include "extensions/common/mojom/manifest.mojom-shared.h"
 
 namespace base {
-class DictionaryValue;
 class FilePath;
 }
 
 namespace extensions {
+class Extension;
 class MessageBundle;
 }
 
 namespace extension_l10n_util {
+
+enum class GzippedMessagesPermission {
+  // Do not allow gzipped locale ('messages.json') files.
+  kDisallow,
+  // Allow gzipped locale files. This should only be set for trusted sources,
+  // e.g. component extensions from the Chrome OS rootfs.
+  kAllowForTrustedSource,
+};
+
+// Returns GzippedMessagesPermission::kAllowForTrustedSource for component
+// extensions, otherwise returns kDisallow.
+GzippedMessagesPermission GetGzippedMessagesPermissionForExtension(
+    const extensions::Extension* extension);
+
+// Returns GzippedMessagesPermission::kAllowForTrustedSource for trusted
+// manifest locations, otherwise returns kDisallow.
+GzippedMessagesPermission GetGzippedMessagesPermissionForLocation(
+    extensions::mojom::ManifestLocation location);
+
+// Called from tests to temporarily allow loading gzipped messages for non
+// component test extensions.
+base::AutoReset<bool> AllowGzippedMessagesAllowedForTest();
 
 // Set the locale for this process to a fixed value, rather than using the
 // normal file-based lookup mechanisms. This is used to set the locale inside
@@ -36,23 +62,25 @@ void SetPreferredLocale(const std::string& locale);
 
 // Returns default locale in form "en-US" or "sr" or empty string if
 // "default_locale" section was not defined in the manifest.json file.
-std::string GetDefaultLocaleFromManifest(const base::DictionaryValue& manifest,
+std::string GetDefaultLocaleFromManifest(const base::Value::Dict& manifest,
                                          std::string* error);
 
 // Returns true iff the extension was localized, and the current locale
 // doesn't match the locale written into info.extension_manifest.
-bool ShouldRelocalizeManifest(const base::DictionaryValue* manifest);
+bool ShouldRelocalizeManifest(const base::Value::Dict& manifest);
 
 // Localize extension name, description, browser_action and other fields
 // in the manifest.
 bool LocalizeManifest(const extensions::MessageBundle& messages,
-                      base::DictionaryValue* manifest,
+                      base::Value::Dict* manifest,
                       std::string* error);
 
 // Load message catalogs, localize manifest and attach message bundle to the
-// extension.
+// extension. |gzip_permission| will be passed to LoadMessageCatalogs
+// (see below for details).
 bool LocalizeExtension(const base::FilePath& extension_path,
-                       base::DictionaryValue* manifest,
+                       base::Value::Dict* manifest,
+                       GzippedMessagesPermission gzip_permission,
                        std::string* error);
 
 // Adds locale_name to the extension if it's in chrome_locales, and
@@ -88,19 +116,23 @@ bool GetValidLocales(const base::FilePath& locale_path,
                      std::set<std::string>* valid_locales,
                      std::string* error);
 
-// Loads messages file for default locale, and application locales (application
-// locales doesn't have to exist). Application locale is current locale and its
-// parents.
-// Returns message bundle if it can load default locale messages file, and all
-// messages are valid, else returns NULL and sets error.
+// Loads messages file for the default locale and application locales
+// (application locales do not have to exist). Application locales include the
+// current locale and its parents. If |gzip_permission| is
+// kAllowForTrustedSource, this will look for compressed messages files and
+// decompress them if they exist. Returns the message bundle if it can load the
+// default locale messages file and all messages are valid. Otherwise returns
+// null and sets |error|.
 extensions::MessageBundle* LoadMessageCatalogs(
     const base::FilePath& locale_path,
     const std::string& default_locale,
+    GzippedMessagesPermission gzip_permission,
     std::string* error);
 
-// Loads message catalogs for all locales to check for validity.
+// Loads message catalogs for all locales to check for validity. Used for
+// validating unpacked extensions.
 bool ValidateExtensionLocales(const base::FilePath& extension_path,
-                              const base::DictionaryValue* manifest,
+                              const base::Value::Dict& manifest,
                               std::string* error);
 
 // Returns true if directory has "." in the name (for .svn) or if it doesn't

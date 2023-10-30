@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,11 @@
 
 #include "base/callback.h"
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
-#include "base/strings/string16.h"
 #include "device/fido/authenticator_get_info_response.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_transport_protocol.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace device {
 
@@ -38,7 +36,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDevice {
   static constexpr CancelToken kInvalidCancelToken = 0;
 
   using DeviceCallback =
-      base::OnceCallback<void(base::Optional<std::vector<uint8_t>>)>;
+      base::OnceCallback<void(absl::optional<std::vector<uint8_t>>)>;
 
   // Internal state machine states.
   enum class State {
@@ -60,12 +58,21 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDevice {
   };
 
   FidoDevice();
+
+  FidoDevice(const FidoDevice&) = delete;
+  FidoDevice& operator=(const FidoDevice&) = delete;
+
   virtual ~FidoDevice();
   // Pure virtual function defined by each device type, implementing
   // the device communication transaction. The function must not immediately
   // call (i.e. hairpin) |callback|.
   virtual CancelToken DeviceTransact(std::vector<uint8_t> command,
                                      DeviceCallback callback) = 0;
+  // Attempt to make the device "wink", i.e. grab the attention of the user
+  // usually by flashing a light. |callback| is run after a successful wink or
+  // if the device does not support winking, in which case it may run
+  // immediately.
+  virtual void TryWink(base::OnceClosure callback);
   // Cancel attempts to cancel an enqueued request. If the request is currently
   // active it will be aborted if possible, which is expected to cause it to
   // complete with |kCtap2ErrKeepAliveCancel|. If the request is still enqueued
@@ -74,8 +81,14 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDevice {
   // cancel may be unsuccessful and that the request may complete normally.
   // It is safe to attempt to cancel an operation that has already completed.
   virtual void Cancel(CancelToken token) = 0;
+  // GetId returns a unique string representing this device. This string should
+  // be distinct from all other devices concurrently discovered.
   virtual std::string GetId() const = 0;
-  virtual base::string16 GetDisplayName() const;
+  // GetDisplayName returns a string identifying a device to a human, which
+  // might not be unique. For example, |GetDisplayName| could return the VID:PID
+  // of a HID device, but |GetId| could not because two devices can share the
+  // same VID:PID. It defaults to returning the value of |GetId|.
+  virtual std::string GetDisplayName() const;
   virtual FidoTransportProtocol DeviceTransport() const = 0;
 
   // These must only be called on Bluetooth devices.
@@ -85,6 +98,10 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDevice {
   // Returns whether the service bit is set to require a PIN or passkey to pair
   // for a FIDO Bluetooth device.
   virtual bool RequiresBlePairingPin() const;
+
+  // NoSilentRequests returns true if this device does not support up=false
+  // requests.
+  bool NoSilentRequests() const;
 
   virtual base::WeakPtr<FidoDevice> GetWeakPtr() = 0;
 
@@ -102,29 +119,37 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoDevice {
   }
 
   ProtocolVersion supported_protocol() const { return supported_protocol_; }
-  const base::Optional<AuthenticatorGetInfoResponse>& device_info() const {
+  const absl::optional<AuthenticatorGetInfoResponse>& device_info() const {
     return device_info_;
   }
   bool is_in_error_state() const {
     return state_ == State::kMsgError || state_ == State::kDeviceError;
   }
 
+  // IsStatusForUnrecognisedCredentialID returns true iff the given |status|, in
+  // response to a CTAP2 GetAssertion command, indicates that none of the
+  // credential IDs was recognised by the authenticator.
+  static bool IsStatusForUnrecognisedCredentialID(
+      CtapDeviceResponseCode status);
+
   State state_for_testing() const { return state_; }
+  void SetStateForTesting(State state) { state_ = state; }
 
  protected:
   void OnDeviceInfoReceived(base::OnceClosure done,
-                            base::Optional<std::vector<uint8_t>> response);
+                            absl::optional<std::vector<uint8_t>> response);
   void SetDeviceInfo(AuthenticatorGetInfoResponse device_info);
 
   State state_ = State::kInit;
   ProtocolVersion supported_protocol_ = ProtocolVersion::kUnknown;
-  base::Optional<AuthenticatorGetInfoResponse> device_info_;
+  absl::optional<AuthenticatorGetInfoResponse> device_info_;
+  // If `true`, the device needs to be sent a specific wink command to flash
+  // when user presence is required.
+  bool needs_explicit_wink_ = false;
   // next_cancel_token_ is the value of the next |CancelToken| returned by this
   // device. It starts at one so that zero can be used as an invalid value where
   // needed.
   CancelToken next_cancel_token_ = kInvalidCancelToken + 1;
-
-  DISALLOW_COPY_AND_ASSIGN(FidoDevice);
 };
 
 }  // namespace device

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/app_window/app_window.h"
 
-using chromeos::FirewallHole;
+using ::ash::FirewallHole;
 using content::BrowserContext;
 
 namespace extensions {
@@ -80,16 +80,15 @@ AppFirewallHole::AppFirewallHole(
     : type_(type),
       port_(port),
       extension_id_(extension_id),
-      manager_(manager),
-      weak_factory_(this) {}
+      manager_(manager) {}
 
 void AppFirewallHole::SetVisible(bool app_visible) {
   app_visible_ = app_visible;
   if (app_visible_) {
     if (!firewall_hole_) {
       FirewallHole::Open(type_, port_, "" /* all interfaces */,
-                         base::Bind(&AppFirewallHole::OnFirewallHoleOpened,
-                                    weak_factory_.GetWeakPtr()));
+                         base::BindOnce(&AppFirewallHole::OnFirewallHoleOpened,
+                                        weak_factory_.GetWeakPtr()));
     }
   } else {
     firewall_hole_.reset(nullptr);
@@ -105,8 +104,8 @@ void AppFirewallHole::OnFirewallHoleOpened(
 }
 
 AppFirewallHoleManager::AppFirewallHoleManager(BrowserContext* context)
-    : context_(context), observer_(this), weak_factory_(this) {
-  observer_.Add(AppWindowRegistry::Get(context));
+    : context_(context) {
+  observation_.Observe(AppWindowRegistry::Get(context));
 }
 
 AppFirewallHoleManager::~AppFirewallHoleManager() {}

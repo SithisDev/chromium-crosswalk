@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,16 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
-#include "base/scoped_observer.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/api/runtime/runtime_api_delegate.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/events/lazy_event_dispatch_util.h"
 #include "extensions/browser/extension_function.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/browser/lazy_context_task_queue.h"
 #include "extensions/browser/process_manager.h"
@@ -71,16 +73,28 @@ class RuntimeAPI : public BrowserContextKeyedAPI,
     SUCCESS_RESTART_SCHEDULED,
   };
 
+  // After this many suspiciously fast consecutive reloads, an extension will
+  // get disabled.
+  static constexpr int kFastReloadCount = 5;
+
+  // Same as above, but we increase the fast reload count for unpacked
+  // extensions.
+  static constexpr int kUnpackedFastReloadCount = 30;
+
   static BrowserContextKeyedAPIFactory<RuntimeAPI>* GetFactoryInstance();
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
   explicit RuntimeAPI(content::BrowserContext* context);
+
+  RuntimeAPI(const RuntimeAPI&) = delete;
+  RuntimeAPI& operator=(const RuntimeAPI&) = delete;
+
   ~RuntimeAPI() override;
 
   void ReloadExtension(const std::string& extension_id);
   bool CheckForUpdates(const std::string& extension_id,
-                       const RuntimeAPIDelegate::UpdateCheckCallback& callback);
+                       RuntimeAPIDelegate::UpdateCheckCallback callback);
   void OpenURL(const GURL& uninstall_url);
   bool GetPlatformInfo(api::runtime::PlatformInfo* info);
   bool RestartDevice(std::string* error_message);
@@ -143,15 +157,15 @@ class RuntimeAPI : public BrowserContextKeyedAPI,
 
   std::unique_ptr<RuntimeAPIDelegate> delegate_;
 
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
 
   content::NotificationRegistrar registrar_;
 
   // Listen to extension notifications.
-  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
-      extension_registry_observer_;
-  ScopedObserver<ProcessManager, ProcessManagerObserver>
-      process_manager_observer_;
+  base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observation_{this};
+  base::ScopedObservation<ProcessManager, ProcessManagerObserver>
+      process_manager_observation_{this};
 
   // The ID of the first extension to call the restartAfterDelay API. Any other
   // extensions to call this API after that will fail.
@@ -176,8 +190,6 @@ class RuntimeAPI : public BrowserContextKeyedAPI,
   bool was_last_restart_due_to_delayed_restart_api_;
 
   base::WeakPtrFactory<RuntimeAPI> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(RuntimeAPI);
 };
 
 template <>
@@ -217,7 +229,7 @@ class RuntimeEventRouter {
                                      UninstallReason reason);
 };
 
-class RuntimeGetBackgroundPageFunction : public UIThreadExtensionFunction {
+class RuntimeGetBackgroundPageFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("runtime.getBackgroundPage",
                              RUNTIME_GETBACKGROUNDPAGE)
@@ -231,7 +243,7 @@ class RuntimeGetBackgroundPageFunction : public UIThreadExtensionFunction {
       std::unique_ptr<LazyContextTaskQueue::ContextInfo> context_info);
 };
 
-class RuntimeOpenOptionsPageFunction : public UIThreadExtensionFunction {
+class RuntimeOpenOptionsPageFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("runtime.openOptionsPage", RUNTIME_OPENOPTIONSPAGE)
 
@@ -240,7 +252,7 @@ class RuntimeOpenOptionsPageFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class RuntimeSetUninstallURLFunction : public UIThreadExtensionFunction {
+class RuntimeSetUninstallURLFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("runtime.setUninstallURL", RUNTIME_SETUNINSTALLURL)
 
@@ -249,7 +261,7 @@ class RuntimeSetUninstallURLFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class RuntimeReloadFunction : public UIThreadExtensionFunction {
+class RuntimeReloadFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("runtime.reload", RUNTIME_RELOAD)
 
@@ -258,7 +270,7 @@ class RuntimeReloadFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class RuntimeRequestUpdateCheckFunction : public UIThreadExtensionFunction {
+class RuntimeRequestUpdateCheckFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("runtime.requestUpdateCheck",
                              RUNTIME_REQUESTUPDATECHECK)
@@ -271,7 +283,7 @@ class RuntimeRequestUpdateCheckFunction : public UIThreadExtensionFunction {
   void CheckComplete(const RuntimeAPIDelegate::UpdateCheckResult& result);
 };
 
-class RuntimeRestartFunction : public UIThreadExtensionFunction {
+class RuntimeRestartFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("runtime.restart", RUNTIME_RESTART)
 
@@ -280,7 +292,7 @@ class RuntimeRestartFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class RuntimeRestartAfterDelayFunction : public UIThreadExtensionFunction {
+class RuntimeRestartAfterDelayFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("runtime.restartAfterDelay",
                              RUNTIME_RESTARTAFTERDELAY)
@@ -290,7 +302,7 @@ class RuntimeRestartAfterDelayFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class RuntimeGetPlatformInfoFunction : public UIThreadExtensionFunction {
+class RuntimeGetPlatformInfoFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("runtime.getPlatformInfo", RUNTIME_GETPLATFORMINFO)
 
@@ -299,8 +311,7 @@ class RuntimeGetPlatformInfoFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class RuntimeGetPackageDirectoryEntryFunction
-    : public UIThreadExtensionFunction {
+class RuntimeGetPackageDirectoryEntryFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("runtime.getPackageDirectoryEntry",
                              RUNTIME_GETPACKAGEDIRECTORYENTRY)

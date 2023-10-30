@@ -1,22 +1,23 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/browser/service_worker_manager.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
-#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_util.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace extensions {
 
 ServiceWorkerManager::ServiceWorkerManager(
     content::BrowserContext* browser_context)
-    : browser_context_(browser_context), registry_observer_(this) {
-  registry_observer_.Add(ExtensionRegistry::Get(browser_context_));
+    : browser_context_(browser_context) {
+  registry_observation_.Observe(ExtensionRegistry::Get(browser_context_));
 }
 
 ServiceWorkerManager::~ServiceWorkerManager() {}
@@ -25,10 +26,10 @@ void ServiceWorkerManager::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const Extension* extension,
     UnloadedExtensionReason reason) {
-  content::BrowserContext::GetStoragePartitionForSite(browser_context_,
-                                                      extension->url())
+  util::GetStoragePartitionForExtensionId(extension->id(), browser_context_)
       ->GetServiceWorkerContext()
-      ->StopAllServiceWorkersForOrigin(extension->url());
+      ->StopAllServiceWorkersForStorageKey(
+          blink::StorageKey(extension->origin()));
 }
 
 void ServiceWorkerManager::OnExtensionUninstalled(
@@ -39,10 +40,10 @@ void ServiceWorkerManager::OnExtensionUninstalled(
   // a) Keep track of extensions with registered service workers.
   // b) Add a callback to the (Un)SuspendServiceWorkersOnOrigin() method.
   // c) Check for any orphaned workers.
-  content::BrowserContext::GetStoragePartitionForSite(browser_context_,
-                                                      extension->url())
+  util::GetStoragePartitionForExtensionId(extension->id(), browser_context_)
       ->GetServiceWorkerContext()
-      ->DeleteForOrigin(extension->url(), base::DoNothing());
+      ->DeleteForStorageKey(blink::StorageKey(extension->origin()),
+                            base::DoNothing());
 }
 
 }  // namespace extensions

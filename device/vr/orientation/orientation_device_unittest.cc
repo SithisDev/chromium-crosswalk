@@ -1,21 +1,27 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "base/memory/shared_memory_mapping.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "device/vr/orientation/orientation_device.h"
 #include "device/vr/orientation/orientation_session.h"
 #include "device/vr/test/fake_orientation_provider.h"
 #include "device/vr/test/fake_sensor_provider.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading_shared_buffer_reader.h"
 #include "services/device/public/cpp/generic_sensor/sensor_traits.h"
@@ -45,6 +51,11 @@ class FakeScreen : public display::Screen {
   gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) override {
     return nullptr;
   }
+  gfx::NativeWindow GetLocalProcessWindowAtPoint(
+      const gfx::Point& point,
+      const std::set<gfx::NativeWindow>& ignore) override {
+    return nullptr;
+  }
   display::Display GetDisplayNearestWindow(
       gfx::NativeWindow window) const override {
     return display;
@@ -72,56 +83,50 @@ class FakeScreen : public display::Screen {
 
 class VROrientationDeviceTest : public testing::Test {
  public:
+  VROrientationDeviceTest(const VROrientationDeviceTest&) = delete;
+  VROrientationDeviceTest& operator=(const VROrientationDeviceTest&) = delete;
+
   void onDisplaySynced() {}
 
  protected:
   VROrientationDeviceTest() = default;
   ~VROrientationDeviceTest() override = default;
   void SetUp() override {
-    fake_sensor_provider_ = std::make_unique<FakeSensorProvider>(
-        mojo::MakeRequest(&sensor_provider_ptr_));
+    fake_sensor_provider_ = std::make_unique<FakeXRSensorProvider>(
+        sensor_provider_.BindNewPipeAndPassReceiver());
 
     fake_sensor_ = std::make_unique<FakeOrientationSensor>(
-        mojo::MakeRequest(&sensor_ptr_));
+        sensor_.InitWithNewPipeAndPassReceiver());
 
-    shared_buffer_handle_ = mojo::SharedBufferHandle::Create(
+    mapped_region_ = base::ReadOnlySharedMemoryRegion::Create(
         sizeof(SensorReadingSharedBuffer) *
         (static_cast<uint64_t>(mojom::SensorType::kMaxValue) + 1));
-
-    shared_buffer_mapping_ = shared_buffer_handle_->MapAtOffset(
-        mojom::SensorInitParams::kReadBufferSizeForTests, GetBufferOffset());
+    ASSERT_TRUE(mapped_region_.IsValid());
 
     fake_screen_ = std::make_unique<FakeScreen>();
 
     scoped_screen_override_ =
         std::make_unique<ScopedScreenOverride>(fake_screen_.get());
 
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
   }
 
-  void TearDown() override { shared_buffer_handle_.reset(); }
-
-  double GetBufferOffset() {
+  uint64_t GetBufferOffset() {
     return SensorReadingSharedBuffer::GetOffset(kOrientationSensorType);
   }
 
   void InitializeDevice(mojom::SensorInitParamsPtr params) {
     base::RunLoop loop;
 
-    device_ = std::make_unique<VROrientationDevice>(
-        &sensor_provider_ptr_, base::BindOnce(
-                                   [](base::OnceClosure quit_closure) {
-                                     // The callback was called.
-                                     std::move(quit_closure).Run();
-                                   },
-                                   loop.QuitClosure()));
+    device_ = std::make_unique<VROrientationDevice>(sensor_provider_.get(),
+                                                    loop.QuitClosure());
 
     // Complete the creation of device_ by letting the GetSensor function go
     // through.
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
     fake_sensor_provider_->CallCallback(std::move(params));
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
     // Ensure that the callback is called.
     loop.Run();
@@ -140,12 +145,12 @@ class VROrientationDeviceTest : public testing::Test {
         [](base::OnceClosure quit_closure,
            base::OnceCallback<void(mojom::VRPosePtr)> callback,
            mojom::XRFrameDataPtr ptr) {
-          std::move(callback).Run(std::move(ptr->pose));
+          std::move(callback).Run(std::move(ptr->mojo_from_viewer));
           std::move(quit_closure).Run();
         },
         loop.QuitClosure(), std::move(callback)));
 
-    scoped_task_environment_.RunUntilIdle();
+    task_environment_.RunUntilIdle();
 
     // Ensure the pose request callback runs.
     loop.Run();
@@ -161,16 +166,12 @@ class VROrientationDeviceTest : public testing::Test {
     }
   }
 
-  void SetInlinePosesEnabled(bool enabled) {
-    device_->SetInlinePosesEnabled(enabled);
-  }
-
   std::unique_ptr<VROrientationSession> MakeDisplay() {
-    mojom::XRFrameDataProviderPtr data_provider;
-    mojom::XRSessionControllerPtr controller;
+    mojo::PendingRemote<mojom::XRFrameDataProvider> data_provider;
+    mojo::PendingRemote<mojom::XRSessionController> controller;
     return std::make_unique<VROrientationSession>(
-        device_.get(), mojo::MakeRequest(&data_provider),
-        mojo::MakeRequest(&controller));
+        device_.get(), data_provider.InitWithNewPipeAndPassReceiver(),
+        controller.InitWithNewPipeAndPassReceiver());
   }
 
   void TryGetFrameData(VROrientationSession* display, bool expect_null) {
@@ -190,14 +191,13 @@ class VROrientationDeviceTest : public testing::Test {
 
   mojom::SensorInitParamsPtr FakeInitParams() {
     auto init_params = mojom::SensorInitParams::New();
-    init_params->sensor = std::move(sensor_ptr_);
+    init_params->sensor = std::move(sensor_);
     init_params->default_configuration = PlatformSensorConfiguration(
         SensorTraits<kOrientationSensorType>::kDefaultFrequency);
 
-    init_params->client_request = mojo::MakeRequest(&sensor_client_ptr_);
+    init_params->client_receiver = sensor_client_.BindNewPipeAndPassReceiver();
 
-    init_params->memory = shared_buffer_handle_->Clone(
-        mojo::SharedBufferHandle::AccessMode::READ_ONLY);
+    init_params->memory = mapped_region_.region.Duplicate();
 
     init_params->buffer_offset = GetBufferOffset();
 
@@ -205,11 +205,10 @@ class VROrientationDeviceTest : public testing::Test {
   }
 
   void WriteToBuffer(gfx::Quaternion q) {
-    if (!shared_buffer_mapping_)
-      return;
-
     SensorReadingSharedBuffer* buffer =
-        static_cast<SensorReadingSharedBuffer*>(shared_buffer_mapping_.get());
+        reinterpret_cast<SensorReadingSharedBuffer*>(
+            static_cast<char*>(mapped_region_.mapping.memory()) +
+            GetBufferOffset());
 
     auto& seqlock = buffer->seqlock.value();
     seqlock.WriteBegin();
@@ -225,32 +224,29 @@ class VROrientationDeviceTest : public testing::Test {
   }
 
   // Needed for MakeRequest to work.
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
   std::unique_ptr<VROrientationDevice> device_;
-  std::unique_ptr<FakeSensorProvider> fake_sensor_provider_;
-  mojom::SensorProviderPtr sensor_provider_ptr_;
+  std::unique_ptr<FakeXRSensorProvider> fake_sensor_provider_;
+  mojo::Remote<mojom::SensorProvider> sensor_provider_;
 
   // Fake Sensor Init params objects
   std::unique_ptr<FakeOrientationSensor> fake_sensor_;
-  mojom::SensorPtrInfo sensor_ptr_;
-  mojo::ScopedSharedBufferHandle shared_buffer_handle_;
-  mojo::ScopedSharedBufferMapping shared_buffer_mapping_;
-  mojom::SensorClientPtr sensor_client_ptr_;
+  mojo::PendingRemote<mojom::Sensor> sensor_;
+  base::MappedReadOnlyRegion mapped_region_;
+  mojo::Remote<mojom::SensorClient> sensor_client_;
 
   std::unique_ptr<FakeScreen> fake_screen_;
   std::unique_ptr<ScopedScreenOverride> scoped_screen_override_;
-
-  DISALLOW_COPY_AND_ASSIGN(VROrientationDeviceTest);
 };
 
 TEST_F(VROrientationDeviceTest, InitializationTest) {
   // Check that without running anything, the device will return not available,
   // without crashing.
 
-  device_ = std::make_unique<VROrientationDevice>(&sensor_provider_ptr_,
-                                                  base::BindOnce([]() {}));
-  scoped_task_environment_.RunUntilIdle();
+  device_ = std::make_unique<VROrientationDevice>(sensor_provider_.get(),
+                                                  base::DoNothing());
+  task_environment_.RunUntilIdle();
 
   EXPECT_FALSE(device_->IsAvailable());
 }
@@ -378,14 +374,6 @@ TEST_F(VROrientationDeviceTest, OrientationLandscape270Test) {
                    EXPECT_NEAR(ptr->orientation->z(), 0, 0.001);
                    EXPECT_NEAR(ptr->orientation->w(), 0.924, 0.001);
                  }));
-}
-
-TEST_F(VROrientationDeviceTest, NoMagicWindowPosesWhileBrowsing) {
-  InitializeDevice(FakeInitParams());
-
-  AssertInlineFrameDataAvailable(true);
-  SetInlinePosesEnabled(false);
-  AssertInlineFrameDataAvailable(false);
 }
 
 TEST_F(VROrientationDeviceTest, GetFrameDataHelper) {

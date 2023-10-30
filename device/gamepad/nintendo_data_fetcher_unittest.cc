@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,44 +6,50 @@
 
 #include <utility>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "device/gamepad/gamepad_service.h"
 #include "services/device/device_service_test_base.h"
 #include "services/device/hid/hid_manager_impl.h"
-#include "services/device/hid/mock_hid_service.h"
+#include "services/device/public/cpp/test/mock_hid_service.h"
 #include "services/device/public/mojom/hid.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-// TODO(crbug.com/961039): Fix memory leaks in tests and re-enable on LSAN.
-#ifdef LEAK_SANITIZER
-#define MAYBE_AddAndRemoveSwitchPro DISABLED_AddAndRemoveSwitchPro
-#define MAYBE_UnsupportedDeviceIsIgnored DISABLED_UnsupportedDeviceIsIgnored
-#else
-#define MAYBE_AddAndRemoveSwitchPro AddAndRemoveSwitchPro
-#define MAYBE_UnsupportedDeviceIsIgnored UnsupportedDeviceIsIgnored
-#endif
 
 namespace device {
 
 namespace {
 
-#if defined(OS_MACOSX)
+#if BUILDFLAG(IS_MAC)
 const uint64_t kTestDeviceId = 123;
+#elif BUILDFLAG(IS_WIN)
+const wchar_t kTestDeviceId[] = L"123";
 #else
-const char* kTestDeviceId = "123";
+const char kTestDeviceId[] = "123";
 #endif
+
+const char kPhysicalDeviceId[] = "1";
+
+void BindHidManager(mojom::DeviceService* service,
+                    scoped_refptr<base::SequencedTaskRunner> task_runner,
+                    mojo::PendingReceiver<mojom::HidManager> receiver) {
+  task_runner->PostTask(
+      FROM_HERE,
+      base::BindOnce(&mojom::DeviceService::BindHidManager,
+                     base::Unretained(service), std::move(receiver)));
+}
 
 }  // namespace
 
 // Main test fixture
 class NintendoDataFetcherTest : public DeviceServiceTestBase {
  public:
-  NintendoDataFetcherTest() {}
+  NintendoDataFetcherTest() = default;
+  NintendoDataFetcherTest(const NintendoDataFetcherTest&) = delete;
+  NintendoDataFetcherTest& operator=(const NintendoDataFetcherTest&) = delete;
 
   void SetUp() override {
     // Set up the fake HID service.
@@ -55,18 +61,21 @@ class NintendoDataFetcherTest : public DeviceServiceTestBase {
     // It is safe to use |mock_hid_service_| in this test.
     HidManagerImpl::SetHidServiceForTesting(std::move(mock_hid_service));
 
-    // Initialize the device service and pass a service connector to the gamepad
-    // service.
+    // Initialize the device service and pass a HidManager binder to
+    // GamepadService.
     DeviceServiceTestBase::SetUp();
-    GamepadService::GetInstance()->StartUp(connector()->Clone());
+    GamepadService::GetInstance()->StartUp(
+        base::BindRepeating(&BindHidManager, device_service(),
+                            base::SequencedTaskRunnerHandle::Get()));
 
     // Create the data fetcher and polling thread.
     auto fetcher = std::make_unique<NintendoDataFetcher>();
     fetcher_ = fetcher.get();
     auto polling_thread = std::make_unique<base::Thread>("polling thread");
     polling_thread_ = polling_thread.get();
-    provider_.reset(new GamepadProvider(nullptr, std::move(fetcher),
-                                        std::move(polling_thread)));
+    provider_ = std::make_unique<GamepadProvider>(
+        /*connection_change_client=*/nullptr, std::move(fetcher),
+        std::move(polling_thread));
 
     RunUntilIdle();
   }
@@ -81,21 +90,22 @@ class NintendoDataFetcherTest : public DeviceServiceTestBase {
     polling_thread_->FlushForTesting();
   }
 
-  MockHidService* mock_hid_service_;
+  raw_ptr<MockHidService> mock_hid_service_;
   std::unique_ptr<GamepadProvider> provider_;
-  NintendoDataFetcher* fetcher_;
-  base::Thread* polling_thread_;
-
-  DISALLOW_COPY_AND_ASSIGN(NintendoDataFetcherTest);
+  raw_ptr<NintendoDataFetcher> fetcher_;
+  raw_ptr<base::Thread> polling_thread_;
 };
 
-TEST_F(NintendoDataFetcherTest, MAYBE_UnsupportedDeviceIsIgnored) {
+TEST_F(NintendoDataFetcherTest, UnsupportedDeviceIsIgnored) {
   // Simulate an unsupported, non-Nintendo HID device.
   auto collection = mojom::HidCollectionInfo::New();
   collection->usage = mojom::HidUsageAndPage::New(0, 0);
-  scoped_refptr<HidDeviceInfo> device_info(new HidDeviceInfo(
-      kTestDeviceId, 0x1234, 0xabcd, "Invalipad", "",
-      mojom::HidBusType::kHIDBusTypeUSB, std::move(collection), 0, 0, 0));
+  auto device_info = base::MakeRefCounted<HidDeviceInfo>(
+      kTestDeviceId, kPhysicalDeviceId, "interface id", /*vendor_id=*/0x1234,
+      /*product_id=*/0xabcd, "Invalipad", /*serial_number=*/"",
+      mojom::HidBusType::kHIDBusTypeUSB, std::move(collection),
+      /*max_input_report_size=*/0, /*max_output_report_size=*/0,
+      /*max_feature_report_size=*/0);
 
   // Add the device to the mock HID service. The HID service should notify the
   // data fetcher.
@@ -110,13 +120,16 @@ TEST_F(NintendoDataFetcherTest, MAYBE_UnsupportedDeviceIsIgnored) {
   RunUntilIdle();
 }
 
-TEST_F(NintendoDataFetcherTest, MAYBE_AddAndRemoveSwitchPro) {
+TEST_F(NintendoDataFetcherTest, AddAndRemoveSwitchPro) {
   // Simulate a Switch Pro over USB.
   auto collection = mojom::HidCollectionInfo::New();
   collection->usage = mojom::HidUsageAndPage::New(0, 0);
-  scoped_refptr<HidDeviceInfo> device_info(new HidDeviceInfo(
-      kTestDeviceId, 0x057e, 0x2009, "Switch Pro Controller", "",
-      mojom::HidBusType::kHIDBusTypeUSB, std::move(collection), 0, 63, 0));
+  auto device_info = base::MakeRefCounted<HidDeviceInfo>(
+      kTestDeviceId, kPhysicalDeviceId, "interface id", /*vendor_id=*/0x057e,
+      /*product_id=*/0x2009, "Switch Pro Controller", /*serial_number=*/"",
+      mojom::HidBusType::kHIDBusTypeUSB, std::move(collection),
+      /*max_input_report_size=*/0, /*max_output_report_size=*/63,
+      /*max_feature_report_size=*/0);
 
   // Add the device to the mock HID service. The HID service should notify the
   // data fetcher.

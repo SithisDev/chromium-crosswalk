@@ -1,14 +1,15 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_attach_helper.h"
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/memory/ptr_util.h"
 #include "base/no_destructor.h"
-#include "base/task/post_task.h"
+#include "base/strings/stringprintf.h"
 #include "base/unguessable_token.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -17,11 +18,10 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/mime_handler_view_mode.h"
 #include "content/public/common/webplugininfo.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_embedder.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
-#include "extensions/common/guest_view/extensions_guest_view_messages.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -41,9 +41,10 @@ namespace {
 const char kFullPageMimeHandlerViewHTML[] =
     "<!doctype html><html><body style='height: 100%%; width: 100%%; overflow: "
     "hidden; margin:0px; background-color: rgb(%d, %d, %d);'><embed "
+    "name='%s' "
     "style='position:absolute; left: 0; top: 0;'width='100%%' height='100%%'"
     " src='about:blank' type='%s' "
-    "internalid='%s'></embed></body></html>";
+    "internalid='%s'></body></html>";
 const uint32_t kFullPageMimeHandlerViewDataPipeSize = 512U;
 
 SkColor GetBackgroundColorStringForMimeType(const GURL& url,
@@ -93,20 +94,18 @@ bool MimeHandlerViewAttachHelper::OverrideBodyForInterceptedResponse(
     std::string* payload,
     uint32_t* data_pipe_size,
     base::OnceClosure resume_load) {
-  if (!content::MimeHandlerViewMode::UsesCrossProcessFrame())
-    return false;
   auto color = GetBackgroundColorStringForMimeType(resource_url, mime_type);
   std::string token = base::UnguessableToken::Create().ToString();
   auto html_str = base::StringPrintf(
       kFullPageMimeHandlerViewHTML, SkColorGetR(color), SkColorGetG(color),
-      SkColorGetB(color), mime_type.c_str(), token.c_str());
+      SkColorGetB(color), token.c_str(), mime_type.c_str(), token.c_str());
   payload->assign(html_str);
   *data_pipe_size = kFullPageMimeHandlerViewDataPipeSize;
-  base::PostTaskWithTraitsAndReply(
-      FROM_HERE, {BrowserThread::UI},
+  content::GetUIThreadTaskRunner({})->PostTaskAndReply(
+      FROM_HERE,
       base::BindOnce(CreateFullPageMimeHandlerView,
-                     navigating_frame_tree_node_id, resource_url, mime_type,
-                     stream_id, token),
+                     navigating_frame_tree_node_id, resource_url, stream_id,
+                     token),
       std::move(resume_load));
   return true;
 }
@@ -136,11 +135,10 @@ void MimeHandlerViewAttachHelper::AttachToOuterWebContents(
 void MimeHandlerViewAttachHelper::CreateFullPageMimeHandlerView(
     int32_t frame_tree_node_id,
     const GURL& resource_url,
-    const std::string& mime_type,
     const std::string& stream_id,
     const std::string& token) {
-  MimeHandlerViewEmbedder::Create(frame_tree_node_id, resource_url, mime_type,
-                                  stream_id, token);
+  MimeHandlerViewEmbedder::Create(frame_tree_node_id, resource_url, stream_id,
+                                  token);
 }
 
 MimeHandlerViewAttachHelper::MimeHandlerViewAttachHelper(
@@ -155,13 +153,22 @@ void MimeHandlerViewAttachHelper::ResumeAttachOrDestroy(
     int32_t element_instance_id,
     bool is_full_page_plugin,
     content::RenderFrameHost* plugin_rfh) {
+  if (resume_attach_callback_for_testing_) {
+    std::move(resume_attach_callback_for_testing_)
+        .Run(base::BindOnce(&MimeHandlerViewAttachHelper::ResumeAttachOrDestroy,
+                            weak_factory_.GetWeakPtr(), element_instance_id,
+                            is_full_page_plugin, plugin_rfh));
+    return;
+  }
+
   DCHECK(!plugin_rfh || (plugin_rfh->GetProcess() == render_process_host_));
   auto guest_view = pending_guests_[element_instance_id];
   pending_guests_.erase(element_instance_id);
   if (!guest_view)
     return;
   if (!plugin_rfh) {
-    mojom::MimeHandlerViewContainerManagerAssociatedPtr container_manager;
+    mojo::AssociatedRemote<mojom::MimeHandlerViewContainerManager>
+        container_manager;
     guest_view->GetEmbedderFrame()
         ->GetRemoteAssociatedInterfaces()
         ->GetInterface(&container_manager);
@@ -170,6 +177,7 @@ void MimeHandlerViewAttachHelper::ResumeAttachOrDestroy(
     return;
   }
   guest_view->AttachToOuterWebContentsFrame(plugin_rfh, element_instance_id,
-                                            is_full_page_plugin);
+                                            is_full_page_plugin,
+                                            base::NullCallback());
 }
 }  // namespace extensions

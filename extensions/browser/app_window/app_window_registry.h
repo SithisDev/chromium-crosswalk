@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
@@ -80,9 +81,6 @@ class AppWindowRegistry : public KeyedService,
   AppWindowList GetAppWindowsForApp(const std::string& app_id) const;
   const AppWindowList& app_windows() const { return app_windows_; }
 
-  // Close all app windows associated with an app.
-  void CloseAllAppWindowsForApp(const std::string& app_id);
-
   // Helper functions to find app windows with particular attributes.
   AppWindow* GetAppWindowForWebContents(
       const content::WebContents* web_contents) const;
@@ -121,7 +119,6 @@ class AppWindowRegistry : public KeyedService,
     KeyedService* BuildServiceInstanceFor(
         content::BrowserContext* context) const override;
     bool ServiceIsCreatedWithBrowserContext() const override;
-    bool ServiceIsNULLWhileTesting() const override;
     content::BrowserContext* GetBrowserContextToUse(
         content::BrowserContext* context) const override;
   };
@@ -151,7 +148,7 @@ class AppWindowRegistry : public KeyedService,
   void DevToolsAgentHostDetached(
       content::DevToolsAgentHost* agent_host) override;
 
-  content::BrowserContext* context_;
+  raw_ptr<content::BrowserContext> context_;
   AppWindowList app_windows_;
   InspectedWindowSet inspected_windows_;
   base::ObserverList<Observer> observers_;

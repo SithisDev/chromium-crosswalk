@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "device/gamepad/gamepad_service.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/self_owned_receiver.h"
 
 namespace device {
 
@@ -18,9 +18,9 @@ GamepadHapticsManager::~GamepadHapticsManager() = default;
 
 // static
 void GamepadHapticsManager::Create(
-    mojom::GamepadHapticsManagerRequest request) {
-  mojo::MakeStrongBinding(std::make_unique<GamepadHapticsManager>(),
-                          std::move(request));
+    mojo::PendingReceiver<mojom::GamepadHapticsManager> receiver) {
+  mojo::MakeSelfOwnedReceiver(std::make_unique<GamepadHapticsManager>(),
+                              std::move(receiver));
 }
 
 void GamepadHapticsManager::PlayVibrationEffectOnce(

@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,8 +23,7 @@ namespace device {
 U2fSignOperation::U2fSignOperation(FidoDevice* device,
                                    const CtapGetAssertionRequest& request,
                                    DeviceResponseCallback callback)
-    : DeviceOperation(device, request, std::move(callback)),
-      weak_factory_(this) {}
+    : DeviceOperation(device, request, std::move(callback)) {}
 
 U2fSignOperation::~U2fSignOperation() = default;
 
@@ -35,12 +34,12 @@ void U2fSignOperation::Start() {
       // authenticator (at least) crashes if we try the wrong AppID first.
       app_param_type_ = ApplicationParameterType::kAlternative;
     }
-    TrySign();
+    WinkAndTrySign();
   } else {
     // In order to make U2F authenticators blink on sign request with an empty
     // allow list, we send fake enrollment to the device and error out when the
     // user has provided presence.
-    TryFakeEnrollment();
+    WinkAndTryFakeEnrollment();
   }
 }
 
@@ -48,15 +47,20 @@ void U2fSignOperation::Cancel() {
   canceled_ = true;
 }
 
+void U2fSignOperation::WinkAndTrySign() {
+  device()->TryWink(
+      base::BindOnce(&U2fSignOperation::TrySign, weak_factory_.GetWeakPtr()));
+}
+
 void U2fSignOperation::TrySign() {
-  DispatchDeviceRequest(
+  DispatchU2FCommand(
       ConvertToU2fSignCommand(request(), app_param_type_, key_handle()),
       base::BindOnce(&U2fSignOperation::OnSignResponseReceived,
                      weak_factory_.GetWeakPtr()));
 }
 
 void U2fSignOperation::OnSignResponseReceived(
-    base::Optional<std::vector<uint8_t>> device_response) {
+    absl::optional<std::vector<uint8_t>> device_response) {
   if (canceled_) {
     return;
   }
@@ -65,7 +69,7 @@ void U2fSignOperation::OnSignResponseReceived(
   const auto apdu_response =
       device_response
           ? apdu::ApduResponse::CreateFromMessage(std::move(*device_response))
-          : base::nullopt;
+          : absl::nullopt;
   if (apdu_response) {
     result = apdu_response->status();
   }
@@ -89,7 +93,7 @@ void U2fSignOperation::OnSignResponseReceived(
               key_handle());
       if (!sign_response) {
         std::move(callback())
-            .Run(CtapDeviceResponseCode::kCtap2ErrOther, base::nullopt);
+            .Run(CtapDeviceResponseCode::kCtap2ErrOther, absl::nullopt);
         return;
       }
 
@@ -108,13 +112,13 @@ void U2fSignOperation::OnSignResponseReceived(
         // |application_parameter_| failed, but there is also
         // the primary value to try.
         app_param_type_ = ApplicationParameterType::kPrimary;
-        TrySign();
+        WinkAndTrySign();
       } else if (++current_key_handle_index_ < request().allow_list.size()) {
         // Key is not for this device. Try signing with the next key.
         if (request().alternative_application_parameter.has_value()) {
           app_param_type_ = ApplicationParameterType::kAlternative;
         }
-        TrySign();
+        WinkAndTrySign();
       } else {
         // No provided key was accepted by this device. Send registration
         // (i.e. fake enroll) request to device.
@@ -126,7 +130,7 @@ void U2fSignOperation::OnSignResponseReceived(
       // Waiting for user touch. Retry after 200 milliseconds delay.
       base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
           FROM_HERE,
-          base::BindOnce(&U2fSignOperation::TrySign,
+          base::BindOnce(&U2fSignOperation::WinkAndTrySign,
                          weak_factory_.GetWeakPtr()),
           kU2fRetryDelay);
       break;
@@ -134,20 +138,25 @@ void U2fSignOperation::OnSignResponseReceived(
     default:
       // Some sort of failure occurred. Abandon this device and move on.
       std::move(callback())
-          .Run(CtapDeviceResponseCode::kCtap2ErrOther, base::nullopt);
+          .Run(CtapDeviceResponseCode::kCtap2ErrOther, absl::nullopt);
       return;
   }
 }
 
+void U2fSignOperation::WinkAndTryFakeEnrollment() {
+  device()->TryWink(base::BindOnce(&U2fSignOperation::TryFakeEnrollment,
+                                   weak_factory_.GetWeakPtr()));
+}
+
 void U2fSignOperation::TryFakeEnrollment() {
-  DispatchDeviceRequest(
+  DispatchU2FCommand(
       ConstructBogusU2fRegistrationCommand(),
       base::BindOnce(&U2fSignOperation::OnEnrollmentResponseReceived,
                      weak_factory_.GetWeakPtr()));
 }
 
 void U2fSignOperation::OnEnrollmentResponseReceived(
-    base::Optional<std::vector<uint8_t>> device_response) {
+    absl::optional<std::vector<uint8_t>> device_response) {
   if (canceled_) {
     return;
   }
@@ -164,7 +173,7 @@ void U2fSignOperation::OnEnrollmentResponseReceived(
   switch (result) {
     case apdu::ApduResponse::Status::SW_NO_ERROR:
       std::move(callback())
-          .Run(CtapDeviceResponseCode::kCtap2ErrNoCredentials, base::nullopt);
+          .Run(CtapDeviceResponseCode::kCtap2ErrNoCredentials, absl::nullopt);
       break;
 
     case apdu::ApduResponse::Status::SW_CONDITIONS_NOT_SATISFIED:
@@ -179,14 +188,14 @@ void U2fSignOperation::OnEnrollmentResponseReceived(
     default:
       // Some sort of failure occurred. Abandon this device and move on.
       std::move(callback())
-          .Run(CtapDeviceResponseCode::kCtap2ErrOther, base::nullopt);
+          .Run(CtapDeviceResponseCode::kCtap2ErrOther, absl::nullopt);
       return;
   }
 }
 
 const std::vector<uint8_t>& U2fSignOperation::key_handle() const {
   DCHECK_LT(current_key_handle_index_, request().allow_list.size());
-  return request().allow_list.at(current_key_handle_index_).id();
+  return request().allow_list.at(current_key_handle_index_).id;
 }
 
 }  // namespace device

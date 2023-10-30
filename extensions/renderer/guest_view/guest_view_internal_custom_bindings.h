@@ -1,11 +1,9 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef EXTENSIONS_RENDERER_GUEST_VIEW_GUEST_VIEW_INTERNAL_CUSTOM_BINDINGS_H_
 #define EXTENSIONS_RENDERER_GUEST_VIEW_GUEST_VIEW_INTERNAL_CUSTOM_BINDINGS_H_
-
-#include <map>
 
 #include "extensions/renderer/object_backed_native_handler.h"
 
@@ -25,10 +23,10 @@ class GuestViewInternalCustomBindings : public ObjectBackedNativeHandler {
   // weak view reference held in |view_map_|.
   static void ResetMapEntry(const v8::WeakCallbackInfo<int>& data);
 
-  // AttachGuest attaches a GuestView to a provided container element. Once
-  // attached, the GuestView will participate in layout of the container page
-  // and become visible on screen.
-  // AttachGuest takes four parameters:
+  // AttachIframeGuest attaches a GuestView to a provided <iframe> container
+  // element. Once attached, the GuestView will participate in layout of the
+  // container page and become visible on screen.
+  // AttachIframeGuest takes five parameters:
   // |element_instance_id| uniquely identifies a container within the content
   // module is able to host GuestViews.
   // |guest_instance_id| uniquely identifies an unattached GuestView.
@@ -36,29 +34,12 @@ class GuestViewInternalCustomBindings : public ObjectBackedNativeHandler {
   // container element at the time of attachment. These parameters are passed
   // down to the GuestView. The GuestView may use these parameters to update the
   // state of the guest hosted in another process.
+  // |contentWindow| is used to identify the RenderFrame of the <iframe>
+  // container element.
   // |callback| is an optional callback that is called once attachment is
   // complete. The callback takes in a parameter for the WindowProxy of the
   // guest identified by |guest_instance_id|.
-  void AttachGuest(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // DetachGuest detaches the container container specified from the associated
-  // GuestViewBase. DetachGuest takes two parameters:
-  // |element_instance_id| uniquely identifies a container within the content
-  // module is able to host GuestViews.
-  // |callback| is an optional callback that is called once the container has
-  // been detached.
-  void DetachGuest(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // AttachIframeGuest is --site-per-process variant of AttachGuest().
-  //
-  // AttachIframeGuest takes a |contentWindow| parameter in addition to the
-  // parameters to AttachGuest. That parameter is used to identify the
-  // RenderFrame of the <iframe> container element.
   void AttachIframeGuest(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  // GetContentWindow takes in a RenderView routing ID and returns the
-  // Window JavaScript object for that RenderView.
-  void GetContentWindow(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Destroys the GuestViewContainer given an element instance ID in |args|.
   void DestroyContainer(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -95,7 +76,7 @@ class GuestViewInternalCustomBindings : public ObjectBackedNativeHandler {
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // Runs a JavaScript function that may use window.customElements.define
-  // with whitelisted custom element names.
+  // with allowlisted custom element names.
   void AllowGuestViewElementDefinition(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 };

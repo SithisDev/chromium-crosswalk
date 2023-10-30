@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,17 +38,17 @@ const ExtensionIconSet& IconsInfo::GetIcons(const Extension* extension) {
 // static
 ExtensionResource IconsInfo::GetIconResource(
     const Extension* extension,
-    int size,
+    int size_in_px,
     ExtensionIconSet::MatchType match_type) {
-  const std::string& path = GetIcons(extension).Get(size, match_type);
+  const std::string& path = GetIcons(extension).Get(size_in_px, match_type);
   return path.empty() ? ExtensionResource() : extension->GetResource(path);
 }
 
 // static
 GURL IconsInfo::GetIconURL(const Extension* extension,
-                           int size,
+                           int size_in_px,
                            ExtensionIconSet::MatchType match_type) {
-  const std::string& path = GetIcons(extension).Get(size, match_type);
+  const std::string& path = GetIcons(extension).Get(size_in_px, match_type);
   return path.empty() ? GURL() : extension->GetResourceURL(path);
 }
 
@@ -58,11 +58,11 @@ IconsHandler::IconsHandler() {
 IconsHandler::~IconsHandler() {
 }
 
-bool IconsHandler::Parse(Extension* extension, base::string16* error) {
+bool IconsHandler::Parse(Extension* extension, std::u16string* error) {
   std::unique_ptr<IconsInfo> icons_info(new IconsInfo);
   const base::Value* icons_dict = nullptr;
   if (!extension->manifest()->GetDictionary(keys::kIcons, &icons_dict)) {
-    *error = base::ASCIIToUTF16(manifest_errors::kInvalidIcons);
+    *error = manifest_errors::kInvalidIcons;
     return false;
   }
 
@@ -81,7 +81,7 @@ bool IconsHandler::Validate(const Extension* extension,
   // Analyze the icons for visibility using the default toolbar color, since
   // the majority of Chrome users don't modify their theme.
   return file_util::ValidateExtensionIconSet(
-      IconsInfo::GetIcons(extension), extension, IDS_EXTENSION_LOAD_ICON_FAILED,
+      IconsInfo::GetIcons(extension), extension, manifest_keys::kIcons,
       image_util::kDefaultToolbarColor, error);
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,12 @@
 
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "extensions/browser/api_test_utils.h"
 #include "extensions/browser/api_unittest.h"
+#include "extensions/browser/unloaded_extension_reason.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_builder.h"
 #include "services/device/public/mojom/wake_lock.mojom.h"
@@ -48,11 +49,14 @@ class FakeWakeLockManager {
       : browser_context_(context), is_active_(false) {
     PowerAPI::Get(browser_context_)
         ->SetWakeLockFunctionsForTesting(
-            base::Bind(&FakeWakeLockManager::ActivateWakeLock,
-                       base::Unretained(this)),
-            base::Bind(&FakeWakeLockManager::CancelWakeLock,
-                       base::Unretained(this)));
+            base::BindRepeating(&FakeWakeLockManager::ActivateWakeLock,
+                                base::Unretained(this)),
+            base::BindRepeating(&FakeWakeLockManager::CancelWakeLock,
+                                base::Unretained(this)));
   }
+
+  FakeWakeLockManager(const FakeWakeLockManager&) = delete;
+  FakeWakeLockManager& operator=(const FakeWakeLockManager&) = delete;
 
   ~FakeWakeLockManager() {
     PowerAPI::Get(browser_context_)
@@ -133,15 +137,13 @@ class FakeWakeLockManager {
     is_active_ = false;
   }
 
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
 
   device::mojom::WakeLockType type_;
   bool is_active_;
 
   // Requests in chronological order.
   base::circular_deque<Request> requests_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeWakeLockManager);
 };
 
 }  // namespace
@@ -150,7 +152,7 @@ class PowerAPITest : public ApiUnitTest {
  public:
   void SetUp() override {
     ApiUnitTest::SetUp();
-    manager_.reset(new FakeWakeLockManager(browser_context()));
+    manager_ = std::make_unique<FakeWakeLockManager>(browser_context());
   }
 
   void TearDown() override {
@@ -171,12 +173,11 @@ class PowerAPITest : public ApiUnitTest {
   bool CallFunction(FunctionType type,
                     const std::string& args,
                     const extensions::Extension* extension) {
-    scoped_refptr<UIThreadExtensionFunction> function(
-        type == REQUEST ?
-        static_cast<UIThreadExtensionFunction*>(
-            new PowerRequestKeepAwakeFunction) :
-        static_cast<UIThreadExtensionFunction*>(
-            new PowerReleaseKeepAwakeFunction));
+    scoped_refptr<ExtensionFunction> function(
+        type == REQUEST
+            ? static_cast<ExtensionFunction*>(new PowerRequestKeepAwakeFunction)
+            : static_cast<ExtensionFunction*>(
+                  new PowerReleaseKeepAwakeFunction));
     function->set_extension(extension);
     return api_test_utils::RunFunction(function.get(), args, browser_context());
   }

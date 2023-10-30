@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,13 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/memory/raw_ptr.h"
+#include "base/task/single_thread_task_runner.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/api/power.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/wake_lock.mojom.h"
 
 namespace content {
@@ -25,7 +26,7 @@ class BrowserContext;
 namespace extensions {
 
 // Implementation of the chrome.power.requestKeepAwake API.
-class PowerRequestKeepAwakeFunction : public UIThreadExtensionFunction {
+class PowerRequestKeepAwakeFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("power.requestKeepAwake", POWER_REQUESTKEEPAWAKE)
 
@@ -37,7 +38,7 @@ class PowerRequestKeepAwakeFunction : public UIThreadExtensionFunction {
 };
 
 // Implementation of the chrome.power.releaseKeepAwake API.
-class PowerReleaseKeepAwakeFunction : public UIThreadExtensionFunction {
+class PowerReleaseKeepAwakeFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("power.releaseKeepAwake", POWER_RELEASEKEEPAWAKE)
 
@@ -54,9 +55,12 @@ class PowerReleaseKeepAwakeFunction : public UIThreadExtensionFunction {
 class PowerAPI : public BrowserContextKeyedAPI,
                  public extensions::ExtensionRegistryObserver {
  public:
-  typedef base::Callback<void(device::mojom::WakeLockType)>
-      ActivateWakeLockFunction;
-  typedef base::Callback<void()> CancelWakeLockFunction;
+  using ActivateWakeLockFunction =
+      base::RepeatingCallback<void(device::mojom::WakeLockType)>;
+  using CancelWakeLockFunction = base::RepeatingCallback<void()>;
+
+  PowerAPI(const PowerAPI&) = delete;
+  PowerAPI& operator=(const PowerAPI&) = delete;
 
   static PowerAPI* Get(content::BrowserContext* context);
 
@@ -81,8 +85,8 @@ class PowerAPI : public BrowserContextKeyedAPI,
   // Replaces the functions that will be called to activate and cancel the wake
   // lock. Passing empty callbacks will revert to the default.
   void SetWakeLockFunctionsForTesting(
-      const ActivateWakeLockFunction& activate_function,
-      const CancelWakeLockFunction& cancel_function);
+      ActivateWakeLockFunction activate_function,
+      CancelWakeLockFunction cancel_function);
 
   // Overridden from extensions::ExtensionRegistryObserver.
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
@@ -118,7 +122,7 @@ class PowerAPI : public BrowserContextKeyedAPI,
   // created only once at the first time the GetWakeLock() is called.
   device::mojom::WakeLock* GetWakeLock();
 
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
 
   // Functions that should be called to activate and cancel the wake lock.
   // Tests can change this to record what would've been done instead of
@@ -126,7 +130,7 @@ class PowerAPI : public BrowserContextKeyedAPI,
   ActivateWakeLockFunction activate_wake_lock_function_;
   CancelWakeLockFunction cancel_wake_lock_function_;
 
-  device::mojom::WakeLockPtr wake_lock_;
+  mojo::Remote<device::mojom::WakeLock> wake_lock_;
   bool is_wake_lock_active_;
 
   // Current level used by wake lock.
@@ -134,8 +138,6 @@ class PowerAPI : public BrowserContextKeyedAPI,
 
   // Outstanding requests.
   ExtensionLevelMap extension_levels_;
-
-  DISALLOW_COPY_AND_ASSIGN(PowerAPI);
 };
 
 }  // namespace extensions

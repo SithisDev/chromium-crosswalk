@@ -1,10 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef DEVICE_BLUETOOTH_GATT_RESULT_TYPE_CONVERTER_H_
-#define DEVICE_BLUETOOTH_GATT_RESULT_TYPE_CONVERTER_H_
+#ifndef DEVICE_BLUETOOTH_PUBLIC_MOJOM_GATT_RESULT_TYPE_CONVERTER_H_
+#define DEVICE_BLUETOOTH_PUBLIC_MOJOM_GATT_RESULT_TYPE_CONVERTER_H_
 
+#include "base/notreached.h"
 #include "device/bluetooth/bluetooth_gatt_service.h"
 #include "device/bluetooth/public/mojom/device.mojom.h"
 #include "mojo/public/cpp/bindings/type_converter.h"
@@ -49,4 +50,4 @@ struct TypeConverter<bluetooth::mojom::GattResult,
 };
 }  // namespace mojo
 
-#endif  // DEVICE_BLUETOOTH_GATT_RESULT_TYPE_CONVERTER_H_
+#endif  // DEVICE_BLUETOOTH_PUBLIC_MOJOM_GATT_RESULT_TYPE_CONVERTER_H_

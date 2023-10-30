@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,9 +17,8 @@ void FakeVRDeviceProvider::AddDevice(std::unique_ptr<VRDeviceBase> device) {
   VRDeviceBase* device_base = static_cast<VRDeviceBase*>(device.get());
   devices_.push_back(std::move(device));
   if (initialized_)
-    add_device_callback_.Run(device_base->GetId(),
-                             device_base->GetVRDisplayInfo(),
-                             device_base->BindXRRuntimePtr());
+    client_->AddRuntime(device_base->GetId(), device_base->GetDeviceData(),
+                        device_base->BindXRRuntime());
 }
 
 void FakeVRDeviceProvider::RemoveDevice(mojom::XRDeviceId device_id) {
@@ -29,27 +28,20 @@ void FakeVRDeviceProvider::RemoveDevice(mojom::XRDeviceId device_id) {
         return static_cast<VRDeviceBase*>(device.get())->GetId() == device_id;
       });
   if (initialized_)
-    remove_device_callback_.Run(device_id);
+    client_->RemoveRuntime(device_id);
   devices_.erase(it);
 }
 
-void FakeVRDeviceProvider::Initialize(
-    base::RepeatingCallback<void(mojom::XRDeviceId,
-                                 mojom::VRDisplayInfoPtr,
-                                 mojom::XRRuntimePtr)> add_device_callback,
-    base::RepeatingCallback<void(mojom::XRDeviceId)> remove_device_callback,
-    base::OnceClosure initialization_complete) {
-  add_device_callback_ = std::move(add_device_callback);
-  remove_device_callback_ = std::move(remove_device_callback);
+void FakeVRDeviceProvider::Initialize(VRDeviceProviderClient* client) {
+  client_ = client;
 
   for (std::unique_ptr<VRDeviceBase>& device : devices_) {
     auto* device_base = static_cast<VRDeviceBase*>(device.get());
-    add_device_callback_.Run(device_base->GetId(),
-                             device_base->GetVRDisplayInfo(),
-                             device_base->BindXRRuntimePtr());
+    client_->AddRuntime(device_base->GetId(), device_base->GetDeviceData(),
+                        device_base->BindXRRuntime());
   }
   initialized_ = true;
-  std::move(initialization_complete).Run();
+  client_->OnProviderInitialized();
 }
 
 bool FakeVRDeviceProvider::Initialized() {

@@ -1,14 +1,18 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/renderer/native_renderer_messaging_service.h"
 
 #include <map>
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/contains.h"
 #include "base/supports_user_data.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/renderer/render_frame.h"
@@ -17,10 +21,12 @@
 #include "extensions/common/api/messaging/messaging_endpoint.h"
 #include "extensions/common/api/messaging/port_id.h"
 #include "extensions/common/extension_messages.h"
+#include "extensions/common/features/feature.h"
 #include "extensions/common/manifest_handlers/externally_connectable.h"
 #include "extensions/renderer/api_activity_logger.h"
 #include "extensions/renderer/bindings/api_binding_util.h"
 #include "extensions/renderer/bindings/get_per_context_data.h"
+#include "extensions/renderer/extension_interaction_provider.h"
 #include "extensions/renderer/get_script_context.h"
 #include "extensions/renderer/ipc_message_sender.h"
 #include "extensions/renderer/message_target.h"
@@ -32,12 +38,15 @@
 #include "gin/data_object_builder.h"
 #include "gin/handle.h"
 #include "gin/per_context_data.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_local_frame.h"
-#include "third_party/blink/public/web/web_scoped_user_gesture.h"
 #include "third_party/blink/public/web/web_scoped_window_focus_allowed_indicator.h"
-#include "third_party/blink/public/web/web_user_gesture_indicator.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-local-handle.h"
+#include "v8/include/v8-persistent-handle.h"
+
+using blink::mojom::UserActivationNotificationType;
 
 namespace extensions {
 
@@ -90,8 +99,9 @@ void NativeRendererMessagingService::ValidateMessagePort(
   // synchronous.
   context_set->ForEach(
       render_frame,
-      base::Bind(&NativeRendererMessagingService::ValidateMessagePortInContext,
-                 base::Unretained(this), port_id, &has_port));
+      base::BindRepeating(
+          &NativeRendererMessagingService::ValidateMessagePortInContext,
+          base::Unretained(this), port_id, &has_port));
 
   // A reply is only sent if the port is missing, because the port is assumed to
   // exist unless stated otherwise.
@@ -115,7 +125,7 @@ void NativeRendererMessagingService::DispatchOnConnect(
   bool port_created = false;
   context_set->ForEach(
       info.target_id, restrict_to_render_frame,
-      base::Bind(
+      base::BindRepeating(
           &NativeRendererMessagingService::DispatchOnConnectToScriptContext,
           base::Unretained(this), target_port_id, channel_name, &source, info,
           &port_created));
@@ -136,8 +146,9 @@ void NativeRendererMessagingService::DeliverMessage(
     content::RenderFrame* restrict_to_render_frame) {
   context_set->ForEach(
       restrict_to_render_frame,
-      base::Bind(&NativeRendererMessagingService::DeliverMessageToScriptContext,
-                 base::Unretained(this), message, target_port_id));
+      base::BindRepeating(
+          &NativeRendererMessagingService::DeliverMessageToScriptContext,
+          base::Unretained(this), message, target_port_id));
 }
 
 void NativeRendererMessagingService::DispatchOnDisconnect(
@@ -147,7 +158,7 @@ void NativeRendererMessagingService::DispatchOnDisconnect(
     content::RenderFrame* restrict_to_render_frame) {
   context_set->ForEach(
       restrict_to_render_frame,
-      base::Bind(
+      base::BindRepeating(
           &NativeRendererMessagingService::DispatchOnDisconnectToScriptContext,
           base::Unretained(this), port_id, error_message));
 }
@@ -156,7 +167,7 @@ gin::Handle<GinPort> NativeRendererMessagingService::Connect(
     ScriptContext* script_context,
     const MessageTarget& target,
     const std::string& channel_name,
-    bool include_tls_channel_id) {
+    SerializationFormat format) {
   if (!ScriptContextIsValid(script_context))
     return gin::Handle<GinPort>();
 
@@ -166,35 +177,44 @@ gin::Handle<GinPort> NativeRendererMessagingService::Connect(
     return gin::Handle<GinPort>();
 
   bool is_opener = true;
-  gin::Handle<GinPort> port = CreatePort(
-      script_context, channel_name,
-      PortId(script_context->context_id(), data->next_port_id++, is_opener));
+  gin::Handle<GinPort> port =
+      CreatePort(script_context, channel_name,
+                 PortId(script_context->context_id(), data->next_port_id++,
+                        is_opener, format));
 
   bindings_system_->GetIPCMessageSender()->SendOpenMessageChannel(
-      script_context, port->port_id(), target, channel_name,
-      include_tls_channel_id);
+      script_context, port->port_id(), target, channel_name);
   return port;
 }
 
-void NativeRendererMessagingService::SendOneTimeMessage(
+v8::Local<v8::Promise> NativeRendererMessagingService::SendOneTimeMessage(
     ScriptContext* script_context,
     const MessageTarget& target,
     const std::string& method_name,
-    bool include_tls_channel_id,
     const Message& message,
+    binding::AsyncResponseType async_type,
     v8::Local<v8::Function> response_callback) {
   if (!ScriptContextIsValid(script_context))
-    return;
+    return v8::Local<v8::Promise>();
 
   MessagingPerContextData* data = GetPerContextData<MessagingPerContextData>(
       script_context->v8_context(), kCreateIfMissing);
 
   bool is_opener = true;
-  PortId port_id(script_context->context_id(), data->next_port_id++, is_opener);
 
-  one_time_message_handler_.SendMessage(script_context, port_id, target,
-                                        method_name, include_tls_channel_id,
-                                        message, response_callback);
+  // TODO(crbug.com/248548): Instead of inferring the SerializationFormat from
+  // Message, it'd be better to have the clients pass it directly. This is
+  // because, in case of `kStructuredCloned` to `kJson` fallback, the format for
+  // the ports will also be `kJson`. This is inconsistent with what we do for
+  // ports for long-lived channels where the port's `SerializationFormat` is
+  // always the same as that passed by messaging clients and is independent of
+  // any fallback behavior.
+  PortId port_id(script_context->context_id(), data->next_port_id++, is_opener,
+                 message.format);
+
+  return one_time_message_handler_.SendMessage(script_context, port_id, target,
+                                               method_name, message, async_type,
+                                               response_callback);
 }
 
 void NativeRendererMessagingService::PostMessageToPort(
@@ -316,19 +336,65 @@ void NativeRendererMessagingService::DeliverMessageToScriptContext(
   if (!ContextHasMessagePort(script_context, target_port_id))
     return;
 
-  std::unique_ptr<blink::WebScopedUserGesture> web_user_gesture;
+  if (script_context->IsForServiceWorker()) {
+    DeliverMessageToWorker(message, target_port_id, script_context);
+  } else {
+    DeliverMessageToBackgroundPage(message, target_port_id, script_context);
+  }
+}
+
+void NativeRendererMessagingService::DeliverMessageToWorker(
+    const Message& message,
+    const PortId& target_port_id,
+    ScriptContext* script_context) {
+  // Note |scoped_extension_interaction| requires a HandleScope.
+  v8::Isolate* isolate = script_context->isolate();
+  v8::HandleScope handle_scope(isolate);
+  std::unique_ptr<InteractionProvider::Scope> scoped_extension_interaction;
+  if (message.user_gesture) {
+    // TODO(https://crbug.com/977629): Add logging for privilege level for
+    // sender and receiver and decide if want to allow unprivileged to
+    // privileged support.
+    scoped_extension_interaction =
+        ExtensionInteractionProvider::Scope::ForWorker(
+            script_context->v8_context());
+  }
+
+  DispatchOnMessageToListeners(script_context, message, target_port_id);
+}
+
+void NativeRendererMessagingService::DeliverMessageToBackgroundPage(
+    const Message& message,
+    const PortId& target_port_id,
+    ScriptContext* script_context) {
   std::unique_ptr<blink::WebScopedWindowFocusAllowedIndicator>
       allow_window_focus;
-  if (message.user_gesture) {
-    web_user_gesture = std::make_unique<blink::WebScopedUserGesture>(
-        script_context->web_frame());
-
-    if (script_context->web_frame()) {
-      blink::WebDocument document = script_context->web_frame()->GetDocument();
-      allow_window_focus =
-          std::make_unique<blink::WebScopedWindowFocusAllowedIndicator>(
-              &document);
+  if (message.user_gesture && script_context->web_frame()) {
+    bool sender_is_privileged = message.from_privileged_context;
+    bool receiver_is_privileged =
+        script_context->context_type() ==
+        extensions::Feature::BLESSED_EXTENSION_CONTEXT;
+    UserActivationNotificationType notification_type;
+    if (sender_is_privileged && receiver_is_privileged) {
+      notification_type =
+          UserActivationNotificationType::kExtensionMessagingBothPrivileged;
+    } else if (sender_is_privileged && !receiver_is_privileged) {
+      notification_type =
+          UserActivationNotificationType::kExtensionMessagingSenderPrivileged;
+    } else if (!sender_is_privileged && receiver_is_privileged) {
+      notification_type =
+          UserActivationNotificationType::kExtensionMessagingReceiverPrivileged;
+    } else /* !sender_is_privileged && !receiver_is_privileged */ {
+      notification_type =
+          UserActivationNotificationType::kExtensionMessagingNeitherPrivileged;
     }
+
+    script_context->web_frame()->NotifyUserActivation(notification_type);
+
+    blink::WebDocument document = script_context->web_frame()->GetDocument();
+    allow_window_focus =
+        std::make_unique<blink::WebScopedWindowFocusAllowedIndicator>(
+            &document);
   }
 
   DispatchOnMessageToListeners(script_context, message, target_port_id);
@@ -377,14 +443,20 @@ void NativeRendererMessagingService::DispatchOnConnectToListeners(
   }
   if (!info.source_url.is_empty())
     sender_builder.Set("url", info.source_url.spec());
+  if (info.source_origin)
+    sender_builder.Set("origin", info.source_origin->Serialize());
   if (source->frame_id >= 0)
     sender_builder.Set("frameId", source->frame_id);
+  if (!source->document_id.empty())
+    sender_builder.Set("documentId", source->document_id);
+  if (!source->document_lifecycle.empty())
+    sender_builder.Set("documentLifecycle", source->document_lifecycle);
 
   const Extension* extension = script_context->extension();
   if (extension) {
     if (!source->tab.empty() && !extension->is_platform_app()) {
       sender_builder.Set("tab", content::V8ValueConverter::Create()->ToV8Value(
-                                    &source->tab, v8_context));
+                                    source->tab, v8_context));
     }
 
     ExternallyConnectableInfo* externally_connectable =
@@ -420,25 +492,22 @@ void NativeRendererMessagingService::DispatchOnConnectToListeners(
 
   if (binding::IsContextValid(v8_context) &&
       APIActivityLogger::IsLoggingEnabled()) {
-    auto activity_logging_args =
-        std::make_unique<base::Value>(base::Value::Type::LIST);
-    auto& list = activity_logging_args->GetList();
+    base::Value::List list;
     list.reserve(2u);
     if (info.source_endpoint.extension_id)
-      list.emplace_back(*info.source_endpoint.extension_id);
+      list.Append(*info.source_endpoint.extension_id);
     else if (info.source_endpoint.native_app_name)
-      list.emplace_back(*info.source_endpoint.native_app_name);
+      list.Append(*info.source_endpoint.native_app_name);
     else
-      list.emplace_back();
+      list.Append(base::Value());
 
     if (!info.source_url.is_empty())
-      list.emplace_back(info.source_url.spec());
+      list.Append(info.source_url.spec());
     else
-      list.emplace_back();
+      list.Append(base::Value());
 
-    APIActivityLogger::LogEvent(
-        script_context, event_name,
-        base::ListValue::From(std::move(activity_logging_args)));
+    APIActivityLogger::LogEvent(bindings_system_->GetIPCMessageSender(),
+                                script_context, event_name, std::move(list));
   }
 }
 

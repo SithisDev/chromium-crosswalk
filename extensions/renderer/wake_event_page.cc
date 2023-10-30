@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,9 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/check_op.h"
 #include "base/lazy_instance.h"
-#include "base/logging.h"
-#include "base/stl_util.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/worker_thread.h"
 #include "extensions/common/extension_messages.h"
@@ -21,10 +20,12 @@
 #include "extensions/renderer/v8_helpers.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-function.h"
+#include "v8/include/v8-persistent-handle.h"
+#include "v8/include/v8-primitive.h"
 
 namespace extensions {
-
-using namespace v8_helpers;
 
 namespace {
 
@@ -59,6 +60,10 @@ class WakeEventPage::WakeEventPageNativeHandler
                             base::Unretained(this)));
   }
 
+  WakeEventPageNativeHandler(const WakeEventPageNativeHandler&) = delete;
+  WakeEventPageNativeHandler& operator=(const WakeEventPageNativeHandler&) =
+      delete;
+
   ~WakeEventPageNativeHandler() override {}
 
  private:
@@ -80,8 +85,8 @@ class WakeEventPage::WakeEventPageNativeHandler
 
     make_request_.Run(
         extension_id,
-        base::Bind(&WakeEventPageNativeHandler::OnEventPageIsAwake,
-                   weak_ptr_factory_.GetWeakPtr(), base::Passed(&callback)));
+        base::BindOnce(&WakeEventPageNativeHandler::OnEventPageIsAwake,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   }
 
   void OnEventPageIsAwake(v8::Global<v8::Function> callback, bool success) {
@@ -91,13 +96,11 @@ class WakeEventPage::WakeEventPageNativeHandler
         v8::Boolean::New(isolate, success),
     };
     context()->SafeCallFunction(v8::Local<v8::Function>::New(isolate, callback),
-                                base::size(args), args);
+                                std::size(args), args);
   }
 
   MakeRequestCallback make_request_;
   base::WeakPtrFactory<WakeEventPageNativeHandler> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WakeEventPageNativeHandler);
 };
 
 // static
@@ -124,8 +127,8 @@ v8::Local<v8::Function> WakeEventPage::GetForContext(ScriptContext* context) {
 
   // Cache the imported function as a hidden property on the global object of
   // |v8_context|. Creating it isn't free.
-  v8::Local<v8::Private> kWakeEventPageKey =
-      v8::Private::ForApi(isolate, ToV8StringUnsafe(isolate, "WakeEventPage"));
+  v8::Local<v8::Private> kWakeEventPageKey = v8::Private::ForApi(
+      isolate, v8_helpers::ToV8StringUnsafe(isolate, "WakeEventPage"));
   v8::Local<v8::Value> wake_event_page;
   if (!v8_context->Global()
            ->GetPrivate(v8_context, kWakeEventPageKey)
@@ -134,13 +137,13 @@ v8::Local<v8::Function> WakeEventPage::GetForContext(ScriptContext* context) {
     // Implement this using a NativeHandler, which requires a function name
     // (arbitrary in this case). Handles own lifetime.
     WakeEventPageNativeHandler* native_handler = new WakeEventPageNativeHandler(
-        context, base::Bind(&WakeEventPage::MakeRequest,
-                            // Safe, owned by a LazyInstance.
-                            base::Unretained(this)));
+        context, base::BindRepeating(&WakeEventPage::MakeRequest,
+                                     // Safe, owned by a LazyInstance.
+                                     base::Unretained(this)));
     native_handler->Initialize();
 
     // Extract and cache the wake-event-page function from the native handler.
-    wake_event_page = GetPropertyUnsafe(
+    wake_event_page = v8_helpers::GetPropertyUnsafe(
         v8_context, native_handler->NewInstance(), kWakeEventPageFunctionName);
     v8_context->Global()
         ->SetPrivate(v8_context, kWakeEventPageKey, wake_event_page)
@@ -152,8 +155,8 @@ v8::Local<v8::Function> WakeEventPage::GetForContext(ScriptContext* context) {
 }
 
 WakeEventPage::RequestData::RequestData(int thread_id,
-                                        const OnResponseCallback& on_response)
-    : thread_id(thread_id), on_response(on_response) {}
+                                        OnResponseCallback on_response)
+    : thread_id(thread_id), on_response(std::move(on_response)) {}
 
 WakeEventPage::RequestData::~RequestData() {}
 
@@ -162,13 +165,13 @@ WakeEventPage::WakeEventPage() {}
 WakeEventPage::~WakeEventPage() {}
 
 void WakeEventPage::MakeRequest(const std::string& extension_id,
-                                const OnResponseCallback& on_response) {
+                                OnResponseCallback on_response) {
   static base::AtomicSequenceNumber sequence_number;
   int request_id = sequence_number.GetNext();
   {
     base::AutoLock lock(requests_lock_);
     requests_[request_id] = std::make_unique<RequestData>(
-        content::WorkerThread::GetCurrentId(), on_response);
+        content::WorkerThread::GetCurrentId(), std::move(on_response));
   }
   message_filter_->Send(
       new ExtensionHostMsg_WakeEventPage(request_id, extension_id));
@@ -196,11 +199,11 @@ void WakeEventPage::OnWakeEventPageResponse(int request_id, bool success) {
   if (request_data->thread_id == 0) {
     // Thread ID of 0 means it wasn't called on a worker thread, so safe to
     // call immediately.
-    request_data->on_response.Run(success);
+    std::move(request_data->on_response).Run(success);
   } else {
     content::WorkerThread::PostTask(
         request_data->thread_id,
-        base::Bind(request_data->on_response, success));
+        base::BindOnce(std::move(request_data->on_response), success));
   }
 }
 

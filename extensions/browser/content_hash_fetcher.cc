@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,7 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
-#include "base/macros.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/content_verifier/content_hash.h"
@@ -24,31 +22,42 @@
 #include "extensions/browser/verified_contents.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/file_util.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_errors.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/url_response_head.mojom.h"
 
 namespace extensions {
 
 namespace internals {
 
-ContentHashFetcher::ContentHashFetcher(const ContentHash::ExtensionKey& key,
-                                       ContentHash::FetchParams fetch_params)
-    : extension_key_(key),
-      fetch_params_(std::move(fetch_params)),
+ContentHashFetcher::ContentHashFetcher(ContentHash::FetchKey key)
+    : fetch_key_(std::move(key)),
       response_task_runner_(base::SequencedTaskRunnerHandle::Get()) {}
 
 void ContentHashFetcher::OnSimpleLoaderComplete(
     std::unique_ptr<std::string> response_body) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  VLOG(1) << "URLFetchComplete for " << extension_key_.extension_id
+  VLOG(1) << "URLFetchComplete for " << fetch_key_.extension_id
           << " is_success:" << !!response_body << " "
-          << fetch_params_.fetch_url.possibly_invalid_spec();
+          << fetch_key_.fetch_url.possibly_invalid_spec();
   DCHECK(hash_fetcher_callback_);
+  DCHECK(simple_loader_);
+  bool report_http_response_code =
+      (simple_loader_->NetError() == net::OK ||
+       simple_loader_->NetError() == net::ERR_HTTP_RESPONSE_CODE_FAILURE) &&
+      simple_loader_->ResponseInfo() && simple_loader_->ResponseInfo()->headers;
   response_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(std::move(hash_fetcher_callback_),
-                                extension_key_, std::move(response_body)));
+      FROM_HERE,
+      base::BindOnce(
+          std::move(hash_fetcher_callback_), std::move(fetch_key_),
+          std::move(response_body),
+          report_http_response_code
+              ? simple_loader_->ResponseInfo()->headers->response_code()
+              : simple_loader_->NetError()));
   delete this;
 }
 
@@ -82,14 +91,12 @@ void ContentHashFetcher::Start(HashFetcherCallback hash_fetcher_callback) {
             "extensions match what is distributed by the store."
         })");
   auto resource_request = std::make_unique<network::ResourceRequest>();
-  resource_request->url = fetch_params_.fetch_url;
-  resource_request->load_flags = net::LOAD_DO_NOT_SEND_COOKIES |
-                                 net::LOAD_DO_NOT_SAVE_COOKIES |
-                                 net::LOAD_DISABLE_CACHE;
+  resource_request->url = fetch_key_.fetch_url;
+  resource_request->load_flags = net::LOAD_DISABLE_CACHE;
+  resource_request->credentials_mode = network::mojom::CredentialsMode::kOmit;
 
-  network::mojom::URLLoaderFactoryPtr url_loader_factory_ptr;
-  url_loader_factory_ptr.Bind(
-      std::move(fetch_params_.url_loader_factory_ptr_info));
+  mojo::Remote<network::mojom::URLLoaderFactory> url_loader_factory_remote(
+      std::move(fetch_key_.url_loader_factory_remote));
 
   simple_loader_ = network::SimpleURLLoader::Create(std::move(resource_request),
                                                     traffic_annotation);
@@ -98,7 +105,7 @@ void ContentHashFetcher::Start(HashFetcherCallback hash_fetcher_callback) {
       kMaxRetries,
       network::SimpleURLLoader::RetryMode::RETRY_ON_NETWORK_CHANGE);
   simple_loader_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      url_loader_factory_ptr.get(),
+      url_loader_factory_remote.get(),
       base::BindOnce(&ContentHashFetcher::OnSimpleLoaderComplete,
                      base::Unretained(this)));
 }

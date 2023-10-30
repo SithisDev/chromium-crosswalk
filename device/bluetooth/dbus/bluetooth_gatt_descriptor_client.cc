@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include <stddef.h>
 
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/values.h"
@@ -50,8 +51,12 @@ class BluetoothGattDescriptorClientImpl
     : public BluetoothGattDescriptorClient,
       public dbus::ObjectManager::Interface {
  public:
-  BluetoothGattDescriptorClientImpl()
-      : object_manager_(NULL), weak_ptr_factory_(this) {}
+  BluetoothGattDescriptorClientImpl() : object_manager_(nullptr) {}
+
+  BluetoothGattDescriptorClientImpl(const BluetoothGattDescriptorClientImpl&) =
+      delete;
+  BluetoothGattDescriptorClientImpl& operator=(
+      const BluetoothGattDescriptorClientImpl&) = delete;
 
   ~BluetoothGattDescriptorClientImpl() override {
     object_manager_->UnregisterInterface(
@@ -103,8 +108,7 @@ class BluetoothGattDescriptorClientImpl
 
     // Append empty option dict
     dbus::MessageWriter writer(&method_call);
-    base::DictionaryValue dict;
-    dbus::AppendValueData(&writer, dict);
+    dbus::AppendValueData(&writer, base::Value::Dict());
 
     object_proxy->CallMethodWithErrorCallback(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
@@ -134,8 +138,7 @@ class BluetoothGattDescriptorClientImpl
     writer.AppendArrayOfBytes(value.data(), value.size());
 
     // Append empty option dict
-    base::DictionaryValue dict;
-    dbus::AppendValueData(&writer, dict);
+    dbus::AppendValueData(&writer, base::Value::Dict());
 
     object_proxy->CallMethodWithErrorCallback(
         &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
@@ -151,17 +154,17 @@ class BluetoothGattDescriptorClientImpl
       dbus::ObjectProxy* object_proxy,
       const dbus::ObjectPath& object_path,
       const std::string& interface_name) override {
-    Properties* properties = new Properties(
+    return new Properties(
         object_proxy, interface_name,
-        base::Bind(&BluetoothGattDescriptorClientImpl::OnPropertyChanged,
-                   weak_ptr_factory_.GetWeakPtr(), object_path));
-    return static_cast<dbus::PropertySet*>(properties);
+        base::BindRepeating(
+            &BluetoothGattDescriptorClientImpl::OnPropertyChanged,
+            weak_ptr_factory_.GetWeakPtr(), object_path));
   }
 
   // dbus::ObjectManager::Interface override.
   void ObjectAdded(const dbus::ObjectPath& object_path,
                    const std::string& interface_name) override {
-    VLOG(2) << "Remote GATT descriptor added: " << object_path.value();
+    DVLOG(2) << "Remote GATT descriptor added: " << object_path.value();
     for (auto& observer : observers_)
       observer.GattDescriptorAdded(object_path);
   }
@@ -169,7 +172,7 @@ class BluetoothGattDescriptorClientImpl
   // dbus::ObjectManager::Interface override.
   void ObjectRemoved(const dbus::ObjectPath& object_path,
                      const std::string& interface_name) override {
-    VLOG(2) << "Remote GATT descriptor removed: " << object_path.value();
+    DVLOG(2) << "Remote GATT descriptor removed: " << object_path.value();
     for (auto& observer : observers_)
       observer.GattDescriptorRemoved(object_path);
   }
@@ -192,8 +195,8 @@ class BluetoothGattDescriptorClientImpl
   // observers.
   virtual void OnPropertyChanged(const dbus::ObjectPath& object_path,
                                  const std::string& property_name) {
-    VLOG(2) << "Remote GATT descriptor property changed: "
-            << object_path.value() << ": " << property_name;
+    DVLOG(2) << "Remote GATT descriptor property changed: "
+             << object_path.value() << ": " << property_name;
     for (auto& observer : observers_)
       observer.GattDescriptorPropertyChanged(object_path, property_name);
   }
@@ -214,14 +217,14 @@ class BluetoothGattDescriptorClientImpl
     size_t length = 0;
 
     if (!reader.PopArrayOfBytes(&bytes, &length))
-      VLOG(2) << "Error reading array of bytes in ValueCallback";
+      DVLOG(2) << "Error reading array of bytes in ValueCallback";
 
     std::vector<uint8_t> value;
 
     if (bytes)
       value.assign(bytes, bytes + length);
 
-    std::move(callback).Run(value);
+    std::move(callback).Run(/*error_code=*/absl::nullopt, value);
   }
 
   // Called when a response for a failed method call is received.
@@ -240,7 +243,7 @@ class BluetoothGattDescriptorClientImpl
     std::move(error_callback).Run(error_name, error_message);
   }
 
-  dbus::ObjectManager* object_manager_;
+  raw_ptr<dbus::ObjectManager> object_manager_;
 
   // List of observers interested in event notifications from us.
   base::ObserverList<BluetoothGattDescriptorClient::Observer>::Unchecked
@@ -250,9 +253,8 @@ class BluetoothGattDescriptorClientImpl
   // than we do.
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<BluetoothGattDescriptorClientImpl> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothGattDescriptorClientImpl);
+  base::WeakPtrFactory<BluetoothGattDescriptorClientImpl> weak_ptr_factory_{
+      this};
 };
 
 BluetoothGattDescriptorClient::BluetoothGattDescriptorClient() = default;

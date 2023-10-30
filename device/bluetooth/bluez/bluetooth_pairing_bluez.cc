@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,11 +40,11 @@ BluetoothPairingBlueZ::BluetoothPairingBlueZ(
     : device_(device),
       pairing_delegate_(pairing_delegate),
       pairing_delegate_used_(false) {
-  VLOG(1) << "Created BluetoothPairingBlueZ for " << device_->GetAddress();
+  DVLOG(1) << "Created BluetoothPairingBlueZ for " << device_->GetAddress();
 }
 
 BluetoothPairingBlueZ::~BluetoothPairingBlueZ() {
-  VLOG(1) << "Destroying BluetoothPairingBlueZ for " << device_->GetAddress();
+  DVLOG(1) << "Destroying BluetoothPairingBlueZ for " << device_->GetAddress();
 
   if (!pairing_delegate_used_) {
     UMA_HISTOGRAM_ENUMERATION("Bluetooth.PairingMethod",
@@ -67,7 +67,7 @@ BluetoothPairingBlueZ::~BluetoothPairingBlueZ() {
         .Run(bluez::BluetoothAgentServiceProvider::Delegate::CANCELLED);
   }
 
-  pairing_delegate_ = NULL;
+  pairing_delegate_ = nullptr;
 }
 
 void BluetoothPairingBlueZ::RequestPinCode(

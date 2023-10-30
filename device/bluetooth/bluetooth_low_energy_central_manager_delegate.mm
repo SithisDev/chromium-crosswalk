@@ -1,9 +1,12 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/bluetooth/bluetooth_low_energy_central_manager_delegate.h"
 
+#include <memory>
+
+#include "base/memory/raw_ptr.h"
 #include "device/bluetooth/bluetooth_adapter_mac.h"
 #include "device/bluetooth/bluetooth_low_energy_discovery_manager_mac.h"
 
@@ -50,20 +53,21 @@ class BluetoothLowEnergyCentralManagerBridge {
   }
 
  private:
-  BluetoothLowEnergyDiscoveryManagerMac* discovery_manager_;
-  BluetoothAdapterMac* adapter_;
+  raw_ptr<BluetoothLowEnergyDiscoveryManagerMac> discovery_manager_;
+  raw_ptr<BluetoothAdapterMac> adapter_;
 };
 
 }  // namespace device
 
 @implementation BluetoothLowEnergyCentralManagerDelegate
 
-- (id)initWithDiscoveryManager:
-          (device::BluetoothLowEnergyDiscoveryManagerMac*)discovery_manager
-                    andAdapter:(device::BluetoothAdapterMac*)adapter {
+- (instancetype)initWithDiscoveryManager:
+                    (device::BluetoothLowEnergyDiscoveryManagerMac*)
+                        discovery_manager
+                              andAdapter:(device::BluetoothAdapterMac*)adapter {
   if ((self = [super init])) {
-    bridge_.reset(new device::BluetoothLowEnergyCentralManagerBridge(
-        discovery_manager, adapter));
+    _bridge = std::make_unique<device::BluetoothLowEnergyCentralManagerBridge>(
+        discovery_manager, adapter);
   }
   return self;
 }
@@ -73,29 +77,29 @@ class BluetoothLowEnergyCentralManagerBridge {
      advertisementData:(NSDictionary*)advertisementData
                   RSSI:(NSNumber*)RSSI {
   // Notifies the discovery of a device.
-  bridge_->DiscoveredPeripheral(peripheral, advertisementData, [RSSI intValue]);
+  _bridge->DiscoveredPeripheral(peripheral, advertisementData, [RSSI intValue]);
 }
 
 - (void)centralManagerDidUpdateState:(CBCentralManager*)central {
   // Notifies when the powered state of the central manager changed.
-  bridge_->UpdatedState();
+  _bridge->UpdatedState();
 }
 
 - (void)centralManager:(CBCentralManager*)central
     didConnectPeripheral:(CBPeripheral*)peripheral {
-  bridge_->DidConnectPeripheral(peripheral);
+  _bridge->DidConnectPeripheral(peripheral);
 }
 
 - (void)centralManager:(CBCentralManager*)central
     didFailToConnectPeripheral:(CBPeripheral*)peripheral
                          error:(nullable NSError*)error {
-  bridge_->DidFailToConnectPeripheral(peripheral, error);
+  _bridge->DidFailToConnectPeripheral(peripheral, error);
 }
 
 - (void)centralManager:(CBCentralManager*)central
     didDisconnectPeripheral:(CBPeripheral*)peripheral
                       error:(nullable NSError*)error {
-  bridge_->DidDisconnectPeripheral(peripheral, error);
+  _bridge->DidDisconnectPeripheral(peripheral, error);
 }
 
 @end

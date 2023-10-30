@@ -13,13 +13,15 @@ enterprise user types, see
 
 Regular users that were registered using their GAIA account.
 
-
 ## Child users
 
 Users that logged in using
-*   a child account - an account designated for children under the age of 13.
+*   a Unicorn account - an account designated for children under the age of
+    consent in their jurisdiction.
 *   a Geller account - an account with parental supervision that has no age
     restrictions.
+*   a Griffin account - similar to a Geller account, but for compliance with
+    European Union laws.
 
 In order to add a child user to the device, the user has to go through an
 adapted GAIA flow, which also requires their parent to authenticate.
@@ -52,6 +54,8 @@ unnecessary time to the test runtime. To avoid this, tests should:
     *   If the test user is logged in using `LoginManagerMixin`, the injected
         `UserContext` has to have the refresh token matching the token passed to
         `FakeGaiaMixin`.
+*   Note that `LoggedInUserMixin` is a compound helper mixin that conveniently
+    packages the mixins mentioned above into an easy-to-use interface.
 
 ## Guest
 
@@ -59,10 +63,10 @@ Ephemeral, anonymous users that are logged into an incognito session. The user
 cryptohome is mounted on tmpfs, and none of the data from the user session is
 persisted after the guest session ends.
 
-To test guest session state, use `GaiaSessionMixin` - this will set up
+To test guest session state, use `GuestSessionMixin` - this will set up
 appropriate guest session flags.
 
-Testing guest user login is more complicated, as guest login required Chrome
+Testing guest user login is more complicated, as guest login requires Chrome
 restart. The test will require two parts:
 *   `PRE_BrowserTest` test that requests login
 *   `BrowserTest` that can test guest session state
@@ -70,4 +74,3 @@ restart. The test will require two parts:
 To properly set up and preserve Chrome flags between sessions runs, use
 `LoginManagerMixin`, and set it up using
 `LoginManagerMixin::set_session_restore_enabled()`
-

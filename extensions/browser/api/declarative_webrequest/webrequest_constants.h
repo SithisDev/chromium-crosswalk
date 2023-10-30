@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,13 +20,14 @@ extern const char kAgeLowerBoundKey[];
 extern const char kAgeUpperBoundKey[];
 extern const char kCookieKey[];
 extern const char kContentTypeKey[];
+extern const char kDeprecatedFirstPartyForCookiesUrlKey[];
+extern const char kDeprecatedThirdPartyKey[];
 extern const char kDomainKey[];
 extern const char kExcludeContentTypeKey[];
 extern const char kExcludeRequestHeadersKey[];
 extern const char kExcludeResponseHeadersKey[];
 extern const char kExpiresKey[];
 extern const char kFilterKey[];
-extern const char kFirstPartyForCookiesUrlKey[];
 extern const char kFromKey[];
 extern const char kHttpOnlyKey[];
 extern const char kHasTagKey[];
@@ -48,7 +49,6 @@ extern const char kResponseHeadersKey[];
 extern const char kSecureKey[];
 extern const char kSessionCookieKey[];
 extern const char kStagesKey[];
-extern const char kThirdPartyKey[];
 extern const char kToKey[];
 extern const char kUrlKey[];
 extern const char kValueContainsKey[];

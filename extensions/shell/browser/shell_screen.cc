@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check.h"
 #include "extensions/shell/browser/root_window_controller.h"
 #include "extensions/shell/browser/shell_desktop_controller_aura.h"
 #include "ui/aura/env.h"

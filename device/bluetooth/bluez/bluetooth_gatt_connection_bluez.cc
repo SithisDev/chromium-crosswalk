@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ bool BluetoothGattConnectionBlueZ::IsConnected() {
 
 void BluetoothGattConnectionBlueZ::Disconnect() {
   if (!connected_) {
-    VLOG(1) << "Connection already inactive.";
+    DVLOG(1) << "Connection already inactive.";
     return;
   }
 

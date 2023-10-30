@@ -1,11 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef EXTENSIONS_BROWSER_API_SYSTEM_STORAGE_SYSTEM_STORAGE_API_H_
 #define EXTENSIONS_BROWSER_API_SYSTEM_STORAGE_SYSTEM_STORAGE_API_H_
 
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "extensions/browser/api/system_storage/storage_info_provider.h"
 #include "extensions/browser/extension_function.h"
@@ -14,7 +14,7 @@ namespace extensions {
 
 // Implementation of the systeminfo.storage.get API. It is an asynchronous
 // call relative to browser UI thread.
-class SystemStorageGetInfoFunction : public UIThreadExtensionFunction {
+class SystemStorageGetInfoFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("system.storage.getInfo", SYSTEM_STORAGE_GETINFO)
   SystemStorageGetInfoFunction();
@@ -28,7 +28,7 @@ class SystemStorageGetInfoFunction : public UIThreadExtensionFunction {
   void OnGetStorageInfoCompleted(bool success);
 };
 
-class SystemStorageEjectDeviceFunction : public UIThreadExtensionFunction {
+class SystemStorageEjectDeviceFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("system.storage.ejectDevice",
                              SYSTEM_STORAGE_EJECTDEVICE)
@@ -46,8 +46,7 @@ class SystemStorageEjectDeviceFunction : public UIThreadExtensionFunction {
   void HandleResponse(storage_monitor::StorageMonitor::EjectStatus status);
 };
 
-class SystemStorageGetAvailableCapacityFunction
-    : public UIThreadExtensionFunction {
+class SystemStorageGetAvailableCapacityFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("system.storage.getAvailableCapacity",
                              SYSTEM_STORAGE_GETAVAILABLECAPACITY)

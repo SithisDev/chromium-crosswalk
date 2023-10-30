@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "base/strings/string16.h"
 #include "extensions/common/permissions/base_set_operators.h"
 
 namespace base {
@@ -34,11 +33,10 @@ class ManifestPermissionSet : public BaseSetOperators<ManifestPermissionSet> {
   // If |error| is NULL, parsing will continue with the next permission if
   // invalid data is detected. If |error| is not NULL, it will be set to an
   // error message and false is returned when an invalid permission is found.
-  static bool ParseFromJSON(
-      const base::ListValue* permissions,
-      ManifestPermissionSet* manifest_permissions,
-      base::string16* error,
-      std::vector<std::string>* unhandled_permissions);
+  static bool ParseFromJSON(const base::ListValue* permissions,
+                            ManifestPermissionSet* manifest_permissions,
+                            std::u16string* error,
+                            std::vector<std::string>* unhandled_permissions);
 };
 
 }  // namespace extensions

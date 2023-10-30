@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,11 @@
 #include "base/bind.h"
 #include "base/containers/queue.h"
 #include "base/run_loop.h"
-#include "chromeos/dbus/media_analytics/fake_media_analytics_client.h"
-#include "chromeos/dbus/media_analytics/media_analytics_client.h"
-#include "chromeos/dbus/upstart/fake_upstart_client.h"
+#include "chromeos/ash/components/dbus/media_analytics/fake_media_analytics_client.h"
+#include "chromeos/ash/components/dbus/media_analytics/media_analytics_client.h"
+#include "chromeos/ash/components/dbus/upstart/fake_upstart_client.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace media_perception = extensions::api::media_perception_private;
@@ -22,9 +22,12 @@ namespace extensions {
 
 namespace {
 
-class TestUpstartClient : public chromeos::FakeUpstartClient {
+class TestUpstartClient : public ash::FakeUpstartClient {
  public:
   TestUpstartClient() = default;
+
+  TestUpstartClient(const TestUpstartClient&) = delete;
+  TestUpstartClient& operator=(const TestUpstartClient&) = delete;
 
   ~TestUpstartClient() override = default;
 
@@ -59,7 +62,7 @@ class TestUpstartClient : public chromeos::FakeUpstartClient {
       return true;
     }
 
-    chromeos::FakeUpstartClient::StartMediaAnalytics({}, std::move(callback));
+    ash::FakeUpstartClient::StartMediaAnalytics({}, std::move(callback));
     return true;
   }
 
@@ -79,16 +82,14 @@ class TestUpstartClient : public chromeos::FakeUpstartClient {
       pending_upstart_request_callbacks_;
 
   bool enqueue_requests_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(TestUpstartClient);
 };
 
 void RecordServiceErrorFromStateAndRunClosure(
-    base::Closure quit_run_loop,
+    base::OnceClosure quit_run_loop,
     media_perception::ServiceError* service_error,
     media_perception::State result_state) {
   *service_error = result_state.service_error;
-  quit_run_loop.Run();
+  std::move(quit_run_loop).Run();
 }
 
 void RecordServiceErrorFromProcessStateAndRunClosure(
@@ -100,11 +101,11 @@ void RecordServiceErrorFromProcessStateAndRunClosure(
 }
 
 void RecordServiceErrorFromDiagnosticsAndRunClosure(
-    base::Closure quit_run_loop,
+    base::OnceClosure quit_run_loop,
     media_perception::ServiceError* service_error,
     media_perception::Diagnostics result_diagnostics) {
   *service_error = result_diagnostics.service_error;
-  quit_run_loop.Run();
+  std::move(quit_run_loop).Run();
 }
 
 media_perception::ServiceError SetStateAndWaitForResponse(
@@ -112,8 +113,9 @@ media_perception::ServiceError SetStateAndWaitForResponse(
     const media_perception::State& state) {
   base::RunLoop run_loop;
   media_perception::ServiceError service_error;
-  manager->SetState(state, base::Bind(&RecordServiceErrorFromStateAndRunClosure,
-                                      run_loop.QuitClosure(), &service_error));
+  manager->SetState(state,
+                    base::BindOnce(&RecordServiceErrorFromStateAndRunClosure,
+                                   run_loop.QuitClosure(), &service_error));
   run_loop.Run();
   return service_error;
 }
@@ -122,8 +124,8 @@ media_perception::ServiceError GetStateAndWaitForResponse(
     MediaPerceptionAPIManager* manager) {
   base::RunLoop run_loop;
   media_perception::ServiceError service_error;
-  manager->GetState(base::Bind(&RecordServiceErrorFromStateAndRunClosure,
-                               run_loop.QuitClosure(), &service_error));
+  manager->GetState(base::BindOnce(&RecordServiceErrorFromStateAndRunClosure,
+                                   run_loop.QuitClosure(), &service_error));
   run_loop.Run();
   return service_error;
 }
@@ -146,8 +148,8 @@ media_perception::ServiceError GetDiagnosticsAndWaitForResponse(
   base::RunLoop run_loop;
   media_perception::ServiceError service_error;
   manager->GetDiagnostics(
-      base::Bind(&RecordServiceErrorFromDiagnosticsAndRunClosure,
-                 run_loop.QuitClosure(), &service_error));
+      base::BindOnce(&RecordServiceErrorFromDiagnosticsAndRunClosure,
+                     run_loop.QuitClosure(), &service_error));
   run_loop.Run();
   return service_error;
 }
@@ -157,10 +159,15 @@ media_perception::ServiceError GetDiagnosticsAndWaitForResponse(
 class MediaPerceptionAPIManagerTest : public testing::Test {
  public:
   MediaPerceptionAPIManagerTest() = default;
+
+  MediaPerceptionAPIManagerTest(const MediaPerceptionAPIManagerTest&) = delete;
+  MediaPerceptionAPIManagerTest& operator=(
+      const MediaPerceptionAPIManagerTest&) = delete;
+
   ~MediaPerceptionAPIManagerTest() override = default;
 
   void SetUp() override {
-    chromeos::MediaAnalyticsClient::InitializeFake();
+    ash::MediaAnalyticsClient::InitializeFake();
 
     upstart_client_ = std::make_unique<TestUpstartClient>();
 
@@ -173,7 +180,7 @@ class MediaPerceptionAPIManagerTest : public testing::Test {
     // MediaAnalyticsClient.
     manager_.reset();
     upstart_client_.reset();
-    chromeos::MediaAnalyticsClient::Shutdown();
+    ash::MediaAnalyticsClient::Shutdown();
   }
 
   std::unique_ptr<MediaPerceptionAPIManager> manager_;
@@ -181,11 +188,9 @@ class MediaPerceptionAPIManagerTest : public testing::Test {
   TestUpstartClient* upstart_client() { return upstart_client_.get(); }
 
  private:
-  content::TestBrowserThreadBundle thread_bundle_;
+  content::BrowserTaskEnvironment task_environment_;
   content::TestBrowserContext browser_context_;
   std::unique_ptr<TestUpstartClient> upstart_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaPerceptionAPIManagerTest);
 };
 
 TEST_F(MediaPerceptionAPIManagerTest, UpstartFailure) {
@@ -196,8 +201,8 @@ TEST_F(MediaPerceptionAPIManagerTest, UpstartFailure) {
   base::RunLoop run_loop;
   media_perception::ServiceError service_error;
   manager_->SetState(state,
-                     base::Bind(&RecordServiceErrorFromStateAndRunClosure,
-                                run_loop.QuitClosure(), &service_error));
+                     base::BindOnce(&RecordServiceErrorFromStateAndRunClosure,
+                                    run_loop.QuitClosure(), &service_error));
   EXPECT_TRUE(upstart_client()->HandleNextUpstartRequest(false));
   run_loop.Run();
   EXPECT_EQ(media_perception::SERVICE_ERROR_SERVICE_NOT_RUNNING, service_error);
@@ -238,8 +243,8 @@ TEST_F(MediaPerceptionAPIManagerTest, UpstartStopFailure) {
   base::RunLoop run_loop;
   media_perception::ServiceError service_error;
   manager_->SetState(state,
-                     base::Bind(&RecordServiceErrorFromStateAndRunClosure,
-                                run_loop.QuitClosure(), &service_error));
+                     base::BindOnce(&RecordServiceErrorFromStateAndRunClosure,
+                                    run_loop.QuitClosure(), &service_error));
   EXPECT_TRUE(upstart_client()->HandleNextUpstartRequest(false));
   run_loop.Run();
   EXPECT_EQ(media_perception::SERVICE_ERROR_SERVICE_UNREACHABLE, service_error);
@@ -280,8 +285,8 @@ TEST_F(MediaPerceptionAPIManagerTest, UpstartRestartFailure) {
   base::RunLoop run_loop;
   media_perception::ServiceError service_error;
   manager_->SetState(state,
-                     base::Bind(&RecordServiceErrorFromStateAndRunClosure,
-                                run_loop.QuitClosure(), &service_error));
+                     base::BindOnce(&RecordServiceErrorFromStateAndRunClosure,
+                                    run_loop.QuitClosure(), &service_error));
   EXPECT_TRUE(upstart_client()->HandleNextUpstartRequest(false));
   run_loop.Run();
   EXPECT_EQ(media_perception::SERVICE_ERROR_SERVICE_NOT_RUNNING, service_error);
@@ -301,8 +306,8 @@ TEST_F(MediaPerceptionAPIManagerTest, UpstartStall) {
   base::RunLoop run_loop;
   media_perception::ServiceError service_error;
   manager_->SetState(state,
-                     base::Bind(&RecordServiceErrorFromStateAndRunClosure,
-                                run_loop.QuitClosure(), &service_error));
+                     base::BindOnce(&RecordServiceErrorFromStateAndRunClosure,
+                                    run_loop.QuitClosure(), &service_error));
 
   EXPECT_EQ(media_perception::SERVICE_ERROR_SERVICE_BUSY_LAUNCHING,
             GetStateAndWaitForResponse(manager_.get()));
@@ -355,8 +360,8 @@ TEST_F(MediaPerceptionAPIManagerTest, UpstartRestartStall) {
   base::RunLoop run_loop;
   media_perception::ServiceError service_error;
   manager_->SetState(state,
-                     base::Bind(&RecordServiceErrorFromStateAndRunClosure,
-                                run_loop.QuitClosure(), &service_error));
+                     base::BindOnce(&RecordServiceErrorFromStateAndRunClosure,
+                                    run_loop.QuitClosure(), &service_error));
 
   EXPECT_EQ(media_perception::SERVICE_ERROR_SERVICE_BUSY_LAUNCHING,
             GetStateAndWaitForResponse(manager_.get()));
@@ -381,7 +386,7 @@ TEST_F(MediaPerceptionAPIManagerTest, MediaAnalyticsDbusError) {
   EXPECT_EQ(media_perception::SERVICE_ERROR_NONE,
             SetStateAndWaitForResponse(manager_.get(), state));
   // Disable the functionality of the fake process.
-  chromeos::FakeMediaAnalyticsClient::Get()->set_process_running(false);
+  ash::FakeMediaAnalyticsClient::Get()->set_process_running(false);
   EXPECT_EQ(media_perception::SERVICE_ERROR_SERVICE_UNREACHABLE,
             GetStateAndWaitForResponse(manager_.get()));
   EXPECT_EQ(media_perception::SERVICE_ERROR_SERVICE_UNREACHABLE,

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "extensions/common/extension_id.h"
 #include "extensions/common/extension_messages.h"
 
-class UIThreadExtensionFunction;
+class ExtensionFunction;
 
 namespace extensions {
 class AutomationInternalApiDelegate;
@@ -25,10 +25,11 @@ class WebContents;
 
 namespace ui {
 class AXTreeID;
-class AXEventBundleSink;
 }  // namespace ui
 
 namespace extensions {
+
+class AutomationEventRouterInterface;
 
 class AutomationInternalApiDelegate {
  public:
@@ -52,7 +53,10 @@ class AutomationInternalApiDelegate {
   virtual int GetTabId(content::WebContents* contents) = 0;
   // Retrieves the active web contents.
   virtual content::WebContents* GetActiveWebContents(
-      UIThreadExtensionFunction* function) = 0;
+      ExtensionFunction* function) = 0;
+  // Enable automation nodes on the specified ax tree. Returns true if the
+  // request is handled in the delegation.
+  virtual bool EnableTree(const ui::AXTreeID& tree_id) = 0;
   // Starts managing automation nodes on the desktop.
   virtual void EnableDesktop() = 0;
   // Gets the ax tree id for the nodes being managed for the desktop.
@@ -60,8 +64,10 @@ class AutomationInternalApiDelegate {
   // Gets the active user context, if multiple contexts are managed by
   // the delegate. Otherwise, may return null.
   virtual content::BrowserContext* GetActiveUserContext() = 0;
-  // Sets the event bundle sink that should be set on the automation manager.
-  virtual void SetEventBundleSink(ui::AXEventBundleSink* sink) = 0;
+  // Sets the automation event router interface that should be set on the
+  // automation manager.
+  virtual void SetAutomationEventRouterInterface(
+      AutomationEventRouterInterface* router) = 0;
 };
 
 }  // namespace extensions

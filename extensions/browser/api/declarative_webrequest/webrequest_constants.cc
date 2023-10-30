@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,13 +16,14 @@ const char kAgeLowerBoundKey[] = "ageLowerBound";
 const char kAgeUpperBoundKey[] = "ageUpperBound";
 const char kCookieKey[] = "cookie";
 const char kContentTypeKey[] = "contentType";
+const char kDeprecatedFirstPartyForCookiesUrlKey[] = "firstPartyForCookiesUrl";
+const char kDeprecatedThirdPartyKey[] = "thirdPartyForCookies";
 const char kDomainKey[] = "domain";
 const char kExcludeContentTypeKey[] = "excludeContentType";
 const char kExcludeRequestHeadersKey[] = "excludeRequestHeaders";
 const char kExcludeResponseHeadersKey[] = "excludeResponseHeaders";
 const char kExpiresKey[] = "expires";
 const char kFilterKey[] ="filter";
-const char kFirstPartyForCookiesUrlKey[] = "firstPartyForCookiesUrl";
 const char kFromKey[] = "from";
 const char kHttpOnlyKey[] = "httpOnly";
 const char kHasTagKey[] = "hasTag";
@@ -44,7 +45,6 @@ const char kResponseHeadersKey[] = "responseHeaders";
 const char kSecureKey[] = "secure";
 const char kSessionCookieKey[] = "sessionCookie";
 const char kStagesKey[] = "stages";
-const char kThirdPartyKey[] = "thirdPartyForCookies";
 const char kToKey[] = "to";
 const char kUrlKey[] = "url";
 const char kValueContainsKey[] = "valueContains";

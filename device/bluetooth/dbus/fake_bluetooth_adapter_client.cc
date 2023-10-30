@@ -1,17 +1,18 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/bluetooth/dbus/fake_bluetooth_adapter_client.h"
 
 #include <map>
+#include <memory>
 #include <utility>
 
-#include "base/bind_helpers.h"
-#include "base/callback_forward.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/single_thread_task_runner.h"
+#include "base/observer_list.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "dbus/bus.h"
@@ -51,18 +52,18 @@ FakeBluetoothAdapterClient::Properties::~Properties() = default;
 void FakeBluetoothAdapterClient::Properties::Get(
     dbus::PropertyBase* property,
     dbus::PropertySet::GetCallback callback) {
-  VLOG(1) << "Get " << property->name();
+  DVLOG(1) << "Get " << property->name();
   std::move(callback).Run(false);
 }
 
 void FakeBluetoothAdapterClient::Properties::GetAll() {
-  VLOG(1) << "GetAll";
+  DVLOG(1) << "GetAll";
 }
 
 void FakeBluetoothAdapterClient::Properties::Set(
     dbus::PropertyBase* property,
     dbus::PropertySet::SetCallback callback) {
-  VLOG(1) << "Set " << property->name();
+  DVLOG(1) << "Set " << property->name();
   if (property->name() == powered.name() || property->name() == alias.name() ||
       property->name() == discoverable.name() ||
       property->name() == discoverable_timeout.name()) {
@@ -74,25 +75,17 @@ void FakeBluetoothAdapterClient::Properties::Set(
 }
 
 FakeBluetoothAdapterClient::FakeBluetoothAdapterClient()
-    : visible_(true),
-      second_visible_(false),
-      discovering_count_(0),
-      pause_count_(0),
-      unpause_count_(0),
-      set_discovery_filter_should_fail_(false),
-      simulation_interval_ms_(kSimulationIntervalMs),
-      last_handle_(0),
-      set_long_term_keys_call_count_(0) {
-  properties_.reset(new Properties(base::Bind(
-      &FakeBluetoothAdapterClient::OnPropertyChanged, base::Unretained(this))));
+    : simulation_interval_ms_(kSimulationIntervalMs) {
+  properties_ = std::make_unique<Properties>(base::BindRepeating(
+      &FakeBluetoothAdapterClient::OnPropertyChanged, base::Unretained(this)));
 
   properties_->address.ReplaceValue(kAdapterAddress);
   properties_->name.ReplaceValue("Fake Adapter (Name)");
   properties_->alias.ReplaceValue(kAdapterName);
   properties_->pairable.ReplaceValue(true);
 
-  second_properties_.reset(new Properties(base::Bind(
-      &FakeBluetoothAdapterClient::OnPropertyChanged, base::Unretained(this))));
+  second_properties_ = std::make_unique<Properties>(base::BindRepeating(
+      &FakeBluetoothAdapterClient::OnPropertyChanged, base::Unretained(this)));
 
   second_properties_->address.ReplaceValue(kSecondAdapterAddress);
   second_properties_->name.ReplaceValue("Second Fake Adapter (Name)");
@@ -116,10 +109,10 @@ void FakeBluetoothAdapterClient::RemoveObserver(Observer* observer) {
 
 std::vector<dbus::ObjectPath> FakeBluetoothAdapterClient::GetAdapters() {
   std::vector<dbus::ObjectPath> object_paths;
-  if (visible_)
-    object_paths.push_back(dbus::ObjectPath(kAdapterPath));
-  if (second_visible_)
-    object_paths.push_back(dbus::ObjectPath(kSecondAdapterPath));
+  if (present_)
+    object_paths.emplace_back(dbus::ObjectPath(kAdapterPath));
+  if (second_present_)
+    object_paths.emplace_back(dbus::ObjectPath(kSecondAdapterPath));
   return object_paths;
 }
 
@@ -142,18 +135,28 @@ void FakeBluetoothAdapterClient::StartDiscovery(
     return;
   }
 
+  if (set_start_discovery_should_fail_) {
+    set_start_discovery_should_fail_ = false;
+    PostDelayedTask(
+        base::BindOnce(std::move(callback), Error(kUnknownAdapterError, "")));
+    return;
+  }
+
   ++discovering_count_;
-  VLOG(1) << "StartDiscovery: " << object_path.value() << ", "
-          << "count is now " << discovering_count_;
-  PostDelayedTask(base::BindOnce(std::move(callback), base::nullopt));
+  DVLOG(1) << "StartDiscovery: " << object_path.value() << ", "
+           << "count is now " << discovering_count_;
+  PostDelayedTask(base::BindOnce(std::move(callback), absl::nullopt));
 
   if (discovering_count_ == 1) {
-    properties_->discovering.ReplaceValue(true);
-
+    PostDelayedTask(
+        base::BindOnce(&FakeBluetoothAdapterClient::UpdateDiscoveringProperty,
+                       weak_ptr_factory_.GetWeakPtr(), /*discovering=*/true));
     FakeBluetoothDeviceClient* device_client =
         static_cast<FakeBluetoothDeviceClient*>(
             bluez::BluezDBusManager::Get()->GetBluetoothDeviceClient());
-    device_client->BeginDiscoverySimulation(dbus::ObjectPath(kAdapterPath));
+    if (enable_discovery_simulation_) {
+      device_client->BeginDiscoverySimulation(dbus::ObjectPath(kAdapterPath));
+    }
   }
 }
 
@@ -174,9 +177,9 @@ void FakeBluetoothAdapterClient::StopDiscovery(
   }
 
   --discovering_count_;
-  VLOG(1) << "StopDiscovery: " << object_path.value() << ", "
-          << "count is now " << discovering_count_;
-  PostDelayedTask(base::BindOnce(std::move(callback), base::nullopt));
+  DVLOG(1) << "StopDiscovery: " << object_path.value() << ", "
+           << "count is now " << discovering_count_;
+  PostDelayedTask(base::BindOnce(std::move(callback), absl::nullopt));
 
   if (discovering_count_ == 0) {
     FakeBluetoothDeviceClient* device_client =
@@ -190,39 +193,29 @@ void FakeBluetoothAdapterClient::StopDiscovery(
     }
 
     discovery_filter_.reset();
-    properties_->discovering.ReplaceValue(false);
+    PostDelayedTask(
+        base::BindOnce(&FakeBluetoothAdapterClient::UpdateDiscoveringProperty,
+                       weak_ptr_factory_.GetWeakPtr(), /*discovering=*/false));
   }
 }
 
-void FakeBluetoothAdapterClient::PauseDiscovery(
-    const dbus::ObjectPath& object_path,
-    const base::Closure& callback,
-    ErrorCallback error_callback) {
-  ++pause_count_;
-  callback.Run();
-}
-
-void FakeBluetoothAdapterClient::UnpauseDiscovery(
-    const dbus::ObjectPath& object_path,
-    const base::Closure& callback,
-    ErrorCallback error_callback) {
-  ++unpause_count_;
-  callback.Run();
+void FakeBluetoothAdapterClient::UpdateDiscoveringProperty(bool discovering) {
+  properties_->discovering.ReplaceValue(discovering);
 }
 
 void FakeBluetoothAdapterClient::RemoveDevice(
     const dbus::ObjectPath& object_path,
     const dbus::ObjectPath& device_path,
-    const base::Closure& callback,
+    base::OnceClosure callback,
     ErrorCallback error_callback) {
   if (object_path != dbus::ObjectPath(kAdapterPath)) {
     std::move(error_callback).Run(kNoResponseError, "");
     return;
   }
 
-  VLOG(1) << "RemoveDevice: " << object_path.value() << " "
-          << device_path.value();
-  callback.Run();
+  DVLOG(1) << "RemoveDevice: " << object_path.value() << " "
+           << device_path.value();
+  std::move(callback).Run();
 
   FakeBluetoothDeviceClient* device_client =
       static_cast<FakeBluetoothDeviceClient*>(
@@ -234,17 +227,25 @@ void FakeBluetoothAdapterClient::MakeSetDiscoveryFilterFail() {
   set_discovery_filter_should_fail_ = true;
 }
 
+void FakeBluetoothAdapterClient::MakeStartDiscoveryFail() {
+  set_start_discovery_should_fail_ = true;
+}
+
+void FakeBluetoothAdapterClient::SetDiscoverySimulation(bool enabled) {
+  enable_discovery_simulation_ = enabled;
+}
+
 void FakeBluetoothAdapterClient::SetDiscoveryFilter(
     const dbus::ObjectPath& object_path,
     const DiscoveryFilter& discovery_filter,
-    const base::Closure& callback,
+    base::OnceClosure callback,
     ErrorCallback error_callback) {
   if (object_path != dbus::ObjectPath(kAdapterPath)) {
     PostDelayedTask(
         base::BindOnce(std::move(error_callback), kNoResponseError, ""));
     return;
   }
-  VLOG(1) << "SetDiscoveryFilter: " << object_path.value();
+  DVLOG(1) << "SetDiscoveryFilter: " << object_path.value();
 
   if (set_discovery_filter_should_fail_) {
     PostDelayedTask(
@@ -253,26 +254,26 @@ void FakeBluetoothAdapterClient::SetDiscoveryFilter(
     return;
   }
 
-  discovery_filter_.reset(new DiscoveryFilter());
+  discovery_filter_ = std::make_unique<DiscoveryFilter>();
   discovery_filter_->CopyFrom(discovery_filter);
-  PostDelayedTask(callback);
+  PostDelayedTask(std::move(callback));
 }
 
 void FakeBluetoothAdapterClient::CreateServiceRecord(
     const dbus::ObjectPath& object_path,
     const bluez::BluetoothServiceRecordBlueZ& record,
-    const ServiceRecordCallback& callback,
+    ServiceRecordCallback callback,
     ErrorCallback error_callback) {
   ++last_handle_;
   records_.insert(
       std::pair<uint32_t, BluetoothServiceRecordBlueZ>(last_handle_, record));
-  callback.Run(last_handle_);
+  std::move(callback).Run(last_handle_);
 }
 
 void FakeBluetoothAdapterClient::RemoveServiceRecord(
     const dbus::ObjectPath& object_path,
     uint32_t handle,
-    const base::Closure& callback,
+    base::OnceClosure callback,
     ErrorCallback error_callback) {
   auto it = records_.find(handle);
   if (it == records_.end()) {
@@ -282,14 +283,16 @@ void FakeBluetoothAdapterClient::RemoveServiceRecord(
     return;
   }
   records_.erase(it);
-  callback.Run();
+  std::move(callback).Run();
 }
 
-void FakeBluetoothAdapterClient::SetLongTermKeys(
+void FakeBluetoothAdapterClient::ConnectDevice(
     const dbus::ObjectPath& object_path,
-    const std::vector<std::vector<uint8_t>>& long_term_keys,
+    const std::string& address,
+    const absl::optional<AddressType>& address_type,
+    ConnectDeviceCallback callback,
     ErrorCallback error_callback) {
-  set_long_term_keys_call_count_++;
+  NOTIMPLEMENTED();
 }
 
 void FakeBluetoothAdapterClient::SetSimulationIntervalMs(int interval_ms) {
@@ -301,34 +304,34 @@ FakeBluetoothAdapterClient::GetDiscoveryFilter() {
   return discovery_filter_.get();
 }
 
-void FakeBluetoothAdapterClient::SetVisible(bool visible) {
-  if (visible && !visible_) {
-    // Adapter becoming visible
-    visible_ = visible;
+void FakeBluetoothAdapterClient::SetPresent(bool present) {
+  if (present && !present_) {
+    // Adapter becoming present
+    present_ = present;
 
     for (auto& observer : observers_)
       observer.AdapterAdded(dbus::ObjectPath(kAdapterPath));
 
-  } else if (visible_ && !visible) {
-    // Adapter becoming invisible
-    visible_ = visible;
+  } else if (present_ && !present) {
+    // Adapter no longer present
+    present_ = present;
 
     for (auto& observer : observers_)
       observer.AdapterRemoved(dbus::ObjectPath(kAdapterPath));
   }
 }
 
-void FakeBluetoothAdapterClient::SetSecondVisible(bool visible) {
-  if (visible && !second_visible_) {
-    // Second adapter becoming visible
-    second_visible_ = visible;
+void FakeBluetoothAdapterClient::SetSecondPresent(bool present) {
+  if (present && !second_present_) {
+    // Second adapter becoming present
+    second_present_ = present;
 
     for (auto& observer : observers_)
       observer.AdapterAdded(dbus::ObjectPath(kSecondAdapterPath));
 
-  } else if (second_visible_ && !visible) {
-    // Second adapter becoming invisible
-    second_visible_ = visible;
+  } else if (second_present_ && !present) {
+    // Second adapter no longer present
+    second_present_ = present;
 
     for (auto& observer : observers_)
       observer.AdapterRemoved(dbus::ObjectPath(kSecondAdapterPath));
@@ -353,7 +356,7 @@ void FakeBluetoothAdapterClient::OnPropertyChanged(
     const std::string& property_name) {
   if (property_name == properties_->powered.name() &&
       !properties_->powered.value()) {
-    VLOG(1) << "Adapter powered off";
+    DVLOG(1) << "Adapter powered off";
 
     if (discovering_count_) {
       discovering_count_ = 0;
@@ -370,7 +373,7 @@ void FakeBluetoothAdapterClient::OnPropertyChanged(
 void FakeBluetoothAdapterClient::PostDelayedTask(base::OnceClosure callback) {
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, std::move(callback),
-      base::TimeDelta::FromMilliseconds(simulation_interval_ms_));
+      base::Milliseconds(simulation_interval_ms_));
 }
 
 }  // namespace bluez

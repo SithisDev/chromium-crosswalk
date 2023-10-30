@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/api/api_resource.h"
 #include "extensions/browser/api/socket/mojo_data_pump.h"
@@ -23,12 +23,13 @@ namespace extensions {
 const char kTLSSocketTypeInvalidError[] =
     "Cannot listen on a socket that is already connected.";
 
-TLSSocket::TLSSocket(network::mojom::TLSClientSocketPtr tls_socket,
-                     const net::IPEndPoint& local_addr,
-                     const net::IPEndPoint& peer_addr,
-                     mojo::ScopedDataPipeConsumerHandle receive_stream,
-                     mojo::ScopedDataPipeProducerHandle send_stream,
-                     const std::string& owner_extension_id)
+TLSSocket::TLSSocket(
+    mojo::PendingRemote<network::mojom::TLSClientSocket> tls_socket,
+    const net::IPEndPoint& local_addr,
+    const net::IPEndPoint& peer_addr,
+    mojo::ScopedDataPipeConsumerHandle receive_stream,
+    mojo::ScopedDataPipeProducerHandle send_stream,
+    const std::string& owner_extension_id)
     : ResumableTCPSocket(nullptr, owner_extension_id),
       tls_socket_(std::move(tls_socket)),
       local_addr_(local_addr),
@@ -51,8 +52,8 @@ void TLSSocket::Connect(const net::AddressList& address,
 void TLSSocket::Disconnect(bool socket_destroying) {
   is_connected_ = false;
   tls_socket_.reset();
-  local_addr_ = base::nullopt;
-  peer_addr_ = base::nullopt;
+  local_addr_ = absl::nullopt;
+  peer_addr_ = absl::nullopt;
   mojo_data_pump_ = nullptr;
   // TODO(devlin): Should we do this for all callbacks?
   if (read_callback_) {

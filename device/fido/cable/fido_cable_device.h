@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,68 +12,135 @@
 
 #include "base/component_export.h"
 #include "base/containers/span.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "crypto/aead.h"
-#include "device/fido/ble/fido_ble_device.h"
+#include "device/fido/cable/fido_ble_connection.h"
+#include "device/fido/cable/fido_ble_transaction.h"
+#include "device/fido/fido_device.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace device {
 
 class BluetoothAdapter;
-class FidoBleConnection;
 class FidoBleFrame;
 
-class COMPONENT_EXPORT(DEVICE_FIDO) FidoCableDevice : public FidoBleDevice {
+class COMPONENT_EXPORT(DEVICE_FIDO) FidoCableDevice : public FidoDevice {
  public:
-  // Encapsulates state FidoCableDevice maintains to encrypt and decrypt
-  // data within FidoBleFrame.
-  struct COMPONENT_EXPORT(DEVICE_FIDO) EncryptionData {
-    EncryptionData(std::string session_key, base::span<const uint8_t, 8> nonce);
-    EncryptionData(EncryptionData&& data);
-    EncryptionData& operator=(EncryptionData&& other);
-    ~EncryptionData();
-
-    std::string session_key;
-    std::array<uint8_t, 8> nonce;
-    crypto::Aead aes_key{crypto::Aead::AES_256_GCM};
-    uint32_t write_sequence_num = 0;
-    uint32_t read_sequence_num = 0;
-
-    DISALLOW_COPY_AND_ASSIGN(EncryptionData);
-  };
-
   using FrameCallback = FidoBleTransaction::FrameCallback;
+
+  class Observer {
+   public:
+    virtual void FidoCableDeviceConnected(FidoCableDevice* device,
+                                          bool success) {}
+    virtual void FidoCableDeviceTimeout(FidoCableDevice* device) {}
+  };
 
   FidoCableDevice(BluetoothAdapter* adapter, std::string address);
   // Constructor used for testing purposes.
   FidoCableDevice(std::unique_ptr<FidoBleConnection> connection);
+
+  FidoCableDevice(const FidoCableDevice&) = delete;
+  FidoCableDevice& operator=(const FidoCableDevice&) = delete;
+
   ~FidoCableDevice() override;
 
-  // FidoBleDevice:
+  // Returns FidoDevice::GetId() for a given FidoBleConnection address.
+  static std::string GetIdForAddress(const std::string& ble_address);
+
+  std::string GetAddress();
+  void Connect();
+  void SendPing(std::vector<uint8_t> data, DeviceCallback callback);
+  FidoBleConnection::ReadCallback GetReadCallbackForTesting();
+  void set_observer(Observer* observer);
+
+  // FidoDevice:
+  void Cancel(CancelToken token) override;
+  std::string GetId() const override;
+  FidoTransportProtocol DeviceTransport() const override;
   CancelToken DeviceTransact(std::vector<uint8_t> command,
                              DeviceCallback callback) override;
-  void OnResponseFrame(FrameCallback callback,
-                       base::Optional<FidoBleFrame> frame) override;
-  base::WeakPtr<FidoDevice> GetWeakPtr() override;
 
   void SendHandshakeMessage(std::vector<uint8_t> handshake_message,
                             DeviceCallback callback);
 
-  void SetEncryptionData(std::string session_key,
-                         base::span<const uint8_t, 8> nonce);
-  FidoTransportProtocol DeviceTransport() const override;
+  // Configure caBLE v1 keys.
+  void SetV1EncryptionData(base::span<const uint8_t, 32> session_key,
+                           base::span<const uint8_t, 8> nonce);
+
+  // SetCountersForTesting allows tests to set the message counters. Non-test
+  // code must not call this function.
+  void SetSequenceNumbersForTesting(uint32_t read_counter,
+                                    uint32_t write_counter);
+
+  base::WeakPtr<FidoDevice> GetWeakPtr() override;
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(FidoCableDeviceTest,
-                           TestCableDeviceSendMultipleRequests);
-  FRIEND_TEST_ALL_PREFIXES(FidoCableDeviceTest,
-                           TestCableDeviceErrorOnMaxCounter);
+  struct PendingFrame {
+    PendingFrame(FidoBleFrame frame, FrameCallback callback, CancelToken token);
+    PendingFrame(PendingFrame&&);
+    ~PendingFrame();
 
-  base::Optional<EncryptionData> encryption_data_;
-  base::WeakPtrFactory<FidoCableDevice> weak_factory_;
+    FidoBleFrame frame;
+    FrameCallback callback;
+    CancelToken token;
+  };
 
-  DISALLOW_COPY_AND_ASSIGN(FidoCableDevice);
+  // Encapsulates state FidoCableDevice maintains to encrypt and decrypt
+  // data within FidoBleFrame.
+  struct EncryptionData {
+    EncryptionData();
+    ~EncryptionData();
+
+    std::array<uint8_t, 32> read_key;
+    std::array<uint8_t, 32> write_key;
+    std::array<uint8_t, 8> nonce;
+    uint32_t write_sequence_num = 0;
+    uint32_t read_sequence_num = 0;
+  };
+
+  void OnResponseFrame(FrameCallback callback,
+                       absl::optional<FidoBleFrame> frame);
+  void Transition();
+  CancelToken AddToPendingFrames(FidoBleDeviceCommand cmd,
+                                 std::vector<uint8_t> request,
+                                 DeviceCallback callback);
+  void ResetTransaction();
+
+  void OnConnected(bool success);
+  void OnStatusMessage(std::vector<uint8_t> data);
+
+  void OnReadControlPointLength(absl::optional<uint16_t> length);
+
+  void SendRequestFrame(FidoBleFrame frame, FrameCallback callback);
+
+  void StartTimeout();
+  void StopTimeout();
+  void OnTimeout();
+
+  void OnBleResponseReceived(DeviceCallback callback,
+                             absl::optional<FidoBleFrame> frame);
+  void ProcessBleDeviceError(base::span<const uint8_t> data);
+
+  bool EncryptOutgoingMessage(std::vector<uint8_t>* message_to_encrypt);
+  bool DecryptIncomingMessage(FidoBleFrame* incoming_frame);
+
+  base::OneShotTimer timer_;
+
+  std::unique_ptr<FidoBleConnection> connection_;
+  uint16_t control_point_length_ = 0;
+
+  // pending_frames_ contains frames that have not yet been sent, i.e. the
+  // current frame is not included at the head of the list.
+  std::list<PendingFrame> pending_frames_;
+  // current_token_ contains the cancelation token of the currently running
+  // request, or else is empty if no request is currently pending.
+  absl::optional<CancelToken> current_token_;
+  absl::optional<FidoBleTransaction> transaction_;
+  raw_ptr<Observer> observer_ = nullptr;
+
+  absl::optional<EncryptionData> encryption_data_;
+  base::WeakPtrFactory<FidoCableDevice> weak_factory_{this};
 };
 
 }  // namespace device

@@ -1,6 +1,6 @@
 # Running web tests on Linux
 
-1.  Build `blink_tests` (see [Linux-specific build instructions](https://chromium.googlesource.com/chromium/src/+/master/docs/linux_build_instructions.md))
+1.  Build `blink_tests` (see [Linux-specific build instructions](https://chromium.googlesource.com/chromium/src/+/main/docs/linux/build_instructions.md))
 1.  Checkout the web tests
     *   If you have an entry in your `.gclient` file that includes
         "web_tests", you may need to comment it out and sync.
@@ -59,7 +59,7 @@ If `fast/dom/object-plugin-hides-properties.html` and
     using a chroot jail with Lucid 64-bit user space to be sure that your system
     matches the checked in baselines.  You can use `build/install-chroot.sh` to
     set up a Lucid 64 chroot. Learn more about
-    [using a linux chroot](using_a_linux_chroot.md).
+    [using a linux chroot](linux/using_a_chroot.md).
 
 ## Getting a web test into a debugger
 
@@ -72,7 +72,7 @@ There are two ways:
         `blink/web_tests`).
 1.  Or, run as normal but with the
     `--additional-drt-flag=--renderer-startup-dialog
-    --additional-drt-flag=--no-timeout --time-out-ms=86400000` flags. The first
+    --additional-drt-flag=--no-timeout --timeout-ms=86400000` flags. The first
     one makes content\_shell bring up a dialog before running, which then would
     let you attach to the process via `gdb -p PID_OF_DUMPRENDERTREE`. The others
     help avoid the test shell and DumpRenderTree timeouts during the debug

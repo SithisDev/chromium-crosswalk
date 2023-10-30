@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,16 @@
 
 #include <memory>
 
-#include "base/macros.h"
+#include "components/viz/common/gpu/context_provider.h"
+#include "device/vr/openxr/context_provider_callbacks.h"
+#include "device/vr/openxr/openxr_util.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "device/vr/vr_device_base.h"
+#include "device/vr/vr_export.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "third_party/openxr/src/include/openxr/openxr.h"
 
 namespace device {
 
@@ -18,54 +25,51 @@ class OpenXrRenderLoop;
 class DEVICE_VR_EXPORT OpenXrDevice
     : public VRDeviceBase,
       public mojom::XRSessionController,
-      public mojom::IsolatedXRGamepadProviderFactory,
       public mojom::XRCompositorHost {
  public:
-  OpenXrDevice();
-  ~OpenXrDevice() override;
+  OpenXrDevice(VizContextProviderFactoryAsync context_provider_factory_async);
 
-  static bool IsHardwareAvailable();
-  static bool IsApiAvailable();
+  OpenXrDevice(const OpenXrDevice&) = delete;
+  OpenXrDevice& operator=(const OpenXrDevice&) = delete;
+
+  ~OpenXrDevice() override;
 
   // VRDeviceBase
   void RequestSession(
       mojom::XRRuntimeSessionOptionsPtr options,
       mojom::XRRuntime::RequestSessionCallback callback) override;
 
-  mojom::IsolatedXRGamepadProviderFactoryPtr BindGamepadFactory();
-  mojom::XRCompositorHostPtr BindCompositorHost();
+  mojo::PendingRemote<mojom::XRCompositorHost> BindCompositorHost();
 
  private:
   // XRSessionController
   void SetFrameDataRestricted(bool restricted) override;
 
-  // mojom::IsolatedXRGamepadProviderFactory
-  void GetIsolatedXRGamepadProvider(
-      mojom::IsolatedXRGamepadProviderRequest provider_request) override;
-
   // XRCompositorHost
   void CreateImmersiveOverlay(
-      mojom::ImmersiveOverlayRequest overlay_request) override;
+      mojo::PendingReceiver<mojom::ImmersiveOverlay> overlay_receiver) override;
 
-  void OnRequestSessionResult(mojom::XRRuntime::RequestSessionCallback callback,
-                              bool result,
-                              mojom::XRSessionPtr session);
+  void EnsureRenderLoop();
+
+  void OnRequestSessionResult(bool result, mojom::XRSessionPtr session);
   void OnPresentingControllerMojoConnectionError();
+  bool IsArBlendModeSupported();
 
+  XrInstance instance_;
+  OpenXrExtensionHelper extension_helper_;
   std::unique_ptr<OpenXrRenderLoop> render_loop_;
 
-  mojo::Binding<mojom::XRSessionController> exclusive_controller_binding_;
+  mojo::Receiver<mojom::XRSessionController> exclusive_controller_receiver_{
+      this};
 
-  mojo::Binding<mojom::IsolatedXRGamepadProviderFactory>
-      gamepad_provider_factory_binding_;
-  mojom::IsolatedXRGamepadProviderRequest provider_request_;
+  mojo::Receiver<mojom::XRCompositorHost> compositor_host_receiver_{this};
+  mojo::PendingReceiver<mojom::ImmersiveOverlay> overlay_receiver_;
 
-  mojo::Binding<mojom::XRCompositorHost> compositor_host_binding_;
-  mojom::ImmersiveOverlayRequest overlay_request_;
+  VizContextProviderFactoryAsync context_provider_factory_async_;
+
+  mojom::XRRuntime::RequestSessionCallback request_session_callback_;
 
   base::WeakPtrFactory<OpenXrDevice> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(OpenXrDevice);
 };
 
 }  // namespace device

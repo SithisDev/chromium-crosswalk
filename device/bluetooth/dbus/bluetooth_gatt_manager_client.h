@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "dbus/object_path.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/dbus/bluez_dbus_client.h"
@@ -26,13 +25,18 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothGattManagerClient
     // later as we know more about how this will be used.
   };
 
+  BluetoothGattManagerClient(const BluetoothGattManagerClient&) = delete;
+  BluetoothGattManagerClient& operator=(const BluetoothGattManagerClient&) =
+      delete;
+
   ~BluetoothGattManagerClient() override;
 
   // The ErrorCallback is used by GATT manager methods to indicate failure. It
   // receives two arguments: the name of the error in |error_name| and an
   // optional message in |error_message|.
-  typedef base::Callback<void(const std::string& error_name,
-                              const std::string& error_message)> ErrorCallback;
+  typedef base::OnceCallback<void(const std::string& error_name,
+                                  const std::string& error_message)>
+      ErrorCallback;
 
   // Registers a GATT service implementation within the local process at the
   // D-Bus object path |service_path| with the remote GATT manager. The local
@@ -48,28 +52,26 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothGattManagerClient
   virtual void RegisterApplication(const dbus::ObjectPath& adapter_object_path,
                                    const dbus::ObjectPath& application_path,
                                    const Options& options,
-                                   const base::Closure& callback,
-                                   const ErrorCallback& error_callback) = 0;
+                                   base::OnceClosure callback,
+                                   ErrorCallback error_callback) = 0;
 
   // Unregisters the GATT service with the D-Bus object path |service_path| from
   // the remote GATT manager.
   virtual void UnregisterApplication(
       const dbus::ObjectPath& adapter_object_path,
       const dbus::ObjectPath& application_path,
-      const base::Closure& callback,
-      const ErrorCallback& error_callback) = 0;
+      base::OnceClosure callback,
+      ErrorCallback error_callback) = 0;
 
   // Creates the instance.
   static BluetoothGattManagerClient* Create();
 
   // Constants used to indicate exceptional error conditions.
   static const char kNoResponseError[];
+  static const char kUnknownGattManager[];
 
  protected:
   BluetoothGattManagerClient();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(BluetoothGattManagerClient);
 };
 
 }  // namespace bluez

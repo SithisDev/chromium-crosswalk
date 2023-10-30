@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "extensions/browser/extension_function.h"
 
 namespace base {
@@ -17,7 +18,7 @@ namespace extensions {
 struct Alarm;
 using AlarmList = std::vector<std::unique_ptr<Alarm>>;
 
-class AlarmsCreateFunction : public UIThreadExtensionFunction {
+class AlarmsCreateFunction : public ExtensionFunction {
  public:
   AlarmsCreateFunction();
   // Use |clock| instead of the default clock. Does not take ownership
@@ -27,20 +28,20 @@ class AlarmsCreateFunction : public UIThreadExtensionFunction {
  protected:
   ~AlarmsCreateFunction() override;
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("alarms.create", ALARMS_CREATE)
  private:
   void Callback();
 
-  base::Clock* const clock_;
+  const raw_ptr<base::Clock> clock_;
 };
 
-class AlarmsGetFunction : public UIThreadExtensionFunction {
+class AlarmsGetFunction : public ExtensionFunction {
  protected:
   ~AlarmsGetFunction() override {}
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() override;
 
  private:
@@ -48,11 +49,11 @@ class AlarmsGetFunction : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("alarms.get", ALARMS_GET)
 };
 
-class AlarmsGetAllFunction : public UIThreadExtensionFunction {
+class AlarmsGetAllFunction : public ExtensionFunction {
  protected:
   ~AlarmsGetAllFunction() override {}
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() override;
 
  private:
@@ -60,11 +61,11 @@ class AlarmsGetAllFunction : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("alarms.getAll", ALARMS_GETALL)
 };
 
-class AlarmsClearFunction : public UIThreadExtensionFunction {
+class AlarmsClearFunction : public ExtensionFunction {
  protected:
   ~AlarmsClearFunction() override {}
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() override;
 
  private:
@@ -72,11 +73,11 @@ class AlarmsClearFunction : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("alarms.clear", ALARMS_CLEAR)
 };
 
-class AlarmsClearAllFunction : public UIThreadExtensionFunction {
+class AlarmsClearAllFunction : public ExtensionFunction {
  protected:
   ~AlarmsClearAllFunction() override {}
 
-  // UIThreadExtensionFunction:
+  // ExtensionFunction:
   ResponseAction Run() override;
 
  private:

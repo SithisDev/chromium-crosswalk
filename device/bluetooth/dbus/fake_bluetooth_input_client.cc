@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/observer_list.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_manager.h"
@@ -30,18 +31,18 @@ FakeBluetoothInputClient::Properties::~Properties() = default;
 void FakeBluetoothInputClient::Properties::Get(
     dbus::PropertyBase* property,
     dbus::PropertySet::GetCallback callback) {
-  VLOG(1) << "Get " << property->name();
+  DVLOG(1) << "Get " << property->name();
   std::move(callback).Run(false);
 }
 
 void FakeBluetoothInputClient::Properties::GetAll() {
-  VLOG(1) << "GetAll";
+  DVLOG(1) << "GetAll";
 }
 
 void FakeBluetoothInputClient::Properties::Set(
     dbus::PropertyBase* property,
     dbus::PropertySet::SetCallback callback) {
-  VLOG(1) << "Set " << property->name();
+  DVLOG(1) << "Set " << property->name();
   std::move(callback).Run(false);
 }
 
@@ -75,8 +76,8 @@ void FakeBluetoothInputClient::AddInputDevice(
     return;
 
   std::unique_ptr<Properties> properties = std::make_unique<Properties>(
-      base::Bind(&FakeBluetoothInputClient::OnPropertyChanged,
-                 base::Unretained(this), object_path));
+      base::BindRepeating(&FakeBluetoothInputClient::OnPropertyChanged,
+                          base::Unretained(this), object_path));
 
   // The LegacyAutopair and DisplayPinCode devices represent a typical mouse
   // and keyboard respectively, so mark them as ReconnectMode "any". The

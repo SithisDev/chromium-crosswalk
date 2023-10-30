@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,9 @@
 
 #include "extensions/browser/lazy_background_task_queue.h"
 #include "extensions/browser/service_worker_task_queue.h"
+#include "extensions/browser/task_queue_util.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/manifest_handlers/background_info.h"
 
 namespace extensions {
 
@@ -21,11 +24,23 @@ LazyContextId::LazyContextId(content::BrowserContext* context,
       extension_id_(extension_id),
       service_worker_scope_(service_worker_scope) {}
 
+LazyContextId::LazyContextId(content::BrowserContext* context,
+                             const Extension* extension)
+    : context_(context), extension_id_(extension->id()) {
+  if (BackgroundInfo::HasLazyBackgroundPage(extension)) {
+    type_ = Type::kEventPage;
+  } else {
+    // TODO(crbug.com/773103): This currently assumes all workers are
+    // registered in the '/' scope.
+    DCHECK(BackgroundInfo::IsServiceWorkerBased(extension));
+    type_ = Type::kServiceWorker;
+    service_worker_scope_ =
+        Extension::GetBaseURLFromExtensionId(extension->id());
+  }
+}
+
 LazyContextTaskQueue* LazyContextId::GetTaskQueue() const {
-  if (is_for_event_page())
-    return LazyBackgroundTaskQueue::Get(context_);
-  DCHECK(is_for_service_worker());
-  return ServiceWorkerTaskQueue::Get(context_);
+  return GetTaskQueueForLazyContextId(*this);
 }
 
 }  // namespace extensions

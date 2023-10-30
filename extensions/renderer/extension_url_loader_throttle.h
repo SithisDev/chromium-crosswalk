@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
-#include "content/public/common/url_loader_throttle.h"
+#include "third_party/blink/public/common/loader/url_loader_throttle.h"
+#include "url/gurl.h"
 
 namespace extensions {
 
@@ -19,34 +19,36 @@ class ExtensionThrottleManager;
 // if there are too many requests made within a short time to urls with the same
 // scheme, host, port and path. For the exact criteria for throttling, please
 // also see extension_throttle_manager.cc.
-class ExtensionURLLoaderThrottle : public content::URLLoaderThrottle {
+class ExtensionURLLoaderThrottle : public blink::URLLoaderThrottle {
  public:
   explicit ExtensionURLLoaderThrottle(ExtensionThrottleManager* manager);
 
+  ExtensionURLLoaderThrottle(const ExtensionURLLoaderThrottle&) = delete;
+  ExtensionURLLoaderThrottle& operator=(const ExtensionURLLoaderThrottle&) =
+      delete;
+
   ~ExtensionURLLoaderThrottle() override;
 
-  // content::URLLoaderThrottle:
+  // blink::URLLoaderThrottle:
   void WillStartRequest(network::ResourceRequest* request,
                         bool* defer) override;
   void WillRedirectRequest(
       net::RedirectInfo* redirect_info,
-      const network::ResourceResponseHead& response_head,
+      const network::mojom::URLResponseHead& response_head,
       bool* defer,
       std::vector<std::string>* to_be_removed_request_headers,
-      net::HttpRequestHeaders* modified_request_headers) override;
+      net::HttpRequestHeaders* modified_request_headers,
+      net::HttpRequestHeaders* modified_cors_exempt_request_headers) override;
   void WillProcessResponse(const GURL& response_url,
-                           network::ResourceResponseHead* response_head,
+                           network::mojom::URLResponseHead* response_head,
                            bool* defer) override;
 
  private:
-  // content::URLLoaderThrottle:
+  // blink::URLLoaderThrottle:
   void DetachFromCurrentSequence() override;
 
   ExtensionThrottleManager* manager_ = nullptr;
-  int request_load_flags_ = 0;
   GURL start_request_url_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionURLLoaderThrottle);
 };
 
 }  // namespace extensions

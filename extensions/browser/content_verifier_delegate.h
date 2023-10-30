@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,13 +23,29 @@ class Extension;
 // This is an interface for clients that want to use a ContentVerifier.
 class ContentVerifierDelegate {
  public:
+  // Types of hash sources used for content verification of an extension.
+  enum class VerifierSourceType {
+    // Use no hashes for verification, this effectively means the extension
+    // won't be verified.
+    NONE,
+
+    // Use unsigned local hashes (computed_hashes.json) only and not
+    // verified_contents.json.
+    UNSIGNED_HASHES,
+
+    // Use signed hashes (verified_contents.json).
+    // Note that GetPublicKey and GetSignatureFetchUrl would be required for
+    // this.
+    SIGNED_HASHES,
+  };
+
   virtual ~ContentVerifierDelegate() {}
 
-  // Returns whether or not resources from |extension| should be verified.
-  virtual bool ShouldBeVerified(const Extension& extension) = 0;
+  // Returns verification source type for |extension|.
+  virtual VerifierSourceType GetVerifierSourceType(
+      const Extension& extension) = 0;
 
-  // Returns the public key to use for validating signatures via the two out
-  // parameters.
+  // Returns the public key to use for validating signatures.
   virtual ContentVerifierKey GetPublicKey() = 0;
 
   // Returns a URL that can be used to fetch the verified_contents.json

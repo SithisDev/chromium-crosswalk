@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@ class ShellBrowserMainDelegate {
   virtual ~ShellBrowserMainDelegate() {}
 
   // Called to start an application after all initialization processes that are
-  // necesary to run apps are completed.
+  // necessary to run apps are completed.
   virtual void Start(content::BrowserContext* context) = 0;
 
   // Called after the main message looop has stopped, but before

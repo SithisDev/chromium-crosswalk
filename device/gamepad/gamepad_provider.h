@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
@@ -26,32 +26,33 @@
 namespace base {
 class SingleThreadTaskRunner;
 class Thread;
-}
+}  // namespace base
 
 namespace device {
 
 class GamepadDataFetcher;
 
-class DEVICE_GAMEPAD_EXPORT GamepadConnectionChangeClient {
+class DEVICE_GAMEPAD_EXPORT GamepadChangeClient {
  public:
   virtual void OnGamepadConnectionChange(bool connected,
                                          uint32_t index,
                                          const Gamepad& pad) = 0;
+  virtual void OnGamepadChange(mojom::GamepadChangesPtr changes) = 0;
 };
 
 class DEVICE_GAMEPAD_EXPORT GamepadProvider
     : public GamepadPadStateProvider,
       public base::SystemMonitor::DevicesChangedObserver {
  public:
-  explicit GamepadProvider(
-      GamepadConnectionChangeClient* connection_change_client);
+  explicit GamepadProvider(GamepadChangeClient* gamepad_change_client);
 
   // Manually specifies the data fetcher and polling thread. The polling thread
   // will be created normally if |polling_thread| is nullptr. Used for testing.
-  GamepadProvider(GamepadConnectionChangeClient* connection_change_client,
+  GamepadProvider(GamepadChangeClient* gamepad_change_client,
                   std::unique_ptr<GamepadDataFetcher> fetcher,
                   std::unique_ptr<base::Thread> polling_thread);
-
+  GamepadProvider(const GamepadProvider&) = delete;
+  GamepadProvider& operator=(const GamepadProvider&) = delete;
   ~GamepadProvider() override;
 
   // Returns a duplicate of the shared memory region of the gamepad data.
@@ -76,7 +77,7 @@ class DEVICE_GAMEPAD_EXPORT GamepadProvider
 
   // Registers the given closure for calling when the user has interacted with
   // the device. This callback will only be issued once.
-  void RegisterForUserGesture(const base::Closure& closure);
+  void RegisterForUserGesture(base::OnceClosure closure);
 
   // base::SystemMonitor::DevicesChangedObserver implementation.
   void OnDevicesChanged(base::SystemMonitor::DeviceType type) override;
@@ -107,6 +108,8 @@ class DEVICE_GAMEPAD_EXPORT GamepadProvider
   void DoPoll();
   void ScheduleDoPoll();
 
+  void SendChangeEvents(mojom::GamepadChangesPtr changes);
+
   void OnGamepadConnectionChange(bool connected,
                                  uint32_t index,
                                  const Gamepad& pad);
@@ -114,6 +117,10 @@ class DEVICE_GAMEPAD_EXPORT GamepadProvider
   // Checks the gamepad state to see if the user has interacted with it. Returns
   // true if any user gesture observers were notified.
   bool CheckForUserGesture();
+
+  // GamepadPadStateProvider implementation.
+  void DisconnectUnrecognizedGamepad(GamepadSource source,
+                                     int source_id) override;
 
   void PlayEffectOnPollingThread(
       uint32_t pad_index,
@@ -133,12 +140,12 @@ class DEVICE_GAMEPAD_EXPORT GamepadProvider
   // Keeps track of when the background thread is paused. Access to is_paused_
   // must be guarded by is_paused_lock_.
   base::Lock is_paused_lock_;
-  bool is_paused_;
+  bool is_paused_ = true;
 
   // Keep track of when a polling task is schedlued, so as to prevent us from
   // accidentally scheduling more than one at any time, when rapidly toggling
   // |is_paused_|.
-  bool have_scheduled_do_poll_;
+  bool have_scheduled_do_poll_ = false;
 
   // Lists all observers registered for user gestures, and the thread which
   // to issue the callbacks on. Since we always issue the callback on the
@@ -146,15 +153,8 @@ class DEVICE_GAMEPAD_EXPORT GamepadProvider
   // thread, the message loop proxies will normally just be the I/O thread.
   // However, this will be the main thread for unit testing.
   base::Lock user_gesture_lock_;
-  struct ClosureAndThread {
-    ClosureAndThread(const base::Closure& c,
-                     const scoped_refptr<base::SingleThreadTaskRunner>& m);
-    ClosureAndThread(const ClosureAndThread& other);
-    ~ClosureAndThread();
-
-    base::Closure closure;
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner;
-  };
+  using ClosureAndThread =
+      std::pair<base::OnceClosure, scoped_refptr<base::SingleThreadTaskRunner>>;
   using UserGestureObserverVector = std::vector<ClosureAndThread>;
   UserGestureObserverVector user_gesture_observers_;
 
@@ -164,10 +164,10 @@ class DEVICE_GAMEPAD_EXPORT GamepadProvider
   // tests. Access to devices_changed_ must be guarded by
   // devices_changed_lock_.
   base::Lock devices_changed_lock_;
-  bool devices_changed_;
+  bool devices_changed_ = true;
 
-  bool ever_had_user_gesture_;
-  bool sanitize_;
+  bool ever_had_user_gesture_ = false;
+  bool sanitize_ = true;
 
   // Only used on the polling thread.
   using GamepadFetcherVector = std::vector<std::unique_ptr<GamepadDataFetcher>>;
@@ -179,9 +179,9 @@ class DEVICE_GAMEPAD_EXPORT GamepadProvider
   // Polling is done on this background thread.
   std::unique_ptr<base::Thread> polling_thread_;
 
-  GamepadConnectionChangeClient* connection_change_client_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
 
-  DISALLOW_COPY_AND_ASSIGN(GamepadProvider);
+  raw_ptr<GamepadChangeClient> gamepad_change_client_;
 };
 
 }  // namespace device

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,19 +7,20 @@
 
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "content/public/test/test_content_client_initializer.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/test/test_renderer_host.h"
 #include "extensions/browser/mock_extension_system.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/lacros/lacros_test_helper.h"
+#endif
 
 class ExtensionPrefValueMap;
 class PrefService;
 
 namespace content {
 class BrowserContext;
-class ContentUtilityClient;
 class RenderViewHostTestEnabler;
 }
 
@@ -38,8 +39,10 @@ class ExtensionsTest : public testing::Test {
   template <typename... Args>
   constexpr ExtensionsTest(Args... args)
       : ExtensionsTest(
-            std::make_unique<content::TestBrowserThreadBundle>(args...)) {}
+            std::make_unique<content::BrowserTaskEnvironment>(args...)) {}
 
+  ExtensionsTest(const ExtensionsTest&) = delete;
+  ExtensionsTest& operator=(const ExtensionsTest&) = delete;
   ~ExtensionsTest() override;
 
   // Allows setting a custom TestExtensionsBrowserClient. Must only be called
@@ -64,6 +67,15 @@ class ExtensionsTest : public testing::Test {
 
   PrefService* pref_service() { return pref_service_.get(); }
 
+  MockExtensionSystem* extension_system() {
+    return static_cast<MockExtensionSystem*>(
+        extension_system_factory_.GetForBrowserContext(browser_context_.get()));
+  }
+
+  content::BrowserTaskEnvironment* task_environment() {
+    return task_environment_.get();
+  }
+
   // testing::Test overrides:
   void SetUp() override;
   void TearDown() override;
@@ -72,10 +84,12 @@ class ExtensionsTest : public testing::Test {
   // The template constructor has to be in the header but it delegates to this
   // constructor to initialize all other members out-of-line.
   explicit ExtensionsTest(
-      std::unique_ptr<content::TestBrowserThreadBundle> thread_bundle);
+      std::unique_ptr<content::BrowserTaskEnvironment> task_environment);
 
-  content::TestContentClientInitializer content_client_initializer_;
-  std::unique_ptr<content::ContentUtilityClient> content_utility_client_;
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  chromeos::ScopedLacrosServiceTestHelper lacros_service_test_helper_;
+#endif
+
   std::unique_ptr<content::BrowserContext> browser_context_;
   std::unique_ptr<content::BrowserContext> incognito_context_;
   std::unique_ptr<TestExtensionsBrowserClient> extensions_browser_client_;
@@ -84,13 +98,11 @@ class ExtensionsTest : public testing::Test {
 
   MockExtensionSystemFactory<MockExtensionSystem> extension_system_factory_;
 
-  std::unique_ptr<content::TestBrowserThreadBundle> thread_bundle_;
+  std::unique_ptr<content::BrowserTaskEnvironment> task_environment_;
 
   // The existence of this object enables tests via
   // RenderViewHostTester.
   std::unique_ptr<content::RenderViewHostTestEnabler> rvh_test_enabler_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsTest);
 };
 
 }  // namespace extensions

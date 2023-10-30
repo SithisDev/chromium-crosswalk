@@ -1,34 +1,36 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef DEVICE_VR_ORIENTATION_DEVICE_PROVIDER_H
-#define DEVICE_VR_ORIENTATION_DEVICE_PROVIDER_H
+#ifndef DEVICE_VR_ORIENTATION_ORIENTATION_DEVICE_PROVIDER_H_
+#define DEVICE_VR_ORIENTATION_ORIENTATION_DEVICE_PROVIDER_H_
 
 #include <memory>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/component_export.h"
+#include "base/memory/raw_ptr.h"
 #include "device/vr/orientation/orientation_device.h"
-#include "device/vr/vr_device_provider.h"
-#include "device/vr/vr_export.h"
-#include "services/device/public/mojom/constants.mojom.h"
+#include "device/vr/public/cpp/vr_device_provider.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/sensor_provider.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace device {
 
-class DEVICE_VR_EXPORT VROrientationDeviceProvider : public VRDeviceProvider {
+class COMPONENT_EXPORT(VR_ORIENTATION) VROrientationDeviceProvider
+    : public VRDeviceProvider {
  public:
-  VROrientationDeviceProvider(service_manager::Connector* connector);
+  explicit VROrientationDeviceProvider(
+      mojo::PendingRemote<device::mojom::SensorProvider> sensor_provider);
+
+  VROrientationDeviceProvider(const VROrientationDeviceProvider&) = delete;
+  VROrientationDeviceProvider& operator=(const VROrientationDeviceProvider&) =
+      delete;
+
   ~VROrientationDeviceProvider() override;
 
-  void Initialize(
-      base::RepeatingCallback<void(mojom::XRDeviceId,
-                                   mojom::VRDisplayInfoPtr,
-                                   mojom::XRRuntimePtr)> add_device_callback,
-      base::RepeatingCallback<void(mojom::XRDeviceId)> remove_device_callback,
-      base::OnceClosure initialization_complete) override;
+  void Initialize(VRDeviceProviderClient* client) override;
 
   bool Initialized() override;
 
@@ -37,18 +39,12 @@ class DEVICE_VR_EXPORT VROrientationDeviceProvider : public VRDeviceProvider {
 
   bool initialized_ = false;
 
-  device::mojom::SensorProviderPtr sensor_provider_;
+  mojo::Remote<device::mojom::SensorProvider> sensor_provider_;
 
   std::unique_ptr<VROrientationDevice> device_;
-
-  base::RepeatingCallback<
-      void(mojom::XRDeviceId, mojom::VRDisplayInfoPtr, mojom::XRRuntimePtr)>
-      add_device_callback_;
-  base::OnceClosure initialized_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(VROrientationDeviceProvider);
+  raw_ptr<VRDeviceProviderClient> client_ = nullptr;
 };
 
 }  // namespace device
 
-#endif  // DEVICE_VR_ORIENTATION_DEVICE_PROVIDER_H
+#endif  // DEVICE_VR_ORIENTATION_ORIENTATION_DEVICE_PROVIDER_H_

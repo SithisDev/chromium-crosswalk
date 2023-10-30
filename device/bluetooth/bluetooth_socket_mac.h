@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 
 #include "base/containers/queue.h"
 #include "base/mac/scoped_nsobject.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread_checker.h"
 #include "device/bluetooth/bluetooth_adapter.h"
@@ -39,6 +38,9 @@ class BluetoothSocketMac : public BluetoothSocket {
  public:
   static scoped_refptr<BluetoothSocketMac> CreateSocket();
 
+  BluetoothSocketMac(const BluetoothSocketMac&) = delete;
+  BluetoothSocketMac& operator=(const BluetoothSocketMac&) = delete;
+
   // Connects this socket to the service on |device| published as UUID |uuid|.
   // The underlying protocol and PSM or Channel is obtained through service
   // discovery. On a successful connection, the socket properties will be
@@ -46,8 +48,8 @@ class BluetoothSocketMac : public BluetoothSocket {
   // called with a message explaining the cause of failure.
   void Connect(IOBluetoothDevice* device,
                const BluetoothUUID& uuid,
-               const base::Closure& success_callback,
-               const ErrorCompletionCallback& error_callback);
+               base::OnceClosure success_callback,
+               ErrorCompletionCallback error_callback);
 
   // Listens for incoming RFCOMM connections using this socket: Publishes an
   // RFCOMM service on the |adapter| as UUID |uuid| with Channel
@@ -59,8 +61,8 @@ class BluetoothSocketMac : public BluetoothSocket {
   void ListenUsingRfcomm(scoped_refptr<BluetoothAdapterMac> adapter,
                          const BluetoothUUID& uuid,
                          const BluetoothAdapter::ServiceOptions& options,
-                         const base::Closure& success_callback,
-                         const ErrorCompletionCallback& error_callback);
+                         base::OnceClosure success_callback,
+                         ErrorCompletionCallback error_callback);
 
   // Listens for incoming L2CAP connections using this socket: Publishes an
   // L2CAP service on the |adapter| as UUID |uuid| with PSM |options.psm|, or an
@@ -72,31 +74,29 @@ class BluetoothSocketMac : public BluetoothSocket {
   void ListenUsingL2cap(scoped_refptr<BluetoothAdapterMac> adapter,
                         const BluetoothUUID& uuid,
                         const BluetoothAdapter::ServiceOptions& options,
-                        const base::Closure& success_callback,
-                        const ErrorCompletionCallback& error_callback);
+                        base::OnceClosure success_callback,
+                        ErrorCompletionCallback error_callback);
 
   // BluetoothSocket:
-  void Close() override;
-  void Disconnect(const base::Closure& callback) override;
+  void Disconnect(base::OnceClosure callback) override;
   void Receive(int /* buffer_size */,
-               const ReceiveCompletionCallback& success_callback,
-               const ReceiveErrorCompletionCallback& error_callback) override;
+               ReceiveCompletionCallback success_callback,
+               ReceiveErrorCompletionCallback error_callback) override;
   void Send(scoped_refptr<net::IOBuffer> buffer,
             int buffer_size,
-            const SendCompletionCallback& success_callback,
-            const ErrorCompletionCallback& error_callback) override;
-  void Accept(const AcceptCompletionCallback& success_callback,
-              const ErrorCompletionCallback& error_callback) override;
+            SendCompletionCallback success_callback,
+            ErrorCompletionCallback error_callback) override;
+  void Accept(AcceptCompletionCallback success_callback,
+              ErrorCompletionCallback error_callback) override;
 
   // Callback that is invoked when the OS completes an SDP query.
   // |status| is the returned status from the SDP query, |device| is the
   // IOBluetoothDevice for which the query was made. The remaining
   // parameters are those from |Connect()|.
-  void OnSDPQueryComplete(
-      IOReturn status,
-      IOBluetoothDevice* device,
-      const base::Closure& success_callback,
-      const ErrorCompletionCallback& error_callback);
+  void OnSDPQueryComplete(IOReturn status,
+                          IOBluetoothDevice* device,
+                          base::OnceClosure success_callback,
+                          ErrorCompletionCallback error_callback);
 
   // Called by BluetoothRfcommConnectionListener and
   // BluetoothL2capConnectionListener.
@@ -140,7 +140,7 @@ class BluetoothSocketMac : public BluetoothSocket {
   struct ConnectCallbacks {
     ConnectCallbacks();
     ~ConnectCallbacks();
-    base::Closure success_callback;
+    base::OnceClosure success_callback;
     ErrorCompletionCallback error_callback;
   };
 
@@ -197,8 +197,6 @@ class BluetoothSocketMac : public BluetoothSocket {
 
   // Queue of incoming connections.
   base::queue<std::unique_ptr<BluetoothChannelMac>> accept_queue_;
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothSocketMac);
 };
 
 }  // namespace device

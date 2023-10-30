@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/task_traits.h"
 #include "device/bluetooth/bluetooth_adapter_mac.h"
@@ -144,7 +145,7 @@ BluetoothLowEnergyDeviceWatcherMac::BluetoothPlistFilePath() {
 void BluetoothLowEnergyDeviceWatcherMac::AddBluetoothPropertyListFileWatcher() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   property_list_watcher_->Watch(
-      BluetoothPlistFilePath(), false /* recursive */,
+      BluetoothPlistFilePath(), base::FilePathWatcher::Type::kNonRecursive,
       base::BindRepeating(&BluetoothLowEnergyDeviceWatcherMac::
                               OnPropertyListFileChangedOnFileThread,
                           this));

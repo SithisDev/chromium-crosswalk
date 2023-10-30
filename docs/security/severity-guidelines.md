@@ -8,11 +8,27 @@ for how to rate these issues. Check out our
 [security release management page](https://www.chromium.org/Home/chromium-security/security-release-management)
 for guidance on how to release fixes based on severity.
 
-Any significant mitigating factors, such as unusual or additional user
-interaction, or running Chrome with a specific command line flag or non-default
-feature enabled, may reduce an issue’s severity by one or more levels. Also note
-that most crashes do not indicate vulnerabilities. Chromium is designed to crash
-in a controlled manner (e.g., with a ```__debugBreak```) when memory is
+Any significant mitigating factors will generally reduce an issue's severity by one or
+more levels:
+* Not web accessible, reliant solely on direct UI interaction to trigger.
+* Unusual or unlikely user interaction will normally reduce severity by one
+  level. This means interaction which may sometimes occur, but would not be
+  typical of an average user engaging with Chrome or a particular feature in
+  Chrome, nor could a user be easily convinced to perform by a persuasive web page.
+* Requiring profile destruction or browser shutdown will normally reduce
+  severity by one level.
+
+Bugs that require implausible interaction, interactions a user would not
+realistically be convinced to perform, will generally be downgraded to a
+functional bug and not considered a security bug.
+
+Conversely, we do not consider it a mitigating factor if a vulnerability applies
+only to a particular group of users. For instance, a Critical vulnerability is
+still considered Critical even if it applies only to Linux or to those users
+running with accessibility features enabled.
+
+Also note that most crashes do not indicate vulnerabilities. Chromium is designed
+to crash in a controlled manner (e.g., with a ```__debugBreak```) when memory is
 exhausted or in other exceptional circumstances.
 
 
@@ -37,7 +53,7 @@ if there is evidence of active exploitation.
 
 Example bugs:
 
-* Memory corruption in the browser process ([564501](https://crbug.com/564501)).
+* Memory corruption in the browser process ([319125](https://crbug.com/319125#c10)).
 * Exploit chains made up of multiple bugs that can lead to code execution
   outside of the sandbox ([416449](https://crbug.com/416449)).
 * A bug that enables web content to read local files
@@ -55,7 +71,14 @@ Bugs which would normally be
 critical severity with unusual mitigating factors may be rated as high severity.
 For example, renderer sandbox escapes fall into this category as their impact is
 that of a critical severity bug, but they require the precondition of a
-compromised renderer.
+compromised renderer. (Bugs which involve using [MojoJS](../../mojo/public/js/README.md)
+to trigger an exploitable browser process crash usually fall into this category).
+Another example are bugs that result in memory corruption in the browser
+process, which would normally be critical severity, but require browser shutdown
+or profile destruction, which would lower these issues to high severity. A
+bug with the precondition of browser shutdown or profile destruction should be
+considered to have a maximum severity of high and could potentially be
+reduced by other mitigating factors.
 
 They are normally assigned priority **Pri-1** and assigned to the current stable
 milestone (or earliest milestone affected). For high severity bugs,
@@ -71,7 +94,7 @@ Example bugs:
 bugs fall into this category, as they allow script execution in the context of
 an arbitrary origin ([534923](https://crbug.com/534923)).
 * A bug that allows arbitrary code execution within the confines of the sandbox,
-such as renderer or GPU process memory corruption
+such as renderer, network, or GPU process memory corruption
 ([570427](https://crbug.com/570427), [468936](https://crbug.com/468936)).
 * Complete control over the apparent origin in the omnibox
 ([76666](https://crbug.com/76666)).
@@ -82,8 +105,11 @@ compromised renderer, leading to a sandbox escape
 compromised renderer ([377392](https://crbug.com/377392)).
 * Memory corruption in the browser process that requires specific user
 interaction, such as granting a permission ([455735](https://crbug.com/455735)).
-* Cross-site execution contexts unexpectedly sharing a renderer process despite
-Site Isolation ([863069](https://crbug.com/863069)).
+* Site Isolation bypasses:
+    - Cross-site execution contexts unexpectedly sharing a renderer process
+      ([863069](https://crbug.com/863069), [886976](https://crbug.com/886976)).
+    - Cross-site data disclosure
+      ([917668](https://crbug.com/917668), [927849](https://crbug.com/927849)).
 
 
 ## Medium severity {#TOC-Medium-severity}
@@ -109,6 +135,10 @@ Example bugs:
 passed to a compromised renderer via IPC ([469151](https://crbug.com/469151)).
 * Memory corruption that requires a specific extension to be installed
 ([313743](https://crbug.com/313743)).
+* Memory corruption in the browser process, triggered by a browser shutdown that
+  is not reliably triggered and/or is difficult to trigger ([1230513](https://crbug.com/1230513)).
+* Memory corruption in the browser process, requiring a non-standard flag and
+  user interaction ([1255332](https://crbug.com/1255332)).
 * An HSTS bypass ([461481](https://crbug.com/461481)).
 * A bypass of the same origin policy for pages that meet several preconditions
 ([419383](https://crbug.com/419383)).
@@ -143,5 +173,44 @@ Example bugs:
 * An uncontrolled single-byte out-of-bounds read
 ([128163](https://crbug.com/128163)).
 
+
+## Can't impact Chrome users by default {#TOC-No-impact}
+
+If the bug can't impact Chrome users by default, this is denoted instead by
+the **Security-Impact_None** label. See
+[the security labels document](security-labels.md#TOC-Security_Impact-None)
+for more information. The bug should still have a severity set according
+to these guidelines.
+
+
+## Not a security bug {#TOC-Not-a-security-bug}
+
 The [security FAQ](faq.md) covers many of the cases that we do not consider to
-be security bugs, such as [denial of service](faq.md#TOC-Are-denial-of-service-issues-considered-security-bugs-).
+be security bugs, such as [denial of service](faq.md#TOC-Are-denial-of-service-issues-considered-security-bugs-)
+and, in particular, null pointer dereferences with consistent fixed offsets.
+
+
+## "MiraclePtr" protection against use-after-free
+
+["MiraclePtr"](../../base/memory/raw_ptr.md) is a technology designed to
+deterministically prevent exploitation of use-after-free bugs. Address
+sanitizer is aware of MiraclePtr and will report on whether a given
+use-after-free bug is protected or not:
+
+```
+MiraclePtr Status: NOT PROTECTED
+No raw_ptr<T> access to this region was detected prior to the crash.
+```
+
+or
+
+```
+MiraclePtr Status: PROTECTED
+The crash occurred while a raw_ptr<T> object containing a dangling pointer was being dereferenced.
+MiraclePtr should make this crash non-exploitable in regular builds.
+```
+
+For now, ignore these messages while determining severity, because MiraclePtr
+is not yet active on all Chromium platforms. In the future, we'll use this
+protection to reduce the severity of these bugs or even (once we have a lot of
+practical experience) reclassify them as non-security bugs.

@@ -1,18 +1,19 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef DEVICE_GAMEPAD_XINPUT_HAPTIC_GAMEPAD_WIN_
-#define DEVICE_GAMEPAD_XINPUT_HAPTIC_GAMEPAD_WIN_
+#ifndef DEVICE_GAMEPAD_XINPUT_HAPTIC_GAMEPAD_WIN_H_
+#define DEVICE_GAMEPAD_XINPUT_HAPTIC_GAMEPAD_WIN_H_
 
 #include <Unknwn.h>
 #include <XInput.h>
 
+#include "base/memory/weak_ptr.h"
 #include "device/gamepad/abstract_haptic_gamepad.h"
 
 namespace device {
 
-class XInputHapticGamepadWin : public AbstractHapticGamepad {
+class XInputHapticGamepadWin final : public AbstractHapticGamepad {
  public:
   typedef DWORD(WINAPI* XInputSetStateFunc)(DWORD dwUserIndex,
                                             XINPUT_VIBRATION* pVibration);
@@ -20,13 +21,16 @@ class XInputHapticGamepadWin : public AbstractHapticGamepad {
   XInputHapticGamepadWin(int pad_id, XInputSetStateFunc xinput_set_state);
   ~XInputHapticGamepadWin() override;
 
-  void SetVibration(double strong_magnitude, double weak_magnitude) override;
+  // AbstractHapticGamepad implementation.
+  void SetVibration(mojom::GamepadEffectParametersPtr params) override;
+  base::WeakPtr<AbstractHapticGamepad> GetWeakPtr() override;
 
  private:
   int pad_id_;
   XInputSetStateFunc xinput_set_state_;
+  base::WeakPtrFactory<XInputHapticGamepadWin> weak_factory_{this};
 };
 
 }  // namespace device
 
-#endif  // DEVICE_GAMEPAD_EVDEV_HAPTIC_GAMEPAD_WIN_
+#endif  // DEVICE_GAMEPAD_XINPUT_HAPTIC_GAMEPAD_WIN_H_

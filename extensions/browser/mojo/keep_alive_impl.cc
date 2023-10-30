@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,32 +8,30 @@
 
 #include "base/bind.h"
 #include "content/public/browser/browser_context.h"
-#include "extensions/browser/extension_registry.h"
-#include "extensions/browser/process_manager.h"
 
 namespace extensions {
 
 // static
 void KeepAliveImpl::Create(content::BrowserContext* context,
                            const Extension* extension,
-                           KeepAliveRequest request,
-                           content::RenderFrameHost* render_frame_host) {
+                           content::RenderFrameHost* render_frame_host,
+                           mojo::PendingReceiver<KeepAlive> receiver) {
   // Owns itself.
-  new KeepAliveImpl(context, extension, std::move(request));
+  new KeepAliveImpl(context, extension, std::move(receiver));
 }
 
 KeepAliveImpl::KeepAliveImpl(content::BrowserContext* context,
                              const Extension* extension,
-                             KeepAliveRequest request)
+                             mojo::PendingReceiver<KeepAlive> receiver)
     : context_(context),
       extension_(extension),
-      extension_registry_observer_(this),
-      binding_(this, std::move(request)) {
+      receiver_(this, std::move(receiver)) {
   ProcessManager::Get(context_)->IncrementLazyKeepaliveCount(
       extension_, Activity::MOJO, std::string());
-  binding_.set_connection_error_handler(
-      base::Bind(&KeepAliveImpl::OnDisconnected, base::Unretained(this)));
-  extension_registry_observer_.Add(ExtensionRegistry::Get(context_));
+  receiver_.set_disconnect_handler(
+      base::BindOnce(&KeepAliveImpl::OnDisconnected, base::Unretained(this)));
+  extension_registry_observation_.Observe(ExtensionRegistry::Get(context_));
+  process_manager_observation_.Observe(ProcessManager::Get(context_));
 }
 
 KeepAliveImpl::~KeepAliveImpl() = default;
@@ -53,6 +51,10 @@ void KeepAliveImpl::OnShutdown(ExtensionRegistry* registry) {
 void KeepAliveImpl::OnDisconnected() {
   ProcessManager::Get(context_)->DecrementLazyKeepaliveCount(
       extension_, Activity::MOJO, std::string());
+  delete this;
+}
+
+void KeepAliveImpl::OnProcessManagerShutdown(ProcessManager* manager) {
   delete this;
 }
 

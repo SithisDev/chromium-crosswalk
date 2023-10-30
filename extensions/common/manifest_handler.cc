@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include <map>
 #include <vector>
 
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check.h"
+#include "base/containers/contains.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/manifest_permission.h"
 #include "extensions/common/permissions/manifest_permission_set.h"
@@ -21,7 +21,7 @@ namespace {
 
 static base::LazyInstance<ManifestHandlerRegistry>::DestructorAtExit
     g_registry = LAZY_INSTANCE_INITIALIZER;
-static ManifestHandlerRegistry* g_registry_override = NULL;
+static ManifestHandlerRegistry* g_registry_override = nullptr;
 
 }  // namespace
 
@@ -50,12 +50,12 @@ const std::vector<std::string> ManifestHandler::PrerequisiteKeys() const {
 }
 
 ManifestPermission* ManifestHandler::CreatePermission() {
-  return NULL;
+  return nullptr;
 }
 
 ManifestPermission* ManifestHandler::CreateInitialRequiredPermission(
     const Extension* extension) {
-  return NULL;
+  return nullptr;
 }
 
 // static
@@ -70,7 +70,7 @@ bool ManifestHandler::IsRegistrationFinalized() {
 
 // static
 bool ManifestHandler::ParseExtension(Extension* extension,
-                                     base::string16* error) {
+                                     std::u16string* error) {
   return ManifestHandlerRegistry::Get()->ParseExtension(extension, error);
 }
 
@@ -130,12 +130,12 @@ void ManifestHandlerRegistry::RegisterHandler(
 }
 
 bool ManifestHandlerRegistry::ParseExtension(Extension* extension,
-                                             base::string16* error) {
+                                             std::u16string* error) {
   std::map<int, ManifestHandler*> handlers_by_priority;
   for (ManifestHandlerMap::iterator iter = handlers_.begin();
        iter != handlers_.end(); ++iter) {
     ManifestHandler* handler = iter->second;
-    if (extension->manifest()->HasPath(iter->first) ||
+    if (extension->manifest()->FindPath(iter->first) ||
         handler->AlwaysParseForType(extension->GetType())) {
       handlers_by_priority[priority_map_[handler]] = handler;
     }
@@ -156,7 +156,7 @@ bool ManifestHandlerRegistry::ValidateExtension(
   for (ManifestHandlerMap::iterator iter = handlers_.begin();
        iter != handlers_.end(); ++iter) {
     ManifestHandler* handler = iter->second;
-    if (extension->manifest()->HasPath(iter->first) ||
+    if (extension->manifest()->FindPath(iter->first) ||
         handler->AlwaysValidateForType(extension->GetType())) {
       handlers.insert(handler);
     }
@@ -172,7 +172,7 @@ ManifestPermission* ManifestHandlerRegistry::CreatePermission(
     const std::string& name) {
   ManifestHandlerMap::const_iterator it = handlers_.find(name);
   if (it == handlers_.end())
-    return NULL;
+    return nullptr;
 
   return it->second->CreatePermission();
 }
@@ -203,7 +203,7 @@ ManifestHandlerRegistry* ManifestHandlerRegistry::SetForTesting(
   if (new_registry != g_registry.Pointer())
     g_registry_override = new_registry;
   else
-    g_registry_override = NULL;
+    g_registry_override = nullptr;
   return old_registry;
 }
 

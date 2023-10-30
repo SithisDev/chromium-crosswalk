@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/optional.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/cbor/reader.h"
 #include "components/cbor/values.h"
@@ -21,14 +21,15 @@
 #include "crypto/hmac.h"
 #include "device/bluetooth/test/bluetooth_test.h"
 #include "device/bluetooth/test/mock_bluetooth_adapter.h"
-#include "device/fido/ble/fido_ble_frames.h"
-#include "device/fido/ble/mock_fido_ble_connection.h"
+#include "device/fido/cable/fido_ble_frames.h"
 #include "device/fido/cable/fido_cable_device.h"
+#include "device/fido/cable/mock_fido_ble_connection.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_parsing_utils.h"
 #include "device/fido/test_callback_receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace device {
 
@@ -38,7 +39,7 @@ using ::testing::_;
 using ::testing::Invoke;
 using ::testing::Test;
 using TestDeviceCallbackReceiver =
-    test::ValueCallbackReceiver<base::Optional<std::vector<uint8_t>>>;
+    test::ValueCallbackReceiver<absl::optional<std::vector<uint8_t>>>;
 using NiceMockBluetoothAdapter = ::testing::NiceMock<MockBluetoothAdapter>;
 
 // Sufficiently large test control point length as we are not interested
@@ -117,18 +118,15 @@ constexpr char kIncorrectHandshakeKey[] = "INCORRECT_HANDSHAKE_KEY_12345678";
 // factors (i.e. authenticator session random, session pre key, and nonce) are
 // |kAuthenticatorSessionRandom|, |kTestSessionPreKey|, and |kTestNonce|,
 // respectively.
-std::string GetExpectedEncryptionKey(
+std::vector<uint8_t> GetExpectedEncryptionKey(
     base::span<const uint8_t> client_random_nonce) {
   std::vector<uint8_t> nonce_message =
       fido_parsing_utils::Materialize(kTestNonce);
   fido_parsing_utils::Append(&nonce_message, client_random_nonce);
   fido_parsing_utils::Append(&nonce_message, kAuthenticatorSessionRandom);
-  return crypto::HkdfSha256(
-      fido_parsing_utils::ConvertToStringPiece(kTestSessionPreKey),
-      fido_parsing_utils::ConvertToStringPiece(
-          fido_parsing_utils::CreateSHA256Hash(
-              fido_parsing_utils::ConvertToStringPiece(nonce_message))),
-      kCableDeviceEncryptionKeyInfo, 32);
+  return crypto::HkdfSha256(kTestSessionPreKey,
+                            crypto::SHA256Hash(nonce_message),
+                            kCableDeviceEncryptionKeyInfo, 32);
 }
 
 // Given a hello message and handshake key from the authenticator, construct
@@ -264,11 +262,11 @@ class FidoCableHandshakeHandlerTest : public Test {
     connection_->read_callback() = device_->GetReadCallbackForTesting();
   }
 
-  std::unique_ptr<FidoCableHandshakeHandler> CreateHandshakeHandler(
+  std::unique_ptr<FidoCableV1HandshakeHandler> CreateHandshakeHandler(
       std::array<uint8_t, 8> nonce,
       std::array<uint8_t, 32> session_pre_key) {
-    return std::make_unique<FidoCableHandshakeHandler>(device_.get(), nonce,
-                                                       session_pre_key);
+    return std::make_unique<FidoCableV1HandshakeHandler>(device_.get(), nonce,
+                                                         session_pre_key);
   }
 
   void ConnectWithLength(uint16_t length) {
@@ -288,13 +286,13 @@ class FidoCableHandshakeHandlerTest : public Test {
   TestDeviceCallbackReceiver& callback_receiver() { return callback_receiver_; }
 
  protected:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::test::TaskEnvironment task_environment_;
 
  private:
   scoped_refptr<MockBluetoothAdapter> adapter_ =
       base::MakeRefCounted<NiceMockBluetoothAdapter>();
   FakeCableAuthenticator authenticator_;
-  MockFidoBleConnection* connection_;
+  raw_ptr<MockFidoBleConnection> connection_;
   std::unique_ptr<FidoCableDevice> device_;
   TestDeviceCallbackReceiver callback_receiver_;
 };

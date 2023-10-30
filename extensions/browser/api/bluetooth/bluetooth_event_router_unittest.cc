@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include <string>
 #include <utility>
 
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "content/public/test/test_browser_context.h"
@@ -18,6 +19,7 @@
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extensions_test.h"
+#include "extensions/browser/unloaded_extension_reason.h"
 #include "extensions/common/api/bluetooth.h"
 #include "extensions/common/extension_builder.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -53,12 +55,12 @@ class BluetoothEventRouterTest : public ExtensionsTest {
   void TearDown() override {
     // It's important to destroy the router before the browser context keyed
     // services so it removes itself as an ExtensionRegistry observer.
-    router_.reset(NULL);
+    router_.reset();
     ExtensionsTest::TearDown();
   }
 
  protected:
-  testing::StrictMock<device::MockBluetoothAdapter>* mock_adapter_;
+  raw_ptr<testing::StrictMock<device::MockBluetoothAdapter>> mock_adapter_;
   std::unique_ptr<BluetoothEventRouter> router_;
 };
 
@@ -101,11 +103,12 @@ TEST_F(BluetoothEventRouterTest, UnloadExtension) {
 // This test check that calling SetDiscoveryFilter before StartDiscoverySession
 // for given extension will start session with proper filter.
 TEST_F(BluetoothEventRouterTest, SetDiscoveryFilter) {
-  std::unique_ptr<device::BluetoothDiscoveryFilter> discovery_filter(
-      new device::BluetoothDiscoveryFilter(device::BLUETOOTH_TRANSPORT_LE));
-
+  auto discovery_filter = std::make_unique<device::BluetoothDiscoveryFilter>(
+      device::BLUETOOTH_TRANSPORT_LE);
   discovery_filter->SetRSSI(-80);
-  discovery_filter->AddUUID(device::BluetoothUUID("1000"));
+  device::BluetoothDiscoveryFilter::DeviceInfoFilter device_filter;
+  device_filter.uuids.insert(device::BluetoothUUID("1000"));
+  discovery_filter->AddDeviceFilter(std::move(device_filter));
 
   device::BluetoothDiscoveryFilter df(device::BLUETOOTH_TRANSPORT_LE);
   df.CopyFrom(*discovery_filter);
@@ -117,13 +120,18 @@ TEST_F(BluetoothEventRouterTest, SetDiscoveryFilter) {
   EXPECT_CALL(
       *mock_adapter_,
       StartScanWithFilter_(testing::Pointee(IsFilterEqual(&df)), testing::_))
-      .Times(1);
+      .WillOnce(testing::Invoke(
+          [](const device::BluetoothDiscoveryFilter* filter,
+             base::OnceCallback<void(
+                 /*is_error*/ bool,
+                 device::UMABluetoothDiscoverySessionOutcome)>& callback) {
+            std::move(callback).Run(
+                false, device::UMABluetoothDiscoverySessionOutcome::SUCCESS);
+          }));
 
   // RemoveDiscoverySession will be called when the BluetoothDiscoverySession
   // is destroyed
-  EXPECT_CALL(*mock_adapter_,
-              RemoveDiscoverySession_(testing::_, testing::_, testing::_))
-      .Times(1);
+  EXPECT_CALL(*mock_adapter_, StopScan(testing::_)).Times(1);
 
   router_->StartDiscoverySession(mock_adapter_, kTestExtensionId,
                                  base::DoNothing(), base::DoNothing());

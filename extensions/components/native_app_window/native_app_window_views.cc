@@ -1,17 +1,21 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/components/native_app_window/native_app_window_views.h"
 
-#include "content/public/browser/render_view_host.h"
+#include "base/bind.h"
+#include "base/observer_list.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/common/draggable_region.h"
 #include "third_party/skia/include/core/SkRegion.h"
+#include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/views/controls/webview/webview.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
@@ -19,28 +23,42 @@
 #include "ui/aura/window.h"
 #endif
 
-using extensions::AppWindow;
-
 namespace native_app_window {
 
-NativeAppWindowViews::NativeAppWindowViews()
-    : app_window_(NULL),
-      web_view_(NULL),
-      widget_(NULL),
-      frameless_(false),
-      resizable_(false) {
+NativeAppWindowViews::NativeAppWindowViews() {
+  set_suppress_default_focus_handling();
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 }
 
-void NativeAppWindowViews::Init(AppWindow* app_window,
-                                const AppWindow::CreateParams& create_params) {
+void NativeAppWindowViews::Init(
+    extensions::AppWindow* app_window,
+    const extensions::AppWindow::CreateParams& create_params) {
   app_window_ = app_window;
-  frameless_ = create_params.frame == AppWindow::FRAME_NONE;
+  frameless_ = create_params.frame == extensions::AppWindow::FRAME_NONE;
   resizable_ = create_params.resizable;
   size_constraints_.set_minimum_size(
       create_params.GetContentMinimumSize(gfx::Insets()));
   size_constraints_.set_maximum_size(
       create_params.GetContentMaximumSize(gfx::Insets()));
   Observe(app_window_->web_contents());
+
+  // TODO(pbos): See if this can retain SetOwnedByWidget(true) and get deleted
+  // through WidgetDelegate::DeleteDelegate(). It's not clear to me how this
+  // ends up destructed, but the below preserves a previous DialogDelegate
+  // override that did not end with a direct `delete this;`.
+  SetOwnedByWidget(false);
+  RegisterDeleteDelegateCallback(base::BindOnce(
+      [](NativeAppWindowViews* dialog) {
+        dialog->widget_->RemoveObserver(dialog);
+        dialog->app_window_->OnNativeClose();
+      },
+      this));
+  web_view_ = AddChildView(std::make_unique<views::WebView>(nullptr));
+  web_view_->SetWebContents(app_window_->web_contents());
+
+  SetCanMinimize(!app_window_->show_on_lock_screen());
+  SetCanMaximize(GetCanMaximizeWindow());
+  SetCanResize(GetCanResizeWindow());
 
   widget_ = new views::Widget;
   widget_->AddObserver(this);
@@ -50,7 +68,8 @@ void NativeAppWindowViews::Init(AppWindow* app_window,
 }
 
 NativeAppWindowViews::~NativeAppWindowViews() {
-  web_view_->SetWebContents(NULL);
+  web_view_->SetWebContents(nullptr);
+  CHECK(!IsInObserverList());
 }
 
 void NativeAppWindowViews::OnCanHaveAlphaEnabledChanged() {
@@ -58,14 +77,14 @@ void NativeAppWindowViews::OnCanHaveAlphaEnabledChanged() {
 }
 
 void NativeAppWindowViews::InitializeWindow(
-    AppWindow* app_window,
-    const AppWindow::CreateParams& create_params) {
+    extensions::AppWindow* app_window,
+    const extensions::AppWindow::CreateParams& create_params) {
   // Stub implementation. See also ChromeNativeAppWindowViews.
   views::Widget::InitParams init_params(views::Widget::InitParams::TYPE_WINDOW);
   init_params.delegate = this;
   if (create_params.always_on_top)
     init_params.z_order = ui::ZOrderLevel::kFloatingWindow;
-  widget_->Init(init_params);
+  widget_->Init(std::move(init_params));
   widget_->CenterWindow(
       create_params.GetInitialWindowBounds(gfx::Insets()).size());
 }
@@ -173,34 +192,6 @@ void NativeAppWindowViews::SetZOrderLevel(ui::ZOrderLevel order) {
   widget_->SetZOrderLevel(order);
 }
 
-gfx::NativeView NativeAppWindowViews::GetHostView() const {
-  return widget_->GetNativeView();
-}
-
-gfx::Point NativeAppWindowViews::GetDialogPosition(const gfx::Size& size) {
-  gfx::Size app_window_size = widget_->GetWindowBoundsInScreen().size();
-  return gfx::Point(app_window_size.width() / 2 - size.width() / 2,
-                    app_window_size.height() / 2 - size.height() / 2);
-}
-
-gfx::Size NativeAppWindowViews::GetMaximumDialogSize() {
-  return widget_->GetWindowBoundsInScreen().size();
-}
-
-void NativeAppWindowViews::AddObserver(
-    web_modal::ModalDialogHostObserver* observer) {
-  observer_list_.AddObserver(observer);
-}
-void NativeAppWindowViews::RemoveObserver(
-    web_modal::ModalDialogHostObserver* observer) {
-  observer_list_.RemoveObserver(observer);
-}
-
-void NativeAppWindowViews::OnViewWasResized() {
-  for (auto& observer : observer_list_)
-    observer.OnPositionRequiresUpdate();
-}
-
 // WidgetDelegate implementation.
 
 void NativeAppWindowViews::OnWidgetMove() {
@@ -211,21 +202,7 @@ views::View* NativeAppWindowViews::GetInitiallyFocusedView() {
   return web_view_;
 }
 
-bool NativeAppWindowViews::CanResize() const {
-  return resizable_ && !size_constraints_.HasFixedSize() &&
-         !WidgetHasHitTestMask();
-}
-
-bool NativeAppWindowViews::CanMaximize() const {
-  return resizable_ && !size_constraints_.HasMaximumSize() &&
-         !WidgetHasHitTestMask();
-}
-
-bool NativeAppWindowViews::CanMinimize() const {
-  return !app_window_->show_on_lock_screen();
-}
-
-base::string16 NativeAppWindowViews::GetWindowTitle() const {
+std::u16string NativeAppWindowViews::GetWindowTitle() const {
   return app_window_->GetTitle();
 }
 
@@ -233,23 +210,14 @@ bool NativeAppWindowViews::ShouldShowWindowTitle() const {
   return false;
 }
 
+bool NativeAppWindowViews::ShouldSaveWindowPlacement() const {
+  return true;
+}
+
 void NativeAppWindowViews::SaveWindowPlacement(const gfx::Rect& bounds,
                                                ui::WindowShowState show_state) {
   views::WidgetDelegate::SaveWindowPlacement(bounds, show_state);
   app_window_->OnNativeWindowChanged();
-}
-
-void NativeAppWindowViews::DeleteDelegate() {
-  widget_->RemoveObserver(this);
-  app_window_->OnNativeClose();
-}
-
-views::Widget* NativeAppWindowViews::GetWidget() {
-  return widget_;
-}
-
-const views::Widget* NativeAppWindowViews::GetWidget() const {
-  return widget_;
 }
 
 bool NativeAppWindowViews::ShouldDescendIntoChildForEventHandling(
@@ -288,46 +256,22 @@ void NativeAppWindowViews::OnWidgetActivationChanged(views::Widget* widget,
 
 // WebContentsObserver implementation.
 
-void NativeAppWindowViews::RenderViewCreated(
-    content::RenderViewHost* render_view_host) {
+void NativeAppWindowViews::RenderFrameCreated(
+    content::RenderFrameHost* render_frame_host) {
+  if (render_frame_host->GetParentOrOuterDocument())
+    return;
+
   if (app_window_->requested_alpha_enabled() && CanHaveAlphaEnabled()) {
-    content::RenderWidgetHostView* view =
-        render_view_host->GetWidget()->GetView();
-    DCHECK(view);
-    view->SetBackgroundColor(SK_ColorTRANSPARENT);
+    render_frame_host->GetView()->SetBackgroundColor(SK_ColorTRANSPARENT);
   } else if (app_window_->show_on_lock_screen()) {
-    content::RenderWidgetHostView* view =
-        render_view_host->GetWidget()->GetView();
-    DCHECK(view);
     // When shown on the lock screen, app windows will be shown on top of black
     // background - to avoid a white flash while launching the app window,
     // initialize it with black background color.
-    view->SetBackgroundColor(SK_ColorBLACK);
+    render_frame_host->GetView()->SetBackgroundColor(SK_ColorBLACK);
   }
-}
-
-void NativeAppWindowViews::RenderViewHostChanged(
-    content::RenderViewHost* old_host,
-    content::RenderViewHost* new_host) {
-  OnViewWasResized();
 }
 
 // views::View implementation.
-
-void NativeAppWindowViews::Layout() {
-  DCHECK(web_view_);
-  web_view_->SetBounds(0, 0, width(), height());
-  OnViewWasResized();
-}
-
-void NativeAppWindowViews::ViewHierarchyChanged(
-    const views::ViewHierarchyChangedDetails& details) {
-  if (details.is_add && details.child == this) {
-    web_view_ = new views::WebView(NULL);
-    AddChildView(web_view_);
-    web_view_->SetWebContents(app_window_->web_contents());
-  }
-}
 
 gfx::Size NativeAppWindowViews::GetMinimumSize() const {
   return size_constraints_.GetMinimumSize();
@@ -335,6 +279,10 @@ gfx::Size NativeAppWindowViews::GetMinimumSize() const {
 
 gfx::Size NativeAppWindowViews::GetMaximumSize() const {
   return size_constraints_.GetMaximumSize();
+}
+
+void NativeAppWindowViews::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  OnViewWasResized();
 }
 
 void NativeAppWindowViews::OnFocus() {
@@ -345,7 +293,8 @@ void NativeAppWindowViews::OnFocus() {
 
 void NativeAppWindowViews::SetFullscreen(int fullscreen_types) {
   // Stub implementation. See also ChromeNativeAppWindowViews.
-  widget_->SetFullscreen(fullscreen_types != AppWindow::FULLSCREEN_TYPE_NONE);
+  widget_->SetFullscreen(fullscreen_types !=
+                         extensions::AppWindow::FULLSCREEN_TYPE_NONE);
 }
 
 bool NativeAppWindowViews::IsFullscreenOrPending() const {
@@ -367,7 +316,8 @@ void NativeAppWindowViews::UpdateDraggableRegions(
   if (!frameless_)
     return;
 
-  draggable_region_.reset(AppWindow::RawDraggableRegionsToSkRegion(regions));
+  draggable_region_.reset(
+      extensions::AppWindow::RawDraggableRegionsToSkRegion(regions));
   OnViewWasResized();
 }
 
@@ -416,12 +366,6 @@ gfx::Insets NativeAppWindowViews::GetFrameInsets() const {
   return window_bounds.InsetsFrom(client_bounds);
 }
 
-void NativeAppWindowViews::HideWithApp() {
-}
-
-void NativeAppWindowViews::ShowWithApp() {
-}
-
 gfx::Size NativeAppWindowViews::GetContentMinimumSize() const {
   return size_constraints_.GetMinimumSize();
 }
@@ -435,6 +379,8 @@ void NativeAppWindowViews::SetContentSizeConstraints(
     const gfx::Size& max_size) {
   size_constraints_.set_minimum_size(min_size);
   size_constraints_.set_maximum_size(max_size);
+  SetCanMaximize(GetCanMaximizeWindow());
+  SetCanResize(GetCanResizeWindow());
   widget_->OnSizeConstraintsChanged();
 }
 
@@ -447,5 +393,53 @@ void NativeAppWindowViews::SetVisibleOnAllWorkspaces(bool always_visible) {
 }
 
 void NativeAppWindowViews::SetActivateOnPointer(bool activate_on_pointer) {}
+
+gfx::NativeView NativeAppWindowViews::GetHostView() const {
+  return widget_->GetNativeView();
+}
+
+gfx::Point NativeAppWindowViews::GetDialogPosition(const gfx::Size& size) {
+  gfx::Size app_window_size = widget_->GetWindowBoundsInScreen().size();
+  return gfx::Point((app_window_size.width() - size.width()) / 2,
+                    (app_window_size.height() - size.height()) / 2);
+}
+
+gfx::Size NativeAppWindowViews::GetMaximumDialogSize() {
+  return widget_->GetWindowBoundsInScreen().size();
+}
+
+void NativeAppWindowViews::AddObserver(
+    web_modal::ModalDialogHostObserver* observer) {
+  observer_list_.AddObserver(observer);
+}
+void NativeAppWindowViews::RemoveObserver(
+    web_modal::ModalDialogHostObserver* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
+void NativeAppWindowViews::OnWidgetHasHitTestMaskChanged() {
+  SetCanMaximize(GetCanMaximizeWindow());
+  SetCanResize(GetCanResizeWindow());
+}
+
+void NativeAppWindowViews::OnViewWasResized() {
+  for (auto& observer : observer_list_)
+    observer.OnPositionRequiresUpdate();
+}
+
+bool NativeAppWindowViews::GetCanResizeWindow() const {
+  return resizable_ && !size_constraints_.HasFixedSize() &&
+         !WidgetHasHitTestMask();
+}
+
+bool NativeAppWindowViews::GetCanMaximizeWindow() const {
+  return resizable_ && !size_constraints_.HasMaximumSize() &&
+         !WidgetHasHitTestMask();
+}
+
+BEGIN_METADATA(NativeAppWindowViews, views::WidgetDelegateView)
+ADD_READONLY_PROPERTY_METADATA(bool, CanMaximizeWindow)
+ADD_READONLY_PROPERTY_METADATA(bool, CanResizeWindow)
+END_METADATA
 
 }  // namespace native_app_window

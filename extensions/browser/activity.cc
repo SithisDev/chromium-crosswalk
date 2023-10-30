@@ -1,10 +1,11 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/browser/activity.h"
 
 #include "base/logging.h"
+#include "base/notreached.h"
 
 namespace extensions {
 
@@ -16,6 +17,8 @@ const char Activity::kRenderFrame[] = "render-frame";
 
 const char* Activity::ToString(Type type) {
   switch (type) {
+    case ACCESSIBILITY:
+      return "ACCESSIBILITY";
     case API_FUNCTION:
       return "API_FUNCTION";
     case DEV_TOOLS:

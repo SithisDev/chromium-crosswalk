@@ -1,11 +1,13 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/common/constants.h"
 
-#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
+#include "build/build_config.h"
+#include "build/chromecast_buildflags.h"
+#include "build/chromeos_buildflags.h"
 
 namespace extensions {
 
@@ -13,10 +15,14 @@ const char kExtensionScheme[] = "chrome-extension";
 
 const base::FilePath::CharType kManifestFilename[] =
     FILE_PATH_LITERAL("manifest.json");
+const base::FilePath::CharType kDifferentialFingerprintFilename[] =
+    FILE_PATH_LITERAL("manifest.fingerprint");
 const base::FilePath::CharType kLocaleFolder[] =
     FILE_PATH_LITERAL("_locales");
 const base::FilePath::CharType kMessagesFilename[] =
     FILE_PATH_LITERAL("messages.json");
+const base::FilePath::CharType kGzippedMessagesFilename[] =
+    FILE_PATH_LITERAL("messages.json.gz");
 const base::FilePath::CharType kPlatformSpecificFolder[] =
     FILE_PATH_LITERAL("_platform_specific");
 const base::FilePath::CharType kMetadataFolder[] =
@@ -25,8 +31,8 @@ const base::FilePath::CharType kVerifiedContentsFilename[] =
     FILE_PATH_LITERAL("verified_contents.json");
 const base::FilePath::CharType kComputedHashesFilename[] =
     FILE_PATH_LITERAL("computed_hashes.json");
-const base::FilePath::CharType kIndexedRulesetFilename[] =
-    FILE_PATH_LITERAL("generated_indexed_ruleset");
+const base::FilePath::CharType kIndexedRulesetDirectory[] =
+    FILE_PATH_LITERAL("generated_indexed_rulesets");
 
 const char kInstallDirectoryName[] = "Extensions";
 
@@ -36,6 +42,8 @@ const char kDecodedMessageCatalogsFilename[] = "DECODED_MESSAGE_CATALOGS";
 
 const char kGeneratedBackgroundPageFilename[] =
     "_generated_background_page.html";
+
+const char kFaviconSourcePath[] = "_favicon";
 
 const char kModulesDir[] = "_modules";
 
@@ -47,14 +55,28 @@ const base::FilePath::CharType kExtensionKeyFileExtension[] =
 // If auto-updates are turned on, default to running every 5 hours.
 const int kDefaultUpdateFrequencySeconds = 60 * 60 * 5;
 
-const char kLocalAppSettingsDirectoryName[] = "Local App Settings";
-const char kLocalExtensionSettingsDirectoryName[] = "Local Extension Settings";
-const char kSyncAppSettingsDirectoryName[] = "Sync App Settings";
-const char kSyncExtensionSettingsDirectoryName[] = "Sync Extension Settings";
-const char kManagedSettingsDirectoryName[] = "Managed Extension Settings";
-const char kStateStoreName[] = "Extension State";
-const char kRulesStoreName[] = "Extension Rules";
+const base::FilePath::CharType kLocalAppSettingsDirectoryName[] =
+    FILE_PATH_LITERAL("Local App Settings");
+const base::FilePath::CharType kLocalExtensionSettingsDirectoryName[] =
+    FILE_PATH_LITERAL("Local Extension Settings");
+const base::FilePath::CharType kSyncAppSettingsDirectoryName[] =
+    FILE_PATH_LITERAL("Sync App Settings");
+const base::FilePath::CharType kSyncExtensionSettingsDirectoryName[] =
+    FILE_PATH_LITERAL("Sync Extension Settings");
+const base::FilePath::CharType kManagedSettingsDirectoryName[] =
+    FILE_PATH_LITERAL("Managed Extension Settings");
+const base::FilePath::CharType kStateStoreName[] =
+    FILE_PATH_LITERAL("Extension State");
+const base::FilePath::CharType kRulesStoreName[] =
+    FILE_PATH_LITERAL("Extension Rules");
+const base::FilePath::CharType kScriptsStoreName[] =
+    FILE_PATH_LITERAL("Extension Scripts");
 const char kWebStoreAppId[] = "ahfgeienlihckogmohjhadlkjgocpleb";
+
+const char kSettingsDatabaseUMAClientName[] = "Settings";
+const char kRulesDatabaseUMAClientName[] = "Rules";
+const char kStateDatabaseUMAClientName[] = "State";
+const char kScriptsDatabaseUMAClientName[] = "Scripts";
 
 const uint8_t kWebstoreSignaturesPublicKey[] = {
     0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
@@ -84,7 +106,9 @@ const uint8_t kWebstoreSignaturesPublicKey[] = {
     0xcd, 0x02, 0x03, 0x01, 0x00, 0x01};
 
 const size_t kWebstoreSignaturesPublicKeySize =
-    base::size(kWebstoreSignaturesPublicKey);
+    std::size(kWebstoreSignaturesPublicKey);
+
+const char kUpdateURLData[] = "update_url_data";
 
 const int kMainThreadId = 0;
 
@@ -95,14 +119,18 @@ const char kMimeTypePng[] = "image/png";
 
 namespace extension_misc {
 
-#if defined(OS_CHROMEOS) || defined(IS_CHROMECAST)
+const int kUnknownTabId = -1;
+const int kUnknownWindowId = -1;
+const int kCurrentWindowId = -2;
+
+#if BUILDFLAG(IS_CHROMEOS)
 // The extension id for the built-in component extension.
 const char kChromeVoxExtensionId[] = "mndnfokpggljbaajbnioimlmbfngpief";
 #else
 // The extension id for the web store extension.
 const char kChromeVoxExtensionId[] = "kgejglhpjiefppelpmljglcjbhoiplfn";
 #endif
-const char kFeedbackExtensionId[] = "gfdkimpbcpahaombhbimeihdjnejgicl";
+
 const char kPdfExtensionId[] = "mhjfbmdgcfjbbpaeojofohoefgiehjai";
 const char kQuickOfficeComponentExtensionId[] =
     "bpmcpldpdmajfigpchkicefoigmkfalc";
@@ -111,38 +139,51 @@ const char kQuickOfficeInternalExtensionId[] =
 const char kQuickOfficeExtensionId[] = "gbkeegbaiigmenfmjfclcdgdpimamgkj";
 const char kMimeHandlerPrivateTestExtensionId[] =
     "oickdpebdnfbgkcaoklfcdhjniefkcji";
-const char kCameraAppId[] = "hfhhnacclhffhdffklopdkcgdhifgngh";
-const char kChromeAppId[] = "mgndgikekgjfcpckkfioiadnlibdjbkf";
 const char kFilesManagerAppId[] = "hhaomjibdihmijegdhdafkllkbggdgoj";
+const char kCalculatorAppId[] = "joodangkbfjnajiiifokapkpmhfnpleo";
+const char kCalendarDemoAppId[] = "fpgfohogebplgnamlafljlcidjedbdeb";
+const char kGmailAppId[] = "pjkljhegncpnkpknbcohdijeoejaedia";
+const char kGoogleDocsDemoAppId[] = "chdaoodbokekbiiphekbfjdmiodccljl";
+const char kGoogleDocsPwaAppId[] = "cepkndkdlbllfhpfhledabdcdbidehkd";
+const char kGoogleDriveAppId[] = "apdfllckaahabafndbhieahigkjlhalf";
+const char kGoogleMeetPwaAppId[] = "dkainijpcknoofiakgccliajhbmlbhji";
+const char kGoogleSheetsDemoAppId[] = "nifkmgcdokhkjghdlgflonppnefddien";
+const char kGoogleSheetsPwaAppId[] = "hcgjdbbnhkmopplfiibmdgghhdhbiidh";
+const char kGoogleSlidesDemoAppId[] = "hdmobeajeoanbanmdlabnbnlopepchip";
 const char kGoogleKeepAppId[] = "hmjkmjkepdijhoojdojkdfohbdgmmhki";
 const char kYoutubeAppId[] = "blpcfgokakmgnkcojhhkbfbldkacnbeo";
-const char kGeniusAppId[] = "ljoammodoonkhnehlncldjelhidljdpi";
+const char kYoutubePwaAppId[] = "agimnkijcaahngcdmfeangaknmldooml";
+const char kSpotifyAppId[] = "pjibgclleladliembfgfagdaldikeohf";
+const char kBeFunkyAppId[] = "fjoomcalbeohjbnlcneddljemclcekeg";
+const char kClipchampAppId[] = "pfepfhbcedkbjdkanpimmmdjfgoddhkg";
+const char kGeForceNowAppId[] = "egmafekfmcnknbdlbfbhafbllplmjlhn";
+const char kZoomAppId[] = "jldpdkiafafcejhceeincjmlkmibemgj";
+const char kSumoAppId[] = "mfknjekfflbfdchhohffdpkokgfbfmdc";
+const char kAdobeSparkAppId[] = "magefboookdoiehjohjmbjmkepngibhm";
+const char kGoogleDocsAppId[] = "aohghmighlieiainnegkcijnfilokake";
+const char kGoogleSheetsAppId[] = "felcaaldnbdncclmgdcncolpebgiejap";
+const char kGoogleSlidesAppId[] = "aapocclcgogkmnckokdopfmhonfmgoek";
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // TODO(michaelpg): Deprecate old app IDs before adding new ones to avoid bloat.
 const char kHighlightsAppId[] = "lpmakjfjcconjeehbidjclhdlpjmfjjj";
-const char kHighlightsEveAppId[] = "iggildboghmjpbjcpmobahnkmoefkike";
-const char kHighlightsNocturneAppId[] = "elhbopodaklenjkeihkdhhfaghalllba";
-const char kHighlightsAltAppId[] = "gjeelkjnolfmhphfhhjokaijbicopfln";
 const char kScreensaverAppId[] = "mnoijifedipmbjaoekhadjcijipaijjc";
-const char kScreensaverEveAppId[] = "gdobaoeekhiklaljmhladjfdfkigampc";
-const char kScreensaverNocturneAppId[] = "lminefdanffajachfahfpmphfkhahcnj";
-const char kScreensaverAltAppId[] = "bnabjkecnachpogjlfilfcnlpcmacglh";
+const char kSigninProfileTestExtensionId[] = "mecfefiddjlmabpeilblgegnbioikfmp";
+const char kGuestModeTestExtensionId[] = "behllobkkfkfnphdnhnkndlbkcpglgmj";
+
+const char kStagingAttractLoopAppId[] = "aefaeciooibphdopnjjmgjdlckdcfbae";
+const char kStagingHighlightsAppId[] = "glochkamldfopmdlegmcnjmgkopfiplb";
+// 2022 Attract Loop App ID
+const char kNewAttractLoopAppId[] = "igilkdghcdehjdcpndaodgnjgdggiemm";
+// 2022 Highlights App ID
+const char kNewHighlightsAppId[] = "enchmnkoajljphdmahljlebfmpkkbnkj";
 
 bool IsSystemUIApp(base::StringPiece extension_id) {
   static const char* const kApps[] = {
       // clang-format off
-      kCameraAppId,
       kChromeVoxExtensionId,
-      kFeedbackExtensionId,
       kFilesManagerAppId,
-      kHighlightsEveAppId,
-      kHighlightsNocturneAppId,
-      kHighlightsAltAppId,
       kHighlightsAppId,
-      kScreensaverEveAppId,
-      kScreensaverNocturneAppId,
-      kScreensaverAltAppId,
       kScreensaverAppId,
       // clang-format on
   };
@@ -152,7 +193,31 @@ bool IsSystemUIApp(base::StringPiece extension_id) {
   }
   return false;
 }
-#endif  // defined(OS_CHROMEOS)
+
+bool IsDemoModeChromeApp(base::StringPiece extension_id) {
+  static const char* const kDemoModeApps[] = {
+      kHighlightsAppId,        kScreensaverAppId,    kStagingAttractLoopAppId,
+      kStagingHighlightsAppId, kNewAttractLoopAppId, kNewHighlightsAppId,
+  };
+  for (const char* id : kDemoModeApps) {
+    if (extension_id == id)
+      return true;
+  }
+  return false;
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+bool IsQuickOfficeExtension(const std::string& id) {
+  return id == kQuickOfficeComponentExtensionId ||
+         id == kQuickOfficeInternalExtensionId || id == kQuickOfficeExtensionId;
+}
+
+// TODO(https://crbug.com/1257275): remove after default app migration is done.
+bool IsPreinstalledAppId(const std::string& app_id) {
+  return app_id == kGmailAppId || app_id == kGoogleDocsAppId ||
+         app_id == kGoogleDriveAppId || app_id == kGoogleSheetsAppId ||
+         app_id == kGoogleSlidesAppId || app_id == kYoutubeAppId;
+}
 
 const char kProdHangoutsExtensionId[] = "nckgahadagoaajjgafhacjanaoiihapd";
 const char* const kHangoutsExtensionIds[6] = {
@@ -171,6 +236,8 @@ const char kPolicyBlockedScripting[] =
 
 const int kContentVerificationDefaultBlockSize = 4096;
 
-const logging::LogSeverity kMinimumSeverityToReportError = logging::LOG_WARNING;
+const char kCryptotokenExtensionId[] = "kmendfapggjehodndflmmgagdbamhnfd";
+
+const char kCryptotokenDeprecationTrialName[] = "U2FSecurityKeyAPI";
 
 }  // namespace extension_misc

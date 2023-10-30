@@ -1,9 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/renderer/dom_activity_logger.h"
 
+#include <memory>
 #include <utility>
 
 #include "content/public/renderer/render_thread.h"
@@ -13,6 +14,7 @@
 #include "extensions/renderer/activity_log_converter_strategy.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
+#include "v8/include/v8-isolate.h"
 
 using blink::WebString;
 using blink::WebURL;
@@ -36,7 +38,7 @@ void AppendV8Value(const std::string& api_name,
       v8_value, v8::Isolate::GetCurrent()->GetCurrentContext()));
 
   if (value.get())
-    list->Append(std::move(value));
+    list->Append(base::Value::FromUniquePtrValue(std::move(value)));
 }
 
 }  // namespace
@@ -47,7 +49,7 @@ DOMActivityLogger::DOMActivityLogger(const std::string& extension_id)
 
 DOMActivityLogger::~DOMActivityLogger() {}
 
-void DOMActivityLogger::AttachToWorld(int world_id,
+void DOMActivityLogger::AttachToWorld(int32_t world_id,
                                       const std::string& extension_id) {
   // If there is no logger registered for world_id, construct a new logger
   // and register it with world_id.
@@ -64,7 +66,7 @@ void DOMActivityLogger::LogGetter(const WebString& api_name,
                                   const WebString& title) {
   SendDomActionMessage(api_name.Utf8(), url, title.Utf16(),
                        DomActionType::GETTER,
-                       std::unique_ptr<base::ListValue>(new base::ListValue()));
+                       std::make_unique<base::ListValue>());
 }
 
 void DOMActivityLogger::LogSetter(const WebString& api_name,
@@ -109,7 +111,7 @@ void DOMActivityLogger::LogEvent(const WebString& event_name,
   std::unique_ptr<base::ListValue> args(new base::ListValue);
   std::string event_name_utf8 = event_name.Utf8();
   for (int i = 0; i < argc; ++i)
-    args->AppendString(argv[i].Utf8());
+    args->Append(argv[i].Utf8());
   SendDomActionMessage(event_name_utf8, url, title.Utf16(),
                        DomActionType::METHOD, std::move(args));
 }
@@ -117,7 +119,7 @@ void DOMActivityLogger::LogEvent(const WebString& event_name,
 void DOMActivityLogger::SendDomActionMessage(
     const std::string& api_call,
     const GURL& url,
-    const base::string16& url_title,
+    const std::u16string& url_title,
     DomActionType::Type call_type,
     std::unique_ptr<base::ListValue> args) {
   ExtensionHostMsg_DOMAction_Params params;

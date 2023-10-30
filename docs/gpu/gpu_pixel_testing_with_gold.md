@@ -1,9 +1,16 @@
 # GPU Pixel Testing With Gold
 
-This page describes in detail the GPU pixel tests that utilize Skia Gold for
-storing and comparing images (the `pixel_skia_gold_test` type). This includes
-information such as how Skia Gold works, how to triage images produced by these
-tests, and working on Gold itself.
+This page describes various extra details of the Skia Gold service
+that the GPU pixel tests use. For information on running the tests locally, see
+[this section][local pixel testing]. For common information on triaging,
+modification, or general pixel wrangling, see [GPU Pixel Wrangling] or these
+sections ([1][pixel debugging], [2][pixel updating]) of the general GPU testing
+documentation.
+
+[local pixel testing]: gpu_testing.md#Running-the-pixel-tests-locally
+[GPU Pixel Wrangling]: http://go/gpu-pixel-wrangler
+[pixel debugging]: gpu_testing.md#Debugging-Pixel-Test-Failures-on-the-GPU-Bots
+[pixel updating]: gpu_testing.md#Updating-and-Adding-New-Pixel-Tests-to-the-GPU-Bots
 
 [TOC]
 
@@ -111,48 +118,16 @@ the CL was merged as. In the above example, if the CL was merged as commit
 `ffff`, then both `abcd` and `abef` would be approved images on master from
 `ffff` onward.
 
-## Triaging Failures
+## Triaging Less Common Failures
 
-### Standard Workflow
+### Triaging Images Without A Specific Build
 
-The current approach to getting the triage links for new images is:
+You can see all currently untriaged images that are currently being produced on
+ToT on the [GPU Gold instance's main page][gpu gold instance] and currently
+untriaged images for a CL by substituting the Gerrit CL number into
+`https://chrome-gold.skia.org/search?issue=[CL Number]&unt=true&master=true`.
 
-1. Navigate to the failed build.
-2. Search for the failed step for the `pixel_skia_gold_test` test.
-3. Look for either:
-    1. One or more links named `gold_triage_link for <test name>`. This will be
-    the case if there are fewer than 10 links.
-    2. A single link named
-    `Too many artifacts produced to link individually, click for links`. This
-    will be the case if there are 10 or more links.
-4. In either case, follow the link(s) to the triage page for the image the
-failing test produced.
-5. Triage images on those pages (typically by approving them, but you can also
-mark them as a negative if it is an image that should not be produced). In the
-case of a negative image, a bug should be filed on [crbug] to investigate and
-fix the cause of the that particular image being produced, as future
-occurrences of it will cause the test to fail. Such bugs should include the
-`Internals>GPU>Testing` component and whatever component is suitable for the
-type of failing test (likely `Blink>WebGL` or `Blink>Canvas`). The test should
-also be marked as failing or skipped in
-`//content/test/gpu/gpu_tests/test_expectations/pixel_expectations.txt` so that
-the test failure doesn't show up as a builder failure. If the failure is
-consistent, prefer to skip instead of mark as failing so that the failure links
-don't pile up. If the failure occurs on the trybots, include the change to the
-expectations in your CL.
-
-[crbug]: https://crbug.com
-
-In the future, a comment will also be automatically posted to CLs that produce
-new images with a link to triage them.
-
-In addition, you can see all currently untriaged images that are currently
-being produced on ToT on the [GPU Gold instance's main page][gpu gold instance]
-and currently untriaged images for a CL by substituting the Gerrit CL number
-into
-`https://chrome-gpu-gold.skia.org/search?issue=[CL Number]&unt=true&master=true`.
-
-[gpu gold instance]: https://chrome-gpu-gold.skia.org
+[gpu gold instance]: https://chrome-gold.skia.org
 
 It's possible, particularly if a test is regularly producing multiple images,
 for an image to be untriaged but not show up on the front page of the Gold
@@ -160,7 +135,7 @@ instance (for details, see [this crbug comment][untriaged non tot comment]). To
 see all such images, visit [this link][untriaged non tot].
 
 [untriaged non tot comment]: https://bugs.chromium.org/p/skia/issues/detail?id=9189#c4
-[untriaged non tot]: https://chrome-gpu-gold.skia.org/search?fdiffmax=-1&fref=false&frgbamax=255&frgbamin=0&head=false&include=false&limit=50&master=false&match=name&metric=combined&neg=false&offset=0&pos=false&query=source_type%3Dchrome-gpu&sort=desc&unt=true
+[untriaged non tot]: https://chrome-gold.skia.org/search?fdiffmax=-1&fref=false&frgbamax=255&frgbamin=0&head=false&include=false&limit=50&master=false&match=name&metric=combined&neg=false&offset=0&pos=false&query=source_type%3Dchrome-gpu&sort=desc&unt=true
 
 ### Finding A Failed Build
 
@@ -185,7 +160,7 @@ shard number.
 
 If for some reason an image is not showing up in Gold but you know the hash, you
 can manually navigate to the page for it by filling in the correct information
-to `https://chrome-gpu-gold.skia.org/detail?test=[test_name]&digest=[hash]`.
+to `https://chrome-gold.skia.org/detail?test=[test_name]&digest=[hash]`.
 From there, you should be able to triage it as normal.
 
 If this happens, please also file a bug in [Skia's bug tracker][skia crbug] so
@@ -197,37 +172,34 @@ the triage link for the problematic image.
 
 [skia crbug]: https://bugs.chromium.org/p/skia
 
-## Running Locally
+## Inexact Matching
 
-Normally, `goldctl` uploads images and image metadata to the Gold server when
-used. This is not desirable when running locally for a couple reasons:
+By default, Gold uses exact matching with support for multiple baselines per
+test. This works well for most of the GPU tests, but there are a handful of
+tests such as `Pixel_CSS3DBlueBox` that are prone to noise which causes them to
+need additional triaging at times.
 
-1. Uploading requires the user to be whitelisted on the server, and whitelisting
-everyone who wants to run the tests locally is not a viable solution.
-2. Images produced during local runs are usually slightly different from those
-that are produced on the bots due to hardware/software differences. Thus, most
-images uploaded to Gold from local runs would likely only ever actually be used
-by tests run on the machine that initially generated those images, which just
-adds noise to the list of approved images.
+For cases like this, using inexact matching can help, as it allows a comparison
+to pass if there are only minor differences between the produced image and a
+known-good image. Images that pass in this way will be automatically approved
+in Gold, so there is still a record of exactly what was produced.
 
-Additionally, the tests normally rely on the Gold server for viewing images
-produced by a test run. This does not work if the data is not actually uploaded.
+To enable this functionality, simply add a `matching_algorithm` field to the
+`PixelTestPage` definition for the test (see other uses of this in the file for
+concrete examples).
 
-In order to get around both of these issues, simply pass the `--local-run` flag
-to the tests. This will disable uploading, but otherwise go through the same
-steps as a test normally would. Each test will also print out a `file://` URL to
-the image it produces and a link to all approved images for that test in Gold.
+In order to determine which values to use, you can use the script located at
+`//content/test/gpu/gold_inexact_matching/determine_gold_inexact_parameters.py`.
 
-Because the image produced by the test locally is likely slightly different from
-any of the approved images in Gold, local test runs are likely to fail during
-the comparison step. In order to cut down on the amount of noise, you can also
-pass the `--no-skia-gold-failure` flag to not fail the test on a failed image
-comparison. When using `--no-skia-gold-failure`, you'll also need to pass the
-`--passthrough` flag in order to actually see the link output.
-
-Example usage:
-`run_gpu_integration_test.py pixel --no-skia-gold-failure --local-run
---passthrough --build-revision aabbccdd --test-machine-name local`
+More complete documentation can be found in the `--help` output of the script,
+but in general:
+* Use the `binary_search` optimization algorithm if you only want to vary
+    a single parameter, e.g. you only want to use a Sobel filter.
+* Use the `local_minima` optimization algorithm if you want to vary multiple
+    parameters, such as using fuzzy diffing + a Sobel filter together.
+* The default boundaries and weights generally work and give good results, but
+    you may need to tune them to better suit your particular test, e.g.
+    increasing the maximum number of differing pixels if your image is large.
 
 ## Working On Gold
 

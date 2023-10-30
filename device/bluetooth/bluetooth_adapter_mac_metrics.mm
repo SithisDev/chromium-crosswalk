@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,9 @@
 
 #include "base/mac/mac_util.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/notreached.h"
 
 namespace {
-
-#if !defined(MAC_OS_X_VERSION_10_13) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_13
-
-const NSInteger CBErrorConnectionFailed = 10;
-const NSInteger CBErrorConnectionLimitReached = 11;
-
-// Match the SDK, which now has a typo. https://openradar.appspot.com/34413811
-const NSInteger CBErrorUnkownDevice = 12;
-
-#endif  // MAC_OS_X_VERSION_10_13
 
 MacOSBluetoothOperationsResult GetMacOSOperationResultFromNSError(
     NSError* error) {
@@ -52,18 +42,10 @@ MacOSBluetoothOperationsResult GetMacOSOperationResultFromNSError(
       case CBErrorAlreadyAdvertising:
         return MacOSBluetoothOperationsResult::CBERROR_ALREADY_ADVERTISING;
       case CBErrorConnectionFailed:
-        if (base::mac::IsAtLeastOS10_13()) {
-          return MacOSBluetoothOperationsResult::CBERROR_CONNECTION_FAILED;
-        } else {
-          // For macOS 10.12 or before, the value CBErrorMaxConnection has the
-          // same value than CBErrorConnectionFailed and the same description
-          // than CBErrorConnectionLimitReached.
-          return MacOSBluetoothOperationsResult::
-              CBERROR_CONNECTION_LIMIT_REACHED;
-        }
+        return MacOSBluetoothOperationsResult::CBERROR_CONNECTION_FAILED;
       case CBErrorConnectionLimitReached:
         return MacOSBluetoothOperationsResult::CBERROR_CONNECTION_LIMIT_REACHED;
-      case CBErrorUnkownDevice:
+      case CBErrorUnknownDevice:
         return MacOSBluetoothOperationsResult::CBERROR_UNKNOWN_DEVICE;
       default:
         NOTREACHED();

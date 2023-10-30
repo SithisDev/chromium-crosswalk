@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,8 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
-#include "base/scoped_observer.h"
-#include "base/strings/string16.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "extensions/browser/api/management/management_api_delegate.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
@@ -20,13 +19,15 @@
 #include "extensions/browser/extension_function.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/browser/preload_check.h"
+#include "extensions/browser/supervised_user_extensions_delegate.h"
+#include "services/data_decoder/public/cpp/data_decoder.h"
 
 namespace extensions {
 
 class ExtensionRegistry;
 class RequirementsChecker;
 
-class ManagementGetAllFunction : public UIThreadExtensionFunction {
+class ManagementGetAllFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.getAll", MANAGEMENT_GETALL)
 
@@ -37,7 +38,7 @@ class ManagementGetAllFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class ManagementGetFunction : public UIThreadExtensionFunction {
+class ManagementGetFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.get", MANAGEMENT_GET)
 
@@ -48,7 +49,7 @@ class ManagementGetFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class ManagementGetSelfFunction : public UIThreadExtensionFunction {
+class ManagementGetSelfFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.getSelf", MANAGEMENT_GETSELF)
 
@@ -59,8 +60,7 @@ class ManagementGetSelfFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class ManagementGetPermissionWarningsByIdFunction
-    : public UIThreadExtensionFunction {
+class ManagementGetPermissionWarningsByIdFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.getPermissionWarningsById",
                              MANAGEMENT_GETPERMISSIONWARNINGSBYID)
@@ -73,14 +73,13 @@ class ManagementGetPermissionWarningsByIdFunction
 };
 
 class ManagementGetPermissionWarningsByManifestFunction
-    : public UIThreadExtensionFunction {
+    : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.getPermissionWarningsByManifest",
                              MANAGEMENT_GETPERMISSIONWARNINGSBYMANIFEST)
 
-  // Called when utility process finishes.
-  void OnParseSuccess(base::Value value);
-  void OnParseFailure(const std::string& error);
+  // Called when manifest parsing is finished.
+  void OnParse(data_decoder::DataDecoder::ValueOrError result);
 
  protected:
   ~ManagementGetPermissionWarningsByManifestFunction() override {}
@@ -89,7 +88,7 @@ class ManagementGetPermissionWarningsByManifestFunction
   ResponseAction Run() override;
 };
 
-class ManagementLaunchAppFunction : public UIThreadExtensionFunction {
+class ManagementLaunchAppFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.launchApp", MANAGEMENT_LAUNCHAPP)
 
@@ -100,7 +99,7 @@ class ManagementLaunchAppFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class ManagementSetEnabledFunction : public UIThreadExtensionFunction {
+class ManagementSetEnabledFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.setEnabled", MANAGEMENT_SETENABLED)
 
@@ -115,7 +114,17 @@ class ManagementSetEnabledFunction : public UIThreadExtensionFunction {
  private:
   void OnInstallPromptDone(bool did_accept);
 
+  bool HasUnsupportedRequirements(const std::string& extension_id);
+
   void OnRequirementsChecked(const PreloadCheck::Errors& errors);
+
+  // Called when the user dismisses the Parent Permission Dialog.
+  void OnParentPermissionDialogDone(
+      SupervisedUserExtensionsDelegate::ParentPermissionDialogResult result);
+
+  // Called when the user dismisses the Extension Install Blocked By Parent
+  // Dialog.
+  void OnBlockedByParentDialogDone();
 
   std::string extension_id_;
 
@@ -124,12 +133,12 @@ class ManagementSetEnabledFunction : public UIThreadExtensionFunction {
   std::unique_ptr<RequirementsChecker> requirements_checker_;
 };
 
-class ManagementUninstallFunctionBase : public UIThreadExtensionFunction {
+class ManagementUninstallFunctionBase : public ExtensionFunction {
  public:
   ManagementUninstallFunctionBase();
 
   void OnExtensionUninstallDialogClosed(bool did_start_uninstall,
-                                        const base::string16& error);
+                                        const std::u16string& error);
 
  protected:
   ~ManagementUninstallFunctionBase() override;
@@ -169,7 +178,7 @@ class ManagementUninstallSelfFunction : public ManagementUninstallFunctionBase {
   ResponseAction Run() override;
 };
 
-class ManagementCreateAppShortcutFunction : public UIThreadExtensionFunction {
+class ManagementCreateAppShortcutFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.createAppShortcut",
                              MANAGEMENT_CREATEAPPSHORTCUT)
@@ -186,7 +195,7 @@ class ManagementCreateAppShortcutFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class ManagementSetLaunchTypeFunction : public UIThreadExtensionFunction {
+class ManagementSetLaunchTypeFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.setLaunchType",
                              MANAGEMENT_SETLAUNCHTYPE)
@@ -197,7 +206,7 @@ class ManagementSetLaunchTypeFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class ManagementGenerateAppForLinkFunction : public UIThreadExtensionFunction {
+class ManagementGenerateAppForLinkFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.generateAppForLink",
                              MANAGEMENT_GENERATEAPPFORLINK)
@@ -215,8 +224,41 @@ class ManagementGenerateAppForLinkFunction : public UIThreadExtensionFunction {
   std::unique_ptr<AppForLinkDelegate> app_for_link_delegate_;
 };
 
-class ManagementInstallReplacementWebAppFunction
-    : public UIThreadExtensionFunction {
+class ManagementCanInstallReplacementAndroidAppFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("management.canInstallReplacementAndroidApp",
+                             MANAGEMENT_CANINSTALLREPLACEMENTANDROIDAPP)
+
+  ManagementCanInstallReplacementAndroidAppFunction();
+
+ protected:
+  ~ManagementCanInstallReplacementAndroidAppFunction() override;
+
+  ResponseAction Run() override;
+
+ private:
+  void OnFinishedAndroidAppCheck(bool result);
+};
+
+class ManagementInstallReplacementAndroidAppFunction
+    : public ExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("management.installReplacementAndroidApp",
+                             MANAGEMENT_INSTALLREPLACEMENTANDROIDAPP)
+
+  ManagementInstallReplacementAndroidAppFunction();
+
+ protected:
+  ~ManagementInstallReplacementAndroidAppFunction() override;
+
+  ResponseAction Run() override;
+
+ private:
+  void OnAppInstallInitiated(bool installable);
+};
+
+class ManagementInstallReplacementWebAppFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("management.installReplacementWebApp",
                              MANAGEMENT_INSTALLREPLACEMENTWEBAPP)
@@ -229,12 +271,17 @@ class ManagementInstallReplacementWebAppFunction
   ResponseAction Run() override;
 
  private:
-  void FinishCreateWebApp(ManagementAPIDelegate::InstallWebAppResult result);
+  void FinishResponse(
+      ManagementAPIDelegate::InstallOrLaunchWebAppResult result);
 };
 
 class ManagementEventRouter : public ExtensionRegistryObserver {
  public:
   explicit ManagementEventRouter(content::BrowserContext* context);
+
+  ManagementEventRouter(const ManagementEventRouter&) = delete;
+  ManagementEventRouter& operator=(const ManagementEventRouter&) = delete;
+
   ~ManagementEventRouter() override;
 
  private:
@@ -256,18 +303,20 @@ class ManagementEventRouter : public ExtensionRegistryObserver {
                       events::HistogramValue histogram_value,
                       const char* event_name);
 
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
 
-  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
-      extension_registry_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ManagementEventRouter);
+  base::ScopedObservation<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observation_{this};
 };
 
 class ManagementAPI : public BrowserContextKeyedAPI,
                       public EventRouter::Observer {
  public:
   explicit ManagementAPI(content::BrowserContext* context);
+
+  ManagementAPI(const ManagementAPI&) = delete;
+  ManagementAPI& operator=(const ManagementAPI&) = delete;
+
   ~ManagementAPI() override;
 
   // KeyedService implementation.
@@ -282,10 +331,25 @@ class ManagementAPI : public BrowserContextKeyedAPI,
   // Returns the ManagementAPI delegate.
   const ManagementAPIDelegate* GetDelegate() const { return delegate_.get(); }
 
+  // Returns the SupervisedUserService delegate, which might be null depending
+  // on the extensions embedder.
+  SupervisedUserExtensionsDelegate* GetSupervisedUserExtensionsDelegate()
+      const {
+    return supervised_user_extensions_delegate_.get();
+  }
+
+  void set_delegate_for_test(std::unique_ptr<ManagementAPIDelegate> delegate) {
+    delegate_ = std::move(delegate);
+  }
+  void set_supervised_user_extensions_delegate_for_test(
+      std::unique_ptr<SupervisedUserExtensionsDelegate> delegate) {
+    supervised_user_extensions_delegate_ = std::move(delegate);
+  }
+
  private:
   friend class BrowserContextKeyedAPIFactory<ManagementAPI>;
 
-  content::BrowserContext* browser_context_;
+  raw_ptr<content::BrowserContext> browser_context_;
 
   // BrowserContextKeyedAPI implementation.
   static const char* service_name() { return "ManagementAPI"; }
@@ -296,8 +360,8 @@ class ManagementAPI : public BrowserContextKeyedAPI,
   std::unique_ptr<ManagementEventRouter> management_event_router_;
 
   std::unique_ptr<ManagementAPIDelegate> delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(ManagementAPI);
+  std::unique_ptr<SupervisedUserExtensionsDelegate>
+      supervised_user_extensions_delegate_;
 };
 
 }  // namespace extensions

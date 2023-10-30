@@ -1,19 +1,22 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/browser/api/networking_private/networking_private_delegate_factory.h"
 
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extensions_browser_client.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "extensions/browser/api/networking_private/networking_private_chromeos.h"
-#elif defined(OS_LINUX)
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "extensions/browser/api/networking_private/networking_private_lacros.h"
+#elif BUILDFLAG(IS_LINUX)
 #include "extensions/browser/api/networking_private/networking_private_linux.h"
-#elif defined(OS_WIN) || defined(OS_MACOSX)
+#elif BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 #include "components/wifi/wifi_service.h"
 #include "extensions/browser/api/networking_private/networking_private_service_client.h"
 #endif
@@ -59,11 +62,13 @@ KeyedService* NetworkingPrivateDelegateFactory::BuildServiceInstanceFor(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   NetworkingPrivateDelegate* delegate;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   delegate = new NetworkingPrivateChromeOS(browser_context);
-#elif defined(OS_LINUX)
+#elif BUILDFLAG(IS_CHROMEOS_LACROS)
+  delegate = new NetworkingPrivateLacros(browser_context);
+#elif BUILDFLAG(IS_LINUX)
   delegate = new NetworkingPrivateLinux();
-#elif defined(OS_WIN) || defined(OS_MACOSX)
+#elif BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   std::unique_ptr<wifi::WiFiService> wifi_service(wifi::WiFiService::Create());
   delegate = new NetworkingPrivateServiceClient(std::move(wifi_service));
 #else
@@ -80,15 +85,6 @@ KeyedService* NetworkingPrivateDelegateFactory::BuildServiceInstanceFor(
 BrowserContext* NetworkingPrivateDelegateFactory::GetBrowserContextToUse(
     BrowserContext* context) const {
   return ExtensionsBrowserClient::Get()->GetOriginalContext(context);
-}
-
-bool NetworkingPrivateDelegateFactory::ServiceIsCreatedWithBrowserContext()
-    const {
-  return false;
-}
-
-bool NetworkingPrivateDelegateFactory::ServiceIsNULLWhileTesting() const {
-  return false;
 }
 
 }  // namespace extensions

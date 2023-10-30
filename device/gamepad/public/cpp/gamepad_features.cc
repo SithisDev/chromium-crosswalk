@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,34 +15,26 @@
 
 namespace features {
 
-namespace {
-
-const size_t kPollingIntervalMillisecondsMin = 4;   // ~250 Hz
-const size_t kPollingIntervalMillisecondsMax = 16;  // ~62.5 Hz
-
-size_t OverrideIntervalIfValid(base::StringPiece param_value,
-                               size_t default_interval) {
-  size_t interval;
-  if (param_value.empty() || !base::StringToSizeT(param_value, &interval))
-    return default_interval;
-  // Clamp interval duration to valid range.
-  interval = std::max(interval, kPollingIntervalMillisecondsMin);
-  interval = std::min(interval, kPollingIntervalMillisecondsMax);
-  return interval;
-}
-
-}  // namespace
-
 // Enables gamepadbuttondown, gamepadbuttonup, gamepadbuttonchange,
 // gamepadaxismove non-standard gamepad events.
 const base::Feature kEnableGamepadButtonAxisEvents{
     "EnableGamepadButtonAxisEvents", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Overrides the gamepad polling interval.
-const base::Feature kGamepadPollingInterval{"GamepadPollingInterval",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
+// Enables the Windows.Gaming.Input data fetcher.
+const base::Feature kEnableWindowsGamingInputDataFetcher{
+    "EnableWindowsGamingInputDataFetcher", base::FEATURE_DISABLED_BY_DEFAULT};
 
-const char kGamepadPollingIntervalParamKey[] = "interval-ms";
+// TODO(https://crbug.com/1011006): When we enable this feature and enable the
+// permission policy of the Gamepad API, remove the fenced frame specific code
+// introduced by crrev.com/c/3403761.
+const base::Feature kRestrictGamepadAccess{"RestrictGamepadAccess",
+                                           base::FEATURE_DISABLED_BY_DEFAULT};
+
+#if BUILDFLAG(IS_ANDROID)
+// Enables gamepad vibration on Android 12+.
+const base::Feature kEnableAndroidGamepadVibration{
+    "EnableAndroidGamepadVibration", base::FEATURE_DISABLED_BY_DEFAULT};
+#endif  // BUILDFLAG(IS_ANDROID)
 
 bool AreGamepadButtonAxisEventsEnabled() {
   // Check if button and axis events are enabled by a field trial.
@@ -57,29 +49,6 @@ bool AreGamepadButtonAxisEventsEnabled() {
   }
 
   return false;
-}
-
-size_t GetGamepadPollingInterval() {
-  // Default to the minimum polling interval.
-  size_t polling_interval = kPollingIntervalMillisecondsMin;
-
-  // Check if the polling interval is overridden by a field trial.
-  if (base::FeatureList::IsEnabled(kGamepadPollingInterval)) {
-    std::string param_value = base::GetFieldTrialParamValueByFeature(
-        kGamepadPollingInterval, kGamepadPollingIntervalParamKey);
-    polling_interval = OverrideIntervalIfValid(param_value, polling_interval);
-  }
-
-  // Check if the polling interval is overridden by a command-line flag.
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line &&
-      command_line->HasSwitch(switches::kGamepadPollingInterval)) {
-    std::string switch_value =
-        command_line->GetSwitchValueASCII(switches::kGamepadPollingInterval);
-    polling_interval = OverrideIntervalIfValid(switch_value, polling_interval);
-  }
-
-  return polling_interval;
 }
 
 }  // namespace features

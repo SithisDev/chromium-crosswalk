@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,7 +84,7 @@ constexpr uint8_t kCertificates[] = {
 TEST(PackedAttestationStatementTest, CBOR) {
   EXPECT_THAT(
       *cbor::Writer::Write(AsCBOR(PackedAttestationStatement(
-          CoseAlgorithmIdentifier::kCoseEs256,
+          CoseAlgorithmIdentifier::kEs256,
           fido_parsing_utils::Materialize(kSignature),
           {fido_parsing_utils::Materialize(kCertificates)}))),
       testing::ElementsAreArray(test_data::kPackedAttestationStatementCBOR));
@@ -92,7 +92,7 @@ TEST(PackedAttestationStatementTest, CBOR) {
 
 TEST(PackedAttestationStatementTest, CBOR_NoCerts) {
   EXPECT_THAT(*cbor::Writer::Write(AsCBOR(PackedAttestationStatement(
-                  CoseAlgorithmIdentifier::kCoseEs256,
+                  CoseAlgorithmIdentifier::kEs256,
                   fido_parsing_utils::Materialize(kSignature), {}))),
               testing::ElementsAreArray(
                   test_data::kPackedAttestationStatementCBORNoCerts));

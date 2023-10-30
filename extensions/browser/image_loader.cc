@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/thread_pool.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/component_extension_resource_manager.h"
 #include "extensions/browser/extensions_browser_client.h"
@@ -30,6 +30,7 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image_family.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_rep.h"
 
 using content::BrowserThread;
 
@@ -112,7 +113,7 @@ std::vector<SkBitmap> LoadResourceBitmaps(
            extension->path() == it->resource.extension_root());
 
     int resource_id = 0;
-    if (extension->location() == Manifest::COMPONENT) {
+    if (extension->location() == mojom::ManifestLocation::kComponent) {
       const extensions::ComponentExtensionResourceManager* manager =
           extensions::ExtensionsBrowserClient::Get()
               ->GetComponentExtensionResourceManager();
@@ -238,8 +239,8 @@ void ImageLoader::LoadImageAtEveryScaleFactorAsync(
   std::vector<ImageRepresentation> info_list;
 
   std::set<float> scales;
-  for (auto scale : ui::GetSupportedScaleFactors())
-    scales.insert(ui::GetScaleForScaleFactor(scale));
+  for (auto scale : ui::GetSupportedResourceScaleFactors())
+    scales.insert(ui::GetScaleForResourceScaleFactor(scale));
 
   // There may not be a screen in unit tests.
   auto* screen = display::Screen::GetScreen();
@@ -263,7 +264,7 @@ void ImageLoader::LoadImagesAsync(
     const std::vector<ImageRepresentation>& info_list,
     ImageLoaderImageCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
       base::BindOnce(LoadImagesBlocking, info_list,
                      LoadResourceBitmaps(extension, info_list)),
@@ -276,7 +277,7 @@ void ImageLoader::LoadImageFamilyAsync(
     const std::vector<ImageRepresentation>& info_list,
     ImageLoaderImageFamilyCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  base::PostTaskWithTraitsAndReplyWithResult(
+  base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
       base::BindOnce(LoadImagesBlocking, info_list,
                      LoadResourceBitmaps(extension, info_list)),

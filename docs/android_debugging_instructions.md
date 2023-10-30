@@ -4,6 +4,11 @@ for debugging. Here's some tips.
 
 [TOC]
 
+## Instructions for Google Employees
+
+See also
+[go/clankium/06-debugging-clank](https://goto.google.com/clankium/06-debugging-clank).
+
 ## Launching
 You can run the app by using one of the wrappers.
 
@@ -15,7 +20,7 @@ out/Default/bin/chrome_public_apk launch --args='--disable-fre' 'data:text/html;
 ```
 
 ## Logging
-[Chromium logging from LOG(INFO)](https://chromium.googlesource.com/chromium/src/+/master/docs/android_logging.md)
+[Chromium logging from LOG(INFO)](https://chromium.googlesource.com/chromium/src/+/main/docs/android_logging.md)
 etc., is directed to the Android logcat logging facility. You can filter the
 messages, e.g. view chromium verbose logging, everything else at warning level
 with:
@@ -24,6 +29,9 @@ with:
 # Shows a coloured & filtered logcat.
 out/Default/bin/chrome_public_apk logcat [-v]  # Use -v to show logs for other processes
 ```
+
+If this doesn't display the logs you're looking for, try `adb logcat` with your system `adb`
+or the one in `//third_party/android_sdk/`.
 
 ### Warnings for Blink developers
 *   **Do not use fprintf or printf debugging!** This does not
@@ -69,6 +77,7 @@ out/Default/bin/run_chrome_junit_tests --wait-for-java-debugger  # Specify custo
 *   Click "Run"->"Attach debugger to Android process" (see
 [here](https://developer.android.com/studio/debug/index.html) for more).
 *   Click "Run"->"Attach to Local Process..." for Robolectric junit tests.
+    * If this fails, you likely need to follow [these instructions](https://stackoverflow.com/questions/21114066/attach-intellij-idea-debugger-to-a-running-java-process).
 
 ### Eclipse
 *   In Eclipse, make a debug configuration of type "Remote Java Application".
@@ -114,6 +123,17 @@ warning: Could not load shared library symbols for 211 libraries, e.g. /system/f
 Use the "info sharedlibrary" command to see the complete listing.
 Do you need "set solib-search-path" or "set sysroot"?
 Failed to read a valid object file image from memory.
+```
+
+If you have ever run an ASAN build of chromium on the device, you may get
+an error like the following when you start up gdb:
+```
+/tmp/<username>-adb-gdb-tmp-<pid>/gdb.init:11: Error in sourced command file:
+"/tmp/<username>-adb-gdb-tmp-<pid>/app_process32": not in executable format: file format not recognized
+```
+If this happens, run the following command and try again:
+```shell
+$ src/android/asan/third_party/asan_device_setup.sh --revert
 ```
 
 ### Using Visual Studio Code
@@ -188,7 +208,6 @@ that crashed was built. When building locally, these are found in:
 
 ```shell
 out/Default/apks/ChromePublic.apk.mapping
-out/Default/apks/ChromeModernPublic.apk.mapping
 etc.
 ```
 
@@ -202,22 +221,19 @@ file as follows:
    test.
 4. Download the `.mapping` file for the APK used by the test (e.g.,
    `ChromePublic.apk.mapping`). Note that you may need to use the
-   `tools/swarming_client/isolateserver.py` script to download the mapping
-   file if it's too big. The viewer will provide instructions for this.
+   `tools/luci-go/isolated` to download the mapping file if it's too big. The
+   viewer will provide instructions for this.
 
-Build the `java_deobfuscate` tool:
+**Googlers Only**: For official build mapping files, see
+[go/chromejavadeobfuscation](https://goto.google.com/chromejavadeobfuscation).
 
-```shell
-ninja -C out/Default java_deobfuscate
-```
-
-Then run it via:
+Once you have a .mapping file:
 
 ```shell
 # For a file:
-out/Default/bin/java_deobfuscate PROGUARD_MAPPING_FILE.mapping < FILE
+build/android/stacktrace/java_deobfuscate.py PROGUARD_MAPPING_FILE.mapping < FILE
 # For logcat:
-adb logcat | out/Default/bin/java_deobfuscate PROGUARD_MAPPING_FILE.mapping
+adb logcat | build/android/stacktrace/java_deobfuscate.py PROGUARD_MAPPING_FILE.mapping
 ```
 
 ## Get WebKit code to output to the adb log

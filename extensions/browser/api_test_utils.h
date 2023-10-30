@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,11 @@ namespace api_test_utils {
 // A helper class to handle waiting for a function response.
 class SendResponseHelper {
  public:
-  explicit SendResponseHelper(UIThreadExtensionFunction* function);
+  explicit SendResponseHelper(ExtensionFunction* function);
+
+  SendResponseHelper(const SendResponseHelper&) = delete;
+  SendResponseHelper& operator=(const SendResponseHelper&) = delete;
+
   ~SendResponseHelper();
 
   bool has_response() { return response_.get() != nullptr; }
@@ -49,13 +53,11 @@ class SendResponseHelper {
  private:
   // Response handler.
   void OnResponse(ExtensionFunction::ResponseType response,
-                  const base::ListValue& results,
+                  base::Value::List results,
                   const std::string& error);
 
   base::RunLoop run_loop_;
   std::unique_ptr<bool> response_;
-
-  DISALLOW_COPY_AND_ASSIGN(SendResponseHelper);
 };
 
 enum RunFunctionFlags { NONE = 0, INCLUDE_INCOGNITO = 1 << 0 };
@@ -67,34 +69,34 @@ std::unique_ptr<base::DictionaryValue> ParseDictionary(const std::string& data);
 // Get |key| from |val| as the specified type. If |key| does not exist, or is
 // not of the specified type, adds a failure to the current test and returns
 // false, 0, empty string, etc.
-bool GetBoolean(const base::DictionaryValue* val, const std::string& key);
-int GetInteger(const base::DictionaryValue* val, const std::string& key);
-std::string GetString(const base::DictionaryValue* val, const std::string& key);
+bool GetBoolean(const base::Value::Dict& val, const std::string& key);
+int GetInteger(const base::Value::Dict& val, const std::string& key);
+std::string GetString(const base::Value::Dict& val, const std::string& key);
+base::Value::List GetList(const base::Value::Dict& val, const std::string& key);
+base::Value::Dict GetDict(const base::Value::Dict& val, const std::string& key);
 
 // Run |function| with |args| and return the result. Adds an error to the
 // current test if |function| returns an error. Takes ownership of
 // |function|. The caller takes ownership of the result.
 std::unique_ptr<base::Value> RunFunctionWithDelegateAndReturnSingleResult(
-    scoped_refptr<UIThreadExtensionFunction> function,
+    scoped_refptr<ExtensionFunction> function,
     const std::string& args,
-    content::BrowserContext* context,
     std::unique_ptr<ExtensionFunctionDispatcher> dispatcher,
     RunFunctionFlags flags);
 std::unique_ptr<base::Value> RunFunctionWithDelegateAndReturnSingleResult(
-    scoped_refptr<UIThreadExtensionFunction> function,
+    scoped_refptr<ExtensionFunction> function,
     std::unique_ptr<base::ListValue> args,
-    content::BrowserContext* context,
     std::unique_ptr<ExtensionFunctionDispatcher> dispatcher,
     RunFunctionFlags flags);
 
 // RunFunctionWithDelegateAndReturnSingleResult, except with a NULL
 // implementation of the Delegate.
 std::unique_ptr<base::Value> RunFunctionAndReturnSingleResult(
-    UIThreadExtensionFunction* function,
+    ExtensionFunction* function,
     const std::string& args,
     content::BrowserContext* context);
 std::unique_ptr<base::Value> RunFunctionAndReturnSingleResult(
-    UIThreadExtensionFunction* function,
+    ExtensionFunction* function,
     const std::string& args,
     content::BrowserContext* context,
     RunFunctionFlags flags);
@@ -102,11 +104,11 @@ std::unique_ptr<base::Value> RunFunctionAndReturnSingleResult(
 // Run |function| with |args| and return the resulting error. Adds an error to
 // the current test if |function| returns a result. Takes ownership of
 // |function|.
-std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
+std::string RunFunctionAndReturnError(ExtensionFunction* function,
                                       const std::string& args,
                                       content::BrowserContext* context,
                                       RunFunctionFlags flags);
-std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
+std::string RunFunctionAndReturnError(ExtensionFunction* function,
                                       const std::string& args,
                                       content::BrowserContext* context);
 
@@ -120,17 +122,15 @@ std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
 // TODO(aa): I'm concerned that this style won't scale to all the bits and bobs
 // we're going to need to frob for all the different extension functions. But
 // we can refactor when we see what is needed.
-bool RunFunction(UIThreadExtensionFunction* function,
+bool RunFunction(ExtensionFunction* function,
                  const std::string& args,
                  content::BrowserContext* context);
-bool RunFunction(UIThreadExtensionFunction* function,
+bool RunFunction(ExtensionFunction* function,
                  const std::string& args,
-                 content::BrowserContext* context,
                  std::unique_ptr<ExtensionFunctionDispatcher> dispatcher,
                  RunFunctionFlags flags);
-bool RunFunction(UIThreadExtensionFunction* function,
+bool RunFunction(ExtensionFunction* function,
                  std::unique_ptr<base::ListValue> args,
-                 content::BrowserContext* context,
                  std::unique_ptr<ExtensionFunctionDispatcher> dispatcher,
                  RunFunctionFlags flags);
 

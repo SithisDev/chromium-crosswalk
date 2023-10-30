@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <map>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/stl_util.h"
+#include "base/check.h"
+#include "base/memory/raw_ptr.h"
+#include "base/observer_list.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_manager.h"
@@ -32,7 +32,10 @@ BluetoothInputClient::Properties::~Properties() = default;
 class BluetoothInputClientImpl : public BluetoothInputClient,
                                  public dbus::ObjectManager::Interface {
  public:
-  BluetoothInputClientImpl() : object_manager_(NULL), weak_ptr_factory_(this) {}
+  BluetoothInputClientImpl() : object_manager_(nullptr) {}
+
+  BluetoothInputClientImpl(const BluetoothInputClientImpl&) = delete;
+  BluetoothInputClientImpl& operator=(const BluetoothInputClientImpl&) = delete;
 
   ~BluetoothInputClientImpl() override {
     object_manager_->UnregisterInterface(
@@ -56,11 +59,10 @@ class BluetoothInputClientImpl : public BluetoothInputClient,
       dbus::ObjectProxy* object_proxy,
       const dbus::ObjectPath& object_path,
       const std::string& interface_name) override {
-    Properties* properties =
-        new Properties(object_proxy, interface_name,
-                       base::Bind(&BluetoothInputClientImpl::OnPropertyChanged,
-                                  weak_ptr_factory_.GetWeakPtr(), object_path));
-    return static_cast<dbus::PropertySet*>(properties);
+    return new Properties(
+        object_proxy, interface_name,
+        base::BindRepeating(&BluetoothInputClientImpl::OnPropertyChanged,
+                            weak_ptr_factory_.GetWeakPtr(), object_path));
   }
 
   // BluetoothInputClient override.
@@ -106,7 +108,7 @@ class BluetoothInputClientImpl : public BluetoothInputClient,
       observer.InputPropertyChanged(object_path, property_name);
   }
 
-  dbus::ObjectManager* object_manager_;
+  raw_ptr<dbus::ObjectManager> object_manager_;
 
   // List of observers interested in event notifications from us.
   base::ObserverList<BluetoothInputClient::Observer>::Unchecked observers_;
@@ -115,9 +117,7 @@ class BluetoothInputClientImpl : public BluetoothInputClient,
   // than we do.
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
-  base::WeakPtrFactory<BluetoothInputClientImpl> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothInputClientImpl);
+  base::WeakPtrFactory<BluetoothInputClientImpl> weak_ptr_factory_{this};
 };
 
 BluetoothInputClient::BluetoothInputClient() = default;

@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,11 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/test/bind.h"
+#include "base/test/task_environment.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/bluetooth_advertisement.h"
@@ -57,33 +56,28 @@ class BluetoothAdvertisementBlueZTest : public testing::Test {
 
   // Gets the existing Bluetooth adapter.
   void GetAdapter() {
-    BluetoothAdapterFactory::GetAdapter(
-        base::BindOnce(&BluetoothAdvertisementBlueZTest::GetAdapterCallback,
-                       base::Unretained(this)));
-    base::RunLoop().Run();
-  }
-
-  // Called whenever BluetoothAdapter is retrieved successfully.
-  void GetAdapterCallback(scoped_refptr<BluetoothAdapter> adapter) {
-    adapter_ = adapter;
-    ASSERT_NE(adapter_.get(), nullptr);
+    base::RunLoop run_loop;
+    device::BluetoothAdapterFactory::Get()->GetAdapter(
+        base::BindLambdaForTesting(
+            [&](scoped_refptr<BluetoothAdapter> adapter) {
+              adapter_ = std::move(adapter);
+              run_loop.Quit();
+            }));
+    run_loop.Run();
+    ASSERT_TRUE(adapter_);
     ASSERT_TRUE(adapter_->IsInitialized());
-    if (base::RunLoop::IsRunningOnCurrentThread())
-      base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    ASSERT_TRUE(adapter_->IsPresent());
   }
 
   std::unique_ptr<BluetoothAdvertisement::Data> CreateAdvertisementData() {
     std::unique_ptr<BluetoothAdvertisement::Data> data =
         std::make_unique<BluetoothAdvertisement::Data>(
             BluetoothAdvertisement::ADVERTISEMENT_TYPE_BROADCAST);
-    data->set_service_uuids(
-        std::make_unique<BluetoothAdvertisement::UUIDList>());
-    data->set_manufacturer_data(
-        std::make_unique<BluetoothAdvertisement::ManufacturerData>());
-    data->set_solicit_uuids(
-        std::make_unique<BluetoothAdvertisement::UUIDList>());
-    data->set_service_data(
-        std::make_unique<BluetoothAdvertisement::ServiceData>());
+    data->set_service_uuids(BluetoothAdvertisement::UUIDList());
+    data->set_manufacturer_data(BluetoothAdvertisement::ManufacturerData());
+    data->set_solicit_uuids(BluetoothAdvertisement::UUIDList());
+    data->set_service_data(BluetoothAdvertisement::ServiceData());
+    data->set_scan_response_data(BluetoothAdvertisement::ScanResponseData());
     return data;
   }
 
@@ -94,10 +88,11 @@ class BluetoothAdvertisementBlueZTest : public testing::Test {
 
     adapter_->RegisterAdvertisement(
         CreateAdvertisementData(),
-        base::Bind(&BluetoothAdvertisementBlueZTest::RegisterCallback,
-                   base::Unretained(this)),
-        base::Bind(&BluetoothAdvertisementBlueZTest::AdvertisementErrorCallback,
-                   base::Unretained(this)));
+        base::BindOnce(&BluetoothAdvertisementBlueZTest::RegisterCallback,
+                       base::Unretained(this)),
+        base::BindOnce(
+            &BluetoothAdvertisementBlueZTest::AdvertisementErrorCallback,
+            base::Unretained(this)));
 
     base::RunLoop().RunUntilIdle();
     return advertisement_;
@@ -106,10 +101,11 @@ class BluetoothAdvertisementBlueZTest : public testing::Test {
   void UnregisterAdvertisement(
       scoped_refptr<BluetoothAdvertisement> advertisement) {
     advertisement->Unregister(
-        base::Bind(&BluetoothAdvertisementBlueZTest::Callback,
-                   base::Unretained(this)),
-        base::Bind(&BluetoothAdvertisementBlueZTest::AdvertisementErrorCallback,
-                   base::Unretained(this)));
+        base::BindOnce(&BluetoothAdvertisementBlueZTest::Callback,
+                       base::Unretained(this)),
+        base::BindOnce(
+            &BluetoothAdvertisementBlueZTest::AdvertisementErrorCallback,
+            base::Unretained(this)));
 
     base::RunLoop().RunUntilIdle();
   }
@@ -166,7 +162,8 @@ class BluetoothAdvertisementBlueZTest : public testing::Test {
 
   BluetoothAdvertisement::ErrorCode last_error_code_;
 
-  base::MessageLoopForIO message_loop_;
+  base::test::SingleThreadTaskEnvironment task_environment_{
+      base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
 
   std::unique_ptr<TestBluetoothAdvertisementObserver> observer_;
   scoped_refptr<BluetoothAdapter> adapter_;
@@ -232,7 +229,8 @@ TEST_F(BluetoothAdvertisementBlueZTest, UnregisterAfterReleasedFailed) {
   ExpectSuccess();
   EXPECT_TRUE(advertisement);
 
-  observer_.reset(new TestBluetoothAdvertisementObserver(advertisement));
+  observer_ =
+      std::make_unique<TestBluetoothAdvertisementObserver>(advertisement);
   TriggerReleased(advertisement);
   EXPECT_TRUE(observer_->released());
 
@@ -271,10 +269,11 @@ TEST_F(BluetoothAdvertisementBlueZTest, ResetAdvertising) {
   EXPECT_EQ(2, adv_client->currently_registered());
 
   adapter_->ResetAdvertising(
-      base::Bind(&BluetoothAdvertisementBlueZTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothAdvertisementBlueZTest::AdvertisementErrorCallback,
-                 base::Unretained(this)));
+      base::BindOnce(&BluetoothAdvertisementBlueZTest::Callback,
+                     base::Unretained(this)),
+      base::BindOnce(
+          &BluetoothAdvertisementBlueZTest::AdvertisementErrorCallback,
+          base::Unretained(this)));
   ExpectSuccess();
 
   // Checks that the advertisements have been cleared after ResetAdvertising.

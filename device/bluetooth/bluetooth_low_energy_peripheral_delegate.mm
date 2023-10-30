@@ -1,9 +1,12 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/bluetooth/bluetooth_low_energy_peripheral_delegate.h"
 
+#include <memory>
+
+#include "base/memory/raw_ptr.h"
 #include "device/bluetooth/bluetooth_adapter_mac.h"
 #include "device/bluetooth/bluetooth_low_energy_discovery_manager_mac.h"
 
@@ -60,72 +63,73 @@ class BluetoothLowEnergyPeripheralBridge {
   CBPeripheral* GetPeripheral() { return device_mac_->GetPeripheral(); }
 
  private:
-  BluetoothLowEnergyDeviceMac* device_mac_;
+  raw_ptr<BluetoothLowEnergyDeviceMac> device_mac_;
 };
 
 }  // namespace device
 
 @implementation BluetoothLowEnergyPeripheralDelegate
 
-- (id)initWithBluetoothLowEnergyDeviceMac:
+- (instancetype)initWithBluetoothLowEnergyDeviceMac:
     (device::BluetoothLowEnergyDeviceMac*)device_mac {
   if ((self = [super init])) {
-    bridge_.reset(new device::BluetoothLowEnergyPeripheralBridge(device_mac));
+    _bridge = std::make_unique<device::BluetoothLowEnergyPeripheralBridge>(
+        device_mac);
   }
   return self;
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
     didModifyServices:(NSArray*)invalidatedServices {
-  bridge_->DidModifyServices(invalidatedServices);
+  _bridge->DidModifyServices(invalidatedServices);
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
     didDiscoverServices:(NSError*)error {
-  bridge_->DidDiscoverPrimaryServices(error);
+  _bridge->DidDiscoverPrimaryServices(error);
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
     didDiscoverCharacteristicsForService:(CBService*)service
                                    error:(NSError*)error {
-  bridge_->DidDiscoverCharacteristics(service, error);
+  _bridge->DidDiscoverCharacteristics(service, error);
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
     didUpdateValueForCharacteristic:(CBCharacteristic*)characteristic
                               error:(NSError*)error {
-  bridge_->DidUpdateValue(characteristic, error);
+  _bridge->DidUpdateValue(characteristic, error);
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
     didWriteValueForCharacteristic:(nonnull CBCharacteristic*)characteristic
                              error:(nullable NSError*)error {
-  bridge_->DidWriteValue(characteristic, error);
+  _bridge->DidWriteValue(characteristic, error);
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
     didUpdateNotificationStateForCharacteristic:
         (nonnull CBCharacteristic*)characteristic
                                           error:(nullable NSError*)error {
-  bridge_->DidUpdateNotificationState(characteristic, error);
+  _bridge->DidUpdateNotificationState(characteristic, error);
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
     didDiscoverDescriptorsForCharacteristic:(CBCharacteristic*)characteristic
                                       error:(nullable NSError*)error {
-  bridge_->DidDiscoverDescriptors(characteristic, error);
+  _bridge->DidDiscoverDescriptors(characteristic, error);
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
     didUpdateValueForDescriptor:(CBDescriptor*)descriptor
                           error:(nullable NSError*)error {
-  bridge_->DidUpdateValueForDescriptor(descriptor, error);
+  _bridge->DidUpdateValueForDescriptor(descriptor, error);
 }
 
 - (void)peripheral:(CBPeripheral*)peripheral
     didWriteValueForDescriptor:(CBDescriptor*)descriptor
                          error:(nullable NSError*)error {
-  bridge_->DidWriteValueForDescriptor(descriptor, error);
+  _bridge->DidWriteValueForDescriptor(descriptor, error);
 }
 
 @end

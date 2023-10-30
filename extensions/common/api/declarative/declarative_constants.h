@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,16 @@ extern const char kSetIcon[];
 
 // The old ShowAction instance type.
 extern const char kLegacyShowAction[];
+
+// Describes the injected action type. Used for logging when an action is
+// created. Entries should not be renumbered and numeric values should never be
+// reused.
+enum class ContentActionType {
+  kShowAction = 0,
+  kSetIcon = 1,
+  kRequestContentScript = 2,
+  kMaxValue = kRequestContentScript,
+};
 
 }  // namespace declarative_content_constants
 }  // namespace extensions

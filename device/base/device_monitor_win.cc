@@ -1,19 +1,21 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/base/device_monitor_win.h"
 
-#include <dbt.h>
+// windows.h must be included before dbt.h.
 #include <windows.h>
+
+#include <dbt.h>
 
 #include <map>
 #include <memory>
 
 #include "base/at_exit.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
-#include "base/macros.h"
+#include "base/callback_helpers.h"
+#include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/win/message_window.h"
@@ -24,8 +26,7 @@ class DeviceMonitorMessageWindow;
 
 namespace {
 
-const base::char16 kWindowClassName[] =
-    STRING16_LITERAL("DeviceMonitorMessageWindow");
+const wchar_t kWindowClassName[] = L"DeviceMonitorMessageWindow";
 DeviceMonitorMessageWindow* g_message_window;
 
 // Provides basic comparability for GUIDs so that they can be used as keys to an
@@ -47,8 +48,8 @@ class DeviceMonitorMessageWindow {
       g_message_window = new DeviceMonitorMessageWindow();
       if (g_message_window->Init()) {
         base::AtExitManager::RegisterTask(
-            base::Bind(&base::DeletePointer<DeviceMonitorMessageWindow>,
-                       base::Unretained(g_message_window)));
+            base::BindOnce(&base::DeletePointer<DeviceMonitorMessageWindow>,
+                           base::Unretained(g_message_window)));
       } else {
         delete g_message_window;
         g_message_window = nullptr;
@@ -56,6 +57,10 @@ class DeviceMonitorMessageWindow {
     }
     return g_message_window;
   }
+
+  DeviceMonitorMessageWindow(const DeviceMonitorMessageWindow&) = delete;
+  DeviceMonitorMessageWindow& operator=(const DeviceMonitorMessageWindow&) =
+      delete;
 
   DeviceMonitorWin* GetForDeviceInterface(const GUID& device_interface) {
     std::unique_ptr<DeviceMonitorWin>& device_monitor =
@@ -81,11 +86,11 @@ class DeviceMonitorMessageWindow {
   }
 
   bool Init() {
-    window_.reset(new base::win::MessageWindow());
+    window_ = std::make_unique<base::win::MessageWindow>();
     if (!window_->CreateNamed(
-            base::Bind(&DeviceMonitorMessageWindow::HandleMessage,
-                       base::Unretained(this)),
-            base::string16(kWindowClassName))) {
+            base::BindRepeating(&DeviceMonitorMessageWindow::HandleMessage,
+                                base::Unretained(this)),
+            kWindowClassName)) {
       LOG(ERROR) << "Failed to create message window: " << kWindowClassName;
       return false;
     }
@@ -121,7 +126,7 @@ class DeviceMonitorMessageWindow {
       if (map_entry != device_monitors_.end())
         device_monitor = map_entry->second.get();
 
-      std::string device_path(base::SysWideToUTF8(db->dbcc_name));
+      std::wstring device_path(db->dbcc_name);
       DCHECK(base::IsStringASCII(device_path));
       device_path = base::ToLowerASCII(device_path);
 
@@ -148,17 +153,15 @@ class DeviceMonitorMessageWindow {
   DeviceMonitorWin all_device_monitor_;
   std::unique_ptr<base::win::MessageWindow> window_;
   HDEVNOTIFY notify_handle_ = NULL;
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceMonitorMessageWindow);
 };
 
-void DeviceMonitorWin::Observer::OnDeviceAdded(const GUID& class_guid,
-                                               const std::string& device_path) {
-}
+void DeviceMonitorWin::Observer::OnDeviceAdded(
+    const GUID& class_guid,
+    const std::wstring& device_path) {}
 
 void DeviceMonitorWin::Observer::OnDeviceRemoved(
     const GUID& class_guid,
-    const std::string& device_path) {}
+    const std::wstring& device_path) {}
 
 // static
 DeviceMonitorWin* DeviceMonitorWin::GetForDeviceInterface(
@@ -194,13 +197,13 @@ void DeviceMonitorWin::RemoveObserver(Observer* observer) {
 DeviceMonitorWin::DeviceMonitorWin() {}
 
 void DeviceMonitorWin::NotifyDeviceAdded(const GUID& class_guid,
-                                         const std::string& device_path) {
+                                         const std::wstring& device_path) {
   for (auto& observer : observer_list_)
     observer.OnDeviceAdded(class_guid, device_path);
 }
 
 void DeviceMonitorWin::NotifyDeviceRemoved(const GUID& class_guid,
-                                           const std::string& device_path) {
+                                           const std::wstring& device_path) {
   for (auto& observer : observer_list_)
     observer.OnDeviceRemoved(class_guid, device_path);
 }

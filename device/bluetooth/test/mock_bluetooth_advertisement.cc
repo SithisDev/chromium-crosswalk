@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,9 @@ MockBluetoothAdvertisement::MockBluetoothAdvertisement() = default;
 
 MockBluetoothAdvertisement::~MockBluetoothAdvertisement() = default;
 
-void MockBluetoothAdvertisement::Unregister(
-    const SuccessCallback& success_callback,
-    const ErrorCallback& error_callback) {
-  success_callback.Run();
+void MockBluetoothAdvertisement::Unregister(SuccessCallback success_callback,
+                                            ErrorCallback error_callback) {
+  std::move(success_callback).Run();
 }
 
 }  // namespace device

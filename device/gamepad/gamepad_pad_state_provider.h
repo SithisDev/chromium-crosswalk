@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,10 +37,18 @@ enum GamepadSource {
   GAMEPAD_SOURCE_WIN_XINPUT,
   GAMEPAD_SOURCE_WIN_RAW,
   GAMEPAD_SOURCE_WIN_MR,
-  kMaxValue = GAMEPAD_SOURCE_WIN_MR,
+  GAMEPAD_SOURCE_OPENXR,
+  GAMEPAD_SOURCE_WIN_WGI,
+  kMaxValue = GAMEPAD_SOURCE_WIN_WGI,
 };
 
 struct PadState {
+  PadState();
+  ~PadState();
+
+  // Index of the slot occupied by this gamepad.
+  int pad_index;
+
   // Which data fetcher provided this gamepad's data.
   GamepadSource source;
   // Data fetcher-specific identifier for this gamepad.
@@ -58,6 +66,11 @@ struct PadState {
   // Set by the data fetcher to indicate that one-time initialization for this
   // gamepad has been completed.
   bool is_initialized;
+
+  // Set by the data fetcher to indicate whether this gamepad's ids are
+  // recognized as a specific gamepad. It is then used to prioritize recognized
+  // gamepads when finding an empty slot for any new gamepads when activated.
+  bool is_recognized;
 
   // Gamepad data, unmapped.
   Gamepad data;
@@ -91,8 +104,12 @@ class DEVICE_GAMEPAD_EXPORT GamepadPadStateProvider {
 
   // Gets a PadState object for the given source and id. If the device hasn't
   // been encountered before one of the remaining slots will be reserved for it.
-  // If no slots are available will return NULL.
-  PadState* GetPadState(GamepadSource source, int source_id);
+  // If no slots are available this returns nullptr. However, if one of those
+  // slots contains an unrecognized gamepad and |new_gamepad_recognized| is true
+  // that slot will be reset and returned.
+  PadState* GetPadState(GamepadSource source,
+                        int source_id,
+                        bool new_gamepad_recognized);
 
   // Gets a PadState object for a connected gamepad by specifying its index in
   // the pad_states_ array. Returns NULL if there is no connected gamepad at
@@ -110,6 +127,13 @@ class DEVICE_GAMEPAD_EXPORT GamepadPadStateProvider {
 
   // Tracks the state of each gamepad slot.
   std::unique_ptr<PadState[]> pad_states_;
+
+ private:
+  // Calls the DisconnectUnrecognizedGamepad method on the data fetcher
+  // associated with the given |source|. The actual implementation is always
+  // in the |gamepad_provider|.
+  virtual void DisconnectUnrecognizedGamepad(GamepadSource source,
+                                             int source_id) = 0;
 };
 
 }  // namespace device

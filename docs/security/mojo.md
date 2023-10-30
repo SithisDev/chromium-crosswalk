@@ -22,7 +22,7 @@ that needs to be maintained in sync.
 
 ```c++
 interface TeleporterFactory {
-  Create(Location start, Location end) => (Teleporter);
+  Create(Location start, Location end) => (pending_remote<Teleporter>);
 };
 
 interface Teleporter {
@@ -64,8 +64,9 @@ interface Teleporter {
   TeleportGoat(Goat) = ();
   TeleportPlant(Plant) => ();
 
-  // TeleportStats is only non-null if success is true.
-  GetStats() => (bool success, TeleporterStats?);
+  // TeleporterStats will be have a value if and only if the call was
+  // successful.
+  GetStats() => (TeleporterStats?);
 };
 ```
 
@@ -78,7 +79,7 @@ interface Teleporter {
   // supposed to only pass one non-null argument per call?
   Teleport(Animal?, Fungi?, Goat?, Plant?) => ();
 
-  // Does this return all stats if sucess is true? Or just the categories that
+  // Does this return all stats if success is true? Or just the categories that
   // the teleporter already has stats for? The intent is uncertain, so wrapping
   // the disparate values into a result struct would be cleaner.
   GetStats() =>
@@ -114,11 +115,9 @@ interface Teleporter {
   TeleportGoat(Goat) => ();
   TeleportPlant(Plant) => ();
 
-  // Returns current teleportation stats. On failure (e.g. a teleportation
-  // operation is currently in progress) success will be false and a null stats
-  // object will be returned.
-  GetStats() =>
-      (bool success, TeleportationStats?);
+  // Returns current teleporter stats. On failure (e.g. a teleportation
+  // operation is currently in progress) a null stats object will be returned.
+  GetStats() => (TeleporterStats?);
 };
 ```
 
@@ -164,9 +163,10 @@ callee to trust the caller.
 
 ### Do not send unnecessary or privilege-presuming data
 
-> Note: there is currently work in progress to associate origins with the
-> `InterfaceProvider`s for frames and workers: <https://crbug.com/734210> and
-> <https://crbug.com/775792/>.
+> Each `BrowserInterfaceBroker` for frames and workers is strongly associated with an
+> origin. Where possible, prefer to use this associated origin rather than
+> sending it over IPC. (See <https://crbug.com/734210> and
+> <https://crbug.com/775792/>).
 
 For example, the browser process must not (fully) trust the renderer's claims
 about origins. The browser process should already know what origin the renderer
@@ -207,11 +207,6 @@ the previous section), then such data should be verified before being used.
       messages handled asynchronously).  For legacy IPC, the renderer process
       may be terminated by calling the `ReceivedBadMessage` function (separate
       implementations exist for `//content`, `//chrome` and other layers).
-
-* NetworkService process:
-    - Do not trust `network::ResourceRequest::request_initiator` - verify it
-      using `VerifyRequestInitiatorLock` and fall back to a fail-safe origin
-      (e.g. an opaque origin) when verification fails.
 
 
 ### Do not define unused or unimplemented things
@@ -254,7 +249,7 @@ class View : public mojom::View {
  public:
   // ...
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void UpdateBrowserControlsState(bool enable_hiding, bool enable_showing,
                                   bool animate);
 #endif
@@ -276,7 +271,7 @@ class View : public mojom::View {
  public:
   // ...
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void UpdateBrowserControlsState(bool enable_hiding, bool enable_showing,
                                   bool animate) override;
 #else
@@ -521,6 +516,152 @@ for (size_t i = 0; i < request->element_size(); ++i) {
 ```
 
 
+### All possible message values are semantically valid
+
+When possible, messages should be defined in such a way that all possible values
+are semantically valid. As a corollary, avoid having the value of one field
+dictate the validity of other fields.
+
+**_Good_**
+
+```c++
+union CreateTokenResult {
+  // Implies success.
+  string token;
+
+  // Implies failure.
+  string error_message;
+};
+
+struct TokenManager {
+  CreateToken() => (CreateTokenResult result);
+};
+```
+
+**_Bad_**
+```c++
+struct TokenManager {
+  // Requires caller to handle edge case where |success| is set to true, but
+  // |token| is null.
+  CreateToken() => (bool success, string? token, string? error_message);
+
+  // Requires caller to handle edge case where both |token| and |error_message|
+  // are set, or both are null.
+  CreateToken() => (string? token, string? error_message);
+};
+```
+
+There are some known exceptions to this rule because mojo does not handle
+optional primitives.
+
+**_Allowed because mojo has no support for optional primitives_**
+```c++
+  struct Foo {
+    int32 x;
+    bool has_x;  // does the value of `x` have meaning?
+    int32 y;
+    bool has_y;  // does the value of `y` have meaning?
+  };
+```
+
+Another common case where we tolerate imperfect message semantics is
+with weakly typed integer [bitfields](#handling-bitfields).
+
+### Handling bitfields
+
+Mojom has no native support for bitfields. There are two common approaches: a
+type-safe struct of bools which is a bit clunky (preferred) and an integer-based
+approach (allowed but not preferred).
+
+**_Type-safe bitfields_**
+```c++
+struct VehicleBits {
+  bool has_car;
+  bool has_bicycle;
+  bool has_boat;
+};
+
+struct Person {
+  VehicleBits bits;
+};
+```
+
+**_Integer based approach_**
+```c++
+struct Person {
+  const uint64 kHasCar = 1;
+  const uint64 kHasBicycle = 2;
+  const uint64 kHasGoat= 4;
+
+  uint32 vehicle_bitfield;
+};
+```
+
+### Avoid object lifetime issues with self-owned receivers
+
+When creating new
+[Mojo services](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/mojo_and_services.md)
+in the browser process (exposed to the renderer via `BrowserInterfaceBrokers` in
+a host object like `RenderFrameHostImpl`, `DedicatedWorkerHost`, etc.), one
+approach is to have the interface implementation be owned by the `Receiver`
+using `mojo::MakeSelfOwnedReceiver`. From the
+[`mojo::MakeSelfOwnedReceiver` declaration](https://source.chromium.org/chromium/chromium/src/+/main:mojo/public/cpp/bindings/self_owned_receiver.h;l=129;drc=643cdf61903e99f27c3d80daee67e217e9d280e0):
+```
+// Binds the lifetime of an interface implementation to the lifetime of the
+// Receiver. When the Receiver is disconnected (typically by the remote end
+// closing the entangled Remote), the implementation will be deleted.
+```
+Consider such an interface created in `RenderFrameHostImpl`, and consider that
+and a corresponding `Remote` was created for this interface and owned by
+`RenderFrame`. It may seem logical to think that:
+ 1. (true) The `Receiver` owns the interface implementation
+ 2. (true) The lifetime of the `Receiver` is based on the lifetime of the
+    `Remote` in the renderer
+ 3. (true) The `Remote` is owned by the `RenderFrame`
+ 4. (true) The lifetime of the `RenderFrameHostImpl` is based on the lifetime of
+    the `RenderFrame`
+ 5. (true) Destroying the `RenderFrame` will cause the `Remote` to be destroyed,
+    ultimately causing the `Receiver` and the interface implementation to be
+    destroyed. The `RenderFrameHostImpl` will likely be destroyed at some point
+    as well.
+ 6. (false) It's safe to assume that `RenderFrameHostImpl` will outlive the
+    self-owned `Receiver` and interface implementation
+
+A
+[common](https://microsoftedge.github.io/edgevr/posts/yet-another-uaf/)
+mistake based on the last assumption above is to store and use a raw pointer
+to the `RenderFrameHostImpl` object in the interface implementation. If the
+`Receiver` outlives the `RenderFrameHostImpl` and uses the pointer to it, a
+Use-After-Free will occur. One way a malicious site or compromised renderer
+could make this happen is to generate lots of messages to the interface and then
+close the frame. The `Receiver` might have a backlog of messages to process
+before it gets the message indicating that the renderer's `Remote` was closed,
+and the `RenderFrameHostImpl` can be destroyed in the meantime.
+
+Similarly, it's not safe to assume that the `Profile` object (and objects owned
+by it; `StoragePartitionImpl`, for instance) will outlive the `Receiver`. This
+has been observed to be true for at least incognito windows, where a renderer
+can generate messages, close the page, and cause the entire window to close
+(assuming no other pages are open), ultimately causing the
+`OffTheRecordProfileImpl` object to be destroyed before the `Receiver` object.
+
+To avoid these types of issues, some solutions include:
+
+ - Using `DocumentService` or `DocumentUserData` instead of
+   `mojo::MakeSelfOwnedReceiver` for document-based interfaces where the
+   interface implementation needs access to a `RenderFrameHostImpl` object. See
+   the
+   [`DocumentService` declaration](https://source.chromium.org/chromium/chromium/src/+/main:content/public/browser/document_service.h;l=27;drc=d4bf612a0258dd80cfc6d17d49419dd878ebaeb0)
+   for more details.
+
+ - Having the `Receiver` and/or interface implementation be owned by the object
+   it relies on (for instance, store the `Receiver` in a private member or
+   use a `mojo::UniqueReceiverSet` for storing multiple `Receiver` /
+   interface implementation pairs).
+
+ - Using `WeakPtr`s instead of raw pointers to provide a way to check whether
+   an object has been destroyed.
+
 ## C++ Best Practices
 
 
@@ -532,8 +673,8 @@ destroyed, e.g.:
 
 ```c++
   {
-    base::Callback<int> cb = mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-        base::Bind([](int) { ... }), -1);
+    base::OnceCallback<int> cb = mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+        base::BindOnce([](int) { ... }), -1);
   }  // |cb| is automatically invoked with an argument of -1.
 ```
 
@@ -542,7 +683,7 @@ This can be useful for detecting interface errors:
 ```c++
   process->GetMemoryStatistics(
       mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-          base::Bind(&MemoryProfiler::OnReplyFromRenderer), <failure args>));
+          base::BindOnce(&MemoryProfiler::OnReplyFromRenderer), <failure args>));
   // If the remote process dies, &MemoryProfiler::OnReplyFromRenderer will be
   // invoked with <failure args> when Mojo drops outstanding callbacks due to
   // a connection error on |process|.
@@ -604,7 +745,9 @@ bool StructTraits<url::mojom::UrlDataView, GURL>::Read(
   if (url_string.length() > url::kMaxURLChars)
     return false;
   *out = GURL(url_string);
-  return !url_string.empty() && out->is_valid();
+  if (!url_string.empty() && !out->is_valid())
+    return false;
+  return true;
 }
 ```
 
@@ -689,9 +832,9 @@ IDLDictionary* FromMojo(const mojom::blink::DictionaryPtr& in) {
 
 ### Use the proper abstractions
 
-`mojo::BindingSet` implies multiple clients may connect. If this actually isn't
+`mojo::ReceiverSet` implies multiple clients may connect. If this actually isn't
 the case, please do not use it. For example, if an interface can be rebound,
-then use the singular `mojo::Binding` and simply `Close()` the existing binding
+then use the singular `mojo::Receiver` and simply `reset()` the existing receiver
 before reusing it.
 
 
@@ -770,6 +913,15 @@ control messages to establish a message pipe. Keep this in mind: if the
 interface is used relatively frequently, connecting once and reusing the
 interface pointer is probably a good idea.
 
+## Copy data out of BigBuffer before parsing
+
+[BigBuffer](mojo/public/mojom/base/big_buffer.mojom) uses shared memory to make
+passing large messages fast. When shmem is backing the message, it may be
+writable in the sending process while being read in the receiving process. If a
+BigBuffer is received from an untrustworthy process, you should make a copy of
+the data before processing it to avoid time-of-check time-of-use (TOCTOU) bugs.
+The |size()| of the data cannot be manipulated.
+
 
 ## Ensure An Explicit Grant For WebUI Bindings
 
@@ -800,5 +952,5 @@ safe, vulnerabilities could arise.
 
 [security-tips-for-ipc]: https://www.chromium.org/Home/chromium-security/education/security-tips-for-ipc
 [NfcTypeConverter.java]: https://chromium.googlesource.com/chromium/src/+/e97442ee6e8c4cf6bcf7f5623c6fb2cc8cce92ac/services/device/nfc/android/java/src/org/chromium/device/nfc/NfcTypeConverter.java
-[mojo-doc-process-crashes]: https://chromium.googlesource.com/chromium/src/+/master/mojo/public/cpp/bindings#Best-practices-for-dealing-with-process-crashes-and-callbacks
+[mojo-doc-process-crashes]: https://chromium.googlesource.com/chromium/src/+/main/mojo/public/cpp/bindings#Best-practices-for-dealing-with-process-crashes-and-callbacks
 [serialize-struct-tm-safely]: https://chromium-review.googlesource.com/c/chromium/src/+/679441

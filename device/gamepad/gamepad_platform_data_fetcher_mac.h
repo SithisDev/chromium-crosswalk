@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,18 @@
 #include <memory>
 
 #include "base/mac/scoped_cftyperef.h"
-#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "device/gamepad/gamepad_data_fetcher.h"
-#include "device/gamepad/gamepad_device_mac.h"
 #include "device/gamepad/public/cpp/gamepad.h"
+#include "device/gamepad/public/mojom/gamepad.mojom-forward.h"
+
+namespace base {
+class SequencedTaskRunner;
+}  // namespace base
 
 namespace device {
+
+class GamepadDeviceMac;
 
 class GamepadPlatformDataFetcherMac : public GamepadDataFetcher {
  public:
@@ -25,10 +31,15 @@ class GamepadPlatformDataFetcherMac : public GamepadDataFetcher {
                                                 GAMEPAD_SOURCE_MAC_HID>;
 
   GamepadPlatformDataFetcherMac();
+
+  GamepadPlatformDataFetcherMac(const GamepadPlatformDataFetcherMac&) = delete;
+  GamepadPlatformDataFetcherMac& operator=(
+      const GamepadPlatformDataFetcherMac&) = delete;
+
   ~GamepadPlatformDataFetcherMac() override;
 
+  // GamepadDataFetcher public implementation.
   GamepadSource source() override;
-
   void GetGamepadData(bool devices_changed_hint) override;
   void PauseHint(bool paused) override;
   void PlayEffect(int source_id,
@@ -42,10 +53,6 @@ class GamepadPlatformDataFetcherMac : public GamepadDataFetcher {
       scoped_refptr<base::SequencedTaskRunner>) override;
 
  private:
-  bool enabled_;
-  bool paused_;
-  base::ScopedCFTypeRef<IOHIDManagerRef> hid_manager_ref_;
-
   static GamepadPlatformDataFetcherMac* InstanceFromContext(void* context);
   static void DeviceAddCallback(void* context,
                                 IOReturn result,
@@ -60,20 +67,12 @@ class GamepadPlatformDataFetcherMac : public GamepadDataFetcher {
                                    void* sender,
                                    IOHIDValueRef ref);
 
+  // GamepadDataFetcher private implementation.
   void OnAddedToProvider() override;
 
-  // Returns the index of the first empty slot, or Gamepads::kItemsLengthCap if
-  // there are no empty slots.
-  size_t GetEmptySlot();
-
-  // Returns the index of the slot allocated for this device, or the first empty
-  // slot if none is yet allocated. If there is no allocated or empty slots,
-  // returns Gamepads::kItemsLengthCap.
-  size_t GetSlotForDevice(IOHIDDeviceRef device);
-
-  // Returns the index of the slot allocated for the device with the specified
-  // |location_id|, or Gamepads::kItemsLengthCap if none is yet allocated.
-  size_t GetSlotForLocation(int location_id);
+  // Returns the GamepadDeviceMac from |devices_| that has the given device
+  // reference. Returns nullptr if the device is not in |devices_|.
+  GamepadDeviceMac* GetGamepadFromHidDevice(IOHIDDeviceRef device);
 
   // Query device info for |device| and add it to |devices_| if it is a
   // gamepad.
@@ -92,9 +91,14 @@ class GamepadPlatformDataFetcherMac : public GamepadDataFetcher {
   // Unregister from connection events and value change notifications.
   void UnregisterFromNotifications();
 
-  std::unique_ptr<GamepadDeviceMac> devices_[Gamepads::kItemsLengthCap];
+  bool DisconnectUnrecognizedGamepad(int source_id) override;
 
-  DISALLOW_COPY_AND_ASSIGN(GamepadPlatformDataFetcherMac);
+  bool enabled_ = false;
+  bool paused_ = false;
+  base::ScopedCFTypeRef<IOHIDManagerRef> hid_manager_ref_;
+
+  // A map of all devices using this data fetcher with the source_id as the key.
+  std::unordered_map<int, std::unique_ptr<GamepadDeviceMac>> devices_;
 };
 
 }  // namespace device

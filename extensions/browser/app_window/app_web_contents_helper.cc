@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/suggest_permission_util.h"
 #include "extensions/common/permissions/api_permission.h"
+#include "third_party/blink/public/common/input/web_gesture_event.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
-#include "third_party/blink/public/platform/web_gesture_event.h"
 
 namespace extensions {
 
@@ -33,7 +33,7 @@ AppWebContentsHelper::AppWebContentsHelper(
 bool AppWebContentsHelper::ShouldSuppressGestureEvent(
     const blink::WebGestureEvent& event) {
   // Disable "smart zoom" (double-tap with two fingers on Mac trackpad).
-  if (event.GetType() == blink::WebInputEvent::kGestureDoubleTap)
+  if (event.GetType() == blink::WebInputEvent::Type::kGestureDoubleTap)
     return true;
 
   // Disable pinch zooming in app windows.
@@ -56,23 +56,23 @@ content::WebContents* AppWebContentsHelper::OpenURLFromTab(
   // TODO(mihaip): Can we check for user gestures instead?
   WindowOpenDisposition disposition = params.disposition;
   if (disposition == WindowOpenDisposition::CURRENT_TAB) {
-    web_contents_->GetMainFrame()->AddMessageToConsole(
+    web_contents_->GetPrimaryMainFrame()->AddMessageToConsole(
         blink::mojom::ConsoleMessageLevel::kError,
         base::StringPrintf(
             "Can't open same-window link to \"%s\"; try target=\"_blank\".",
             params.url.spec().c_str()));
-    return NULL;
+    return nullptr;
   }
 
   // These dispositions aren't really navigations.
   if (disposition == WindowOpenDisposition::SAVE_TO_DISK ||
       disposition == WindowOpenDisposition::IGNORE_ACTION)
-    return NULL;
+    return nullptr;
 
   content::WebContents* contents =
       app_delegate_->OpenURLFromTab(browser_context_, web_contents_, params);
   if (!contents) {
-    web_contents_->GetMainFrame()->AddMessageToConsole(
+    web_contents_->GetPrimaryMainFrame()->AddMessageToConsole(
         blink::mojom::ConsoleMessageLevel::kError,
         base::StringPrintf(
             "Can't navigate to \"%s\"; apps do not support navigation.",
@@ -88,9 +88,15 @@ void AppWebContentsHelper::RequestToLockMouse() const {
     return;
 
   bool has_permission = IsExtensionWithPermissionOrSuggestInConsole(
-      APIPermission::kPointerLock, extension, web_contents_->GetMainFrame());
+      mojom::APIPermissionID::kPointerLock, extension,
+      web_contents_->GetPrimaryMainFrame());
 
-  web_contents_->GotResponseToLockMouseRequest(has_permission);
+  if (has_permission)
+    web_contents_->GotResponseToLockMouseRequest(
+        blink::mojom::PointerLockResult::kSuccess);
+  else
+    web_contents_->GotResponseToLockMouseRequest(
+        blink::mojom::PointerLockResult::kPermissionDenied);
 }
 
 void AppWebContentsHelper::RequestMediaAccessPermission(

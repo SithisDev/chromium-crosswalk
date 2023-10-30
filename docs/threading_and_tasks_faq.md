@@ -9,7 +9,7 @@ docs first.
 
 ### On which thread will a task run?
 
-A task is posted through the `base/task/post_task.h` API with `TaskTraits`.
+A task is posted through the `base/task/thread_pool.h` API with `TaskTraits`.
 
 * If `TaskTraits` contain `BrowserThread::UI`:
     * The task runs on the main thread.
@@ -19,16 +19,16 @@ A task is posted through the `base/task/post_task.h` API with `TaskTraits`.
 
 * If `TaskTraits` don't contain `BrowserThread::UI/IO`:
     * If the task is posted through a `SingleThreadTaskRunner` obtained from
-      `CreateSingleThreadTaskRunnerWithTraits(..., mode)`:
+      `CreateSingleThreadTaskRunner(..., mode)`:
         * Where `mode` is `SingleThreadTaskRunnerThreadMode::DEDICATED`:
-              * The task runs on a thread that only runs tasks from that
-                SingleThreadTaskRunner. This is not the main thread nor the IO
-                thread.
+            * The task runs on a thread that only runs tasks from that
+              SingleThreadTaskRunner. This is not the main thread nor the IO
+              thread.
 
         * Where `mode` is `SingleThreadTaskRunnerThreadMode::SHARED`:
-              * The task runs on a thread that runs tasks from one or many
-                unrelated SingleThreadTaskRunners. This is not the main thread
-                nor the IO thread.
+            * The task runs on a thread that runs tasks from one or many
+              unrelated SingleThreadTaskRunners. This is not the main thread nor
+              the IO thread.
 
     * Otherwise:
         * The task runs in a thread pool.
@@ -85,7 +85,7 @@ If the task runs on a `DEDICATED SingleThreadTaskRunner`:
   returns).
 
 [base/threading/scoped_blocking_call.h](https://cs.chromium.org/chromium/src/base/threading/scoped_blocking_call.h)
-explains the difference between `MAY_BLOCK ` and  `WILL_BLOCK` and gives
+explains the difference between `MAY_BLOCK` and `WILL_BLOCK` and gives
 examples of blocking operations.
 
 ### How to make a blocking call that may never return without preventing other tasks from being scheduled?
@@ -104,15 +104,15 @@ such tasks at which point sequencing can be a useful tool to prevent flooding).
 
 ### Do calls to blocking //base APIs need to be annotated with ScopedBlockingCall?
 
-No. All blocking //base APIs (e.g. base::ReadFileToString, base::File::Read,
-base::SysInfo::AmountOfFreeDiskSpace, base::WaitableEvent::Wait, etc.) have their
-own internal annotations. See
+No. All blocking //base APIs (e.g. `base::ReadFileToString`, `base::File::Read`,
+`base::SysInfo::AmountOfFreeDiskSpace`, `base::WaitableEvent::Wait`, etc.) have
+their own internal annotations. See
 [base/threading/scoped_blocking_call.h](https://cs.chromium.org/chromium/src/base/threading/scoped_blocking_call.h).
 
 ### Can multiple ScopedBlockingCall be nested for the purpose of documentation?
 
 Nested `ScopedBlockingCall` are supported. Most of the time, the inner
-ScopedBlockingCalls will no-op (the exception is WILL_BLOCK nested in MAY_BLOCK).
+ScopedBlockingCalls will no-op (the exception is `WILL_BLOCK` nested in `MAY_BLOCK`).
 As such, it is permitted to add a ScopedBlockingCall in the scope where a function
 that is already annotated is called for documentation purposes.:
 
@@ -155,15 +155,15 @@ The following mappings can be useful when migrating code from a
 * base::ThreadLocalStorage::Slot -> base::SequenceLocalStorageSlot
 * BrowserThread::DeleteOnThread -> base::OnTaskRunnerDeleter / base::RefCountedDeleteOnSequence
 * BrowserMessageFilter::OverrideThreadForMessage() -> BrowserMessageFilter::OverrideTaskRunnerForMessage()
-* CreateSingleThreadTaskRunnerWithTraits() -> CreateSequencedTaskRunnerWithTraits()
-     * Every CreateSingleThreadTaskRunnerWithTraits() usage, outside of
+* CreateSingleThreadTaskRunner() -> CreateSequencedTaskRunner()
+     * Every CreateSingleThreadTaskRunner() usage, outside of
        BrowserThread::UI/IO, should be accompanied with a comment and ideally a
        bug to make it sequence when the sequence-unfriendly dependency is
        addressed.
 
 ### How to ensure mutual exclusion between tasks posted by a component?
 
-Create a `SequencedTaskRunner` using `CreateSequencedTaskRunnerWithTraits()` and
+Create a `SequencedTaskRunner` using `CreateSequencedTaskRunner()` and
 store it on an object that can be accessed from all the PostTask() call sites
 that require mutual exclusion. If there isn't a shared object that can own a
 common `SequencedTaskRunner`, use
@@ -174,12 +174,12 @@ common `SequencedTaskRunner`, use
 ### How to test code that posts tasks?
 
 If the test uses `BrowserThread::UI/IO`, instantiate a
-`content::TestBrowserThreadBundle` for the scope of the test. Call
-`TestBrowserThreadBundle::RunUntilIdle()` to wait until all tasks have run.
+`content::BrowserTaskEnvironment` for the scope of the test. Call
+`BrowserTaskEnvironment::RunUntilIdle()` to wait until all tasks have run.
 
 If the test doesn't use `BrowserThread::UI/IO`, instantiate a
-`base::test::ScopedTaskEnvironment` for the scope of the test. Call
-`base::test::ScopedTaskEnvironment::RunUntilIdle()` to wait until all tasks have
+`base::test::TaskEnvironment` for the scope of the test. Call
+`base::test::TaskEnvironment::RunUntilIdle()` to wait until all tasks have
 run.
 
 In both cases, you can run tasks until a condition is met. A test that waits for
@@ -190,7 +190,7 @@ for all tasks to run.
 int g_condition = false;
 
 base::RunLoop run_loop;
-base::PostTaskWithTraits(FROM_HERE, {}, base::BindOnce(
+base::ThreadPool::PostTask(FROM_HERE, {}, base::BindOnce(
     [] (base::OnceClosure closure) {
         g_condition = true;
         std::move(quit_closure).Run();

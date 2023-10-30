@@ -1,4 +1,4 @@
-// Copyright (c) 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include <memory>
 #include <string>
 
-#include "base/scoped_observer.h"
+#include "base/memory/raw_ptr.h"
+#include "base/scoped_observation.h"
 #include "extensions/browser/api/audio/audio_service.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_function.h"
@@ -25,6 +26,10 @@ class AudioAPI : public BrowserContextKeyedAPI, public AudioService::Observer {
   static void RegisterUserPrefs(PrefRegistrySimple* registry);
 
   explicit AudioAPI(content::BrowserContext* context);
+
+  AudioAPI(const AudioAPI&) = delete;
+  AudioAPI& operator=(const AudioAPI&) = delete;
+
   ~AudioAPI() override;
 
   AudioService* GetService() const;
@@ -34,7 +39,6 @@ class AudioAPI : public BrowserContextKeyedAPI, public AudioService::Observer {
   static const bool kServiceRedirectedInIncognito = true;
 
   // AudioService::Observer implementation.
-  void OnDeviceChanged() override;
   void OnLevelChanged(const std::string& id, int level) override;
   void OnMuteChanged(bool is_input, bool is_muted) override;
   void OnDevicesChanged(const DeviceInfoList& devices) override;
@@ -47,67 +51,63 @@ class AudioAPI : public BrowserContextKeyedAPI, public AudioService::Observer {
     return "AudioAPI";
   }
 
-  content::BrowserContext* const browser_context_;
+  const raw_ptr<content::BrowserContext> browser_context_;
   std::unique_ptr<AudioDeviceIdCalculator> stable_id_calculator_;
   std::unique_ptr<AudioService> service_;
 
-  ScopedObserver<AudioService, AudioService::Observer> audio_service_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioAPI);
+  base::ScopedObservation<AudioService, AudioService::Observer>
+      audio_service_observation_{this};
 };
 
-class AudioGetInfoFunction : public UIThreadExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("audio.getInfo", AUDIO_GETINFO)
-
- protected:
-  ~AudioGetInfoFunction() override {}
-  ResponseAction Run() override;
-};
-
-class AudioGetDevicesFunction : public UIThreadExtensionFunction {
+class AudioGetDevicesFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("audio.getDevices", AUDIO_GETDEVICES)
 
  protected:
   ~AudioGetDevicesFunction() override {}
   ResponseAction Run() override;
+  void OnResponse(bool success,
+                  std::vector<api::audio::AudioDeviceInfo> devices);
 };
 
-class AudioSetActiveDevicesFunction : public UIThreadExtensionFunction {
+class AudioSetActiveDevicesFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("audio.setActiveDevices", AUDIO_SETACTIVEDEVICES)
 
  protected:
   ~AudioSetActiveDevicesFunction() override {}
   ResponseAction Run() override;
+  void OnResponse(bool success);
 };
 
-class AudioSetPropertiesFunction : public UIThreadExtensionFunction {
+class AudioSetPropertiesFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("audio.setProperties", AUDIO_SETPROPERTIES)
 
  protected:
   ~AudioSetPropertiesFunction() override {}
   ResponseAction Run() override;
+  void OnResponse(bool success);
 };
 
-class AudioSetMuteFunction : public UIThreadExtensionFunction {
+class AudioSetMuteFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("audio.setMute", AUDIO_SETMUTE)
 
  protected:
   ~AudioSetMuteFunction() override {}
   ResponseAction Run() override;
+  void OnResponse(bool success);
 };
 
-class AudioGetMuteFunction : public UIThreadExtensionFunction {
+class AudioGetMuteFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("audio.getMute", AUDIO_GETMUTE)
 
  protected:
   ~AudioGetMuteFunction() override {}
   ResponseAction Run() override;
+  void OnResponse(bool success, bool is_muted);
 };
 
 }  // namespace extensions

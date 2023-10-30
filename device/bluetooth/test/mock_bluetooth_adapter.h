@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,17 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
 #include "device/bluetooth/test/mock_bluetooth_device.h"
 #include "testing/gmock/include/gmock/gmock.h"
+
+#if BUILDFLAG(IS_CHROMEOS)
+#include "device/bluetooth/bluetooth_low_energy_scan_filter.h"
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 namespace device {
 
@@ -25,6 +29,10 @@ class MockBluetoothAdapter : public BluetoothAdapter {
   class Observer : public BluetoothAdapter::Observer {
    public:
     Observer(scoped_refptr<BluetoothAdapter> adapter);
+
+    Observer(const Observer&) = delete;
+    Observer& operator=(const Observer&) = delete;
+
     ~Observer() override;
 
     MOCK_METHOD2(AdapterPresentChanged, void(BluetoothAdapter*, bool));
@@ -40,15 +48,14 @@ class MockBluetoothAdapter : public BluetoothAdapter {
 
    private:
     const scoped_refptr<BluetoothAdapter> adapter_;
-
-    DISALLOW_COPY_AND_ASSIGN(Observer);
   };
 
   MockBluetoothAdapter();
 
   bool IsInitialized() const override { return true; }
 
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+  void Initialize(base::OnceClosure callback) override;
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
   void Shutdown() override;
 #endif
   MOCK_METHOD1(AddObserver, void(BluetoothAdapter::Observer*));
@@ -57,31 +64,34 @@ class MockBluetoothAdapter : public BluetoothAdapter {
   MOCK_CONST_METHOD0(GetName, std::string());
   MOCK_METHOD3(SetName,
                void(const std::string& name,
-                    const base::Closure& callback,
-                    const ErrorCallback& error_callback));
+                    base::OnceClosure callback,
+                    ErrorCallback error_callback));
   MOCK_CONST_METHOD0(IsPresent, bool());
   MOCK_CONST_METHOD0(IsPowered, bool());
   MOCK_CONST_METHOD0(CanPower, bool());
   MOCK_METHOD3(SetPowered,
                void(bool powered,
-                    const base::Closure& callback,
-                    const ErrorCallback& error_callback));
+                    base::OnceClosure callback,
+                    ErrorCallback error_callback));
   MOCK_CONST_METHOD0(IsDiscoverable, bool());
   MOCK_METHOD3(SetDiscoverable,
                void(bool discoverable,
-                    const base::Closure& callback,
-                    const ErrorCallback& error_callback));
+                    base::OnceClosure callback,
+                    ErrorCallback error_callback));
   MOCK_CONST_METHOD0(IsDiscovering, bool());
   MOCK_METHOD2(
       StartScanWithFilter_,
       void(const BluetoothDiscoveryFilter*,
-           base::OnceCallback<void(/*is_error*/ bool,
+           base::OnceCallback<void(/*is_error=*/bool,
                                    UMABluetoothDiscoverySessionOutcome)>&
                callback));
-  MOCK_METHOD3(RemoveDiscoverySession_,
-               void(BluetoothDiscoveryFilter* discovery_filter,
-                    const base::RepeatingClosure& callback,
-                    DiscoverySessionErrorCallback& error_callback));
+  MOCK_METHOD2(
+      UpdateFilter_,
+      void(const BluetoothDiscoveryFilter*,
+           base::OnceCallback<void(/*is_error=*/bool,
+                                   UMABluetoothDiscoverySessionOutcome)>&
+               callback));
+  MOCK_METHOD1(StopScan, void(DiscoverySessionResultCallback callback));
   MOCK_METHOD3(SetDiscoveryFilterRaw,
                void(const BluetoothDiscoveryFilter*,
                     const base::RepeatingClosure& callback,
@@ -100,15 +110,42 @@ class MockBluetoothAdapter : public BluetoothAdapter {
   MOCK_METHOD4(CreateRfcommService,
                void(const BluetoothUUID& uuid,
                     const ServiceOptions& options,
-                    const CreateServiceCallback& callback,
-                    const CreateServiceErrorCallback& error_callback));
+                    CreateServiceCallback callback,
+                    CreateServiceErrorCallback error_callback));
   MOCK_METHOD4(CreateL2capService,
                void(const BluetoothUUID& uuid,
                     const ServiceOptions& options,
-                    const CreateServiceCallback& callback,
-                    const CreateServiceErrorCallback& error_callback));
+                    CreateServiceCallback callback,
+                    CreateServiceErrorCallback error_callback));
   MOCK_CONST_METHOD1(GetGattService,
                      BluetoothLocalGattService*(const std::string& identifier));
+#if BUILDFLAG(IS_CHROMEOS)
+  MOCK_METHOD3(SetServiceAllowList,
+               void(const UUIDList& uuids,
+                    base::OnceClosure callback,
+                    ErrorCallback error_callback));
+  MOCK_METHOD0(GetLowEnergyScanSessionHardwareOffloadingStatus,
+               LowEnergyScanSessionHardwareOffloadingStatus());
+  MOCK_METHOD2(
+      StartLowEnergyScanSession,
+      std::unique_ptr<BluetoothLowEnergyScanSession>(
+          std::unique_ptr<BluetoothLowEnergyScanFilter> filter,
+          base::WeakPtr<BluetoothLowEnergyScanSession::Delegate> delegate));
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  MOCK_METHOD0(SetStandardChromeOSAdapterName, void());
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
+  MOCK_METHOD4(
+      ConnectDevice,
+      void(const std::string& address,
+           const absl::optional<BluetoothDevice::AddressType>& address_type,
+           ConnectDeviceCallback callback,
+           ConnectDeviceErrorCallback error_callback));
+
+#endif
 
   // BluetoothAdapter is supposed to manage the lifetime of BluetoothDevices.
   // This method takes ownership of the MockBluetoothDevice. This is only for
@@ -129,33 +166,25 @@ class MockBluetoothAdapter : public BluetoothAdapter {
   }
 
  protected:
+  base::WeakPtr<BluetoothAdapter> GetWeakPtr() override;
   bool SetPoweredImpl(bool powered) override;
   void StartScanWithFilter(
       std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
       DiscoverySessionResultCallback callback) override;
   void UpdateFilter(std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
                     DiscoverySessionResultCallback callback) override;
-  void RemoveDiscoverySession(
-      BluetoothDiscoveryFilter* discovery_filter,
-      const base::Closure& callback,
-      DiscoverySessionErrorCallback error_callback) override;
-  void SetDiscoveryFilter(
-      std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
-      const base::Closure& callback,
-      DiscoverySessionErrorCallback error_callback) override;
   void RegisterAdvertisement(
       std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
-      const CreateAdvertisementCallback& callback,
-      const AdvertisementErrorCallback& error_callback) override;
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+      CreateAdvertisementCallback callback,
+      AdvertisementErrorCallback error_callback) override;
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
   void SetAdvertisingInterval(
       const base::TimeDelta& min,
       const base::TimeDelta& max,
-      const base::Closure& callback,
-      const AdvertisementErrorCallback& error_callback) override;
-  void ResetAdvertising(
-      const base::Closure& callback,
-      const AdvertisementErrorCallback& error_callback) override;
+      base::OnceClosure callback,
+      AdvertisementErrorCallback error_callback) override;
+  void ResetAdvertising(base::OnceClosure callback,
+                        AdvertisementErrorCallback error_callback) override;
 #endif
   ~MockBluetoothAdapter() override;
 
@@ -163,6 +192,10 @@ class MockBluetoothAdapter : public BluetoothAdapter {
                void(BluetoothDevice::PairingDelegate* pairing_delegate));
 
   std::vector<std::unique_ptr<MockBluetoothDevice>> mock_devices_;
+
+  // This must be the last field in the class so that weak pointers are
+  // invalidated first.
+  base::WeakPtrFactory<MockBluetoothAdapter> weak_ptr_factory_{this};
 };
 
 }  // namespace device

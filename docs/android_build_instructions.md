@@ -19,7 +19,7 @@ instead.
 * You must have Git and Python installed already.
 
 Most development is done on Ubuntu. Other distros may or may not work;
-see the [Linux instructions](linux_build_instructions.md) for some suggestions.
+see the [Linux instructions](linux/build_instructions.md) for some suggestions.
 
 Building the Android client on Windows or Mac is not supported and doesn't work.
 
@@ -71,7 +71,7 @@ cd src
 ### Converting an existing Linux checkout
 
 If you have an existing Linux checkout, you can add Android support by
-appending `target_os = ['android']` to your `.gclient` file (in the
+appending `target_os = ['linux', 'android']` to your `.gclient` file (in the
 directory above `src`):
 
 ```shell
@@ -116,7 +116,7 @@ development and testing purposes.
 ## Setting up the build
 
 Chromium uses [Ninja](https://ninja-build.org) as its main build tool along with
-a tool called [GN](https://gn.googlesource.com/gn/+/master/docs/quick_start.md)
+a tool called [GN](https://gn.googlesource.com/gn/+/main/docs/quick_start.md)
 to generate `.ninja` files. You can create any number of *build directories*
 with different configurations. To create a build directory which builds Chrome
 for Android, run `gn args out/Default` and edit the file to contain the
@@ -135,7 +135,7 @@ target_cpu = "arm64"  # See "Figuring out target_cpu" below
   configuration](https://www.chromium.org/developers/gn-build-configuration).
   The default will be a debug component build.
 * For more info on GN, run `gn help` on the command line or read the
-  [quick start guide](../tools/gn/docs/quick_start.md).
+  [quick start guide](https://gn.googlesource.com/gn/+/main/docs/quick_start.md).
 
 Also be aware that some scripts (e.g. `tombstones.py`, `adb_gdb.py`)
 require you to set `CHROMIUM_OUTPUT_DIR=out/Default`.
@@ -143,7 +143,7 @@ require you to set `CHROMIUM_OUTPUT_DIR=out/Default`.
 ### Figuring out target\_cpu
 
 The value of
-[`target_cpu`](https://gn.googlesource.com/gn/+/master/docs/reference.md#target_cpu)
+[`target_cpu`](https://gn.googlesource.com/gn/+/main/docs/reference.md#var_target_cpu)
 determines what instruction set to use for native code. Given a device (or
 emulator), you can determine the correct instruction set with `adb shell getprop
 ro.product.cpu.abi`:
@@ -177,45 +177,40 @@ out/Default` from the command line. To compile one, pass the GN label to Ninja
 with no preceding "//" (so, for `//chrome/test:unit_tests` use `autoninja -C
 out/Default chrome/test:unit_tests`).
 
-### Multiple Chrome APK Targets
+### Multiple Chrome Targets
 
-The Google Play Store allows apps to send customized `.apk` files depending on
-the version of Android running on a device. Chrome uses this feature to target
-4 different versions using 4 different ninja targets:
+The Google Play Store allows apps to send customized `.apk` or `.aab` files
+depending on the version of Android running on a device. Chrome uses this
+feature to package optimized versions for different OS versions.
 
-1. `chrome_public_apk` (ChromePublic.apk)
-   * `minSdkVersion=19` (KitKat).
-   * Stores libchrome.so compressed within the APK.
-   * Uses [Crazy Linker](https://cs.chromium.org/chromium/src/base/android/linker/BUILD.gn?rcl=6bb29391a86f2be58c626170156cbfaa2cbc5c91&l=9).
-   * Shipped only for Android < 21, but still works fine on Android >= 21.
-2. `chrome_modern_public_apk` (ChromeModernPublic.apk)
+1. `chrome_modern_public_bundle` (ChromeModernPublic.aab)
    * `minSdkVersion=21` (Lollipop).
    * Uses [Crazy Linker](https://cs.chromium.org/chromium/src/base/android/linker/BUILD.gn?rcl=6bb29391a86f2be58c626170156cbfaa2cbc5c91&l=9).
-   * Stores libchrome.so uncompressed within the APK.
-     * This APK is bigger, but the installation size is smaller since there is
-       no need to extract the .so file.
-3. `monochrome_public_apk` (MonochromePublic.apk)
+   * Stores native library with "crazy." prefix to prevent extraction.
+   * WebView packaged independently (`system_webview_bundle`).
+2. `monochrome_public_bundle` (MonochromePublic.aab)
    * `minSdkVersion=24` (Nougat).
-   * Contains both WebView and Chrome within the same APK.
-     * This APK is even bigger, but much smaller than SystemWebView.apk + ChromePublic.apk.
-   * Stores libmonochrome.so uncompressed within the APK.
+   * Contains both Chrome and WebView (to save disk space).
    * Does not use Crazy Linker (WebView requires system linker).
-     * But system linker supports crazy linker features now anyways.
-4. `trichrome_chrome_apk` and `trichrome_library_apk` (TrichromeChrome.apk and TrichromeLibrary.apk)
-   * `minSdkVersion=Q` (Q).
-   * TrichromeChrome contains only the Chrome code that is not shared with WebView.
-   * TrichromeLibrary contains the shared code and is a "static shared library APK", which must be installed prior to TrichromeChrome.
-   * Stores libmonochrome.so uncompressed within TrichromeLibrary.apk.
-   * Does not use Crazy Linker (WebView requires system linker).
-     * But system linker supports crazy linker features now anyways.
+3. `trichrome_chrome_bundle` (TrichromeChrome.aab)
+   * `minSdkVersion=29` (Android 10).
+   * Native code shared with WebView through a "Static Shared Library APK": `trichrome_library_apk` 
+   * Corresponding WebView target: `trichrome_webview_bundle`
+4. `chrome_public_apk` (ChromePublic.apk)
+   * Used for only local development and tests (simpler than using bundle
+     targets).
+   * Same configuration as chrome_modern_public_bundle, except without
+     separating things into modules.
 
-**Note**: These instructions use `chrome_public_apk`, but either of the other
-two targets can be substituted.
-
-**Note**: These targets are actually the open-source equivalents to the
-closed-source targets that get shipped to the Play Store.
-
-**Note**: For more in-depth differences, see [android_native_libraries.md](android_native_libraries.md).
+*** note
+**Notes:**
+* These instructions use `chrome_public_apk`, but any of the other targets can
+  be substituted.
+* For more about bundles, see [android_dynamic feature modules.md](android_dynamic_feature_modules.md).
+* For more about native library packaging & loading, see [android_native_libraries.md](android_native_libraries.md).
+* There are closed-source equivalents to these targets (for Googlers), which
+  are identical but link in some extra code.
+***
 
 ## Updating your checkout
 
@@ -228,7 +223,7 @@ $ gclient sync
 
 The first command updates the primary Chromium source repository and rebases
 any of your local branches on top of tip-of-tree (aka the Git branch
-`origin/master`). If you don't want to use this script, you can also just use
+`origin/main`). If you don't want to use this script, you can also just use
 `git pull` or other common Git commands to update the repo.
 
 The second command syncs dependencies to the appropriate versions and re-runs
@@ -338,6 +333,19 @@ You can see these log via `adb logcat`, or:
 out/Default/bin/chrome_public_apk logcat
 ```
 
+Logcat supports an additional feature of filtering and highlighting user-defined patterns. To use
+this mechanism, define a shell variable: `CHROMIUM_LOGCAT_HIGHLIGHT` and assign your desired
+pattern. The pattern will be used to search for any substring (ie. no need to prefix or suffix it
+with `.*`), eg:
+
+```shell
+export CHROMIUM_LOGCAT_HIGHLIGHT='(WARNING|cr_Child)'
+out/Default.bin/chrome_public_apk logcat
+# Highlights messages/tags containing WARNING and cr_Child strings.
+```
+
+Note: both _Message_ and _Tag_ portion of logcat are matched against the pattern.
+
 To debug C++ code, use one of the following commands:
 
 ```shell
@@ -351,7 +359,7 @@ for more on debugging, including how to debug Java code.
 ### Testing
 
 For information on running tests, see
-[Android Test Instructions](testing/android_test_instructions.md).
+[Android Test Instructions](/testing/android/docs/README.md)
 
 ### Faster Edit/Deploy
 
@@ -361,56 +369,88 @@ Args that affect build speed:
    * What it does: Uses multiple `.so` files instead of just one (faster links)
  * `is_java_debug = true` *(default=`is_debug`)*
    * What it does: Disables ProGuard (slow build step)
+ * `treat_warnings_as_errors = false` *(default=`true`)*
+   * Causes any compiler warnings or lint checks to not fail the build.
+   * Allows you to iterate without needing to satisfy static analysis checks.
+ * `android_static_analysis = "build_server"` *(default=`"on"`)*
+   * Offloads static analysis steps to the build server. Explained below.
+   * Set this to `"off"` if you want to turn off static analysis altogether.
+ * `incremental_install = true` *(default=`false`)*
+   * Makes build and install quite a bit faster. Explained in a later section.
+
+#### Running static analysis with the build server
+Normally analysis build steps like lint and errorprone will run in parallel with
+the rest of the build. The build will then wait for all analysis steps to
+complete successfully. By offloading analysis build steps to a separate build
+server to be run lazily at a low priority when the machine is idle, the actual
+build can complete up to 50-80% faster.
+
+There are **two** steps to using the build server.
+1. Add the gn arg `android_static_analysis = "build_server"`
+2. Run the script at
+[//build/android/fast_local_dev_server.py][fast_local_dev]
+
+All your local builds will now forward analysis steps to this server, including
+android lint, errorprone, bytecode processor.
+
+If you run (2) in a terminal, the output of the checks will be displayed there.
+Alternatively, you can set up the server as a Linux service, so it runs on the
+background and starts on boot. If you're using systemd:
+
+Save the following as /etc/systemd/user/fast-local-dev-server.service.
+```
+[Unit]
+Description=Chrome server for android build static analysis
+
+[Service]
+Type=simple
+ExecStart=<path to fast_local_dev_server.py>
+Restart=always
+
+[Install]
+WantedBy=default.target
+```
+
+Then
+```bash
+systemctl --user daemon-reload
+systemctl --user enable fast-local-dev-server
+systemctl --user start fast-local-dev-server
+```
+
+The output can be inspected with
+```
+journalctl --user -e -u fast-local-dev-server
+```
+
+**Note**: Since the build completes before the analysis checks finish, the build
+will not fail if an analysis check fails. Make sure to check the terminal that
+the server is running in at regular intervals to fix outstanding issues caught
+by these analysis checks.
+
+[fast_local_dev]: https://source.chromium.org/chromium/chromium/src/+/main:build/android/fast_local_dev_server.py
 
 #### Incremental Install
-"Incremental install" uses reflection and side-loading to speed up the edit
-& deploy cycle (normally < 10 seconds). The initial launch of the apk will be
-a little slower since updated dex files are installed manually.
+[Incremental Install](/build/android/incremental_install/README.md) uses
+reflection and sideloading to speed up the edit & deploy cycle (normally < 10
+seconds). The initial launch of the apk will be a lot slower on older Android
+versions (pre-N) where the OS needs to pre-optimize the side-loaded files, but
+then be only marginally slower after the first launch.
 
-*   All apk targets have \*`_incremental` targets defined (e.g.
-    `chrome_public_apk_incremental`) except for Webview and Monochrome
-
-Here's an example:
-
-```shell
-autoninja -C out/Default chrome_public_apk_incremental
-out/Default/bin/chrome_public_apk install --incremental --verbose
-```
-
-For gunit tests (note that run_*_incremental automatically add
-`--fast-local-dev` when calling `test_runner.py`):
-
-```shell
-autoninja -C out/Default base_unittests_incremental
-out/Default/bin/run_base_unittests_incremental
-```
-
-For instrumentation tests:
-
-```shell
-autoninja -C out/Default chrome_public_test_apk_incremental
-out/Default/bin/run_chrome_public_test_apk_incremental
-```
-
-To uninstall:
-
-```shell
-out/Default/bin/chrome_public_apk uninstall
-```
-
-To avoid typing `_incremental` when building targets, you can use the GN arg:
+To enable Incremental Install, add the gn args:
 
 ```gn
-incremental_apk_by_default = true
+incremental_install = true
 ```
 
-This will make `chrome_public_apk` build in incremental mode.
+Some APKs (e.g. WebView) do not work with `incremental install = true` and are
+always built as normal APKs. This behavior is controlled via
+`never_incremental = true`.
 
 ## Installing and Running Chromium on an Emulator
 
 Running on an emulator is the same as on a device. Refer to
 [android_emulator.md](android_emulator.md) for setting up emulators.
-
 
 ## Tips, tricks, and troubleshooting
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "device/bluetooth/bluetooth_remote_gatt_service.h"
 #include "device/bluetooth/public/cpp/bluetooth_uuid.h"
 #include "device/bluetooth/test/mock_bluetooth_gatt_characteristic.h"
@@ -25,13 +24,15 @@ class MockBluetoothGattService : public BluetoothRemoteGattService {
   MockBluetoothGattService(MockBluetoothDevice* device,
                            const std::string& identifier,
                            const BluetoothUUID& uuid,
-                           bool is_primary,
-                           bool is_local);
+                           bool is_primary);
+
+  MockBluetoothGattService(const MockBluetoothGattService&) = delete;
+  MockBluetoothGattService& operator=(const MockBluetoothGattService&) = delete;
+
   ~MockBluetoothGattService() override;
 
   MOCK_CONST_METHOD0(GetIdentifier, std::string());
   MOCK_CONST_METHOD0(GetUUID, BluetoothUUID());
-  MOCK_CONST_METHOD0(IsLocal, bool());
   MOCK_CONST_METHOD0(IsPrimary, bool());
   MOCK_CONST_METHOD0(GetDevice, BluetoothDevice*());
   MOCK_CONST_METHOD0(GetCharacteristics,
@@ -43,15 +44,9 @@ class MockBluetoothGattService : public BluetoothRemoteGattService {
   MOCK_CONST_METHOD1(
       GetCharacteristicsByUUID,
       std::vector<BluetoothRemoteGattCharacteristic*>(const BluetoothUUID&));
-  MOCK_METHOD1(AddIncludedService, bool(BluetoothRemoteGattService*));
-  MOCK_METHOD2(Register, void(const base::Closure&, const ErrorCallback&));
-  MOCK_METHOD2(Unregister, void(const base::Closure&, const ErrorCallback&));
 
   void AddMockCharacteristic(
       std::unique_ptr<MockBluetoothGattCharacteristic> mock_characteristic);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockBluetoothGattService);
 };
 
 }  // namespace device

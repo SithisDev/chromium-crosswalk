@@ -1,18 +1,18 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef EXTENSIONS_BROWSER_API_APP_CURRENT_WINDOW_INTERNAL_APP_CURRENT_WINDOW_INTERNAL_API_H_
 #define EXTENSIONS_BROWSER_API_APP_CURRENT_WINDOW_INTERNAL_APP_CURRENT_WINDOW_INTERNAL_API_H_
 
+#include "base/memory/raw_ptr.h"
 #include "extensions/browser/extension_function.h"
 
 namespace extensions {
 
 class AppWindow;
 
-class AppCurrentWindowInternalExtensionFunction
-    : public UIThreadExtensionFunction {
+class AppCurrentWindowInternalExtensionFunction : public ExtensionFunction {
  protected:
   ~AppCurrentWindowInternalExtensionFunction() override {}
 
@@ -23,7 +23,7 @@ class AppCurrentWindowInternalExtensionFunction
   bool PreRunValidation(std::string* error) override;
 
   // The current AppWindow.
-  AppWindow* window_ = nullptr;
+  raw_ptr<AppWindow> window_ = nullptr;
 };
 
 class AppCurrentWindowInternalFocusFunction

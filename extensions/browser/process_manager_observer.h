@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include "base/observer_list_types.h"
+
 namespace content {
 class RenderFrameHost;
 }
@@ -14,8 +16,10 @@ class RenderFrameHost;
 namespace extensions {
 class Extension;
 class ExtensionHost;
+class ProcessManager;
+struct WorkerId;
 
-class ProcessManagerObserver {
+class ProcessManagerObserver : public base::CheckedObserver {
  public:
   // Called immediately after an extension background host is started. This
   // corresponds with the loading of background hosts immediately after profile
@@ -39,6 +43,18 @@ class ProcessManagerObserver {
   virtual void OnExtensionFrameUnregistered(
       const std::string& extension_id,
       content::RenderFrameHost* render_frame_host) {}
+
+  // Called when a service worker is started.
+  virtual void OnServiceWorkerRegistered(const WorkerId& worker_id) {}
+
+  // Called when a service worker is no longer part of an extension process.
+  virtual void OnServiceWorkerUnregistered(const WorkerId& worker_id) {}
+
+  // Called when the observed ProcessManager is shutting down.
+  virtual void OnProcessManagerShutdown(ProcessManager* manager) {}
+
+  // Called when the renderer process has gone.
+  virtual void OnExtensionProcessTerminated(const Extension* extension) {}
 };
 
 }  // namespace extensions

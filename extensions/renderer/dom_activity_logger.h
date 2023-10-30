@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,9 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "extensions/common/dom_action_types.h"
 #include "third_party/blink/public/web/web_dom_activity_logger.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-forward.h"
 
 namespace base {
 class ListValue;
@@ -30,13 +29,16 @@ class DOMActivityLogger: public blink::WebDOMActivityLogger {
  public:
   static const int kMainWorldId = 0;
   explicit DOMActivityLogger(const std::string& extension_id);
+
+  DOMActivityLogger(const DOMActivityLogger&) = delete;
+  DOMActivityLogger& operator=(const DOMActivityLogger&) = delete;
+
   ~DOMActivityLogger() override;
 
   // Check (using the WebKit API) if there is no logger attached to the world
   // corresponding to world_id, and if so, construct a new logger and attach it.
   // world_id = 0 indicates the main world.
-  static void AttachToWorld(int world_id,
-                            const std::string& extension_id);
+  static void AttachToWorld(int32_t world_id, const std::string& extension_id);
 
  private:
   // blink::WebDOMActivityLogger implementation.
@@ -71,17 +73,14 @@ class DOMActivityLogger: public blink::WebDOMActivityLogger {
   // Helper function to actually send the message across IPC.
   void SendDomActionMessage(const std::string& api_call,
                             const GURL& url,
-                            const base::string16& url_title,
+                            const std::u16string& url_title,
                             DomActionType::Type call_type,
                             std::unique_ptr<base::ListValue> args);
 
   // The id of the extension with which this logger is associated.
   std::string extension_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(DOMActivityLogger);
 };
 
 }  // namespace extensions
 
 #endif  // EXTENSIONS_RENDERER_DOM_ACTIVITY_LOGGER_H_
-

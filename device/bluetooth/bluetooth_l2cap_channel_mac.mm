@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include <memory>
 
-#include "base/logging.h"
-#include "base/mac/sdk_forward_declarations.h"
+#include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "device/bluetooth/bluetooth_classic_device_mac.h"
 #include "device/bluetooth/bluetooth_socket_mac.h"
 
@@ -16,41 +16,41 @@
 @interface BluetoothL2capChannelDelegate
     : NSObject <IOBluetoothL2CAPChannelDelegate> {
  @private
-  device::BluetoothL2capChannelMac* channel_;  // weak
+  raw_ptr<device::BluetoothL2capChannelMac> _channel;  // weak
 }
 
-- (id)initWithChannel:(device::BluetoothL2capChannelMac*)channel;
+- (instancetype)initWithChannel:(device::BluetoothL2capChannelMac*)channel;
 
 @end
 
 @implementation BluetoothL2capChannelDelegate
 
-- (id)initWithChannel:(device::BluetoothL2capChannelMac*)channel {
+- (instancetype)initWithChannel:(device::BluetoothL2capChannelMac*)channel {
   if ((self = [super init]))
-    channel_ = channel;
+    _channel = channel;
 
   return self;
 }
 
 - (void)l2capChannelOpenComplete:(IOBluetoothL2CAPChannel*)l2capChannel
                           status:(IOReturn)error {
-  channel_->OnChannelOpenComplete(l2capChannel, error);
+  _channel->OnChannelOpenComplete(l2capChannel, error);
 }
 
 - (void)l2capChannelWriteComplete:(IOBluetoothL2CAPChannel*)l2capChannel
                            refcon:(void*)refcon
                            status:(IOReturn)error {
-  channel_->OnChannelWriteComplete(l2capChannel, refcon, error);
+  _channel->OnChannelWriteComplete(l2capChannel, refcon, error);
 }
 
 - (void)l2capChannelData:(IOBluetoothL2CAPChannel*)l2capChannel
                     data:(void*)dataPointer
                   length:(size_t)dataLength {
-  channel_->OnChannelDataReceived(l2capChannel, dataPointer, dataLength);
+  _channel->OnChannelDataReceived(l2capChannel, dataPointer, dataLength);
 }
 
 - (void)l2capChannelClosed:(IOBluetoothL2CAPChannel*)l2capChannel {
-  channel_->OnChannelClosed(l2capChannel);
+  _channel->OnChannelClosed(l2capChannel);
 }
 
 @end

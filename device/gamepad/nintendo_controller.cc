@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/strings/stringprintf.h"
+#include "base/cxx17_backports.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "device/gamepad/gamepad_data_fetcher.h"
 #include "device/gamepad/gamepad_id_list.h"
 
@@ -81,8 +82,7 @@ const uint8_t kUsbDeviceTypeProController = 0x03;
 // The timeout duration was chosen through experimentation. A shorter duration
 // (~1 second) works for Pro controllers, but Joy-Cons sometimes fail to
 // initialize correctly.
-const base::TimeDelta kTimeoutDuration =
-    base::TimeDelta::FromMilliseconds(3000);
+const base::TimeDelta kTimeoutDuration = base::Milliseconds(3000);
 const size_t kMaxRetryCount = 3;
 
 const size_t kMaxVibrationEffectDurationMillis = 100;
@@ -93,6 +93,15 @@ const uint8_t kAccelerometerSensitivity8G = 0x00;
 const uint8_t kGyroPerformance208Hz = 0x01;
 const uint8_t kAccelerometerFilterBandwidth100Hz = 0x01;
 const uint8_t kPlayerLightPattern1 = 0x01;
+
+// Bogus calibration value that should be ignored.
+const uint16_t kCalBogusValue = 0xfff;
+
+// Default calibration values to use if the controller returns bogus values.
+const uint16_t kCalDefaultDeadzone = 160;
+const uint16_t kCalDefaultMin = 550;
+const uint16_t kCalDefaultCenter = 2050;
+const uint16_t kCalDefaultMax = 3550;
 
 // Parameters for the "strong" and "weak" components of the dual-rumble effect.
 const double kVibrationFrequencyStrongRumble = 141.0;
@@ -122,7 +131,7 @@ struct VibrationFrequency {
     // This list must be kept sorted.
     {0x0068, 0x3a, 141},
     {0x0098, 0x46, 182}};
-const size_t kVibrationFrequencySize = base::size(kVibrationFrequency);
+const size_t kVibrationFrequencySize = std::size(kVibrationFrequency);
 
 // https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering/blob/master/rumble_data_table.md
 struct VibrationAmplitude {
@@ -166,7 +175,7 @@ struct VibrationAmplitude {
     {0xc0, 0x0070, 920}, {0xc2, 0x8070, 940},  {0xc4, 0x0071, 960},
     {0xc6, 0x8071, 981}, {0xc8, 0x0072, 1000},
 };
-const size_t kVibrationAmplitudeSize = base::size(kVibrationAmplitude);
+const size_t kVibrationAmplitudeSize = std::size(kVibrationAmplitude);
 
 // Define indices for the additional buttons on Switch controllers.
 enum SWITCH_BUTTON_INDICES {
@@ -303,6 +312,11 @@ void UnpackSwitchAnalogStickParameters(
   DCHECK(data);
   // Only fetch the dead zone and range ratio. The other parameters are unknown.
   UnpackShorts(data[3], data[4], data[5], &cal.dead_zone, &cal.range_ratio);
+  if (cal.dead_zone == kCalBogusValue) {
+    // If the controller reports an invalid dead zone, default to something
+    // reasonable.
+    cal.dead_zone = kCalDefaultDeadzone;
+  }
 }
 
 // Unpack the IMU calibration data into |cal|
@@ -348,14 +362,35 @@ void UnpackSwitchAnalogStickCalibration(
   UnpackShorts(data[9], data[10], data[11], &cal.rx_center, &cal.ry_center);
   UnpackShorts(data[12], data[13], data[14], &cal.rx_min, &cal.ry_min);
   UnpackShorts(data[15], data[16], data[17], &cal.rx_max, &cal.ry_max);
-  cal.lx_min = cal.lx_center - cal.lx_min;
-  cal.lx_max = cal.lx_center + cal.lx_max;
-  cal.ly_min = cal.ly_center - cal.ly_min;
-  cal.ly_max = cal.ly_center + cal.ly_max;
-  cal.rx_min = cal.rx_center - cal.rx_min;
-  cal.rx_max = cal.rx_center + cal.rx_max;
-  cal.ry_min = cal.ry_center - cal.ry_min;
-  cal.ry_max = cal.ry_center + cal.ry_max;
+  if (cal.lx_min == kCalBogusValue && cal.ly_max == kCalBogusValue) {
+    // No valid data for the left stick, use reasonable defaults.
+    cal.lx_min = kCalDefaultMin;
+    cal.lx_center = kCalDefaultCenter;
+    cal.lx_max = kCalDefaultMax;
+    cal.ly_min = kCalDefaultMin;
+    cal.ly_center = kCalDefaultCenter;
+    cal.ly_max = kCalDefaultMax;
+  } else {
+    cal.lx_min = cal.lx_center - cal.lx_min;
+    cal.lx_max = cal.lx_center + cal.lx_max;
+    cal.ly_min = cal.ly_center - cal.ly_min;
+    cal.ly_max = cal.ly_center + cal.ly_max;
+  }
+
+  if (cal.rx_min == kCalBogusValue && cal.ry_max == kCalBogusValue) {
+    // No valid data for the right stick, use reasonable defaults.
+    cal.rx_min = kCalDefaultMin;
+    cal.rx_center = kCalDefaultCenter;
+    cal.rx_max = kCalDefaultMax;
+    cal.ry_min = kCalDefaultMin;
+    cal.ry_center = kCalDefaultCenter;
+    cal.ry_max = kCalDefaultMax;
+  } else {
+    cal.rx_min = cal.rx_center - cal.rx_min;
+    cal.rx_max = cal.rx_center + cal.rx_max;
+    cal.ry_min = cal.ry_center - cal.ry_min;
+    cal.ry_max = cal.ry_center + cal.ry_max;
+  }
 }
 
 // Unpack one frame of IMU data into |imu_data|.
@@ -408,6 +443,7 @@ bool UpdateGamepadFromControllerData(
     const NintendoController::SwitchCalibrationData& cal,
     Gamepad& pad) {
   bool buttons_changed =
+      pad.buttons_length != SWITCH_BUTTON_INDEX_COUNT ||
       pad.buttons[BUTTON_INDEX_PRIMARY].pressed != data.button_b ||
       pad.buttons[BUTTON_INDEX_SECONDARY].pressed != data.button_a ||
       pad.buttons[BUTTON_INDEX_TERTIARY].pressed != data.button_y ||
@@ -435,6 +471,7 @@ bool UpdateGamepadFromControllerData(
       pad.buttons[SWITCH_BUTTON_INDEX_RIGHT_SR].pressed != data.button_right_sr;
 
   if (buttons_changed) {
+    pad.buttons_length = SWITCH_BUTTON_INDEX_COUNT;
     pad.buttons[BUTTON_INDEX_PRIMARY].pressed = data.button_b;
     pad.buttons[BUTTON_INDEX_PRIMARY].value = data.button_b ? 1.0 : 0.0;
     pad.buttons[BUTTON_INDEX_SECONDARY].pressed = data.button_a;
@@ -510,11 +547,13 @@ bool UpdateGamepadFromControllerData(
       rdead ? 0.0 : NormalizeAndClampAxis(axis_rx, cal.rx_min, cal.rx_max);
   double ry =
       rdead ? 0.0 : -NormalizeAndClampAxis(axis_ry, cal.ry_min, cal.ry_max);
-  bool axes_changed = pad.axes[device::AXIS_INDEX_LEFT_STICK_X] != lx ||
+  bool axes_changed = pad.axes_length != AXIS_INDEX_COUNT ||
+                      pad.axes[device::AXIS_INDEX_LEFT_STICK_X] != lx ||
                       pad.axes[device::AXIS_INDEX_LEFT_STICK_Y] != ly ||
                       pad.axes[device::AXIS_INDEX_RIGHT_STICK_X] != rx ||
                       pad.axes[device::AXIS_INDEX_RIGHT_STICK_Y] != ry;
   if (axes_changed) {
+    pad.axes_length = AXIS_INDEX_COUNT;
     pad.axes[device::AXIS_INDEX_LEFT_STICK_X] = lx;
     pad.axes[device::AXIS_INDEX_LEFT_STICK_Y] = ly;
     pad.axes[device::AXIS_INDEX_RIGHT_STICK_X] = rx;
@@ -716,9 +755,8 @@ void FrequencyToHex(float frequency,
   int freq = static_cast<int>(frequency);
   int amp = static_cast<int>(amplitude * kVibrationAmplitudeMax);
   // Clamp the target frequency and amplitude to a safe range.
-  freq = std::min(std::max(freq, kVibrationFrequencyHzMin),
-                  kVibrationFrequencyHzMax);
-  amp = std::min(std::max(amp, 0), kVibrationAmplitudeMax);
+  freq = base::clamp(freq, kVibrationFrequencyHzMin, kVibrationFrequencyHzMax);
+  amp = base::clamp(amp, 0, kVibrationAmplitudeMax);
   const auto* best_vf = &kVibrationFrequency[0];
   for (size_t i = 1; i < kVibrationFrequencySize; ++i) {
     const auto* vf = &kVibrationFrequency[i];
@@ -766,7 +804,8 @@ GamepadBusType BusTypeFromDeviceInfo(const mojom::HidDeviceInfo* device_info) {
   // regardless of the actual connection.
   if (device_info->bus_type == mojom::HidBusType::kHIDBusTypeBluetooth)
     return GAMEPAD_BUS_BLUETOOTH;
-  auto gamepad_id = GamepadIdList::Get().GetGamepadId(device_info->vendor_id,
+  auto gamepad_id = GamepadIdList::Get().GetGamepadId(device_info->product_name,
+                                                      device_info->vendor_id,
                                                       device_info->product_id);
   switch (gamepad_id) {
     case GamepadId::kNintendoProduct2009:
@@ -790,6 +829,9 @@ GamepadBusType BusTypeFromDeviceInfo(const mojom::HidDeviceInfo* device_info) {
       // Joy Cons can only be connected over Bluetooth. When connected through
       // a Charging Grip, the grip's ID is reported instead.
       return GAMEPAD_BUS_BLUETOOTH;
+    case GamepadId::kPowerALicPro:
+      // The PowerA controller can only be connected over Bluetooth.
+      return GAMEPAD_BUS_BLUETOOTH;
     default:
       break;
   }
@@ -812,12 +854,12 @@ NintendoController::NintendoController(int source_id,
       bus_type_(GAMEPAD_BUS_UNKNOWN),
       output_report_size_bytes_(0),
       device_info_(std::move(device_info)),
-      hid_manager_(hid_manager),
-      weak_factory_(this) {
+      hid_manager_(hid_manager) {
   if (device_info_) {
     bus_type_ = BusTypeFromDeviceInfo(device_info_.get());
     output_report_size_bytes_ = device_info_->max_output_report_size;
-    gamepad_id_ = GamepadIdList::Get().GetGamepadId(device_info_->vendor_id,
+    gamepad_id_ = GamepadIdList::Get().GetGamepadId(device_info_->product_name,
+                                                    device_info_->vendor_id,
                                                     device_info_->product_id);
   } else {
     gamepad_id_ = GamepadId::kUnknownGamepad;
@@ -829,10 +871,7 @@ NintendoController::NintendoController(
     std::unique_ptr<NintendoController> composite1,
     std::unique_ptr<NintendoController> composite2,
     mojom::HidManager* hid_manager)
-    : source_id_(source_id),
-      is_composite_(true),
-      hid_manager_(hid_manager),
-      weak_factory_(this) {
+    : source_id_(source_id), is_composite_(true), hid_manager_(hid_manager) {
   // Require exactly one left component and one right component, but allow them
   // to be provided in either order.
   DCHECK(composite1);
@@ -869,14 +908,13 @@ std::unique_ptr<NintendoController> NintendoController::CreateComposite(
 }
 
 // static
-bool NintendoController::IsNintendoController(uint16_t vendor_id,
-                                              uint16_t product_id) {
-  auto gamepad_id = GamepadIdList::Get().GetGamepadId(vendor_id, product_id);
+bool NintendoController::IsNintendoController(GamepadId gamepad_id) {
   switch (gamepad_id) {
     case GamepadId::kNintendoProduct2006:
     case GamepadId::kNintendoProduct2007:
     case GamepadId::kNintendoProduct2009:
     case GamepadId::kNintendoProduct200e:
+    case GamepadId::kPowerALicPro:
       return true;
     default:
       break;
@@ -886,6 +924,9 @@ bool NintendoController::IsNintendoController(uint16_t vendor_id,
 
 std::vector<std::unique_ptr<NintendoController>>
 NintendoController::Decompose() {
+  // Stop any ongoing vibration effects before decomposing the device.
+  SetZeroVibration();
+
   std::vector<std::unique_ptr<NintendoController>> decomposed_devices;
   if (composite_left_)
     decomposed_devices.push_back(std::move(composite_left_));
@@ -899,9 +940,10 @@ void NintendoController::Open(base::OnceClosure device_ready_closure) {
   if (is_composite_) {
     StartInitSequence();
   } else {
-    uint16_t vendor_id = device_info_->vendor_id;
-    uint16_t product_id = device_info_->product_id;
-    if (IsNintendoController(vendor_id, product_id)) {
+    GamepadId gamepad_id = GamepadIdList::Get().GetGamepadId(
+        device_info_->product_name, device_info_->vendor_id,
+        device_info_->product_id);
+    if (IsNintendoController(gamepad_id)) {
       Connect(base::BindOnce(&NintendoController::OnConnect,
                              weak_factory_.GetWeakPtr()));
     }
@@ -913,7 +955,8 @@ GamepadHand NintendoController::GetGamepadHand() const {
     return GamepadHand::kNone;
   switch (gamepad_id_) {
     case GamepadId::kNintendoProduct2009:
-      // Switch Pro is held in both hands.
+    case GamepadId::kPowerALicPro:
+      // Switch Pro and PowerA are held in both hands.
       return GamepadHand::kNone;
     case GamepadId::kNintendoProduct2006:
       // Joy-Con L is held in the left hand.
@@ -951,11 +994,12 @@ bool NintendoController::IsUsable() const {
   if (state_ != kInitialized)
     return false;
   if (is_composite_)
-    return true;
+    return composite_left_ && composite_right_;
   switch (gamepad_id_) {
     case GamepadId::kNintendoProduct2009:
     case GamepadId::kNintendoProduct2006:
     case GamepadId::kNintendoProduct2007:
+    case GamepadId::kPowerALicPro:
       return true;
     case GamepadId::kNintendoProduct200e:
       // Only usable as a composite device.
@@ -968,21 +1012,26 @@ bool NintendoController::IsUsable() const {
 }
 
 bool NintendoController::HasGuid(const std::string& guid) const {
-  if (is_composite_)
+  if (is_composite_) {
+    DCHECK(composite_left_);
+    DCHECK(composite_right_);
     return composite_left_->HasGuid(guid) || composite_right_->HasGuid(guid);
-  else
-    return device_info_->guid == guid;
+  }
+  return device_info_->guid == guid;
 }
 
 GamepadStandardMappingFunction NintendoController::GetMappingFunction() const {
   if (is_composite_) {
     // In composite mode, we use the same mapping as the Charging Grip.
     return GetGamepadStandardMappingFunction(
-        kVendorNintendo, kProductSwitchChargingGrip,
+        kProductNameSwitchCompositeDevice, kVendorNintendo,
+        kProductSwitchChargingGrip,
         /*hid_specification_version=*/0, /*version_number=*/0, bus_type_);
   } else {
     return GetGamepadStandardMappingFunction(
-        device_info_->vendor_id, device_info_->product_id,
+        device_info_->product_name, device_info_->vendor_id,
+        device_info_->product_id,
+
         /*hid_specification_version=*/0, /*version_number=*/0, bus_type_);
   }
 }
@@ -991,8 +1040,12 @@ void NintendoController::InitializeGamepadState(bool has_standard_mapping,
                                                 Gamepad& pad) const {
   pad.buttons_length = SWITCH_BUTTON_INDEX_COUNT;
   pad.axes_length = device::AXIS_INDEX_COUNT;
-  pad.vibration_actuator.type = GamepadHapticActuatorType::kDualRumble;
-  pad.vibration_actuator.not_null = true;
+  if (gamepad_id_ == GamepadId::kPowerALicPro) {
+    pad.vibration_actuator.not_null = false;
+  } else {
+    pad.vibration_actuator.type = GamepadHapticActuatorType::kDualRumble;
+    pad.vibration_actuator.not_null = true;
+  }
   pad.timestamp = GamepadDataFetcher::CurrentTimeInMicroseconds();
   if (is_composite_) {
     // Composite devices use the same product ID as the Switch Charging Grip.
@@ -1027,6 +1080,8 @@ void NintendoController::UpdatePadConnected() {
 
 void NintendoController::UpdateGamepadState(Gamepad& pad) const {
   if (is_composite_) {
+    DCHECK(composite_left_);
+    DCHECK(composite_right_);
     // If this is a composite device, update the gamepad state using the state
     // of the subcomponents.
     pad.connected = true;
@@ -1071,19 +1126,23 @@ void NintendoController::UpdateLeftGamepadState(Gamepad& pad,
       BUTTON_INDEX_DPAD_RIGHT,      SWITCH_BUTTON_INDEX_CAPTURE,
       SWITCH_BUTTON_INDEX_LEFT_SL,  SWITCH_BUTTON_INDEX_LEFT_SR,
   };
-  const size_t kLeftButtonIndicesSize = base::size(kLeftButtonIndices);
+  const size_t kLeftButtonIndicesSize = std::size(kLeftButtonIndices);
 
   // Axes associated with the left Joy-Con thumbstick.
   const size_t kLeftAxisIndices[] = {
       AXIS_INDEX_LEFT_STICK_X,  // Axes assume the Joy-Con is held vertically
       AXIS_INDEX_LEFT_STICK_Y,  // or is attached to a grip.
   };
-  const size_t kLeftAxisIndicesSize = base::size(kLeftAxisIndices);
+  const size_t kLeftAxisIndicesSize = std::size(kLeftAxisIndices);
 
-  for (size_t i = 0; i < kLeftButtonIndicesSize; ++i)
-    UpdateButtonForLeftSide(pad_, pad, kLeftButtonIndices[i], horizontal);
-  for (size_t i = 0; i < kLeftAxisIndicesSize; ++i)
-    UpdateAxisForLeftSide(pad_, pad, kLeftAxisIndices[i], horizontal);
+  if (pad_.buttons_length == SWITCH_BUTTON_INDEX_COUNT) {
+    for (size_t i = 0; i < kLeftButtonIndicesSize; ++i)
+      UpdateButtonForLeftSide(pad_, pad, kLeftButtonIndices[i], horizontal);
+  }
+  if (pad_.axes_length == AXIS_INDEX_COUNT) {
+    for (size_t i = 0; i < kLeftAxisIndicesSize; ++i)
+      UpdateAxisForLeftSide(pad_, pad, kLeftAxisIndices[i], horizontal);
+  }
   pad.timestamp = std::max(pad.timestamp, pad_.timestamp);
   if (!pad_.connected)
     pad.connected = false;
@@ -1105,19 +1164,23 @@ void NintendoController::UpdateRightGamepadState(Gamepad& pad,
       SWITCH_BUTTON_INDEX_RIGHT_SL,
       SWITCH_BUTTON_INDEX_RIGHT_SR,
   };
-  const size_t kRightButtonIndicesSize = base::size(kRightButtonIndices);
+  const size_t kRightButtonIndicesSize = std::size(kRightButtonIndices);
 
   // Axes associated with the right Joy-Con thumbstick.
   const size_t kRightAxisIndices[] = {
       AXIS_INDEX_RIGHT_STICK_X,  // Axes assume the Joy-Con is held vertically
       AXIS_INDEX_RIGHT_STICK_Y,  // or is attached to a grip.
   };
-  const size_t kRightAxisIndicesSize = base::size(kRightAxisIndices);
+  const size_t kRightAxisIndicesSize = std::size(kRightAxisIndices);
 
-  for (size_t i = 0; i < kRightButtonIndicesSize; ++i)
-    UpdateButtonForRightSide(pad_, pad, kRightButtonIndices[i], horizontal);
-  for (size_t i = 0; i < kRightAxisIndicesSize; ++i)
-    UpdateAxisForRightSide(pad_, pad, kRightAxisIndices[i], horizontal);
+  if (pad_.buttons_length == SWITCH_BUTTON_INDEX_COUNT) {
+    for (size_t i = 0; i < kRightButtonIndicesSize; ++i)
+      UpdateButtonForRightSide(pad_, pad, kRightButtonIndices[i], horizontal);
+  }
+  if (pad_.axes_length == AXIS_INDEX_COUNT) {
+    for (size_t i = 0; i < kRightAxisIndicesSize; ++i)
+      UpdateAxisForRightSide(pad_, pad, kRightAxisIndices[i], horizontal);
+  }
   pad.timestamp = std::max(pad.timestamp, pad_.timestamp);
   if (!pad_.connected)
     pad.connected = false;
@@ -1126,13 +1189,17 @@ void NintendoController::UpdateRightGamepadState(Gamepad& pad,
 void NintendoController::Connect(mojom::HidManager::ConnectCallback callback) {
   DCHECK(!is_composite_);
   DCHECK(hid_manager_);
-  hid_manager_->Connect(device_info_->guid, /*connection_client=*/nullptr,
-                        std::move(callback));
+  hid_manager_->Connect(device_info_->guid,
+                        /*connection_client=*/mojo::NullRemote(),
+                        /*watcher=*/mojo::NullRemote(),
+                        /*allow_protected_reports=*/false,
+                        /*allow_fido_reports=*/false, std::move(callback));
 }
 
-void NintendoController::OnConnect(mojom::HidConnectionPtr connection) {
+void NintendoController::OnConnect(
+    mojo::PendingRemote<mojom::HidConnection> connection) {
   if (connection) {
-    connection_ = std::move(connection);
+    connection_.Bind(std::move(connection));
     ReadInputReport();
     StartInitSequence();
   }
@@ -1385,7 +1452,13 @@ void NintendoController::ContinueInitSequence(
     case kPendingEnableVibration:
       if (spi_subcommand == kSubCommandEnableVibration) {
         CancelTimeout();
-        MakeInitSequenceRequests(kPendingSetHomeLight);
+        // PowerA controller doesn't have a home light and trying to set it will
+        // fail, so skip this step.
+        if (gamepad_id_ == GamepadId::kPowerALicPro) {
+          MakeInitSequenceRequests(kPendingSetInputReportMode);
+        } else {
+          MakeInitSequenceRequests(kPendingSetHomeLight);
+        }
       }
       break;
     case kPendingSetHomeLight:
@@ -1481,7 +1554,7 @@ void NintendoController::SubCommand(uint8_t sub_command,
   // Serial subcommands also carry vibration data. Configure the vibration
   // portion of the report for a neutral vibration effect (zero amplitude).
   // https://github.com/dekuNukem/Nintendo_Switch_Reverse_Engineering/blob/master/bluetooth_hid_notes.md#output-0x12
-  report_bytes[0] = uint8_t{output_report_counter_++ & 0xff};
+  report_bytes[0] = static_cast<uint8_t>(output_report_counter_++ & 0xff);
   report_bytes[1] = 0x00;
   report_bytes[2] = 0x01;
   report_bytes[3] = 0x40;
@@ -1535,7 +1608,7 @@ void NintendoController::RequestVibration(double left_frequency,
   FrequencyToHex(left_frequency, left_magnitude, &lhf, &llf, &lhfa, &llfa);
   FrequencyToHex(right_frequency, right_magnitude, &rhf, &rlf, &rhfa, &rlfa);
   std::vector<uint8_t> report_bytes(output_report_size_bytes_ - 1);
-  uint8_t counter = uint8_t{output_report_counter_++ & 0x0f};
+  uint8_t counter = static_cast<uint8_t>(output_report_counter_++ & 0x0f);
   report_bytes[0] = counter;
   report_bytes[1] = lhf & 0xff;
   report_bytes[2] = lhfa + ((lhf >> 8) & 0xff);
@@ -1562,11 +1635,13 @@ void NintendoController::RequestEnableUsbTimeout(bool enable) {
 }
 
 void NintendoController::RequestEnableImu(bool enable) {
-  SubCommand(kSubCommandEnableImu, {enable ? 0x01 : 0x00});
+  SubCommand(kSubCommandEnableImu,
+             {static_cast<uint8_t>(enable ? 0x01 : 0x00)});
 }
 
 void NintendoController::RequestEnableVibration(bool enable) {
-  SubCommand(kSubCommandEnableVibration, {enable ? 0x01 : 0x00});
+  SubCommand(kSubCommandEnableVibration,
+             {static_cast<uint8_t>(enable ? 0x01 : 0x00)});
 }
 
 void NintendoController::RequestSetPlayerLights(uint8_t light_pattern) {
@@ -1585,15 +1660,15 @@ void NintendoController::RequestSetHomeLight(
   DCHECK_LE(cycle_count, 0xf);
   if ((cycle_count > 0 && minicycle_count == 1) || minicycle_duration == 0)
     minicycle_count = 0;
-  std::vector<uint8_t> bytes = {(minicycle_count << 4) | minicycle_duration,
-                                (start_intensity << 4) | cycle_count};
+  std::vector<uint8_t> bytes = {
+      static_cast<uint8_t>((minicycle_count << 4) | minicycle_duration),
+      static_cast<uint8_t>((start_intensity << 4) | cycle_count)};
   bytes.insert(bytes.end(), minicycle_data.begin(), minicycle_data.end());
   SubCommand(kSubCommandSetHomeLight, bytes);
 }
 
 void NintendoController::RequestSetHomeLightIntensity(double intensity) {
-  // Clamp |intensity| to [0,1].
-  intensity = std::max(0.0, std::min(1.0, intensity));
+  intensity = base::clamp(intensity, 0.0, 1.0);
   uint8_t led_intensity = std::round(intensity * 0x0f);
   // Each pair of bytes in the minicycle data describes two minicyles.
   // The first byte holds two 4-bit values encoding minicycle intensities.
@@ -1604,7 +1679,8 @@ void NintendoController::RequestSetHomeLightIntensity(double intensity) {
   // 1x minicycle duration. Because |minicycle_count| and |cycle_count| are
   // both zero, the device will transition to the 1st minicycle and then stay at
   // |led_intensity|.
-  RequestSetHomeLight(0, 1, led_intensity, 0, {led_intensity << 4, 0x00});
+  RequestSetHomeLight(0, 1, led_intensity, 0,
+                      {static_cast<uint8_t>(led_intensity << 4), 0x00});
 }
 
 void NintendoController::RequestSetImuSensitivity(
@@ -1626,8 +1702,8 @@ void NintendoController::ReadSpi(uint16_t address, size_t length) {
   length = std::min(length, output_report_size_bytes_ - kSpiDataOffset);
   uint8_t address_high = (address >> 8) & 0xff;
   uint8_t address_low = address & 0xff;
-  SubCommand(kSubCommandReadSpi,
-             {address_low, address_high, 0x00, 0x00, uint8_t{length}});
+  SubCommand(kSubCommandReadSpi, {address_low, address_high, 0x00, 0x00,
+                                  static_cast<uint8_t>(length)});
 }
 
 void NintendoController::RequestImuCalibration() {
@@ -1655,7 +1731,7 @@ void NintendoController::ReadInputReport() {
 void NintendoController::OnReadInputReport(
     bool success,
     uint8_t report_id,
-    const base::Optional<std::vector<uint8_t>>& report_bytes) {
+    const absl::optional<std::vector<uint8_t>>& report_bytes) {
   if (success) {
     DCHECK(report_bytes);
     HandleInputReport(report_id, *report_bytes);
@@ -1696,17 +1772,24 @@ void NintendoController::DoShutdown() {
   device_info_.reset();
 }
 
-void NintendoController::SetVibration(double strong_magnitude,
-                                      double weak_magnitude) {
+void NintendoController::SetVibration(
+    mojom::GamepadEffectParametersPtr params) {
   if (is_composite_) {
     // Split the vibration effect between the left and right subdevices.
-    composite_left_->SetVibration(strong_magnitude, 0);
-    composite_right_->SetVibration(0, weak_magnitude);
+    if (composite_left_ && composite_right_) {
+      composite_left_->SetVibration(mojom::GamepadEffectParameters::New(
+          params->duration, params->start_delay, params->strong_magnitude,
+          /*weak_magnitude=*/0, /*left_trigger=*/0, /*right_trigger=*/0));
+      composite_right_->SetVibration(mojom::GamepadEffectParameters::New(
+          params->duration, params->start_delay, /*strong_magnitude=*/0,
+          params->weak_magnitude, /*left_trigger=*/0, /*right_trigger=*/0));
+    }
   } else {
-    RequestVibration(kVibrationFrequencyStrongRumble,
-                     kVibrationAmplitudeStrongRumbleMax * strong_magnitude,
-                     kVibrationFrequencyWeakRumble,
-                     kVibrationAmplitudeWeakRumbleMax * weak_magnitude);
+    RequestVibration(
+        kVibrationFrequencyStrongRumble,
+        kVibrationAmplitudeStrongRumbleMax * params->strong_magnitude,
+        kVibrationFrequencyWeakRumble,
+        kVibrationAmplitudeWeakRumbleMax * params->weak_magnitude);
   }
 }
 
@@ -1735,6 +1818,10 @@ void NintendoController::OnTimeout() {
     retry_count_ = 0;
     StartInitSequence();
   }
+}
+
+base::WeakPtr<AbstractHapticGamepad> NintendoController::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 }  // namespace device

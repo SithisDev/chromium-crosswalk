@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,17 +22,21 @@ NoneAttestationStatement::NoneAttestationStatement()
 NoneAttestationStatement::~NoneAttestationStatement() = default;
 
 bool NoneAttestationStatement::
-    IsAttestationCertificateInappropriatelyIdentifying() {
+    IsAttestationCertificateInappropriatelyIdentifying() const {
   return false;
 }
 
-bool NoneAttestationStatement::IsSelfAttestation() {
+bool NoneAttestationStatement::IsNoneAttestation() const {
+  return true;
+}
+
+bool NoneAttestationStatement::IsSelfAttestation() const {
   return false;
 }
 
-base::Optional<base::span<const uint8_t>>
+absl::optional<base::span<const uint8_t>>
 NoneAttestationStatement::GetLeafCertificate() const {
-  return base::nullopt;
+  return absl::nullopt;
 }
 
 cbor::Value NoneAttestationStatement::AsCBOR() const {

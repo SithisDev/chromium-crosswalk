@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,18 @@
 #include <set>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/singleton.h"
+#include "base/observer_list.h"
+#include "base/scoped_multi_source_observation.h"
 #include "content/public/browser/ax_event_notification_details.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_process_host_observer.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/api/automation_internal/automation_event_router_interface.h"
 #include "extensions/common/api/automation_internal.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/extension_messages.h"
-#include "ui/accessibility/ax_event_bundle_sink.h"
 #include "ui/accessibility/ax_tree_id.h"
 
 namespace content {
@@ -34,8 +36,13 @@ struct ExtensionMsg_AccessibilityLocationChangeParams;
 namespace extensions {
 struct AutomationListener;
 
-class AutomationEventRouter : public ui::AXEventBundleSink,
-                              public content::NotificationObserver,
+class AutomationEventRouterObserver {
+ public:
+  virtual void AllAutomationExtensionsGone() = 0;
+  virtual void ExtensionListenerAdded() = 0;
+};
+
+class AutomationEventRouter : public content::RenderProcessHostObserver,
                               public AutomationEventRouterInterface {
  public:
   static AutomationEventRouter* GetInstance();
@@ -46,42 +53,62 @@ class AutomationEventRouter : public ui::AXEventBundleSink,
   // listener process dies.
   void RegisterListenerForOneTree(const ExtensionId& extension_id,
                                   int listener_process_id,
+                                  content::WebContents* web_contents,
                                   ui::AXTreeID source_ax_tree_id);
 
   // Indicates that the listener at |listener_process_id| wants to receive
   // automation events from all accessibility trees because it has Desktop
   // permission.
-  void RegisterListenerWithDesktopPermission(const ExtensionId& extension_id,
-                                             int listener_process_id);
+  void RegisterListenerWithDesktopPermission(
+      const ExtensionId& extension_id,
+      int listener_process_id,
+      content::WebContents* web_contents);
 
-  void DispatchAccessibilityEvents(
-      const ExtensionMsg_AccessibilityEventBundleParams& events) override;
+  // Undoes the Register call above. May result in disabling of automation.
+  void UnregisterListenerWithDesktopPermission(int lsitener_process_id);
 
+  // The following two methods should only be called by Lacros.
+  void NotifyAllAutomationExtensionsGone();
+  void NotifyExtensionListenerAdded();
+
+  void AddObserver(AutomationEventRouterObserver* observer);
+  void RemoveObserver(AutomationEventRouterObserver* observer);
+
+  // AutomationEventRouterInterface:
+  void DispatchAccessibilityEvents(const ui::AXTreeID& tree_id,
+                                   std::vector<ui::AXTreeUpdate> updates,
+                                   const gfx::Point& mouse_location,
+                                   std::vector<ui::AXEvent> events) override;
   void DispatchAccessibilityLocationChange(
       const ExtensionMsg_AccessibilityLocationChangeParams& params) override;
-
-  // Notify all automation extensions that an accessibility tree was
-  // destroyed. If |browser_context| is null,
   void DispatchTreeDestroyedEvent(
       ui::AXTreeID tree_id,
       content::BrowserContext* browser_context) override;
-
-  // Notify the source extension of the action of an action result.
   void DispatchActionResult(
       const ui::AXActionData& data,
       bool result,
       content::BrowserContext* browser_context = nullptr) override;
+  void DispatchGetTextLocationDataResult(
+      const ui::AXActionData& data,
+      const absl::optional<gfx::Rect>& rect) override;
 
-  // Notify the source extension of the result to getTextLocation.
-  void DispatchGetTextLocationDataResult(const ui::AXActionData& data,
-                                         const base::Optional<gfx::Rect>& rect);
+  // If a remote router is registered, then all events are directly forwarded to
+  // it. The caller of this method is responsible for calling it again with
+  // |nullptr| before the remote router is destroyed to prevent UaF.
+  void RegisterRemoteRouter(AutomationEventRouterInterface* router);
 
  private:
-  struct AutomationListener {
-    AutomationListener();
-    AutomationListener(const AutomationListener& other);
-    ~AutomationListener();
+  class AutomationListener : public content::WebContentsObserver {
+   public:
+    explicit AutomationListener(content::WebContents* web_contents);
+    AutomationListener(const AutomationListener& other) = delete;
+    AutomationListener& operator=(const AutomationListener&) = delete;
+    ~AutomationListener() override;
 
+    // content:WebContentsObserver:
+    void PrimaryPageChanged(content::Page& page) override;
+
+    raw_ptr<AutomationEventRouter> router;
     ExtensionId extension_id;
     int process_id;
     bool desktop;
@@ -90,23 +117,28 @@ class AutomationEventRouter : public ui::AXEventBundleSink,
   };
 
   AutomationEventRouter();
+
+  AutomationEventRouter(const AutomationEventRouter&) = delete;
+  AutomationEventRouter& operator=(const AutomationEventRouter&) = delete;
+
   ~AutomationEventRouter() override;
 
   void Register(const ExtensionId& extension_id,
                 int listener_process_id,
+                content::WebContents* web_contents,
                 ui::AXTreeID source_ax_tree_id,
                 bool desktop);
 
-  // ui::AXEventBundleSink:
-  void DispatchAccessibilityEvents(const ui::AXTreeID& tree_id,
-                                   std::vector<ui::AXTreeUpdate> updates,
-                                   const gfx::Point& mouse_location,
-                                   std::vector<ui::AXEvent> events) override;
+  void DispatchAccessibilityEventsInternal(
+      const ExtensionMsg_AccessibilityEventBundleParams& events);
 
-  // content::NotificationObserver interface.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // RenderProcessHostObserver:
+  void RenderProcessExited(
+      content::RenderProcessHost* host,
+      const content::ChildProcessTerminationInfo& info) override;
+  void RenderProcessHostDestroyed(content::RenderProcessHost* host) override;
+
+  void RemoveAutomationListener(content::RenderProcessHost* host);
 
   // Called when the user switches profiles or when a listener is added
   // or removed. The purpose is to ensure that multiple instances of the
@@ -121,13 +153,22 @@ class AutomationEventRouter : public ui::AXEventBundleSink,
   void UpdateActiveProfile();
 
   content::NotificationRegistrar registrar_;
-  std::vector<AutomationListener> listeners_;
+  std::vector<std::unique_ptr<AutomationListener>> listeners_;
 
-  content::BrowserContext* active_context_;
+  raw_ptr<content::BrowserContext> active_context_;
+
+  // The caller of RegisterRemoteRouter is responsible for ensuring that this
+  // pointer is valid. The remote router must be unregistered with
+  // RegisterRemoteRouter(nullptr) before it is destroyed.
+  raw_ptr<AutomationEventRouterInterface> remote_router_ = nullptr;
+
+  base::ScopedMultiSourceObservation<content::RenderProcessHost,
+                                     content::RenderProcessHostObserver>
+      rph_observers_{this};
+
+  base::ObserverList<AutomationEventRouterObserver>::Unchecked observers_;
 
   friend struct base::DefaultSingletonTraits<AutomationEventRouter>;
-
-  DISALLOW_COPY_AND_ASSIGN(AutomationEventRouter);
 };
 
 }  // namespace extensions

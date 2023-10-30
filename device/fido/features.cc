@@ -1,31 +1,55 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/fido/features.h"
 
+#include <vector>
+
 #include "base/feature_list.h"
+#include "base/strings/string_split.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+#include "url/origin.h"
 
 namespace device {
 
-#if defined(OS_WIN)
-// Controls whether on Windows, U2F/CTAP2 requests are forwarded to the
-// native WebAuthentication API, where available.
+#if BUILDFLAG(IS_WIN)
 const base::Feature kWebAuthUseNativeWinApi{"WebAuthenticationUseNativeWinApi",
                                             base::FEATURE_ENABLED_BY_DEFAULT};
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
-extern const base::Feature kWebAuthPINSupport{"WebAuthenticationPINSupport",
-                                              base::FEATURE_ENABLED_BY_DEFAULT};
+extern const base::Feature kWebAuthCableExtensionAnywhere{
+    "WebAuthenticationCableExtensionAnywhere",
+    base::FEATURE_DISABLED_BY_DEFAULT};
 
-extern const base::Feature kWebAuthResidentKeys{
-    "WebAuthenticationResidentKeys", base::FEATURE_ENABLED_BY_DEFAULT};
+#if BUILDFLAG(IS_CHROMEOS)
+const base::Feature kWebAuthCrosPlatformAuthenticator{
+    "WebAuthenticationCrosPlatformAuthenticator",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
-extern const base::Feature kWebAuthBiometricEnrollment{
-    "WebAuthenticationBiometricEnrollment", base::FEATURE_DISABLED_BY_DEFAULT};
+extern const base::Feature kU2fPermissionPrompt{
+    "U2fPermissionPrompt", base::FEATURE_ENABLED_BY_DEFAULT};
 
-extern const base::Feature kWebAuthCredentialManagement{
-    "WebAuthenticationCredentialManagement", base::FEATURE_DISABLED_BY_DEFAULT};
+extern const base::Feature kWebAuthnGoogleCorpRemoteDesktopClientPrivilege{
+    "WebAuthenticationGoogleCorpRemoteDesktopClientPrivilege",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+extern const base::Feature kWebAuthPasskeysUI{
+    "WebAuthenticationPasskeysUI", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// TODO(1358719): Resolve all i18n TODOs before default enabling.
+extern const base::Feature kWebAuthnNewDiscoverableCredentialsUi{
+    "WebAuthenticationNewDiscoverableCredentialsUi",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+extern const base::Feature kWebAuthnNoEmptyDisplayNameCBOR{
+    "WebAuthenticationNoEmptyDisplayNameCBOR",
+    base::FEATURE_ENABLED_BY_DEFAULT};
+
+extern const base::Feature kWebAuthnNonDiscoverableMakeCredentialQRFlag{
+    "WebAuthenticationNonDiscoverableMakeCredentialQRFlag",
+    base::FEATURE_ENABLED_BY_DEFAULT};
 
 }  // namespace device

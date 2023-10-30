@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,19 +13,18 @@
 #include "base/lazy_instance.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/media_analytics/media_analytics_client.h"
-#include "chromeos/dbus/upstart/upstart_client.h"
+#include "chromeos/ash/components/dbus/dbus_thread_manager.h"
+#include "chromeos/ash/components/dbus/upstart/upstart_client.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/media_perception_private/conversion_utils.h"
 #include "extensions/browser/api/media_perception_private/media_perception_api_delegate.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/platform/platform_channel.h"
 #include "mojo/public/cpp/system/invitation.h"
-#include "services/video_capture/public/mojom/device_factory_provider.mojom.h"
 
 namespace extensions {
 
@@ -74,10 +73,8 @@ GetFailedToInstallComponentState() {
 // Pulls out the version number from a mount_point location for the media
 // perception component. Mount points look like
 // /run/imageloader/rtanalytics-light/1.0, where 1.0 is the version string.
-std::unique_ptr<std::string> ExtractVersionFromMountPoint(
-    const std::string& mount_point) {
-  return std::make_unique<std::string>(
-      base::FilePath(mount_point).BaseName().value());
+std::string ExtractVersionFromMountPoint(const std::string& mount_point) {
+  return base::FilePath(mount_point).BaseName().value();
 }
 
 }  // namespace
@@ -89,37 +86,36 @@ class MediaPerceptionAPIManager::MediaPerceptionControllerClient
   // delegate is owned by the ExtensionsAPIClient.
   MediaPerceptionControllerClient(
       MediaPerceptionAPIDelegate* delegate,
-      chromeos::media_perception::mojom::MediaPerceptionControllerClientRequest
-          request)
-      : delegate_(delegate), binding_(this, std::move(request)) {
+      mojo::PendingReceiver<
+          chromeos::media_perception::mojom::MediaPerceptionControllerClient>
+          receiver)
+      : delegate_(delegate), receiver_(this, std::move(receiver)) {
     DCHECK(delegate_) << "Delegate not set.";
   }
+
+  MediaPerceptionControllerClient(const MediaPerceptionControllerClient&) =
+      delete;
+  MediaPerceptionControllerClient& operator=(
+      const MediaPerceptionControllerClient&) = delete;
 
   ~MediaPerceptionControllerClient() override = default;
 
   // media_perception::mojom::MediaPerceptionControllerClient:
   void ConnectToVideoCaptureService(
-      video_capture::mojom::VideoSourceProviderRequest request) override {
+      mojo::PendingReceiver<video_capture::mojom::VideoSourceProvider> receiver)
+      override {
     DCHECK(delegate_) << "Delegate not set.";
-    delegate_->BindDeviceFactoryProviderToVideoCaptureService(
-        &device_factory_provider_);
-    device_factory_provider_->ConnectToVideoSourceProvider(std::move(request));
+    delegate_->BindVideoSourceProvider(std::move(receiver));
   }
 
  private:
   // Provides access to methods for talking to core Chrome code.
   MediaPerceptionAPIDelegate* delegate_;
 
-  // Binding of the MediaPerceptionControllerClient to the message pipe.
-  mojo::Binding<
+  // Receiver of the MediaPerceptionControllerClient to the message pipe.
+  mojo::Receiver<
       chromeos::media_perception::mojom::MediaPerceptionControllerClient>
-      binding_;
-
-  // Bound to the VideoCaptureService to establish the connection to the
-  // media analytics process.
-  video_capture::mojom::DeviceFactoryProviderPtr device_factory_provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(MediaPerceptionControllerClient);
+      receiver_;
 };
 
 // static
@@ -141,21 +137,20 @@ MediaPerceptionAPIManager::GetFactoryInstance() {
 MediaPerceptionAPIManager::MediaPerceptionAPIManager(
     content::BrowserContext* context)
     : browser_context_(context),
-      analytics_process_state_(AnalyticsProcessState::IDLE),
-      scoped_observer_(this),
-      weak_ptr_factory_(this) {
-  scoped_observer_.Add(chromeos::MediaAnalyticsClient::Get());
+      analytics_process_state_(AnalyticsProcessState::IDLE) {
+  scoped_observation_.Observe(ash::MediaAnalyticsClient::Get());
 }
 
 MediaPerceptionAPIManager::~MediaPerceptionAPIManager() {
   // Stop the separate media analytics process.
-  chromeos::UpstartClient::Get()->StopMediaAnalytics();
+  ash::UpstartClient::Get()->StopMediaAnalytics();
 }
 
 void MediaPerceptionAPIManager::ActivateMediaPerception(
-    chromeos::media_perception::mojom::MediaPerceptionRequest request) {
+    mojo::PendingReceiver<chromeos::media_perception::mojom::MediaPerception>
+        receiver) {
   if (media_perception_controller_.is_bound())
-    media_perception_controller_->ActivateMediaPerception(std::move(request));
+    media_perception_controller_->ActivateMediaPerception(std::move(receiver));
 }
 
 void MediaPerceptionAPIManager::SetMountPointNonEmptyForTesting() {
@@ -164,7 +159,7 @@ void MediaPerceptionAPIManager::SetMountPointNonEmptyForTesting() {
 
 void MediaPerceptionAPIManager::GetState(APIStateCallback callback) {
   if (analytics_process_state_ == AnalyticsProcessState::RUNNING) {
-    chromeos::MediaAnalyticsClient::Get()->GetState(
+    ash::MediaAnalyticsClient::Get()->GetState(
         base::BindOnce(&MediaPerceptionAPIManager::StateCallback,
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
     return;
@@ -204,10 +199,15 @@ void MediaPerceptionAPIManager::SetAnalyticsComponent(
 
 void MediaPerceptionAPIManager::LoadComponentCallback(
     APISetAnalyticsComponentCallback callback,
-    bool success,
+    const extensions::api::media_perception_private::ComponentInstallationError
+        installation_error,
     const base::FilePath& mount_point) {
-  if (!success) {
-    std::move(callback).Run(GetFailedToInstallComponentState());
+  if (installation_error != extensions::api::media_perception_private::
+                                COMPONENT_INSTALLATION_ERROR_NONE) {
+    extensions::api::media_perception_private::ComponentState component_state =
+        GetFailedToInstallComponentState();
+    component_state.installation_error_code = installation_error;
+    std::move(callback).Run(std::move(component_state));
     return;
   }
 
@@ -245,8 +245,7 @@ void MediaPerceptionAPIManager::SetComponentProcessState(
     base::OnceCallback<void(bool)> stop_callback =
         base::BindOnce(&MediaPerceptionAPIManager::UpstartStopProcessCallback,
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback));
-    chromeos::UpstartClient::Get()->StopMediaAnalytics(
-        std::move(stop_callback));
+    ash::UpstartClient::Get()->StopMediaAnalytics(std::move(stop_callback));
     return;
   }
 
@@ -265,7 +264,7 @@ void MediaPerceptionAPIManager::SetComponentProcessState(
     std::vector<std::string> upstart_env;
     upstart_env.push_back(std::string("mount_point=") + mount_point_);
 
-    chromeos::UpstartClient::Get()->StartMediaAnalytics(
+    ash::UpstartClient::Get()->StartMediaAnalytics(
         upstart_env,
         base::BindOnce(&MediaPerceptionAPIManager::UpstartStartProcessCallback,
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
@@ -301,7 +300,7 @@ void MediaPerceptionAPIManager::SetState(
   // upstart stop command if requested.
   if (state_proto.status() == mri::State::STOPPED) {
     analytics_process_state_ = AnalyticsProcessState::CHANGING_PROCESS_STATE;
-    chromeos::UpstartClient::Get()->StopMediaAnalytics(
+    ash::UpstartClient::Get()->StopMediaAnalytics(
         base::BindOnce(&MediaPerceptionAPIManager::UpstartStopCallback,
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
     return;
@@ -311,7 +310,7 @@ void MediaPerceptionAPIManager::SetState(
   // then send restart upstart command.
   if (state_proto.status() == mri::State::RESTARTING) {
     analytics_process_state_ = AnalyticsProcessState::CHANGING_PROCESS_STATE;
-    chromeos::UpstartClient::Get()->RestartMediaAnalytics(
+    ash::UpstartClient::Get()->RestartMediaAnalytics(
         base::BindOnce(&MediaPerceptionAPIManager::UpstartRestartCallback,
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
     return;
@@ -337,7 +336,7 @@ void MediaPerceptionAPIManager::SetState(
     if (!mount_point_.empty())
       upstart_env.push_back(std::string("mount_point=") + mount_point_);
 
-    chromeos::UpstartClient::Get()->StartMediaAnalytics(
+    ash::UpstartClient::Get()->StartMediaAnalytics(
         upstart_env,
         base::BindOnce(&MediaPerceptionAPIManager::UpstartStartCallback,
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback),
@@ -352,17 +351,17 @@ void MediaPerceptionAPIManager::SetState(
 
 void MediaPerceptionAPIManager::SetStateInternal(APIStateCallback callback,
                                                  const mri::State& state) {
-  chromeos::MediaAnalyticsClient::Get()->SetState(
+  ash::MediaAnalyticsClient::Get()->SetState(
       state,
       base::BindOnce(&MediaPerceptionAPIManager::StateCallback,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }
 
 void MediaPerceptionAPIManager::GetDiagnostics(
-    const APIGetDiagnosticsCallback& callback) {
-  chromeos::MediaAnalyticsClient::Get()->GetDiagnostics(
-      base::Bind(&MediaPerceptionAPIManager::GetDiagnosticsCallback,
-                 weak_ptr_factory_.GetWeakPtr(), callback));
+    APIGetDiagnosticsCallback callback) {
+  ash::MediaAnalyticsClient::Get()->GetDiagnostics(
+      base::BindOnce(&MediaPerceptionAPIManager::GetDiagnosticsCallback,
+                     weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }
 
 void MediaPerceptionAPIManager::UpstartStartProcessCallback(
@@ -391,7 +390,7 @@ void MediaPerceptionAPIManager::UpstartStartProcessCallback(
       FROM_HERE,
       base::BindOnce(&MediaPerceptionAPIManager::SendMojoInvitation,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)),
-      base::TimeDelta::FromMilliseconds(kStartupDelayMs));
+      base::Milliseconds(kStartupDelayMs));
 }
 
 void MediaPerceptionAPIManager::SendMojoInvitation(
@@ -414,14 +413,15 @@ void MediaPerceptionAPIManager::SendMojoInvitation(
                                  base::kNullProcessHandle,
                                  channel.TakeLocalEndpoint());
 
-  media_perception_service_ =
-      chromeos::media_perception::mojom::MediaPerceptionServicePtr(
-          chromeos::media_perception::mojom::MediaPerceptionServicePtrInfo(
-              std::move(server_pipe), 0));
+  media_perception_service_.reset();
+  media_perception_service_.Bind(
+      mojo::PendingRemote<
+          chromeos::media_perception::mojom::MediaPerceptionService>(
+          std::move(server_pipe), 0));
 
   base::ScopedFD fd =
       channel.TakeRemoteEndpoint().TakePlatformHandle().TakeFD();
-  chromeos::MediaAnalyticsClient::Get()->BootstrapMojoConnection(
+  ash::MediaAnalyticsClient::Get()->BootstrapMojoConnection(
       std::move(fd),
       base::BindOnce(&MediaPerceptionAPIManager::OnBootstrapMojoConnection,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
@@ -469,19 +469,22 @@ void MediaPerceptionAPIManager::OnBootstrapMojoConnection(
     return;
   }
 
-  auto controller_request = mojo::MakeRequest(&media_perception_controller_);
+  media_perception_controller_.reset();
+  auto controller_receiver =
+      media_perception_controller_.BindNewPipeAndPassReceiver();
 
-  chromeos::media_perception::mojom::MediaPerceptionControllerClientPtr
-      client_ptr;
+  mojo::PendingRemote<
+      chromeos::media_perception::mojom::MediaPerceptionControllerClient>
+      client_remote;
   media_perception_controller_client_ =
       std::make_unique<MediaPerceptionControllerClient>(
-          delegate, mojo::MakeRequest(&client_ptr));
+          delegate, client_remote.InitWithNewPipeAndPassReceiver());
   delegate->SetMediaPerceptionRequestHandler(
       base::BindRepeating(&MediaPerceptionAPIManager::ActivateMediaPerception,
                           weak_ptr_factory_.GetWeakPtr()));
 
-  media_perception_service_->GetController(std::move(controller_request),
-                                           std::move(client_ptr));
+  media_perception_service_->GetController(std::move(controller_receiver),
+                                           std::move(client_remote));
   std::move(callback).Run(std::move(state_started));
 }
 
@@ -550,7 +553,7 @@ void MediaPerceptionAPIManager::UpstartRestartCallback(
 
 void MediaPerceptionAPIManager::StateCallback(
     APIStateCallback callback,
-    base::Optional<mri::State> result) {
+    absl::optional<mri::State> result) {
   if (!result.has_value()) {
     std::move(callback).Run(
         GetStateForServiceError(extensions::api::media_perception_private::
@@ -563,16 +566,17 @@ void MediaPerceptionAPIManager::StateCallback(
 }
 
 void MediaPerceptionAPIManager::GetDiagnosticsCallback(
-    const APIGetDiagnosticsCallback& callback,
-    base::Optional<mri::Diagnostics> result) {
+    APIGetDiagnosticsCallback callback,
+    absl::optional<mri::Diagnostics> result) {
   if (!result.has_value()) {
-    callback.Run(GetDiagnosticsForServiceError(
+    std::move(callback).Run(GetDiagnosticsForServiceError(
         extensions::api::media_perception_private::
             SERVICE_ERROR_SERVICE_UNREACHABLE));
     return;
   }
-  callback.Run(extensions::api::media_perception_private::DiagnosticsProtoToIdl(
-      result.value()));
+  std::move(callback).Run(
+      extensions::api::media_perception_private::DiagnosticsProtoToIdl(
+          result.value()));
 }
 
 void MediaPerceptionAPIManager::OnDetectionSignal(

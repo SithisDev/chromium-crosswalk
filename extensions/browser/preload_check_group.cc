@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,8 +27,8 @@ void PreloadCheckGroup::Start(ResultCallback callback) {
   callback_ = std::move(callback);
   running_checks_ = checks_.size();
   for (auto* check : checks_) {
-    check->Start(base::Bind(&PreloadCheckGroup::OnCheckComplete,
-                            weak_ptr_factory_.GetWeakPtr()));
+    check->Start(base::BindOnce(&PreloadCheckGroup::OnCheckComplete,
+                                weak_ptr_factory_.GetWeakPtr()));
     // Synchronous checks may fail immediately.
     if (running_checks_ == 0)
       return;

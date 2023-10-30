@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,7 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/run_loop.h"
-#include "extensions/browser/extension_registry.h"
 
 namespace extensions {
 
@@ -16,9 +14,13 @@ class TestExtensionRegistryObserver::Waiter {
  public:
   Waiter() : observed_(false), extension_(nullptr) {}
 
-  void Wait() {
+  Waiter(const Waiter&) = delete;
+  Waiter& operator=(const Waiter&) = delete;
+
+  scoped_refptr<const Extension> Wait() {
     if (!observed_)
       run_loop_.Run();
+    return extension_;
   }
 
   void OnObserved(const Extension* extension) {
@@ -27,14 +29,10 @@ class TestExtensionRegistryObserver::Waiter {
     extension_ = extension;
   }
 
-  const Extension* extension() const { return extension_; }
-
  private:
   bool observed_;
   base::RunLoop run_loop_;
-  const Extension* extension_;
-
-  DISALLOW_COPY_AND_ASSIGN(Waiter);
+  scoped_refptr<const Extension> extension_;
 };
 
 TestExtensionRegistryObserver::TestExtensionRegistryObserver(
@@ -48,39 +46,49 @@ TestExtensionRegistryObserver::TestExtensionRegistryObserver(
     : will_be_installed_waiter_(std::make_unique<Waiter>()),
       installed_waiter_(std::make_unique<Waiter>()),
       uninstalled_waiter_(std::make_unique<Waiter>()),
+      uninstallation_denied_waiter_(std::make_unique<Waiter>()),
       loaded_waiter_(std::make_unique<Waiter>()),
       ready_waiter_(std::make_unique<Waiter>()),
       unloaded_waiter_(std::make_unique<Waiter>()),
-      extension_registry_observer_(this),
       extension_id_(extension_id) {
-  extension_registry_observer_.Add(registry);
+  extension_registry_observation_.Observe(registry);
 }
 
 TestExtensionRegistryObserver::~TestExtensionRegistryObserver() {
 }
 
-const Extension* TestExtensionRegistryObserver::WaitForExtensionUninstalled() {
+scoped_refptr<const Extension>
+TestExtensionRegistryObserver::WaitForExtensionUninstalled() {
   return Wait(&uninstalled_waiter_);
 }
 
-const Extension*
+scoped_refptr<const Extension>
+TestExtensionRegistryObserver::WaitForExtensionUninstallationDenied() {
+  return Wait(&uninstallation_denied_waiter_);
+}
+
+scoped_refptr<const Extension>
 TestExtensionRegistryObserver::WaitForExtensionWillBeInstalled() {
   return Wait(&will_be_installed_waiter_);
 }
 
-const Extension* TestExtensionRegistryObserver::WaitForExtensionInstalled() {
+scoped_refptr<const Extension>
+TestExtensionRegistryObserver::WaitForExtensionInstalled() {
   return Wait(&installed_waiter_);
 }
 
-const Extension* TestExtensionRegistryObserver::WaitForExtensionLoaded() {
+scoped_refptr<const Extension>
+TestExtensionRegistryObserver::WaitForExtensionLoaded() {
   return Wait(&loaded_waiter_);
 }
 
-const Extension* TestExtensionRegistryObserver::WaitForExtensionUnloaded() {
+scoped_refptr<const Extension>
+TestExtensionRegistryObserver::WaitForExtensionUnloaded() {
   return Wait(&unloaded_waiter_);
 }
 
-const Extension* TestExtensionRegistryObserver::WaitForExtensionReady() {
+scoped_refptr<const Extension>
+TestExtensionRegistryObserver::WaitForExtensionReady() {
   return Wait(&ready_waiter_);
 }
 
@@ -109,6 +117,13 @@ void TestExtensionRegistryObserver::OnExtensionUninstalled(
     uninstalled_waiter_->OnObserved(extension);
 }
 
+void TestExtensionRegistryObserver::OnExtensionUninstallationDenied(
+    content::BrowserContext* browser_context,
+    const Extension* extension) {
+  if (extension_id_.empty() || extension->id() == extension_id_)
+    uninstallation_denied_waiter_->OnObserved(extension);
+}
+
 void TestExtensionRegistryObserver::OnExtensionLoaded(
     content::BrowserContext* browser_context,
     const Extension* extension) {
@@ -131,10 +146,9 @@ void TestExtensionRegistryObserver::OnExtensionUnloaded(
     unloaded_waiter_->OnObserved(extension);
 }
 
-const Extension* TestExtensionRegistryObserver::Wait(
+scoped_refptr<const Extension> TestExtensionRegistryObserver::Wait(
     std::unique_ptr<Waiter>* waiter) {
-  waiter->get()->Wait();
-  const Extension* extension = waiter->get()->extension();
+  scoped_refptr<const Extension> extension = (*waiter)->Wait();
   // Reset the waiter for future uses.
   // We could have a Waiter::Reset method, but it would reset every field in the
   // class, so let's just reset the pointer.

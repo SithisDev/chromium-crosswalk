@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,7 @@ BluetoothRemoteGattDescriptorWin::BluetoothRemoteGattDescriptorWin(
     scoped_refptr<base::SequencedTaskRunner>& ui_task_runner)
     : parent_characteristic_(parent_characteristic),
       descriptor_info_(descriptor_info),
-      ui_task_runner_(ui_task_runner),
-      weak_ptr_factory_(this) {
+      ui_task_runner_(ui_task_runner) {
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
   DCHECK(parent_characteristic_);
   DCHECK(descriptor_info_.get());
@@ -70,13 +69,12 @@ BluetoothRemoteGattDescriptorWin::GetPermissions() const {
 }
 
 void BluetoothRemoteGattDescriptorWin::ReadRemoteDescriptor(
-    ValueCallback callback,
-    ErrorCallback error_callback) {
+    ValueCallback callback) {
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
 
   NOTIMPLEMENTED();
-  std::move(error_callback)
-      .Run(BluetoothRemoteGattService::GATT_ERROR_NOT_SUPPORTED);
+  std::move(callback).Run(BluetoothGattService::GATT_ERROR_NOT_SUPPORTED,
+                          /*value=*/std::vector<uint8_t>());
 }
 
 void BluetoothRemoteGattDescriptorWin::WriteRemoteDescriptor(
@@ -86,8 +84,7 @@ void BluetoothRemoteGattDescriptorWin::WriteRemoteDescriptor(
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
 
   NOTIMPLEMENTED();
-  std::move(error_callback)
-      .Run(BluetoothRemoteGattService::GATT_ERROR_NOT_SUPPORTED);
+  std::move(error_callback).Run(BluetoothGattService::GATT_ERROR_NOT_SUPPORTED);
 }
 
 uint16_t BluetoothRemoteGattDescriptorWin::GetAttributeHandle() const {

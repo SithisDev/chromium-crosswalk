@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,16 @@
 #include <vector>
 
 #include "base/cancelable_callback.h"
-#include "base/optional.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "device/gamepad/abstract_haptic_gamepad.h"
 #include "device/gamepad/gamepad_id_list.h"
 #include "device/gamepad/gamepad_standard_mappings.h"
 #include "device/gamepad/public/cpp/gamepad.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/hid.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace device {
 
@@ -56,7 +60,7 @@ namespace device {
 // strong and weak effect magnitudes. When a vibration effect is played on a
 // composite device, the effect is split so that each component receives one
 // channel of the dual-rumble effect.
-class NintendoController : public AbstractHapticGamepad {
+class NintendoController final : public AbstractHapticGamepad {
  public:
   struct SwitchCalibrationData {
     SwitchCalibrationData();
@@ -125,8 +129,8 @@ class NintendoController : public AbstractHapticGamepad {
       std::unique_ptr<NintendoController> composite2,
       mojom::HidManager* hid_manager);
 
-  // Return true if |vendor_id| and |product_id| describe a Nintendo controller.
-  static bool IsNintendoController(uint16_t vendor_id, uint16_t product_id);
+  // Return true if |gamepad_id| describes a Nintendo controller.
+  static bool IsNintendoController(GamepadId gamepad_id);
 
   // Decompose a composite device and return a vector of its subcomponents.
   // Return an empty vector if the device is non-composite.
@@ -179,8 +183,9 @@ class NintendoController : public AbstractHapticGamepad {
 
   // AbstractHapticGamepad implementation.
   void DoShutdown() override;
-  void SetVibration(double strong_magnitude, double weak_magnitude) override;
+  void SetVibration(mojom::GamepadEffectParametersPtr params) override;
   double GetMaxEffectDurationMillis() override;
+  base::WeakPtr<AbstractHapticGamepad> GetWeakPtr() override;
 
   NintendoController(int source_id,
                      mojom::HidDeviceInfoPtr device_info,
@@ -236,7 +241,7 @@ class NintendoController : public AbstractHapticGamepad {
   void Connect(mojom::HidManager::ConnectCallback callback);
 
   // Completion callback for the HID connection request.
-  void OnConnect(mojom::HidConnectionPtr connection);
+  void OnConnect(mojo::PendingRemote<mojom::HidConnection> connection);
 
   // Initiate the sequence of exchanges to prepare the device to provide
   // controller data.
@@ -286,7 +291,7 @@ class NintendoController : public AbstractHapticGamepad {
   void OnReadInputReport(
       bool success,
       uint8_t report_id,
-      const base::Optional<std::vector<uint8_t>>& report_bytes);
+      const absl::optional<std::vector<uint8_t>>& report_bytes);
 
   // Request to send an output report to the underlying HID device. If
   // |expect_reply| is true, a timeout is armed that will retry the current
@@ -393,16 +398,16 @@ class NintendoController : public AbstractHapticGamepad {
   GamepadId gamepad_id_;
 
   // HID service manager.
-  mojom::HidManager* const hid_manager_;
+  const raw_ptr<mojom::HidManager> hid_manager_;
 
   // The open connection to the underlying HID device.
-  mojom::HidConnectionPtr connection_;
+  mojo::Remote<mojom::HidConnection> connection_;
 
   // A closure, provided in the call to Open, to be called once the device
   // becomes ready.
   base::OnceClosure device_ready_closure_;
 
-  base::WeakPtrFactory<NintendoController> weak_factory_;
+  base::WeakPtrFactory<NintendoController> weak_factory_{this};
 };
 
 }  // namespace device

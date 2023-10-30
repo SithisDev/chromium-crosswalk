@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,16 +10,19 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/time/time.h"
 #include "components/apdu/apdu_command.h"
 #include "components/apdu/apdu_response.h"
+#include "components/cbor/reader.h"
+#include "components/cbor/values.h"
 #include "crypto/ec_private_key.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_parsing_utils.h"
+#include "device/fido/public_key.h"
 
 namespace device {
 
@@ -32,7 +35,7 @@ namespace {
 constexpr uint8_t kU2fRegistrationResponseHeader = 0x05;
 
 // Returns an error response with the given status.
-base::Optional<std::vector<uint8_t>> ErrorStatus(
+absl::optional<std::vector<uint8_t>> ErrorStatus(
     apdu::ApduResponse::Status status) {
   return apdu::ApduResponse(std::vector<uint8_t>(), status)
       .GetEncodedResponse();
@@ -51,11 +54,10 @@ bool VirtualU2fDevice::IsTransportSupported(FidoTransportProtocol transport) {
                         transport);
 }
 
-VirtualU2fDevice::VirtualU2fDevice()
-    : VirtualFidoDevice(), weak_factory_(this) {}
+VirtualU2fDevice::VirtualU2fDevice() : VirtualFidoDevice() {}
 
 VirtualU2fDevice::VirtualU2fDevice(scoped_refptr<State> state)
-    : VirtualFidoDevice(std::move(state)), weak_factory_(this) {
+    : VirtualFidoDevice(std::move(state)) {
   DCHECK(IsTransportSupported(mutable_state()->transport));
 }
 
@@ -90,7 +92,7 @@ FidoDevice::CancelToken VirtualU2fDevice::DeviceTransact(
     return 0;
   }
 
-  base::Optional<std::vector<uint8_t>> response;
+  absl::optional<std::vector<uint8_t>> response;
 
   switch (parsed_command->ins()) {
     // Version request is defined by the U2F spec, but is never used in
@@ -122,7 +124,7 @@ base::WeakPtr<FidoDevice> VirtualU2fDevice::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
-base::Optional<std::vector<uint8_t>> VirtualU2fDevice::DoRegister(
+absl::optional<std::vector<uint8_t>> VirtualU2fDevice::DoRegister(
     uint8_t ins,
     uint8_t p1,
     uint8_t p2,
@@ -131,9 +133,8 @@ base::Optional<std::vector<uint8_t>> VirtualU2fDevice::DoRegister(
     return ErrorStatus(apdu::ApduResponse::Status::SW_WRONG_LENGTH);
   }
 
-  if (mutable_state()->simulate_press_callback) {
-    if (!mutable_state()->simulate_press_callback.Run(this))
-      return base::nullopt;
+  if (!SimulatePress()) {
+    return absl::nullopt;
   }
 
   auto challenge_param = data.first<32>();
@@ -142,27 +143,26 @@ base::Optional<std::vector<uint8_t>> VirtualU2fDevice::DoRegister(
   // Create key to register.
   // Note: Non-deterministic, you need to mock this out if you rely on
   // deterministic behavior.
-  auto private_key = crypto::ECPrivateKey::Create();
-  std::string public_key;
-  bool status = private_key->ExportRawPublicKey(&public_key);
-  DCHECK(status);
-  public_key.insert(0, 1, 0x04);
-  DCHECK_EQ(public_key.size(), 65ul);
+  std::unique_ptr<PrivateKey> private_key(PrivateKey::FreshP256Key());
+  std::vector<uint8_t> x962 = private_key->GetX962PublicKey();
+
+  if (mutable_state()->u2f_invalid_public_key) {
+    // Flip a bit in the x-coordinate, which will push the point off the curve.
+    x962[10] ^= 1;
+  }
 
   // Our key handles are simple hashes of the public key.
-  auto hash = fido_parsing_utils::CreateSHA256Hash(public_key);
-  std::vector<uint8_t> key_handle(hash.begin(), hash.end());
+  const auto key_handle = crypto::SHA256Hash(x962);
 
   // Data to be signed.
   std::vector<uint8_t> sign_buffer;
   sign_buffer.reserve(1 + application_parameter.size() +
-                      challenge_param.size() + key_handle.size() +
-                      public_key.size());
+                      challenge_param.size() + key_handle.size() + x962.size());
   sign_buffer.push_back(0x00);
   Append(&sign_buffer, application_parameter);
   Append(&sign_buffer, challenge_param);
   Append(&sign_buffer, key_handle);
-  Append(&sign_buffer, base::as_bytes(base::make_span(public_key)));
+  Append(&sign_buffer, x962);
 
   // Sign with attestation key.
   // Note: Non-deterministic, you need to mock this out if you rely on
@@ -170,23 +170,23 @@ base::Optional<std::vector<uint8_t>> VirtualU2fDevice::DoRegister(
   std::vector<uint8_t> sig;
   std::unique_ptr<crypto::ECPrivateKey> attestation_private_key =
       crypto::ECPrivateKey::CreateFromPrivateKeyInfo(GetAttestationKey());
-  status = Sign(attestation_private_key.get(), sign_buffer, &sig);
+  bool status = Sign(attestation_private_key.get(), sign_buffer, &sig);
   DCHECK(status);
 
   // The spec says that the other bits of P1 should be zero. However, Chrome
   // sends Test User Presence (0x03) so we ignore those bits.
   bool individual_attestation_requested = p1 & kP1IndividualAttestation;
-  const auto attestation_cert =
-      GenerateAttestationCertificate(individual_attestation_requested);
+  const auto attestation_cert = GenerateAttestationCertificate(
+      individual_attestation_requested, /*include_transports=*/true);
   if (!attestation_cert)
     return ErrorStatus(apdu::ApduResponse::Status::SW_INS_NOT_SUPPORTED);
 
   // U2F response data.
   std::vector<uint8_t> response;
-  response.reserve(1 + public_key.size() + 1 + key_handle.size() +
+  response.reserve(1 + x962.size() + 1 + key_handle.size() +
                    attestation_cert->size() + sig.size());
   response.push_back(kU2fRegistrationResponseHeader);
-  Append(&response, base::as_bytes(base::make_span(public_key)));
+  Append(&response, base::as_bytes(base::make_span(x962)));
   response.push_back(key_handle.size());
   Append(&response, key_handle);
   Append(&response, *attestation_cert);
@@ -201,7 +201,7 @@ base::Optional<std::vector<uint8_t>> VirtualU2fDevice::DoRegister(
       .GetEncodedResponse();
 }
 
-base::Optional<std::vector<uint8_t>> VirtualU2fDevice::DoSign(
+absl::optional<std::vector<uint8_t>> VirtualU2fDevice::DoSign(
     uint8_t ins,
     uint8_t p1,
     uint8_t p2,
@@ -212,9 +212,8 @@ base::Optional<std::vector<uint8_t>> VirtualU2fDevice::DoSign(
     return ErrorStatus(apdu::ApduResponse::Status::SW_WRONG_DATA);
   }
 
-  if (mutable_state()->simulate_press_callback) {
-    if (!mutable_state()->simulate_press_callback.Run(this))
-      return base::nullopt;
+  if (!SimulatePress()) {
+    return absl::nullopt;
   }
 
   if (data.size() < 32 + 32 + 1)
@@ -249,9 +248,13 @@ base::Optional<std::vector<uint8_t>> VirtualU2fDevice::DoSign(
   Append(&sign_buffer, challenge_param);
 
   // Sign with credential key.
-  std::vector<uint8_t> sig;
-  bool status = Sign(registration->private_key.get(), sign_buffer, &sig);
-  DCHECK(status);
+  std::vector<uint8_t> sig = registration->private_key->Sign(sign_buffer);
+
+  if (mutable_state()->u2f_invalid_signature) {
+    // Flip a bit in the ASN.1 header to make the signature structurally
+    // invalid.
+    sig[0] ^= 1;
+  }
 
   // Add signature for full response.
   Append(&response, sig);

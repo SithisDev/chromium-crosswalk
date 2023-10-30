@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "v8/include/v8.h"
 
 namespace extensions {
@@ -18,11 +17,21 @@ class BindingAccessChecker {
  public:
   // The callback for determining if a given API feature (specified by |name|)
   // is available in the given context.
-  using AvailabilityCallback =
+  using APIAvailabilityCallback =
       base::RepeatingCallback<bool(v8::Local<v8::Context>,
                                    const std::string& name)>;
 
-  BindingAccessChecker(AvailabilityCallback is_available);
+  // The callback for determining if a given context is allowed to use promises
+  // with API calls.
+  using PromiseAvailabilityCallback =
+      base::RepeatingCallback<bool(v8::Local<v8::Context>)>;
+
+  BindingAccessChecker(APIAvailabilityCallback api_available,
+                       PromiseAvailabilityCallback promises_available);
+
+  BindingAccessChecker(const BindingAccessChecker&) = delete;
+  BindingAccessChecker& operator=(const BindingAccessChecker&) = delete;
+
   ~BindingAccessChecker();
 
   // Returns true if the feature specified by |full_name| is available to the
@@ -35,10 +44,12 @@ class BindingAccessChecker {
   bool HasAccessOrThrowError(v8::Local<v8::Context> context,
                              const std::string& full_name) const;
 
- private:
-  AvailabilityCallback is_available_;
+  // Returns true if the given |context| is allowed to use promise-based APIs.
+  bool HasPromiseAccess(v8::Local<v8::Context> context) const;
 
-  DISALLOW_COPY_AND_ASSIGN(BindingAccessChecker);
+ private:
+  APIAvailabilityCallback api_available_;
+  PromiseAvailabilityCallback promises_available_;
 };
 
 }  // namespace extensions

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,8 @@
 
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "device/bluetooth/bluetooth_classic_device_mac.h"
 #include "device/bluetooth/bluetooth_socket_mac.h"
 
@@ -15,41 +16,41 @@
 @interface BluetoothRfcommChannelDelegate
     : NSObject <IOBluetoothRFCOMMChannelDelegate> {
  @private
-  device::BluetoothRfcommChannelMac* channel_;  // weak
+  raw_ptr<device::BluetoothRfcommChannelMac> _channel;  // weak
 }
 
-- (id)initWithChannel:(device::BluetoothRfcommChannelMac*)channel;
+- (instancetype)initWithChannel:(device::BluetoothRfcommChannelMac*)channel;
 
 @end
 
 @implementation BluetoothRfcommChannelDelegate
 
-- (id)initWithChannel:(device::BluetoothRfcommChannelMac*)channel {
+- (instancetype)initWithChannel:(device::BluetoothRfcommChannelMac*)channel {
   if ((self = [super init]))
-    channel_ = channel;
+    _channel = channel;
 
   return self;
 }
 
 - (void)rfcommChannelOpenComplete:(IOBluetoothRFCOMMChannel*)rfcommChannel
                            status:(IOReturn)error {
-  channel_->OnChannelOpenComplete(rfcommChannel, error);
+  _channel->OnChannelOpenComplete(rfcommChannel, error);
 }
 
 - (void)rfcommChannelWriteComplete:(IOBluetoothRFCOMMChannel*)rfcommChannel
                             refcon:(void*)refcon
                             status:(IOReturn)error {
-  channel_->OnChannelWriteComplete(rfcommChannel, refcon, error);
+  _channel->OnChannelWriteComplete(rfcommChannel, refcon, error);
 }
 
 - (void)rfcommChannelData:(IOBluetoothRFCOMMChannel*)rfcommChannel
                      data:(void*)dataPointer
                    length:(size_t)dataLength {
-  channel_->OnChannelDataReceived(rfcommChannel, dataPointer, dataLength);
+  _channel->OnChannelDataReceived(rfcommChannel, dataPointer, dataLength);
 }
 
 - (void)rfcommChannelClosed:(IOBluetoothRFCOMMChannel*)rfcommChannel {
-  channel_->OnChannelClosed(rfcommChannel);
+  _channel->OnChannelClosed(rfcommChannel);
 }
 
 @end

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/synchronization/lock.h"
 #include "content/public/browser/browser_thread.h"
@@ -31,11 +31,12 @@ ApiResourceManager<UsbDeviceResource>::GetFactoryInstance() {
   return g_factory.Pointer();
 }
 
-UsbDeviceResource::UsbDeviceResource(const std::string& owner_extension_id,
-                                     const std::string& guid,
-                                     device::mojom::UsbDevicePtr device)
+UsbDeviceResource::UsbDeviceResource(
+    const std::string& owner_extension_id,
+    const std::string& guid,
+    mojo::Remote<device::mojom::UsbDevice> device)
     : ApiResource(owner_extension_id), guid_(guid), device_(std::move(device)) {
-  device_.set_connection_error_handler(base::BindOnce(
+  device_.set_disconnect_handler(base::BindOnce(
       &UsbDeviceResource::OnConnectionError, base::Unretained(this)));
 }
 

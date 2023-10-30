@@ -7,6 +7,11 @@ changes required.
 
 ## Code Changes
 
+NOTE: You can land these code changes before requesting to run an origin trial.
+These code changes make it possible to control a feature via an origin trial,
+but don't require an origin trial to be approved. For more on the process, see
+[Running an Origin Trial].
+
 ### Runtime Enabled Features
 
 First, you’ll need to configure [runtime\_enabled\_features.json5]. This is
@@ -17,6 +22,11 @@ name will be used in the origin trials developer console. You can have both
 `status: experimental` and `origin_trial_feature_name` if you want your feature
 to be enabled either by using the `--enable-experimental-web-platform-features`
 flag **or** the origin trial.
+
+You will have to change all callers of the no-argument overload of
+`RuntimeEnabledFeatures::FooEnabled()` to the overload that takes a
+`const FeatureContext*`. You can pass an `ExecutionContext` here
+(e.g. using `ExecutionContext::From(ScriptState*)`).
 
 You may have a feature that is not available on all platforms, or need to limit
 the trial to specific platforms. Use `origin_trial_os: [list]` to specify which
@@ -52,6 +62,35 @@ Trial limited to specific platform:
 },
 ```
 
+#### WebView considerations
+Because WebView is built as part of the `"android"` os target, it is not possible
+to exclude a trial from WebView if it is enabled on Android.
+
+If the feature under trial can be enabled on WebView alongside other Android
+platforms, this is preferred.
+
+In situations where this is not feasible, the recommended solution is to
+explicitly disable the origin trial in
+`AwMainDelegate::BasicStartupComplete()` in [aw\_main\_delegate.cc] by
+appending the `embedder_support::kOriginTrialDisabledFeatures` switch with the
+disabled trial names as values.
+
+See http://crrev.com/c/3733267 for an example of how this can be done.
+
+### CSS Properties
+
+You can also run experiment for new CSS properties with origin trial. After you
+have configured your feature in [runtime\_enabled\_features.json5] as above, head
+to [css\_properties.json5]. As explained in the file, you use `runtime_flag` to associate
+the CSS property with the feature you just defined. This will automatically link the CSS
+property to the origin trial defined in the runtime feature. It will be available
+in both JavaScript (`Element.style`) and CSS (including `@supports`) when the trial
+is enabled.
+
+
+**Example:** [origin-trial-test-property] defines a test css property controlled via
+runtime feature `OriginTrialsSampleAPI` and subsequently an origin trial named `Frobulate`.
+
 ### Gating Access
 
 Once configured, there are two mechanisms to gate access to your feature behind
@@ -73,6 +112,14 @@ partial interface Navigator {
 check. Your code should simply call
 `RuntimeEnabledFeatures::MyFeatureEnabled(ExecutionContext*)` as often as
 necessary to gate access to your feature.
+
+**NOTE:** For CSS properties, you do not need to edit the IDL files, as the exposure
+on the [CSSStyleDeclaration] is handled at runtime.
+
+**ISSUE:** In the rare cases where the origin trial token is added via script after
+the css style declaration, the css property will be enabled and is fully functional,
+however it will not appear on the [CSSStyleDeclaration] interface, i.e. not accessible
+in `Element.style`. This issue is tracked in crbug/1041993.
 
 ### Web Feature Counting
 
@@ -164,11 +211,22 @@ To test an origin trial feature during development, follow these steps:
       tools/origin_trials/generate_token.py http://localhost:8000 MyFeature
       ```
 
+   There are additional flags to generate third-party tokens, set the expiry
+   date, and control other options. See the command help for details (`--help`).
+   For example, to generate a third-party token, with [user subset exclusion]:
+
+      ```
+      tools/origin_trials/generate_token.py --is-third-party --usage-restriction=subset http://localhost:8000 MyFeature
+      ```
+
 2. Copy the token from the end of the output and use it in a `<meta>` tag or
    an `Origin-Trial` header as described in the [Developer Guide].
 
 3. Run Chrome with the test public key by passing:
    `--origin-trial-public-key=dRCs+TocuKkocNKa0AtZ4awrt9XKH2SQCI6o4FY6BNA=`
+
+You can also run Chrome with both the test public key and the default public key along side by passing:
+`--origin-trial-public-key=dRCs+TocuKkocNKa0AtZ4awrt9XKH2SQCI6o4FY6BNA=,fMS4mpO6buLQ/QMd+zJmxzty/VQ6B1EUZqoCU04zoRU=`
 
 The `--origin-trial-public-key` switch is not needed with `content_shell`, as it
 uses the test public key by default.
@@ -178,6 +236,17 @@ It's also used by Origin Trials unit tests and web tests.
 
 If you cannot set command-line switches (e.g., on Chrome OS), you can also
 directly modify [chrome_origin_trial_policy.cc].
+
+To see additional information about origin trial token parsing (including reasons
+for failures, or token names for successful tokens), you can add these switches:
+
+  `--vmodule=trial_token=2,origin_trial_context=1`
+
+If you are building with `is_debug=false`, then you will also need to add
+`dcheck_always_on=true` to your build options, and add this to the command line:
+
+  `--enable-logging=stderr`
+
 
 ### Web Tests
 When using the \[RuntimeEnabled\] IDL attribute, you should add web tests
@@ -194,6 +263,11 @@ as tests for script-added tokens. For examples, refer to the existing tests in
 [origin_trials/webexposed]: /third_party/blink/web_tests/http/tests/origin_trials/webexposed/
 [runtime\_enabled\_features.json5]: /third_party/blink/renderer/platform/runtime_enabled_features.json5
 [trial_token_unittest.cc]: /third_party/blink/common/origin_trials/trial_token_unittest.cc
-[web\_feature.mojom]: /third_party/blink/public/mojom/web_feature/web_feature.mojom
+[web\_feature.mojom]: /third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom
 [update\_use\_counter\_feature\_enum.py]: /tools/metrics/histograms/update_use_counter_feature_enum.py
 [Measure]: /third_party/blink/renderer/bindings/IDLExtendedAttributes.md#Measure_i_m_a_c
+[css\_properties.json5]: /third_party/blink/renderer/core/css/css_properties.json5
+[origin-trial-test-property]: https://chromium.googlesource.com/chromium/src/+/ff2ab8b89745602c8300322c2a0158e210178c7e/third_party/blink/renderer/core/css/css_properties.json5#2635
+[CSSStyleDeclaration]: /third_party/blink/renderer/core/css/css_style_declaration.idl
+[Running an Origin Trial]: https://www.chromium.org/blink/origin-trials/running-an-origin-trial
+[user subset exclusion]: https://docs.google.com/document/d/1xALH9W7rWmX0FpjudhDeS2TNTEOXuPn4Tlc9VmuPdHA/edit#heading=h.myaz1twlipw

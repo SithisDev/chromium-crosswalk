@@ -1,10 +1,9 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/gamepad/gamepad_blocklist.h"
 
-#include "base/stl_util.h"
 #include "device/gamepad/gamepad_id_list.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -13,15 +12,16 @@ namespace {
 // Blocked devices, taken from the gamepad blocklist.
 constexpr std::pair<uint16_t, uint16_t> kBlockedDevices[] = {
     {0x045e, 0x0922},  // Microsoft keyboard
-    {0x056a, 0x50b8},  // Wacom touchpad
-    {0x06cb, 0x000f},  // Synaptics touchpad
+    {0x05ac, 0x3232},  // Apple(?) bluetooth mouse
     {0x17ef, 0x6099},  // Lenovo keyboard
 };
-constexpr size_t kBlockedDevicesLength = base::size(kBlockedDevices);
+constexpr size_t kBlockedDevicesLength = std::size(kBlockedDevices);
 
 // Known devices from blocked vendors, taken from usb.ids.
 // http://www.linux-usb.org/usb.ids
 constexpr std::pair<uint16_t, uint16_t> kBlockedVendorDevices[] = {
+    {0x056a, 0x50b8},  // Wacom touchpad
+    {0x06cb, 0x000f},  // Synaptics touchpad
     {0x2833, 0x0001},  // Oculus Rift DK1 head tracker
     {0x2833, 0x0021},  // Oculus Rift DK2 USB hub
     {0x2833, 0x0031},  // Oculus Rift CV1 subdevice
@@ -35,8 +35,7 @@ constexpr std::pair<uint16_t, uint16_t> kBlockedVendorDevices[] = {
     {0x2833, 0x3031},  // Oculus Rift CV1 subdevice
     {0xb58e, 0x9e84},  // Blue Yeti Stereo Microphone
 };
-constexpr size_t kBlockedVendorDevicesLength =
-    base::size(kBlockedVendorDevices);
+constexpr size_t kBlockedVendorDevicesLength = std::size(kBlockedVendorDevices);
 
 }  // namespace
 

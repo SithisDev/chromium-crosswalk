@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,10 @@
 
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/common/content_switches.h"
+#include "extensions/browser/api/test/test_api_observer_registry.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/notification_types.h"
 #include "extensions/common/api/test.h"
 
 namespace {
@@ -38,7 +37,7 @@ namespace WaitForRoundTrip = api::test::WaitForRoundTrip;
 TestExtensionFunction::~TestExtensionFunction() {}
 
 bool TestExtensionFunction::PreRunValidation(std::string* error) {
-  if (!UIThreadExtensionFunction::PreRunValidation(error))
+  if (!ExtensionFunction::PreRunValidation(error))
     return false;
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType)) {
     *error = kNotTestProcessError;
@@ -50,10 +49,7 @@ bool TestExtensionFunction::PreRunValidation(std::string* error) {
 TestNotifyPassFunction::~TestNotifyPassFunction() {}
 
 ExtensionFunction::ResponseAction TestNotifyPassFunction::Run() {
-  content::NotificationService::current()->Notify(
-      extensions::NOTIFICATION_EXTENSION_TEST_PASSED,
-      content::Source<content::BrowserContext>(dispatcher()->browser_context()),
-      content::NotificationService::NoDetails());
+  TestApiObserverRegistry::GetInstance()->NotifyTestPassed(browser_context());
   return RespondNow(NoArguments());
 }
 
@@ -61,42 +57,37 @@ TestNotifyFailFunction::~TestNotifyFailFunction() {}
 
 ExtensionFunction::ResponseAction TestNotifyFailFunction::Run() {
   std::unique_ptr<NotifyFail::Params> params(
-      NotifyFail::Params::Create(*args_));
+      NotifyFail::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
-  content::NotificationService::current()->Notify(
-      extensions::NOTIFICATION_EXTENSION_TEST_FAILED,
-      content::Source<content::BrowserContext>(dispatcher()->browser_context()),
-      content::Details<std::string>(&params->message));
+  TestApiObserverRegistry::GetInstance()->NotifyTestFailed(
+      browser_context(), params->message);
   return RespondNow(NoArguments());
 }
 
 TestLogFunction::~TestLogFunction() {}
 
 ExtensionFunction::ResponseAction TestLogFunction::Run() {
-  std::unique_ptr<Log::Params> params(Log::Params::Create(*args_));
+  std::unique_ptr<Log::Params> params(Log::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   VLOG(1) << params->message;
   return RespondNow(NoArguments());
 }
 
-TestSendMessageFunction::TestSendMessageFunction() : waiting_(false) {}
+TestSendMessageFunction::TestSendMessageFunction() = default;
 
 ExtensionFunction::ResponseAction TestSendMessageFunction::Run() {
   std::unique_ptr<PassMessage::Params> params(
-      PassMessage::Params::Create(*args_));
+      PassMessage::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
-  bool listener_will_respond = false;
-  std::pair<std::string, bool*> details(params->message,
-                                        &listener_will_respond);
-  content::NotificationService::current()->Notify(
-      extensions::NOTIFICATION_EXTENSION_TEST_MESSAGE,
-      content::Source<TestSendMessageFunction>(this),
-      content::Details<std::pair<std::string, bool*>>(&details));
-  // If the listener is not intending to respond, or has already responded,
-  // finish the function.
+  bool listener_will_respond =
+      TestApiObserverRegistry::GetInstance()->NotifyTestMessage(
+          this, params->message);
+  // If none of the listeners intend to respond, or one has already responded,
+  // finish the function. We always reply to the message, even if it's just an
+  // empty string.
   if (!listener_will_respond || response_.get()) {
     if (!response_) {
-      response_ = OneArgument(std::make_unique<base::Value>(std::string()));
+      response_ = OneArgument(base::Value(std::string()));
     }
     return RespondNow(std::move(response_));
   }
@@ -105,11 +96,11 @@ ExtensionFunction::ResponseAction TestSendMessageFunction::Run() {
   return RespondLater();
 }
 
-TestSendMessageFunction::~TestSendMessageFunction() {}
+TestSendMessageFunction::~TestSendMessageFunction() = default;
 
 void TestSendMessageFunction::Reply(const std::string& message) {
   DCHECK(!response_);
-  response_ = OneArgument(std::make_unique<base::Value>(message));
+  response_ = OneArgument(base::Value(message));
   if (waiting_)
     Respond(std::move(response_));
 }
@@ -121,6 +112,18 @@ void TestSendMessageFunction::ReplyWithError(const std::string& error) {
     Respond(std::move(response_));
 }
 
+TestSendScriptResultFunction::TestSendScriptResultFunction() = default;
+TestSendScriptResultFunction::~TestSendScriptResultFunction() = default;
+
+ExtensionFunction::ResponseAction TestSendScriptResultFunction::Run() {
+  std::unique_ptr<api::test::SendScriptResult::Params> params(
+      api::test::SendScriptResult::Params::Create(args()));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  TestApiObserverRegistry::GetInstance()->NotifyScriptResult(params->result);
+  return RespondNow(NoArguments());
+}
+
 // static
 void TestGetConfigFunction::set_test_config_state(
     base::DictionaryValue* value) {
@@ -129,7 +132,7 @@ void TestGetConfigFunction::set_test_config_state(
 }
 
 TestGetConfigFunction::TestConfigState::TestConfigState()
-    : config_state_(NULL) {}
+    : config_state_(nullptr) {}
 
 // static
 TestGetConfigFunction::TestConfigState*
@@ -143,17 +146,17 @@ ExtensionFunction::ResponseAction TestGetConfigFunction::Run() {
   TestConfigState* test_config_state = TestConfigState::GetInstance();
   if (!test_config_state->config_state())
     return RespondNow(Error(kNoTestConfigDataError));
-  return RespondNow(
-      OneArgument(test_config_state->config_state()->CreateDeepCopy()));
+  return RespondNow(OneArgument(base::Value::FromUniquePtrValue(
+      base::DictionaryValue::From(base::Value::ToUniquePtrValue(
+          test_config_state->config_state()->Clone())))));
 }
 
 TestWaitForRoundTripFunction::~TestWaitForRoundTripFunction() {}
 
 ExtensionFunction::ResponseAction TestWaitForRoundTripFunction::Run() {
   std::unique_ptr<WaitForRoundTrip::Params> params(
-      WaitForRoundTrip::Params::Create(*args_));
-  return RespondNow(
-      OneArgument(std::make_unique<base::Value>(params->message)));
+      WaitForRoundTrip::Params::Create(args()));
+  return RespondNow(OneArgument(base::Value(params->message)));
 }
 
 }  // namespace extensions

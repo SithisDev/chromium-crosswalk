@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #ifndef DEVICE_BLUETOOTH_TEST_FAKE_BLUETOOTH_H_
@@ -8,8 +8,9 @@
 
 #include "base/compiler_specific.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
-#include "device/bluetooth/public/mojom/test/fake_bluetooth.mojom.h"
+#include "device/bluetooth/public/mojom/test/fake_bluetooth.mojom-forward.h"
 #include "device/bluetooth/test/fake_central.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
 
 namespace bluetooth {
 
@@ -24,7 +25,7 @@ class FakeBluetooth : public mojom::FakeBluetooth {
   FakeBluetooth();
   ~FakeBluetooth() override;
 
-  static void Create(mojom::FakeBluetoothRequest request);
+  static void Create(mojo::PendingReceiver<mojom::FakeBluetooth> receiver);
 
   void SetLESupported(bool available, SetLESupportedCallback callback) override;
   void SimulateCentral(mojom::CentralState state,

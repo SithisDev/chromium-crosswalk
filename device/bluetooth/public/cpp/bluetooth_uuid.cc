@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,21 @@
 
 #include <stddef.h>
 
-#include "base/logging.h"
+#include <ostream>
+#include <string>
+
+#include "base/check_op.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <objbase.h>
 
-#include "base/strings/string16.h"
 #include "base/win/win_util.h"
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 namespace device {
 
@@ -77,36 +81,62 @@ BluetoothUUID::BluetoothUUID(const std::string& uuid) {
   GetCanonicalUuid(uuid, &value_, &canonical_value_, &format_);
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 BluetoothUUID::BluetoothUUID(GUID uuid) {
-  auto buffer = base::win::String16FromGUID(uuid);
+  auto buffer = base::win::WStringFromGUID(uuid);
   DCHECK_EQ('{', buffer[0]);
   DCHECK_EQ('}', buffer[37]);
 
-  GetCanonicalUuid(base::UTF16ToUTF8(buffer.substr(1, 36)), &value_,
+  GetCanonicalUuid(base::WideToUTF8(buffer.substr(1, 36)), &value_,
                    &canonical_value_, &format_);
   DCHECK_EQ(kFormat128Bit, format_);
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 BluetoothUUID::BluetoothUUID() : format_(kFormatInvalid) {}
 
 BluetoothUUID::~BluetoothUUID() = default;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // static
 GUID BluetoothUUID::GetCanonicalValueAsGUID(base::StringPiece uuid) {
   DCHECK_EQ(36u, uuid.size());
-  base::string16 braced_uuid =
-      STRING16_LITERAL('{') + base::UTF8ToUTF16(uuid) + STRING16_LITERAL('}');
+  std::u16string braced_uuid = u'{' + base::UTF8ToUTF16(uuid) + u'}';
   GUID guid;
   CHECK_EQ(NOERROR, ::CLSIDFromString(base::as_wcstr(braced_uuid), &guid));
   return guid;
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 bool BluetoothUUID::IsValid() const {
   return format_ != kFormatInvalid;
+}
+
+std::vector<uint8_t> BluetoothUUID::GetBytes() const {
+  if (!IsValid())
+    return std::vector<uint8_t>();
+
+  base::StringPiece input(canonical_value());
+
+  std::vector<uint8_t> bytes(16);
+  base::span<uint8_t> out(bytes);
+
+  //           0         1         2         3
+  //           012345678901234567890123456789012345
+  // Example: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  //           12345678-1234-5678-9abc-def123456789
+  bool success =
+      (input.size() == 36) && (input[8] == '-') && (input[13] == '-') &&
+      (input[18] == '-') && (input[23] == '-') &&
+      base::HexStringToSpan(input.substr(0, 8), out.subspan<0, 4>()) &&
+      base::HexStringToSpan(input.substr(9, 4), out.subspan<4, 2>()) &&
+      base::HexStringToSpan(input.substr(14, 4), out.subspan<6, 2>()) &&
+      base::HexStringToSpan(input.substr(19, 4), out.subspan<8, 2>()) &&
+      base::HexStringToSpan(input.substr(24, 12), out.subspan<10, 6>());
+
+  DCHECK(success);
+
+  return bytes;
 }
 
 bool BluetoothUUID::operator<(const BluetoothUUID& uuid) const {
@@ -121,8 +151,8 @@ bool BluetoothUUID::operator!=(const BluetoothUUID& uuid) const {
   return canonical_value_ != uuid.canonical_value_;
 }
 
-void PrintTo(const BluetoothUUID& uuid, std::ostream* out) {
-  *out << uuid.canonical_value();
+std::ostream& operator<<(std::ostream& os, BluetoothUUID uuid) {
+  return os << uuid.canonical_value();
 }
 
 }  // namespace device

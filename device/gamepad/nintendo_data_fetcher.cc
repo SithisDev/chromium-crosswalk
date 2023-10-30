@@ -1,21 +1,17 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/gamepad/nintendo_data_fetcher.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "device/gamepad/gamepad_service.h"
 #include "device/gamepad/gamepad_uma.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-#include "services/device/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace device {
 
-NintendoDataFetcher::NintendoDataFetcher()
-    : binding_(this), weak_factory_(this) {}
+NintendoDataFetcher::NintendoDataFetcher() = default;
 
 NintendoDataFetcher::~NintendoDataFetcher() {
   for (auto& entry : controllers_) {
@@ -31,15 +27,11 @@ GamepadSource NintendoDataFetcher::source() {
 void NintendoDataFetcher::OnAddedToProvider() {
   // Open a connection to the HID service. On a successful connection,
   // OnGetDevices will be called with a list of connected HID devices.
-  auto* connector = GamepadService::GetInstance()->GetConnector();
-  DCHECK(connector);
-  connector->BindInterface(mojom::kServiceName,
-                           mojo::MakeRequest(&hid_manager_));
-  mojom::HidManagerClientAssociatedPtrInfo client;
-  binding_.Bind(mojo::MakeRequest(&client));
+  BindHidManager(hid_manager_.BindNewPipeAndPassReceiver());
   hid_manager_->GetDevicesAndSetClient(
-      std::move(client), base::BindOnce(&NintendoDataFetcher::OnGetDevices,
-                                        weak_factory_.GetWeakPtr()));
+      receiver_.BindNewEndpointAndPassRemote(),
+      base::BindOnce(&NintendoDataFetcher::OnGetDevices,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void NintendoDataFetcher::OnGetDevices(
@@ -87,22 +79,35 @@ void NintendoDataFetcher::OnDeviceReady(int source_id) {
 }
 
 void NintendoDataFetcher::DeviceAdded(mojom::HidDeviceInfoPtr device_info) {
-  if (NintendoController::IsNintendoController(device_info->vendor_id,
-                                               device_info->product_id)) {
+  GamepadId gamepad_id = GamepadIdList::Get().GetGamepadId(
+      device_info->product_name, device_info->vendor_id,
+      device_info->product_id);
+  if (NintendoController::IsNintendoController(gamepad_id)) {
     AddDevice(std::move(device_info));
   }
 }
 
 void NintendoDataFetcher::DeviceRemoved(mojom::HidDeviceInfoPtr device_info) {
-  if (NintendoController::IsNintendoController(device_info->vendor_id,
-                                               device_info->product_id)) {
+  GamepadId gamepad_id = GamepadIdList::Get().GetGamepadId(
+      device_info->product_name, device_info->vendor_id,
+      device_info->product_id);
+  if (NintendoController::IsNintendoController(gamepad_id)) {
     RemoveDevice(device_info->guid);
   }
 }
 
+void NintendoDataFetcher::DeviceChanged(mojom::HidDeviceInfoPtr device_info) {
+  // Ignore updated device info. NintendoController will retain the old
+  // HidDeviceInfo. This is fine since it does not rely on any HidDeviceInfo
+  // members that could change.
+}
+
 bool NintendoDataFetcher::AddDevice(mojom::HidDeviceInfoPtr device_info) {
   DCHECK(hid_manager_);
-  RecordConnectedGamepad(device_info->vendor_id, device_info->product_id);
+  GamepadId gamepad_id = GamepadIdList::Get().GetGamepadId(
+      device_info->product_name, device_info->vendor_id,
+      device_info->product_id);
+  RecordConnectedGamepad(gamepad_id);
   int source_id = next_source_id_++;
   auto emplace_result = controllers_.emplace(
       source_id, NintendoController::Create(source_id, std::move(device_info),
@@ -182,6 +187,9 @@ void NintendoDataFetcher::GetGamepadData(bool) {
     auto& device = entry.second;
     if (device->IsOpen() && device->IsUsable()) {
       PadState* state = GetPadState(device->GetSourceId());
+      if (!state)
+        continue;
+
       if (!state->is_initialized) {
         state->mapper = device->GetMappingFunction();
         device->InitializeGamepadState(state->mapper != nullptr, state->data);

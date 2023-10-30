@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,11 @@
 #include "base/containers/queue.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/api/api_resource.h"
 #include "extensions/browser/api/api_resource_manager.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
@@ -26,9 +28,9 @@
 #include "services/network/public/mojom/tcp_socket.mojom.h"
 #include "services/network/public/mojom/tls_socket.mojom.h"
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "extensions/browser/api/socket/app_firewall_hole_manager.h"
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 namespace net {
 class AddressList;
@@ -51,17 +53,20 @@ using RecvFromCompletionCallback =
 using ListenCallback =
     base::OnceCallback<void(int, const std::string& error_msg)>;
 
-using AcceptCompletionCallback =
-    base::OnceCallback<void(int,
-                            network::mojom::TCPConnectedSocketPtr,
-                            const base::Optional<net::IPEndPoint>&,
-                            mojo::ScopedDataPipeConsumerHandle,
-                            mojo::ScopedDataPipeProducerHandle)>;
+using AcceptCompletionCallback = base::OnceCallback<void(
+    int,
+    mojo::PendingRemote<network::mojom::TCPConnectedSocket>,
+    const absl::optional<net::IPEndPoint>&,
+    mojo::ScopedDataPipeConsumerHandle,
+    mojo::ScopedDataPipeProducerHandle)>;
 
 // A Socket wraps a low-level socket and includes housekeeping information that
 // we need to manage it in the context of an extension.
 class Socket : public ApiResource {
  public:
+  static const content::BrowserThread::ID kThreadId =
+      content::BrowserThread::UI;
+
   enum SocketType { TYPE_TCP, TYPE_UDP, TYPE_TLS };
 
   ~Socket() override;
@@ -77,13 +82,11 @@ class Socket : public ApiResource {
   // unbracketed.
   void set_hostname(const std::string& hostname) { hostname_ = hostname; }
 
-#if defined(OS_CHROMEOS)
-  void set_firewall_hole(
-      std::unique_ptr<AppFirewallHole, content::BrowserThread::DeleteOnUIThread>
-          firewall_hole) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  void set_firewall_hole(std::unique_ptr<AppFirewallHole> firewall_hole) {
     firewall_hole_ = std::move(firewall_hole);
   }
-#endif  // OS_CHROMEOS
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   // Note: |address| contains the resolved IP address, not the hostname of
   // the remote endpoint. In order to upgrade this socket to TLS, callers
@@ -171,11 +174,10 @@ class Socket : public ApiResource {
   base::queue<WriteRequest> write_queue_;
   scoped_refptr<net::IOBuffer> io_buffer_write_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   // Represents a hole punched in the system firewall for this socket.
-  std::unique_ptr<AppFirewallHole, content::BrowserThread::DeleteOnUIThread>
-      firewall_hole_;
-#endif  // OS_CHROMEOS
+  std::unique_ptr<AppFirewallHole> firewall_hole_;
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 };
 
 }  //  namespace extensions

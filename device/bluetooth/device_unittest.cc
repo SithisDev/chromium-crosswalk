@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,16 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "device/bluetooth/test/mock_bluetooth_adapter.h"
 #include "device/bluetooth/test/mock_bluetooth_device.h"
 #include "device/bluetooth/test/mock_bluetooth_gatt_characteristic.h"
 #include "device/bluetooth/test/mock_bluetooth_gatt_connection.h"
 #include "device/bluetooth/test/mock_bluetooth_gatt_service.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::Return;
@@ -72,39 +72,38 @@ class BluetoothInterfaceDeviceTest : public testing::Test {
                 kTestLeDeviceName0,
                 kTestLeDeviceAddress0,
                 false,
-                true),
-        weak_factory_(this) {
+                true) {
     ON_CALL(*adapter_, GetDevice(kTestLeDeviceAddress0))
         .WillByDefault(Return(&device_));
 
     auto service1 = std::make_unique<NiceMockBluetoothGattService>(
         &device_, kTestServiceId0, device::BluetoothUUID(kTestServiceUuid0),
-        true /* is_primary */, false /* is_local */);
+        /*is_primary=*/true);
 
     auto characteristic1 =
         std::make_unique<NiceMockBluetoothGattCharacteristic>(
             service1.get(), kTestCharacteristicId0,
             device::BluetoothUUID(kTestCharacteristicUuid0),
-            false /* is_local */, kReadWriteProperties, 0 /* permissions */);
+            kReadWriteProperties, 0 /* permissions */);
 
     auto characteristic2 =
         std::make_unique<NiceMockBluetoothGattCharacteristic>(
             service1.get(), kTestCharacteristicId1,
             device::BluetoothUUID(kTestCharacteristicUuid1),
-            false /* is_local */, kReadWriteProperties, 0 /* permissions */);
+            kReadWriteProperties, 0 /* permissions */);
 
     service1->AddMockCharacteristic(std::move(characteristic1));
     service1->AddMockCharacteristic(std::move(characteristic2));
 
     auto service2 = std::make_unique<NiceMockBluetoothGattService>(
         &device_, kTestServiceId1, device::BluetoothUUID(kTestServiceUuid1),
-        true /* is_primary */, false /* is_local */);
+        /*is_primary=*/true);
 
     auto characteristic3 =
         std::make_unique<NiceMockBluetoothGattCharacteristic>(
             service2.get(), kTestCharacteristicId2,
-            device::BluetoothUUID(kTestCharacteristicUuid2),
-            false /* is_local */, kAllProperties, 0 /* permissions */);
+            device::BluetoothUUID(kTestCharacteristicUuid2), kAllProperties,
+            0 /* permissions */);
 
     service2->AddMockCharacteristic(std::move(characteristic3));
 
@@ -122,9 +121,10 @@ class BluetoothInterfaceDeviceTest : public testing::Test {
     auto connection = std::make_unique<NiceMockBluetoothGattConnection>(
         adapter_, device_.GetAddress());
 
-    Device::Create(adapter_, std::move(connection), mojo::MakeRequest(&proxy_));
+    Device::Create(adapter_, std::move(connection),
+                   proxy_.BindNewPipeAndPassReceiver());
 
-    proxy_.set_connection_error_handler(
+    proxy_.set_disconnect_handler(
         base::BindOnce(&BluetoothInterfaceDeviceTest::OnConnectionError,
                        weak_factory_.GetWeakPtr()));
   }
@@ -174,9 +174,8 @@ class BluetoothInterfaceDeviceTest : public testing::Test {
 
   scoped_refptr<NiceMockBluetoothAdapter> adapter_;
   NiceMockBluetoothDevice device_;
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
-  mojom::DevicePtr proxy_;
-  mojo::StrongBindingPtr<mojom::Device> binding_ptr_;
+  base::test::SingleThreadTaskEnvironment task_environment_;
+  mojo::Remote<mojom::Device> proxy_;
 
   bool message_pipe_closed_ = false;
   bool expect_device_service_deleted_ = false;
@@ -185,7 +184,7 @@ class BluetoothInterfaceDeviceTest : public testing::Test {
   int actual_callback_count_ = 0;
   int expected_callback_count_ = 0;
 
-  base::WeakPtrFactory<BluetoothInterfaceDeviceTest> weak_factory_;
+  base::WeakPtrFactory<BluetoothInterfaceDeviceTest> weak_factory_{this};
 };
 }  // namespace
 

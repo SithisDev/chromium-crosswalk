@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <memory>
 #include <string>
 
+#include "base/check.h"
 #include "base/lazy_instance.h"
-#include "base/logging.h"
-#include "base/macros.h"
+#include "base/notreached.h"
 #include "components/version_info/version_info.h"
 #include "content/public/common/user_agent.h"
 #include "extensions/common/core_extensions_api_provider.h"
@@ -27,16 +27,15 @@ namespace {
 // code. For now, this implementation does nothing.
 class ShellPermissionMessageProvider : public PermissionMessageProvider {
  public:
-  ShellPermissionMessageProvider() {}
-  ~ShellPermissionMessageProvider() override {}
+  ShellPermissionMessageProvider() = default;
+  ShellPermissionMessageProvider(const ShellPermissionMessageProvider&) =
+      delete;
+  ShellPermissionMessageProvider& operator=(
+      const ShellPermissionMessageProvider&) = delete;
+  ~ShellPermissionMessageProvider() override = default;
 
   // PermissionMessageProvider implementation.
   PermissionMessages GetPermissionMessages(
-      const PermissionIDSet& permissions) const override {
-    return PermissionMessages();
-  }
-
-  PermissionMessages GetPowerfulPermissionMessages(
       const PermissionIDSet& permissions) const override {
     return PermissionMessages();
   }
@@ -54,9 +53,6 @@ class ShellPermissionMessageProvider : public PermissionMessageProvider {
       Manifest::Type extension_type) const override {
     return PermissionIDSet();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ShellPermissionMessageProvider);
 };
 
 base::LazyInstance<ShellPermissionMessageProvider>::DestructorAtExit
@@ -66,6 +62,7 @@ base::LazyInstance<ShellPermissionMessageProvider>::DestructorAtExit
 
 ShellExtensionsClient::ShellExtensionsClient()
     : webstore_base_url_(extension_urls::kChromeWebstoreBaseURL),
+      new_webstore_base_url_(extension_urls::kNewChromeWebstoreBaseURL),
       webstore_update_url_(extension_urls::kChromeWebstoreUpdateURL) {
   AddAPIProvider(std::make_unique<CoreExtensionsAPIProvider>());
   AddAPIProvider(std::make_unique<ShellExtensionsAPIProvider>());
@@ -98,15 +95,15 @@ void ShellExtensionsClient::FilterHostPermissions(
   NOTIMPLEMENTED();
 }
 
-void ShellExtensionsClient::SetScriptingWhitelist(
-    const ScriptingWhitelist& whitelist) {
-  scripting_whitelist_ = whitelist;
+void ShellExtensionsClient::SetScriptingAllowlist(
+    const ScriptingAllowlist& allowlist) {
+  scripting_allowlist_ = allowlist;
 }
 
-const ExtensionsClient::ScriptingWhitelist&
-ShellExtensionsClient::GetScriptingWhitelist() const {
-  // TODO(jamescook): Real whitelist.
-  return scripting_whitelist_;
+const ExtensionsClient::ScriptingAllowlist&
+ShellExtensionsClient::GetScriptingAllowlist() const {
+  // TODO(jamescook): Real allowlist.
+  return scripting_allowlist_;
 }
 
 URLPatternSet ShellExtensionsClient::GetPermittedChromeSchemeHosts(
@@ -126,13 +123,17 @@ const GURL& ShellExtensionsClient::GetWebstoreBaseURL() const {
   return webstore_base_url_;
 }
 
+const GURL& ShellExtensionsClient::GetNewWebstoreBaseURL() const {
+  return new_webstore_base_url_;
+}
+
 const GURL& ShellExtensionsClient::GetWebstoreUpdateURL() const {
   return webstore_update_url_;
 }
 
-bool ShellExtensionsClient::IsBlacklistUpdateURL(const GURL& url) const {
+bool ShellExtensionsClient::IsBlocklistUpdateURL(const GURL& url) const {
   // TODO(rockot): Maybe we want to do something else here. For now we accept
-  // any URL as a blacklist URL because we don't really care.
+  // any URL as a blocklist URL because we don't really care.
   return true;
 }
 

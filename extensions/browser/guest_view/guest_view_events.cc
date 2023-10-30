@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,8 @@
 #include <map>
 
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "components/guest_view/common/guest_view_constants.h"
 #include "extensions/browser/guest_view/extension_options/extension_options_constants.h"
-#include "extensions/browser/guest_view/extension_view/extension_view_constants.h"
 #include "extensions/browser/guest_view/web_view/web_view_constants.h"
 #include "extensions/common/api/extension_options_internal.h"
 
@@ -34,8 +32,6 @@ class EventMap {
          events::EXTENSION_OPTIONS_INTERNAL_ON_LOAD},
         {api::extension_options_internal::OnPreferredSizeChanged::kEventName,
          events::EXTENSION_OPTIONS_INTERNAL_ON_PREFERRED_SIZE_CHANGED},
-        {extensionview::kEventLoadCommit,
-         events::EXTENSION_VIEW_INTERNAL_ON_LOAD_COMMIT},
         {guest_view::kEventResize, events::GUEST_VIEW_INTERNAL_ON_RESIZE},
         {webview::kEventAudioStateChanged,
          events::WEB_VIEW_INTERNAL_ON_AUDIO_STATE_CHANGED},
@@ -49,7 +45,6 @@ class EventMap {
          events::WEB_VIEW_INTERNAL_ON_CONSOLE_MESSAGE},
         {webview::kEventContentLoad, events::WEB_VIEW_INTERNAL_ON_CONTENT_LOAD},
         {webview::kEventDialog, events::WEB_VIEW_INTERNAL_ON_DIALOG},
-        {webview::kEventDropLink, events::WEB_VIEW_INTERNAL_ON_DROP_LINK},
         {webview::kEventExit, events::WEB_VIEW_INTERNAL_ON_EXIT},
         {webview::kEventExitFullscreen,
          events::WEB_VIEW_INTERNAL_ON_EXIT_FULLSCREEN},
@@ -89,6 +84,9 @@ class EventMap {
     }
   }
 
+  EventMap(const EventMap&) = delete;
+  EventMap& operator=(const EventMap&) = delete;
+
   events::HistogramValue Get(const std::string& event_name) {
     auto value = values_.find(event_name);
     return value != values_.end() ? value->second : events::UNKNOWN;
@@ -96,8 +94,6 @@ class EventMap {
 
  private:
   std::map<std::string, events::HistogramValue> values_;
-
-  DISALLOW_COPY_AND_ASSIGN(EventMap);
 };
 
 base::LazyInstance<EventMap>::DestructorAtExit g_event_map =

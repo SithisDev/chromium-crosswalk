@@ -1,15 +1,13 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/shell/test/shell_apitest.h"
 
-#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/threading/thread_restrictions.h"
-#include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/notification_types.h"
+#include "extensions/browser/unloaded_extension_reason.h"
 #include "extensions/common/extension_paths.h"
 #include "extensions/shell/browser/shell_extension_system.h"
 #include "extensions/test/result_catcher.h"
@@ -28,6 +26,11 @@ const Extension* ShellApiTest::LoadExtension(const std::string& extension_dir) {
   base::PathService::Get(extensions::DIR_TEST_DATA, &test_data_dir);
   base::FilePath extension_path = test_data_dir.AppendASCII(extension_dir);
 
+  return extension_system_->LoadExtension(extension_path);
+}
+
+const Extension* ShellApiTest::LoadExtension(
+    const base::FilePath& extension_path) {
   return extension_system_->LoadExtension(extension_path);
 }
 
@@ -71,11 +74,6 @@ void ShellApiTest::UnloadApp(const Extension* app) {
 
   UnloadedExtensionReason reason(UnloadedExtensionReason::DISABLE);
   registry->TriggerOnUnloaded(app, reason);
-
-  content::NotificationService::current()->Notify(
-      extensions::NOTIFICATION_EXTENSION_REMOVED,
-      content::Source<content::BrowserContext>(browser_context()),
-      content::Details<const Extension>(app));
 }
 
 }  // namespace extensions

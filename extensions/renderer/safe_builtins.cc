@@ -1,18 +1,26 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/renderer/safe_builtins.h"
 
-#include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/check.h"
+#include "base/notreached.h"
 #include "base/strings/stringprintf.h"
 #include "extensions/renderer/script_context.h"
 #include "extensions/renderer/v8_helpers.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-exception.h"
+#include "v8/include/v8-extension.h"
+#include "v8/include/v8-function.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-microtask-queue.h"
+#include "v8/include/v8-object.h"
+#include "v8/include/v8-primitive-object.h"
+#include "v8/include/v8-primitive.h"
+#include "v8/include/v8-template.h"
 
 namespace extensions {
-
-using namespace v8_helpers;
 
 namespace {
 
@@ -89,6 +97,8 @@ const char kScript[] =
     "saveBuiltin(Error,\n"
     "            [],\n"
     "            ['captureStackTrace']);\n"
+    "saveBuiltin(Promise,\n"
+    "            ['then', 'catch']);\n"
     "\n"
     "// JSON is trickier because extensions can override toJSON in\n"
     "// incompatible ways, and we need to prevent that.\n"
@@ -132,7 +142,7 @@ const char kScript[] =
 
 v8::Local<v8::Private> MakeKey(const char* name, v8::Isolate* isolate) {
   return v8::Private::ForApi(
-      isolate, ToV8StringUnsafe(
+      isolate, v8_helpers::ToV8StringUnsafe(
                    isolate, base::StringPrintf("%s::%s", kClassName, name)));
 }
 
@@ -162,9 +172,9 @@ class ExtensionImpl : public v8::Extension {
   v8::Local<v8::FunctionTemplate> GetNativeFunctionTemplate(
       v8::Isolate* isolate,
       v8::Local<v8::String> name) override {
-    if (name->StringEquals(ToV8StringUnsafe(isolate, "Apply")))
+    if (name->StringEquals(v8_helpers::ToV8StringUnsafe(isolate, "Apply")))
       return v8::FunctionTemplate::New(isolate, Apply);
-    if (name->StringEquals(ToV8StringUnsafe(isolate, "Save")))
+    if (name->StringEquals(v8_helpers::ToV8StringUnsafe(isolate, "Save")))
       return v8::FunctionTemplate::New(isolate, Save);
     NOTREACHED() << *v8::String::Utf8Value(isolate, name);
     return v8::Local<v8::FunctionTemplate>();
@@ -176,6 +186,8 @@ class ExtensionImpl : public v8::Extension {
           info[2]->IsObject() &&  // args
           info[3]->IsInt32() &&   // first_arg_index
           info[4]->IsInt32());    // args_length
+    v8::MicrotasksScope microtasks(info.GetIsolate(),
+                                   v8::MicrotasksScope::kDoNotRunMicrotasks);
     v8::Local<v8::Function> function = info[0].As<v8::Function>();
     v8::Local<v8::Object> recv;
     if (info[1]->IsObject()) {
@@ -186,7 +198,7 @@ class ExtensionImpl : public v8::Extension {
                  .As<v8::Object>();
     } else {
       info.GetIsolate()->ThrowException(
-          v8::Exception::TypeError(ToV8StringUnsafe(
+          v8::Exception::TypeError(v8_helpers::ToV8StringUnsafe(
               info.GetIsolate(),
               "The first argument is the receiver and must be an object")));
       return;
@@ -200,14 +212,13 @@ class ExtensionImpl : public v8::Extension {
     std::unique_ptr<v8::Local<v8::Value>[]> argv(
         new v8::Local<v8::Value>[argc]);
     for (int i = 0; i < argc; ++i) {
-      CHECK(IsTrue(args->Has(context, i + first_arg_index)));
+      CHECK(v8_helpers::IsTrue(args->Has(context, i + first_arg_index)));
       // Getting a property value could throw an exception.
-      if (!GetProperty(context, args, i + first_arg_index, &argv[i]))
+      if (!v8_helpers::GetProperty(context, args, i + first_arg_index,
+                                   &argv[i]))
         return;
     }
 
-    v8::MicrotasksScope microtasks(
-        info.GetIsolate(), v8::MicrotasksScope::kDoNotRunMicrotasks);
     v8::Local<v8::Value> return_value;
     if (function->Call(context, recv, argc, argv.get()).ToLocal(&return_value))
       info.GetReturnValue().Set(return_value);
@@ -257,6 +268,10 @@ v8::Local<v8::Object> SafeBuiltins::GetString() const {
 
 v8::Local<v8::Object> SafeBuiltins::GetError() const {
   return Load("Error", context_->v8_context());
+}
+
+v8::Local<v8::Object> SafeBuiltins::GetPromise() const {
+  return Load("Promise", context_->v8_context());
 }
 
 }  //  namespace extensions

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,7 +32,7 @@ BluetoothLocalGattCharacteristic::Create(
   return characteristic->weak_ptr_factory_.GetWeakPtr();
 }
 
-}  // device
+}  // namespace device
 
 namespace bluez {
 
@@ -47,10 +47,9 @@ BluetoothLocalGattCharacteristicBlueZ::BluetoothLocalGattCharacteristicBlueZ(
       uuid_(uuid),
       properties_(properties),
       permissions_(permissions),
-      service_(service),
-      weak_ptr_factory_(this) {
-  VLOG(1) << "Creating local GATT characteristic with identifier: "
-          << GetIdentifier();
+      service_(service) {
+  DVLOG(1) << "Creating local GATT characteristic with identifier: "
+           << GetIdentifier();
   service->AddCharacteristic(base::WrapUnique(this));
 }
 

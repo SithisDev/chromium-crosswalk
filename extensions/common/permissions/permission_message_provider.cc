@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,4 +15,9 @@ const PermissionMessageProvider* PermissionMessageProvider::Get() {
   return &(ExtensionsClient::Get()->GetPermissionMessageProvider());
 }
 
+PermissionIDSet PermissionMessageProvider::GetManagementUIPermissionIDs(
+    const PermissionSet& permissions,
+    Manifest::Type extension_type) const {
+  return PermissionIDSet();
+}
 }  // namespace extensions

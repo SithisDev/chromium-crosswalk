@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,7 +21,6 @@ namespace test {
 FakeFidoDiscovery::FakeFidoDiscovery(FidoTransportProtocol transport,
                                      StartMode mode)
     : FidoDeviceDiscovery(transport), mode_(mode) {}
-FakeFidoDiscovery::~FakeFidoDiscovery() = default;
 
 void FakeFidoDiscovery::WaitForCallToStart() {
   wait_for_start_loop_.Run();
@@ -66,17 +65,10 @@ FakeFidoDiscovery* FakeFidoDiscoveryFactory::ForgeNextNfcDiscovery(
   return next_nfc_discovery_.get();
 }
 
-FakeFidoDiscovery* FakeFidoDiscoveryFactory::ForgeNextBleDiscovery(
-    FakeFidoDiscovery::StartMode mode) {
-  next_ble_discovery_ = std::make_unique<FakeFidoDiscovery>(
-      FidoTransportProtocol::kBluetoothLowEnergy, mode);
-  return next_ble_discovery_.get();
-}
-
 FakeFidoDiscovery* FakeFidoDiscoveryFactory::ForgeNextCableDiscovery(
     FakeFidoDiscovery::StartMode mode) {
-  next_cable_discovery_ = std::make_unique<FakeFidoDiscovery>(
-      FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy, mode);
+  next_cable_discovery_ =
+      std::make_unique<FakeFidoDiscovery>(FidoTransportProtocol::kHybrid, mode);
   return next_cable_discovery_.get();
 }
 
@@ -87,29 +79,23 @@ FakeFidoDiscovery* FakeFidoDiscoveryFactory::ForgeNextPlatformDiscovery(
   return next_platform_discovery_.get();
 }
 
-std::unique_ptr<FidoDiscoveryBase> FakeFidoDiscoveryFactory::Create(
-    FidoTransportProtocol transport,
-    ::service_manager::Connector* connector) {
+std::vector<std::unique_ptr<FidoDiscoveryBase>>
+FakeFidoDiscoveryFactory::Create(FidoTransportProtocol transport) {
   switch (transport) {
     case FidoTransportProtocol::kUsbHumanInterfaceDevice:
-      return std::move(next_hid_discovery_);
+      return SingleDiscovery(std::move(next_hid_discovery_));
     case FidoTransportProtocol::kNearFieldCommunication:
-      return std::move(next_nfc_discovery_);
+      return SingleDiscovery(std::move(next_nfc_discovery_));
     case FidoTransportProtocol::kBluetoothLowEnergy:
-      return std::move(next_ble_discovery_);
-    case FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy:
-      NOTREACHED() << "CaBLE should be handled by CreateCable().";
-      return nullptr;
+    case FidoTransportProtocol::kAndroidAccessory:
+      return {};
+    case FidoTransportProtocol::kHybrid:
+      return SingleDiscovery(std::move(next_cable_discovery_));
     case FidoTransportProtocol::kInternal:
-      return std::move(next_platform_discovery_);
+      return SingleDiscovery(std::move(next_platform_discovery_));
   }
   NOTREACHED();
-  return nullptr;
-}
-
-std::unique_ptr<FidoDiscoveryBase> FakeFidoDiscoveryFactory::CreateCable(
-    std::vector<CableDiscoveryData> cable_data) {
-  return std::move(next_cable_discovery_);
+  return {};
 }
 
 }  // namespace test

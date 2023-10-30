@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,7 +64,7 @@ void Socket::WriteData() {
 }
 
 void Socket::OnWriteComplete(int result) {
-  io_buffer_write_ = NULL;
+  io_buffer_write_.reset();
 
   WriteRequest& request = write_queue_.front();
 
@@ -103,8 +103,8 @@ void Socket::Listen(const std::string& address,
 }
 
 void Socket::Accept(AcceptCompletionCallback callback) {
-  std::move(callback).Run(net::ERR_FAILED, nullptr /* socket */, base::nullopt,
-                          mojo::ScopedDataPipeConsumerHandle(),
+  std::move(callback).Run(net::ERR_FAILED, mojo::NullRemote() /* socket */,
+                          absl::nullopt, mojo::ScopedDataPipeConsumerHandle(),
                           mojo::ScopedDataPipeProducerHandle());
 }
 
@@ -167,8 +167,8 @@ net::NetworkTrafficAnnotationTag Socket::GetNetworkTrafficAnnotationTag() {
             "uses this API. Other than that, this request will not be sent if "
             "the user does not install a Chrome App that uses the Socket API."
           chrome_policy {
-            ExtensionInstallBlacklist {
-              ExtensionInstallBlacklist: {
+            ExtensionInstallBlocklist {
+              ExtensionInstallBlocklist: {
                 entries: '*'
               }
             }

@@ -83,7 +83,9 @@ one object of this type or its variants as an argument of all functions that
 create a network request.
 
 ### Content of Annotation Tag
-Each network traffic annotation should specify the following items:
+Each network traffic annotation should specify the following items, as defined
+in the `NetworkTrafficAnnotation` message of
+`chrome/browser/privacy/traffic_annotation.proto`:
 * `uniqueـid`: A globally unique identifier that must stay unchanged while the
   network request carries the same semantic meaning. If the network request gets
   a new meaning, this ID needs to be changed. The purpose of this ID is to give
@@ -92,10 +94,10 @@ Each network traffic annotation should specify the following items:
   with a network request). IDs of one component should have a shared prefix so
   that sorting all NetworkTrafficAnnotations by unique_id groups those that
   belong to the same component together.
-* `TrafficSource`: These set of fields specify the location of annotation in
+* `source`: These set of fields specify the location of annotation in
   the source code. These fields are automatically set and do not need
   specification.
-* `TrafficSemantics`: These set of fields specify meta information about the
+* `semantics`: These set of fields specify meta information about the
   network request’s content and reason.
    * `sender`: What component triggers the request. The components should be
      human readable and don’t need to reflect the components/ directory. Avoid
@@ -117,13 +119,13 @@ Each network traffic annotation should specify the following items:
      the source code has hardcoded that the request goes to Google (e.g. for
      ZeroSuggest), use  `GOOGLE_OWNED_SERVICE`. If the request can go to other
      domains and is perceived as a part of a website rather than a native
-     browser feature, use `WEBSITE`. Use `LOCAL` if the reques is processed
+     browser feature, use `WEBSITE`. Use `LOCAL` if the request is processed
      locally and doesn't go to network, otherwise use `OTHER`. If `OTHER` is
      used, please add plain text description in `destination_other`
      field.
    * `destination_other`: Human readable description in case the destination
      points to `OTHER`.
-* `TrafficPolicy`: These set of fields specify the controls that a user may have
+* `policy`: These set of fields specify the controls that a user may have
   on disabling or limiting the network request and its trace.
    * `cookies_allowed`: Specifies if this request stores and uses cookies or
      not. Use values `YES` or `NO`.
@@ -146,7 +148,9 @@ Each network traffic annotation should specify the following items:
      description works everywhere!
    * `chrome_policy`: Policy configuration that disables or limits this network
      request. This would be a text serialized protobuf of any enterprise policy.
-     See policy list or  chrome_settings.proto for the full list of policies.
+     See policy list or
+     `out/Debug/gen/components/policy/proto/chrome_settings.proto` for the full
+     list of policies.
    * `policy_exception_justification`: If there is no policy to disable or limit
      this request, a justification can be presented here.
 * `comments`: If required, any human readable extra comments.
@@ -285,26 +289,28 @@ change list. These checks include:
 * All usages from Chrome have annotation.
 * Unique ids are unique, through history (even if an annotation gets deprecated,
   its unique id cannot be reused to keep the stats sound).
+* That the annotation appears in
+  `tools/traffic_annotation/summary/grouping.xml`. When adding a new annotation,
+  it must also be included in `grouping.xml` for reporting purposes (please
+  refer to the **Annotations Review**).
+
 
 ### Presubmit tests
-To perform tests prior to submit, one can use traffic_annotation_auditor binary.
-It runs over the whole repository and using a clang tool, checks if all above
-items are correct.
-Running the `traffic_annotation_auditor` requires having a COMPLETE compiled
-build directory and can be done with the following syntax.
-`tools/traffic_annotation/bin/[linux64/win32]/traffic_annotation_auditor
- --build-path=[out/Default]`
-The latest executable of `traffic_annotation_auditor` for supported platforms
-can be found in `tools/traffic_annotation/bin/[platform]`.
-As this test is slow, it is not a mandatory step of the presubmit checks on
-clients, and one can run it manually.
+To perform tests prior to submit, one can use the `auditor.py`
+script. It runs over the whole repository, extracts
+all the annotations from C++ code, and then checks them for correctness.
+
+Running the `auditor.py` script requires a build directory in which you just
+built the `chrome` target. You can invoke it like this:
+`vpython3 tools/traffic_annotation/scripts/auditor/auditor.py
+ --build-path=out/Default`
 
 ### Waterfall tests
 Two commit queue trybots test traffic annotations on changed files using the
 scripts in `tools/traffic_annotation/scripts`. To run these tests faster and to
-avoid spamming the commit queue if an unforeseen error has happed in downstream
-scripts or tools, they are run in error resilient mode, only on changed files,
-and using heuristics to decide which files to process.
+avoid spamming the commit queue if an unforeseen error has happened in
+downstream scripts or tools, they are run in error resilient mode, only on
+changed files, and using heuristics to decide which files to process.
 An FYI bot runs more detailed tests on the whole repository and with different
 switches, to make sure that the heuristics that trybot tests use and the limited
 scope of tests have not neglected any issues.
@@ -314,15 +320,22 @@ scope of tests have not neglected any issues.
 
 Network traffic annotations require review before landing in code and this is
 enforced through keeping a summary of annotations in
-`tools/traffic_annotation/summary/annotations.xml`.
-Once a new annotation is added, one is updated, or deleted, this file
-should also be updated. To update the file automatically, one can run
-`traffic_annotation_auditor` as specified in presubmit tests. But if it is not
-possible to do so (e.g., if you are changing the code from an unsupported
-platform or you don’t have a compiled build directory), the code can be
-submitted to the trybot and the test on trybot will tell you the required
-modifications.
+`tools/traffic_annotation/summary/annotations.xml`. Once a new annotation is added,
+one is updated, or deleted, this file should also be updated. To update the
+`annotations.xml` file automatically, one can run `auditor.py`
+as specified in presubmit tests. But if it is not possible to do so (e.g., if
+you are changing the code from an unsupported platform or you don’t have a
+compiled build directory), the code can be submitted to the trybot and the test
+on trybot will tell you the required modifications.
 
+In order to help make external reports easier, annotation unique ids should be
+mentioned in `tools/traffic_annotation/summary/grouping.xml`. Once a new
+annotation is added, or a preexisting annotation's unique id changes, this file
+should also be updated. When adding a new annotation, make sure it is placed
+within an appropriate group of `grouping.xml`. In the rare case that none of
+the groups are appropriate, one can create a new group for the annotation; the
+arrangement of annotations and group names in `grouping.xml` may be later
+updated by a technical writer to better coincide with the external reports.
 
 ## Partial Annotations (Advanced)
 
@@ -423,11 +436,12 @@ where after serialization, the annotation object is first created, then receives
 value. In these cases, `net::MutableNetworkTrafficAnnotationTag` and
 `net::MutablePartialNetworkTrafficAnnotationTag` can be used which do not have
 this limitation.
+
 Mutable annotations have a run time check before being converted into normal
 annotations to ensure their content is valid. Therefore it is suggested that
 they would be used only if there is no other way around it. Use cases are
-checked with the `traffic_annotation_auditor` to ensure proper initialization
-values for the mutable annotations.
+checked with `auditor.py` to ensure proper initialization values for the
+mutable annotations.
 
 
 ## Mojo Interfaces (Advanced)

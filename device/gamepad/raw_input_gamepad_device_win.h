@@ -1,9 +1,9 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef DEVICE_GAMEPAD_RAW_INPUT_GAMEPAD_DEVICE_WIN_
-#define DEVICE_GAMEPAD_RAW_INPUT_GAMEPAD_DEVICE_WIN_
+#ifndef DEVICE_GAMEPAD_RAW_INPUT_GAMEPAD_DEVICE_WIN_H_
+#define DEVICE_GAMEPAD_RAW_INPUT_GAMEPAD_DEVICE_WIN_H_
 
 #include <Unknwn.h>
 #include <WinDef.h>
@@ -15,15 +15,16 @@
 #include <memory>
 #include <vector>
 
+#include "base/memory/weak_ptr.h"
 #include "device/gamepad/abstract_haptic_gamepad.h"
-#include "device/gamepad/dualshock4_controller_win.h"
-#include "device/gamepad/hid_dll_functions_win.h"
-#include "device/gamepad/hid_haptic_gamepad_win.h"
 #include "device/gamepad/public/cpp/gamepad.h"
 
 namespace device {
 
-class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
+class HidHapticGamepad;
+class Dualshock4Controller;
+
+class RawInputGamepadDeviceWin final : public AbstractHapticGamepad {
  public:
   // Relevant usage IDs within the Generic Desktop usage page. RawInput gamepads
   // must have one of these usage IDs.
@@ -31,9 +32,9 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
   static const uint16_t kGenericDesktopGamePad = 0x05;
   static const uint16_t kGenericDesktopMultiAxisController = 0x08;
 
-  RawInputGamepadDeviceWin(HANDLE device_handle,
-                           int source_id,
-                           HidDllFunctionsWin* hid_functions);
+  RawInputGamepadDeviceWin(HANDLE device_handle, int source_id);
+  RawInputGamepadDeviceWin(const RawInputGamepadDeviceWin&) = delete;
+  RawInputGamepadDeviceWin& operator=(const RawInputGamepadDeviceWin&) = delete;
   ~RawInputGamepadDeviceWin() override;
 
   static bool IsGamepadUsageId(uint16_t usage);
@@ -57,8 +58,9 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
   // Read the current gamepad state into |pad|.
   void ReadPadState(Gamepad* pad) const;
 
-  // Set the vibration magnitude for the strong and weak vibration actuators.
-  void SetVibration(double strong_magnitude, double weak_magnitude) override;
+  // AbstractHapticGamepad implementation.
+  void SetVibration(mojom::GamepadEffectParametersPtr params) override;
+  base::WeakPtr<AbstractHapticGamepad> GetWeakPtr() override;
 
  private:
   // Axis state and capabilities for a single RawInput axis.
@@ -69,8 +71,12 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
     unsigned long bitmask;
   };
 
-  // Stop vibration and release held resources.
+  // AbstractHapticGamepad implementation.
   void DoShutdown() override;
+
+  // "Returns an open handle for the HID device, or an invalid handle if the
+  // device could not be opened."
+  base::win::ScopedHandle OpenHidHandle();
 
   // Fetch information about this device. Returns true if the device appears to
   // be a valid gamepad.
@@ -83,19 +89,21 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
   bool QueryDeviceName();
 
   // Fetch the product string. Returns false if none is available.
-  bool QueryProductString();
+  bool QueryProductString(base::win::ScopedHandle& hid_handle);
 
   // These methods fetch information about the capabilities of buttons and axes
   // on the device.
   bool QueryDeviceCapabilities();
   void QueryButtonCapabilities(uint16_t button_count);
-  void QueryNormalButtonCapabilities(HIDP_BUTTON_CAPS button_caps[],
-                                     uint16_t button_count,
-                                     std::vector<bool>* button_indices_used);
-  void QuerySpecialButtonCapabilities(HIDP_BUTTON_CAPS button_caps[],
-                                      uint16_t button_count,
-                                      std::vector<bool>* button_indices_used);
+  void QueryNormalButtonCapabilities(
+      base::span<const HIDP_BUTTON_CAPS> button_caps);
+  void QuerySpecialButtonCapabilities(
+      base::span<const HIDP_BUTTON_CAPS> button_caps);
   void QueryAxisCapabilities(uint16_t axis_count);
+
+  // Reads the value of the axis at index |axis_index| from |input| and scales
+  // to the range [-1.0,+1.0].
+  void UpdateAxisValue(size_t axis_index, RAWINPUT& input);
 
   // True if the device described by this object is a valid RawInput gamepad.
   bool is_valid_ = false;
@@ -109,9 +117,6 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
   // The last time the pad state was updated.
   int64_t last_update_timestamp_;
 
-  // Functions loaded from hid.dll. Not owned.
-  HidDllFunctionsWin* hid_functions_ = nullptr;
-
   uint16_t vendor_id_ = 0;
   uint16_t product_id_ = 0;
   uint16_t version_number_ = 0;
@@ -121,6 +126,15 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
 
   size_t buttons_length_ = 0;
   bool buttons_[Gamepad::kButtonsLengthCap];
+
+  // Keep track of which button indices are in use.
+  std::vector<bool> button_indices_used_;
+
+  // Bitfield to keep track of which axes indices are in use.
+  uint32_t axes_used_ = 0;
+  static_assert(Gamepad::kAxesLengthCap <=
+                    std::numeric_limits<uint32_t>::digits,
+                "axes_used_ is not large enough");
 
   // Mapping from "Special" usage index (defined by the kSpecialUsages table)
   // to an index within the |buttons_| array, or -1 if the special usage is not
@@ -136,12 +150,14 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
   PHIDP_PREPARSED_DATA preparsed_data_ = nullptr;
 
   // Dualshock4-specific functionality (e.g., haptics), if available.
-  std::unique_ptr<Dualshock4ControllerWin> dualshock4_;
+  std::unique_ptr<Dualshock4Controller> dualshock4_;
 
   // A controller that uses a HID output report for vibration effects.
-  std::unique_ptr<HidHapticGamepadWin> hid_haptics_;
+  std::unique_ptr<HidHapticGamepad> hid_haptics_;
+
+  base::WeakPtrFactory<RawInputGamepadDeviceWin> weak_factory_{this};
 };
 
 }  // namespace device
 
-#endif  // DEVICE_GAMEPAD_RAW_INPUT_GAMEPAD_DEVICE_WIN_
+#endif  // DEVICE_GAMEPAD_RAW_INPUT_GAMEPAD_DEVICE_WIN_H_

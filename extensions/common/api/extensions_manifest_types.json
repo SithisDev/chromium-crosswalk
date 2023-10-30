@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,7 +91,7 @@
             "type": "string"
           },
           "chrome_style": {
-            "description": "If <code>true</code>, a Chrome user agent stylesheet will be applied to your options page. The default value is <code>false</code>, but we recommend you enable it for a consistent UI with Chrome.",
+            "description": "If <code>true</code>, a Chrome user agent stylesheet will be applied to your options page. The default value is <code>false</code>. We do not recommend you enable it as it no longer results in a consistent UI with Chrome. This option will be removed in Manifest V3.",
             "optional": true,
             "type": "boolean"
           },

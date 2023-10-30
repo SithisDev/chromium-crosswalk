@@ -1,21 +1,22 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/fido/win/discovery.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "device/fido/win/webauthn_api.h"
 
 namespace device {
 
 WinWebAuthnApiAuthenticatorDiscovery::WinWebAuthnApiAuthenticatorDiscovery(
-    HWND parent_window)
-    : FidoDiscoveryBase(FidoTransportProtocol::kUsbHumanInterfaceDevice),
+    HWND parent_window,
+    WinWebAuthnApi* api)
+    : FidoDiscoveryBase(FidoTransportProtocol::kInternal),
       parent_window_(parent_window),
-      weak_factory_(this) {}
+      api_(api) {}
 
 WinWebAuthnApiAuthenticatorDiscovery::~WinWebAuthnApiAuthenticatorDiscovery() =
     default;
@@ -25,13 +26,6 @@ void WinWebAuthnApiAuthenticatorDiscovery::Start() {
   if (!observer()) {
     return;
   }
-
-  if (!WinWebAuthnApi::GetDefault()->IsAvailable()) {
-    observer()->DiscoveryStarted(this, false /* discovery failed */);
-    return;
-  }
-
-  observer()->DiscoveryStarted(this, true /* success */);
 
   // Start() is currently invoked synchronously in the
   // FidoRequestHandler ctor. Invoke AddAuthenticator() asynchronously
@@ -44,13 +38,13 @@ void WinWebAuthnApiAuthenticatorDiscovery::Start() {
 }
 
 void WinWebAuthnApiAuthenticatorDiscovery::AddAuthenticator() {
-  if (!WinWebAuthnApi::GetDefault()->IsAvailable()) {
-    NOTREACHED();
+  if (!api_->IsAvailable()) {
+    observer()->DiscoveryStarted(this, /*success=*/false);
     return;
   }
   authenticator_ =
-      std::make_unique<WinWebAuthnApiAuthenticator>(parent_window_);
-  observer()->AuthenticatorAdded(this, authenticator_.get());
+      std::make_unique<WinWebAuthnApiAuthenticator>(parent_window_, api_);
+  observer()->DiscoveryStarted(this, /*success=*/true, {authenticator_.get()});
 }
 
 }  // namespace device

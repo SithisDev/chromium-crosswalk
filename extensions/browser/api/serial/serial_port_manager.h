@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,15 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/api/api_resource_manager.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/common/api/serial.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/serial.mojom.h"
 
 namespace content {
@@ -29,23 +33,36 @@ namespace api {
 // Per-browser-context dispatcher for events on serial connections.
 class SerialPortManager : public BrowserContextKeyedAPI {
  public:
+  using OpenPortCallback =
+      base::OnceCallback<void(mojo::PendingRemote<device::mojom::SerialPort>)>;
+
   static SerialPortManager* Get(content::BrowserContext* context);
 
   // BrowserContextKeyedAPI implementation.
   static BrowserContextKeyedAPIFactory<SerialPortManager>* GetFactoryInstance();
 
   explicit SerialPortManager(content::BrowserContext* context);
+
+  SerialPortManager(const SerialPortManager&) = delete;
+  SerialPortManager& operator=(const SerialPortManager&) = delete;
+
   ~SerialPortManager() override;
 
   void GetDevices(
       device::mojom::SerialPortManager::GetDevicesCallback callback);
-
-  void GetPort(const std::string& path,
-               device::mojom::SerialPortRequest request);
+  void OpenPort(const std::string& path,
+                device::mojom::SerialConnectionOptionsPtr options,
+                mojo::PendingRemote<device::mojom::SerialPortClient> client,
+                OpenPortCallback callback);
 
   // Start the poilling process for the connection.
   void StartConnectionPolling(const std::string& extension_id,
                               int connection_id);
+
+  // Allows tests to override how this class binds SerialPortManager receivers.
+  using Binder = base::RepeatingCallback<void(
+      mojo::PendingReceiver<device::mojom::SerialPortManager>)>;
+  static void OverrideBinderForTesting(Binder binder);
 
  private:
   typedef ApiResourceManager<SerialConnection>::ApiResourceData ConnectionData;
@@ -61,8 +78,7 @@ class SerialPortManager : public BrowserContextKeyedAPI {
     ReceiveParams(const ReceiveParams& other);
     ~ReceiveParams();
 
-    content::BrowserThread::ID thread_id;
-    void* browser_context_id;
+    raw_ptr<void> browser_context_id;
     std::string extension_id;
     scoped_refptr<ConnectionData> connections;
     int connection_id;
@@ -71,29 +87,25 @@ class SerialPortManager : public BrowserContextKeyedAPI {
                                    std::vector<uint8_t> data,
                                    serial::ReceiveError error);
 
-  static void PostEvent(const ReceiveParams& params,
-                        std::unique_ptr<extensions::Event> event);
-
-  static void DispatchEvent(void* browser_context_id,
-                            const std::string& extension_id,
+  static void DispatchEvent(const ReceiveParams& params,
                             std::unique_ptr<extensions::Event> event);
 
   void EnsureConnection();
   void OnGotDevicesToGetPort(
       const std::string& path,
-      device::mojom::SerialPortRequest request,
+      device::mojom::SerialConnectionOptionsPtr options,
+      mojo::PendingRemote<device::mojom::SerialPortClient> client,
+      OpenPortCallback callback,
       std::vector<device::mojom::SerialPortInfoPtr> devices);
   void OnPortManagerConnectionError();
 
-  device::mojom::SerialPortManagerPtr port_manager_;
+  mojo::Remote<device::mojom::SerialPortManager> port_manager_;
   content::BrowserThread::ID thread_id_;
   scoped_refptr<ConnectionData> connections_;
-  content::BrowserContext* const context_;
+  const raw_ptr<content::BrowserContext> context_;
 
   THREAD_CHECKER(thread_checker_);
   base::WeakPtrFactory<SerialPortManager> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SerialPortManager);
 };
 
 }  // namespace api

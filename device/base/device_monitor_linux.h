@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/files/file_descriptor_watcher_posix.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "device/base/device_base_export.h"
@@ -23,7 +22,7 @@ namespace device {
 // connected/disconnected devices. This class is *NOT* thread-safe.
 class DEVICE_BASE_EXPORT DeviceMonitorLinux {
  public:
-  typedef base::Callback<void(udev_device* device)> EnumerateCallback;
+  typedef base::RepeatingCallback<void(udev_device* device)> EnumerateCallback;
 
   class Observer {
    public:
@@ -33,6 +32,9 @@ class DEVICE_BASE_EXPORT DeviceMonitorLinux {
   };
 
   DeviceMonitorLinux();
+
+  DeviceMonitorLinux(const DeviceMonitorLinux&) = delete;
+  DeviceMonitorLinux& operator=(const DeviceMonitorLinux&) = delete;
 
   static DeviceMonitorLinux* GetInstance();
 
@@ -57,8 +59,6 @@ class DEVICE_BASE_EXPORT DeviceMonitorLinux {
   base::ObserverList<Observer, true>::Unchecked observers_;
 
   base::ThreadChecker thread_checker_;
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceMonitorLinux);
 };
 
 }  // namespace device

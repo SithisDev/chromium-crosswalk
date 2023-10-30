@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,11 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/api/api_resource.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/hid.mojom.h"
 
 namespace extensions {
@@ -20,8 +21,13 @@ class HidConnectionResource : public ApiResource {
   static const content::BrowserThread::ID kThreadId =
       content::BrowserThread::UI;
 
-  HidConnectionResource(const std::string& owner_extension_id,
-                        device::mojom::HidConnectionPtr connection);
+  HidConnectionResource(
+      const std::string& owner_extension_id,
+      mojo::PendingRemote<device::mojom::HidConnection> connection);
+
+  HidConnectionResource(const HidConnectionResource&) = delete;
+  HidConnectionResource& operator=(const HidConnectionResource&) = delete;
+
   ~HidConnectionResource() override;
 
   device::mojom::HidConnection* connection() const { return connection_.get(); }
@@ -31,9 +37,7 @@ class HidConnectionResource : public ApiResource {
   static const char* service_name() { return "HidConnectionResourceManager"; }
 
  private:
-  device::mojom::HidConnectionPtr connection_;
-
-  DISALLOW_COPY_AND_ASSIGN(HidConnectionResource);
+  mojo::Remote<device::mojom::HidConnection> connection_;
 };
 
 }  // namespace extensions

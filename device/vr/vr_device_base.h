@@ -1,43 +1,44 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef DEVICE_VR_VR_DEVICE_BASE_H_
 #define DEVICE_VR_VR_DEVICE_BASE_H_
 
-#include <memory>
-#include <vector>
-
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/component_export.h"
+#include "build/build_config.h"
+#include "device/vr/public/mojom/isolated_xr_service.mojom.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "device/vr/vr_device.h"
-#include "device/vr/vr_export.h"
-#include "mojo/public/cpp/bindings/binding.h"
-#include "ui/display/display.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_associated_remote.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+
+struct CHROME_LUID;
 
 namespace device {
 
 // Represents one of the platform's VR devices. Owned by the respective
 // VRDeviceProvider.
-// TODO(mthiesse, crbug.com/769373): Remove DEVICE_VR_EXPORT.
-class DEVICE_VR_EXPORT VRDeviceBase : public mojom::XRRuntime {
+class COMPONENT_EXPORT(DEVICE_VR_BASE) VRDeviceBase : public mojom::XRRuntime {
  public:
   explicit VRDeviceBase(mojom::XRDeviceId id);
+
+  VRDeviceBase(const VRDeviceBase&) = delete;
+  VRDeviceBase& operator=(const VRDeviceBase&) = delete;
+
   ~VRDeviceBase() override;
 
-  // VRDevice Implementation
+  // XRRuntime implementation
   void ListenToDeviceChanges(
-      mojom::XRRuntimeEventListenerAssociatedPtrInfo listener,
-      mojom::XRRuntime::ListenToDeviceChangesCallback callback) final;
-  void SetListeningForActivate(bool is_listening) override;
-  void EnsureInitialized(EnsureInitializedCallback callback) override;
-  void SetInlinePosesEnabled(bool enable) override;
+      mojo::PendingAssociatedRemote<mojom::XRRuntimeEventListener> listener)
+      final;
+  void ShutdownSession(mojom::XRRuntime::ShutdownSessionCallback) override;
 
-  virtual void RequestHitTest(
-      mojom::XRRayPtr ray,
-      mojom::XREnvironmentIntegrationProvider::RequestHitTestCallback callback);
   device::mojom::XRDeviceId GetId() const;
+  device::mojom::XRDeviceDataPtr GetDeviceData() const;
 
   bool HasExclusiveSession();
 
@@ -45,10 +46,8 @@ class DEVICE_VR_EXPORT VRDeviceBase : public mojom::XRRuntime {
   virtual void PauseTracking();
   virtual void ResumeTracking();
 
-  mojom::VRDisplayInfoPtr GetVRDisplayInfo();
-
   // Used by providers to bind devices.
-  mojom::XRRuntimePtr BindXRRuntimePtr();
+  mojo::PendingRemote<mojom::XRRuntime> BindXRRuntime();
 
   // TODO(mthiesse): The browser should handle browser-side exiting of
   // presentation before device/ is even aware presentation is being exited.
@@ -62,27 +61,24 @@ class DEVICE_VR_EXPORT VRDeviceBase : public mojom::XRRuntime {
   // with an OnExitPresent when the device stops presenting.
   void OnStartPresenting();
   bool IsPresenting() { return presenting_; }  // Exposed for test.
-  void SetVRDisplayInfo(mojom::VRDisplayInfoPtr display_info);
-  void OnActivate(mojom::VRDisplayEventReason reason,
-                  base::Callback<void(bool)> on_handled);
-
-  mojom::VRDisplayInfoPtr display_info_;
-
-  bool inline_poses_enabled_ = true;
+  void OnVisibilityStateChanged(mojom::XRVisibilityState visibility_state);
+  void SetArBlendModeSupported(bool is_ar_blend_mode_supported);
+  void SetSupportedFeatures(
+      const std::vector<mojom::XRSessionFeature>& features);
+#if BUILDFLAG(IS_WIN)
+  void SetLuid(const CHROME_LUID& luid);
+#endif
 
  private:
-  // TODO(https://crbug.com/842227): Rename methods to HandleOnXXX
-  virtual void OnListeningForActivate(bool listening);
-
-  mojom::XRRuntimeEventListenerAssociatedPtr listener_;
+  mojo::AssociatedRemote<mojom::XRRuntimeEventListener> listener_;
 
   bool presenting_ = false;
 
   device::mojom::XRDeviceId id_;
 
-  mojo::Binding<mojom::XRRuntime> runtime_binding_;
+  device::mojom::XRDeviceData device_data_;
 
-  DISALLOW_COPY_AND_ASSIGN(VRDeviceBase);
+  mojo::Receiver<mojom::XRRuntime> runtime_receiver_{this};
 };
 
 }  // namespace device

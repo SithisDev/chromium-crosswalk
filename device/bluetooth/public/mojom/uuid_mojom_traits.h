@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 #include <string>
 
 #include "device/bluetooth/public/cpp/bluetooth_uuid.h"
-#include "device/bluetooth/public/mojom/uuid.mojom.h"
+#include "device/bluetooth/public/mojom/uuid.mojom-shared.h"
+#include "mojo/public/cpp/bindings/struct_traits.h"
 
 namespace mojo {
 

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,32 +6,38 @@
 
 #include <utility>
 
-#include "base/optional.h"
+#include "base/json/json_reader.h"
+#include "base/strings/stringprintf.h"
 #include "components/crx_file/id_util.h"
+#include "extensions/common/api/content_scripts.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace extensions {
+
+constexpr char ExtensionBuilder::kServiceWorkerScriptFile[];
 
 struct ExtensionBuilder::ManifestData {
   Type type;
   std::string name;
   std::vector<std::string> permissions;
-  base::Optional<ActionType> action;
-  base::Optional<BackgroundPage> background_page;
-  base::Optional<std::string> version;
+  absl::optional<ActionInfo::Type> action;
+  absl::optional<BackgroundContext> background_context;
+  absl::optional<std::string> version;
+  absl::optional<int> manifest_version;
 
   // A ContentScriptEntry includes a string name, and a vector of string
   // match patterns.
   using ContentScriptEntry = std::pair<std::string, std::vector<std::string>>;
   std::vector<ContentScriptEntry> content_scripts;
 
-  base::Optional<base::Value> extra;
+  absl::optional<base::Value> extra;
 
   std::unique_ptr<base::DictionaryValue> GetValue() const {
     DictionaryBuilder manifest;
     manifest.Set(manifest_keys::kName, name)
-        .Set(manifest_keys::kManifestVersion, 2)
+        .Set(manifest_keys::kManifestVersion, manifest_version.value_or(2))
         .Set(manifest_keys::kVersion, version.value_or("0.1"))
         .Set(manifest_keys::kDescription, "some description");
 
@@ -56,31 +62,42 @@ struct ExtensionBuilder::ManifestData {
     }
 
     if (action) {
+      // TODO(devlin): Update this when action_info_test_util.[h|cc] is moved to
+      // //extensions.
       const char* action_key = nullptr;
       switch (*action) {
-        case ActionType::PAGE_ACTION:
+        case ActionInfo::TYPE_PAGE:
           action_key = manifest_keys::kPageAction;
           break;
-        case ActionType::BROWSER_ACTION:
+        case ActionInfo::TYPE_BROWSER:
           action_key = manifest_keys::kBrowserAction;
+          break;
+        case ActionInfo::TYPE_ACTION:
+          action_key = manifest_keys::kAction;
           break;
       }
       manifest.Set(action_key, std::make_unique<base::DictionaryValue>());
     }
 
-    if (background_page) {
+    if (background_context) {
       DictionaryBuilder background;
-      background.Set("page", "background_page.html");
-      bool persistent = false;
-      switch (*background_page) {
-        case BackgroundPage::PERSISTENT:
+      absl::optional<bool> persistent;
+      switch (*background_context) {
+        case BackgroundContext::BACKGROUND_PAGE:
+          background.Set("page", "background_page.html");
           persistent = true;
           break;
-        case BackgroundPage::EVENT:
+        case BackgroundContext::EVENT_PAGE:
+          background.Set("page", "background_page.html");
           persistent = false;
           break;
+        case BackgroundContext::SERVICE_WORKER:
+          background.Set("service_worker", kServiceWorkerScriptFile);
+          break;
       }
-      background.Set("persistent", persistent);
+      if (persistent) {
+        background.Set("persistent", *persistent);
+      }
       manifest.Set("background", background.Build());
     }
 
@@ -88,16 +105,17 @@ struct ExtensionBuilder::ManifestData {
       ListBuilder scripts_value;
       for (const auto& script : content_scripts) {
         ListBuilder matches;
-        for (const auto& match : script.second)
-          matches.Append(match);
+        matches.Append(script.second.begin(), script.second.end());
         scripts_value.Append(
             DictionaryBuilder()
-                .Set(manifest_keys::kJs,
+                .Set(api::content_scripts::ContentScript::kJs,
                      ListBuilder().Append(script.first).Build())
-                .Set(manifest_keys::kMatches, matches.Build())
+                .Set(api::content_scripts::ContentScript::kMatches,
+                     matches.Build())
                 .Build());
       }
-      manifest.Set(manifest_keys::kContentScripts, scripts_value.Build());
+      manifest.Set(api::content_scripts::ManifestKeys::kContentScripts,
+                   scripts_value.Build());
     }
 
     std::unique_ptr<base::DictionaryValue> result = manifest.Build();
@@ -118,7 +136,8 @@ struct ExtensionBuilder::ManifestData {
 };
 
 ExtensionBuilder::ExtensionBuilder()
-    : location_(Manifest::UNPACKED), flags_(Extension::NO_FLAGS) {}
+    : location_(mojom::ManifestLocation::kUnpacked),
+      flags_(Extension::NO_FLAGS) {}
 
 ExtensionBuilder::ExtensionBuilder(const std::string& name, Type type)
     : ExtensionBuilder() {
@@ -151,6 +170,13 @@ scoped_refptr<const Extension> ExtensionBuilder::Build() {
   return extension;
 }
 
+base::Value ExtensionBuilder::BuildManifest() {
+  CHECK(manifest_data_ || manifest_value_);
+  return manifest_data_
+             ? base::Value::FromUniquePtrValue(manifest_data_->GetValue())
+             : manifest_value_->Clone();
+}
+
 ExtensionBuilder& ExtensionBuilder::AddPermission(
     const std::string& permission) {
   CHECK(manifest_data_);
@@ -166,16 +192,16 @@ ExtensionBuilder& ExtensionBuilder::AddPermissions(
   return *this;
 }
 
-ExtensionBuilder& ExtensionBuilder::SetAction(ActionType action) {
+ExtensionBuilder& ExtensionBuilder::SetAction(ActionInfo::Type type) {
   CHECK(manifest_data_);
-  manifest_data_->action = action;
+  manifest_data_->action = type;
   return *this;
 }
 
-ExtensionBuilder& ExtensionBuilder::SetBackgroundPage(
-    BackgroundPage background_page) {
+ExtensionBuilder& ExtensionBuilder::SetBackgroundContext(
+    BackgroundContext background_context) {
   CHECK(manifest_data_);
-  manifest_data_->background_page = background_page;
+  manifest_data_->background_context = background_context;
   return *this;
 }
 
@@ -193,12 +219,29 @@ ExtensionBuilder& ExtensionBuilder::SetVersion(const std::string& version) {
   return *this;
 }
 
+ExtensionBuilder& ExtensionBuilder::SetManifestVersion(int manifest_version) {
+  CHECK(manifest_data_);
+  manifest_data_->manifest_version = manifest_version;
+  return *this;
+}
+
+ExtensionBuilder& ExtensionBuilder::AddJSON(base::StringPiece json) {
+  CHECK(manifest_data_);
+  std::string wrapped_json = base::StringPrintf("{%s}", json.data());
+  auto parsed = base::JSONReader::ReadAndReturnValueWithError(wrapped_json);
+  CHECK(parsed.has_value())
+      << "Failed to parse json for extension '" << manifest_data_->name
+      << "':" << parsed.error().message;
+  return MergeManifest(*parsed);
+}
+
 ExtensionBuilder& ExtensionBuilder::SetPath(const base::FilePath& path) {
   path_ = path;
   return *this;
 }
 
-ExtensionBuilder& ExtensionBuilder::SetLocation(Manifest::Location location) {
+ExtensionBuilder& ExtensionBuilder::SetLocation(
+    mojom::ManifestLocation location) {
   location_ = location;
   return *this;
 }
@@ -210,16 +253,19 @@ ExtensionBuilder& ExtensionBuilder::SetManifest(
   return *this;
 }
 
-ExtensionBuilder& ExtensionBuilder::MergeManifest(
-    std::unique_ptr<base::DictionaryValue> manifest) {
+ExtensionBuilder& ExtensionBuilder::MergeManifest(const base::Value& to_merge) {
+  CHECK(to_merge.is_dict());
   if (manifest_data_) {
-    base::DictionaryValue* extra_dict = nullptr;
-    manifest_data_->get_extra()->GetAsDictionary(&extra_dict);
-    extra_dict->MergeDictionary(manifest.get());
+    manifest_data_->get_extra()->MergeDictionary(&to_merge);
   } else {
-    manifest_value_->MergeDictionary(manifest.get());
+    manifest_value_->MergeDictionary(&to_merge);
   }
   return *this;
+}
+
+ExtensionBuilder& ExtensionBuilder::MergeManifest(
+    std::unique_ptr<base::DictionaryValue> manifest) {
+  return MergeManifest(*manifest);
 }
 
 ExtensionBuilder& ExtensionBuilder::AddFlags(int init_from_value_flags) {

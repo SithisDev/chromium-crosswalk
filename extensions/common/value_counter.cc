@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,15 @@
 namespace extensions {
 
 struct ValueCounter::Entry {
-  explicit Entry(std::unique_ptr<base::Value> value)
-      : value(std::move(value)), count(1) {}
+  explicit Entry(base::Value value) : value(std::move(value)), count(1) {}
 
-  std::unique_ptr<base::Value> value;
+  Entry(Entry&) = delete;
+  Entry& operator=(Entry&) = delete;
+
+  Entry(Entry&&) = default;
+  Entry& operator=(Entry&&) = default;
+
+  base::Value value;
   int count;
 };
 
@@ -27,20 +32,20 @@ ValueCounter::~ValueCounter() {
 }
 
 bool ValueCounter::Add(const base::Value& value) {
-  for (const auto& entry : entries_) {
-    if (entry->value->Equals(&value)) {
-      ++entry->count;
+  for (auto& entry : entries_) {
+    if (entry.value == value) {
+      ++entry.count;
       return false;
     }
   }
-  entries_.push_back(std::make_unique<Entry>(value.CreateDeepCopy()));
+  entries_.emplace_back(value.Clone());
   return true;
 }
 
 bool ValueCounter::Remove(const base::Value& value) {
   for (auto it = entries_.begin(); it != entries_.end(); ++it) {
-    if ((*it)->value->Equals(&value)) {
-      if (--(*it)->count == 0) {
+    if (it->value == value) {
+      if (--it->count == 0) {
         std::swap(*it, entries_.back());
         entries_.pop_back();
         return true;  // Removed the last entry.

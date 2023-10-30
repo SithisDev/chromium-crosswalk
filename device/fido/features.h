@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,30 +7,57 @@
 
 #include "base/component_export.h"
 #include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
+
+namespace url {
+class Origin;
+}
 
 namespace device {
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
+// Controls whether on Windows, U2F/CTAP2 requests are forwarded to the
+// native WebAuthentication API, where available.
 COMPONENT_EXPORT(DEVICE_FIDO)
 extern const base::Feature kWebAuthUseNativeWinApi;
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
-// Enable support for PIN-based user-verification.
+// Support the caBLE extension in assertion requests from any origin.
 COMPONENT_EXPORT(DEVICE_FIDO)
-extern const base::Feature kWebAuthPINSupport;
+extern const base::Feature kWebAuthCableExtensionAnywhere;
 
-// Enable support for resident keys.
+#if BUILDFLAG(IS_CHROMEOS)
+// Enable a ChromeOS platform authenticator
 COMPONENT_EXPORT(DEVICE_FIDO)
-extern const base::Feature kWebAuthResidentKeys;
+extern const base::Feature kWebAuthCrosPlatformAuthenticator;
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
-// Enable biometric enrollment in the security keys settings UI.
 COMPONENT_EXPORT(DEVICE_FIDO)
-extern const base::Feature kWebAuthBiometricEnrollment;
-//
-// Enable credential management in the security keys settings UI.
+extern const base::Feature kU2fPermissionPrompt;
+
+// Feature flag for the Google-internal
+// `WebAuthenticationAllowGoogleCorpRemoteRequestProxying` enterprise policy.
 COMPONENT_EXPORT(DEVICE_FIDO)
-extern const base::Feature kWebAuthCredentialManagement;
+extern const base::Feature kWebAuthnGoogleCorpRemoteDesktopClientPrivilege;
+
+// Enable some experimental UI changes
+COMPONENT_EXPORT(DEVICE_FIDO)
+extern const base::Feature kWebAuthPasskeysUI;
+
+// Reshuffle WebAuthn request UI to put account selection for discoverable
+// credentials on platform authenticators first, where applicable.
+COMPONENT_EXPORT(DEVICE_FIDO)
+extern const base::Feature kWebAuthnNewDiscoverableCredentialsUi;
+
+// Don't send empty displayName values to security keys when creating
+// credentials.
+extern const base::Feature kWebAuthnNoEmptyDisplayNameCBOR;
+
+// Include an indication for non-discoverable makeCredential calls in caBLE QR
+// codes.
+extern const base::Feature kWebAuthnNonDiscoverableMakeCredentialQRFlag;
 
 }  // namespace device
 

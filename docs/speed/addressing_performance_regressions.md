@@ -7,15 +7,18 @@ and assigned a bug to you! What should you do? Read on...
 
 ## About our performance tests
 
-The [chromium.perf waterfall](perf_waterfall.md) is a continuous build which
-runs performance tests on dozens of devices across Windows, Mac, Linux, and
-Android Chrome and WebView. Often, a performance regression only affects a
-certain type of hardware or a certain operating system, which may be different
-than what you tested locally before landing your CL.
+The [chrome.perf waterfall](perf_waterfall.md) is a continuous build which
+runs performance tests on dozens of devices across Android, Windows,
+Mac, and Linux hardware; see [list of platforms](perf_lab_platforms.md).
+Often, a performance regression only affects a certain type of hardware or a
+certain operating system, which may be different than what you tested locally
+before landing your CL.
 
 Each test has an owner, named in
 [this spreadsheet](https://docs.google.com/spreadsheets/d/1xaAo0_SU3iDfGdqDJZX_jRV0QtkufwHUKH3kQKF3YQs/edit#gid=0),
 who you can cc on a performance bug if you have questions.
+
+(Googlers only) For broad overview of various performance tools available for Chrome and where lab perf fits in, see [go/chrome-performance-how](http://go/chrome-performance-how).
 
 ## Understanding the bisect results
 
@@ -32,7 +35,7 @@ The bisect service spits out a comment on the bug that looks like this:
 > **Roll src/third_party/depot_tools/ 0f7b2007a..fd4ad2416 (1 commit)**
 > by depot-tools-roller@chromium.org<br>
 > https://chromium.googlesource.com/chromium/src/+/14fc99e3fd3614096caab7c7a8362edde8327a5d
-> 
+>
 > Understanding performance regressions:<br>
 > &nbsp;&nbsp;http://g.co/ChromePerformanceRegressions
 
@@ -89,10 +92,14 @@ making the regression more likely to reproduce. From the Pinpoint Job page,
 clicking the `+` button in the bottom-right corner to test a patch with the
 current configuration.
 
-You can also run locally:
+You can also run locally (note that running this successfully on Android
+requires the device to be rooted):
 ```
 src$ tools/perf/run_benchmark benchmark_name --story-filter story_name
 ```
+
+If the run crashes, it is often helpful to add the `-v` flag in order to better
+understand what is causing the crash.
 
 ### Can I get a trace?
 
@@ -121,13 +128,13 @@ to learn how to use traces to debug performance issues.
 
 ### Are there debugging tips specific to certain benchmarks?
 
-* [Memory](https://chromium.googlesource.com/chromium/src/+/master/docs/memory-infra/memory_benchmarks.md)
+* [Memory](https://chromium.googlesource.com/chromium/src/+/main/docs/memory-infra/memory_benchmarks.md)
 * [Android binary size](apk_size_regressions.md)
 * [Micro-benchmarks](microbenchmark_regressions.md)
 
 ### How do I profile?
 
-Here is the [documentation on CPU Profiling Chrome](https://chromium.googlesource.com/chromium/src/+/master/docs/profiling.md)
+Here is the [documentation on CPU Profiling Chrome](https://chromium.googlesource.com/chromium/src/+/main/docs/profiling.md)
 
 ## If you don't believe your CL could be the cause
 

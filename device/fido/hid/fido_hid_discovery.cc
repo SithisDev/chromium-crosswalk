@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,34 +7,64 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
+#include "base/no_destructor.h"
+#include "components/device_event_log/device_event_log.h"
 #include "device/fido/hid/fido_hid_device.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-#include "services/device/public/mojom/constants.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace device {
 
-FidoHidDiscovery::FidoHidDiscovery(::service_manager::Connector* connector)
+namespace {
+
+// Checks that the supported report sizes of |device| are sufficient for at
+// least one byte of non-header data per report and not larger than our maximum
+// size.
+bool ReportSizesSufficient(const device::mojom::HidDeviceInfo& device) {
+  return device.max_input_report_size > kHidInitPacketHeaderSize &&
+         device.max_input_report_size <= kHidMaxPacketSize &&
+         device.max_output_report_size > kHidInitPacketHeaderSize &&
+         device.max_output_report_size <= kHidMaxPacketSize;
+}
+
+FidoHidDiscovery::HidManagerBinder& GetHidManagerBinder() {
+  static base::NoDestructor<FidoHidDiscovery::HidManagerBinder> binder;
+  return *binder;
+}
+
+}  // namespace
+
+bool operator==(const VidPid& lhs, const VidPid& rhs) {
+  return lhs.vid == rhs.vid && lhs.pid == rhs.pid;
+}
+
+bool operator<(const VidPid& lhs, const VidPid& rhs) {
+  return lhs.vid < rhs.vid || (lhs.vid == rhs.vid && lhs.pid < rhs.pid);
+}
+
+FidoHidDiscovery::FidoHidDiscovery(base::flat_set<VidPid> ignore_list)
     : FidoDeviceDiscovery(FidoTransportProtocol::kUsbHumanInterfaceDevice),
-      connector_(connector),
-      binding_(this),
-      weak_factory_(this) {
-  // TODO(piperc@): Give this constant a name.
-  filter_.SetUsagePage(0xf1d0);
+      ignore_list_(std::move(ignore_list)) {
+  constexpr uint16_t kFidoUsagePage = 0xf1d0;
+  filter_.SetUsagePage(kFidoUsagePage);
 }
 
 FidoHidDiscovery::~FidoHidDiscovery() = default;
 
-void FidoHidDiscovery::StartInternal() {
-  DCHECK(connector_);
-  connector_->BindInterface(device::mojom::kServiceName,
-                            mojo::MakeRequest(&hid_manager_));
-  device::mojom::HidManagerClientAssociatedPtrInfo client;
-  binding_.Bind(mojo::MakeRequest(&client));
+// static
+void FidoHidDiscovery::SetHidManagerBinder(HidManagerBinder binder) {
+  GetHidManagerBinder() = std::move(binder);
+}
 
+void FidoHidDiscovery::StartInternal() {
+  const auto& binder = GetHidManagerBinder();
+  if (!binder)
+    return;
+
+  binder.Run(hid_manager_.BindNewPipeAndPassReceiver());
   hid_manager_->GetDevicesAndSetClient(
-      std::move(client), base::BindOnce(&FidoHidDiscovery::OnGetDevices,
-                                        weak_factory_.GetWeakPtr()));
+      receiver_.BindNewEndpointAndPassRemote(),
+      base::BindOnce(&FidoHidDiscovery::OnGetDevices,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void FidoHidDiscovery::DeviceAdded(
@@ -45,18 +75,19 @@ void FidoHidDiscovery::DeviceAdded(
       kHidInitPacketHeaderSize >= kHidContinuationPacketHeaderSize,
       "init header is expected to be larger than continuation header");
 
-  // Ignore non-U2F devices.
-  if (filter_.Matches(*device_info) &&
-      // Check that the supported report sizes are sufficient for at least one
-      // byte of non-header data per report and not larger than our maximum
-      // size.
-      device_info->max_input_report_size > kHidInitPacketHeaderSize &&
-      device_info->max_input_report_size <= kHidMaxPacketSize &&
-      device_info->max_output_report_size > kHidInitPacketHeaderSize &&
-      device_info->max_output_report_size <= kHidMaxPacketSize) {
-    AddDevice(std::make_unique<FidoHidDevice>(std::move(device_info),
-                                              hid_manager_.get()));
+  if (!filter_.Matches(*device_info) || !ReportSizesSufficient(*device_info)) {
+    return;
   }
+
+  const VidPid vid_pid{device_info->vendor_id, device_info->product_id};
+  if (base::Contains(ignore_list_, vid_pid)) {
+    FIDO_LOG(EVENT) << "Ignoring HID device " << vid_pid.vid << ":"
+                    << vid_pid.pid;
+    return;
+  }
+
+  AddDevice(std::make_unique<FidoHidDevice>(std::move(device_info),
+                                            hid_manager_.get()));
 }
 
 void FidoHidDiscovery::DeviceRemoved(
@@ -65,6 +96,21 @@ void FidoHidDiscovery::DeviceRemoved(
   if (filter_.Matches(*device_info)) {
     RemoveDevice(FidoHidDevice::GetIdForDevice(*device_info));
   }
+}
+
+void FidoHidDiscovery::DeviceChanged(
+    device::mojom::HidDeviceInfoPtr device_info) {
+  // The changed |device_info| may affect how the device should be filtered.
+  // For instance, it may have been updated from a device with no FIDO U2F
+  // capabilities to a device with FIDO U2F capabilities.
+  //
+  // Try adding it again. If the device is already present in |authenticators_|
+  // then the updated device will be detected as a duplicate and will not be
+  // added.
+  //
+  // The FidoHidDevice object will retain the old device info. This is fine
+  // since it does not rely on any HidDeviceInfo members that could change.
+  DeviceAdded(std::move(device_info));
 }
 
 void FidoHidDiscovery::OnGetDevices(

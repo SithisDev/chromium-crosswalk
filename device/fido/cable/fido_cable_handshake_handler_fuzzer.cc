@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,8 +37,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* raw_data, size_t size) {
   auto adapter =
       base::MakeRefCounted<::testing::NiceMock<device::MockBluetoothAdapter>>();
   device::FidoCableDevice test_cable_device(adapter.get(), kTestDeviceAddress);
-  device::FidoCableHandshakeHandler handshake_handler(
+
+  device::FidoCableV1HandshakeHandler handshake_handler_v1(
       &test_cable_device, kTestNonce, kTestSessionPreKey);
-  handshake_handler.ValidateAuthenticatorHandshakeMessage(data_span);
+  handshake_handler_v1.ValidateAuthenticatorHandshakeMessage(data_span);
   return 0;
 }

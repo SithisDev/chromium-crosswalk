@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,7 @@ ApiResourceManager<HidConnectionResource>::GetFactoryInstance() {
 
 HidConnectionResource::HidConnectionResource(
     const std::string& owner_extension_id,
-    device::mojom::HidConnectionPtr connection)
+    mojo::PendingRemote<device::mojom::HidConnection> connection)
     : ApiResource(owner_extension_id), connection_(std::move(connection)) {}
 
 HidConnectionResource::~HidConnectionResource() {

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/callback_forward.h"
 #include "base/logging.h"
+#include "base/observer_list.h"
 #include "dbus/bus.h"
 #include "dbus/property.h"
 #include "device/bluetooth/dbus/bluetooth_gatt_characteristic_client.h"
@@ -36,18 +36,18 @@ FakeBluetoothGattDescriptorClient::Properties::~Properties() = default;
 void FakeBluetoothGattDescriptorClient::Properties::Get(
     dbus::PropertyBase* property,
     dbus::PropertySet::GetCallback callback) {
-  VLOG(1) << "Get " << property->name();
+  DVLOG(1) << "Get " << property->name();
   std::move(callback).Run(true);
 }
 
 void FakeBluetoothGattDescriptorClient::Properties::GetAll() {
-  VLOG(1) << "GetAll";
+  DVLOG(1) << "GetAll";
 }
 
 void FakeBluetoothGattDescriptorClient::Properties::Set(
     dbus::PropertyBase* property,
     dbus::PropertySet::SetCallback callback) {
-  VLOG(1) << "Set " << property->name();
+  DVLOG(1) << "Set " << property->name();
   std::move(callback).Run(false);
 }
 
@@ -55,8 +55,7 @@ FakeBluetoothGattDescriptorClient::DescriptorData::DescriptorData() = default;
 
 FakeBluetoothGattDescriptorClient::DescriptorData::~DescriptorData() = default;
 
-FakeBluetoothGattDescriptorClient::FakeBluetoothGattDescriptorClient()
-    : weak_ptr_factory_(this) {}
+FakeBluetoothGattDescriptorClient::FakeBluetoothGattDescriptorClient() {}
 
 FakeBluetoothGattDescriptorClient::~FakeBluetoothGattDescriptorClient() {
   for (auto iter = properties_.begin(); iter != properties_.end(); iter++)
@@ -122,7 +121,8 @@ void FakeBluetoothGattDescriptorClient::ReadValue(
     }
   }
 
-  std::move(callback).Run(iter->second->properties->value.value());
+  std::move(callback).Run(/*error_code=*/absl::nullopt,
+                          iter->second->properties->value.value());
 }
 
 void FakeBluetoothGattDescriptorClient::WriteValue(
@@ -147,7 +147,7 @@ dbus::ObjectPath FakeBluetoothGattDescriptorClient::ExposeDescriptor(
     const dbus::ObjectPath& characteristic_path,
     const std::string& uuid) {
   if (uuid != kClientCharacteristicConfigurationUUID) {
-    VLOG(2) << "Unsupported UUID: " << uuid;
+    DVLOG(2) << "Unsupported UUID: " << uuid;
     return dbus::ObjectPath();
   }
 
@@ -158,13 +158,13 @@ dbus::ObjectPath FakeBluetoothGattDescriptorClient::ExposeDescriptor(
   DCHECK(object_path.IsValid());
   PropertiesMap::const_iterator iter = properties_.find(object_path);
   if (iter != properties_.end()) {
-    VLOG(1) << "Descriptor already exposed: " << object_path.value();
+    DVLOG(1) << "Descriptor already exposed: " << object_path.value();
     return dbus::ObjectPath();
   }
 
   Properties* properties = new Properties(
-      base::Bind(&FakeBluetoothGattDescriptorClient::OnPropertyChanged,
-                 weak_ptr_factory_.GetWeakPtr(), object_path));
+      base::BindRepeating(&FakeBluetoothGattDescriptorClient::OnPropertyChanged,
+                          weak_ptr_factory_.GetWeakPtr(), object_path));
   properties->uuid.ReplaceValue(uuid);
   properties->characteristic.ReplaceValue(characteristic_path);
 
@@ -182,7 +182,7 @@ void FakeBluetoothGattDescriptorClient::HideDescriptor(
     const dbus::ObjectPath& descriptor_path) {
   auto iter = properties_.find(descriptor_path);
   if (iter == properties_.end()) {
-    VLOG(1) << "Descriptor not exposed: " << descriptor_path.value();
+    DVLOG(1) << "Descriptor not exposed: " << descriptor_path.value();
     return;
   }
 
@@ -195,8 +195,8 @@ void FakeBluetoothGattDescriptorClient::HideDescriptor(
 void FakeBluetoothGattDescriptorClient::OnPropertyChanged(
     const dbus::ObjectPath& object_path,
     const std::string& property_name) {
-  VLOG(2) << "Descriptor property changed: " << object_path.value() << ": "
-          << property_name;
+  DVLOG(2) << "Descriptor property changed: " << object_path.value() << ": "
+           << property_name;
 
   for (auto& observer : observers_)
     observer.GattDescriptorPropertyChanged(object_path, property_name);

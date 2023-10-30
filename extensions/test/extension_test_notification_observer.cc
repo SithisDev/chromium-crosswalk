@@ -1,43 +1,58 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/test/extension_test_notification_observer.h"
+#include "base/memory/raw_ptr.h"
+
+#include <memory>
 
 #include "base/bind.h"
+#include "base/containers/contains.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/test_utils.h"
-#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/notification_types.h"
-#include "extensions/browser/process_manager.h"
 #include "extensions/common/extension.h"
 
 namespace extensions {
 
-namespace {
-
 // A callback that returns true if the condition has been met and takes no
 // arguments.
-using ConditionCallback = base::Callback<bool(void)>;
+using ConditionCallback = base::RepeatingCallback<bool(void)>;
 
-const Extension* GetNonTerminatedExtensions(const std::string& id,
-                                            content::BrowserContext* context) {
-  return ExtensionRegistry::Get(context)->GetExtensionById(
-      id, ExtensionRegistry::EVERYTHING & ~ExtensionRegistry::TERMINATED);
-}
+////////////////////////////////////////////////////////////////////////////////
+// NotificationSet::ForwardingWebContentsObserver
 
-}  // namespace
+class ExtensionTestNotificationObserver::NotificationSet::
+    ForwardingWebContentsObserver : public content::WebContentsObserver {
+ public:
+  ForwardingWebContentsObserver(
+      content::WebContents* contents,
+      ExtensionTestNotificationObserver::NotificationSet* owner)
+      : WebContentsObserver(contents), owner_(owner) {}
+
+ private:
+  // content::WebContentsObserver
+  void WebContentsDestroyed() override {
+    // Do not add code after this line, deletes `this`.
+    owner_->WebContentsDestroyed(web_contents());
+  }
+
+  raw_ptr<ExtensionTestNotificationObserver::NotificationSet> owner_;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // ExtensionTestNotificationObserver::NotificationSet
 
-ExtensionTestNotificationObserver::NotificationSet::NotificationSet()
-    : process_manager_observer_(this) {}
-ExtensionTestNotificationObserver::NotificationSet::~NotificationSet() {}
+ExtensionTestNotificationObserver::NotificationSet::NotificationSet() = default;
+ExtensionTestNotificationObserver::NotificationSet::~NotificationSet() =
+    default;
 
 void ExtensionTestNotificationObserver::NotificationSet::Add(
     int type,
@@ -51,20 +66,38 @@ void ExtensionTestNotificationObserver::NotificationSet::Add(int type) {
 
 void ExtensionTestNotificationObserver::NotificationSet::
     AddExtensionFrameUnregistration(ProcessManager* manager) {
-  process_manager_observer_.Add(manager);
+  process_manager_observation_.Observe(manager);
 }
 
 void ExtensionTestNotificationObserver::NotificationSet::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  callback_list_.Notify();
+  closure_list_.Notify();
+}
+
+void ExtensionTestNotificationObserver::NotificationSet::
+    AddWebContentsDestroyed(extensions::ProcessManager* manager) {
+  for (content::RenderFrameHost* render_frame_host : manager->GetAllFrames()) {
+    content::WebContents* contents =
+        content::WebContents::FromRenderFrameHost(render_frame_host);
+    if (!base::Contains(web_contents_observers_, contents)) {
+      web_contents_observers_[contents] =
+          std::make_unique<ForwardingWebContentsObserver>(contents, this);
+    }
+  }
 }
 
 void ExtensionTestNotificationObserver::NotificationSet::
     OnExtensionFrameUnregistered(const std::string& extension_id,
                                  content::RenderFrameHost* render_frame_host) {
-  callback_list_.Notify();
+  closure_list_.Notify();
+}
+
+void ExtensionTestNotificationObserver::NotificationSet::WebContentsDestroyed(
+    content::WebContents* web_contents) {
+  web_contents_observers_.erase(web_contents);
+  closure_list_.Notify();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -73,12 +106,9 @@ void ExtensionTestNotificationObserver::NotificationSet::
 ExtensionTestNotificationObserver::ExtensionTestNotificationObserver(
     content::BrowserContext* context)
     : context_(context),
-      extension_installs_observed_(0),
-      extension_load_errors_observed_(0),
-      crx_installers_done_observed_(0),
-      registry_observer_(this) {
+      crx_installers_done_observed_(0) {
   if (context_)
-    registry_observer_.Add(ExtensionRegistry::Get(context_));
+    registry_observation_.Observe(ExtensionRegistry::Get(context_));
 }
 
 ExtensionTestNotificationObserver::~ExtensionTestNotificationObserver() {}
@@ -96,39 +126,6 @@ void ExtensionTestNotificationObserver::WaitForNotification(
       .Wait();
 }
 
-bool ExtensionTestNotificationObserver::WaitForExtensionInstallError() {
-  int before = extension_installs_observed_;
-  content::WindowedNotificationObserver(
-      NOTIFICATION_EXTENSION_INSTALL_ERROR,
-      content::NotificationService::AllSources())
-      .Wait();
-  return extension_installs_observed_ == before;
-}
-
-bool ExtensionTestNotificationObserver::WaitForExtensionLoadError() {
-  int before = extension_load_errors_observed_;
-  WaitForNotification(NOTIFICATION_EXTENSION_LOAD_ERROR);
-  return extension_load_errors_observed_ != before;
-}
-
-bool ExtensionTestNotificationObserver::WaitForExtensionCrash(
-    const std::string& extension_id) {
-  if (!GetNonTerminatedExtensions(extension_id, context_)) {
-    // The extension is already unloaded, presumably due to a crash.
-    return true;
-  }
-
-  content::WindowedNotificationObserver(
-      NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
-      content::NotificationService::AllSources())
-      .Wait();
-  // GetNonTerminatedExtensions consults ExtensionRegistry which gets updated
-  // asynchronously in a task posted when
-  // NOTIFICATION_EXTENSION_PROCESS_TERMINATED is handled, so let this task run.
-  base::RunLoop().RunUntilIdle();
-  return (GetNonTerminatedExtensions(extension_id, context_) == NULL);
-}
-
 bool ExtensionTestNotificationObserver::WaitForCrxInstallerDone() {
   int before = crx_installers_done_observed_;
   WaitForNotification(NOTIFICATION_CRX_INSTALLER_DONE);
@@ -140,7 +137,8 @@ void ExtensionTestNotificationObserver::Watch(
     int type,
     const content::NotificationSource& source) {
   CHECK(!observer_);
-  observer_.reset(new content::WindowedNotificationObserver(type, source));
+  observer_ =
+      std::make_unique<content::WindowedNotificationObserver>(type, source);
   registrar_.Add(this, type, source);
 }
 
@@ -169,11 +167,6 @@ void ExtensionTestNotificationObserver::Observe(
       ++crx_installers_done_observed_;
       break;
 
-    case NOTIFICATION_EXTENSION_LOAD_ERROR:
-      VLOG(1) << "Got EXTENSION_LOAD_ERROR notification.";
-      ++extension_load_errors_observed_;
-      break;
-
     default:
       NOTREACHED();
       break;
@@ -189,7 +182,7 @@ void ExtensionTestNotificationObserver::OnExtensionLoaded(
 
 void ExtensionTestNotificationObserver::OnShutdown(
     ExtensionRegistry* registry) {
-  registry_observer_.RemoveAll();
+  registry_observation_.Reset();
 }
 
 void ExtensionTestNotificationObserver::WaitForCondition(
@@ -202,9 +195,9 @@ void ExtensionTestNotificationObserver::WaitForCondition(
   base::RunLoop run_loop;
   quit_closure_ = run_loop.QuitClosure();
 
-  std::unique_ptr<base::CallbackList<void()>::Subscription> subscription;
+  base::CallbackListSubscription subscription;
   if (notification_set) {
-    subscription = notification_set->callback_list().Add(base::Bind(
+    subscription = notification_set->closure_list().Add(base::BindRepeating(
         &ExtensionTestNotificationObserver::MaybeQuit, base::Unretained(this)));
   }
   run_loop.Run();
@@ -214,8 +207,13 @@ void ExtensionTestNotificationObserver::WaitForCondition(
 }
 
 void ExtensionTestNotificationObserver::MaybeQuit() {
+  // We can be called synchronously from any of the events being observed,
+  // so return immediately if the closure has already been run.
+  if (quit_closure_.is_null())
+    return;
+
   if (condition_.Run())
-    quit_closure_.Run();
+    std::move(quit_closure_).Run();
 }
 
 }  // namespace extensions

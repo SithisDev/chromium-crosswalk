@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,11 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "base/values.h"
-
-namespace service_manager {
-class Connector;
-}
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace extensions {
 
@@ -37,9 +32,12 @@ class ZipFileInstaller : public base::RefCountedThreadSafe<ZipFileInstaller> {
                                                const base::FilePath& unzip_dir,
                                                const std::string& error)>;
 
+  ZipFileInstaller(const ZipFileInstaller&) = delete;
+  ZipFileInstaller& operator=(const ZipFileInstaller&) = delete;
+
   // Creates a ZipFileInstaller that invokes |done_callback| when done.
   static scoped_refptr<ZipFileInstaller> Create(
-      service_manager::Connector* connector,
+      const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
       DoneCallback done_callback);
 
   // Creates a temporary directory and unzips the extension in it.
@@ -55,20 +53,22 @@ class ZipFileInstaller : public base::RefCountedThreadSafe<ZipFileInstaller> {
   FRIEND_TEST_ALL_PREFIXES(ZipFileInstallerTest, Theme_FileExtractionFilter);
   FRIEND_TEST_ALL_PREFIXES(ZipFileInstallerTest, ManifestExtractionFilter);
 
-  ZipFileInstaller(service_manager::Connector* connector,
-                   DoneCallback done_callback);
+  explicit ZipFileInstaller(
+      const scoped_refptr<base::SequencedTaskRunner>& io_task_runner,
+      DoneCallback done_callback);
   ~ZipFileInstaller();
 
   void LoadFromZipFileImpl(const base::FilePath& zip_file,
                            const base::FilePath& unzip_dir);
 
   // Unzip an extension into |unzip_dir| and load it with an UnpackedInstaller.
-  void Unzip(base::Optional<base::FilePath> unzip_dir);
+  void Unzip(absl::optional<base::FilePath> unzip_dir);
   void ManifestUnzipped(const base::FilePath& unzip_dir, bool success);
   void ManifestRead(const base::FilePath& unzip_dir,
-                    base::Optional<std::string> manifest_content);
-  void ManifestParsingFailed(const std::string& error);
-  void ManifestParsed(const base::FilePath& unzip_dir, base::Value manifest);
+                    absl::optional<std::string> manifest_content);
+  void ManifestParsed(const base::FilePath& unzip_dir,
+                      absl::optional<base::Value> result,
+                      const absl::optional<std::string>& error);
   void UnzipDone(const base::FilePath& unzip_dir, bool success);
 
   // On failure, report the |error| reason.
@@ -87,12 +87,10 @@ class ZipFileInstaller : public base::RefCountedThreadSafe<ZipFileInstaller> {
   // File containing the extension to unzip.
   base::FilePath zip_file_;
 
-  // Connector to the ServiceManager. Bound to the UI thread.
-  service_manager::Connector* connector_;
+  // Task runner for file I/O.
+  scoped_refptr<base::SequencedTaskRunner> io_task_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(ZipFileInstaller);
 };
 
 }  // namespace extensions

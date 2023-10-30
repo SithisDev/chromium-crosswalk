@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,9 @@ MockBluetoothGattService::MockBluetoothGattService(
     MockBluetoothDevice* device,
     const std::string& identifier,
     const BluetoothUUID& uuid,
-    bool is_primary,
-    bool is_local) {
+    bool is_primary) {
   ON_CALL(*this, GetIdentifier()).WillByDefault(Return(identifier));
   ON_CALL(*this, GetUUID()).WillByDefault(Return(uuid));
-  ON_CALL(*this, IsLocal()).WillByDefault(Return(is_local));
   ON_CALL(*this, IsPrimary()).WillByDefault(Return(is_primary));
   ON_CALL(*this, GetDevice()).WillByDefault(Return(device));
   ON_CALL(*this, GetCharacteristics()).WillByDefault(Invoke([this] {

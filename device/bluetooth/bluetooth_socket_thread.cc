@@ -1,12 +1,14 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "device/bluetooth/bluetooth_socket_thread.h"
 
+#include <memory>
+
 #include "base/lazy_instance.h"
-#include "base/message_loop/message_loop.h"
-#include "base/sequenced_task_runner.h"
+#include "base/message_loop/message_pump_type.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread.h"
 
 namespace device {
@@ -25,7 +27,7 @@ scoped_refptr<BluetoothSocketThread> BluetoothSocketThread::Get() {
 // static
 void BluetoothSocketThread::CleanupForTesting() {
   DCHECK(g_instance.Get().get());
-  g_instance.Get() = NULL;
+  g_instance.Get().reset();
 }
 
 BluetoothSocketThread::BluetoothSocketThread()
@@ -35,7 +37,7 @@ BluetoothSocketThread::~BluetoothSocketThread() {
   if (thread_) {
     thread_->Stop();
     thread_.reset(NULL);
-    task_runner_ = NULL;
+    task_runner_.reset();
   }
 }
 
@@ -56,9 +58,9 @@ void BluetoothSocketThread::EnsureStarted() {
     return;
 
   base::Thread::Options thread_options;
-  thread_options.message_loop_type = base::MessageLoop::TYPE_IO;
-  thread_.reset(new base::Thread("BluetoothSocketThread"));
-  thread_->StartWithOptions(thread_options);
+  thread_options.message_pump_type = base::MessagePumpType::IO;
+  thread_ = std::make_unique<base::Thread>("BluetoothSocketThread");
+  thread_->StartWithOptions(std::move(thread_options));
   task_runner_ = thread_->task_runner();
 }
 

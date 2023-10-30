@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -135,12 +135,16 @@ cbor::Value FidoAttestationStatement::AsCBOR() const {
   return cbor::Value(std::move(attestation_statement_map));
 }
 
-bool FidoAttestationStatement::IsSelfAttestation() {
+bool FidoAttestationStatement::IsNoneAttestation() const {
+  return false;
+}
+
+bool FidoAttestationStatement::IsSelfAttestation() const {
   return false;
 }
 
 bool FidoAttestationStatement::
-    IsAttestationCertificateInappropriatelyIdentifying() {
+    IsAttestationCertificateInappropriatelyIdentifying() const {
   // An attestation certificate is considered inappropriately identifying if it
   // contains a common name of "FT FIDO 0100". See "Inadequately batched
   // attestation certificates" on https://www.chromium.org/security-keys
@@ -153,10 +157,10 @@ bool FidoAttestationStatement::
   return false;
 }
 
-base::Optional<base::span<const uint8_t>>
+absl::optional<base::span<const uint8_t>>
 FidoAttestationStatement::GetLeafCertificate() const {
   if (x509_certificates_.empty()) {
-    return base::nullopt;
+    return absl::nullopt;
   }
   return x509_certificates_[0];
 }
@@ -194,12 +198,16 @@ cbor::Value PackedAttestationStatement::AsCBOR() const {
   return cbor::Value(std::move(attestation_statement_map));
 }
 
-bool PackedAttestationStatement::IsSelfAttestation() {
+bool PackedAttestationStatement::IsNoneAttestation() const {
+  return false;
+}
+
+bool PackedAttestationStatement::IsSelfAttestation() const {
   return x509_certificates_.empty();
 }
 
 bool PackedAttestationStatement::
-    IsAttestationCertificateInappropriatelyIdentifying() {
+    IsAttestationCertificateInappropriatelyIdentifying() const {
   for (const auto& der_bytes : x509_certificates_) {
     if (IsCertificateInappropriatelyIdentifying(der_bytes)) {
       return true;
@@ -209,10 +217,10 @@ bool PackedAttestationStatement::
   return false;
 }
 
-base::Optional<base::span<const uint8_t>>
+absl::optional<base::span<const uint8_t>>
 PackedAttestationStatement::GetLeafCertificate() const {
   if (x509_certificates_.empty()) {
-    return base::nullopt;
+    return absl::nullopt;
   }
   return x509_certificates_[0];
 }

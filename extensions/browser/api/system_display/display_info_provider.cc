@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,11 @@ int RotationToDegrees(display::Display::Rotation rotation) {
 
 }  // namespace
 
-DisplayInfoProvider::DisplayInfoProvider() = default;
+DisplayInfoProvider::DisplayInfoProvider(display::Screen* screen)
+    : screen_(screen ? screen : display::Screen::GetScreen()) {
+  // Do not use/call on the screen object in this constructor yet because a
+  // subclass may pass not-yet-initialized screen instance.
+}
 
 DisplayInfoProvider::~DisplayInfoProvider() = default;
 
@@ -57,6 +61,11 @@ void DisplayInfoProvider::InitializeForTesting(
   if (g_display_info_provider)
     delete g_display_info_provider;
   g_display_info_provider = display_info_provider;
+}
+
+// static
+void DisplayInfoProvider::ResetForTesting() {
+  g_display_info_provider = nullptr;
 }
 
 // static
@@ -106,9 +115,8 @@ void DisplayInfoProvider::EnableUnifiedDesktop(bool enable) {}
 void DisplayInfoProvider::GetAllDisplaysInfo(
     bool /* single_unified*/,
     base::OnceCallback<void(DisplayUnitInfoList result)> callback) {
-  display::Screen* screen = display::Screen::GetScreen();
-  int64_t primary_id = screen->GetPrimaryDisplay().id();
-  std::vector<display::Display> displays = screen->GetAllDisplays();
+  int64_t primary_id = screen_->GetPrimaryDisplay().id();
+  std::vector<display::Display> displays = screen_->GetAllDisplays();
   DisplayUnitInfoList all_displays;
   for (const display::Display& display : displays) {
     api::system_display::DisplayUnitInfo unit =
@@ -128,15 +136,11 @@ void DisplayInfoProvider::GetDisplayLayout(
 }
 
 void DisplayInfoProvider::StartObserving() {
-  display::Screen* screen = display::Screen::GetScreen();
-  if (screen)
-    screen->AddObserver(this);
+  display_observer_.emplace(this);
 }
 
 void DisplayInfoProvider::StopObserving() {
-  display::Screen* screen = display::Screen::GetScreen();
-  if (screen)
-    screen->RemoveObserver(this);
+  display_observer_.reset();
 }
 
 bool DisplayInfoProvider::OverscanCalibrationStart(const std::string& id) {
@@ -188,10 +192,16 @@ void DisplayInfoProvider::SetMirrorMode(
 }
 
 void DisplayInfoProvider::DispatchOnDisplayChangedEvent() {
+  // This function will dispatch the OnDisplayChangedEvent to both on-the-record
+  // and off-the-record profiles. This allows extensions running in incognito
+  // to be notified mirroring is enabled / disabled, which allows the Virtual
+  // keyboard on ChromeOS to correctly disable key highlighting when typing
+  // passwords on the login page (crbug/824656)
+  constexpr bool dispatch_to_off_the_record_profiles = true;
   ExtensionsBrowserClient::Get()->BroadcastEventToRenderers(
       events::SYSTEM_DISPLAY_ON_DISPLAY_CHANGED,
       extensions::api::system_display::OnDisplayChanged::kEventName,
-      std::make_unique<base::ListValue>());
+      base::Value::List(), dispatch_to_off_the_record_profiles);
 }
 
 void DisplayInfoProvider::UpdateDisplayUnitInfoForPlatform(

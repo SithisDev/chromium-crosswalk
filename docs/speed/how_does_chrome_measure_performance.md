@@ -1,28 +1,31 @@
 # How Chrome Measures Performance
 
-Chrome collects performance data both in the lab, and from end users. There are
+Chrome collects performance data both in the lab and from end users. There are
 thousands of individual metrics. This is an overview of how to sort through
 them at a high level.
 
-## Tracks and Metrics
+## Domain Areas
 
-At a high level, performance work in Chrome is categorized into **tracks**,
-like loading, memory, and power. Each track has high-level metrics associated
-with it.
+At a high level, performance work in Chrome is categorized into **domains**,
+like loading, memory, and power. Each domain has critical laboratory and
+end-user metrics associated with it.
 
-  * **[An overview of tracks](speed_tracks.md)**: lists the tracks and key contact points.
+  * **[An overview of domains](speed_domains.md)**: lists the domains and key contact points.
   * **[Speed Launch Metrics](https://docs.google.com/document/d/1Ww487ZskJ-xBmJGwPO-XPz_QcJvw-kSNffm0nPhVpj8/edit)**:
-    the important high-level metrics we measure for each track.
+    the important high-level end-user metrics we measure for each domain.
+  * TODO: Link to documentation on critical laboratory measurements for each
+    domain.
 
 ## Laboratory Metrics
 
 Chrome has multiple performance labs in which benchmarks are run on continuous
 builds to pinpoint performance regressions down to individual changelists.
 
-### The chromium.perf lab
+### The chrome.perf lab
 
-The main lab for performance monitoring is chromium.perf. It continuously tests
-chromium commits and is monitored by the perf sheriff rotation.
+The main lab for performance monitoring is
+[chrome.perf](https://ci.chromium.org/p/chrome/g/chrome.perf/console). It continuously tests
+chromium commits and is monitored by several perf sheriff rotations.
 
   * **[What is the perf waterfall?](perf_waterfall.md)** An overview of the
     waterfall that runs the continuous build.
@@ -60,7 +63,9 @@ There are several other performance labs for specialized use:
 The **[Speed Launch Metrics](https://docs.google.com/document/d/1Ww487ZskJ-xBmJGwPO-XPz_QcJvw-kSNffm0nPhVpj8/edit)**
 doc explains metrics available in UMA for end user performance. If you want to
 test how your change impacts these metrics for end users, you'll probably want
-to **[Run a Finch Trial](http://goto.google.com/finch101)**.
+to **[Run a Finch Trial (Googlers only)](http://goto.google.com/finch101)**. If
+you want to run a trial and are not a Googler, you'll need a Google-internal partner
+to help you run it.
 
 The **[UMA Sampling Profiler (Googlers only)](http://goto.google.com/uma-sampling-profiler-overview)**
 measures Chrome execution using statistical profiling, producing aggregate

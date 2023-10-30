@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,26 +9,23 @@
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
+#include "base/no_destructor.h"
+#include "components/guest_view/common/guest_view.mojom.h"
 #include "components/guest_view/common/guest_view_constants.h"
-#include "components/guest_view/common/guest_view_messages.h"
+#include "components/guest_view/renderer/guest_view_container.h"
 #include "components/guest_view/renderer/guest_view_request.h"
-#include "components/guest_view/renderer/iframe_guest_view_container.h"
-#include "components/guest_view/renderer/iframe_guest_view_request.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_thread.h"
-#include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/extension_messages.h"
-#include "extensions/common/guest_view/extensions_guest_view_messages.h"
-#include "extensions/renderer/guest_view/extensions_guest_view_container.h"
 #include "extensions/renderer/script_context.h"
+#include "ipc/ipc_sync_channel.h"
+#include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom.h"
 #include "third_party/blink/public/web/web_custom_element.h"
 #include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_remote_frame.h"
-#include "third_party/blink/public/web/web_scoped_user_gesture.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "v8/include/v8.h"
 
@@ -44,6 +41,18 @@ using ViewMap = std::map<int, v8::Global<v8::Object>*>;
 static base::LazyInstance<ViewMap>::DestructorAtExit weak_view_map =
     LAZY_INSTANCE_INITIALIZER;
 
+guest_view::mojom::GuestViewHost* GetGuestViewHost() {
+  static base::NoDestructor<
+      mojo::AssociatedRemote<guest_view::mojom::GuestViewHost>>
+      guest_view_host;
+  if (!*guest_view_host) {
+    content::RenderThread::Get()->GetChannel()->GetRemoteAssociatedInterface(
+        guest_view_host.get());
+  }
+
+  return guest_view_host->get();
+}
+
 }  // namespace
 
 namespace extensions {
@@ -51,17 +60,18 @@ namespace extensions {
 namespace {
 
 content::RenderFrame* GetRenderFrame(v8::Local<v8::Value> value) {
-  v8::Local<v8::Context> context =
-      v8::Local<v8::Object>::Cast(value)->CreationContext();
-  if (context.IsEmpty())
-    return nullptr;
+  v8::Local<v8::Context> context;
+  if (!v8::Local<v8::Object>::Cast(value)->GetCreationContext().ToLocal(
+          &context))
+    if (context.IsEmpty())
+      return nullptr;
   blink::WebLocalFrame* frame = blink::WebLocalFrame::FrameForContext(context);
   if (!frame)
     return nullptr;
   return content::RenderFrame::FromWebFrame(frame);
 }
 
-class RenderFrameStatus : public content::RenderFrameObserver {
+class RenderFrameStatus final : public content::RenderFrameObserver {
  public:
   explicit RenderFrameStatus(content::RenderFrame* render_frame)
       : content::RenderFrameObserver(render_frame) {}
@@ -83,24 +93,12 @@ GuestViewInternalCustomBindings::~GuestViewInternalCustomBindings() {}
 
 void GuestViewInternalCustomBindings::AddRoutes() {
   RouteHandlerFunction(
-      "AttachGuest",
-      base::BindRepeating(&GuestViewInternalCustomBindings::AttachGuest,
-                          base::Unretained(this)));
-  RouteHandlerFunction(
-      "DetachGuest",
-      base::BindRepeating(&GuestViewInternalCustomBindings::DetachGuest,
-                          base::Unretained(this)));
-  RouteHandlerFunction(
       "AttachIframeGuest",
       base::BindRepeating(&GuestViewInternalCustomBindings::AttachIframeGuest,
                           base::Unretained(this)));
   RouteHandlerFunction(
       "DestroyContainer",
       base::BindRepeating(&GuestViewInternalCustomBindings::DestroyContainer,
-                          base::Unretained(this)));
-  RouteHandlerFunction(
-      "GetContentWindow",
-      base::BindRepeating(&GuestViewInternalCustomBindings::GetContentWindow,
                           base::Unretained(this)));
   RouteHandlerFunction(
       "GetViewFromID",
@@ -149,91 +147,7 @@ void GuestViewInternalCustomBindings::ResetMapEntry(
   view_map.erase(entry);
 
   // Let the GuestViewManager know that a GuestView has been garbage collected.
-  content::RenderThread::Get()->Send(
-      new GuestViewHostMsg_ViewGarbageCollected(view_instance_id));
-}
-
-void GuestViewInternalCustomBindings::AttachGuest(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
-  // Allow for an optional callback parameter.
-  CHECK(args.Length() >= 3 && args.Length() <= 4);
-  // Element Instance ID.
-  CHECK(args[0]->IsInt32());
-  // Guest Instance ID.
-  CHECK(args[1]->IsInt32());
-  // Attach Parameters.
-  CHECK(args[2]->IsObject());
-  // Optional Callback Function.
-  CHECK(args.Length() < 4 || args[3]->IsFunction());
-
-  int element_instance_id = args[0].As<v8::Int32>()->Value();
-  // An element instance ID uniquely identifies a GuestViewContainer.
-  auto* guest_view_container =
-      guest_view::GuestViewContainer::FromID(element_instance_id);
-
-  // TODO(fsamuel): Should we be reporting an error if the element instance ID
-  // is invalid?
-  if (!guest_view_container)
-    return;
-  // Retain a weak pointer so we can easily test if the container goes away.
-  auto weak_ptr = guest_view_container->GetWeakPtr();
-
-  int guest_instance_id = args[1].As<v8::Int32>()->Value();
-
-  std::unique_ptr<base::DictionaryValue> params = base::DictionaryValue::From(
-      content::V8ValueConverter::Create()->FromV8Value(
-          args[2], context()->v8_context()));
-  CHECK(params);
-
-  // We should be careful that some malicious JS in the GuestView's embedder
-  // hasn't destroyed |guest_view_container| during the enumeration of the
-  // properties of the guest's object during extraction of |params| above
-  // (see https://crbug.com/683523).
-  if (!weak_ptr)
-    return;
-
-  // Add flag to |params| to indicate that the element size is specified in
-  // logical units.
-  params->SetBoolean(guest_view::kElementSizeIsLogical, true);
-
-  std::unique_ptr<guest_view::GuestViewRequest> request(
-      new guest_view::GuestViewAttachRequest(
-          guest_view_container, guest_instance_id, std::move(params),
-          args.Length() == 4 ? args[3].As<v8::Function>()
-                             : v8::Local<v8::Function>(),
-          args.GetIsolate()));
-  guest_view_container->IssueRequest(std::move(request));
-
-  args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
-}
-
-void GuestViewInternalCustomBindings::DetachGuest(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
-  // Allow for an optional callback parameter.
-  CHECK(args.Length() >= 1 && args.Length() <= 2);
-  // Element Instance ID.
-  CHECK(args[0]->IsInt32());
-  // Optional Callback Function.
-  CHECK(args.Length() < 2 || args[1]->IsFunction());
-
-  int element_instance_id = args[0].As<v8::Int32>()->Value();
-  // An element instance ID uniquely identifies a GuestViewContainer.
-  auto* guest_view_container =
-      guest_view::GuestViewContainer::FromID(element_instance_id);
-
-  // TODO(fsamuel): Should we be reporting an error if the element instance ID
-  // is invalid?
-  if (!guest_view_container)
-    return;
-
-  std::unique_ptr<guest_view::GuestViewRequest> request(
-      new guest_view::GuestViewDetachRequest(
-          guest_view_container, args.Length() == 2 ? args[1].As<v8::Function>()
-                                                   : v8::Local<v8::Function>(),
-          args.GetIsolate()));
-  guest_view_container->IssueRequest(std::move(request));
-
-  args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
+  GetGuestViewHost()->ViewGarbageCollected(view_instance_id);
 }
 
 void GuestViewInternalCustomBindings::AttachIframeGuest(
@@ -263,10 +177,11 @@ void GuestViewInternalCustomBindings::AttachIframeGuest(
   content::RenderFrame* render_frame = GetRenderFrame(args[3]);
   RenderFrameStatus render_frame_status(render_frame);
 
-  std::unique_ptr<base::DictionaryValue> params = base::DictionaryValue::From(
-      content::V8ValueConverter::Create()->FromV8Value(
-          args[2], context()->v8_context()));
+  std::unique_ptr<base::Value> params =
+      content::V8ValueConverter::Create()->FromV8Value(args[2],
+                                                       context()->v8_context());
   CHECK(params);
+  CHECK(params->is_dict());
 
   if (!render_frame_status.is_ok())
     return;
@@ -279,13 +194,13 @@ void GuestViewInternalCustomBindings::AttachIframeGuest(
 
   // Add flag to |params| to indicate that the element size is specified in
   // logical units.
-  params->SetBoolean(guest_view::kElementSizeIsLogical, true);
+  params->GetDict().Set(guest_view::kElementSizeIsLogical, true);
 
   content::RenderFrame* embedder_parent_frame =
       content::RenderFrame::FromWebFrame(parent_frame->ToWebLocalFrame());
 
   // Create a GuestViewContainer if it does not exist.
-  // An element instance ID uniquely identifies an IframeGuestViewContainer
+  // An element instance ID uniquely identifies a GuestViewContainer
   // within a RenderView.
   auto* guest_view_container =
       guest_view::GuestViewContainer::FromID(element_instance_id);
@@ -293,16 +208,17 @@ void GuestViewInternalCustomBindings::AttachIframeGuest(
   DCHECK(!guest_view_container);
   // The <webview> element's GC takes ownership of |guest_view_container|.
   guest_view_container =
-      new guest_view::IframeGuestViewContainer(embedder_parent_frame);
+      new guest_view::GuestViewContainer(embedder_parent_frame);
   guest_view_container->SetElementInstanceID(element_instance_id);
 
-  std::unique_ptr<guest_view::GuestViewRequest> request(
-      new guest_view::GuestViewAttachIframeRequest(
+  std::unique_ptr<guest_view::GuestViewAttachRequest> request =
+      std::make_unique<guest_view::GuestViewAttachRequest>(
           guest_view_container, render_frame->GetRoutingID(), guest_instance_id,
-          std::move(params), args.Length() == (num_required_params + 1)
-                                 ? args[num_required_params].As<v8::Function>()
-                                 : v8::Local<v8::Function>(),
-          args.GetIsolate()));
+          std::move(params->GetDict()),
+          args.Length() == (num_required_params + 1)
+              ? args[num_required_params].As<v8::Function>()
+              : v8::Local<v8::Function>(),
+          args.GetIsolate());
   guest_view_container->IssueRequest(std::move(request));
 
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
@@ -330,31 +246,6 @@ void GuestViewInternalCustomBindings::DestroyContainer(
   // a GuestViewContainer. That won't be necessary once GuestViewContainer
   // always runs w/o plugin.
   guest_view_container->Destroy(false /* embedder_frame_destroyed */);
-}
-
-void GuestViewInternalCustomBindings::GetContentWindow(
-    const v8::FunctionCallbackInfo<v8::Value>& args) {
-  // Default to returning null.
-  args.GetReturnValue().SetNull();
-
-  if (args.Length() != 1)
-    return;
-
-  // The routing ID for the RenderView.
-  if (!args[0]->IsInt32())
-    return;
-
-  int view_id = args[0].As<v8::Int32>()->Value();
-  if (view_id == MSG_ROUTING_NONE)
-    return;
-
-  content::RenderView* view = content::RenderView::FromRoutingID(view_id);
-  if (!view)
-    return;
-
-  blink::WebFrame* frame = view->GetWebView()->MainFrame();
-  v8::Local<v8::Value> window = frame->GlobalProxy();
-  args.GetReturnValue().Set(window);
 }
 
 void GuestViewInternalCustomBindings::GetViewFromID(
@@ -452,8 +343,7 @@ void GuestViewInternalCustomBindings::RegisterView(
   // Let the GuestViewManager know that a GuestView has been created.
   const std::string& view_type =
       *v8::String::Utf8Value(args.GetIsolate(), args[2]);
-  content::RenderThread::Get()->Send(
-      new GuestViewHostMsg_ViewCreated(view_instance_id, view_type));
+  GetGuestViewHost()->ViewCreated(view_instance_id, view_type);
 }
 
 void GuestViewInternalCustomBindings::RunWithGesture(
@@ -462,7 +352,10 @@ void GuestViewInternalCustomBindings::RunWithGesture(
   // TODO(devlin): All this needs to do is enter fullscreen. We should make this
   // EnterFullscreen() and do it directly rather than having a generic "run with
   // user gesture" function.
-  blink::WebScopedUserGesture user_gesture(context()->web_frame());
+  if (context()->web_frame()) {
+    context()->web_frame()->NotifyUserActivation(
+        blink::mojom::UserActivationNotificationType::kExtensionGuestView);
+  }
   CHECK_EQ(args.Length(), 1);
   CHECK(args[0]->IsFunction());
   context()->SafeCallFunction(

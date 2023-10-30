@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,14 +34,14 @@ bool ExtensionFunctionRegistry::OverrideFunctionForTesting(
   return true;
 }
 
-ExtensionFunction* ExtensionFunctionRegistry::NewFunction(
+scoped_refptr<ExtensionFunction> ExtensionFunctionRegistry::NewFunction(
     const std::string& name) {
   auto iter = factories_.find(name);
   if (iter == factories_.end()) {
-    return NULL;
+    return nullptr;
   }
-  ExtensionFunction* function = iter->second.factory_();
-  function->set_name(iter->second.function_name_);
+  scoped_refptr<ExtensionFunction> function = iter->second.factory_();
+  function->SetName(iter->second.function_name_);
   function->set_histogram_value(iter->second.histogram_value_);
   return function;
 }

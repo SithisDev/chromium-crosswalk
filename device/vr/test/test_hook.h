@@ -1,19 +1,20 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef DEVICE_VR_TEST_TEST_HOOK_H_
 #define DEVICE_VR_TEST_TEST_HOOK_H_
 
-#include "base/logging.h"
-#include "ui/gfx/transform.h"
+#include "base/check.h"
+#include "device/vr/public/mojom/browser_test_interfaces.mojom.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/transform.h"
 
 #include <cstdint>
 
 namespace device {
 
 // Update this string whenever either interface changes.
-constexpr char kChromeOpenVRTestHookAPI[] = "ChromeTestHook_3";
 constexpr unsigned int kMaxTrackedDevices = 64;
 constexpr unsigned int kMaxNumAxes = 5;
 
@@ -28,10 +29,15 @@ enum XrButtonId {
   kDpadRight = 5,
   kDpadDown = 6,
   kA = 7,
+  kB = 8,
+  kX = 9,
+  kY = 10,
+  kThumbRest = 11,
+  kShoulder = 12,
   kProximitySensor = 31,
-  kAxisPrimary = 32,
+  kAxisTrackpad = 32,
   kAxisTrigger = 33,
-  kAxisSecondary = 34,
+  kAxisThumbstick = 34,
   kAxisTertiary = 35,
   kAxisQuaternary = 36,
   kMax = 64
@@ -44,15 +50,21 @@ enum XrAxisType {
   kTrigger = 3,
 };
 
+enum class XrEye {
+  kLeft = 0,
+  kRight = 1,
+  kNone = 2,
+};
+
 inline uint64_t XrButtonMaskFromId(XrButtonId id) {
   return 1ull << id;
 }
 
 inline unsigned int XrAxisOffsetFromId(XrButtonId id) {
-  DCHECK(XrButtonId::kAxisPrimary <= id &&
-         id < XrButtonId::kAxisPrimary + kMaxNumAxes);
+  DCHECK(XrButtonId::kAxisTrackpad <= id &&
+         id < XrButtonId::kAxisTrackpad + kMaxNumAxes);
   return static_cast<unsigned int>(id) -
-         static_cast<unsigned int>(XrButtonId::kAxisPrimary);
+         static_cast<unsigned int>(XrButtonId::kAxisTrackpad);
 }
 
 struct Color {
@@ -62,19 +74,10 @@ struct Color {
   unsigned char a;
 };
 
-struct Viewport {
-  float left, right, top, bottom;
-};
-
-struct SubmittedFrameData {
+struct ViewData {
   Color color;
-
-  bool left_eye;
-
-  Viewport viewport;
-  unsigned int image_width;
-  unsigned int image_height;
-
+  XrEye eye;
+  gfx::Rect viewport;
   char raw_buffer[256];  // Can encode raw data here.
 };
 
@@ -105,9 +108,10 @@ enum TrackedDeviceClass {
 };
 
 enum ControllerRole {
-  kControllerRoleInvalid,
+  kControllerRoleInvalid,  // Test hook should ignore this controller.
   kControllerRoleLeft,
-  kControllerRoleRight
+  kControllerRoleRight,
+  kControllerRoleVoice  // Simulates voice input such as saying "select" in WMR.
 };
 
 struct ControllerFrameData {
@@ -136,7 +140,7 @@ inline gfx::Transform PoseFrameDataToTransform(PoseFrameData data) {
 // Tests may implement this, and register it to control behavior of VR runtime.
 class VRTestHook {
  public:
-  virtual void OnFrameSubmitted(SubmittedFrameData frame_data) = 0;
+  virtual void OnFrameSubmitted(const std::vector<ViewData>& frame_data) = 0;
   virtual DeviceConfig WaitGetDeviceConfig() = 0;
   virtual PoseFrameData WaitGetPresentingPose() = 0;
   virtual PoseFrameData WaitGetMagicWindowPose() = 0;
@@ -144,6 +148,8 @@ class VRTestHook {
       unsigned int index) = 0;
   virtual TrackedDeviceClass WaitGetTrackedDeviceClass(unsigned int index) = 0;
   virtual ControllerFrameData WaitGetControllerData(unsigned int index) = 0;
+  virtual device_test::mojom::EventData WaitGetEventData() = 0;
+  virtual bool WaitGetCanCreateSession() = 0;
 
   virtual void AttachCurrentThread() = 0;
   virtual void DetachCurrentThread() = 0;

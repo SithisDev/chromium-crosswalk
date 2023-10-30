@@ -1,9 +1,10 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -248,9 +249,8 @@ TEST(ExtensionCSPValidator, IsSecure) {
   EXPECT_TRUE(CheckCSP(SanitizeCSP(
       "default-src 'self' chrome-extension://aabbcc;",
       OPTIONS_ALLOW_UNSAFE_EVAL)));
-  EXPECT_TRUE(CheckCSP(SanitizeCSP(
-      "default-src 'self' chrome-extension-resource://aabbcc;",
-      OPTIONS_ALLOW_UNSAFE_EVAL)));
+  EXPECT_TRUE(
+      CheckCSP(SanitizeCSP("default-src 'self';", OPTIONS_ALLOW_UNSAFE_EVAL)));
   EXPECT_TRUE(CheckCSP(
       SanitizeCSP("default-src 'self' https:", OPTIONS_ALLOW_UNSAFE_EVAL),
       "default-src 'self';", InsecureValueWarning("default-src", "https:")));
@@ -394,41 +394,20 @@ TEST(ExtensionCSPValidator, IsSecure) {
                InsecureValueWarning("object-src", "*")));
   EXPECT_TRUE(CheckCSP(SanitizeCSP("script-src 'self'; object-src *",
                                    OPTIONS_ALLOW_INSECURE_OBJECT_SRC),
-                       "script-src 'self'; object-src;",
-                       InsecureValueWarning("object-src", "*")));
-  EXPECT_TRUE(CheckCSP(SanitizeCSP(
-      "script-src 'self'; object-src *; plugin-types application/pdf;",
-      OPTIONS_ALLOW_INSECURE_OBJECT_SRC)));
-  EXPECT_TRUE(CheckCSP(SanitizeCSP("script-src 'self'; object-src *; "
-                                   "plugin-types application/x-shockwave-flash",
+                       "script-src 'self'; object-src *;"));
+  EXPECT_TRUE(CheckCSP(
+      SanitizeCSP("script-src 'self'; object-src http://www.example.com",
+                  OPTIONS_ALLOW_INSECURE_OBJECT_SRC)));
+  EXPECT_TRUE(CheckCSP(
+      SanitizeCSP("object-src http://www.example.com blob:; script-src 'self'",
+                  OPTIONS_ALLOW_INSECURE_OBJECT_SRC)));
+  EXPECT_TRUE(
+      CheckCSP(SanitizeCSP("script-src 'self'; object-src http://*.example.com",
+                           OPTIONS_ALLOW_INSECURE_OBJECT_SRC)));
+  EXPECT_TRUE(CheckCSP(SanitizeCSP("script-src *; object-src *",
                                    OPTIONS_ALLOW_INSECURE_OBJECT_SRC),
-                       "script-src 'self'; object-src; "
-                       "plugin-types application/x-shockwave-flash;",
-                       InsecureValueWarning("object-src", "*")));
-  EXPECT_TRUE(CheckCSP(
-      SanitizeCSP("script-src 'self'; object-src *; "
-                  "plugin-types application/x-shockwave-flash application/pdf;",
-                  OPTIONS_ALLOW_INSECURE_OBJECT_SRC),
-      "script-src 'self'; object-src; "
-      "plugin-types application/x-shockwave-flash application/pdf;",
-      InsecureValueWarning("object-src", "*")));
-  EXPECT_TRUE(CheckCSP(SanitizeCSP(
-      "script-src 'self'; object-src http://www.example.com; "
-      "plugin-types application/pdf;",
-      OPTIONS_ALLOW_INSECURE_OBJECT_SRC)));
-  EXPECT_TRUE(CheckCSP(SanitizeCSP(
-      "object-src http://www.example.com blob:; script-src 'self'; "
-      "plugin-types application/pdf;",
-      OPTIONS_ALLOW_INSECURE_OBJECT_SRC)));
-  EXPECT_TRUE(CheckCSP(SanitizeCSP(
-      "script-src 'self'; object-src http://*.example.com; "
-      "plugin-types application/pdf;",
-      OPTIONS_ALLOW_INSECURE_OBJECT_SRC)));
-  EXPECT_TRUE(CheckCSP(
-      SanitizeCSP("script-src *; object-src *; plugin-types application/pdf;",
-                  OPTIONS_ALLOW_INSECURE_OBJECT_SRC),
-      "script-src; object-src *; plugin-types application/pdf;",
-      InsecureValueWarning("script-src", "*")));
+                       "script-src; object-src *",
+                       InsecureValueWarning("script-src", "*")));
 
   EXPECT_TRUE(CheckCSP(SanitizeCSP(
       "default-src; script-src"
@@ -566,7 +545,7 @@ namespace csp_validator {
 
 void PrintTo(const CSPParser::Directive& directive, ::std::ostream* os) {
   *os << base::StringPrintf(
-      "[[%s] [%s] [%s]]", directive.directive_string.as_string().c_str(),
+      "[[%s] [%s] [%s]]", std::string(directive.directive_string).c_str(),
       directive.directive_name.c_str(),
       base::JoinString(directive.directive_values, ",").c_str());
 }
@@ -617,19 +596,17 @@ TEST(ExtensionCSPValidator, ParseCSP) {
   }
 }
 
-TEST(ExtensionCSPValidator, IsSecureIsolatedWorldCSP) {
-  auto insecure_value_error = [](const std::string& directive,
-                                 const std::string& value) {
+TEST(ExtensionCSPValidator, DoesCSPDisallowRemoteCode) {
+  const char* kManifestKey = "dummy_key";
+  auto insecure_value_error = [kManifestKey](const std::string& directive,
+                                             const std::string& value) {
     return ErrorUtils::FormatErrorMessage(
         extensions::manifest_errors::kInvalidCSPInsecureValueError,
-        extensions::manifest_keys::kContentSecurityPolicy_IsolatedWorldPath,
-        value, directive);
+        kManifestKey, value, directive);
   };
 
-  auto missing_secure_src_error = [](const std::string& directive) {
-    return MissingSecureSrcWarning(
-        extensions::manifest_keys::kContentSecurityPolicy_IsolatedWorldPath,
-        directive);
+  auto missing_secure_src_error = [kManifestKey](const std::string& directive) {
+    return MissingSecureSrcWarning(kManifestKey, directive);
   };
 
   struct {
@@ -657,9 +634,9 @@ TEST(ExtensionCSPValidator, IsSecureIsolatedWorldCSP) {
 
   for (const auto& test_case : test_cases) {
     SCOPED_TRACE(test_case.policy);
-    base::string16 error;
-    bool result = extensions::csp_validator::IsSecureIsolatedWorldCSP(
-        test_case.policy, &error);
+    std::u16string error;
+    bool result = extensions::csp_validator::DoesCSPDisallowRemoteCode(
+        test_case.policy, kManifestKey, &error);
     EXPECT_EQ(test_case.expected_error.empty(), result);
     EXPECT_EQ(base::ASCIIToUTF16(test_case.expected_error), error);
   }

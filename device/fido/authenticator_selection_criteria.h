@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,18 +7,20 @@
 
 #include "base/component_export.h"
 #include "device/fido/fido_constants.h"
+#include "device/fido/fido_types.h"
 
 namespace device {
 
 // Represents authenticator properties the relying party can specify to restrict
 // the type of authenticator used in creating credentials.
+//
 // https://w3c.github.io/webauthn/#authenticatorSelection
 class COMPONENT_EXPORT(DEVICE_FIDO) AuthenticatorSelectionCriteria {
  public:
   AuthenticatorSelectionCriteria();
   AuthenticatorSelectionCriteria(
       AuthenticatorAttachment authenticator_attachment,
-      bool require_resident_key,
+      ResidentKeyRequirement resident_key,
       UserVerificationRequirement user_verification_requirement);
   AuthenticatorSelectionCriteria(const AuthenticatorSelectionCriteria& other);
   AuthenticatorSelectionCriteria(AuthenticatorSelectionCriteria&& other);
@@ -29,33 +31,10 @@ class COMPONENT_EXPORT(DEVICE_FIDO) AuthenticatorSelectionCriteria {
   bool operator==(const AuthenticatorSelectionCriteria& other) const;
   ~AuthenticatorSelectionCriteria();
 
-  AuthenticatorAttachment authenticator_attachment() const {
-    return authenticator_attachment_;
-  }
-
-  bool require_resident_key() const { return require_resident_key_; }
-
-  UserVerificationRequirement user_verification_requirement() const {
-    return user_verification_requirement_;
-  }
-
-  void SetAuthenticatorAttachmentForTesting(
-      AuthenticatorAttachment attachment) {
-    authenticator_attachment_ = attachment;
-  }
-  void SetRequireResidentKeyForTesting(bool require) {
-    require_resident_key_ = require;
-  }
-  void SetUserVerificationRequirementForTesting(
-      UserVerificationRequirement uv) {
-    user_verification_requirement_ = uv;
-  }
-
- private:
-  AuthenticatorAttachment authenticator_attachment_ =
+  AuthenticatorAttachment authenticator_attachment =
       AuthenticatorAttachment::kAny;
-  bool require_resident_key_ = false;
-  UserVerificationRequirement user_verification_requirement_ =
+  ResidentKeyRequirement resident_key = ResidentKeyRequirement::kDiscouraged;
+  UserVerificationRequirement user_verification_requirement =
       UserVerificationRequirement::kPreferred;
 };
 

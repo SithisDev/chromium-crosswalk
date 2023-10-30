@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ class URLPatternSet;
 // process. This should be implemented by the client of the extensions system.
 class ExtensionsClient {
  public:
-  typedef std::vector<std::string> ScriptingWhitelist;
+  using ScriptingAllowlist = std::vector<std::string>;
 
   // Return the extensions client.
   static ExtensionsClient* Get();
@@ -44,6 +44,8 @@ class ExtensionsClient {
   static void Set(ExtensionsClient* client);
 
   ExtensionsClient();
+  ExtensionsClient(const ExtensionsClient&) = delete;
+  ExtensionsClient& operator=(const ExtensionsClient&) = delete;
   virtual ~ExtensionsClient();
 
   // Create a FeatureProvider for a specific feature type, e.g. "permission".
@@ -92,13 +94,13 @@ class ExtensionsClient {
                                      URLPatternSet* new_hosts,
                                      PermissionIDSet* permissions) const = 0;
 
-  // Replaces the scripting whitelist with |whitelist|. Used in the renderer;
+  // Replaces the scripting allowlist with |allowlist|. Used in the renderer;
   // only used for testing in the browser process.
-  virtual void SetScriptingWhitelist(const ScriptingWhitelist& whitelist) = 0;
+  virtual void SetScriptingAllowlist(const ScriptingAllowlist& allowlist) = 0;
 
-  // Return the whitelist of extensions that can run content scripts on
+  // Return the allowlist of extensions that can run content scripts on
   // any origin.
-  virtual const ScriptingWhitelist& GetScriptingWhitelist() const = 0;
+  virtual const ScriptingAllowlist& GetScriptingAllowlist() const = 0;
 
   // Get the set of chrome:// hosts that |extension| can have host permissions
   // for.
@@ -112,12 +114,18 @@ class ExtensionsClient {
   // Returns the base webstore URL prefix.
   virtual const GURL& GetWebstoreBaseURL() const = 0;
 
+  // Returns the base webstore URL prefix for the new webstore. This is defined
+  // separately rather than just changing what GetWebstoreBaseURL returns, as
+  // during the transition some functionality needs to operate across both the
+  // old and the new domain.
+  virtual const GURL& GetNewWebstoreBaseURL() const = 0;
+
   // Returns the URL to use for update manifest queries.
   virtual const GURL& GetWebstoreUpdateURL() const = 0;
 
   // Returns a flag indicating whether or not a given URL is a valid
-  // extension blacklist URL.
-  virtual bool IsBlacklistUpdateURL(const GURL& url) const = 0;
+  // extension blocklist URL.
+  virtual bool IsBlocklistUpdateURL(const GURL& url) const = 0;
 
   // Returns the set of file paths corresponding to any images within an
   // extension's contents that may be displayed directly within the browser UI
@@ -132,19 +140,17 @@ class ExtensionsClient {
   virtual std::set<base::FilePath> GetBrowserImagePaths(
       const Extension* extension);
 
-  // Returns whether or not extension APIs are allowed in extension service
-  // workers.
-  // This is currently disallowed as the code to support this is work in
-  // progress.
-  // Can be overridden in tests.
-  virtual bool ExtensionAPIEnabledInExtensionServiceWorkers() const;
-
   // Adds client specific permitted origins to |origin_patterns| for
   // cross-origin communication for an extension context.
   virtual void AddOriginAccessPermissions(
       const Extension& extension,
       bool is_extension_active,
       std::vector<network::mojom::CorsOriginPatternPtr>* origin_patterns) const;
+
+  // Returns the extended error code used by the embedder when an extension
+  // blocks a request. Returns absl::nullopt if the embedder doesn't define such
+  // an error code.
+  virtual absl::optional<int> GetExtensionExtendedErrorCode() const;
 
  private:
   // Performs common initialization and calls Initialize() to allow subclasses
@@ -155,8 +161,6 @@ class ExtensionsClient {
 
   // Whether DoInitialize() has been called.
   bool initialize_called_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsClient);
 };
 
 }  // namespace extensions

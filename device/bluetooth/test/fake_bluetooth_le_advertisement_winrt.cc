@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
-#include "base/strings/string_split.h"
 #include "base/win/reference.h"
 #include "base/win/scoped_hstring.h"
 #include "base/win/vector.h"
@@ -92,24 +90,12 @@ namespace device {
 
 namespace {
 
-constexpr size_t kNumBytesCanonicalUuid = 16;
-
 std::vector<ComPtr<IBluetoothLEAdvertisementDataSection>> ToDataSections(
     const BluetoothDevice::ServiceDataMap& service_data) {
   std::vector<ComPtr<IBluetoothLEAdvertisementDataSection>> data_sections;
   data_sections.reserve(service_data.size());
   for (const auto& pair : service_data) {
-    std::vector<uint8_t> data;
-    data.reserve(kNumBytesCanonicalUuid + pair.second.size());
-
-    // HexDecode the UUID while ignoring dashes.
-    for (const auto& token :
-         base::SplitStringPiece(pair.first.canonical_value(), "-",
-                                base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
-      std::vector<uint8_t> tmp;
-      base::HexStringToBytes(token, &tmp);
-      data.insert(data.end(), tmp.begin(), tmp.end());
-    }
+    std::vector<uint8_t> data = pair.first.GetBytes();
 
     // Reverse the data as UUIDs are specified in little endian order in the
     // advertisement payload.
@@ -130,10 +116,10 @@ FakeBluetoothLEAdvertisementWinrt::FakeBluetoothLEAdvertisementWinrt() =
     default;
 
 FakeBluetoothLEAdvertisementWinrt::FakeBluetoothLEAdvertisementWinrt(
-    base::Optional<std::string> local_name,
-    base::Optional<uint8_t> flags,
+    absl::optional<std::string> local_name,
+    absl::optional<uint8_t> flags,
     BluetoothDevice::UUIDList advertised_uuids,
-    base::Optional<int8_t> tx_power,
+    absl::optional<int8_t> tx_power,
     BluetoothDevice::ServiceDataMap service_data,
     BluetoothDevice::ManufacturerDataMap manufacturer_data)
     : local_name_(std::move(local_name)),
@@ -220,7 +206,7 @@ HRESULT FakeBluetoothLEAdvertisementWinrt::GetSectionsByType(
   std::vector<ComPtr<IBluetoothLEAdvertisementDataSection>> data_sections;
   if (type == BluetoothDeviceWinrt::kTxPowerLevelDataSection && tx_power_) {
     data_sections.push_back(Make<FakeBluetoothLEAdvertisementDataSectionWinrt>(
-        std::vector<uint8_t>({*tx_power_})));
+        std::vector<uint8_t>({static_cast<uint8_t>(*tx_power_)})));
   }
 
   // For simplicity we only implement querying 128 Bit UUID Service Data.

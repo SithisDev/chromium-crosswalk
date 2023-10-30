@@ -7,75 +7,48 @@ describes how to build a package at a newer revision and update Chromium to it.
 An archive of all packages built so far is at https://is.gd/chromeclang
 
 1.  Check that https://ci.chromium.org/p/chromium/g/chromium.clang/console
-    looks reasonably green.
+    looks reasonably green. Red bots with seemingly normal test failures are
+    usually ok, that likely means the test is broken with the stable Clang as
+    well.
 1.  Sync your Chromium tree to the latest revision to pick up any plugin
-    changes
-1.  Run `python tools/clang/scripts/upload_revision.py NNNN`
-    with the target LLVM SVN revision number. This creates a roll CL on a new
-    branch, uploads it and starts tryjobs that build the compiler binaries into
-    a staging bucket on Google Cloud Storage (GCS).
-1.  If the clang upload try bots succeed, copy the binaries from the staging
-    bucket to the production one. For example:
-
-    ```shell
-    $ export rev=123456-abcd1234-1
-    $ for x in Linux_x64 Mac Win ; do \
-        gsutil.py cp -n -a public-read gs://chromium-browser-clang-staging/$x/clang-$rev.tgz \
-            gs://chromium-browser-clang/$x/clang-$rev.tgz ; \
-        gsutil.py cp -n -a public-read gs://chromium-browser-clang-staging/$x/clang-$rev-buildlog.txt \
-            gs://chromium-browser-clang/$x/clang-$rev-buildlog.txt ; \
-        gsutil.py cp -n -a public-read gs://chromium-browser-clang-staging/$x/llvmobjdump-$rev.tgz \
-            gs://chromium-browser-clang/$x/llvmobjdump-$rev.tgz ; \
-        gsutil.py cp -n -a public-read gs://chromium-browser-clang-staging/$x/translation_unit-$rev.tgz \
-            gs://chromium-browser-clang/$x/translation_unit-$rev.tgz ; \
-        gsutil.py cp -n -a public-read gs://chromium-browser-clang-staging/$x/llvm-code-coverage-$rev.tgz \
-            gs://chromium-browser-clang/$x/llvm-code-coverage-$rev.tgz ; \
-        done && gsutil.py cp -n -a public-read gs://chromium-browser-clang-staging/Mac/lld-$rev.tgz \
-            gs://chromium-browser-clang/Mac/lld-$rev.tgz
-    ```
-
-1.  Run the goma package update script to push these packages to goma. If you do
-    not have the necessary credentials to do the upload, ask clang@chromium.org
-    to find someone who does
-1.  Run an exhaustive set of try jobs to test the new compiler:
-
-    ```shell
-    git cl try &&
-    git cl try -B luci.chromium.try -b mac_chromium_asan_rel_ng \
-      -b linux_chromium_cfi_rel_ng \
-      -b linux_chromium_chromeos_asan_rel_ng -b linux_chromium_msan_rel_ng \
-      -b linux_chromium_chromeos_msan_rel_ng -b linux-chromeos-dbg \
-      -b win-asan -b chromeos-amd64-generic-cfi-thin-lto-rel &&
-    git cl try -B luci.chrome.try -b iphone-device -b ipad-device
-    ```
-
-1.  Optional: Start Pinpoint perf tryjobs. These are generally too noisy to
-    catch minor regressions pre-commit, but make sure there are no large
-    regressions.
-
-    a.  (Log in to store OAuth2 token in the depot_tools cache. Only needs to be
-        run once:)
-
-        $ PYTHONPATH=$(dirname $(which git-cl)) python -c"import auth;auth.OAUTH_CLIENT_ID='62121018386-h08uiaftreu4dr3c4alh3l7mogskvb7i.apps.googleusercontent.com';auth.OAUTH_CLIENT_SECRET='vc1fZfV1cZC6mgDSHV-KSPOz';print auth.get_authenticator_for_host('pinpoint',auth.make_auth_config()).login()"
-
-    b.  Generate a fresh Oauth2 token:
-
-        $ TOKEN=$(PYTHONPATH=$(dirname $(which git-cl)) python -c"import auth;print auth.get_authenticator_for_host('pinpoint',auth.make_auth_config()).get_access_token().token")
-
-    c.  Launch Pinpoint job:
-
-        $ curl -H"Authorization: Bearer $TOKEN" -F configuration=chromium-rel-win7-gpu-nvidia \
-            -F target=performance_test_suite -F benchmark=speedometer2 \
-            -F patch=https://chromium-review.googlesource.com/c/chromium/src/+/$(git cl issue | cut -d' ' -f3) \
-            -F start_git_hash=HEAD -F end_git_hash=HEAD https://pinpoint-dot-chromeperf.appspot.com/api/new
-
-    d.  Use the URL returned by the command above to see the progress and result
-        of the tryjob, checking that it doesn't regress significantly (> 10%).
-        Post the URL to the codereview.
-
-1.  Commit roll CL from the first step
+    changes.
+1.  Run [go/chrome-push-clang-to-goma](https://goto.google.com/chrome-push-clang-to-goma).
+    This takes a recent dry run CL to update clang, and if the trybots were
+    successful it will copy the binaries from the staging bucket to the
+    production one. Writing to this bucket requires special permissions. File a
+    bug at g.co/bugatrooper if you don't have these already (e.g.,
+    https://crbug.com/1034081). Then it will push the packages to goma. If you
+    do not have the necessary credentials to do the upload, ask
+    clang@chromium.org to find someone who does.
+    *   Alternatively, to create your own roll CL, you can manually run
+	`tools/clang/scripts/upload_revision.py` with a recent upstream LLVM
+	commit hash as the argument. After the `*_upload_clang` trybots are
+	successfully finished, run
+	[go/chrome-promote-clang](https://goto.google.com/chrome-promote-clang)
+	on the new Clang package name.
+1.  Run an exhaustive set of try jobs to test the new compiler. The CL
+    description created previously by upload_revision.py includes
+    `Cq-Include-Trybots:` lines for all needed bots, so it's sufficient to just
+    run `git cl try` (or hit "CQ DRY RUN" on gerrit).
+1.  Commit the roll CL from the previous step.
 1.  The bots will now pull the prebuilt binary, and goma will have a matching
     binary, too.
+
+## Performance regressions
+
+After doing a clang roll, you may get a performance bug assigned to you
+([example](https://crbug.com/1094671)). Some performance noise is expected
+while doing a clang roll.
+
+You can check all performance data for a clang roll via
+`https://chromeperf.appspot.com/group_report?rev=XXXXXX`, where `XXXXXX` is the
+revision number, e.g. `778090` for the example bug (look in the first message
+of the performance bug to find this). Click the checkboxes to display graphs.
+Hover over points in the graph to see the value and error.
+
+Serious regressions require bisecting upstream commits (TODO: how to repro?).
+If the regressions look insignificant and there is green as well as red, you
+can close the bug as "WontFix" with an explanation.
 
 ## Adding files to the clang package
 
@@ -92,14 +65,7 @@ criteria:
 
 If you want to add something to the clang package that doesn't (yet?) meet
 these criteria, you can make package.py upload it to a separate zip file
-and then download it on an opt-in basis by requiring users to run a script
-to download the additional zip file. You can structure your script in a way that
-it downloads your additional zip automatically if the script detects an
-old version on disk, that way users have to run the download script just
-once. `tools/clang/scripts/download_lld_mac.py` is an example for this
-(It doesn't do the "only download if old version is on disk or if requested"
-bit, and hence doesn't run as a default DEPS hook. TODO(thakis): Make
-coverage stuff a better example and link to that.)
+and then download it on an opt-in basis by using update.py's --package option.
 
 If you're adding a new feature that you expect will meet the inclusion criteria
 eventually but doesn't yet, start by having your things in a separate zip

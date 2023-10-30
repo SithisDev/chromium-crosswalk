@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <tuple>
 
+#include "base/memory/raw_ptr.h"
 #include "extensions/common/extension_id.h"
 #include "url/gurl.h"
 
@@ -15,6 +16,7 @@ class BrowserContext;
 }
 
 namespace extensions {
+class Extension;
 class LazyContextTaskQueue;
 
 class LazyContextId {
@@ -32,6 +34,9 @@ class LazyContextId {
   LazyContextId(content::BrowserContext* context,
                 const ExtensionId& extension_id,
                 const GURL& service_worker_scope);
+
+  // The context is derived from the extension.
+  LazyContextId(content::BrowserContext* context, const Extension* extension);
 
   // Copy and move constructors.
   LazyContextId(const LazyContextId& other) = default;
@@ -58,15 +63,22 @@ class LazyContextId {
   LazyContextTaskQueue* GetTaskQueue() const;
 
   bool operator<(const LazyContextId& rhs) const {
-    return std::make_tuple(type_, context_, extension_id_,
-                           service_worker_scope_) <
-           std::make_tuple(rhs.type_, rhs.context_, rhs.extension_id_,
-                           rhs.service_worker_scope_);
+    return std::tie(type_, context_, extension_id_, service_worker_scope_) <
+           std::tie(rhs.type_, rhs.context_, rhs.extension_id_,
+                    rhs.service_worker_scope_);
   }
+
+  bool operator==(const LazyContextId& rhs) const {
+    return std::tie(type_, context_, extension_id_, service_worker_scope_) ==
+           std::tie(rhs.type_, rhs.context_, rhs.extension_id_,
+                    rhs.service_worker_scope_);
+  }
+
+  bool operator!=(const LazyContextId& rhs) const { return !(*this == rhs); }
 
  private:
   Type type_;
-  content::BrowserContext* context_;
+  raw_ptr<content::BrowserContext> context_;
   ExtensionId extension_id_;
   GURL service_worker_scope_;
 };

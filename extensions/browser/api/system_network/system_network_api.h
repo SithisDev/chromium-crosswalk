@@ -1,11 +1,9 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef EXTENSIONS_BROWSER_API_SYSTEM_NETWORK_SYSTEM_NETWORK_API_H_
 #define EXTENSIONS_BROWSER_API_SYSTEM_NETWORK_SYSTEM_NETWORK_API_H_
-
-#include <memory>
 
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/api/system_network.h"
@@ -14,8 +12,7 @@
 namespace extensions {
 namespace api {
 
-class SystemNetworkGetNetworkInterfacesFunction
-    : public UIThreadExtensionFunction {
+class SystemNetworkGetNetworkInterfacesFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("system.network.getNetworkInterfaces",
                              SYSTEM_NETWORK_GETNETWORKINTERFACES)
@@ -30,7 +27,7 @@ class SystemNetworkGetNetworkInterfacesFunction
 
  private:
   void SendResponseOnUIThread(
-      const base::Optional<net::NetworkInterfaceList>& interface_list);
+      const absl::optional<net::NetworkInterfaceList>& interface_list);
 };
 
 }  // namespace api

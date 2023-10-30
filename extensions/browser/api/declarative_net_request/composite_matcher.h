@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,82 +7,117 @@
 
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <vector>
 
-#include "base/macros.h"
-#include "base/optional.h"
+#include "extensions/browser/api/declarative_net_request/constants.h"
+#include "extensions/browser/api/declarative_net_request/request_action.h"
 #include "extensions/browser/api/declarative_net_request/ruleset_matcher.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+
+namespace content {
+class NavigationHandle;
+class RenderFrameHost;
+}  // namespace content
 
 namespace extensions {
 namespace declarative_net_request {
 
-// Per extension instance which manages the different rulesets for an extension
-// while respecting their priorities.
+struct RequestAction;
+
+// Per extension instance which manages the different rulesets for an extension.
 class CompositeMatcher {
  public:
-  struct RedirectAction {
-    RedirectAction(base::Optional<GURL> redirect_url, bool notify);
-    ~RedirectAction();
-    RedirectAction(RedirectAction&& other);
-    RedirectAction& operator=(RedirectAction&& other);
+  struct ActionInfo {
+    // Constructs a no-op ActionInfo object.
+    ActionInfo();
 
-    // The URL the request will be redirected to. The request should not be
-    // redirected if this is not specified.
-    base::Optional<GURL> redirect_url;
+    ActionInfo(absl::optional<RequestAction> action,
+               bool notify_request_withheld);
+
+    ActionInfo(const ActionInfo&) = delete;
+    ActionInfo& operator=(const ActionInfo&) = delete;
+
+    ~ActionInfo();
+    ActionInfo(ActionInfo&& other);
+    ActionInfo& operator=(ActionInfo&& other);
+
+    // The action to be taken for this request.
+    absl::optional<RequestAction> action;
 
     // Whether the extension should be notified that the request was unable to
     // be redirected as the extension lacks the appropriate host permission for
-    // the request.
+    // the request. Can only be true for redirect actions.
     bool notify_request_withheld = false;
-
-    DISALLOW_COPY_AND_ASSIGN(RedirectAction);
   };
 
   using MatcherList = std::vector<std::unique_ptr<RulesetMatcher>>;
 
-  // Each RulesetMatcher should have a distinct ID and priority.
-  explicit CompositeMatcher(MatcherList matchers);
+  // Each RulesetMatcher should have a distinct RulesetID.
+  CompositeMatcher(MatcherList matchers, HostPermissionsAlwaysRequired mode);
+
+  CompositeMatcher(const CompositeMatcher&) = delete;
+  CompositeMatcher& operator=(const CompositeMatcher&) = delete;
+
   ~CompositeMatcher();
 
-  // Adds the |new_matcher| to the list of matchers. If a matcher with the
-  // corresponding ID is already present, updates the matcher.
-  void AddOrUpdateRuleset(std::unique_ptr<RulesetMatcher> new_matcher);
+  const MatcherList& matchers() const { return matchers_; }
 
-  // Returns whether the network request as specified by |params| should be
-  // blocked.
-  bool ShouldBlockRequest(const RequestParams& params) const;
+  HostPermissionsAlwaysRequired host_permissions_always_required() const {
+    return host_permissions_always_required_;
+  }
 
-  // Returns a RedirectAction struct containing a redirect URL if the request
-  // is to be redirected, and whether the extension should be notified if its
-  // access to the request is withheld.
-  RedirectAction ShouldRedirectRequest(
+  // Returns a pointer to RulesetMatcher with the given |id| if one is present.
+  const RulesetMatcher* GetMatcherWithID(RulesetID id) const;
+
+  // Inserts |matcher|, overwriting any existing RulesetMatcher with the same
+  // RulesetID.
+  void AddOrUpdateRuleset(std::unique_ptr<RulesetMatcher> matcher);
+
+  // Inserts |matchers| overwriting any matchers with the same RulesetID.
+  void AddOrUpdateRulesets(CompositeMatcher::MatcherList matchers);
+
+  // Erases RulesetMatchers with the given RulesetIDs.
+  void RemoveRulesetsWithIDs(const std::set<RulesetID>& ids);
+
+  // Computes and returns the set of static RulesetIDs corresponding to
+  // |matchers_|.
+  std::set<RulesetID> ComputeStaticRulesetIDs() const;
+
+  // Returns a RequestAction for the network request specified by |params|, or
+  // absl::nullopt if there is no matching rule.
+  ActionInfo GetBeforeRequestAction(
       const RequestParams& params,
       PermissionsData::PageAccess page_access) const;
 
-  // Returns the bitmask of headers to remove from the request. The bitmask
-  // corresponds to RemoveHeadersMask type. |current_mask| denotes the current
-  // mask of headers to be removed and is included in the return value.
-  uint8_t GetRemoveHeadersMask(const RequestParams& params,
-                               uint8_t current_mask) const;
+  // Returns all matching RequestActions for the request corresponding to
+  // modifyHeaders rules matched from this extension, sorted in descending order
+  // by rule priority.
+  std::vector<RequestAction> GetModifyHeadersActions(
+      const RequestParams& params) const;
 
   // Returns whether this modifies "extraHeaders".
   bool HasAnyExtraHeadersMatcher() const;
 
+  void OnRenderFrameCreated(content::RenderFrameHost* host);
+  void OnRenderFrameDeleted(content::RenderFrameHost* host);
+  void OnDidFinishNavigation(content::NavigationHandle* navigation_handle);
+
  private:
+  // This must be called whenever |matchers_| are modified.
+  void OnMatchersModified();
+
   bool ComputeHasAnyExtraHeadersMatcher() const;
 
-  // Sorts |matchers_| in descending order of priority.
-  void SortMatchersByPriority();
-
-  // Sorted by priority in descending order.
+  // The RulesetMatchers, in an arbitrary order.
   MatcherList matchers_;
 
   // Denotes the cached return value for |HasAnyExtraHeadersMatcher|. Care must
   // be taken to reset this as this object is modified.
-  mutable base::Optional<bool> has_any_extra_headers_matcher_;
+  mutable absl::optional<bool> has_any_extra_headers_matcher_;
 
-  DISALLOW_COPY_AND_ASSIGN(CompositeMatcher);
+  const HostPermissionsAlwaysRequired host_permissions_always_required_;
 };
 
 }  // namespace declarative_net_request

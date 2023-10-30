@@ -1,16 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/renderer/extensions_renderer_client.h"
 
-#include "base/logging.h"
+#include "base/check.h"
 
 namespace extensions {
 
 namespace {
 
-ExtensionsRendererClient* g_client = NULL;
+ExtensionsRendererClient* g_client = nullptr;
 
 }  // namespace
 

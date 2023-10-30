@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "base/bind.h"
-#include "base/stl_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "device/gamepad/gamepad_standard_mappings.h"
 #include "device/gamepad/gamepad_uma.h"
@@ -39,13 +40,8 @@ GamepadSource RawInputDataFetcher::source() {
   return Factory::static_source();
 }
 
-void RawInputDataFetcher::OnAddedToProvider() {
-  hid_functions_ = std::make_unique<HidDllFunctionsWin>();
-  rawinput_available_ = hid_functions_->IsValid();
-}
-
 RAWINPUTDEVICE* RawInputDataFetcher::GetRawInputDevices(DWORD flags) {
-  size_t usage_count = base::size(DeviceUsages);
+  size_t usage_count = std::size(DeviceUsages);
   std::unique_ptr<RAWINPUTDEVICE[]> devices(new RAWINPUTDEVICE[usage_count]);
   for (size_t i = 0; i < usage_count; ++i) {
     devices[i].dwFlags = flags;
@@ -64,13 +60,13 @@ void RawInputDataFetcher::PauseHint(bool pause) {
 }
 
 void RawInputDataFetcher::StartMonitor() {
-  if (!rawinput_available_ || events_monitored_)
+  if (events_monitored_)
     return;
 
   if (!window_) {
-    window_.reset(new base::win::MessageWindow());
-    if (!window_->Create(base::Bind(&RawInputDataFetcher::HandleMessage,
-                                    base::Unretained(this)))) {
+    window_ = std::make_unique<base::win::MessageWindow>();
+    if (!window_->Create(base::BindRepeating(
+            &RawInputDataFetcher::HandleMessage, base::Unretained(this)))) {
       PLOG(ERROR) << "Failed to create the raw input window";
       window_.reset();
       return;
@@ -80,7 +76,7 @@ void RawInputDataFetcher::StartMonitor() {
   // Register to receive raw HID input.
   std::unique_ptr<RAWINPUTDEVICE[]> devices(
       GetRawInputDevices(RIDEV_INPUTSINK));
-  if (!::RegisterRawInputDevices(devices.get(), base::size(DeviceUsages),
+  if (!::RegisterRawInputDevices(devices.get(), std::size(DeviceUsages),
                                  sizeof(RAWINPUTDEVICE))) {
     PLOG(ERROR) << "RegisterRawInputDevices() failed for RIDEV_INPUTSINK";
     window_.reset();
@@ -91,20 +87,31 @@ void RawInputDataFetcher::StartMonitor() {
 }
 
 void RawInputDataFetcher::StopMonitor() {
-  if (!rawinput_available_ || !events_monitored_)
+  if (!events_monitored_)
     return;
 
   // Stop receiving raw input.
   DCHECK(window_);
   std::unique_ptr<RAWINPUTDEVICE[]> devices(GetRawInputDevices(RIDEV_REMOVE));
 
-  if (!::RegisterRawInputDevices(devices.get(), base::size(DeviceUsages),
+  if (!::RegisterRawInputDevices(devices.get(), std::size(DeviceUsages),
                                  sizeof(RAWINPUTDEVICE))) {
     PLOG(INFO) << "RegisterRawInputDevices() failed for RIDEV_REMOVE";
   }
 
   events_monitored_ = false;
   window_.reset();
+}
+
+bool RawInputDataFetcher::DisconnectUnrecognizedGamepad(int source_id) {
+  for (auto it = controllers_.begin(); it != controllers_.end(); ++it) {
+    if (it->second->GetSourceId() == source_id) {
+      it->second->Shutdown();
+      controllers_.erase(it);
+      return true;
+    }
+  }
+  return false;
 }
 
 void RawInputDataFetcher::ClearControllers() {
@@ -114,9 +121,6 @@ void RawInputDataFetcher::ClearControllers() {
 }
 
 void RawInputDataFetcher::GetGamepadData(bool devices_changed_hint) {
-  if (!rawinput_available_)
-    return;
-
   if (devices_changed_hint)
     EnumerateDevices();
 
@@ -162,7 +166,7 @@ void RawInputDataFetcher::EnumerateDevices() {
       } else {
         int source_id = ++last_source_id_;
         auto new_device = std::make_unique<RawInputGamepadDeviceWin>(
-            device_handle, source_id, hid_functions_.get());
+            device_handle, source_id);
         if (!new_device->IsValid()) {
           new_device->Shutdown();
           continue;
@@ -171,18 +175,23 @@ void RawInputDataFetcher::EnumerateDevices() {
         const int vendor_int = new_device->GetVendorId();
         const int product_int = new_device->GetProductId();
         const int version_number = new_device->GetVersionNumber();
-        const std::wstring product_string = new_device->GetProductString();
+        const std::wstring product_wstring = new_device->GetProductString();
+        const std::string product_string = base::SysWideToUTF8(product_wstring);
+        const GamepadId gamepad_id = GamepadIdList::Get().GetGamepadId(
+            product_string, vendor_int, product_int);
 
-        if (NintendoController::IsNintendoController(vendor_int, product_int)) {
+        if (NintendoController::IsNintendoController(gamepad_id)) {
           // Nintendo devices are handled by the Nintendo data fetcher.
           new_device->Shutdown();
           continue;
         }
 
+        bool is_recognized = GamepadId::kUnknownGamepad != gamepad_id;
+
         // Record gamepad metrics before excluding XInput devices. This allows
         // us to recognize XInput devices even though the XInput API masks
         // the vendor and product IDs.
-        RecordConnectedGamepad(vendor_int, product_int);
+        RecordConnectedGamepad(gamepad_id);
 
         // The presence of "IG_" in the device name indicates that this is an
         // XInput Gamepad. Skip enumerating these devices and let the XInput
@@ -194,7 +203,7 @@ void RawInputDataFetcher::EnumerateDevices() {
           continue;
         }
 
-        PadState* state = GetPadState(source_id);
+        PadState* state = GetPadState(source_id, is_recognized);
         if (!state) {
           new_device->Shutdown();
           continue;  // No slot available for this gamepad.
@@ -211,19 +220,14 @@ void RawInputDataFetcher::EnumerateDevices() {
         pad.vibration_actuator.not_null = device->SupportsVibration();
 
         state->mapper = GetGamepadStandardMappingFunction(
-            vendor_int, product_int, /*hid_specification_version=*/0,
-            version_number, GAMEPAD_BUS_UNKNOWN);
+            product_string, vendor_int, product_int,
+            /*hid_specification_version=*/0, version_number,
+            GAMEPAD_BUS_UNKNOWN);
         state->axis_mask = 0;
         state->button_mask = 0;
 
-        pad.SetID(base::StringPrintf(L"%ls (%lsVendor: %04x Product: %04x)",
-                                     product_string.c_str(),
-                                     state->mapper ? L"STANDARD GAMEPAD " : L"",
-                                     vendor_int, product_int));
-
-        // The mapping is standard if there is a standard mapping function.
-        pad.mapping =
-            state->mapper ? GamepadMapping::kStandard : GamepadMapping::kNone;
+        UpdateGamepadStrings(product_string, vendor_int, product_int,
+                             state->mapper != nullptr, pad);
       }
 
       enumerated_device_handles.insert(device_handle);

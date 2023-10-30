@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 
+#include "base/containers/contains.h"
 #include "components/apdu/apdu_command.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_parsing_utils.h"
@@ -19,14 +20,20 @@ bool IsConvertibleToU2fRegisterCommand(
       request.resident_key_required)
     return false;
 
-  const auto& public_key_credential_info =
-      request.public_key_credential_params.public_key_credential_params();
-  return std::any_of(
-      public_key_credential_info.begin(), public_key_credential_info.end(),
-      [](const auto& credential_info) {
-        return credential_info.algorithm ==
-               base::strict_cast<int>(CoseAlgorithmIdentifier::kCoseEs256);
-      });
+  return base::Contains(
+      request.public_key_credential_params.public_key_credential_params(),
+      static_cast<int32_t>(CoseAlgorithmIdentifier::kEs256),
+      &PublicKeyCredentialParams::CredentialInfo::algorithm);
+}
+
+bool ShouldPreferCTAP2EvenIfItNeedsAPIN(
+    const CtapMakeCredentialRequest& request) {
+  return request.hmac_secret ||
+         // U2F devices can only support |kEnterpriseApprovedByBrowser| so
+         // |kEnterpriseIfRPListedOnAuthenticator| should go over CTAP2.
+         request.attestation_preference ==
+             AttestationConveyancePreference::
+                 kEnterpriseIfRPListedOnAuthenticator;
 }
 
 bool IsConvertibleToU2fSignCommand(const CtapGetAssertionRequest& request) {
@@ -34,10 +41,10 @@ bool IsConvertibleToU2fSignCommand(const CtapGetAssertionRequest& request) {
          !request.allow_list.empty();
 }
 
-base::Optional<std::vector<uint8_t>> ConvertToU2fRegisterCommand(
+absl::optional<std::vector<uint8_t>> ConvertToU2fRegisterCommand(
     const CtapMakeCredentialRequest& request) {
   if (!IsConvertibleToU2fRegisterCommand(request))
-    return base::nullopt;
+    return absl::nullopt;
 
   if (request.pin_auth && request.pin_auth->size() == 0) {
     // An empty pin_auth in CTAP2 indicates that the device should just wait
@@ -45,28 +52,28 @@ base::Optional<std::vector<uint8_t>> ConvertToU2fRegisterCommand(
     return ConstructBogusU2fRegistrationCommand();
   }
 
-  const bool is_invidual_attestation =
+  const bool is_individual_attestation =
       request.attestation_preference ==
-      AttestationConveyancePreference::kEnterprise;
+      AttestationConveyancePreference::kEnterpriseApprovedByBrowser;
   return ConstructU2fRegisterCommand(
       fido_parsing_utils::CreateSHA256Hash(request.rp.id),
-      request.client_data_hash, is_invidual_attestation);
+      request.client_data_hash, is_individual_attestation);
 }
 
-base::Optional<std::vector<uint8_t>> ConvertToU2fSignCommand(
+absl::optional<std::vector<uint8_t>> ConvertToU2fSignCommandWithBogusChallenge(
     const CtapMakeCredentialRequest& request,
     base::span<const uint8_t> key_handle) {
   return ConstructU2fSignCommand(
       fido_parsing_utils::CreateSHA256Hash(request.rp.id),
-      request.client_data_hash, key_handle);
+      kBogusChallenge, key_handle);
 }
 
-base::Optional<std::vector<uint8_t>> ConvertToU2fSignCommand(
+absl::optional<std::vector<uint8_t>> ConvertToU2fSignCommand(
     const CtapGetAssertionRequest& request,
     ApplicationParameterType application_parameter_type,
     base::span<const uint8_t> key_handle) {
   if (!IsConvertibleToU2fSignCommand(request))
-    return base::nullopt;
+    return absl::nullopt;
 
   const auto& application_parameter =
       application_parameter_type == ApplicationParameterType::kPrimary
@@ -96,12 +103,12 @@ std::vector<uint8_t> ConstructU2fRegisterCommand(
   return command.GetEncodedCommand();
 }
 
-base::Optional<std::vector<uint8_t>> ConstructU2fSignCommand(
+absl::optional<std::vector<uint8_t>> ConstructU2fSignCommand(
     base::span<const uint8_t, kU2fApplicationParamLength> application_parameter,
     base::span<const uint8_t, kU2fChallengeParamLength> challenge_parameter,
     base::span<const uint8_t> key_handle) {
   if (key_handle.size() > kMaxKeyHandleLength) {
-    return base::nullopt;
+    return absl::nullopt;
   }
 
   std::vector<uint8_t> data;

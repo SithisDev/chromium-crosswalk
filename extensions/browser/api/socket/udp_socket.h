@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,18 +11,21 @@
 #include <vector>
 
 #include "base/containers/span.h"
-#include "base/optional.h"
 #include "extensions/browser/api/socket/socket.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/pending_remote.h"
+#include "mojo/public/cpp/bindings/receiver.h"
+#include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/public/mojom/udp_socket.mojom.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace extensions {
 
-class UDPSocket : public Socket, public network::mojom::UDPSocketReceiver {
+class UDPSocket : public Socket, public network::mojom::UDPSocketListener {
  public:
-  UDPSocket(network::mojom::UDPSocketPtrInfo socket,
-            network::mojom::UDPSocketReceiverRequest receiver_request,
+  UDPSocket(mojo::PendingRemote<network::mojom::UDPSocket> socket,
+            mojo::PendingReceiver<network::mojom::UDPSocketListener>
+                listener_receiver,
             const std::string& owner_extension_id);
   ~UDPSocket() override;
 
@@ -71,18 +74,18 @@ class UDPSocket : public Socket, public network::mojom::UDPSocketReceiver {
 
   bool IsConnectedOrBound() const;
 
-  // network::mojom::UDPSocketReceiver implementation.
+  // network::mojom::UDPSocketListener implementation.
   void OnReceived(int32_t result,
-                  const base::Optional<net::IPEndPoint>& src_addr,
-                  base::Optional<base::span<const uint8_t>> data) override;
+                  const absl::optional<net::IPEndPoint>& src_addr,
+                  absl::optional<base::span<const uint8_t>> data) override;
 
   void OnConnectCompleted(net::CompletionOnceCallback user_callback,
                           const net::IPEndPoint& remote_addr,
                           int result,
-                          const base::Optional<net::IPEndPoint>& local_addr);
+                          const absl::optional<net::IPEndPoint>& local_addr);
   void OnBindCompleted(net::CompletionOnceCallback user_callback,
                        int result,
-                       const base::Optional<net::IPEndPoint>& local_addr);
+                       const absl::optional<net::IPEndPoint>& local_addr);
   void OnSendToCompleted(net::CompletionOnceCallback user_callback,
                          size_t byte_count,
                          int result);
@@ -96,13 +99,13 @@ class UDPSocket : public Socket, public network::mojom::UDPSocketReceiver {
                              const std::string& normalized_address,
                              int result);
 
-  network::mojom::UDPSocketPtr socket_;
+  mojo::Remote<network::mojom::UDPSocket> socket_;
   network::mojom::UDPSocketOptionsPtr socket_options_;
 
   bool is_bound_;
-  mojo::Binding<network::mojom::UDPSocketReceiver> receiver_binding_;
-  base::Optional<net::IPEndPoint> local_addr_;
-  base::Optional<net::IPEndPoint> peer_addr_;
+  mojo::Receiver<network::mojom::UDPSocketListener> listener_receiver_{this};
+  absl::optional<net::IPEndPoint> local_addr_;
+  absl::optional<net::IPEndPoint> peer_addr_;
 
   ReadCompletionCallback read_callback_;
 
@@ -116,8 +119,9 @@ class UDPSocket : public Socket, public network::mojom::UDPSocketReceiver {
 // the "sockets.udp" namespace.
 class ResumableUDPSocket : public UDPSocket {
  public:
-  ResumableUDPSocket(network::mojom::UDPSocketPtrInfo socket,
-                     network::mojom::UDPSocketReceiverRequest receiver_request,
+  ResumableUDPSocket(mojo::PendingRemote<network::mojom::UDPSocket> socket,
+                     mojo::PendingReceiver<network::mojom::UDPSocketListener>
+                         listener_receiver,
                      const std::string& owner_extension_id);
 
   // Overriden from ApiResource

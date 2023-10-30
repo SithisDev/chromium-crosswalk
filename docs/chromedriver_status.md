@@ -1,6 +1,6 @@
 # WebDriver Status
 
-Below is a list of all WebDriver commands and their current support in ChromeDriver based on what is in the [WebDriver Specification](https://w3c.github.io/webdriver/webdriver-spec.html).
+Below is a list of all WebDriver commands and their current support in ChromeDriver based on what is in the [WebDriver Specification](https://w3c.github.io/webdriver/).
 
 | Method | URL | Command | Status | Bug
 | --- | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ Below is a list of all WebDriver commands and their current support in ChromeDri
 | DELETE | /session/{session id}/window                                   | Close Window               | Complete           |
 | POST   | /session/{session id}/window                                   | Switch To Window           | Complete           |
 | GET    | /session/{session id}/window/handles                           | Get Window Handles         | Complete           |
-| POST   | /session/{session id}/window/new                               | New Window                 | Not Yet Implemented | [2690](https://bugs.chromium.org/p/chromedriver/issues/detail?id=2690)
+| POST   | /session/{session id}/window/new                               | New Window                 | Complete           |
 | POST   | /session/{session id}/frame                                    | Switch To Frame            | Complete           |
 | POST   | /session/{session id}/frame/parent                             | Switch To Parent Frame     | Complete           |
 | GET    | /session/{session id}/window/rect                              | Get Window Rect            | Complete           |
@@ -40,18 +40,20 @@ Below is a list of all WebDriver commands and their current support in ChromeDri
 | GET    | /session/{session id}/element/{element id}/name                | Get Element Tag Name       | Complete           |
 | GET    | /session/{session id}/element/{element id}/rect                | Get Element Rect           | Complete           |
 | GET    | /session/{session id}/element/{element id}/enabled             | Is Element Enabled         | Complete           |
+| GET    | /session/{session id}/element/{element id}/computedlabel       | Get Computed Label         | Complete           |
+| GET    | /session/{session id}/element/{element id}/computedrole        | Get Computed Role          | Complete           |
 | POST   | /session/{session id}/element/{element id}/click               | Element Click              | Partially Complete | [1996](https://bugs.chromium.org/p/chromedriver/issues/detail?id=1996)
 | POST   | /session/{session id}/element/{element id}/clear               | Element Clear              | Complete           |
 | POST   | /session/{session id}/element/{element id}/value               | Element Send Keys          | Partially Complete | [1999](https://bugs.chromium.org/p/chromedriver/issues/detail?id=1999)
 | GET    | /session/{session id}/source                                   | Get Page Source            | Complete           |
-| POST   | /session/{session id}/execute/sync                             | Execute Script             | Partially Complete | [2398](https://bugs.chromium.org/p/chromedriver/issues/detail?id=2398) [2556](https://bugs.chromium.org/p/chromedriver/issues/detail?id=2556)
-| POST   | /session/{session id}/execute/async                            | Execute Async Script       | Partially Complete | [2398](https://bugs.chromium.org/p/chromedriver/issues/detail?id=2398) [2556](https://bugs.chromium.org/p/chromedriver/issues/detail?id=2556)
+| POST   | /session/{session id}/execute/sync                             | Execute Script             | Almost Complete    | [2938](https://bugs.chromium.org/p/chromedriver/issues/detail?id=2938)
+| POST   | /session/{session id}/execute/async                            | Execute Async Script       | Almost Complete    | [2938](https://bugs.chromium.org/p/chromedriver/issues/detail?id=2938)
 | GET    | /session/{session id}/cookie                                   | Get All Cookies            | Complete           |
 | GET    | /session/{session id}/cookie/{name}                            | Get Named Cookie           | Complete           |
 | POST   | /session/{session id}/cookie                                   | Add Cookie                 | Complete           |
 | DELETE | /session/{session id}/cookie/{name}                            | Delete Cookie              | Complete           |
 | DELETE | /session/{session id)/cookie                                   | Delete All Cookies         | Complete           |
-| POST   | /session/{session id}/actions                                  | Perform Actions            | Partially Complete | [1897](https://bugs.chromium.org/p/chromedriver/issues/detail?id=1897)
+| POST   | /session/{session id}/actions                                  | Perform Actions            | Complete           |
 | DELETE | /session/{session id}/actions                                  | Release Actions            | Complete           |
 | POST   | /session/{session id}/alert/dismiss                            | Dismiss Alert              | Complete           |
 | POST   | /session/{session id}/alert/accept                             | Accept Alert               | Complete           |
@@ -59,3 +61,4 @@ Below is a list of all WebDriver commands and their current support in ChromeDri
 | POST   | /session/{session id}/alert/text                               | Send Alert Text            | Complete           |
 | GET    | /session/{session id}/screenshot                               | Take Screenshot            | Complete           |
 | GET    | /session/{session id}/element/{element id}/screenshot          | Take Element Screenshot    | Complete           |
+| POST   | /session/{session id}/print                                    | Print Page                 | Partially Complete(available for Headless)           | [3481](https://bugs.chromium.org/p/chromedriver/issues/detail?id=3481)

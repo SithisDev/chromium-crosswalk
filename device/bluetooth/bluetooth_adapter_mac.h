@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,9 @@
 #include <vector>
 
 #include "base/mac/scoped_nsobject.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/observer_list.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_discovery_manager_mac.h"
 #include "device/bluetooth/bluetooth_export.h"
@@ -39,23 +37,19 @@
 
 namespace device {
 
-// The 10.13 SDK deprecates the CBCentralManagerState enum, but marks the
-// replacement enum with limited availability, making it unusable. API methods
-// now return the new enum, so to compare enum values the new enum must be cast.
-// Wrap this in a function to obtain the state via a call to [manager state] to
-// avoid code that would use the replacement enum and trigger warnings.
-CBCentralManagerState GetCBManagerState(CBCentralManager* manager);
-
 class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
     : public BluetoothAdapter,
       public BluetoothDiscoveryManagerMac::Observer,
       public BluetoothLowEnergyDiscoveryManagerMac::Observer {
  public:
-  static base::WeakPtr<BluetoothAdapterMac> CreateAdapter();
-  static base::WeakPtr<BluetoothAdapterMac> CreateAdapterForTest(
+  static scoped_refptr<BluetoothAdapterMac> CreateAdapter();
+  static scoped_refptr<BluetoothAdapterMac> CreateAdapterForTest(
       std::string name,
       std::string address,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
+
+  BluetoothAdapterMac(const BluetoothAdapterMac&) = delete;
+  BluetoothAdapterMac& operator=(const BluetoothAdapterMac&) = delete;
 
   // Converts CBUUID into BluetoothUUID
   static BluetoothUUID BluetoothUUIDWithCBUUID(CBUUID* UUID);
@@ -67,36 +61,37 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   std::string GetAddress() const override;
   std::string GetName() const override;
   void SetName(const std::string& name,
-               const base::Closure& callback,
-               const ErrorCallback& error_callback) override;
+               base::OnceClosure callback,
+               ErrorCallback error_callback) override;
   bool IsInitialized() const override;
   bool IsPresent() const override;
   bool IsPowered() const override;
+  PermissionStatus GetOsPermissionStatus() const override;
   bool IsDiscoverable() const override;
   void SetDiscoverable(bool discoverable,
-                       const base::Closure& callback,
-                       const ErrorCallback& error_callback) override;
+                       base::OnceClosure callback,
+                       ErrorCallback error_callback) override;
   bool IsDiscovering() const override;
   std::unordered_map<BluetoothDevice*, BluetoothDevice::UUIDSet>
   RetrieveGattConnectedDevicesWithDiscoveryFilter(
       const BluetoothDiscoveryFilter& discovery_filter) override;
   UUIDList GetUUIDs() const override;
-  void CreateRfcommService(
-      const BluetoothUUID& uuid,
-      const ServiceOptions& options,
-      const CreateServiceCallback& callback,
-      const CreateServiceErrorCallback& error_callback) override;
-  void CreateL2capService(
-      const BluetoothUUID& uuid,
-      const ServiceOptions& options,
-      const CreateServiceCallback& callback,
-      const CreateServiceErrorCallback& error_callback) override;
+  void CreateRfcommService(const BluetoothUUID& uuid,
+                           const ServiceOptions& options,
+                           CreateServiceCallback callback,
+                           CreateServiceErrorCallback error_callback) override;
+  void CreateL2capService(const BluetoothUUID& uuid,
+                          const ServiceOptions& options,
+                          CreateServiceCallback callback,
+                          CreateServiceErrorCallback error_callback) override;
   void RegisterAdvertisement(
       std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
-      const CreateAdvertisementCallback& callback,
-      const AdvertisementErrorCallback& error_callback) override;
+      CreateAdvertisementCallback callback,
+      AdvertisementErrorCallback error_callback) override;
   BluetoothLocalGattService* GetGattService(
       const std::string& identifier) const override;
+  DeviceList GetDevices() override;
+  ConstDeviceList GetDevices() const override;
 
   // BluetoothDiscoveryManagerMac::Observer overrides:
   void ClassicDeviceFound(IOBluetoothDevice* device) override;
@@ -124,6 +119,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
       base::RepeatingCallback<bool(const std::string& address)>;
 
   // BluetoothAdapter override:
+  base::WeakPtr<BluetoothAdapter> GetWeakPtr() override;
   bool SetPoweredImpl(bool powered) override;
   void RemovePairingDelegateInternal(
       device::BluetoothDevice::PairingDelegate* pairing_delegate) override;
@@ -148,8 +144,16 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   // not know about bool.
   using SetControllerPowerStateFunction = base::RepeatingCallback<void(int)>;
 
+  // Performs initialization steps which touch the Bluetooth API and might
+  // trigger a Bluetooth permission prompt.
+  void LazyInitialize();
+
   // Queries the state of the IOBluetoothHostController.
   HostControllerState GetHostControllerState();
+
+  // Allows configuring whether the adapter is present when running in a test
+  // configuration.
+  void SetPresentForTesting(bool present);
 
   // Resets |low_energy_central_manager_| to |central_manager| and sets
   // |low_energy_central_manager_delegate_| as the manager's delegate. Should
@@ -198,20 +202,13 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   void UpdateFilter(
       std::unique_ptr<device::BluetoothDiscoveryFilter> discovery_filter,
       DiscoverySessionResultCallback callback) override;
-  void RemoveDiscoverySession(
-      BluetoothDiscoveryFilter* discovery_filter,
-      const base::Closure& callback,
-      DiscoverySessionErrorCallback error_callback) override;
-  void SetDiscoveryFilter(
-      std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
-      const base::Closure& callback,
-      DiscoverySessionErrorCallback error_callback) override;
+  void StopScan(DiscoverySessionResultCallback callback) override;
 
   // Start classic and/or low energy discovery sessions, according to the
   // filter.  If a discovery session is already running the filter is updated.
   bool StartDiscovery(BluetoothDiscoveryFilter* discovery_filter);
 
-  void Init();
+  void Initialize(base::OnceClosure callback) override;
   void InitForTest(scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
   void PollAdapter();
 
@@ -253,8 +250,16 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   bool DoesCollideWithKnownDevice(CBPeripheral* peripheral,
                                   BluetoothLowEnergyDeviceMac* device_mac);
 
+  // The Initialize() method intentionally does not initialize
+  // |low_energy_central_manager_| or |low_energy_peripheral_manager_| because
+  // Chromium might not have permission to access the Bluetooth adapter.
+  // Methods which require these to be initialized must call LazyInitialize()
+  // first.
+  bool lazy_initialized_ = false;
+
   std::string address_;
-  bool classic_powered_;
+  bool classic_powered_ = false;
+  absl::optional<bool> is_present_for_testing_;
 
   // Function returning the state of the HostController. Can be overridden for
   // tests.
@@ -275,7 +280,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   mutable std::string name_;
   // True if the name hasn't been acquired yet, the last acquired name is empty
   // or the address has changed indicating the name might have changed.
-  mutable bool should_update_name_;
+  mutable bool should_update_name_ = true;
 
   // Discovery manager for Bluetooth Classic.
   std::unique_ptr<BluetoothDiscoveryManagerMac> classic_discovery_manager_;
@@ -309,9 +314,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   // corresponding device address.
   std::map<std::string, std::string> low_energy_devices_info_;
 
-  base::WeakPtrFactory<BluetoothAdapterMac> weak_ptr_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothAdapterMac);
+  base::WeakPtrFactory<BluetoothAdapterMac> weak_ptr_factory_{this};
 };
 
 }  // namespace device

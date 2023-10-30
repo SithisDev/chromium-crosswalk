@@ -17,14 +17,15 @@ Are you a Google employee? See
 * At least 100GB of free disk space on an NTFS-formatted hard drive. FAT32
   will not work, as some of the Git packfiles are larger than 4GB.
 * An appropriate version of Visual Studio, as described below.
-* Windows 7 or newer.
+* Windows 10 or newer.
 
 ## Setting up Windows
 
 ### Visual Studio
 
-Chromium requires Visual Studio 2017 (>=15.7.2) or 2019 (>=16.0.0) to build.
-Visual Studio can also be used to debug Chromium and Visual Studio 2019 is
+Chromium requires [Visual Studio 2017](https://docs.microsoft.com/en-us/visualstudio/releasenotes/vs2017-relnotes) (>=15.7.2)
+to build, but [Visual Studio 2019](https://docs.microsoft.com/en-us/visualstudio/releases/2019/release-notes) (>=16.0.0)
+is preferred. Visual Studio can also be used to debug Chromium, and version 2019 is
 preferred for this as it handles Chromium's large debug information much better.
 The clang-cl compiler is used but Visual Studio's header files, libraries, and
 some tools are required. Visual Studio Community Edition should work if its
@@ -50,9 +51,9 @@ $ PATH_TO_INSTALLER.EXE ^
 --includeRecommended
 ```
 
-You must have the version 10.0.18362 or higher Windows 10 SDK installed. This
-can be installed separately or by checking the appropriate box in the Visual
-Studio Installer.
+-You must have the version 10.0.20348.0 [Windows 10 SDK](https://developer.microsoft.com/en-us/windows/downloads/sdk-archive/)
+installed. This can be installed separately or by checking the appropriate box
+in the Visual Studio Installer.
 
 The SDK Debugging Tools must also be installed. If the Windows 10 SDK was
 installed via the Visual Studio installer, then they can be installed by going
@@ -64,7 +65,7 @@ to install the Debugging Tools.
 ## Install `depot_tools`
 
 Download the [depot_tools bundle](https://storage.googleapis.com/chrome-infra/depot_tools.zip)
-and extract it somewhere.
+and extract it somewhere (eg: C:\src\depot_tools).
 
 *** note
 **Warning:** **DO NOT** use drag-n-drop or copy-n-paste extract from Explorer,
@@ -74,7 +75,9 @@ context menu though.
 ***
 
 Add depot_tools to the start of your PATH (must be ahead of any installs of
-Python). Assuming you unzipped the bundle to C:\src\depot_tools, open:
+Python. Note that environment variable names are case insensitive).
+
+Assuming you unzipped the bundle to C:\src\depot_tools, open:
 
 Control Panel → System and Security → System → Advanced system settings
 
@@ -83,29 +86,50 @@ put `C:\src\depot_tools` at the front (or at least in front of any directory
 that might already have a copy of Python or Git).
 
 If you don't have Administrator access, you can add a user-level PATH
-environment variable and put `C:\src\depot_tools` at the front, but
-if your system PATH has a Python in it, you will be out of luck.
+environment variable by opening:
 
-Also, add a DEPOT_TOOLS_WIN_TOOLCHAIN system variable in the same way, and set
+Control Panel → System and Security → System → Search for "Edit environment variables for your account"
+
+Add `C:\src\depot_tools` at the front. Note: If your system PATH has a Python in it, you will be out of luck.
+
+Also, add a DEPOT_TOOLS_WIN_TOOLCHAIN environment variable in the same way, and set
 it to 0. This tells depot_tools to use your locally installed version of Visual
-Studio (by default, depot_tools will try to use a google-internal version). If
-you want to build with Visual Studio 2019 instead of Visual Studio 2017 (the
-default) then set the GYP_MSVS_VERSION environment variable to 2019.
+Studio (by default, depot_tools will try to use a google-internal version).
 
-From a cmd.exe shell, run the command gclient (without arguments). On first
-run, gclient will install all the Windows-specific bits needed to work with
-the code, including msysgit and python.
+You may also have to set variable `vs2017_install` or `vs2019_install` or
+`vs2022_install` to your installation path of Visual Studio 2017 or 19 or 22, like
+`set vs2019_install=C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional`
+for Visual Studio 2019, or
+`set vs2022_install=C:\Program Files\Microsoft Visual Studio\2022\Professional`
+for Visual Studio 2022.
+
+From a cmd.exe shell, run:
+
+```shell
+$ gclient
+```
+
+On first run, gclient will install all the Windows-specific bits needed to work
+with the code, including msysgit and python.
 
 * If you run gclient from a non-cmd shell (e.g., cygwin, PowerShell),
   it may appear to run properly, but msysgit, python, and other tools
   may not get installed correctly.
 * If you see strange errors with the file system on the first run of gclient,
-  you may want to [disable Windows Indexing](http://tortoisesvn.tigris.org/faq.html#cantmove2).
+  you may want to [disable Windows Indexing](https://tortoisesvn.net/faq.html#cantmove2).
+
+## Check python install
 
 After running gclient open a command prompt and type `where python` and
 confirm that the depot_tools `python.bat` comes ahead of any copies of
 python.exe. Failing to ensure this can lead to overbuilding when
 using gn - see [crbug.com/611087](https://crbug.com/611087).
+
+[App Execution Aliases](https://docs.microsoft.com/en-us/windows/apps/desktop/modernize/desktop-to-uwp-extensions#alias)
+can conflict with other installations of python on the system so disable
+these for 'python.exe' and 'python3.exe' by opening 'App execution aliases'
+section of Control Panel and unticking the boxes next to both of these
+that point to 'App Installer'.
 
 ## Get the code
 
@@ -156,7 +180,7 @@ development and testing purposes.
 ## Setting up the build
 
 Chromium uses [Ninja](https://ninja-build.org) as its main build tool along with
-a tool called [GN](https://gn.googlesource.com/gn/+/master/docs/quick_start.md)
+a tool called [GN](https://gn.googlesource.com/gn/+/main/docs/quick_start.md)
 to generate `.ninja` files. You can create any number of *build directories*
 with different configurations. To create a build directory:
 
@@ -168,63 +192,13 @@ $ gn gen out/Default
   update the build files as needed.
 * You can replace `Default` with another name, but
   it should be a subdirectory of `out`.
-* For other build arguments, including release settings, see [GN build
+* For other build arguments, including release settings or using an alternate
+  version of Visual Studio, see [GN build
   configuration](https://www.chromium.org/developers/gn-build-configuration).
   The default will be a debug component build matching the current host
   operating system and CPU.
 * For more info on GN, run `gn help` on the command line or read the [quick
-  start guide](https://gn.googlesource.com/gn/+/master/docs/quick_start.md).
-
-### Using the Visual Studio IDE
-
-If you want to use the Visual Studio IDE, use the `--ide` command line
-argument to `gn gen` when you generate your output directory (as described on
-the [get the code](https://dev.chromium.org/developers/how-tos/get-the-code)
-page):
-
-```shell
-$ gn gen --ide=vs out\Default
-$ devenv out\Default\all.sln
-```
-
-GN will produce a file `all.sln` in your build directory. It will internally
-use Ninja to compile while still allowing most IDE functions to work (there is
-no native Visual Studio compilation mode). If you manually run "gen" again you
-will need to resupply this argument, but normally GN will keep the build and
-IDE files up to date automatically when you build.
-
-The generated solution will contain several thousand projects and will be very
-slow to load. Use the `--filters` argument to restrict generating project files
-for only the code you're interested in. Although this will also limit what
-files appear in the project explorer, debugging will still work and you can
-set breakpoints in files that you open manually. A minimal solution that will
-let you compile and run Chrome in the IDE but will not show any source files
-is:
-
-```
-$ gn gen --ide=vs --filters=//chrome --no-deps out\Default
-```
-
-You can selectively add other directories you care about to the filter like so:
-`--filters=//chrome;//third_party/WebKit/*;//gpu/*`.
-
-There are other options for controlling how the solution is generated, run `gn
-help gen` for the current documentation.
-
-By default when you start debugging in Visual Studio the debugger will only
-attach to the main browser process. To debug all of Chrome, install
-[Microsoft's Child Process Debugging Power Tool](https://blogs.msdn.microsoft.com/devops/2014/11/24/introducing-the-child-process-debugging-power-tool/).
-You will also need to run Visual Studio as administrator, or it will silently
-fail to attach to some of Chrome's child processes.
-
-It is also possible to debug and develop Chrome in Visual Studio without a
-solution file. Simply "open" your chrome.exe binary with
-`File->Open->Project/Solution`, or from a Visual Studio command prompt like
-so: `devenv /debugexe out\Debug\chrome.exe <your arguments>`. Many of Visual
-Studio's code editing features will not work in this configuration, but by
-installing the [VsChromium Visual Studio Extension](https://chromium.github.io/vs-chromium/)
-you can get the source code to appear in the solution explorer window along
-with other useful features such as code search.
+  start guide](https://gn.googlesource.com/gn/+/main/docs/quick_start.md).
 
 ### Faster builds
 
@@ -239,7 +213,6 @@ in the editor that appears when you create your output directory
 (`gn args out/Default`) or on the gn gen command line
 (`gn gen out/Default --args="is_component_build = true is_debug = true"`).
 Some helpful settings to consider using include:
-* `use_jumbo_build = true` - [Jumbo/unity](jumbo.md) builds.
 * `is_component_build = true` - this uses more, smaller DLLs, and incremental
 linking.
 * `enable_nacl = false` - this disables Native Client which is usually not
@@ -249,11 +222,16 @@ support incremental linking for more targets. Note that if you set this but
 don't' set enable_nacl = false then build times may get worse.
 * `blink_symbol_level = 0` - turn off source-level debugging for
 blink to reduce build times, appropriate if you don't plan to debug blink.
+* `v8_symbol_level = 0` - turn off source-level debugging for v8 to reduce
+build times, appropriate if you don't plan to debug v8.
 
-In order to speed up linking you can set `symbol_level = 1` - this option
-reduces the work the linker has to do but when this option is set you cannot do
-source-level debugging. Switching from `symbol_level = 2` (the default) to
-`symbol_level = 1` requires recompiling everything.
+In order to speed up linking you can set `symbol_level = 1` or
+`symbol_level = 0` - these options reduce the work the compiler and linker have
+to do. With `symbol_level = 1` the compiler emits file name and line number
+information so you can still do source-level debugging but there will be no
+local variable or type information. With `symbol_level = 0` there is no
+source-level debugging but call stacks still have function names. Changing
+`symbol_level` requires recompiling everything.
 
 In addition, Google employees should use goma, a distributed compilation system.
 Detailed information is available internally but the relevant gn arg is:
@@ -272,6 +250,14 @@ binaries as well.
 
 Still, builds will take many hours on many machines.
 
+#### Use SCCACHE
+
+You might be able to use [sccache](https://github.com/mozilla/sccache) for the
+build process by enabling the following arguments:
+
+* `cc_wrapper = "sccache"` - assuming the `sccache` binary is in your `%PATH%`
+* `chrome_pgo_phase = 0`
+
 ### Why is my build slow?
 
 Many things can make builds slow, with Windows Defender slowing process startups
@@ -283,8 +269,8 @@ values? Have you asked on the chromium-dev mailing list to see if your build is
 slower than expected for your machine's specifications?
 
 The next step is to gather some data. If you set the ``NINJA_SUMMARIZE_BUILD``
-environment variable to 1 then ``autoninja`` will do a couple of things. First,
-it will set the [NINJA_STATUS](https://ninja-build.org/manual.html#_environment_variables)
+environment variable to 1 then ``autoninja`` will do three things. First, it
+will set the [NINJA_STATUS](https://ninja-build.org/manual.html#_environment_variables)
 environment variable so that ninja will print additional information while
 building Chrome. It will show how many build processes are running at any given
 time, how many build steps have completed, how many build steps have completed
@@ -307,17 +293,28 @@ steps and slowest build-step types, as shown here:
 ```shell
 $ set NINJA_SUMMARIZE_BUILD=1
 $ autoninja -C out\Default base
-    Longest build steps:
-...
-           1.2 weighted s to build base.dll, base.dll.lib, base.dll.pdb (1.2 s CPU time)
-           8.5 weighted s to build obj/base/base/base_jumbo_38.obj (30.1 s CPU time)
-    Time by build-step type:
-...
-           1.2 s weighted time to generate 1 PEFile (linking) files (1.2 s CPU time)
-          30.3 s weighted time to generate 45 .obj files (688.8 s CPU time)
-    31.8 s weighted time (693.8 s CPU time, 21.8x parallelism)
-    86 build steps completed, average of 2.71/s
+Longest build steps:
+       0.1 weighted s to build obj/base/base/trace_log.obj (6.7 s elapsed time)
+       0.2 weighted s to build nasm.exe, nasm.exe.pdb (0.2 s elapsed time)
+       0.3 weighted s to build obj/base/base/win_util.obj (12.4 s elapsed time)
+       1.2 weighted s to build base.dll, base.dll.lib (1.2 s elapsed time)
+Time by build-step type:
+       0.0 s weighted time to generate 6 .lib files (0.3 s elapsed time sum)
+       0.1 s weighted time to generate 25 .stamp files (1.2 s elapsed time sum)
+       0.2 s weighted time to generate 20 .o files (2.8 s elapsed time sum)
+       1.7 s weighted time to generate 4 PEFile (linking) files (2.0 s elapsed
+time sum)
+      23.9 s weighted time to generate 770 .obj files (974.8 s elapsed time sum)
+26.1 s weighted time (982.9 s elapsed time sum, 37.7x parallelism)
+839 build steps completed, average of 32.17/s
 ```
+
+The "weighted" time is the elapsed time of each build step divided by the number
+of tasks that were running in parallel. This makes it an excellent approximation
+of how "important" a slow step was. A link that is entirely or mostly serialized
+will have a weighted time that is the same or similar to its elapsed time. A
+compile that runs in parallel with 999 other compiles will have a weighted time
+that is tiny.
 
 You can also generate these reports by manually running the script after a build:
 
@@ -325,20 +322,16 @@ You can also generate these reports by manually running the script after a build
 $ python depot_tools\post_build_ninja_summary.py -C out\Default
 ```
 
-You can also get a visual report of the build performance with
-[ninjatracing](https://github.com/nico/ninjatracing). This converts the
-.ninja_log file into a .json file which can be loaded into chrome://tracing:
+Finally, setting ``NINJA_SUMMARIZE_BUILD=1`` tells autoninja to tell Ninja to
+report on its own overhead by passing "-d stats". This can be helpful if, for
+instance, process creation (which shows up in the StartEdge metric) is making
+builds slow, perhaps due to antivirus interference due to clang-cl not being in
+an excluded directory:
 
 ```shell
-$ python ninjatracing out\Default\.ninja_log >build.json
-```
-
-Finally, Ninja can report on its own overhead which can be helpful if, for
-instance, process creation is making builds slow, perhaps due to antivirus
-interference due to clang-cl not being in an excluded directory:
-
-```shell
-$ autoninja -d stats -C out\Default base
+$ set NINJA_SUMMARIZE_BUILD=1
+$ autoninja -C out\Default base
+"c:\src\depot_tools\ninja.exe" -C out\Default base -j 10 -d stats
 metric                  count   avg (us)        total (ms)
 .ninja parse            3555    1539.4          5472.6
 canonicalize str        1383032 0.0             12.7
@@ -351,6 +344,14 @@ depfile load            2       1132.0          2.3
 StartEdge               88      3508.1          308.7
 FinishCommand           87      1670.9          145.4
 CLParser::Parse         45      1889.1          85.0
+```
+
+You can also get a visual report of the build performance with
+[ninjatracing](https://github.com/nico/ninjatracing). This converts the
+.ninja_log file into a .json file which can be loaded into [chrome://tracing](chrome://tracing):
+
+```shell
+$ python ninjatracing out\Default\.ninja_log >build.json
 ```
 
 ## Build Chromium
@@ -397,13 +398,78 @@ To update an existing checkout, you can run
 
 ```shell
 $ git rebase-update
-$ gclient sync
+$ gclient sync -D
 ```
 
 The first command updates the primary Chromium source repository and rebases
-any of your local branches on top of tip-of-tree (aka the Git branch `origin/master`).
-If you don't want to use this script, you can also just use `git pull` or
-other common Git commands to update the repo.
+any of your local branches on top of tip-of-tree (aka the Git branch
+`origin/main`). If you don't want to use this script, you can also just use
+`git pull` or other common Git commands to update the repo.
 
-The second command syncs the subrepositories to the appropriate versions and
-re-runs the hooks as needed.
+The second command syncs the subrepositories to the appropriate versions,
+deleting those that are no longer needed, and re-runs the hooks as needed.
+
+### Editing and Debugging With the Visual Studio IDE
+
+You can use the Visual Studio IDE to edit and debug Chrome, with or without
+Intellisense support.
+
+#### Using Visual Studio Intellisense
+
+If you want to use Visual Studio Intellisense when developing Chromium, use the
+`--ide` command line argument to `gn gen` when you generate your output
+directory (as described on the [get the code](https://dev.chromium.org/developers/how-tos/get-the-code)
+page):
+
+```shell
+$ gn gen --ide=vs out\Default
+$ devenv out\Default\all.sln
+```
+
+GN will produce a file `all.sln` in your build directory. It will internally
+use Ninja to compile while still allowing most IDE functions to work (there is
+no native Visual Studio compilation mode). If you manually run "gen" again you
+will need to resupply this argument, but normally GN will keep the build and
+IDE files up to date automatically when you build.
+
+The generated solution will contain several thousand projects and will be very
+slow to load. Use the `--filters` argument to restrict generating project files
+for only the code you're interested in. Although this will also limit what
+files appear in the project explorer, debugging will still work and you can
+set breakpoints in files that you open manually. A minimal solution that will
+let you compile and run Chrome in the IDE but will not show any source files
+is:
+
+```
+$ gn gen --ide=vs --filters=//chrome --no-deps out\Default
+```
+
+You can selectively add other directories you care about to the filter like so:
+`--filters=//chrome;//third_party/WebKit/*;//gpu/*`.
+
+There are other options for controlling how the solution is generated, run `gn
+help gen` for the current documentation.
+
+#### Using Visual Studio without Intellisense
+
+It is also possible to debug and develop Chrome in Visual Studio without the
+overhead of a multi-project solution file. Simply "open" your chrome.exe binary
+with `File->Open->Project/Solution`, or from a Visual Studio command prompt like
+so: `devenv /debugexe out\Debug\chrome.exe <your arguments>`. Many of Visual
+Studio's code exploration features will not work in this configuration, but by
+installing the [VsChromium Visual Studio Extension](https://chromium.github.io/vs-chromium/)
+you can get the source code to appear in the solution explorer window along
+with other useful features such as code search. You can add multiple executables
+of interest (base_unittests.exe, browser_tests.exe) to your solution with
+`File->Add->Existing Project...` and change which one will be debugged by
+right-clicking on them in `Solution Explorer` and selecting `Set as Startup
+Project`. You can also change their properties, including command line
+arguments, by right-clicking on them in `Solution Explorer` and selecting
+`Properties`.
+
+By default when you start debugging in Visual Studio the debugger will only
+attach to the main browser process. To debug all of Chrome, install
+[Microsoft's Child Process Debugging Power Tool](https://blogs.msdn.microsoft.com/devops/2014/11/24/introducing-the-child-process-debugging-power-tool/).
+You will also need to run Visual Studio as administrator, or it will silently
+fail to attach to some of Chrome's child processes.
+

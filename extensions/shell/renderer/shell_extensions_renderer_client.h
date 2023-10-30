@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "extensions/renderer/extensions_renderer_client.h"
 
 namespace extensions {
@@ -16,6 +15,9 @@ class Dispatcher;
 class ShellExtensionsRendererClient : public ExtensionsRendererClient {
  public:
   ShellExtensionsRendererClient();
+  ShellExtensionsRendererClient(const ShellExtensionsRendererClient&) = delete;
+  ShellExtensionsRendererClient& operator=(
+      const ShellExtensionsRendererClient&) = delete;
   ~ShellExtensionsRendererClient() override;
 
   // ExtensionsRendererClient implementation.
@@ -28,8 +30,6 @@ class ShellExtensionsRendererClient : public ExtensionsRendererClient {
 
  private:
   std::unique_ptr<Dispatcher> dispatcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShellExtensionsRendererClient);
 };
 
 }  // namespace extensions

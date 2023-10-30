@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,10 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/timer/elapsed_timer.h"
 #include "base/trace_event/trace_event.h"
 #include "content/public/renderer/render_frame.h"
-#include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
 #include "extensions/renderer/console.h"
 #include "extensions/renderer/safe_builtins.h"
@@ -23,12 +19,24 @@
 #include "extensions/renderer/source_map.h"
 #include "extensions/renderer/v8_helpers.h"
 #include "gin/converter.h"
-#include "third_party/blink/public/web/web_context_features.h"
 #include "third_party/blink/public/web/web_frame.h"
+#include "third_party/blink/public/web/web_v8_features.h"
+#include "v8/include/v8-exception.h"
+#include "v8/include/v8-external.h"
+#include "v8/include/v8-function-callback.h"
+#include "v8/include/v8-function.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-message.h"
+#include "v8/include/v8-object.h"
+#include "v8/include/v8-primitive.h"
+#include "v8/include/v8-script.h"
 
 namespace extensions {
 
-using namespace v8_helpers;
+using v8_helpers::GetPrivateProperty;
+using v8_helpers::SetPrivateProperty;
+using v8_helpers::ToV8String;
+using v8_helpers::ToV8StringUnsafe;
 
 namespace {
 
@@ -177,13 +185,22 @@ ModuleSystem::ModuleSystem(ScriptContext* context, const SourceMap* source_map)
       exception_handler_(new DefaultExceptionHandler(context)) {
   v8::Local<v8::Object> global(context->v8_context()->Global());
   v8::Isolate* isolate = context->isolate();
-  SetPrivate(global, kModulesField, v8::Object::New(isolate));
-  SetPrivate(global, kModuleSystem, v8::External::New(isolate, this));
+  // Note: Ensure setting private succeeds with CHECK.
+  // TODO(1276144): remove checks once investigation finished.
+  CHECK(SetPrivate(global, kModulesField, v8::Object::New(isolate)));
+  CHECK(SetPrivate(global, kModuleSystem, v8::External::New(isolate, this)));
+  {
+    // Note: Ensure privates that were set above can be read immediately.
+    // TODO(1276144): remove checks once investigation finished.
+    v8::Local<v8::Value> dummy_value;
+    CHECK(GetPrivate(global, kModulesField, &dummy_value));
+    CHECK(GetPrivate(global, kModuleSystem, &dummy_value));
+  }
 
   if (context_->GetRenderFrame() &&
       context_->context_type() == Feature::BLESSED_EXTENSION_CONTEXT &&
       !context_->IsForServiceWorker() && ContextNeedsMojoBindings(context_)) {
-    blink::WebContextFeatures::EnableMojoJS(context->v8_context(), true);
+    blink::WebV8Features::EnableMojoJS(context->v8_context(), true);
   }
 }
 
@@ -205,12 +222,19 @@ void ModuleSystem::AddRoutes() {
 }
 
 void ModuleSystem::Invalidate() {
+  // TODO(1276144): remove checks once investigation finished.
+  CHECK(!has_been_invalidated_);
+  has_been_invalidated_ = true;
   // Clear the module system properties from the global context. It's polite,
   // and we use this as a signal in lazy handlers that we no longer exist.
   {
     v8::HandleScope scope(GetIsolate());
     v8::Local<v8::Object> global = context()->v8_context()->Global();
+    // TODO(1276144): remove checks once investigation finished.
+    v8::Local<v8::Value> dummy_value;
+    CHECK(GetPrivate(global, kModulesField, &dummy_value));
     DeletePrivate(global, kModulesField);
+    CHECK(GetPrivate(global, kModuleSystem, &dummy_value));
     DeletePrivate(global, kModuleSystem);
   }
 
@@ -299,7 +323,7 @@ void ModuleSystem::CallModuleMethodSafe(const std::string& module_name,
   v8::HandleScope handle_scope(GetIsolate());
   v8::Local<v8::Value> no_args;
   CallModuleMethodSafe(module_name, method_name, 0, &no_args,
-                       ScriptInjectionCallback::CompleteCallback());
+                       blink::WebScriptExecutionCallback());
 }
 
 void ModuleSystem::CallModuleMethodSafe(
@@ -307,7 +331,7 @@ void ModuleSystem::CallModuleMethodSafe(
     const std::string& method_name,
     std::vector<v8::Local<v8::Value>>* args) {
   CallModuleMethodSafe(module_name, method_name, args->size(), args->data(),
-                       ScriptInjectionCallback::CompleteCallback());
+                       blink::WebScriptExecutionCallback());
 }
 
 void ModuleSystem::CallModuleMethodSafe(const std::string& module_name,
@@ -315,7 +339,7 @@ void ModuleSystem::CallModuleMethodSafe(const std::string& module_name,
                                         int argc,
                                         v8::Local<v8::Value> argv[]) {
   CallModuleMethodSafe(module_name, method_name, argc, argv,
-                       ScriptInjectionCallback::CompleteCallback());
+                       blink::WebScriptExecutionCallback());
 }
 
 void ModuleSystem::CallModuleMethodSafe(
@@ -323,7 +347,7 @@ void ModuleSystem::CallModuleMethodSafe(
     const std::string& method_name,
     int argc,
     v8::Local<v8::Value> argv[],
-    const ScriptInjectionCallback::CompleteCallback& callback) {
+    blink::WebScriptExecutionCallback callback) {
   TRACE_EVENT2("v8", "v8.callModuleMethodSafe", "module_name", module_name,
                "method_name", method_name);
 
@@ -346,7 +370,7 @@ void ModuleSystem::CallModuleMethodSafe(
   {
     v8::TryCatch try_catch(GetIsolate());
     try_catch.SetCaptureMessage(true);
-    context_->SafeCallFunction(function, argc, argv, callback);
+    context_->SafeCallFunction(function, argc, argv, std::move(callback));
     if (try_catch.HasCaught())
       HandleException(try_catch);
   }
@@ -365,33 +389,16 @@ void ModuleSystem::OverrideNativeHandlerForTest(const std::string& name) {
 }
 
 // static
-void ModuleSystem::NativeLazyFieldGetter(
-    v8::Local<v8::Name> property,
-    const v8::PropertyCallbackInfo<v8::Value>& info) {
-  LazyFieldGetterInner(property.As<v8::String>(), info,
-                       &ModuleSystem::RequireNativeFromString);
-}
-
-// static
 void ModuleSystem::LazyFieldGetter(
     v8::Local<v8::Name> property,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
-  LazyFieldGetterInner(property.As<v8::String>(), info, &ModuleSystem::Require);
-}
-
-// static
-void ModuleSystem::LazyFieldGetterInner(
-    v8::Local<v8::String> property,
-    const v8::PropertyCallbackInfo<v8::Value>& info,
-    RequireFunction require_function) {
-  base::ElapsedTimer timer;
   CHECK(!info.Data().IsEmpty());
   CHECK(info.Data()->IsObject());
   v8::Isolate* isolate = info.GetIsolate();
   v8::HandleScope handle_scope(isolate);
   v8::Local<v8::Object> parameters = v8::Local<v8::Object>::Cast(info.Data());
   // This context should be the same as context()->v8_context().
-  v8::Local<v8::Context> context = parameters->CreationContext();
+  v8::Local<v8::Context> context = parameters->GetCreationContextChecked();
   v8::Local<v8::Object> global(context->Global());
   v8::Local<v8::Value> module_system_value;
   if (!GetPrivate(context, global, kModuleSystem, &module_system_value) ||
@@ -430,7 +437,7 @@ void ModuleSystem::LazyFieldGetterInner(
 
   v8::TryCatch try_catch(isolate);
   v8::Local<v8::Value> module_value;
-  if (!(module_system->*require_function)(name).ToLocal(&module_value)) {
+  if (!module_system->Require(name).ToLocal(&module_value)) {
     module_system->HandleException(try_catch);
     return;
   }
@@ -447,7 +454,7 @@ void ModuleSystem::LazyFieldGetterInner(
     return;
   }
 
-  if (!IsTrue(module->Has(context, field))) {
+  if (!v8_helpers::IsTrue(module->Has(context, field))) {
     std::string field_str = *v8::String::Utf8Value(isolate, field);
     Fatal(module_system->context_,
           "Lazy require of " + name + "." + field_str + " did not set the " +
@@ -456,7 +463,7 @@ void ModuleSystem::LazyFieldGetterInner(
   }
 
   v8::Local<v8::Value> new_field;
-  if (!GetProperty(context, module, field, &new_field)) {
+  if (!v8_helpers::GetProperty(context, module, field, &new_field)) {
     module_system->HandleException(try_catch);
     return;
   }
@@ -490,23 +497,12 @@ void ModuleSystem::LazyFieldGetterInner(
     NOTREACHED();
   }
   info.GetReturnValue().Set(new_field);
-
-  UMA_HISTOGRAM_TIMES("Extensions.ApiBindingGenerationTime", timer.Elapsed());
 }
 
 void ModuleSystem::SetLazyField(v8::Local<v8::Object> object,
                                 const std::string& field,
                                 const std::string& module_name,
                                 const std::string& module_field) {
-  SetLazyField(
-      object, field, module_name, module_field, &ModuleSystem::LazyFieldGetter);
-}
-
-void ModuleSystem::SetLazyField(v8::Local<v8::Object> object,
-                                const std::string& field,
-                                const std::string& module_name,
-                                const std::string& module_field,
-                                v8::AccessorNameGetterCallback getter) {
   CHECK(field.size() < v8::String::kMaxLength);
   CHECK(module_name.size() < v8::String::kMaxLength);
   CHECK(module_field.size() < v8::String::kMaxLength);
@@ -517,24 +513,13 @@ void ModuleSystem::SetLazyField(v8::Local<v8::Object> object,
   // module.
   loaded_modules_.erase(module_name);
   SetPrivateProperty(context, parameters, kModuleName,
-              ToV8StringUnsafe(GetIsolate(), module_name.c_str()));
+                     ToV8StringUnsafe(GetIsolate(), module_name.c_str()));
   SetPrivateProperty(context, parameters, kModuleField,
-              ToV8StringUnsafe(GetIsolate(), module_field.c_str()));
+                     ToV8StringUnsafe(GetIsolate(), module_field.c_str()));
   auto maybe = object->SetAccessor(
-      context, ToV8StringUnsafe(GetIsolate(), field.c_str()), getter, NULL,
-      parameters);
-  CHECK(IsTrue(maybe));
-}
-
-void ModuleSystem::SetNativeLazyField(v8::Local<v8::Object> object,
-                                      const std::string& field,
-                                      const std::string& module_name,
-                                      const std::string& module_field) {
-  SetLazyField(object,
-               field,
-               module_name,
-               module_field,
-               &ModuleSystem::NativeLazyFieldGetter);
+      context, ToV8StringUnsafe(GetIsolate(), field.c_str()),
+      &ModuleSystem::LazyFieldGetter, nullptr, parameters);
+  CHECK(v8_helpers::IsTrue(maybe));
 }
 
 void ModuleSystem::OnNativeBindingCreated(
@@ -577,8 +562,8 @@ v8::Local<v8::Value> ModuleSystem::RunString(v8::Local<v8::String> code,
                                              v8::Local<v8::String> name) {
   return context_->RunScript(
       name, code,
-      base::Bind(&ExceptionHandler::HandleUncaughtException,
-                 base::Unretained(exception_handler_.get())),
+      base::BindOnce(&ExceptionHandler::HandleUncaughtException,
+                     base::Unretained(exception_handler_.get())),
       v8::ScriptCompiler::NoCacheReason::kNoCacheBecauseExtensionModule);
 }
 
@@ -655,7 +640,7 @@ v8::Local<v8::String> ModuleSystem::WrapSource(v8::Local<v8::String> source) {
       GetIsolate(),
       "(function(require, requireNative, loadScript, exports, console, "
       "privates, apiBridge, bindingUtil, getInternalApi, $Array, $Function, "
-      "$JSON, $Object, $RegExp, $String, $Error) {"
+      "$JSON, $Object, $RegExp, $String, $Error, $Promise) {"
       "'use strict';");
   v8::Local<v8::String> right = ToV8StringUnsafe(GetIsolate(), "\n})");
   return handle_scope.Escape(v8::Local<v8::String>(v8::String::Concat(
@@ -665,12 +650,11 @@ v8::Local<v8::String> ModuleSystem::WrapSource(v8::Local<v8::String> source) {
 void ModuleSystem::Private(const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
   if (!args[0]->IsObject() || args[0]->IsNull()) {
-    GetIsolate()->ThrowException(
-        v8::Exception::TypeError(ToV8StringUnsafe(GetIsolate(),
-            args[0]->IsUndefined()
-                ? "Method called without a valid receiver (this). "
-                  "Did you forget to call .bind()?"
-                : "Invalid invocation: receiver is not an object!")));
+    GetIsolate()->ThrowException(v8::Exception::TypeError(ToV8StringUnsafe(
+        GetIsolate(), args[0]->IsUndefined()
+                          ? "Method called without a valid receiver (this). "
+                            "Did you forget to call .bind()?"
+                          : "Invalid invocation: receiver is not an object!")));
     return;
   }
   v8::Local<v8::Object> obj = args[0].As<v8::Object>();
@@ -728,11 +712,10 @@ v8::Local<v8::Value> ModuleSystem::LoadModuleWithNativeAPIBridge(
   v8::Local<v8::Object> exports = v8::Object::New(GetIsolate());
 
   v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(
-      GetIsolate(),
-      &SetExportsProperty);
-  tmpl->RemovePrototype();
+      GetIsolate(), &SetExportsProperty, v8::Local<v8::Value>(),
+      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
   v8::Local<v8::String> v8_key;
-  if (!v8_helpers::ToV8String(GetIsolate(), "$set", &v8_key)) {
+  if (!ToV8String(GetIsolate(), "$set", &v8_key)) {
     NOTREACHED();
     return v8::Undefined(GetIsolate());
   }
@@ -774,17 +757,17 @@ v8::Local<v8::Value> ModuleSystem::LoadModuleWithNativeAPIBridge(
   // These must match the argument order in WrapSource.
   v8::Local<v8::Value> args[] = {
       // CommonJS.
-      GetPropertyUnsafe(v8_context, natives, "require",
-                        v8::NewStringType::kInternalized),
-      GetPropertyUnsafe(v8_context, natives, "requireNative",
-                        v8::NewStringType::kInternalized),
-      GetPropertyUnsafe(v8_context, natives, "loadScript",
-                        v8::NewStringType::kInternalized),
+      v8_helpers::GetPropertyUnsafe(v8_context, natives, "require",
+                                    v8::NewStringType::kInternalized),
+      v8_helpers::GetPropertyUnsafe(v8_context, natives, "requireNative",
+                                    v8::NewStringType::kInternalized),
+      v8_helpers::GetPropertyUnsafe(v8_context, natives, "loadScript",
+                                    v8::NewStringType::kInternalized),
       exports,
       // Libraries that we magically expose to every module.
       console::AsV8Object(GetIsolate()),
-      GetPropertyUnsafe(v8_context, natives, "privates",
-                        v8::NewStringType::kInternalized),
+      v8_helpers::GetPropertyUnsafe(v8_context, natives, "privates",
+                                    v8::NewStringType::kInternalized),
       api_bridge,        // exposed as apiBridge.
       binding_util,      // exposed as bindingUtil.
       get_internal_api,  // exposed as getInternalApi.
@@ -796,11 +779,12 @@ v8::Local<v8::Value> ModuleSystem::LoadModuleWithNativeAPIBridge(
       context_->safe_builtins()->GetRegExp(),
       context_->safe_builtins()->GetString(),
       context_->safe_builtins()->GetError(),
+      context_->safe_builtins()->GetPromise(),
   };
   {
     v8::TryCatch try_catch(GetIsolate());
     try_catch.SetCaptureMessage(true);
-    context_->SafeCallFunction(func, base::size(args), args);
+    context_->SafeCallFunction(func, std::size(args), args);
     if (try_catch.HasCaught()) {
       HandleException(try_catch);
       return v8::Undefined(GetIsolate());
@@ -848,7 +832,8 @@ v8::Local<v8::Function> ModuleSystem::GetModuleFunction(
 
   v8::Local<v8::Object> object = v8::Local<v8::Object>::Cast(module);
   v8::Local<v8::Value> value;
-  if (!GetProperty(context()->v8_context(), object, v8_method_name, &value) ||
+  if (!v8_helpers::GetProperty(context()->v8_context(), object, v8_method_name,
+                               &value) ||
       !value->IsFunction()) {
     Fatal(context_, module_name + "." + method_name + " is not a function");
     return v8::Local<v8::Function>();

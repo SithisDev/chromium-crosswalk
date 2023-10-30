@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,9 @@ import android.view.MotionEvent;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.annotations.NativeMethods;
+
+import java.util.Objects;
 
 /**
  * Class to manage connected gamepad devices list.
@@ -112,7 +115,14 @@ public class GamepadList {
 
     // ------------------------------------------------------------
 
-    private void onInputDeviceChangedImpl(int deviceId) {}
+    private void onInputDeviceChangedImpl(int deviceId) {
+        InputDevice inputDevice = InputDevice.getDevice(deviceId);
+        if (!isGamepadDevice(inputDevice)) return;
+        synchronized (mLock) {
+            unregisterGamepad(inputDevice.getId());
+            registerGamepad(inputDevice);
+        }
+    }
 
     private void onInputDeviceRemovedImpl(int deviceId) {
         synchronized (mLock) {
@@ -237,6 +247,10 @@ public class GamepadList {
 
     private static boolean isGamepadDevice(InputDevice inputDevice) {
         if (inputDevice == null) return false;
+
+        // The fingerprint sensor is a SOURCE_JOYSTICK but is not a gamepad.
+        if (Objects.equals(inputDevice.getName(), "uinput-fpc")) return false;
+
         return ((inputDevice.getSources() & InputDevice.SOURCE_JOYSTICK)
                 == InputDevice.SOURCE_JOYSTICK);
     }
@@ -271,10 +285,21 @@ public class GamepadList {
             case KeyEvent.KEYCODE_DPAD_DOWN:
             case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_DPAD_RIGHT:
+            // Xbox Series X maps the Share button as KEYCODE_MEDIA_RECORD.
+            case KeyEvent.KEYCODE_MEDIA_RECORD:
                 return true;
             default:
-                return KeyEvent.isGamepadButton(keyCode);
+                break;
         }
+
+        // If the scancode is in the BTN_TRIGGER_HAPPY range it is an extra gamepad button.
+        int scanCode = event.getScanCode();
+        if (keyCode == KeyEvent.KEYCODE_UNKNOWN && scanCode >= GamepadDevice.MIN_BTN_TRIGGER_HAPPY
+                && scanCode <= GamepadDevice.MAX_BTN_TRIGGER_HAPPY) {
+            return true;
+        }
+
+        return KeyEvent.isGamepadButton(keyCode);
     }
 
     @CalledByNative
@@ -288,11 +313,17 @@ public class GamepadList {
                 final GamepadDevice device = getDevice(i);
                 if (device != null) {
                     device.updateButtonsAndAxesMapping();
-                    nativeSetGamepadData(webGamepadsPtr, i, device.isStandardGamepad(), true,
-                            device.getName(), device.getTimestamp(), device.getAxes(),
-                            device.getButtons());
+                    GamepadListJni.get().setGamepadData(GamepadList.this, webGamepadsPtr,
+                            /*index=*/i, device.isStandardGamepad(), /*connected=*/true,
+                            device.getName(), device.getVendorId(), device.getProductId(),
+                            device.getTimestamp(), device.getAxes(), device.getButtons(),
+                            device.getButtonsLength(), device.supportsDualRumble());
                 } else {
-                    nativeSetGamepadData(webGamepadsPtr, i, false, false, null, 0, null, null);
+                    GamepadListJni.get().setGamepadData(GamepadList.this, webGamepadsPtr,
+                            /*index=*/i, /*mapping=*/false, /*connected=*/false,
+                            /*devicename=*/null, /*vendorId=*/0, /*productId=*/0,
+                            /*timestamp=*/0, /*axes=*/null, /*buttons=*/null,
+                            /*buttonsLength=*/0, /*supportsDualRumble=*/false);
                 }
             }
         }
@@ -316,10 +347,40 @@ public class GamepadList {
         }
     }
 
-    private native void nativeSetGamepadData(long webGamepadsPtr, int index, boolean mapping,
-            boolean connected, String devicename, long timestamp, float[] axes, float[] buttons);
+    @CalledByNative
+    static void setVibration(int index, double strongMagnitude, double weakMagnitude) {
+        getInstance().doVibration(index, strongMagnitude, weakMagnitude);
+    }
+
+    private void doVibration(int index, double strongMagnitude, double weakMagnitude) {
+        GamepadDevice device;
+        synchronized (mLock) {
+            device = getDevice(index);
+        }
+        device.doVibration(strongMagnitude, weakMagnitude);
+    }
+
+    @CalledByNative
+    static void setZeroVibration(int index) {
+        getInstance().cancelVibration(index);
+    }
+
+    private void cancelVibration(int index) {
+        GamepadDevice device;
+        synchronized (mLock) {
+            device = getDevice(index);
+        }
+        device.cancelVibration();
+    }
 
     private static class LazyHolder {
         private static final GamepadList INSTANCE = new GamepadList();
+    }
+
+    @NativeMethods
+    interface Natives {
+        void setGamepadData(GamepadList caller, long webGamepadsPtr, int index, boolean mapping,
+                boolean connected, String devicename, int vendorId, int productId, long timestamp,
+                float[] axes, float[] buttons, int buttonsLength, boolean supportsDualRumble);
     }
 }

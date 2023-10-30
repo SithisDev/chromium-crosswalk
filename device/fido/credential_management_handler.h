@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/callback.h"
 #include "base/component_export.h"
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "device/fido/credential_management.h"
@@ -20,14 +20,21 @@
 #include "device/fido/fido_transport_protocol.h"
 #include "device/fido/pin.h"
 
-namespace service_manager {
-class Connector;
-}  // namespace service_manager
-
 namespace device {
 
 class FidoAuthenticator;
 class FidoDiscoveryFactory;
+
+enum class CredentialManagementStatus {
+  kSuccess,
+  kAuthenticatorResponseInvalid,
+  kSoftPINBlock,
+  kHardPINBlock,
+  kAuthenticatorMissingCredentialManagement,
+  kNoCredentials,
+  kNoPINSet,
+  kForcePINChange,
+};
 
 // CredentialManagementHandler implements the authenticatorCredentialManagement
 // protocol.
@@ -37,25 +44,43 @@ class FidoDiscoveryFactory;
 class COMPONENT_EXPORT(DEVICE_FIDO) CredentialManagementHandler
     : public FidoRequestHandlerBase {
  public:
+  // Details of the authenticator tapped by the user that are interesting to the
+  // UI when starting a request or requesting a PIN.
+  struct AuthenticatorProperties {
+    // The minimum accepted PIN length for the authenticator.
+    uint32_t min_pin_length;
+    // The number of PIN retries before the authenticator locks down.
+    int64_t pin_retries;
+    // True if the authenticator supports the UpdateUserInformation command (and
+    // therefore, calling |UpdateUserInformation| is valid). False otherwise.
+    bool supports_update_user_information;
+  };
+
   using DeleteCredentialCallback =
       base::OnceCallback<void(CtapDeviceResponseCode)>;
-  using FinishedCallback = base::OnceCallback<void(FidoReturnCode)>;
+  using UpdateUserInformationCallback =
+      base::OnceCallback<void(CtapDeviceResponseCode)>;
+  using FinishedCallback = base::OnceCallback<void(CredentialManagementStatus)>;
   using GetCredentialsCallback = base::OnceCallback<void(
       CtapDeviceResponseCode,
-      base::Optional<std::vector<AggregatedEnumerateCredentialsResponse>>,
-      base::Optional<size_t>)>;
+      absl::optional<std::vector<AggregatedEnumerateCredentialsResponse>>,
+      absl::optional<size_t>)>;
   using GetPINCallback =
-      base::RepeatingCallback<void(int64_t,
+      base::RepeatingCallback<void(AuthenticatorProperties,
                                    base::OnceCallback<void(std::string)>)>;
   using ReadyCallback = base::OnceClosure;
 
   CredentialManagementHandler(
-      service_manager::Connector* connector,
       FidoDiscoveryFactory* fido_discovery_factory,
       const base::flat_set<FidoTransportProtocol>& supported_transports,
       ReadyCallback ready_callback,
       GetPINCallback get_pin_callback,
       FinishedCallback finished_callback);
+
+  CredentialManagementHandler(const CredentialManagementHandler&) = delete;
+  CredentialManagementHandler& operator=(const CredentialManagementHandler&) =
+      delete;
+
   ~CredentialManagementHandler() override;
 
   // GetCredentials invokes a series of commands to fetch all credentials stored
@@ -74,19 +99,25 @@ class COMPONENT_EXPORT(DEVICE_FIDO) CredentialManagementHandler
                         DeleteCredentialCallback callback);
 
   // DeleteCredentials deletes a list of credentials. Each entry in
-  // |credential_ids| must be a CBOR-serialized PublicKeyCredentialDescriptor.
+  // |credential_ids| must be a CBOR-serialized credential_id.
   // If any individual deletion fails, |callback| is invoked with the
   // respective error, and deletion of the remaining credentials will be
   // aborted (but others may have been deleted successfully already).
-  void DeleteCredentials(std::vector<std::vector<uint8_t>> credential_ids,
-                         DeleteCredentialCallback callback);
+  void DeleteCredentials(
+      std::vector<PublicKeyCredentialDescriptor> credential_ids,
+      DeleteCredentialCallback callback);
+
+  // UpdateUserInformation attempts to update the credential with the given
+  // |credential_id|.
+  void UpdateUserInformation(const PublicKeyCredentialDescriptor& credential_id,
+                             const PublicKeyCredentialUserEntity& updated_user,
+                             UpdateUserInformationCallback callback);
 
  private:
   enum class State {
     kWaitingForTouch,
     kGettingRetries,
     kWaitingForPIN,
-    kGettingEphemeralKey,
     kGettingPINToken,
     kReady,
     kGettingMetadata,
@@ -102,41 +133,36 @@ class COMPONENT_EXPORT(DEVICE_FIDO) CredentialManagementHandler
 
   void OnTouch(FidoAuthenticator* authenticator);
   void OnRetriesResponse(CtapDeviceResponseCode status,
-                         base::Optional<pin::RetriesResponse> response);
+                         absl::optional<pin::RetriesResponse> response);
   void OnHavePIN(std::string pin);
-  void OnHaveEphemeralKey(std::string pin,
-                          CtapDeviceResponseCode status,
-                          base::Optional<pin::KeyAgreementResponse> response);
   void OnHavePINToken(CtapDeviceResponseCode status,
-                      base::Optional<pin::TokenResponse> response);
+                      absl::optional<pin::TokenResponse> response);
   void OnCredentialsMetadata(
       CtapDeviceResponseCode status,
-      base::Optional<CredentialsMetadataResponse> response);
+      absl::optional<CredentialsMetadataResponse> response);
   void OnEnumerateCredentials(
       CredentialsMetadataResponse metadata_response,
       CtapDeviceResponseCode status,
-      base::Optional<std::vector<AggregatedEnumerateCredentialsResponse>>
+      absl::optional<std::vector<AggregatedEnumerateCredentialsResponse>>
           responses);
   void OnDeleteCredentials(
-      std::vector<std::vector<uint8_t>> remaining_credential_ids,
+      std::vector<PublicKeyCredentialDescriptor> remaining_credential_ids,
       CredentialManagementHandler::DeleteCredentialCallback callback,
       CtapDeviceResponseCode status,
-      base::Optional<DeleteCredentialResponse> response);
+      absl::optional<DeleteCredentialResponse> response);
 
   SEQUENCE_CHECKER(sequence_checker_);
 
   State state_ = State::kWaitingForTouch;
-  FidoAuthenticator* authenticator_ = nullptr;
-  base::Optional<std::vector<uint8_t>> pin_token_;
+  raw_ptr<FidoAuthenticator> authenticator_ = nullptr;
+  absl::optional<pin::TokenResponse> pin_token_;
 
   ReadyCallback ready_callback_;
   GetPINCallback get_pin_callback_;
   GetCredentialsCallback get_credentials_callback_;
   FinishedCallback finished_callback_;
 
-  base::WeakPtrFactory<CredentialManagementHandler> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(CredentialManagementHandler);
+  base::WeakPtrFactory<CredentialManagementHandler> weak_factory_{this};
 };
 
 }  // namespace device

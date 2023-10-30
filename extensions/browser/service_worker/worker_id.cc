@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,10 @@ bool WorkerId::operator==(const WorkerId& other) const {
   return extension_id == other.extension_id &&
          render_process_id == other.render_process_id &&
          version_id == other.version_id && thread_id == other.thread_id;
+}
+
+bool WorkerId::operator!=(const WorkerId& other) const {
+  return !this->operator==(other);
 }
 
 }  // namespace extensions

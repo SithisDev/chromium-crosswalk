@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/android/build_info.h"
 #include "base/android/bundle_utils.h"
+#include "base/memory/ptr_util.h"
 #include "device/vr/android/gvr/gvr_device.h"
 
 namespace device {
@@ -13,27 +14,19 @@ namespace device {
 GvrDeviceProvider::GvrDeviceProvider() = default;
 GvrDeviceProvider::~GvrDeviceProvider() = default;
 
-void GvrDeviceProvider::Initialize(
-    base::RepeatingCallback<void(mojom::XRDeviceId,
-                                 mojom::VRDisplayInfoPtr,
-                                 mojom::XRRuntimePtr)> add_device_callback,
-    base::RepeatingCallback<void(mojom::XRDeviceId)> remove_device_callback,
-    base::OnceClosure initialization_complete) {
-  // Version check should match MIN_SDK_VERSION in VrCoreVersionChecker.java.
+void GvrDeviceProvider::Initialize(VRDeviceProviderClient* client) {
   // We only expose GvrDevice if
   //  - we could potentially install VRServices to support presentation, and
   //  - this build is a bundle and, thus, supports installing the VR module.
-  if (base::android::BuildInfo::GetInstance()->sdk_int() >=
-          base::android::SDK_VERSION_LOLLIPOP &&
-      base::android::BundleUtils::IsBundle()) {
+  if (base::android::BundleUtils::IsBundle()) {
     vr_device_ = base::WrapUnique(new GvrDevice());
   }
   if (vr_device_) {
-    add_device_callback.Run(vr_device_->GetId(), vr_device_->GetVRDisplayInfo(),
-                            vr_device_->BindXRRuntimePtr());
+    client->AddRuntime(vr_device_->GetId(), vr_device_->GetDeviceData(),
+                       vr_device_->BindXRRuntime());
   }
   initialized_ = true;
-  std::move(initialization_complete).Run();
+  client->OnProviderInitialized();
 }
 
 bool GvrDeviceProvider::Initialized() {

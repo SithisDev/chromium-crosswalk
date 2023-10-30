@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/macros.h"
-#include "base/optional.h"
+#include "base/callback_helpers.h"
 #include "base/run_loop.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace device {
 namespace test {
@@ -23,7 +22,7 @@ namespace test {
 // signature `void(CallbackArgs...)` can be invoked on.
 //
 // Example usage:
-//   base::test::ScopedTaskEnvironment task_environment;
+//   base::test::TaskEnvironment task_environment;
 //   TestCallbackReceiver<int> callback_receiver;
 //
 //   // Manufacture the base::OnceCallback whose invovcation will be received
@@ -43,6 +42,10 @@ class TestCallbackReceiver {
   using TupleOfNonReferenceArgs = std::tuple<std::decay_t<CallbackArgs>...>;
 
   TestCallbackReceiver() = default;
+
+  TestCallbackReceiver(const TestCallbackReceiver&) = delete;
+  TestCallbackReceiver& operator=(const TestCallbackReceiver&) = delete;
+
   ~TestCallbackReceiver() = default;
 
   // Whether the |callback| was already called.
@@ -50,7 +53,7 @@ class TestCallbackReceiver {
 
   // The result, which is non-null exactly if the callback was already invoked
   // and the result has not yet been taken with TakeResult().
-  const base::Optional<TupleOfNonReferenceArgs>& result() const {
+  const absl::optional<TupleOfNonReferenceArgs>& result() const {
     return result_;
   }
 
@@ -88,9 +91,7 @@ class TestCallbackReceiver {
 
   bool was_called_ = false;
   base::RunLoop wait_for_callback_loop_;
-  base::Optional<TupleOfNonReferenceArgs> result_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestCallbackReceiver);
+  absl::optional<TupleOfNonReferenceArgs> result_;
 };
 
 template <class Value>

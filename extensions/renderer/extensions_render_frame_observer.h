@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,10 @@
 
 #include <stdint.h>
 
-#include "base/macros.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "extensions/common/mojom/app_window.mojom.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/pending_receiver.h"
+#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
 namespace extensions {
@@ -22,29 +22,30 @@ class ExtensionsRenderFrameObserver : public content::RenderFrameObserver,
  public:
   ExtensionsRenderFrameObserver(content::RenderFrame* render_frame,
                                 service_manager::BinderRegistry* registry);
+  ExtensionsRenderFrameObserver(const ExtensionsRenderFrameObserver&) = delete;
+  ExtensionsRenderFrameObserver& operator=(
+      const ExtensionsRenderFrameObserver&) = delete;
   ~ExtensionsRenderFrameObserver() override;
 
  private:
-  void BindAppWindowRequest(mojom::AppWindowRequest request);
+  void BindAppWindowReceiver(mojo::PendingReceiver<mojom::AppWindow> receiver);
 
   // Toggles visual muting of the render view area. This is on when a
   // constrained window is showing.
   void SetVisuallyDeemphasized(bool deemphasized) override;
 
   // RenderFrameObserver implementation.
-  void DetailedConsoleMessageAdded(const base::string16& message,
-                                   const base::string16& source,
-                                   const base::string16& stack_trace,
+  void DetailedConsoleMessageAdded(const std::u16string& message,
+                                   const std::u16string& source,
+                                   const std::u16string& stack_trace,
                                    uint32_t line_number,
                                    int32_t severity_level) override;
   void OnDestruct() override;
 
   // true if webview is overlayed with grey color.
-  bool webview_visually_deemphasized_;
+  bool webview_visually_deemphasized_ = false;
 
-  mojo::BindingSet<mojom::AppWindow> bindings_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsRenderFrameObserver);
+  mojo::ReceiverSet<mojom::AppWindow> receivers_;
 };
 
 }  // namespace extensions

@@ -1,14 +1,14 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/test/test_extension_dir.h"
 
+#include <tuple>
+
 #include "base/files/file_util.h"
-#include "base/json/json_writer.h"
-#include "base/numerics/safe_conversions.h"
+#include "base/numerics/checked_math.h"
 #include "base/strings/string_util.h"
-#include "base/test/values_test_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "extensions/browser/extension_creator.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -23,19 +23,12 @@ TestExtensionDir::TestExtensionDir() {
 
 TestExtensionDir::~TestExtensionDir() {
   base::ScopedAllowBlockingForTesting allow_blocking;
-  ignore_result(dir_.Delete());
-  ignore_result(crx_dir_.Delete());
+  std::ignore = dir_.Delete();
+  std::ignore = crx_dir_.Delete();
 }
 
 void TestExtensionDir::WriteManifest(base::StringPiece manifest) {
   WriteFile(FILE_PATH_LITERAL("manifest.json"), manifest);
-}
-
-void TestExtensionDir::WriteManifestWithSingleQuotes(
-    base::StringPiece manifest) {
-  std::string double_quotes;
-  base::ReplaceChars(manifest.data(), "'", "\"", &double_quotes);
-  WriteManifest(double_quotes);
 }
 
 void TestExtensionDir::WriteFile(const base::FilePath::StringType& filename,
@@ -44,6 +37,15 @@ void TestExtensionDir::WriteFile(const base::FilePath::StringType& filename,
   EXPECT_EQ(base::checked_cast<int>(contents.size()),
             base::WriteFile(dir_.GetPath().Append(filename), contents.data(),
                             contents.size()));
+}
+
+void TestExtensionDir::CopyFileTo(
+    const base::FilePath& from_path,
+    const base::FilePath::StringType& local_filename) {
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  ASSERT_TRUE(base::PathExists(from_path)) << from_path;
+  EXPECT_TRUE(base::CopyFile(from_path, dir_.GetPath().Append(local_filename)))
+      << "Failed to copy file from " << from_path << " to " << local_filename;
 }
 
 base::FilePath TestExtensionDir::Pack() {
@@ -71,7 +73,7 @@ base::FilePath TestExtensionDir::Pack() {
   return crx_path;
 }
 
-base::FilePath TestExtensionDir::UnpackedPath() {
+base::FilePath TestExtensionDir::UnpackedPath() const {
   base::ScopedAllowBlockingForTesting allow_blocking;
   // We make this absolute because it's possible that dir_ contains a symlink as
   // part of it's path. When UnpackedInstaller::GetAbsolutePath() runs as part

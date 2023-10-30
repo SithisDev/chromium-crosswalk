@@ -1,21 +1,18 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "extensions/browser/api/power/power_api.h"
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/lazy_instance.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/system_connector.h"
+#include "content/public/browser/device_service.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/api/power.h"
 #include "extensions/common/extension.h"
-#include "mojo/public/cpp/bindings/interface_request.h"
-#include "services/device/public/mojom/constants.mojom.h"
 #include "services/device/public/mojom/wake_lock_provider.mojom.h"
-#include "services/service_manager/public/cpp/connector.h"
 
 namespace extensions {
 
@@ -42,7 +39,7 @@ base::LazyInstance<BrowserContextKeyedAPIFactory<PowerAPI>>::DestructorAtExit
 
 ExtensionFunction::ResponseAction PowerRequestKeepAwakeFunction::Run() {
   std::unique_ptr<api::power::RequestKeepAwake::Params> params(
-      api::power::RequestKeepAwake::Params::Create(*args_));
+      api::power::RequestKeepAwake::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
   PowerAPI::Get(browser_context())->AddRequest(extension_id(), params->level);
   return RespondNow(NoArguments());
@@ -75,16 +72,18 @@ void PowerAPI::RemoveRequest(const std::string& extension_id) {
 }
 
 void PowerAPI::SetWakeLockFunctionsForTesting(
-    const ActivateWakeLockFunction& activate_function,
-    const CancelWakeLockFunction& cancel_function) {
+    ActivateWakeLockFunction activate_function,
+    CancelWakeLockFunction cancel_function) {
   activate_wake_lock_function_ =
       !activate_function.is_null()
-          ? activate_function
-          : base::Bind(&PowerAPI::ActivateWakeLock, base::Unretained(this));
+          ? std::move(activate_function)
+          : base::BindRepeating(&PowerAPI::ActivateWakeLock,
+                                base::Unretained(this));
   cancel_wake_lock_function_ =
       !cancel_function.is_null()
-          ? cancel_function
-          : base::Bind(&PowerAPI::CancelWakeLock, base::Unretained(this));
+          ? std::move(cancel_function)
+          : base::BindRepeating(&PowerAPI::CancelWakeLock,
+                                base::Unretained(this));
 }
 
 void PowerAPI::OnExtensionUnloaded(content::BrowserContext* browser_context,
@@ -97,9 +96,10 @@ void PowerAPI::OnExtensionUnloaded(content::BrowserContext* browser_context,
 PowerAPI::PowerAPI(content::BrowserContext* context)
     : browser_context_(context),
       activate_wake_lock_function_(
-          base::Bind(&PowerAPI::ActivateWakeLock, base::Unretained(this))),
-      cancel_wake_lock_function_(
-          base::Bind(&PowerAPI::CancelWakeLock, base::Unretained(this))),
+          base::BindRepeating(&PowerAPI::ActivateWakeLock,
+                              base::Unretained(this))),
+      cancel_wake_lock_function_(base::BindRepeating(&PowerAPI::CancelWakeLock,
+                                                     base::Unretained(this))),
       is_wake_lock_active_(false),
       current_level_(api::power::LEVEL_SYSTEM) {
   ExtensionRegistry::Get(browser_context_)->AddObserver(this);
@@ -155,17 +155,13 @@ device::mojom::WakeLock* PowerAPI::GetWakeLock() {
   if (wake_lock_)
     return wake_lock_.get();
 
-  device::mojom::WakeLockRequest request = mojo::MakeRequest(&wake_lock_);
-
-  auto* connector = content::GetSystemConnector();
-  DCHECK(connector);
-  device::mojom::WakeLockProviderPtr wake_lock_provider;
-  connector->BindInterface(device::mojom::kServiceName,
-                           mojo::MakeRequest(&wake_lock_provider));
+  mojo::Remote<device::mojom::WakeLockProvider> wake_lock_provider;
+  content::GetDeviceService().BindWakeLockProvider(
+      wake_lock_provider.BindNewPipeAndPassReceiver());
   wake_lock_provider->GetWakeLockWithoutContext(
       LevelToWakeLockType(current_level_),
       device::mojom::WakeLockReason::kOther, kWakeLockDescription,
-      std::move(request));
+      wake_lock_.BindNewPipeAndPassReceiver());
   return wake_lock_.get();
 }
 

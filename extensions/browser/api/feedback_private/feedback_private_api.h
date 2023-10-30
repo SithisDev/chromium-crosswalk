@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,47 +7,58 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
+#include "build/chromeos_buildflags.h"
 #include "components/feedback/system_logs/system_logs_source.h"
+#include "extensions/browser/api/feedback_private/feedback_service.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/api/feedback_private.h"
 #include "ui/gfx/geometry/rect.h"
 
-namespace feedback {
-class FeedbackData;
-}  // namespace feedback
-
 namespace extensions {
 
-class FeedbackService;
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 class LogSourceAccessManager;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 class FeedbackPrivateAPI : public BrowserContextKeyedAPI {
  public:
   explicit FeedbackPrivateAPI(content::BrowserContext* context);
+
+  FeedbackPrivateAPI(const FeedbackPrivateAPI&) = delete;
+  FeedbackPrivateAPI& operator=(const FeedbackPrivateAPI&) = delete;
+
   ~FeedbackPrivateAPI() override;
 
-  FeedbackService* GetService() const;
+  scoped_refptr<FeedbackService> GetService() const;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   LogSourceAccessManager* GetLogSourceAccessManager() const;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
-  void RequestFeedbackForFlow(const std::string& description_template,
-                              const std::string& description_placeholder_text,
-                              const std::string& category_tag,
-                              const std::string& extra_diagnostics,
-                              const GURL& page_url,
-                              api::feedback_private::FeedbackFlow flow,
-                              bool from_assistant = false,
-                              bool include_bluetooth_logs = false);
+  // Create a FeedbackInfo to be passed to UI/JS
+  std::unique_ptr<api::feedback_private::FeedbackInfo> CreateFeedbackInfo(
+      const std::string& description_template,
+      const std::string& description_placeholder_text,
+      const std::string& category_tag,
+      const std::string& extra_diagnostics,
+      const GURL& page_url,
+      api::feedback_private::FeedbackFlow flow,
+      bool from_assistant,
+      bool include_bluetooth_logs,
+      bool show_questionnaire,
+      bool from_chrome_labs_or_kaleidoscope);
 
   // BrowserContextKeyedAPI implementation.
   static BrowserContextKeyedAPIFactory<FeedbackPrivateAPI>*
   GetFactoryInstance();
+
+  // Use a custom FeedbackService implementation for tests.
+  void SetFeedbackServiceForTesting(scoped_refptr<FeedbackService> service) {
+    service_ = service;
+  }
 
  private:
   friend class BrowserContextKeyedAPIFactory<FeedbackPrivateAPI>;
@@ -57,38 +68,15 @@ class FeedbackPrivateAPI : public BrowserContextKeyedAPI {
 
   static const bool kServiceHasOwnInstanceInIncognito = true;
 
-  content::BrowserContext* const browser_context_;
-  std::unique_ptr<FeedbackService> service_;
+  const raw_ptr<content::BrowserContext> browser_context_;
+  scoped_refptr<FeedbackService> service_;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   std::unique_ptr<LogSourceAccessManager> log_source_access_manager_;
-#endif  // defined(OS_CHROMEOS)
-
-  DISALLOW_COPY_AND_ASSIGN(FeedbackPrivateAPI);
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 };
 
-// Feedback strings.
-class FeedbackPrivateGetStringsFunction : public UIThreadExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getStrings",
-                             FEEDBACKPRIVATE_GETSTRINGS)
-
-  // Invoke this callback when this function is called - used for testing.
-  static void set_test_callback(base::Closure* const callback) {
-    test_callback_ = callback;
-  }
-
- protected:
-  ~FeedbackPrivateGetStringsFunction() override {}
-
-  // ExtensionFunction:
-  ResponseAction Run() override;
-
- private:
-  static base::Closure* test_callback_;
-};
-
-class FeedbackPrivateGetUserEmailFunction : public UIThreadExtensionFunction {
+class FeedbackPrivateGetUserEmailFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getUserEmail",
                              FEEDBACKPRIVATE_GETUSEREMAIL)
@@ -98,8 +86,7 @@ class FeedbackPrivateGetUserEmailFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 };
 
-class FeedbackPrivateGetSystemInformationFunction
-    : public UIThreadExtensionFunction {
+class FeedbackPrivateGetSystemInformationFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getSystemInformation",
                              FEEDBACKPRIVATE_GETSYSTEMINFORMATION)
@@ -110,11 +97,13 @@ class FeedbackPrivateGetSystemInformationFunction
 
  private:
   void OnCompleted(std::unique_ptr<system_logs::SystemLogsResponse> sys_info);
+
+  bool send_all_crash_report_ids_;
 };
 
 // This function only reads from actual log sources on Chrome OS. On other
 // platforms, it just returns EmptyResponse().
-class FeedbackPrivateReadLogSourceFunction : public UIThreadExtensionFunction {
+class FeedbackPrivateReadLogSourceFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.readLogSource",
                              FEEDBACKPRIVATE_READLOGSOURCE)
@@ -123,14 +112,14 @@ class FeedbackPrivateReadLogSourceFunction : public UIThreadExtensionFunction {
   ~FeedbackPrivateReadLogSourceFunction() override {}
   ResponseAction Run() override;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
  private:
   void OnCompleted(
       std::unique_ptr<api::feedback_private::ReadLogSourceResult> result);
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 };
 
-class FeedbackPrivateSendFeedbackFunction : public UIThreadExtensionFunction {
+class FeedbackPrivateSendFeedbackFunction : public ExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.sendFeedback",
                              FEEDBACKPRIVATE_SENDFEEDBACK)
@@ -138,23 +127,7 @@ class FeedbackPrivateSendFeedbackFunction : public UIThreadExtensionFunction {
  protected:
   ~FeedbackPrivateSendFeedbackFunction() override {}
   ResponseAction Run() override;
-
- private:
-  void OnAllLogsFetched(bool send_histograms,
-                        bool send_bluetooth_logs,
-                        scoped_refptr<feedback::FeedbackData> feedback_data);
   void OnCompleted(api::feedback_private::LandingPageType type, bool success);
-};
-
-class FeedbackPrivateLoginFeedbackCompleteFunction
-    : public UIThreadExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("feedbackPrivate.loginFeedbackComplete",
-                             FEEDBACKPRIVATE_LOGINFEEDBACKCOMPLETE)
-
- protected:
-  ~FeedbackPrivateLoginFeedbackCompleteFunction() override {}
-  ResponseAction Run() override;
 };
 
 }  // namespace extensions

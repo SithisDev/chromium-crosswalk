@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 
 #include "base/base_paths.h"
 #include "base/bind.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_io_thread.h"
@@ -29,23 +28,24 @@ namespace {
 // be a persistent object available to tests?
 class ExtensionsContentClient : public content::ContentClient {
  public:
-  ExtensionsContentClient() {}
-  ~ExtensionsContentClient() override {}
+  ExtensionsContentClient() = default;
+  ExtensionsContentClient(const ExtensionsContentClient&) = delete;
+  ExtensionsContentClient& operator=(const ExtensionsContentClient&) = delete;
+  ~ExtensionsContentClient() override = default;
 
   // content::ContentClient overrides:
   void AddAdditionalSchemes(Schemes* schemes) override {
     schemes->standard_schemes.push_back(extensions::kExtensionScheme);
     schemes->savable_schemes.push_back(extensions::kExtensionScheme);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsContentClient);
 };
 
 // The test suite for extensions_unittests.
 class ExtensionsTestSuite : public content::ContentTestSuiteBase {
  public:
   ExtensionsTestSuite(int argc, char** argv);
+  ExtensionsTestSuite(const ExtensionsTestSuite&) = delete;
+  ExtensionsTestSuite& operator=(const ExtensionsTestSuite&) = delete;
   ~ExtensionsTestSuite() override;
 
  private:
@@ -54,8 +54,6 @@ class ExtensionsTestSuite : public content::ContentTestSuiteBase {
   void Shutdown() override;
 
   std::unique_ptr<extensions::TestExtensionsClient> client_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionsTestSuite);
 };
 
 ExtensionsTestSuite::ExtensionsTestSuite(int argc, char** argv)
@@ -67,9 +65,7 @@ void ExtensionsTestSuite::Initialize() {
   content::ContentTestSuiteBase::Initialize();
   gl::GLSurfaceTestSupport::InitializeOneOff();
 
-  // Register the chrome-extension:// scheme via this circuitous path. Note
-  // that this does not persistently set up a ContentClient; individual tests
-  // must use content::SetContentClient().
+  // Register the chrome-extension:// scheme via this circuitous path.
   {
     ExtensionsContentClient content_client;
     RegisterContentSchemes(&content_client);
@@ -79,17 +75,17 @@ void ExtensionsTestSuite::Initialize() {
   extensions::RegisterPathProvider();
 
   base::FilePath extensions_shell_and_test_pak_path;
-  base::PathService::Get(base::DIR_MODULE, &extensions_shell_and_test_pak_path);
+  base::PathService::Get(base::DIR_ASSETS, &extensions_shell_and_test_pak_path);
   ui::ResourceBundle::InitSharedInstanceWithPakPath(
       extensions_shell_and_test_pak_path.AppendASCII(
           "extensions_shell_and_test.pak"));
 
-  client_.reset(new extensions::TestExtensionsClient());
+  client_ = std::make_unique<extensions::TestExtensionsClient>();
   extensions::ExtensionsClient::Set(client_.get());
 }
 
 void ExtensionsTestSuite::Shutdown() {
-  extensions::ExtensionsClient::Set(NULL);
+  extensions::ExtensionsClient::Set(nullptr);
   client_.reset();
 
   ui::ResourceBundle::CleanupSharedInstance();
@@ -99,9 +95,11 @@ void ExtensionsTestSuite::Shutdown() {
 }  // namespace
 
 int main(int argc, char** argv) {
-  content::UnitTestTestSuite test_suite(new ExtensionsTestSuite(argc, argv));
-  return base::LaunchUnitTests(argc,
-                               argv,
-                               base::Bind(&content::UnitTestTestSuite::Run,
-                                          base::Unretained(&test_suite)));
+  content::UnitTestTestSuite test_suite(
+      new ExtensionsTestSuite(argc, argv),
+      base::BindRepeating(
+          content::UnitTestTestSuite::CreateTestContentClients));
+  return base::LaunchUnitTests(argc, argv,
+                               base::BindOnce(&content::UnitTestTestSuite::Run,
+                                              base::Unretained(&test_suite)));
 }

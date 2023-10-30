@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,10 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "build/build_config.h"
 #include "device/bluetooth/public/cpp/bluetooth_uuid.h"
 #include "device/bluetooth/test/fake_remote_gatt_service.h"
 
@@ -24,12 +26,11 @@ FakePeripheral::FakePeripheral(FakeCentral* fake_central,
       system_connected_(false),
       gatt_connected_(false),
       last_service_id_(0),
-      pending_gatt_discovery_(false),
-      weak_ptr_factory_(this) {}
+      pending_gatt_discovery_(false) {}
 
 FakePeripheral::~FakePeripheral() = default;
 
-void FakePeripheral::SetName(base::Optional<std::string> name) {
+void FakePeripheral::SetName(absl::optional<std::string> name) {
   name_ = std::move(name);
 }
 
@@ -54,9 +55,14 @@ void FakePeripheral::SetServiceUUIDs(UUIDSet service_uuids) {
   device_uuids_.ReplaceServiceUUIDs(gatt_services);
 }
 
+void FakePeripheral::SetManufacturerData(
+    ManufacturerDataMap manufacturer_data) {
+  manufacturer_data_ = std::move(manufacturer_data);
+}
+
 void FakePeripheral::SetNextGATTConnectionResponse(uint16_t code) {
   DCHECK(!next_connection_response_);
-  DCHECK(create_gatt_connection_error_callbacks_.empty());
+  DCHECK(create_gatt_connection_callbacks_.empty());
   next_connection_response_ = code;
 }
 
@@ -67,12 +73,10 @@ void FakePeripheral::SetNextGATTDiscoveryResponse(uint16_t code) {
 
 bool FakePeripheral::AllResponsesConsumed() {
   return !next_connection_response_ && !next_discovery_response_ &&
-         std::all_of(gatt_services_.begin(), gatt_services_.end(),
-                     [](const auto& e) {
-                       FakeRemoteGattService* fake_remote_gatt_service =
-                           static_cast<FakeRemoteGattService*>(e.second.get());
-                       return fake_remote_gatt_service->AllResponsesConsumed();
-                     });
+         base::ranges::all_of(gatt_services_, [](const auto& e) {
+           return static_cast<FakeRemoteGattService*>(e.second.get())
+               ->AllResponsesConsumed();
+         });
 }
 
 void FakePeripheral::SimulateGATTDisconnection() {
@@ -93,10 +97,7 @@ std::string FakePeripheral::AddFakeService(
   std::string new_service_id =
       base::StringPrintf("%s_%zu", GetAddress().c_str(), ++last_service_id_);
 
-  GattServiceMap::iterator it;
-  bool inserted;
-
-  std::tie(it, inserted) = gatt_services_.emplace(
+  auto [it, inserted] = gatt_services_.emplace(
       new_service_id,
       std::make_unique<FakeRemoteGattService>(new_service_id, service_uuid,
                                               true /* is_primary */, this));
@@ -120,7 +121,7 @@ uint32_t FakePeripheral::GetBluetoothClass() const {
   return 0;
 }
 
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
 device::BluetoothTransport FakePeripheral::GetType() const {
   NOTREACHED();
   return device::BLUETOOTH_TRANSPORT_INVALID;
@@ -134,6 +135,11 @@ std::string FakePeripheral::GetIdentifier() const {
 
 std::string FakePeripheral::GetAddress() const {
   return address_;
+}
+
+device::BluetoothDevice::AddressType FakePeripheral::GetAddressType() const {
+  NOTREACHED();
+  return ADDR_TYPE_UNKNOWN;
 }
 
 device::BluetoothDevice::VendorIDSource FakePeripheral::GetVendorIDSource()
@@ -162,18 +168,25 @@ uint16_t FakePeripheral::GetAppearance() const {
   return 0;
 }
 
-base::Optional<std::string> FakePeripheral::GetName() const {
+absl::optional<std::string> FakePeripheral::GetName() const {
   return name_;
 }
 
-base::string16 FakePeripheral::GetNameForDisplay() const {
-  return base::string16();
+std::u16string FakePeripheral::GetNameForDisplay() const {
+  return std::u16string();
 }
 
 bool FakePeripheral::IsPaired() const {
   NOTREACHED();
   return false;
 }
+
+#if BUILDFLAG(IS_CHROMEOS)
+bool FakePeripheral::IsBonded() const {
+  NOTREACHED();
+  return false;
+}
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 bool FakePeripheral::IsConnected() const {
   NOTREACHED();
@@ -212,21 +225,27 @@ bool FakePeripheral::ExpectingConfirmation() const {
   return false;
 }
 
-void FakePeripheral::GetConnectionInfo(const ConnectionInfoCallback& callback) {
+void FakePeripheral::GetConnectionInfo(ConnectionInfoCallback callback) {
   NOTREACHED();
 }
 
 void FakePeripheral::SetConnectionLatency(ConnectionLatency connection_latency,
-                                          const base::Closure& callback,
-                                          const ErrorCallback& error_callback) {
+                                          base::OnceClosure callback,
+                                          ErrorCallback error_callback) {
   NOTREACHED();
 }
 
 void FakePeripheral::Connect(PairingDelegate* pairing_delegate,
-                             const base::Closure& callback,
-                             const ConnectErrorCallback& error_callback) {
+                             ConnectCallback callback) {
   NOTREACHED();
 }
+
+#if BUILDFLAG(IS_CHROMEOS)
+void FakePeripheral::ConnectClassic(PairingDelegate* pairing_delegate,
+                                    ConnectCallback callback) {
+  NOTREACHED();
+}
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 void FakePeripheral::SetPinCode(const std::string& pincode) {
   NOTREACHED();
@@ -248,42 +267,41 @@ void FakePeripheral::CancelPairing() {
   NOTREACHED();
 }
 
-void FakePeripheral::Disconnect(const base::Closure& callback,
-                                const ErrorCallback& error_callback) {
+void FakePeripheral::Disconnect(base::OnceClosure callback,
+                                ErrorCallback error_callback) {
   NOTREACHED();
 }
 
-void FakePeripheral::Forget(const base::Closure& callback,
-                            const ErrorCallback& error_callback) {
+void FakePeripheral::Forget(base::OnceClosure callback,
+                            ErrorCallback error_callback) {
   NOTREACHED();
 }
 
 void FakePeripheral::ConnectToService(
     const device::BluetoothUUID& uuid,
-    const ConnectToServiceCallback& callback,
-    const ConnectToServiceErrorCallback& error_callback) {
+    ConnectToServiceCallback callback,
+    ConnectToServiceErrorCallback error_callback) {
   NOTREACHED();
 }
 
 void FakePeripheral::ConnectToServiceInsecurely(
     const device::BluetoothUUID& uuid,
-    const ConnectToServiceCallback& callback,
-    const ConnectToServiceErrorCallback& error_callback) {
+    ConnectToServiceCallback callback,
+    ConnectToServiceErrorCallback error_callback) {
   NOTREACHED();
 }
 
 void FakePeripheral::CreateGattConnection(
-    const GattConnectionCallback& callback,
-    const ConnectErrorCallback& error_callback) {
-  create_gatt_connection_success_callbacks_.push_back(callback);
-  create_gatt_connection_error_callbacks_.push_back(error_callback);
+    GattConnectionCallback callback,
+    absl::optional<device::BluetoothUUID> service_uuid) {
+  create_gatt_connection_callbacks_.push_back(std::move(callback));
 
   // TODO(crbug.com/728870): Stop overriding CreateGattConnection once
   // IsGattConnected() is fixed. See issue for more details.
   if (gatt_connected_)
-    return DidConnectGatt();
+    return DidConnectGatt(/*error_code=*/absl::nullopt);
 
-  CreateGattConnectionImpl();
+  CreateGattConnectionImpl(std::move(service_uuid));
 }
 
 bool FakePeripheral::IsGattServicesDiscoveryComplete() const {
@@ -311,7 +329,8 @@ bool FakePeripheral::IsGattServicesDiscoveryComplete() const {
   return discovery_complete;
 }
 
-void FakePeripheral::CreateGattConnectionImpl() {
+void FakePeripheral::CreateGattConnectionImpl(
+    absl::optional<device::BluetoothUUID>) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(&FakePeripheral::DispatchConnectionResponse,
                                 weak_ptr_factory_.GetWeakPtr()));
@@ -325,11 +344,11 @@ void FakePeripheral::DispatchConnectionResponse() {
 
   if (code == mojom::kHCISuccess) {
     gatt_connected_ = true;
-    DidConnectGatt();
+    DidConnectGatt(/*error_code=*/absl::nullopt);
   } else if (code == mojom::kHCIConnectionTimeout) {
-    DidFailToConnectGatt(ERROR_FAILED);
+    DidConnectGatt(ERROR_FAILED);
   } else {
-    DidFailToConnectGatt(ERROR_UNKNOWN);
+    DidConnectGatt(ERROR_UNKNOWN);
   }
 }
 
@@ -352,17 +371,16 @@ void FakePeripheral::DispatchDiscoveryResponse() {
 void FakePeripheral::DisconnectGatt() {
 }
 
-#if defined(OS_CHROMEOS)
-void FakePeripheral::ExecuteWrite(
-    const base::Closure& callback,
-    const ExecuteWriteErrorCallback& error_callback) {
+#if BUILDFLAG(IS_CHROMEOS)
+void FakePeripheral::ExecuteWrite(base::OnceClosure callback,
+                                  ExecuteWriteErrorCallback error_callback) {
   NOTIMPLEMENTED();
 }
 
-void FakePeripheral::AbortWrite(const base::Closure& callback,
-                                const AbortWriteErrorCallback& error_callback) {
+void FakePeripheral::AbortWrite(base::OnceClosure callback,
+                                AbortWriteErrorCallback error_callback) {
   NOTIMPLEMENTED();
 }
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace bluetooth

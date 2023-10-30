@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,10 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "content/public/test/test_browser_thread_bundle.h"
-#include "services/data_decoder/public/cpp/test_data_decoder_service.h"
-#include "services/data_decoder/public/mojom/constants.mojom.h"
+#include "content/public/test/browser_task_environment.h"
+#include "extensions/browser/extension_file_task_runner.h"
+#include "services/data_decoder/public/cpp/data_decoder.h"
+#include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -23,6 +24,9 @@ namespace {
 class JsonFileSanitizerTest : public testing::Test {
  public:
   JsonFileSanitizerTest() {}
+
+  JsonFileSanitizerTest(const JsonFileSanitizerTest&) = delete;
+  JsonFileSanitizerTest& operator=(const JsonFileSanitizerTest&) = delete;
 
  protected:
   base::FilePath CreateFilePath(const base::FilePath::StringType& file_name) {
@@ -52,12 +56,10 @@ class JsonFileSanitizerTest : public testing::Test {
 
   void CreateAndStartSanitizer(const std::set<base::FilePath>& file_paths) {
     sanitizer_ = JsonFileSanitizer::CreateAndStart(
-        test_data_decoder_service_.connector(),
-        service_manager::ServiceFilter::ByName(
-            data_decoder::mojom::kServiceName),
-        file_paths,
+        &data_decoder_, file_paths,
         base::BindOnce(&JsonFileSanitizerTest::SanitizationDone,
-                       base::Unretained(this)));
+                       base::Unretained(this)),
+        GetExtensionFileTaskRunner());
   }
 
   JsonFileSanitizer::Status last_reported_status() const {
@@ -77,15 +79,14 @@ class JsonFileSanitizerTest : public testing::Test {
       std::move(done_callback_).Run();
   }
 
-  content::TestBrowserThreadBundle thread_bundle_;
-  data_decoder::TestDataDecoderService test_data_decoder_service_;
+  content::BrowserTaskEnvironment task_environment_;
+  data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
+  data_decoder::DataDecoder data_decoder_;
   JsonFileSanitizer::Status last_status_;
   std::string last_error_;
   base::OnceClosure done_callback_;
   std::unique_ptr<JsonFileSanitizer> sanitizer_;
   base::ScopedTempDir temp_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(JsonFileSanitizerTest);
 };
 
 }  // namespace
