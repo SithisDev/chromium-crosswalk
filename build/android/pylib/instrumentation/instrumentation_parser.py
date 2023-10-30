@@ -1,6 +1,7 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+# Copyright 2015 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
 
 import logging
 import re
@@ -20,6 +21,12 @@ STATUS_CODE_SKIP = -3
 # http://junit.org/junit4/javadoc/4.12/org/junit/AssumptionViolatedException.html
 STATUS_CODE_ASSUMPTION_FAILURE = -4
 
+STATUS_CODE_TEST_DURATION = 1337
+
+# When a test batch fails due to post-test Assertion failures (eg.
+# LifetimeAssert).
+STATUS_CODE_BATCH_FAILURE = 1338
+
 # http://developer.android.com/reference/android/app/Activity.html
 RESULT_CODE_OK = -1
 RESULT_CODE_CANCELED = 0
@@ -27,7 +34,7 @@ RESULT_CODE_CANCELED = 0
 _INSTR_LINE_RE = re.compile(r'^\s*INSTRUMENTATION_([A-Z_]+): (.*)$')
 
 
-class InstrumentationParser(object):
+class InstrumentationParser:
 
   def __init__(self, stream):
     """An incremental parser for the output of Android instrumentation tests.

@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,11 @@
 #include <stddef.h>
 
 #include <deque>
+#include <memory>
 #include <set>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "cc/base/region.h"
 #include "cc/tiles/picture_layer_tiling.h"
 #include "ui/gfx/geometry/size.h"
@@ -79,7 +81,8 @@ class CC_EXPORT PictureLayerTilingSet {
   void Invalidate(const Region& layer_invalidation);
 
   PictureLayerTiling* AddTiling(const gfx::AxisTransform2d& raster_transform,
-                                scoped_refptr<RasterSource> raster_source);
+                                scoped_refptr<RasterSource> raster_source,
+                                bool can_use_lcd_text = false);
   size_t num_tilings() const { return tilings_.size(); }
   int NumHighResTilings() const;
   PictureLayerTiling* tiling_at(size_t idx) { return tilings_[idx].get(); }
@@ -91,14 +94,15 @@ class CC_EXPORT PictureLayerTilingSet {
   PictureLayerTiling* FindTilingWithScaleKey(float scale_key) const;
   PictureLayerTiling* FindTilingWithResolution(TileResolution resolution) const;
 
-  void MarkAllTilingsNonIdeal();
-
   // If a tiling exists whose scale is within |snap_to_existing_tiling_ratio|
-  // ratio of |start_scale|, then return that tiling's scale. Otherwise, return
-  // |start_scale|. If multiple tilings match the criteria, return the one with
-  // the least ratio to |start_scale|.
-  float GetSnappedContentsScaleKey(float start_scale,
-                                   float snap_to_existing_tiling_ratio) const;
+  // ratio of |start_scale|, then return that tiling. Otherwise, return null.
+  // If multiple tilings match the criteria, return the one with the least ratio
+  // to |start_scale|.
+  PictureLayerTiling* FindTilingWithNearestScaleKey(
+      float start_scale,
+      float snap_to_existing_tiling_ratio) const;
+
+  void MarkAllTilingsNonIdeal();
 
   // Returns the maximum contents scale of all tilings, or 0 if no tilings
   // exist. Note that this returns the maximum of x and y scales depending on
@@ -173,7 +177,7 @@ class CC_EXPORT PictureLayerTilingSet {
    private:
     size_t NextTiling() const;
 
-    const PictureLayerTilingSet* set_;
+    raw_ptr<const PictureLayerTilingSet> set_;
     float coverage_scale_;
     PictureLayerTiling::CoverageIterator tiling_iter_;
     size_t current_tiling_;
@@ -207,7 +211,7 @@ class CC_EXPORT PictureLayerTilingSet {
       ~AutoClear() { *state_to_clear_ = StateSinceLastTilePriorityUpdate(); }
 
      private:
-      StateSinceLastTilePriorityUpdate* state_to_clear_;
+      raw_ptr<StateSinceLastTilePriorityUpdate> state_to_clear_;
     };
 
     StateSinceLastTilePriorityUpdate()
@@ -249,7 +253,7 @@ class CC_EXPORT PictureLayerTilingSet {
   const float skewport_target_time_in_seconds_;
   const int skewport_extrapolation_limit_in_screen_pixels_;
   WhichTree tree_;
-  PictureLayerTilingClient* client_;
+  raw_ptr<PictureLayerTilingClient> client_;
   const float max_preraster_distance_;
   // State saved for computing velocities based on finite differences.
   // .front() of the deque refers to the most recent FrameVisibleRect.

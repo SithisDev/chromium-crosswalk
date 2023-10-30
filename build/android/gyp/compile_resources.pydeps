@@ -2,6 +2,7 @@
 #   build/print_python_deps.py --root build/android/gyp --output build/android/gyp/compile_resources.pydeps build/android/gyp/compile_resources.py
 ../../../third_party/jinja2/__init__.py
 ../../../third_party/jinja2/_compat.py
+../../../third_party/jinja2/_identifier.py
 ../../../third_party/jinja2/bccache.py
 ../../../third_party/jinja2/compiler.py
 ../../../third_party/jinja2/defaults.py
@@ -23,9 +24,13 @@
 ../../../third_party/markupsafe/_native.py
 ../../gn_helpers.py
 compile_resources.py
+proto/Configuration_pb2.py
+proto/Resources_pb2.py
+proto/__init__.py
 util/__init__.py
 util/build_utils.py
 util/diff_utils.py
 util/manifest_utils.py
-util/md5_check.py
+util/parallel.py
+util/protoresources.py
 util/resource_utils.py

@@ -1,5 +1,5 @@
-#!/usr/bin/env vpython
-# Copyright 2019 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2019 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,9 +14,8 @@ import textwrap
 # The bash template passes the python script into vpython via stdin.
 # The interpreter doesn't know about the script, so we have bash
 # inject the script location.
-BASH_TEMPLATE = textwrap.dedent(
-    """\
-    #!/usr/bin/env vpython
+BASH_TEMPLATE = textwrap.dedent("""\
+    #!/usr/bin/env vpython3
     _SCRIPT_LOCATION = __file__
     {script}
     """)
@@ -26,10 +25,9 @@ BASH_TEMPLATE = textwrap.dedent(
 # flag instructing the interpreter to ignore the first line. The interpreter
 # knows about the (batch) script in this case, so it can get the file location
 # directly.
-BATCH_TEMPLATE = textwrap.dedent(
-    """\
+BATCH_TEMPLATE = textwrap.dedent("""\
     @SETLOCAL ENABLEDELAYEDEXPANSION \
-      & vpython.bat -x "%~f0" %* \
+      & vpython3.bat -x "%~f0" %* \
       & EXIT /B !ERRORLEVEL!
     _SCRIPT_LOCATION = __file__
     {script}
@@ -42,10 +40,10 @@ SCRIPT_TEMPLATES = {
 }
 
 
-PY_TEMPLATE = textwrap.dedent(
-    """\
+PY_TEMPLATE = textwrap.dedent("""\
     import os
     import re
+    import shlex
     import subprocess
     import sys
 
@@ -57,8 +55,29 @@ PY_TEMPLATE = textwrap.dedent(
     def ExpandWrappedPath(arg):
       m = _WRAPPED_PATH_RE.match(arg)
       if m:
-        return os.path.join(
+        relpath = os.path.join(
             os.path.relpath(_SCRIPT_DIR), _PATH_TO_OUTPUT_DIR, m.group(1))
+        npath = os.path.normpath(relpath)
+        if os.path.sep not in npath:
+          # If the original path points to something in the current directory,
+          # returning the normalized version of it can be a problem.
+          # normpath() strips off the './' part of the path
+          # ('./foo' becomes 'foo'), which can be a problem if the result
+          # is passed to something like os.execvp(); in that case
+          # osexecvp() will search $PATH for the executable, rather than
+          # just execing the arg directly, and if '.' isn't in $PATH, this
+          # results in an error.
+          #
+          # So, we need to explicitly return './foo' (or '.\\foo' on windows)
+          # instead of 'foo'.
+          #
+          # Hopefully there are no cases where this causes a problem; if
+          # there are, we will either need to change the interface to
+          # WrappedPath() somehow to distinguish between the two, or
+          # somehow ensure that the wrapped executable doesn't hit cases
+          # like this.
+          return '.' + os.path.sep + npath
+        return npath
       return arg
 
 
@@ -68,10 +87,70 @@ PY_TEMPLATE = textwrap.dedent(
       return args
 
 
+    def FindIsolatedOutdir(raw_args):
+      outdir = None
+      i = 0
+      remaining_args = []
+      while i < len(raw_args):
+        if raw_args[i] == '--isolated-outdir' and i < len(raw_args)-1:
+          outdir = raw_args[i+1]
+          i += 2
+        elif raw_args[i].startswith('--isolated-outdir='):
+          outdir = raw_args[i][len('--isolated-outdir='):]
+          i += 1
+        else:
+          remaining_args.append(raw_args[i])
+          i += 1
+      if not outdir and 'ISOLATED_OUTDIR' in os.environ:
+        outdir = os.environ['ISOLATED_OUTDIR']
+      return outdir, remaining_args
+
+    def InsertWrapperScriptArgs(args):
+      if '--wrapper-script-args' in args:
+        idx = args.index('--wrapper-script-args')
+        args.insert(idx + 1, shlex.join(sys.argv))
+
+    def FilterIsolatedOutdirBasedArgs(outdir, args):
+      rargs = []
+      i = 0
+      while i < len(args):
+        if 'ISOLATED_OUTDIR' in args[i]:
+          if outdir:
+            # Rewrite the arg.
+            rargs.append(args[i].replace('${{ISOLATED_OUTDIR}}',
+                                         outdir).replace(
+              '$ISOLATED_OUTDIR', outdir))
+            i += 1
+          else:
+            # Simply drop the arg.
+            i += 1
+        elif (not outdir and
+              args[i].startswith('-') and
+              '=' not in args[i] and
+              i < len(args) - 1 and
+              'ISOLATED_OUTDIR' in args[i+1]):
+          # Parsing this case is ambiguous; if we're given
+          # `--foo $ISOLATED_OUTDIR` we can't tell if $ISOLATED_OUTDIR
+          # is meant to be the value of foo, or if foo takes no argument
+          # and $ISOLATED_OUTDIR is the first positional arg.
+          #
+          # We assume the former will be much more common, and so we
+          # need to drop --foo and $ISOLATED_OUTDIR.
+          i += 2
+        else:
+          rargs.append(args[i])
+          i += 1
+      return rargs
+
+
     def main(raw_args):
       executable_path = ExpandWrappedPath('{executable_path}')
-      executable_args = ExpandWrappedPaths({executable_args})
-      cmd = [executable_path] + executable_args + raw_args
+      outdir, remaining_args = FindIsolatedOutdir(raw_args)
+      args = {executable_args}
+      InsertWrapperScriptArgs(args)
+      args = FilterIsolatedOutdirBasedArgs(outdir, args)
+      executable_args = ExpandWrappedPaths(args)
+      cmd = [executable_path] + executable_args + remaining_args
       if executable_path.endswith('.py'):
         cmd = [sys.executable] + cmd
       return subprocess.call(cmd)
@@ -99,9 +178,8 @@ def Wrap(args):
         executable_path=str(args.executable),
         executable_args=str(args.executable_args))
     template = SCRIPT_TEMPLATES[args.script_language]
-    wrapper_script.write(template.format(
-        script=py_contents))
-  os.chmod(args.wrapper_script, 0750)
+    wrapper_script.write(template.format(script=py_contents))
+  os.chmod(args.wrapper_script, 0o750)
 
   return 0
 

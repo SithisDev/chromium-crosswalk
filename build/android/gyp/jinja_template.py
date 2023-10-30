@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -34,7 +34,7 @@ class _RecordingFileSystemLoader(jinja2.FileSystemLoader):
     return contents, filename, uptodate
 
 
-class JinjaProcessor(object):
+class JinjaProcessor:
   """Allows easy rendering of jinja templates with input file tracking."""
   def __init__(self, loader_base_dir, variables=None):
     self.loader_base_dir = loader_base_dir
@@ -75,7 +75,7 @@ def _ProcessFile(processor, input_filename, output_filename):
 
 def _ProcessFiles(processor, input_filenames, inputs_base_dir, outputs_zip):
   with build_utils.TempDir() as temp_dir:
-    files_to_zip = dict()
+    path_info = resource_utils.ResourceInfoFile()
     for input_filename in input_filenames:
       relpath = os.path.relpath(os.path.abspath(input_filename),
                                 os.path.abspath(inputs_base_dir))
@@ -87,9 +87,9 @@ def _ProcessFiles(processor, input_filenames, inputs_base_dir, outputs_zip):
       parent_dir = os.path.dirname(output_filename)
       build_utils.MakeDirectory(parent_dir)
       _ProcessFile(processor, input_filename, output_filename)
-      files_to_zip[relpath] = input_filename
+      path_info.AddMapping(relpath, input_filename)
 
-    resource_utils.CreateResourceInfoFile(files_to_zip, outputs_zip)
+    path_info.Write(outputs_zip + '.info')
     build_utils.ZipDir(outputs_zip, temp_dir)
 
 

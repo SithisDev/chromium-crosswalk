@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,13 @@
 #include "base/timer/lap_timer.h"
 #include "cc/paint/paint_op_buffer.h"
 #include "cc/paint/paint_op_buffer_serializer.h"
+#include "cc/paint/paint_shader.h"
 #include "cc/test/test_options_provider.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 #include "third_party/skia/include/core/SkMaskFilter.h"
 #include "third_party/skia/include/effects/SkColorMatrixFilter.h"
 #include "third_party/skia/include/effects/SkDashPathEffect.h"
 #include "third_party/skia/include/effects/SkLayerDrawLooper.h"
-#include "third_party/skia/include/effects/SkOffsetImageFilter.h"
 
 namespace cc {
 namespace {
@@ -30,7 +30,7 @@ class PaintOpPerfTest : public testing::Test {
  public:
   PaintOpPerfTest()
       : timer_(kNumWarmupRuns,
-               base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
+               base::Milliseconds(kTimeLimitMillis),
                kTimeCheckInterval),
         serialized_data_(static_cast<char*>(
             base::AlignedAlloc(kMaxSerializedBufferBytes,
@@ -49,15 +49,7 @@ class PaintOpPerfTest : public testing::Test {
     do {
       SimpleBufferSerializer serializer(
           serialized_data_.get(), kMaxSerializedBufferBytes,
-          test_options_provider.image_provider(),
-          test_options_provider.transfer_cache_helper(),
-          test_options_provider.client_paint_cache(),
-          test_options_provider.strike_server(),
-          test_options_provider.color_space(),
-          test_options_provider.can_use_lcd_text(),
-          test_options_provider.context_supports_distance_field_text(),
-          test_options_provider.max_texture_size(),
-          test_options_provider.max_texture_bytes());
+          test_options_provider.serialize_options());
       serializer.Serialize(&buffer, nullptr, preamble);
       bytes_written = serializer.written();
 
@@ -67,9 +59,9 @@ class PaintOpPerfTest : public testing::Test {
     } while (!timer_.HasTimeLimitExpired());
     CHECK_GT(bytes_written, 0u);
 
-    perf_test::PrintResult(name.c_str(), "", "  serialize",
-                           buffer.size() * timer_.LapsPerSecond(), "ops/s",
-                           true);
+    perf_test::PerfResultReporter reporter(name, "  serialize");
+    reporter.RegisterImportantMetric("", "runs/s");
+    reporter.AddResult("", timer_.LapsPerSecond());
 
     size_t bytes_read = 0;
     timer_.Reset();
@@ -98,9 +90,9 @@ class PaintOpPerfTest : public testing::Test {
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 
-    perf_test::PrintResult(name.c_str(), "", "deserialize",
-                           buffer.size() * timer_.LapsPerSecond(), "ops/s",
-                           true);
+    reporter = perf_test::PerfResultReporter(name, "deserialize");
+    reporter.RegisterImportantMetric("", "runs/s");
+    reporter.AddResult("", timer_.LapsPerSecond());
   }
 
  protected:
@@ -113,7 +105,7 @@ class PaintOpPerfTest : public testing::Test {
 TEST_F(PaintOpPerfTest, SimpleOps) {
   PaintOpBuffer buffer;
   for (size_t i = 0; i < 100; ++i)
-    buffer.push<ConcatOp>(SkMatrix::I());
+    buffer.push<ConcatOp>(SkM44());
   RunTest("simple", buffer);
 }
 
@@ -145,7 +137,7 @@ TEST_F(PaintOpPerfTest, ManyFlagsOps) {
   looper_builder.addLayer(layer_info);
   flags.setLooper(looper_builder.detach());
 
-  sk_sp<PaintShader> shader = PaintShader::MakeColor(SK_ColorTRANSPARENT);
+  sk_sp<PaintShader> shader = PaintShader::MakeColor(SkColors::kTransparent);
   flags.setShader(std::move(shader));
 
   SkPath path;

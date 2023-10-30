@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,32 +8,26 @@
 #include "cc/test/layer_tree_pixel_test.h"
 #include "cc/test/pixel_comparator.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/transform_util.h"
+#include "ui/gfx/geometry/transform_util.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
 namespace cc {
 namespace {
 
 class LayerTreeHostMirrorPixelTest
     : public LayerTreePixelTest,
-      public ::testing::WithParamInterface<LayerTreeTest::RendererType> {
+      public ::testing::WithParamInterface<viz::RendererType> {
  protected:
-  RendererType renderer_type() { return GetParam(); }
+  LayerTreeHostMirrorPixelTest() : LayerTreePixelTest(renderer_type()) {}
+
+  viz::RendererType renderer_type() const { return GetParam(); }
 };
 
-const LayerTreeTest::RendererType kRendererTypes[] = {
-    LayerTreeTest::RENDERER_GL,
-    LayerTreeTest::RENDERER_SKIA_GL,
-    LayerTreeTest::RENDERER_SOFTWARE,
-#if defined(ENABLE_CC_VULKAN_TESTS)
-    LayerTreeTest::RENDERER_SKIA_VK,
-#endif
-};
-
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          LayerTreeHostMirrorPixelTest,
-                         ::testing::ValuesIn(kRendererTypes));
+                         ::testing::ValuesIn(viz::GetRendererTypes()),
+                         ::testing::PrintToStringParamName());
 
 // Verifies that a mirror layer with a scale mirrors another layer correctly.
 TEST_P(LayerTreeHostMirrorPixelTest, MirrorLayer) {
@@ -55,7 +49,7 @@ TEST_P(LayerTreeHostMirrorPixelTest, MirrorLayer) {
   background->AddChild(mirrored_layer);
   background->AddChild(mirror_layer);
 
-  if (renderer_type() == RENDERER_SOFTWARE) {
+  if (use_software_renderer()) {
     const bool discard_alpha = true;
     const float error_pixels_percentage_limit = 3.f;
     const float small_error_pixels_percentage_limit = 0.f;
@@ -68,16 +62,14 @@ TEST_P(LayerTreeHostMirrorPixelTest, MirrorLayer) {
         max_abs_error_limit, small_error_threshold);
   }
 
-#if defined(ENABLE_CC_VULKAN_TESTS) && defined(OS_LINUX)
-  if (renderer_type() == RENDERER_SKIA_VK)
+  if (use_skia_vulkan())
     pixel_comparator_ = std::make_unique<FuzzyPixelOffByOneComparator>(true);
-#endif
 
-  RunPixelTest(renderer_type(), background,
+  RunPixelTest(background,
                base::FilePath(FILE_PATH_LITERAL("mirror_layer.png")));
 }
 
 }  // namespace
 }  // namespace cc
 
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)

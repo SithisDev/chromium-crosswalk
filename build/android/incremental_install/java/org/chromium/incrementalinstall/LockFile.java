@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@ import java.util.concurrent.Callable;
  * Helpers for dealing with .lock files used during install / first run.
  */
 final class LockFile {
-    private static final String TAG = "cr.incrementalinstall";
+    private static final String TAG = "incrementalinstall";
 
     private final File mFile;
     private final FileOutputStream mOutputStream;

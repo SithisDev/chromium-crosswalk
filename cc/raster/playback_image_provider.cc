@@ -1,11 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/raster/playback_image_provider.h"
 
+#include <utility>
 #include "base/bind.h"
 #include "cc/tiles/image_decode_cache.h"
+#include "gpu/command_buffer/common/mailbox.h"
 
 namespace cc {
 namespace {
@@ -19,10 +21,10 @@ void UnrefImageFromCache(DrawImage draw_image,
 
 PlaybackImageProvider::PlaybackImageProvider(
     ImageDecodeCache* cache,
-    const gfx::ColorSpace& target_color_space,
-    base::Optional<Settings>&& settings)
+    const TargetColorParams& target_color_params,
+    absl::optional<Settings>&& settings)
     : cache_(cache),
-      target_color_space_(target_color_space),
+      target_color_params_(target_color_params),
       settings_(std::move(settings)) {
   DCHECK(cache_);
 }
@@ -45,7 +47,7 @@ ImageProvider::ScopedResult PlaybackImageProvider::GetRasterContent(
 
   const PaintImage& paint_image = draw_image.paint_image();
   if (settings_->images_to_skip.count(paint_image.stable_id()) != 0) {
-    DCHECK(paint_image.GetSkImage()->isLazyGenerated());
+    DCHECK(paint_image.IsLazyGenerated());
     return ScopedResult();
   }
 
@@ -55,11 +57,22 @@ ImageProvider::ScopedResult PlaybackImageProvider::GetRasterContent(
                            ? PaintImage::kDefaultFrameIndex
                            : it->second;
 
-  DrawImage adjusted_image(draw_image, 1.f, frame_index, target_color_space_);
+  DrawImage adjusted_image(draw_image, 1.f, frame_index, target_color_params_);
   if (!cache_->UseCacheForDrawImage(adjusted_image)) {
-    return ScopedResult(DecodedDrawImage(
-        paint_image.GetSkImage(), SkSize::Make(0, 0), SkSize::Make(1.f, 1.f),
-        draw_image.filter_quality(), true /* is_budgeted */));
+    if (settings_->raster_mode == RasterMode::kOop) {
+      return ScopedResult(DecodedDrawImage(paint_image.GetMailbox(),
+                                           draw_image.filter_quality()));
+    } else if (settings_->raster_mode == RasterMode::kGpu) {
+      return ScopedResult(DecodedDrawImage(
+          paint_image.GetAcceleratedSkImage(), nullptr, SkSize::Make(0, 0),
+          SkSize::Make(1.f, 1.f), draw_image.filter_quality(),
+          true /* is_budgeted */));
+    } else {
+      return ScopedResult(DecodedDrawImage(
+          paint_image.GetSwSkImage(), nullptr, SkSize::Make(0, 0),
+          SkSize::Make(1.f, 1.f), draw_image.filter_quality(),
+          true /* is_budgeted */));
+    }
   }
 
   auto decoded_draw_image = cache_->GetDecodedImageForDraw(adjusted_image);

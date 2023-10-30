@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,8 +49,7 @@ class TransferCacheTest : public testing::Test {
     context_ = std::make_unique<gpu::RasterInProcessContext>();
     auto result = context_->Initialize(
         viz::TestGpuServiceHolder::GetInstance()->task_executor(), attribs,
-        gpu::SharedMemoryLimits(), &gpu_memory_buffer_manager_, &image_factory_,
-        /*gpu_channel_manager_delegate=*/nullptr, nullptr, nullptr);
+        gpu::SharedMemoryLimits(), &image_factory_, nullptr, nullptr);
 
     ASSERT_EQ(result, gpu::ContextResult::kSuccess);
     ASSERT_TRUE(context_->GetCapabilities().supports_oop_raster);
@@ -229,43 +228,6 @@ TEST_F(TransferCacheTest, RawMemoryTransferLarge) {
   EXPECT_EQ(service_entry->Type(), client_entry.Type());
   const std::vector<uint8_t> service_data =
       static_cast<ServiceRawMemoryTransferCacheEntry*>(service_entry)->data();
-  EXPECT_EQ(data, service_data);
-}
-
-TEST_F(TransferCacheTest, ImageMemoryTransfer) {
-  // TODO(ericrk): This test doesn't work. crbug.com/859619
-  return;
-
-  auto* service_cache = ServiceTransferCache();
-
-  // Create a 10x10 image.
-  SkImageInfo info = SkImageInfo::MakeN32Premul(10, 10);
-  std::vector<uint8_t> data;
-  data.resize(info.width() * info.height() * 4);
-  for (size_t i = 0; i < data.size(); ++i) {
-    data[i] = i;
-  }
-  SkPixmap pixmap(info, data.data(), info.minRowBytes());
-
-  // Add the entry to the transfer cache
-  ClientImageTransferCacheEntry client_entry(&pixmap, nullptr, false);
-  CreateEntry(client_entry);
-  ri()->Finish();
-
-  // Validate service-side data matches.
-  ServiceTransferCacheEntry* service_entry =
-      service_cache->GetEntry(gpu::ServiceTransferCache::EntryKey(
-          decoder_id(), client_entry.Type(), client_entry.Id()));
-  EXPECT_EQ(service_entry->Type(), client_entry.Type());
-  sk_sp<SkImage> service_image =
-      static_cast<ServiceImageTransferCacheEntry*>(service_entry)->image();
-  EXPECT_TRUE(service_image->isTextureBacked());
-
-  std::vector<uint8_t> service_data;
-  service_data.resize(data.size());
-  service_image->readPixels(info, service_data.data(), info.minRowBytes(), 0,
-                            0);
-
   EXPECT_EQ(data, service_data);
 }
 

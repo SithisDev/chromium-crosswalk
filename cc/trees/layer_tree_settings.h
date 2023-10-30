@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 #define CC_TREES_LAYER_TREE_SETTINGS_H_
 
 #include <stddef.h>
-
-#include <vector>
 
 #include "base/time/time.h"
 #include "cc/cc_export.h"
@@ -40,10 +38,9 @@ class CC_EXPORT LayerTreeSettings {
   // When |enable_early_damage_check| is true, the early damage check is
   // performed if one of the last |damaged_frame_limit| frames had no damage.
   int damaged_frame_limit = 3;
-  bool enable_latency_recovery = true;
   bool can_use_lcd_text = true;
-  bool gpu_rasterization_forced = false;
-  int gpu_rasterization_msaa_sample_count = 0;
+  bool gpu_rasterization_disabled = false;
+  int gpu_rasterization_msaa_sample_count = -1;
   float gpu_rasterization_skewport_target_time_in_seconds = 0.2f;
   bool create_low_res_tiling = false;
   bool use_stream_video_draw_quad = false;
@@ -58,12 +55,10 @@ class CC_EXPORT LayerTreeSettings {
   base::TimeDelta scrollbar_fade_duration;
   base::TimeDelta scrollbar_thinning_duration;
   bool scrollbar_flash_after_any_scroll_update = false;
-  bool scrollbar_flash_when_mouse_enter = false;
-  SkColor solid_color_scrollbar_color = SK_ColorWHITE;
+  SkColor4f solid_color_scrollbar_color = SkColors::kWhite;
   base::TimeDelta scroll_animation_duration_for_testing;
   bool timeout_and_draw_when_animation_checkerboards = true;
   bool layers_always_allowed_lcd_text = false;
-  float minimum_contents_scale = 0.0625f;
   float low_res_contents_scale_factor = 0.25f;
   float top_controls_show_threshold = 0.5f;
   float top_controls_hide_threshold = 0.5f;
@@ -72,6 +67,10 @@ class CC_EXPORT LayerTreeSettings {
   // If set, indicates the largest tile size we will use for GPU Raster. If not
   // set, no limit is enforced.
   gfx::Size max_gpu_raster_tile_size;
+  // Even for really wide viewports, at some point GPU raster should use
+  // less than 4 tiles to fill the viewport. This is set to 256 as a
+  // sane minimum for now, but we might want to tune this for low-end.
+  int min_height_for_gpu_raster_tile = 256;
   gfx::Size minimum_occlusion_tracking_size;
   // 3000 pixels should give sufficient area for prepainting.
   // Note this value is specified with an ideal contents scale in mind. That
@@ -84,7 +83,6 @@ class CC_EXPORT LayerTreeSettings {
   bool use_zero_copy = false;
   bool use_partial_raster = false;
   bool enable_elastic_overscroll = false;
-  bool ignore_root_layer_flings = false;
   size_t scheduled_raster_task_limit = 32;
   bool use_occlusion_for_tile_prioritization = false;
   bool use_layer_lists = false;
@@ -100,6 +98,11 @@ class CC_EXPORT LayerTreeSettings {
   // ready.
   bool enable_checker_imaging = false;
 
+  // When content needs a wide color gamut, raster in wide if available.
+  // But when the content is sRGB, some situations prefer to raster in
+  // wide while others prefer to raster in sRGB.
+  bool prefer_raster_in_srgb = false;
+
   // The minimum size of an image we should considering decoding using the
   // deferred path.
   size_t min_image_bytes_to_checker = 1 * 1024 * 1024;  // 1MB.
@@ -109,13 +112,13 @@ class CC_EXPORT LayerTreeSettings {
 
   LayerTreeDebugState initial_debug_state;
 
-  // Indicates that the LayerTreeHost should defer commits unless it has a valid
-  // viz::LocalSurfaceId set.
-  bool enable_surface_synchronization = false;
-
   // Indicates the case when a sub-frame gets its own LayerTree because it's
   // rendered in a different process from its ancestor frames.
-  bool is_layer_tree_for_subframe = false;
+  bool is_for_embedded_frame = false;
+
+  // Indicates when the LayerTree is for a portal element, GuestView, or top
+  // level frame. In all these cases we may have a page scale.
+  bool is_for_scalable_page = true;
 
   // Determines whether we disallow non-exact matches when finding resources
   // in ResourcePool. Only used for layout or pixel tests, as non-deterministic
@@ -130,7 +133,17 @@ class CC_EXPORT LayerTreeSettings {
 
   // Determines whether mouse interactions on composited scrollbars are handled
   // on the compositor thread.
-  bool compositor_threaded_scrollbar_scrolling = false;
+  bool compositor_threaded_scrollbar_scrolling = true;
+
+  // If enabled, the scroll deltas will be a percentage of the target scroller.
+  bool percent_based_scrolling = false;
+
+  // Determines whether animated scrolling is supported. If true, and the
+  // incoming gesture scroll is of a type that would normally be animated (e.g.
+  // coarse granularity scrolls like those coming from an external mouse wheel),
+  // the scroll will be performed smoothly using the animation system rather
+  // than instantly.
+  bool enable_smooth_scroll = false;
 
   // Whether layer tree commits should be made directly to the active
   // tree on the impl thread. If |false| LayerTreeHostImpl creates a
@@ -146,17 +159,9 @@ class CC_EXPORT LayerTreeSettings {
   // Whether to use edge anti-aliasing for all layer types that supports it.
   bool enable_edge_anti_aliasing = true;
 
-  // Whether SetViewportSizeAndScale should update the painted scale factor or
+  // Whether SetViewportRectAndScale should update the painted scale factor or
   // the device scale factor.
   bool use_painted_device_scale_factor = false;
-
-  // Whether a HitTestRegionList should be built from the active layer tree when
-  // submitting a CompositorFrame.
-  bool build_hit_test_data = false;
-
-  // When false, sync tokens are expected to be present, and are verified,
-  // before transfering gpu resources to the display compositor.
-  bool delegated_sync_points_required = true;
 
   // When true, LayerTreeHostImplClient will be posting a task to call
   // DidReceiveCompositorFrameAck, used by the Compositor but not the
@@ -168,6 +173,61 @@ class CC_EXPORT LayerTreeSettings {
   // go away and CC should send Blink fractional values:
   // https://crbug.com/414283.
   bool commit_fractional_scroll_deltas = false;
+
+  // When false, we do not check for occlusion and all quads are drawn.
+  // Defaults to true.
+  bool enable_occlusion = true;
+
+  // Whether experimental de-jelly effect is allowed.
+  bool allow_de_jelly_effect = false;
+
+  // Whether the compositor should attempt to sync with the scroll handlers
+  // before submitting a frame.
+  bool enable_synchronized_scrolling = true;
+
+#if DCHECK_IS_ON()
+  // Whether to check if any double blur exists.
+  bool log_on_ui_double_background_blur = false;
+#endif
+
+  // When enabled, enforces new interoperable semantics for 3D transforms.
+  // See crbug.com/1008483.
+  bool enable_backface_visibility_interop = false;
+
+  // Enables ThrottleDecider which produces a list of FrameSinkIds that are
+  // candidates for throttling.
+  // LayerTreeHostSingleThreadClient::FrameSinksToThrottleUpdated() will be
+  // called with candidates.
+  bool enable_compositing_based_throttling = false;
+
+  // Whether it is a LayerTree for ui.
+  bool is_layer_tree_for_ui = false;
+
+  // Whether tile resources are dropped for hidden layers. In terms of code,
+  // this uses PictureLayerImpl::HasValidTilePriorities(), which may return true
+  // even if the layer is not drawn. For example, if the layer is occluded it is
+  // still considered drawn and will not be impacted by this feature.
+  bool release_tile_resources_for_hidden_layers = false;
+
+  // Whether Fluent scrollbar is enabled. Please check https://crbug.com/1292117
+  // to find the link to the Fluent Scrollbar spec and related CLs.
+  bool enable_fluent_scrollbar = false;
+
+  // This corresponds to the ScrollUpdateOptimizations feature.
+  bool enable_scroll_update_optimizations = false;
+
+  // Whether to disable the frame rate limit in the scheduler.
+  bool disable_frame_rate_limit = false;
+
+  // When enabled commits are aborted if scroll and viewport state from CC could
+  // not be synchronized at the beginning of the frame because main frames were
+  // being deferred.
+  bool skip_commits_if_not_synchronizing_compositor_state = true;
+};
+
+class CC_EXPORT LayerListSettings : public LayerTreeSettings {
+ public:
+  LayerListSettings() { use_layer_lists = true; }
 };
 
 }  // namespace cc

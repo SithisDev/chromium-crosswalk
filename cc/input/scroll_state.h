@@ -1,21 +1,15 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_INPUT_SCROLL_STATE_H_
 #define CC_INPUT_SCROLL_STATE_H_
 
-#include <list>
-#include <memory>
-
 #include "cc/cc_export.h"
 #include "cc/input/scroll_state_data.h"
-#include "ui/gfx/geometry/point.h"
-#include "ui/gfx/geometry/vector2d.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace cc {
-
-class LayerTreeImpl;
 
 // ScrollState is based on the proposal for scroll customization in blink, found
 // here: https://goo.gl/1ipTpP.
@@ -27,9 +21,6 @@ class CC_EXPORT ScrollState {
 
   // Reduce deltas by x, y.
   void ConsumeDelta(double x, double y);
-  // Pops the first layer off of |scroll_chain_| and calls
-  // |DistributeScroll| on it.
-  void DistributeToScrollChainDescendant();
   // Positive when scrolling right.
   double delta_x() const { return data_.delta_x; }
   // Positive when scrolling down.
@@ -63,19 +54,12 @@ class CC_EXPORT ScrollState {
     data_.is_direct_manipulation = is_direct_manipulation;
   }
 
-  void set_scroll_chain_and_layer_tree(
-      const std::list<ScrollNode*>& scroll_chain,
-      LayerTreeImpl* layer_tree_impl) {
-    layer_tree_impl_ = layer_tree_impl;
-    scroll_chain_ = scroll_chain;
+  // True if the user interacts with the scrollbar.
+  bool is_scrollbar_interaction() const {
+    return data_.is_scrollbar_interaction;
   }
-
-  void set_current_native_scrolling_node(ScrollNode* scroll_node) {
-    data_.set_current_native_scrolling_node(scroll_node);
-  }
-
-  ScrollNode* current_native_scrolling_node() const {
-    return data_.current_native_scrolling_node();
+  void set_is_scrollbar_interaction(bool is_scrollbar_interaction) {
+    data_.is_scrollbar_interaction = is_scrollbar_interaction;
   }
 
   bool delta_consumed_for_scroll_sequence() const {
@@ -84,8 +68,6 @@ class CC_EXPORT ScrollState {
   void set_delta_consumed_for_scroll_sequence(bool delta_consumed) {
     data_.delta_consumed_for_scroll_sequence = delta_consumed;
   }
-
-  bool FullyConsumed() const { return !data_.delta_x && !data_.delta_y; }
 
   void set_caused_scroll(bool x, bool y) {
     data_.caused_scroll_x |= x;
@@ -99,15 +81,26 @@ class CC_EXPORT ScrollState {
 
   bool is_scroll_chain_cut() const { return data_.is_scroll_chain_cut; }
 
-  double delta_granularity() const { return data_.delta_granularity; }
+  ui::ScrollGranularity delta_granularity() const {
+    return data_.delta_granularity;
+  }
 
-  LayerTreeImpl* layer_tree_impl() { return layer_tree_impl_; }
+  // Returns a the delta hints if this is a scroll begin or the real delta if
+  // it's a scroll update
+  gfx::Vector2dF DeltaOrHint() const;
+
+  ElementId target_element_id() const {
+    return data_.current_native_scrolling_element();
+  }
+
+  bool is_main_thread_hit_tested() const {
+    return data_.is_main_thread_hit_tested;
+  }
+
   ScrollStateData* data() { return &data_; }
 
  private:
   ScrollStateData data_;
-  LayerTreeImpl* layer_tree_impl_;
-  std::list<ScrollNode*> scroll_chain_;
 };
 
 }  // namespace cc

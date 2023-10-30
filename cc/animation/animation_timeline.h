@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,21 @@
 
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "cc/animation/animation_export.h"
+
+namespace base {
+class TimeTicks;
+}
 
 namespace cc {
 
 class Animation;
 class AnimationHost;
+class ScrollTree;
 
 // An AnimationTimeline owns a group of Animations.
 //
@@ -24,7 +31,7 @@ class CC_ANIMATION_EXPORT AnimationTimeline
     : public base::RefCounted<AnimationTimeline> {
  public:
   static scoped_refptr<AnimationTimeline> Create(int id);
-  scoped_refptr<AnimationTimeline> CreateImplInstance() const;
+  virtual scoped_refptr<AnimationTimeline> CreateImplInstance() const;
 
   AnimationTimeline(const AnimationTimeline&) = delete;
   AnimationTimeline& operator=(const AnimationTimeline&) = delete;
@@ -43,19 +50,35 @@ class CC_ANIMATION_EXPORT AnimationTimeline
   void DetachAnimation(scoped_refptr<Animation> animation);
 
   void ClearAnimations();
+  bool HasAnimation() const { return !id_to_animation_map_.empty(); }
+  bool TickTimeLinkedAnimations(
+      const std::vector<scoped_refptr<Animation>>& ticking_animations,
+      base::TimeTicks monotonic_time);
+  virtual bool TickScrollLinkedAnimations(
+      const std::vector<scoped_refptr<Animation>>& ticking_animations,
+      const ScrollTree& scroll_tree,
+      bool is_active_tree);
 
-  void PushPropertiesTo(AnimationTimeline* timeline_impl);
+  virtual void PushPropertiesTo(AnimationTimeline* timeline_impl);
+  virtual void ActivateTimeline() {}
 
   Animation* GetAnimationById(int animation_id) const;
 
   void SetNeedsPushProperties();
   bool needs_push_properties() const { return needs_push_properties_; }
 
- private:
-  friend class base::RefCounted<AnimationTimeline>;
+  virtual bool IsScrollTimeline() const;
 
+ protected:
   explicit AnimationTimeline(int id);
   virtual ~AnimationTimeline();
+
+  // A list of all animations which this timeline owns.
+  using IdToAnimationMap = std::unordered_map<int, scoped_refptr<Animation>>;
+  IdToAnimationMap id_to_animation_map_;
+
+ private:
+  friend class base::RefCounted<AnimationTimeline>;
 
   void PushAttachedAnimationsToImplThread(AnimationTimeline* timeline) const;
   void RemoveDetachedAnimationsFromImplThread(
@@ -64,12 +87,8 @@ class CC_ANIMATION_EXPORT AnimationTimeline
 
   void EraseAnimation(scoped_refptr<Animation> animation);
 
-  // A list of all animations which this timeline owns.
-  using IdToAnimationMap = std::unordered_map<int, scoped_refptr<Animation>>;
-  IdToAnimationMap id_to_animation_map_;
-
-  int id_;
-  AnimationHost* animation_host_;
+  const int id_;
+  raw_ptr<AnimationHost> animation_host_;
   bool needs_push_properties_;
 
   // Impl-only AnimationTimeline has no main thread instance and lives on

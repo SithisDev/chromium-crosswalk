@@ -1,28 +1,15 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/paint/paint_cache.h"
 
-#include "base/stl_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace cc {
 namespace {
 
 constexpr size_t kDefaultBudget = 1024u;
-
-sk_sp<SkTextBlob> CreateBlob() {
-  SkFont font;
-  font.setTypeface(SkTypeface::MakeDefault());
-
-  SkTextBlobBuilder builder;
-  int glyph_count = 5;
-  const auto& run = builder.allocRun(font, glyph_count, 1.2f, 2.3f);
-  // allocRun() allocates only the glyph buffer.
-  std::fill(run.glyphs, run.glyphs + glyph_count, 0);
-  return builder.make();
-}
 
 SkPath CreatePath() {
   SkPath path;
@@ -92,25 +79,16 @@ TEST_P(PaintCacheTest, CommitPendingEntries) {
 TEST_P(PaintCacheTest, ServiceBasic) {
   ServicePaintCache service_cache;
   switch (GetType()) {
-    case PaintCacheDataType::kTextBlob: {
-      auto blob = CreateBlob();
-      auto id = blob->uniqueID();
-      EXPECT_EQ(nullptr, service_cache.GetTextBlob(id));
-      service_cache.PutTextBlob(id, blob);
-      EXPECT_EQ(blob, service_cache.GetTextBlob(id));
-      service_cache.Purge(GetType(), 1, &id);
-      EXPECT_EQ(nullptr, service_cache.GetTextBlob(id));
-
-      service_cache.PutTextBlob(id, blob);
-    } break;
     case PaintCacheDataType::kPath: {
       auto path = CreatePath();
       auto id = path.getGenerationID();
-      EXPECT_EQ(nullptr, service_cache.GetPath(id));
+      SkPath cached_path;
+      EXPECT_EQ(false, service_cache.GetPath(id, &cached_path));
       service_cache.PutPath(id, path);
-      EXPECT_EQ(path, *service_cache.GetPath(id));
+      EXPECT_EQ(true, service_cache.GetPath(id, &cached_path));
+      EXPECT_EQ(path, cached_path);
       service_cache.Purge(GetType(), 1, &id);
-      EXPECT_EQ(nullptr, service_cache.GetPath(id));
+      EXPECT_EQ(false, service_cache.GetPath(id, &cached_path));
 
       service_cache.PutPath(id, path);
     } break;
@@ -124,8 +102,7 @@ TEST_P(PaintCacheTest, ServiceBasic) {
 INSTANTIATE_TEST_SUITE_P(
     P,
     PaintCacheTest,
-    ::testing::Range(static_cast<uint32_t>(0),
-                     static_cast<uint32_t>(PaintCacheDataType::kLast)));
+    ::testing::Values(static_cast<uint32_t>(PaintCacheDataType::kPath)));
 
 }  // namespace
 }  // namespace cc

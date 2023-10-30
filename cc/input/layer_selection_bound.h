@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,8 @@ struct CC_EXPORT LayerSelectionBound {
   ~LayerSelectionBound();
 
   gfx::SelectionBound::Type type;
-  gfx::Point edge_top;
-  gfx::Point edge_bottom;
+  gfx::Point edge_start;
+  gfx::Point edge_end;
   int layer_id;
   // Whether this bound is hidden (clipped out/occluded) within the painted
   // content of the layer (as opposed to being outside of the layer's bounds).

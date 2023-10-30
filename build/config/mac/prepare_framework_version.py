@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -31,7 +31,7 @@ def PrepareFrameworkVersion(version_file, framework_root_dir, version):
   # directory exists.
   dirname = os.path.dirname(version_file)
   if not os.path.isdir(dirname):
-    os.makedirs(dirname, 0700)
+    os.makedirs(dirname, 0o700)
 
   with open(version_file, 'w+') as f:
     f.write(version)

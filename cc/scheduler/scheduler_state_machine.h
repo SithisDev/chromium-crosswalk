@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,22 +7,13 @@
 
 #include <stdint.h>
 
-#include <memory>
-#include <string>
-
 #include "cc/cc_export.h"
 #include "cc/scheduler/commit_earlyout_reason.h"
 #include "cc/scheduler/draw_result.h"
 #include "cc/scheduler/scheduler_settings.h"
 #include "cc/tiles/tile_priority.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
-
-namespace base {
-namespace trace_event {
-class ConvertableToTraceFormat;
-class TracedValue;
-}
-}
+#include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_compositor_scheduler_state.pbzero.h"
 
 namespace cc {
 
@@ -30,7 +21,6 @@ enum class ScrollHandlerState {
   SCROLL_AFFECTS_SCROLL_HANDLER,
   SCROLL_DOES_NOT_AFFECT_SCROLL_HANDLER,
 };
-const char* ScrollHandlerStateToString(ScrollHandlerState state);
 
 // The SchedulerStateMachine decides how to coordinate main thread activites
 // like painting/running javascript with rendering and input activities on the
@@ -59,8 +49,9 @@ class CC_EXPORT SchedulerStateMachine {
     WAITING_FOR_FIRST_COMMIT,
     WAITING_FOR_FIRST_ACTIVATION,
   };
-  static const char* LayerTreeFrameSinkStateToString(
-      LayerTreeFrameSinkState state);
+  static perfetto::protos::pbzero::ChromeCompositorStateMachine::MajorState::
+      LayerTreeFrameSinkState
+      LayerTreeFrameSinkStateToProtozeroEnum(LayerTreeFrameSinkState state);
 
   // Note: BeginImplFrameState does not cycle through these states in a fixed
   // order on all platforms. It's up to the scheduler to set these correctly.
@@ -69,23 +60,38 @@ class CC_EXPORT SchedulerStateMachine {
     INSIDE_BEGIN_FRAME,
     INSIDE_DEADLINE,
   };
-  static const char* BeginImplFrameStateToString(BeginImplFrameState state);
+  static perfetto::protos::pbzero::ChromeCompositorStateMachine::MajorState::
+      BeginImplFrameState
+      BeginImplFrameStateToProtozeroEnum(BeginImplFrameState state);
 
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  // TODO(weiliangc): The histogram is used to understanding what type of
+  // deadline mode do we encounter in real world and is set to expire after
+  // 2022. The Enum can be changed after the histogram is removed.
   // The scheduler uses a deadline to wait for main thread updates before
   // submitting a compositor frame. BeginImplFrameDeadlineMode specifies when
   // the deadline should run.
   enum class BeginImplFrameDeadlineMode {
-    NONE,  // No deadline should be scheduled e.g. for synchronous compositor.
-    IMMEDIATE,  // Deadline should be scheduled to run immediately.
-    REGULAR,  // Deadline should be scheduled to run at the deadline provided by
-              // in the BeginFrameArgs.
-    LATE,  // Deadline should be scheduled run when the next frame is expected
-           // to arrive.
-    BLOCKED,  // Deadline should be blocked indefinitely until the next frame
-              // arrives.
+    NONE = 0,  // No deadline should be scheduled e.g. for synchronous
+               // compositor.
+    IMMEDIATE = 1,  // Deadline should be scheduled to run immediately.
+    REGULAR = 2,    // Deadline should be scheduled to run at the deadline
+                    // provided by in the BeginFrameArgs.
+    LATE = 3,       // Deadline should be scheduled run when the next frame is
+                    // expected to arrive.
+    BLOCKED = 4,    // Deadline should be blocked indefinitely until the next
+                    // frame arrives.
+    kMaxValue = BLOCKED,
   };
+  // TODO(nuskos): Update Scheduler::ScheduleBeginImplFrameDeadline event to
+  // used typed macros so we can remove this ToString function.
   static const char* BeginImplFrameDeadlineModeToString(
       BeginImplFrameDeadlineMode mode);
+  static perfetto::protos::pbzero::ChromeCompositorSchedulerState::
+      BeginImplFrameDeadlineMode
+      BeginImplFrameDeadlineModeToProtozeroEnum(
+          BeginImplFrameDeadlineMode mode);
 
   enum class BeginMainFrameState {
     IDLE,             // A new BeginMainFrame can start.
@@ -93,7 +99,9 @@ class CC_EXPORT SchedulerStateMachine {
     READY_TO_COMMIT,  // A previously issued BeginMainFrame has been processed,
                       // and is ready to commit.
   };
-  static const char* BeginMainFrameStateToString(BeginMainFrameState state);
+  static perfetto::protos::pbzero::ChromeCompositorStateMachine::MajorState::
+      BeginMainFrameState
+      BeginMainFrameStateToProtozeroEnum(BeginMainFrameState state);
 
   // When a redraw is forced, it goes through a complete commit -> activation ->
   // draw cycle. Until a redraw has been forced, it remains in IDLE state.
@@ -103,8 +111,10 @@ class CC_EXPORT SchedulerStateMachine {
     WAITING_FOR_ACTIVATION,
     WAITING_FOR_DRAW,
   };
-  static const char* ForcedRedrawOnTimeoutStateToString(
-      ForcedRedrawOnTimeoutState state);
+  static perfetto::protos::pbzero::ChromeCompositorStateMachine::MajorState::
+      ForcedRedrawOnTimeoutState
+      ForcedRedrawOnTimeoutStateToProtozeroEnum(
+          ForcedRedrawOnTimeoutState state);
 
   BeginMainFrameState begin_main_frame_state() const {
     return begin_main_frame_state_;
@@ -115,7 +125,8 @@ class CC_EXPORT SchedulerStateMachine {
   }
 
   bool NewActiveTreeLikely() const {
-    return needs_begin_main_frame_ || CommitPending() || has_pending_tree_;
+    return (needs_begin_main_frame_ && !last_commit_had_no_updates_) ||
+           CommitPending() || has_pending_tree_;
   }
 
   bool RedrawPending() const { return needs_redraw_; }
@@ -125,6 +136,7 @@ class CC_EXPORT SchedulerStateMachine {
     NONE,
     SEND_BEGIN_MAIN_FRAME,
     COMMIT,
+    POST_COMMIT,
     ACTIVATE_SYNC_TREE,
     PERFORM_IMPL_SIDE_INVALIDATION,
     DRAW_IF_POSSIBLE,
@@ -136,16 +148,19 @@ class CC_EXPORT SchedulerStateMachine {
     NOTIFY_BEGIN_MAIN_FRAME_NOT_EXPECTED_UNTIL,
     NOTIFY_BEGIN_MAIN_FRAME_NOT_EXPECTED_SOON,
   };
-  static const char* ActionToString(Action action);
+  static perfetto::protos::pbzero::ChromeCompositorSchedulerAction
+  ActionToProtozeroEnum(Action action);
 
-  std::unique_ptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
-  void AsValueInto(base::trace_event::TracedValue* dict) const;
+  void AsProtozeroInto(
+      perfetto::protos::pbzero::ChromeCompositorStateMachine* state) const;
 
   Action NextAction() const;
   void WillSendBeginMainFrame();
   void WillNotifyBeginMainFrameNotExpectedUntil();
   void WillNotifyBeginMainFrameNotExpectedSoon();
   void WillCommit(bool commit_had_no_updates);
+  void DidCommit();
+  void DidPostCommit();
   void WillActivate();
   void WillDraw();
   void WillBeginLayerTreeFrameSinkCreation();
@@ -161,12 +176,16 @@ class CC_EXPORT SchedulerStateMachine {
   // to make progress.
   bool BeginFrameNeeded() const;
 
+  // Indicates whether the compositor should continue to receive BeginFrame
+  // notifications. This is different from BeginFrameNeeded() for cases where we
+  // temporarily stop drawing. Unsubscribing and re-subscribing to BeginFrame
+  // notifications creates unnecessary overhead.
+  bool ShouldSubscribeToBeginFrames() const;
+
   // Indicates that the system has entered and left a BeginImplFrame callback.
   // The scheduler will not draw more than once in a given BeginImplFrame
   // callback nor send more than one BeginMainFrame message.
-  void OnBeginImplFrame(uint64_t source_id,
-                        uint64_t sequence_number,
-                        bool animate_only);
+  void OnBeginImplFrame(const viz::BeginFrameId& frame_id, bool animate_only);
   // Indicates that the scheduler has entered the draw phase. The scheduler
   // will not draw more than once in a single draw phase.
   // TODO(sunnyps): Rename OnBeginImplFrameDeadline to OnDraw or similar.
@@ -198,11 +217,16 @@ class CC_EXPORT SchedulerStateMachine {
   bool begin_frame_source_paused() const { return begin_frame_source_paused_; }
 
   // Indicates that a redraw is required, either due to the impl tree changing
-  // or the screen being damaged and simply needing redisplay.
+  // or the screen being damaged and simply needing redisplay. Note that if the
+  // changes in the impl tree has not been activated yet, then |needs_redraw()|
+  // can return false. For checking any invalidations, check
+  // |did_invalidate_layer_tree_frame_sink()|.
   void SetNeedsRedraw();
   bool needs_redraw() const { return needs_redraw_; }
 
-  bool OnlyImplSideUpdatesExpected() const;
+  bool did_invalidate_layer_tree_frame_sink() const {
+    return did_invalidate_layer_tree_frame_sink_;
+  }
 
   // Indicates that prepare-tiles is required. This guarantees another
   // PrepareTiles will occur shortly (even if no redraw is required).
@@ -255,9 +279,6 @@ class CC_EXPORT SchedulerStateMachine {
   // from NextAction if the client rejects the BeginMainFrame message.
   void BeginMainFrameAborted(CommitEarlyOutReason reason);
 
-  // Indicates production should be skipped to recover latency.
-  void SetSkipNextBeginMainFrameToReduceLatency(bool skip);
-
   // For Android WebView, resourceless software draws are allowed even when
   // invisible.
   void SetResourcelessSoftwareDraw(bool resourceless_draw);
@@ -275,6 +296,7 @@ class CC_EXPORT SchedulerStateMachine {
   // the notification received updated the state for the current pending tree,
   // if any.
   bool NotifyReadyToActivate();
+  bool IsReadyToActivate();
 
   // Indicates the active tree's visible tiles are ready to be drawn.
   void NotifyReadyToDraw();
@@ -312,11 +334,15 @@ class CC_EXPORT SchedulerStateMachine {
   bool CouldSendBeginMainFrame() const;
 
   void SetDeferBeginMainFrame(bool defer_begin_main_frame);
+  void SetPauseRendering(bool pause_rendering);
 
   void SetVideoNeedsBeginFrames(bool video_needs_begin_frames);
   bool video_needs_begin_frames() const { return video_needs_begin_frames_; }
 
   bool did_submit_in_last_frame() const { return did_submit_in_last_frame_; }
+  bool draw_succeeded_in_last_frame() const {
+    return draw_succeeded_in_last_frame_;
+  }
 
   bool needs_impl_side_invalidation() const {
     return needs_impl_side_invalidation_;
@@ -335,9 +361,15 @@ class CC_EXPORT SchedulerStateMachine {
     return should_defer_invalidation_for_fast_main_frame_;
   }
 
-  bool main_thread_failed_to_respond_last_deadline() const {
-    return main_thread_failed_to_respond_last_deadline_;
+  int aborted_begin_main_frame_count() const {
+    return aborted_begin_main_frame_count_;
   }
+
+  bool pending_tree_is_ready_for_activation() const {
+    return pending_tree_is_ready_for_activation_;
+  }
+
+  bool resourceless_draw() const { return resourceless_draw_; }
 
  protected:
   bool BeginFrameRequiredForAction() const;
@@ -365,6 +397,7 @@ class CC_EXPORT SchedulerStateMachine {
   bool ShouldActivateSyncTree() const;
   bool ShouldSendBeginMainFrame() const;
   bool ShouldCommit() const;
+  bool ShouldRunPostCommit() const;
   bool ShouldPrepareTiles() const;
   bool ShouldInvalidateLayerTreeFrameSink() const;
   bool ShouldNotifyBeginMainFrameNotExpectedUntil() const;
@@ -380,6 +413,9 @@ class CC_EXPORT SchedulerStateMachine {
       LayerTreeFrameSinkState::NONE;
   BeginImplFrameState begin_impl_frame_state_ = BeginImplFrameState::IDLE;
   BeginMainFrameState begin_main_frame_state_ = BeginMainFrameState::IDLE;
+  // This tracks a BMF sent to the main thread before we're finished processing
+  // the previous BMF (tracked by begin_main_frame_state_) on the impl thread.
+  BeginMainFrameState next_begin_main_frame_state_ = BeginMainFrameState::IDLE;
 
   // A redraw is forced when too many checkerboarded-frames are produced during
   // an animation.
@@ -425,6 +461,7 @@ class CC_EXPORT SchedulerStateMachine {
   bool needs_prepare_tiles_ = false;
   bool needs_begin_main_frame_ = false;
   bool needs_one_begin_impl_frame_ = false;
+  bool needs_post_commit_ = false;
   bool visible_ = false;
   bool begin_frame_source_paused_ = false;
   bool resourceless_draw_ = false;
@@ -439,12 +476,13 @@ class CC_EXPORT SchedulerStateMachine {
       ScrollHandlerState::SCROLL_DOES_NOT_AFFECT_SCROLL_HANDLER;
   bool critical_begin_main_frame_to_activate_is_fast_ = true;
   bool main_thread_missed_last_deadline_ = false;
-  bool skip_next_begin_main_frame_to_reduce_latency_ = false;
   bool defer_begin_main_frame_ = false;
+  bool pause_rendering_ = false;
   bool video_needs_begin_frames_ = false;
   bool last_commit_had_no_updates_ = false;
   bool active_tree_is_ready_to_draw_ = true;
-  bool did_draw_in_last_frame_ = false;
+  bool did_attempt_draw_in_last_frame_ = false;
+  bool draw_succeeded_in_last_frame_ = false;
   bool did_submit_in_last_frame_ = false;
   bool needs_impl_side_invalidation_ = false;
   bool next_invalidation_needs_first_draw_on_activation_ = false;
@@ -461,10 +499,6 @@ class CC_EXPORT SchedulerStateMachine {
   // tree. During this time we should not activate the pending tree.
   bool processing_paint_worklets_for_pending_tree_ = false;
 
-  // Set to true if the main thread fails to respond with a commit or abort the
-  // main frame before the draw deadline on the previous impl frame.
-  bool main_thread_failed_to_respond_last_deadline_ = false;
-
   bool previous_pending_tree_was_impl_side_ = false;
   bool current_pending_tree_is_impl_side_ = false;
 
@@ -473,6 +507,9 @@ class CC_EXPORT SchedulerStateMachine {
   // If set to true, the pending tree must be drawn at least once after
   // activation before a new tree can be activated.
   bool pending_tree_needs_first_draw_on_activation_ = false;
+
+  // Number of consecutive BeginMainFrames that were aborted without updates.
+  int aborted_begin_main_frame_count_ = 0;
 };
 
 }  // namespace cc

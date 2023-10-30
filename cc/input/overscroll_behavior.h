@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,27 +10,24 @@
 namespace cc {
 
 struct CC_EXPORT OverscrollBehavior {
-  enum OverscrollBehaviorType {
+  enum class Type {
     // Same as contain but also hint that no overscroll affordance should be
     // triggered.
-    kOverscrollBehaviorTypeNone,
+    kNone,
     // Allows the default behavior for the user agent.
-    kOverscrollBehaviorTypeAuto,
+    kAuto,
     // Hint to disable scroll chaining. The user agent may show an appropriate
     // overscroll affordance.
-    kOverscrollBehaviorTypeContain,
-    kOverscrollBehaviorTypeMax = kOverscrollBehaviorTypeContain
+    kContain,
+    kMax = kContain
   };
 
-  OverscrollBehavior()
-      : x(kOverscrollBehaviorTypeAuto), y(kOverscrollBehaviorTypeAuto) {}
-  explicit OverscrollBehavior(OverscrollBehaviorType type) : x(type), y(type) {}
-  OverscrollBehavior(OverscrollBehaviorType x_type,
-                     OverscrollBehaviorType y_type)
-      : x(x_type), y(y_type) {}
+  OverscrollBehavior() : x(Type::kAuto), y(Type::kAuto) {}
+  explicit OverscrollBehavior(Type type) : x(type), y(type) {}
+  OverscrollBehavior(Type x_type, Type y_type) : x(x_type), y(y_type) {}
 
-  OverscrollBehaviorType x;
-  OverscrollBehaviorType y;
+  Type x;
+  Type y;
 
   bool operator==(const OverscrollBehavior& a) const {
     return (a.x == x) && (a.y == y);

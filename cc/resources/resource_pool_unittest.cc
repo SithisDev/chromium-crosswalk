@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,14 @@
 
 #include <stddef.h>
 
-#include "base/single_thread_task_runner.h"
+#include <limits>
+#include <vector>
+
+#include "base/memory/raw_ptr.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "components/viz/client/client_resource_provider.h"
 #include "components/viz/common/resources/resource_sizes.h"
 #include "components/viz/common/resources/returned_resource.h"
@@ -28,7 +33,7 @@ class ResourcePoolTest : public testing::Test {
     context_provider_ =
         viz::TestContextProvider::Create(std::move(context_support));
     context_provider_->BindToCurrentThread();
-    resource_provider_ = std::make_unique<viz::ClientResourceProvider>(true);
+    resource_provider_ = std::make_unique<viz::ClientResourceProvider>();
     test_task_runner_ = base::MakeRefCounted<base::TestMockTimeTaskRunner>();
     resource_pool_ = std::make_unique<ResourcePool>(
         resource_provider_.get(), context_provider_.get(), test_task_runner_,
@@ -70,7 +75,7 @@ class ResourcePoolTest : public testing::Test {
   }
 
   viz::TestSharedBitmapManager shared_bitmap_manager_;
-  MockContextSupport* context_support_;
+  raw_ptr<MockContextSupport> context_support_;
   scoped_refptr<viz::TestContextProvider> context_provider_;
   std::unique_ptr<viz::ClientResourceProvider> resource_provider_;
   scoped_refptr<base::TestMockTimeTaskRunner> test_task_runner_;
@@ -164,6 +169,7 @@ TEST_F(ResourcePoolTest, AccountingSingleResource) {
       viz::ResourceSizes::UncheckedSizeInBytes<size_t>(size, format);
   ResourcePool::InUsePoolResource resource =
       resource_pool_->AcquireResource(size, format, color_space);
+  SetBackingOnResource(resource);
 
   EXPECT_EQ(resource_bytes, resource_pool_->GetTotalMemoryUsageForTesting());
   EXPECT_EQ(resource_bytes, resource_pool_->memory_usage_bytes());
@@ -251,7 +257,7 @@ TEST_F(ResourcePoolTest, LostResource) {
       viz::TransferableResource::ReturnResources(transferable_resources);
   ASSERT_EQ(1u, returned_resources.size());
   returned_resources[0].lost = true;
-  resource_provider_->ReceiveReturnsFromParent(returned_resources);
+  resource_provider_->ReceiveReturnsFromParent(std::move(returned_resources));
 
   EXPECT_EQ(1u, resource_pool_->GetTotalResourceCountForTesting());
   resource_pool_->ReleaseResource(std::move(resource));
@@ -270,10 +276,11 @@ TEST_F(ResourcePoolTest, BusyResourcesNotFreed) {
 
   ResourcePool::InUsePoolResource resource =
       resource_pool_->AcquireResource(size, format, color_space);
+  SetBackingOnResource(resource);
+
   EXPECT_EQ(40000u, resource_pool_->GetTotalMemoryUsageForTesting());
   EXPECT_EQ(1u, resource_pool_->resource_count());
 
-  SetBackingOnResource(resource);
   EXPECT_TRUE(resource_pool_->PrepareForExport(resource));
 
   std::vector<viz::TransferableResource> transfers;
@@ -309,13 +316,13 @@ TEST_F(ResourcePoolTest, UnusedResourcesEventuallyFreed) {
 
   ResourcePool::InUsePoolResource resource =
       resource_pool_->AcquireResource(size, format, color_space);
+  SetBackingOnResource(resource);
   EXPECT_EQ(40000u, resource_pool_->GetTotalMemoryUsageForTesting());
   EXPECT_EQ(1u, resource_pool_->GetTotalResourceCountForTesting());
   EXPECT_EQ(1u, resource_pool_->resource_count());
   EXPECT_EQ(0u, resource_pool_->GetBusyResourceCountForTesting());
 
   // Export the resource to the display compositor.
-  SetBackingOnResource(resource);
   EXPECT_TRUE(resource_pool_->PrepareForExport(resource));
   std::vector<viz::TransferableResource> transfers;
   resource_provider_->PrepareSendToParent(
@@ -361,7 +368,8 @@ TEST_F(ResourcePoolTest, UpdateContentId) {
   gfx::Rect invalidated_rect;
   ResourcePool::InUsePoolResource reacquired_resource =
       resource_pool_->TryAcquireResourceForPartialRaster(
-          new_content_id, new_invalidated_rect, content_id, &invalidated_rect);
+          new_content_id, new_invalidated_rect, content_id, &invalidated_rect,
+          color_space);
   EXPECT_EQ(original_id, reacquired_resource.unique_id_for_testing());
   EXPECT_EQ(new_invalidated_rect, invalidated_rect);
   resource_pool_->ReleaseResource(std::move(reacquired_resource));
@@ -388,7 +396,7 @@ TEST_F(ResourcePoolTest, UpdateContentIdAndInvalidatedRect) {
   ResourcePool::InUsePoolResource reacquired_resource =
       resource_pool_->TryAcquireResourceForPartialRaster(
           content_ids[1], invalidated_rect, content_ids[0],
-          &new_invalidated_rect);
+          &new_invalidated_rect, color_space);
   EXPECT_FALSE(!!reacquired_resource);
   EXPECT_EQ(gfx::Rect(), new_invalidated_rect);
 
@@ -397,7 +405,8 @@ TEST_F(ResourcePoolTest, UpdateContentIdAndInvalidatedRect) {
 
   // Ensure that we cannot retrieve a resource based on the original content id.
   reacquired_resource = resource_pool_->TryAcquireResourceForPartialRaster(
-      content_ids[1], invalidated_rect, content_ids[0], &new_invalidated_rect);
+      content_ids[1], invalidated_rect, content_ids[0], &new_invalidated_rect,
+      color_space);
   EXPECT_FALSE(!!reacquired_resource);
   EXPECT_EQ(gfx::Rect(), new_invalidated_rect);
 
@@ -406,7 +415,7 @@ TEST_F(ResourcePoolTest, UpdateContentIdAndInvalidatedRect) {
   gfx::Rect total_invalidated_rect;
   reacquired_resource = resource_pool_->TryAcquireResourceForPartialRaster(
       content_ids[2], second_invalidated_rect, content_ids[1],
-      &total_invalidated_rect);
+      &total_invalidated_rect, color_space);
   EXPECT_EQ(original_id, reacquired_resource.unique_id_for_testing());
   EXPECT_EQ(expected_total_invalidated_rect, total_invalidated_rect);
   resource_pool_->ReleaseResource(std::move(reacquired_resource));
@@ -431,7 +440,7 @@ TEST_F(ResourcePoolTest, LargeInvalidatedRect) {
   ResourcePool::InUsePoolResource reacquired_resource =
       resource_pool_->TryAcquireResourceForPartialRaster(
           content_ids[1], large_invalidated_rect, content_ids[0],
-          &new_invalidated_rect);
+          &new_invalidated_rect, color_space);
   EXPECT_FALSE(!!reacquired_resource);
 
   // Release the original resource, returning it to the unused pool.
@@ -441,7 +450,7 @@ TEST_F(ResourcePoolTest, LargeInvalidatedRect) {
   // too large to compute the area for.
   resource = resource_pool_->TryAcquireResourceForPartialRaster(
       content_ids[2], large_invalidated_rect, content_ids[1],
-      &new_invalidated_rect);
+      &new_invalidated_rect, color_space);
   EXPECT_TRUE(!!resource);
   resource_pool_->ReleaseResource(std::move(resource));
 }
@@ -713,7 +722,9 @@ TEST_F(ResourcePoolTest, MetadataSentToDisplayCompositor) {
   EXPECT_EQ(transfer[0].mailbox_holder.sync_token, sync_token);
   EXPECT_EQ(transfer[0].mailbox_holder.texture_target, target);
   EXPECT_EQ(transfer[0].format, format);
-  EXPECT_TRUE(transfer[0].read_lock_fences_enabled);
+  EXPECT_EQ(
+      transfer[0].synchronization_type,
+      viz::TransferableResource::SynchronizationType::kGpuCommandsCompleted);
   EXPECT_TRUE(transfer[0].is_overlay_candidate);
 
   resource_pool_->ReleaseResource(std::move(resource));

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 
 namespace cc {
-
 SaveCountingCanvas::SaveCountingCanvas() : SkNoDrawCanvas(100, 100) {}
 
 SkCanvas::SaveLayerStrategy SaveCountingCanvas::getSaveLayerStrategy(
@@ -30,7 +29,7 @@ void SaveCountingCanvas::onDrawPaint(const SkPaint& paint) {
 }
 
 MockCanvas::MockCanvas() : SkNoDrawCanvas(100, 100) {
-  context_ = GrContext::MakeMock(nullptr);
+  context_ = GrDirectContext::MakeMock(nullptr);
 }
 
 MockCanvas::~MockCanvas() = default;

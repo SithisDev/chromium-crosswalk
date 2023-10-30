@@ -1,12 +1,10 @@
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/allocator.gni")
 import("//build/config/c++/c++.gni")
 import("//build/config/chrome_build.gni")
 import("//build/config/chromecast_build.gni")
-import("//build/config/crypto.gni")
 import("//build/config/dcheck_always_on.gni")
 import("//build/config/features.gni")
 
@@ -21,20 +19,8 @@ import("//build/config/pch.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
 import("//build/toolchain/goma.gni")
-declare_args() {
-  # When set (the default) enables C++ iterator debugging in debug builds.
-  # Iterator debugging is always off in release builds (technically, this flag
-  # affects the "debug" config, which is always available but applied by
-  # default only in debug builds).
-  #
-  # Iterator debugging is generally useful for catching bugs. But it can
-  # introduce extra locking to check the state of an iterator against the state
-  # of the current object. For iterator- and thread-heavy code, this can
-  # significantly slow execution - two orders of magnitude slowdown has been
-  # seen (crbug.com/903553) and iterator debugging also slows builds by making
-  # generation of snapshot_blob.bin take ~40-60 s longer. Therefore this
-  # defaults to off.
-  enable_iterator_debugging = false
+if (is_android) {
+  import("//build/config/android/abi.gni")
 }
 
 # ==============================================
@@ -62,9 +48,6 @@ config("feature_flags") {
   defines = []
   if (dcheck_always_on) {
     defines += [ "DCHECK_ALWAYS_ON=1" ]
-    if (dcheck_is_configurable) {
-      defines += [ "DCHECK_IS_CONFIGURABLE" ]
-    }
   }
   if (use_udev) {
     # TODO(brettw) should probably be "=1".
@@ -76,9 +59,6 @@ config("feature_flags") {
   if (use_glib) {
     defines += [ "USE_GLIB=1" ]
   }
-  if (use_nss_certs) {
-    defines += [ "USE_NSS_CERTS=1" ]
-  }
   if (use_ozone && !is_android) {
     # Note that some Chrome OS builds unconditionally set |use_ozone| to true,
     # but they also build some targets with the Android toolchain. This ensures
@@ -87,12 +67,6 @@ config("feature_flags") {
     # TODO(crbug.com/837032): Maybe this can be cleaned up if we can avoid
     # setting use_ozone globally.
     defines += [ "USE_OZONE=1" ]
-  }
-  if (use_x11) {
-    defines += [ "USE_X11=1" ]
-  }
-  if (use_allocator != "tcmalloc") {
-    defines += [ "NO_TCMALLOC" ]
   }
   if (is_asan || is_hwasan || is_lsan || is_tsan || is_msan) {
     defines += [ "MEMORY_TOOL_REPLACES_ALLOCATOR" ]
@@ -112,28 +86,11 @@ config("feature_flags") {
   if (is_msan) {
     defines += [ "MEMORY_SANITIZER" ]
   }
-  if (is_ubsan || is_ubsan_null || is_ubsan_vptr || is_ubsan_security) {
+  if (is_ubsan || is_ubsan_vptr || is_ubsan_security) {
     defines += [ "UNDEFINED_SANITIZER" ]
-  }
-  if (safe_browsing_mode == 1) {
-    defines += [ "FULL_SAFE_BROWSING" ]
-    defines += [ "SAFE_BROWSING_CSD" ]
-    defines += [ "SAFE_BROWSING_DB_LOCAL" ]
-  } else if (safe_browsing_mode == 2) {
-    defines += [ "SAFE_BROWSING_DB_REMOTE" ]
-  } else if (safe_browsing_mode == 3) {
-    defines += [ "SAFE_BROWSING_DB_LOCAL" ]
   }
   if (is_official_build) {
     defines += [ "OFFICIAL_BUILD" ]
-  }
-
-  # TODO(thakis): Remove these in favor of build/branding_buildflags.h.
-  if (is_chrome_branded) {
-    defines += [ "GOOGLE_CHROME_BUILD" ]
-  } else {
-    # TODO(thakis): All uses for this are gone, remove this in a follow-up.
-    defines += [ "CHROMIUM_BUILD" ]
   }
 
   # ==============================================
@@ -161,7 +118,8 @@ config("debug") {
       # builds, and we have to tell it to turn it off.
       defines += [ "_HAS_ITERATOR_DEBUGGING=0" ]
     }
-  } else if (is_linux && current_cpu == "x64" && enable_iterator_debugging) {
+  } else if ((is_linux || is_chromeos) && current_cpu == "x64" &&
+             enable_iterator_debugging) {
     # Enable libstdc++ debugging facilities to help catch problems early, see
     # http://crbug.com/65151 .
     # TODO(phajdan.jr): Should we enable this for all of POSIX?
@@ -251,13 +209,13 @@ config("default_libs") {
   } else if (is_ios) {
     # The libraries listed here will be specified for both the target and the
     # host. Only the common ones should be listed here.
-    libs = [
+    frameworks = [
       "CoreFoundation.framework",
       "CoreGraphics.framework",
       "CoreText.framework",
       "Foundation.framework",
     ]
-  } else if (is_linux) {
+  } else if (is_linux || is_chromeos) {
     libs = [
       "dl",
       "pthread",
@@ -293,20 +251,18 @@ group("common_deps") {
     public_deps += [ "//base/android/orderfile:orderfile_instrumentation" ]
   }
 
-  if (is_win && generate_order_files && !is_nacl) {
-    public_deps += [ "//tools/cygprofile_win" ]
-  }
-
   if (is_fuchsia) {
-    public_deps += [ "//third_party/fuchsia-sdk:runtime_library" ]
+    public_deps +=
+        [ "//third_party/fuchsia-sdk/sdk/build/config:runtime_library_group" ]
+    if (is_asan) {
+      public_deps += [ "//build/config/fuchsia:asan_runtime_library" ]
+    }
   }
 }
 
 # Only the executable template in BUILDCONFIG.gn should reference this.
 group("executable_deps") {
-  public_deps = [
-    ":common_deps",
-  ]
+  public_deps = [ ":common_deps" ]
   if (export_libcxxabi_from_executables) {
     public_deps += [ "//buildtools/third_party/libc++abi" ]
   }
@@ -314,16 +270,12 @@ group("executable_deps") {
 
 # Only the loadable_module template in BUILDCONFIG.gn should reference this.
 group("loadable_module_deps") {
-  public_deps = [
-    ":common_deps",
-  ]
+  public_deps = [ ":common_deps" ]
 }
 
 # Only the shared_library template in BUILDCONFIG.gn should reference this.
 group("shared_library_deps") {
-  public_deps = [
-    ":common_deps",
-  ]
+  public_deps = [ ":common_deps" ]
 }
 
 # Executable configs -----------------------------------------------------------
@@ -349,12 +301,10 @@ config("executable_config") {
       "//build/config/ios:ios_dynamic_flags",
       "//build/config/ios:ios_executable_flags",
     ]
-  } else if (is_linux || is_android || current_os == "aix") {
+  } else if (is_linux || is_chromeos || is_android || current_os == "aix") {
     configs += [ "//build/config/gcc:executable_config" ]
-    if (is_chromecast) {
+    if (is_castos || is_cast_android) {
       configs += [ "//build/config/chromecast:executable_config" ]
-    } else if (is_fuchsia) {
-      configs += [ "//build/config/fuchsia:executable_config" ]
     }
   }
 
@@ -380,10 +330,13 @@ config("shared_library_config") {
   } else if (is_mac) {
     configs += [ "//build/config/mac:mac_dynamic_flags" ]
   } else if (is_ios) {
-    configs += [ "//build/config/ios:ios_dynamic_flags" ]
-  } else if (is_chromecast) {
+    configs += [
+      "//build/config/ios:ios_dynamic_flags",
+      "//build/config/ios:ios_shared_library_flags",
+    ]
+  } else if (is_castos || is_cast_android) {
     configs += [ "//build/config/chromecast:shared_library_config" ]
-  } else if (is_linux || current_os == "aix") {
+  } else if (is_linux || is_chromeos || current_os == "aix") {
     configs += [ "//build/config/gcc:shared_library_config" ]
   }
 
@@ -421,8 +374,15 @@ config("precompiled_headers") {
 
       # Force include the header.
       cflags = [ "/FI$precompiled_header" ]
-    } else if (is_mac) {
+    } else if (is_mac || is_linux) {
       precompiled_source = "//build/precompile.h"
     }
   }
+}
+
+# Add this config to link steps in order to compress debug sections. This is
+# especially useful on 32-bit architectures in order to keep file sizes under
+# 4gb.
+config("compress_debug_sections") {
+  ldflags = [ "-gz" ]
 }

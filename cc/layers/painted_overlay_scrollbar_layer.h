@@ -1,51 +1,55 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_LAYERS_PAINTED_OVERLAY_SCROLLBAR_LAYER_H_
 #define CC_LAYERS_PAINTED_OVERLAY_SCROLLBAR_LAYER_H_
 
+#include <memory>
+
 #include "cc/cc_export.h"
 #include "cc/input/scrollbar.h"
 #include "cc/layers/layer.h"
-#include "cc/layers/scrollbar_layer_interface.h"
-#include "cc/layers/scrollbar_theme_painter.h"
+#include "cc/layers/scrollbar_layer_base.h"
 #include "cc/resources/scoped_ui_resource.h"
 
 namespace cc {
 
-class CC_EXPORT PaintedOverlayScrollbarLayer : public ScrollbarLayerInterface,
-                                               public Layer {
+// For composited overlay scrollbars with nine-patch thumb. For overlay
+// scrollbars whose thumb is not nine-patch, use PaintedScrollbarLayer or
+// SolidColorScrollbarLayer. In practice, this is used for non-custom
+// overlay scrollbars on Win/Linux.
+class CC_EXPORT PaintedOverlayScrollbarLayer : public ScrollbarLayerBase {
  public:
-  std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
+  std::unique_ptr<LayerImpl> CreateLayerImpl(
+      LayerTreeImpl* tree_impl) const override;
+
+  static scoped_refptr<PaintedOverlayScrollbarLayer> CreateOrReuse(
+      scoped_refptr<Scrollbar> scrollbar,
+      PaintedOverlayScrollbarLayer* existing_layer);
+  static scoped_refptr<PaintedOverlayScrollbarLayer> Create(
+      scoped_refptr<Scrollbar> scrollbar);
 
   PaintedOverlayScrollbarLayer(const PaintedOverlayScrollbarLayer&) = delete;
   PaintedOverlayScrollbarLayer& operator=(const PaintedOverlayScrollbarLayer&) =
       delete;
-  static scoped_refptr<PaintedOverlayScrollbarLayer> Create(
-      std::unique_ptr<Scrollbar> scrollbar,
-      ElementId scroll_element_id = ElementId());
 
   bool OpacityCanAnimateOnImplThread() const override;
-
-  // ScrollbarLayerInterface
-  void SetScrollElementId(ElementId element_id) override;
-
-  // Layer interface
   bool Update() override;
   void SetLayerTreeHost(LayerTreeHost* host) override;
-  void PushPropertiesTo(LayerImpl* layer) override;
+  void PushPropertiesTo(LayerImpl* layer,
+                        const CommitState& commit_state,
+                        const ThreadUnsafeCommitState& unsafe_state) override;
+
+  ScrollbarLayerType GetScrollbarLayerType() const override;
 
  protected:
-  PaintedOverlayScrollbarLayer(std::unique_ptr<Scrollbar> scrollbar,
-                               ElementId scroll_element_id);
+  explicit PaintedOverlayScrollbarLayer(scoped_refptr<Scrollbar> scrollbar);
   ~PaintedOverlayScrollbarLayer() override;
 
  private:
-  gfx::Rect OriginThumbRectForPainting() const;
-
   template <typename T>
-  bool UpdateProperty(T value, T* prop) {
+  bool UpdateProperty(const T value, T* prop) {
     if (*prop == value)
       return false;
     *prop = value;
@@ -56,18 +60,14 @@ class CC_EXPORT PaintedOverlayScrollbarLayer : public ScrollbarLayerInterface,
   bool PaintThumbIfNeeded();
   bool PaintTickmarks();
 
-  std::unique_ptr<Scrollbar> scrollbar_;
-  ElementId scroll_element_id_;
+  ProtectedSequenceForbidden<scoped_refptr<Scrollbar>> scrollbar_;
 
-  int thumb_thickness_;
-  int thumb_length_;
-  gfx::Point location_;
-  gfx::Rect track_rect_;
+  ProtectedSequenceReadable<gfx::Size> thumb_size_;
+  ProtectedSequenceReadable<gfx::Rect> track_rect_;
+  ProtectedSequenceReadable<gfx::Rect> aperture_;
 
-  gfx::Rect aperture_;
-
-  std::unique_ptr<ScopedUIResource> thumb_resource_;
-  std::unique_ptr<ScopedUIResource> track_resource_;
+  ProtectedSequenceReadable<std::unique_ptr<ScopedUIResource>> thumb_resource_;
+  ProtectedSequenceReadable<std::unique_ptr<ScopedUIResource>> track_resource_;
 };
 
 }  // namespace cc

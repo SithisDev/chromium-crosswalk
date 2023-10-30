@@ -1,11 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/layers/nine_patch_generator.h"
 
+#include "base/trace_event/traced_value.h"
+#include "cc/base/math_util.h"
 #include "cc/trees/layer_tree_impl.h"
-#include "components/viz/common/quads/render_pass.h"
+#include "components/viz/common/quads/compositor_render_pass.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -330,7 +332,7 @@ std::vector<NinePatchGenerator::Patch> NinePatchGenerator::GeneratePatches()
 
 void NinePatchGenerator::AppendQuads(LayerImpl* layer_impl,
                                      UIResourceId ui_resource_id,
-                                     viz::RenderPass* render_pass,
+                                     viz::CompositorRenderPass* render_pass,
                                      viz::SharedQuadState* shared_quad_state,
                                      const std::vector<Patch>& patches) {
   if (!ui_resource_id)
@@ -359,7 +361,7 @@ void NinePatchGenerator::AppendQuads(LayerImpl* layer_impl,
       auto* quad = render_pass->CreateAndAppendDrawQuad<viz::TextureDrawQuad>();
       quad->SetNew(shared_quad_state, output_rect, visible_rect, needs_blending,
                    resource, premultiplied_alpha, image_rect.origin(),
-                   image_rect.bottom_right(), SK_ColorTRANSPARENT,
+                   image_rect.bottom_right(), SkColors::kTransparent,
                    vertex_opacity, flipped, nearest_neighbor_,
                    /*secure_output_only=*/false,
                    gfx::ProtectedVideoType::kClear);
@@ -368,29 +370,13 @@ void NinePatchGenerator::AppendQuads(LayerImpl* layer_impl,
   }
 }
 
-void NinePatchGenerator::AsJson(base::DictionaryValue* dictionary) const {
-  auto list = std::make_unique<base::ListValue>();
-  list->AppendInteger(image_aperture_.origin().x());
-  list->AppendInteger(image_aperture_.origin().y());
-  list->AppendInteger(image_aperture_.size().width());
-  list->AppendInteger(image_aperture_.size().height());
-  dictionary->Set("ImageAperture", std::move(list));
-
-  list = std::make_unique<base::ListValue>();
-  list->AppendInteger(image_bounds_.width());
-  list->AppendInteger(image_bounds_.height());
-  dictionary->Set("ImageBounds", std::move(list));
-
-  dictionary->Set("Border", MathUtil::AsValue(border_));
-
-  dictionary->SetBoolean("FillCenter", fill_center_);
-
-  list = std::make_unique<base::ListValue>();
-  list->AppendInteger(output_occlusion_.x());
-  list->AppendInteger(output_occlusion_.y());
-  list->AppendInteger(output_occlusion_.width());
-  list->AppendInteger(output_occlusion_.height());
-  dictionary->Set("OutputOcclusion", std::move(list));
+void NinePatchGenerator::AsValueInto(
+    base::trace_event::TracedValue* state) const {
+  MathUtil::AddToTracedValue("ImageAperture", image_aperture_, state);
+  MathUtil::AddToTracedValue("ImageBounds", image_bounds_, state);
+  MathUtil::AddToTracedValue("Border", border_, state);
+  state->SetBoolean("FillCenter", fill_center_);
+  MathUtil::AddToTracedValue("OutputOcclusion", output_occlusion_, state);
 }
 
 }  // namespace cc

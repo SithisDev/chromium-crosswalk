@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,19 @@
 
 #include <stdint.h>
 
-#include "base/sequenced_task_runner.h"
+#include <memory>
+#include <vector>
+
+#include "base/memory/raw_ptr.h"
+#include "base/task/sequenced_task_runner.h"
 #include "cc/raster/raster_buffer_provider.h"
 #include "cc/raster/staging_buffer_pool.h"
 #include "components/viz/client/client_resource_provider.h"
 #include "gpu/command_buffer/common/sync_token.h"
+
+namespace base {
+class WaitableEvent;
+}
 
 namespace gpu {
 class GpuMemoryBufferManager;
@@ -48,7 +56,10 @@ class CC_EXPORT OneCopyRasterBufferProvider : public RasterBufferProvider {
   std::unique_ptr<RasterBuffer> AcquireBufferForRaster(
       const ResourcePool::InUsePoolResource& resource,
       uint64_t resource_content_id,
-      uint64_t previous_content_id) override;
+      uint64_t previous_content_id,
+      bool depends_on_at_raster_decodes,
+      bool depends_on_hardware_accelerated_jpeg_candidates,
+      bool depends_on_hardware_accelerated_webp_candidates) override;
   void Flush() override;
   viz::ResourceFormat GetResourceFormat() const override;
   bool IsResourcePremultiplied() const override;
@@ -59,8 +70,8 @@ class CC_EXPORT OneCopyRasterBufferProvider : public RasterBufferProvider {
       const std::vector<const ResourcePool::InUsePoolResource*>& resources,
       base::OnceClosure callback,
       uint64_t pending_callback_id) const override;
+  void SetShutdownEvent(base::WaitableEvent* shutdown_event) override;
   void Shutdown() override;
-  bool CheckRasterFinishedQueries() override;
 
   // Playback raster source and copy result into |resource|.
   gpu::SyncToken PlaybackAndCopyOnWorkerThread(
@@ -102,11 +113,12 @@ class CC_EXPORT OneCopyRasterBufferProvider : public RasterBufferProvider {
                   const gfx::AxisTransform2d& transform,
                   const RasterSource::PlaybackSettings& playback_settings,
                   const GURL& url) override;
+    bool SupportsBackgroundThreadPriority() const override;
 
    private:
     // These fields may only be used on the compositor thread.
-    OneCopyRasterBufferProvider* const client_;
-    OneCopyGpuBacking* backing_;
+    const raw_ptr<OneCopyRasterBufferProvider> client_;
+    raw_ptr<OneCopyGpuBacking> backing_;
 
     // These fields are for use on the worker thread.
     const gfx::Size resource_size_;
@@ -144,9 +156,10 @@ class CC_EXPORT OneCopyRasterBufferProvider : public RasterBufferProvider {
                                     const gpu::SyncToken& sync_token,
                                     const gfx::ColorSpace& color_space);
 
-  viz::ContextProvider* const compositor_context_provider_;
-  viz::RasterContextProvider* const worker_context_provider_;
-  gpu::GpuMemoryBufferManager* const gpu_memory_buffer_manager_;
+  const raw_ptr<viz::ContextProvider> compositor_context_provider_;
+  const raw_ptr<viz::RasterContextProvider> worker_context_provider_;
+  const raw_ptr<gpu::GpuMemoryBufferManager> gpu_memory_buffer_manager_;
+  raw_ptr<base::WaitableEvent> shutdown_event_ = nullptr;
   const int max_bytes_per_copy_operation_;
   const bool use_partial_raster_;
   const bool use_gpu_memory_buffer_resources_;

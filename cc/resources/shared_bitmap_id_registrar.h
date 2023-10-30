@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,12 +50,12 @@ class CC_EXPORT SharedBitmapIdRegistration {
  public:
   SharedBitmapIdRegistration();
   SharedBitmapIdRegistration(const SharedBitmapIdRegistration&) = delete;
-  SharedBitmapIdRegistration(SharedBitmapIdRegistration&&);
+  SharedBitmapIdRegistration(SharedBitmapIdRegistration&&) noexcept;
   ~SharedBitmapIdRegistration();
 
   SharedBitmapIdRegistration& operator=(const SharedBitmapIdRegistration&) =
       delete;
-  SharedBitmapIdRegistration& operator=(SharedBitmapIdRegistration&&);
+  SharedBitmapIdRegistration& operator=(SharedBitmapIdRegistration&&) noexcept;
 
  private:
   // Constructed by TextureLayer only, then held by the client as long

@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,7 @@
 
 #include <stddef.h>
 
-#include <memory>
-
+#include "base/memory/raw_ptr.h"
 #include "cc/layers/painted_scrollbar_layer.h"
 #include "cc/test/fake_scrollbar.h"
 
@@ -34,9 +33,11 @@ class FakePaintedScrollbarLayer : public PaintedScrollbarLayer {
 
   bool Update() override;
 
-  void PushPropertiesTo(LayerImpl* layer) override;
+  void PushPropertiesTo(LayerImpl* layer,
+                        const CommitState& commit_state,
+                        const ThreadUnsafeCommitState& unsafe_state) override;
 
-  std::unique_ptr<base::AutoReset<bool>> IgnoreSetNeedsCommit();
+  using PaintedScrollbarLayer::IgnoreSetNeedsCommitForTest;
 
   size_t push_properties_count() const { return push_properties_count_; }
   void reset_push_properties_count() { push_properties_count_ = 0; }
@@ -48,20 +49,18 @@ class FakePaintedScrollbarLayer : public PaintedScrollbarLayer {
   UIResourceId thumb_resource_id() {
     return PaintedScrollbarLayer::thumb_resource_id();
   }
-  FakeScrollbar* fake_scrollbar() {
-    return fake_scrollbar_;
-  }
+  FakeScrollbar* fake_scrollbar() { return fake_scrollbar_; }
   using PaintedScrollbarLayer::UpdateInternalContentScale;
   using PaintedScrollbarLayer::UpdateThumbAndTrackGeometry;
 
  private:
-  FakePaintedScrollbarLayer(FakeScrollbar* fake_scrollbar,
+  FakePaintedScrollbarLayer(scoped_refptr<FakeScrollbar> fake_scrollbar,
                             ElementId scrolling_element_id);
   ~FakePaintedScrollbarLayer() override;
 
   int update_count_;
   size_t push_properties_count_;
-  FakeScrollbar* fake_scrollbar_;
+  raw_ptr<FakeScrollbar> fake_scrollbar_;
 };
 
 }  // namespace cc

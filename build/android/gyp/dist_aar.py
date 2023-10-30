@@ -1,13 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2017 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Creates an Android .aar file."""
 
 import argparse
-import collections
 import os
 import posixpath
 import shutil
@@ -15,59 +14,14 @@ import sys
 import tempfile
 import zipfile
 
-from filter_zip import CreatePathTransform
+import filter_zip
 from util import build_utils
 
 
 _ANDROID_BUILD_DIR = os.path.dirname(os.path.dirname(__file__))
 
-def _RenumberRTxt(lines):
-  """Eliminates duplicates and renumbers R.txt lines"""
-  all_resources = collections.defaultdict(dict)
-  # Parse lines
-  for line in lines:
-    jtype, rtype, name, id = line.strip().split(' ', 3)
-    all_resources[(jtype, rtype)][name] = id
-  # Renumber simple int types
-  for tid, typ in enumerate(sorted(all_resources.keys()), start=1):
-    _, rtype = typ
-    if rtype == 'styleable':
-      continue
-    resources = all_resources[typ]
-    for rid, name in enumerate(sorted(resources.keys())):
-      resources[name] = hex((0x7f00 + tid) << 16 | rid)            
-  # Renumber int[] styleables
-  #  - lookup their attribute references in 'int styleable' 
-  #    (a trie would help greatly here)
-  #  - resolve the attribute references' id from 'int attr'
-  styl_resources = all_resources[('int[]', 'styleable')]
-  styl_attr_items = list(all_resources[('int', 'styleable')].items())
-  attr_resources = all_resources[('int', 'attr')]
-  for name in styl_resources:
-    name_ = name + '_'
-    attrs = []
-    for anme, anr in styl_attr_items:
-      if anme.startswith(name_):
-        anr = int(anr)
-        anme = anme[len(name_):]
-        attrs.append((anr, anme))
-    aids = []                
-    for _, aname in sorted(attrs):
-      aid = attr_resources[aname]
-      aids.append(aid)
-    styl_resources[name] = '{ ' + ', '.join(aids) + ' }'
-  # Generate renumbered lines
-  relines = []
-  for typ in sorted(all_resources.keys()):
-    jtype, rtype = typ
-    resources = all_resources[typ]
-    for name in sorted(resources.keys()):
-      reline = '{} {} {} {}\n'.format(jtype, rtype, name, resources[name])
-      relines.append(reline)
-  return relines
 
-
-def _MergeRTxt(r_paths, include_globs, renumber):
+def _MergeRTxt(r_paths, include_globs):
   """Merging the given R.txt files and returns them as a string."""
   all_lines = set()
   for r_path in r_paths:
@@ -75,8 +29,6 @@ def _MergeRTxt(r_paths, include_globs, renumber):
       continue
     with open(r_path) as f:
       all_lines.update(f.readlines())
-  if renumber:
-    all_lines = _RenumberRTxt(all_lines)
   return ''.join(sorted(all_lines))
 
 
@@ -120,14 +72,8 @@ def main(args):
                       help='GN list of resource zips')
   parser.add_argument('--r-text-files', required=True,
                       help='GN list of R.txt files to merge')
-  parser.add_argument('--r-text-renumber', action='store_true', dest='r_text_renumber',
-                      help='Enables R.txt deduplication and renumbering')
   parser.add_argument('--proguard-configs', required=True,
                       help='GN list of ProGuard flag files to merge.')
-  parser.add_argument('--assets', required=True,
-                      help='GN list of asset files')
-  parser.add_argument('--uncompressed-assets',
-      help='Same as --assets, except disables compression.')
   parser.add_argument(
       '--android-manifest',
       help='Path to AndroidManifest.xml to include.',
@@ -146,7 +92,6 @@ def main(args):
   parser.add_argument(
       '--resource-included-globs',
       help='GN-list of globs for paths to include in R.txt and resources zips.')
-  parser.set_defaults(r_text_renumber=False)
 
   options = parser.parse_args(args)
 
@@ -158,9 +103,6 @@ def main(args):
       options.dependencies_res_zips)
   options.r_text_files = build_utils.ParseGnList(options.r_text_files)
   options.proguard_configs = build_utils.ParseGnList(options.proguard_configs)
-  options.assets = build_utils.ParseGnList(options.assets)
-  options.uncompressed_assets = build_utils.ParseGnList(
-    options.uncompressed_assets)
   options.native_libraries = build_utils.ParseGnList(options.native_libraries)
   options.jar_excluded_globs = build_utils.ParseGnList(
       options.jar_excluded_globs)
@@ -171,12 +113,12 @@ def main(args):
 
   with tempfile.NamedTemporaryFile(delete=False) as staging_file:
     try:
-      with zipfile.ZipFile(staging_file.name, 'w', compression=zipfile.ZIP_DEFLATED) as z:
+      with zipfile.ZipFile(staging_file.name, 'w') as z:
         build_utils.AddToZipHermetic(
             z, 'AndroidManifest.xml', src_path=options.android_manifest)
 
-        path_transform = CreatePathTransform(options.jar_excluded_globs,
-                                             options.jar_included_globs, [])
+        path_transform = filter_zip.CreatePathTransform(
+            options.jar_excluded_globs, options.jar_included_globs)
         with tempfile.NamedTemporaryFile() as jar_file:
           build_utils.MergeZips(
               jar_file.name, options.jars, path_transform=path_transform)
@@ -186,8 +128,7 @@ def main(args):
             z,
             'R.txt',
             data=_MergeRTxt(options.r_text_files,
-                            options.resource_included_globs,
-                            options.r_text_renumber))
+                            options.resource_included_globs))
         build_utils.AddToZipHermetic(z, 'public.txt', data='')
 
         if options.proguard_configs:
@@ -203,18 +144,6 @@ def main(args):
           build_utils.AddToZipHermetic(
               z, os.path.join('jni', options.abi, libname),
               src_path=native_library)
-
-        uncompressed_assets = []
-        for asset in options.uncompressed_assets:
-          ext_path, int_path = asset.split(':', 2)
-          uncompressed_assets.append(ext_path)
-          build_utils.AddToZipHermetic(z, 'assets/' + int_path, src_path=ext_path)
-
-        assets = []
-        for asset in options.assets:
-          ext_path, int_path = asset.split(':', 2)
-          assets.append(ext_path)
-          build_utils.AddToZipHermetic(z, 'assets/' + int_path, src_path=ext_path)
     except:
       os.unlink(staging_file.name)
       raise
@@ -222,10 +151,8 @@ def main(args):
 
   if options.depfile:
     all_inputs = (options.jars + options.dependencies_res_zips +
-                  options.r_text_files + options.proguard_configs + 
-                  options.native_libraries + assets + uncompressed_assets)
-    build_utils.WriteDepfile(options.depfile, options.output, all_inputs,
-                             add_pydeps=False)
+                  options.r_text_files + options.proguard_configs)
+    build_utils.WriteDepfile(options.depfile, options.output, all_inputs)
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,21 @@
 #include <inttypes.h>
 #include <limits>
 #include <ostream>
+#include <string>
 
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/traced_value.h"
-#include "base/values.h"
 
 namespace cc {
 
 const ElementIdType ElementId::kInvalidElementId = 0;
+const ElementIdType ElementId::kReservedElementId =
+    std::numeric_limits<ElementIdType>::max();
+
+// static
+bool ElementId::IsValid(ElementIdType id) {
+  return id != kInvalidElementId;
+}
 
 ElementId LayerIdToElementIdForTesting(int layer_id) {
   return ElementId(std::numeric_limits<int>::max() - layer_id);
@@ -26,18 +33,12 @@ void ElementId::AddToTracedValue(base::trace_event::TracedValue* res) const {
   res->EndDictionary();
 }
 
-ElementIdType ElementId::GetInternalValue() const {
+ElementIdType ElementId::GetStableId() const {
   return id_;
 }
 
 std::string ElementId::ToString() const {
   return base::StringPrintf("(%" PRIu64 ")", id_);
-}
-
-std::unique_ptr<base::Value> ElementId::AsValue() const {
-  std::unique_ptr<base::DictionaryValue> res(new base::DictionaryValue());
-  res->SetInteger("id_", id_);
-  return std::move(res);
 }
 
 size_t ElementIdHash::operator()(ElementId key) const {

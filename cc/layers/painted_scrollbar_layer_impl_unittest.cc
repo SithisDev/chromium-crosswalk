@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 #include "cc/resources/ui_resource_bitmap.h"
-#include "cc/test/layer_test_common.h"
+#include "cc/test/layer_tree_impl_test_base.h"
 #include "components/viz/common/quads/draw_quad.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,9 +20,9 @@ TEST(PaintedScrollbarLayerImplTest, Occlusion) {
   float scale = 2.f;
   gfx::Size scaled_layer_size(20, 2000);
   gfx::Size viewport_size(1000, 1000);
-  float thumb_opacity = 0.2f;
+  float painted_opacity_ = 0.2f;
 
-  LayerTestCommon::LayerImplTest impl;
+  LayerTreeImplTestBase impl;
 
   SkBitmap thumb_sk_bitmap;
   thumb_sk_bitmap.allocN32Pixels(10, 10);
@@ -38,10 +38,10 @@ TEST(PaintedScrollbarLayerImplTest, Occlusion) {
   UIResourceBitmap track_bitmap(track_sk_bitmap);
   impl.host_impl()->CreateUIResource(track_uid, track_bitmap);
 
-  ScrollbarOrientation orientation = VERTICAL;
+  ScrollbarOrientation orientation = ScrollbarOrientation::VERTICAL;
 
   PaintedScrollbarLayerImpl* scrollbar_layer_impl =
-      impl.AddChildToRoot<PaintedScrollbarLayerImpl>(orientation, false, false);
+      impl.AddLayer<PaintedScrollbarLayerImpl>(orientation, false, false);
   scrollbar_layer_impl->SetBounds(layer_size);
   scrollbar_layer_impl->SetContentsOpaque(true);
   scrollbar_layer_impl->set_internal_contents_scale_and_bounds(
@@ -49,13 +49,14 @@ TEST(PaintedScrollbarLayerImplTest, Occlusion) {
   scrollbar_layer_impl->SetDrawsContent(true);
   scrollbar_layer_impl->SetThumbThickness(layer_size.width());
   scrollbar_layer_impl->SetThumbLength(500);
-  scrollbar_layer_impl->SetTrackLength(layer_size.height());
+  scrollbar_layer_impl->SetTrackRect(gfx::Rect(0, 0, 15, layer_size.height()));
   scrollbar_layer_impl->SetCurrentPos(100.f / 4);
   scrollbar_layer_impl->SetClipLayerLength(100.f);
   scrollbar_layer_impl->SetScrollLayerLength(200.f);
   scrollbar_layer_impl->set_track_ui_resource_id(track_uid);
   scrollbar_layer_impl->set_thumb_ui_resource_id(thumb_uid);
-  scrollbar_layer_impl->set_thumb_opacity(thumb_opacity);
+  scrollbar_layer_impl->SetScrollbarPaintedOpacity(painted_opacity_);
+  CopyProperties(impl.root_layer(), scrollbar_layer_impl);
 
   impl.CalcDrawProps(viewport_size);
 
@@ -69,8 +70,8 @@ TEST(PaintedScrollbarLayerImplTest, Occlusion) {
     impl.AppendQuadsWithOcclusion(scrollbar_layer_impl, occluded);
 
     size_t partially_occluded_count = 0;
-    LayerTestCommon::VerifyQuadsAreOccluded(
-        impl.quad_list(), occluded, &partially_occluded_count);
+    VerifyQuadsAreOccluded(impl.quad_list(), occluded,
+                           &partially_occluded_count);
     EXPECT_EQ(2u, impl.quad_list().size());
     EXPECT_EQ(0u, partially_occluded_count);
 
@@ -105,7 +106,7 @@ TEST(PaintedScrollbarLayerImplTest, Occlusion) {
     EXPECT_EQ(scrollbar_layer_impl->contents_opaque(),
               thumb_quad->shared_quad_state->are_contents_opaque);
     for (size_t i = 0; i < 4; ++i) {
-      EXPECT_EQ(thumb_opacity, thumb_quad->vertex_opacity[i]);
+      EXPECT_EQ(painted_opacity_, thumb_quad->vertex_opacity[i]);
       EXPECT_EQ(1.f, track_quad->vertex_opacity[i]);
     }
   }
@@ -115,7 +116,7 @@ TEST(PaintedScrollbarLayerImplTest, Occlusion) {
     gfx::Rect occluded(scrollbar_layer_impl->visible_layer_rect());
     impl.AppendQuadsWithOcclusion(scrollbar_layer_impl, occluded);
 
-    LayerTestCommon::VerifyQuadsExactlyCoverRect(impl.quad_list(), gfx::Rect());
+    VerifyQuadsExactlyCoverRect(impl.quad_list(), gfx::Rect());
     EXPECT_EQ(impl.quad_list().size(), 0u);
   }
 
@@ -125,12 +126,67 @@ TEST(PaintedScrollbarLayerImplTest, Occlusion) {
     impl.AppendQuadsWithOcclusion(scrollbar_layer_impl, occluded);
 
     size_t partially_occluded_count = 0;
-    LayerTestCommon::VerifyQuadsAreOccluded(
-        impl.quad_list(), occluded, &partially_occluded_count);
+    VerifyQuadsAreOccluded(impl.quad_list(), occluded,
+                           &partially_occluded_count);
     // The layer outputs two quads, which is partially occluded.
     EXPECT_EQ(2u, impl.quad_list().size());
     EXPECT_EQ(2u, partially_occluded_count);
   }
+}
+
+TEST(PaintedScrollbarLayerImplTest, PaintedOpacityChangesInvalidate) {
+  LayerTreeImplTestBase impl;
+  ScrollbarOrientation orientation = ScrollbarOrientation::VERTICAL;
+  PaintedScrollbarLayerImpl* scrollbar_layer_impl =
+      impl.AddLayer<PaintedScrollbarLayerImpl>(orientation, false, false);
+  EXPECT_FALSE(
+      scrollbar_layer_impl->LayerPropertyChangedNotFromPropertyTrees());
+  scrollbar_layer_impl->SetScrollbarPaintedOpacity(0.3f);
+  EXPECT_TRUE(scrollbar_layer_impl->LayerPropertyChangedNotFromPropertyTrees());
+}
+
+class PaintedScrollbarLayerImplFluentTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    LayerTreeSettings settings;
+    settings.enable_fluent_scrollbar = true;
+    impl_ = std::make_unique<LayerTreeImplTestBase>(settings);
+  }
+
+  std::unique_ptr<LayerTreeImplTestBase> impl_;
+};
+
+TEST_F(PaintedScrollbarLayerImplFluentTest, ComputeThumbQuadRect) {
+  PaintedScrollbarLayerImpl* scrollbar_layer_impl_vertical =
+      impl_->AddLayer<PaintedScrollbarLayerImpl>(
+          ScrollbarOrientation::VERTICAL,
+          /*is_left_side_vertical_scrollbar=*/false,
+          /*is_overlay=*/false);
+  scrollbar_layer_impl_vertical->SetTrackRect(gfx::Rect(0, 0, 14, 100));
+  scrollbar_layer_impl_vertical->SetThumbThickness(6);
+  EXPECT_EQ(scrollbar_layer_impl_vertical->ComputeThumbQuadRect().origin(),
+            gfx::Point(4, 0));
+
+  PaintedScrollbarLayerImpl* scrollbar_layer_impl_vertical_left =
+      impl_->AddLayer<PaintedScrollbarLayerImpl>(
+          ScrollbarOrientation::VERTICAL,
+          /*is_left_side_vertical_scrollbar=*/true,
+          /*is_overlay=*/false);
+  scrollbar_layer_impl_vertical_left->SetTrackRect(gfx::Rect(0, 0, 14, 100));
+  scrollbar_layer_impl_vertical_left->SetThumbThickness(6);
+  scrollbar_layer_impl_vertical_left->SetBounds(gfx::Size(14, 100));
+  EXPECT_EQ(scrollbar_layer_impl_vertical_left->ComputeThumbQuadRect().origin(),
+            gfx::Point(4, 0));
+
+  PaintedScrollbarLayerImpl* scrollbar_layer_impl_horizontal =
+      impl_->AddLayer<PaintedScrollbarLayerImpl>(
+          ScrollbarOrientation::HORIZONTAL,
+          /*is_left_side_vertical_scrollbar=*/false,
+          /*is_overlay=*/false);
+  scrollbar_layer_impl_horizontal->SetTrackRect(gfx::Rect(0, 0, 100, 14));
+  scrollbar_layer_impl_horizontal->SetThumbThickness(6);
+  EXPECT_EQ(scrollbar_layer_impl_horizontal->ComputeThumbQuadRect().origin(),
+            gfx::Point(0, 4));
 }
 
 }  // namespace

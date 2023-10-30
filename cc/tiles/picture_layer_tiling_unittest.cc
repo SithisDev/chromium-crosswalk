@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -80,7 +80,8 @@ class TestablePictureLayerTiling : public PictureLayerTiling {
                            raster_source,
                            client,
                            min_preraster_distance,
-                           max_preraster_distance) {}
+                           max_preraster_distance,
+                           /*can_use_lcd_text*/ false) {}
 };
 
 class PictureLayerTilingIteratorTest : public testing::Test {
@@ -732,8 +733,7 @@ TEST_F(PictureLayerTilingIteratorTest, TilesExistOutsideViewport) {
 
   LayerTreeSettings settings;
   gfx::Rect eventually_rect = viewport_rect;
-  eventually_rect.Inset(-settings.tiling_interest_area_padding,
-                        -settings.tiling_interest_area_padding);
+  eventually_rect.Inset(-settings.tiling_interest_area_padding);
   tiling_->ComputeTilePriorityRects(viewport_rect, viewport_rect, viewport_rect,
                                     eventually_rect, 1.f, Occlusion());
   VerifyTiles(1.f, gfx::Rect(layer_bounds),
@@ -805,8 +805,7 @@ TEST(ComputeTilePriorityRectsTest, VisibleTiles) {
 
   LayerTreeSettings settings;
   gfx::Rect eventually_rect = viewport_in_layer_space;
-  eventually_rect.Inset(-settings.tiling_interest_area_padding,
-                        -settings.tiling_interest_area_padding);
+  eventually_rect.Inset(-settings.tiling_interest_area_padding);
   tiling->ComputeTilePriorityRects(
       viewport_in_layer_space, viewport_in_layer_space, viewport_in_layer_space,
       eventually_rect, current_layer_contents_scale, Occlusion());
@@ -863,8 +862,7 @@ TEST(ComputeTilePriorityRectsTest, OffscreenTiles) {
 
   LayerTreeSettings settings;
   gfx::Rect eventually_rect = viewport_in_layer_space;
-  eventually_rect.Inset(-settings.tiling_interest_area_padding,
-                        -settings.tiling_interest_area_padding);
+  eventually_rect.Inset(-settings.tiling_interest_area_padding);
   tiling->ComputeTilePriorityRects(
       viewport_in_layer_space, viewport_in_layer_space, viewport_in_layer_space,
       eventually_rect, current_layer_contents_scale, Occlusion());
@@ -931,8 +929,7 @@ TEST(ComputeTilePriorityRectsTest, PartiallyOffscreenLayer) {
 
   LayerTreeSettings settings;
   gfx::Rect eventually_rect = viewport_in_layer_space;
-  eventually_rect.Inset(-settings.tiling_interest_area_padding,
-                        -settings.tiling_interest_area_padding);
+  eventually_rect.Inset(-settings.tiling_interest_area_padding);
   tiling->ComputeTilePriorityRects(
       viewport_in_layer_space, viewport_in_layer_space, viewport_in_layer_space,
       eventually_rect, current_layer_contents_scale, Occlusion());
@@ -1313,6 +1310,19 @@ TEST_F(PictureLayerTilingIteratorTest, EdgeCaseLargeIntBounds2) {
        iter; ++iter) {
     EXPECT_FALSE(iter.geometry_rect().IsEmpty());
   }
+}
+
+TEST_F(PictureLayerTilingIteratorTest, SmallRasterTransforms) {
+  gfx::Size tile_size(1, 1);
+  gfx::Size layer_bounds(4357, 4357);
+  float scale = 1.f / layer_bounds.width();
+  Initialize(tile_size, scale, layer_bounds);
+  EXPECT_EQ(tiling_->tiling_size(), tile_size);
+
+  layer_bounds = {378, 378};
+  scale = 1.f / layer_bounds.width();
+  Initialize(tile_size, scale, layer_bounds);
+  EXPECT_EQ(tiling_->tiling_size(), tile_size);
 }
 
 }  // namespace

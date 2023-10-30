@@ -1,5 +1,6 @@
+set noparent
 file://build/OWNERS
 machenbach@chromium.org
-phoglund@chromium.org
+mbonadei@chromium.org
 
-# COMPONENT: Build
+per-file partition_alloc.*=file://base/allocator/partition_allocator/OWNERS

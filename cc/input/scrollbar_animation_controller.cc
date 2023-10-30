@@ -1,12 +1,15 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/input/scrollbar_animation_controller.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "base/bind.h"
+#include "base/cxx17_backports.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "cc/trees/layer_tree_impl.h"
 
@@ -47,13 +50,12 @@ ScrollbarAnimationController::ScrollbarAnimationController(
       fade_duration_(fade_duration),
       need_trigger_scrollbar_fade_in_(false),
       is_animating_(false),
-      animation_change_(NONE),
+      animation_change_(AnimationChange::NONE),
       scroll_element_id_(scroll_element_id),
-      currently_scrolling_(false),
-      show_in_fast_scroll_(false),
       opacity_(initial_opacity),
       show_scrollbars_on_scroll_gesture_(false),
       need_thinning_animation_(false),
+      need_fade_animation_(true),
       is_mouse_down_(false),
       tickmarks_showing_(false) {}
 
@@ -69,13 +71,12 @@ ScrollbarAnimationController::ScrollbarAnimationController(
       fade_duration_(fade_duration),
       need_trigger_scrollbar_fade_in_(false),
       is_animating_(false),
-      animation_change_(NONE),
+      animation_change_(AnimationChange::NONE),
       scroll_element_id_(scroll_element_id),
-      currently_scrolling_(false),
-      show_in_fast_scroll_(false),
       opacity_(initial_opacity),
       show_scrollbars_on_scroll_gesture_(true),
       need_thinning_animation_(true),
+      need_fade_animation_(!client->IsFluentScrollbar()),
       is_mouse_down_(false),
       tickmarks_showing_(false) {
   vertical_controller_ = SingleScrollbarAnimationControllerThinning::Create(
@@ -103,7 +104,7 @@ ScrollbarAnimationController::GetScrollbarAnimationController(
 }
 
 void ScrollbarAnimationController::StartAnimation() {
-  DCHECK(animation_change_ != NONE);
+  DCHECK(animation_change_ != AnimationChange::NONE);
   delayed_scrollbar_animation_.Cancel();
   need_trigger_scrollbar_fade_in_ = false;
   is_animating_ = true;
@@ -115,11 +116,19 @@ void ScrollbarAnimationController::StopAnimation() {
   delayed_scrollbar_animation_.Cancel();
   need_trigger_scrollbar_fade_in_ = false;
   is_animating_ = false;
-  animation_change_ = NONE;
+  animation_change_ = AnimationChange::NONE;
 }
 
 void ScrollbarAnimationController::PostDelayedAnimation(
     AnimationChange animation_change) {
+  // In contrast to Aura overlay scrollbars, Fluent overlay scrollbars
+  // should not fade out completely. After the initial paint, they remain on the
+  // screen in the minimal (thin) mode by default and can expand/transition to
+  // the full (thick) mode. The minimal <-> full mode thinning animation is
+  // controlled by SingleScrollbarAnimationControllerThinning.
+  if (!need_fade_animation_)
+    return;
+
   animation_change_ = animation_change;
   delayed_scrollbar_animation_.Cancel();
   delayed_scrollbar_animation_.Reset(
@@ -138,7 +147,7 @@ bool ScrollbarAnimationController::Animate(base::TimeTicks now) {
   }
 
   if (is_animating_) {
-    DCHECK(animation_change_ != NONE);
+    DCHECK(animation_change_ != AnimationChange::NONE);
     if (last_awaken_time_.is_null())
       last_awaken_time_ = now;
 
@@ -160,16 +169,15 @@ bool ScrollbarAnimationController::Animate(base::TimeTicks now) {
 
 float ScrollbarAnimationController::AnimationProgressAtTime(
     base::TimeTicks now) {
-  base::TimeDelta delta = now - last_awaken_time_;
-  float progress = delta.InSecondsF() / fade_duration_.InSecondsF();
-  return std::max(std::min(progress, 1.f), 0.f);
+  const base::TimeDelta delta = now - last_awaken_time_;
+  return base::clamp(static_cast<float>(delta / fade_duration_), 0.0f, 1.0f);
 }
 
 void ScrollbarAnimationController::RunAnimationFrame(float progress) {
   float opacity;
 
-  DCHECK(animation_change_ != NONE);
-  if (animation_change_ == FADE_IN) {
+  DCHECK(animation_change_ != AnimationChange::NONE);
+  if (animation_change_ == AnimationChange::FADE_IN) {
     opacity = std::max(progress, opacity_);
   } else {
     opacity = std::min(1.f - progress, opacity_);
@@ -178,25 +186,6 @@ void ScrollbarAnimationController::RunAnimationFrame(float progress) {
   ApplyOpacityToScrollbars(opacity);
   if (progress == 1.f)
     StopAnimation();
-}
-
-void ScrollbarAnimationController::DidScrollBegin() {
-  currently_scrolling_ = true;
-}
-
-void ScrollbarAnimationController::DidScrollEnd() {
-  bool has_scrolled = show_in_fast_scroll_;
-  show_in_fast_scroll_ = false;
-
-  currently_scrolling_ = false;
-
-  // We don't fade out scrollbar if they need thinning animation and mouse is
-  // near.
-  if (need_thinning_animation_ && MouseIsNearAnyScrollbar())
-    return;
-
-  if (has_scrolled && !tickmarks_showing_)
-    PostDelayedAnimation(FADE_OUT);
 }
 
 void ScrollbarAnimationController::DidScrollUpdate() {
@@ -211,19 +200,13 @@ void ScrollbarAnimationController::UpdateScrollbarState() {
 
   Show();
 
-  // As an optimization, we avoid spamming fade delay tasks during active fast
-  // scrolls.  But if we're not within one, we need to post every scroll update.
-  if (!currently_scrolling_) {
-    // We don't fade out scrollbar if they need thinning animation (Aura
-    // Overlay) and mouse is near or tickmarks show.
-    if (need_thinning_animation_) {
-      if (!MouseIsNearAnyScrollbar() && !tickmarks_showing_)
-        PostDelayedAnimation(FADE_OUT);
-    } else {
-      PostDelayedAnimation(FADE_OUT);
-    }
+  // We don't fade out scrollbar if they need thinning animation (Aura
+  // Overlay) and mouse is near or tickmarks show.
+  if (need_thinning_animation_) {
+    if (!MouseIsNearAnyScrollbar() && !tickmarks_showing_)
+      PostDelayedAnimation(AnimationChange::FADE_OUT);
   } else {
-    show_in_fast_scroll_ = true;
+    PostDelayedAnimation(AnimationChange::FADE_OUT);
   }
 
   if (need_thinning_animation_) {
@@ -237,7 +220,7 @@ void ScrollbarAnimationController::WillUpdateScroll() {
     UpdateScrollbarState();
 }
 
-void ScrollbarAnimationController::DidRequestShowFromMainThread() {
+void ScrollbarAnimationController::DidRequestShow() {
   UpdateScrollbarState();
 }
 
@@ -278,7 +261,7 @@ void ScrollbarAnimationController::DidMouseUp() {
 
   if (!Captured()) {
     if (MouseIsNearAnyScrollbar() && ScrollbarsHidden()) {
-      PostDelayedAnimation(FADE_IN);
+      PostDelayedAnimation(AnimationChange::FADE_IN);
       need_trigger_scrollbar_fade_in_ = true;
     }
     return;
@@ -288,7 +271,7 @@ void ScrollbarAnimationController::DidMouseUp() {
   horizontal_controller_->DidMouseUp();
 
   if (!MouseIsNearAnyScrollbar() && !ScrollbarsHidden() && !tickmarks_showing_)
-    PostDelayedAnimation(FADE_OUT);
+    PostDelayedAnimation(AnimationChange::FADE_OUT);
 }
 
 void ScrollbarAnimationController::DidMouseLeave() {
@@ -304,7 +287,7 @@ void ScrollbarAnimationController::DidMouseLeave() {
   if (ScrollbarsHidden() || Captured() || tickmarks_showing_)
     return;
 
-  PostDelayedAnimation(FADE_OUT);
+  PostDelayedAnimation(AnimationChange::FADE_OUT);
 }
 
 void ScrollbarAnimationController::DidMouseMove(
@@ -331,7 +314,7 @@ void ScrollbarAnimationController::DidMouseMove(
     if (need_trigger_scrollbar_fade_in_before !=
         need_trigger_scrollbar_fade_in_) {
       if (need_trigger_scrollbar_fade_in_) {
-        PostDelayedAnimation(FADE_IN);
+        PostDelayedAnimation(AnimationChange::FADE_IN);
       } else {
         delayed_scrollbar_animation_.Cancel();
       }
@@ -341,7 +324,7 @@ void ScrollbarAnimationController::DidMouseMove(
       Show();
       StopAnimation();
     } else if (!is_animating_) {
-      PostDelayedAnimation(FADE_OUT);
+      PostDelayedAnimation(AnimationChange::FADE_OUT);
     }
   }
 }
@@ -379,8 +362,10 @@ bool ScrollbarAnimationController::ScrollbarsHidden() const {
 
 bool ScrollbarAnimationController::Captured() const {
   DCHECK(need_thinning_animation_);
-  return GetScrollbarAnimationController(VERTICAL).captured() ||
-         GetScrollbarAnimationController(HORIZONTAL).captured();
+  return GetScrollbarAnimationController(ScrollbarOrientation::VERTICAL)
+             .captured() ||
+         GetScrollbarAnimationController(ScrollbarOrientation::HORIZONTAL)
+             .captured();
 }
 
 void ScrollbarAnimationController::Show() {
@@ -395,16 +380,18 @@ void ScrollbarAnimationController::ApplyOpacityToScrollbars(float opacity) {
     scrollbar->SetOverlayScrollbarLayerOpacityAnimated(effective_opacity);
   }
 
-  bool previouslyVisible = opacity_ > 0.0f;
-  bool currentlyVisible = opacity > 0.0f;
+  bool previously_visible_ = opacity_ > 0.0f;
+  bool currently_visible = opacity > 0.0f;
 
   if (opacity_ != opacity)
     client_->SetNeedsRedrawForScrollbarAnimation();
 
   opacity_ = opacity;
 
-  if (previouslyVisible != currentlyVisible)
+  if (previously_visible_ != currently_visible) {
     client_->DidChangeScrollbarVisibility();
+    visibility_changed_ = true;
+  }
 }
 
 }  // namespace cc

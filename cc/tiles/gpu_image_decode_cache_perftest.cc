@@ -1,7 +1,8 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
 #include <vector>
 
 #include "base/timer/lap_timer.h"
@@ -12,8 +13,9 @@
 #include "components/viz/test/test_in_process_context_provider.h"
 #include "gpu/command_buffer/client/raster_interface.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 #include "third_party/skia/include/core/SkSurface.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 
 namespace cc {
 namespace {
@@ -29,13 +31,11 @@ sk_sp<SkImage> CreateImage(int width, int height) {
   return SkImage::MakeFromBitmap(bitmap);
 }
 
-SkMatrix CreateMatrix(const SkSize& scale) {
-  SkMatrix matrix;
-  matrix.setScale(scale.width(), scale.height());
-  return matrix;
+SkM44 CreateMatrix(const SkSize& scale) {
+  return SkM44::Scale(scale.width(), scale.height());
 }
 
-enum class TestMode { kGpu, kTransferCache, kSw };
+enum class TestMode { kGpu, kSw };
 
 class GpuImageDecodeCachePerfTest
     : public testing::Test,
@@ -43,60 +43,67 @@ class GpuImageDecodeCachePerfTest
  public:
   GpuImageDecodeCachePerfTest()
       : timer_(kWarmupRuns,
-               base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
+               base::Milliseconds(kTimeLimitMillis),
                kTimeCheckInterval),
         context_provider_(
             base::MakeRefCounted<viz::TestInProcessContextProvider>(
-                UseTransferCache(),
-                false /* support_locking */)),
-        cache_(context_provider_.get(),
-               UseTransferCache(),
-               kRGBA_8888_SkColorType,
-               kCacheSize,
-               MaxTextureSize(),
-               PaintImage::kDefaultGeneratorClientId) {
-    // Initializing context here is ok because image decode cache does not use
-    // context provider in its constructor.
+                ParamToTestContextType(GetParam()),
+                /*support_locking=*/false)) {}
+
+  void SetUp() override {
     gpu::ContextResult result = context_provider_->BindToCurrentThread();
-    DCHECK_EQ(result, gpu::ContextResult::kSuccess);
+    ASSERT_EQ(result, gpu::ContextResult::kSuccess);
+    cache_ = std::make_unique<GpuImageDecodeCache>(
+        context_provider_.get(), UseTransferCache(), kRGBA_8888_SkColorType,
+        kCacheSize, MaxTextureSize(), nullptr);
   }
 
  protected:
   size_t MaxTextureSize() const {
     switch (GetParam()) {
       case TestMode::kGpu:
-      case TestMode::kTransferCache:
         return 4096;
       case TestMode::kSw:
         return 0;
     }
   }
 
-  bool UseTransferCache() const {
-    return GetParam() == TestMode::kTransferCache;
-  }
+  bool UseTransferCache() const { return GetParam() == TestMode::kGpu; }
 
   const char* ParamName() const {
     switch (GetParam()) {
       case TestMode::kGpu:
         return "GPU";
-      case TestMode::kTransferCache:
-        return "TransferCache";
       case TestMode::kSw:
         return "SW";
     }
   }
 
+  viz::TestContextType ParamToTestContextType(TestMode mode) {
+    switch (mode) {
+      case TestMode::kGpu:
+        return viz::TestContextType::kGpuRaster;
+      case TestMode::kSw:
+        return viz::TestContextType::kSoftwareRaster;
+    }
+  }
+
+  perf_test::PerfResultReporter SetUpReporter(
+      const std::string& metric_suffix) {
+    perf_test::PerfResultReporter reporter("gpu_image_decode_cache",
+                                           ParamName());
+    reporter.RegisterImportantMetric(metric_suffix, "runs/s");
+    return reporter;
+  }
+
   base::LapTimer timer_;
   scoped_refptr<viz::TestInProcessContextProvider> context_provider_;
-  GpuImageDecodeCache cache_;
+  std::unique_ptr<GpuImageDecodeCache> cache_;
 };
 
 INSTANTIATE_TEST_SUITE_P(P,
                          GpuImageDecodeCachePerfTest,
-                         testing::Values(TestMode::kGpu,
-                                         TestMode::kTransferCache,
-                                         TestMode::kSw));
+                         testing::Values(TestMode::kGpu, TestMode::kSw));
 
 TEST_P(GpuImageDecodeCachePerfTest, DecodeWithColorConversion) {
   timer_.Reset();
@@ -106,25 +113,24 @@ TEST_P(GpuImageDecodeCachePerfTest, DecodeWithColorConversion) {
             .set_id(PaintImage::GetNextId())
             .set_image(CreateImage(1024, 2048), PaintImage::GetNextContentId())
             .TakePaintImage(),
-        SkIRect::MakeWH(1024, 2048), kMedium_SkFilterQuality,
+        false, SkIRect::MakeWH(1024, 2048), PaintFlags::FilterQuality::kMedium,
         CreateMatrix(SkSize::Make(1.0f, 1.0f)), 0u,
-        gfx::ColorSpace::CreateXYZD50());
+        TargetColorParams(gfx::ColorSpace::CreateXYZD50()));
 
-    DecodedDrawImage decoded_image = cache_.GetDecodedImageForDraw(image);
-    cache_.DrawWithImageFinished(image, decoded_image);
+    DecodedDrawImage decoded_image = cache_->GetDecodedImageForDraw(image);
+    cache_->DrawWithImageFinished(image, decoded_image);
     timer_.NextLap();
   } while (!timer_.HasTimeLimitExpired());
 
-  perf_test::PrintResult("gpu_image_decode_cache_decode_with_color_conversion",
-                         ParamName(), "result", timer_.LapsPerSecond(),
-                         "runs/s", true);
+  perf_test::PerfResultReporter reporter =
+      SetUpReporter("_with_color_conversion");
+  reporter.AddResult("_with_color_conversion", timer_.LapsPerSecond());
 }
 
 using GpuImageDecodeCachePerfTestNoSw = GpuImageDecodeCachePerfTest;
 INSTANTIATE_TEST_SUITE_P(P,
                          GpuImageDecodeCachePerfTestNoSw,
-                         testing::Values(TestMode::kGpu,
-                                         TestMode::kTransferCache));
+                         testing::Values(TestMode::kGpu));
 
 TEST_P(GpuImageDecodeCachePerfTestNoSw, DecodeWithMips) {
   // Surface to render into.
@@ -139,26 +145,17 @@ TEST_P(GpuImageDecodeCachePerfTestNoSw, DecodeWithMips) {
             .set_id(PaintImage::GetNextId())
             .set_image(CreateImage(1024, 2048), PaintImage::GetNextContentId())
             .TakePaintImage(),
-        SkIRect::MakeWH(1024, 2048), kMedium_SkFilterQuality,
-        CreateMatrix(SkSize::Make(0.6f, 0.6f)), 0u, gfx::ColorSpace());
+        false, SkIRect::MakeWH(1024, 2048), PaintFlags::FilterQuality::kMedium,
+        CreateMatrix(SkSize::Make(0.6f, 0.6f)), 0u, TargetColorParams());
 
-    DecodedDrawImage decoded_image = cache_.GetDecodedImageForDraw(image);
+    DecodedDrawImage decoded_image = cache_->GetDecodedImageForDraw(image);
 
-    if (GetParam() == TestMode::kGpu) {
-      SkPaint paint;
-      paint.setFilterQuality(kMedium_SkFilterQuality);
-      surface->getCanvas()->drawImageRect(decoded_image.image().get(),
-                                          SkRect::MakeWH(1024, 2048),
-                                          SkRect::MakeWH(614, 1229), &paint);
-      surface->flush();
-    }
-
-    cache_.DrawWithImageFinished(image, decoded_image);
+    cache_->DrawWithImageFinished(image, decoded_image);
     timer_.NextLap();
   } while (!timer_.HasTimeLimitExpired());
 
-  perf_test::PrintResult("gpu_image_decode_cache_decode_with_mips", ParamName(),
-                         "result", timer_.LapsPerSecond(), "runs/s", true);
+  perf_test::PerfResultReporter reporter = SetUpReporter("_with_mips");
+  reporter.AddResult("_with_mips", timer_.LapsPerSecond());
 }
 
 TEST_P(GpuImageDecodeCachePerfTest, AcquireExistingImages) {
@@ -168,22 +165,22 @@ TEST_P(GpuImageDecodeCachePerfTest, AcquireExistingImages) {
           .set_id(PaintImage::GetNextId())
           .set_image(CreateImage(1024, 2048), PaintImage::GetNextContentId())
           .TakePaintImage(),
-      SkIRect::MakeWH(1024, 2048), kMedium_SkFilterQuality,
+      false, SkIRect::MakeWH(1024, 2048), PaintFlags::FilterQuality::kMedium,
       CreateMatrix(SkSize::Make(1.0f, 1.0f)), 0u,
-      gfx::ColorSpace::CreateXYZD50());
+      TargetColorParams(gfx::ColorSpace::CreateXYZD50()));
 
-  DecodedDrawImage decoded_image = cache_.GetDecodedImageForDraw(image);
-  cache_.DrawWithImageFinished(image, decoded_image);
+  DecodedDrawImage decoded_image = cache_->GetDecodedImageForDraw(image);
+  cache_->DrawWithImageFinished(image, decoded_image);
 
   do {
-    DecodedDrawImage decoded_image = cache_.GetDecodedImageForDraw(image);
-    cache_.DrawWithImageFinished(image, decoded_image);
+    decoded_image = cache_->GetDecodedImageForDraw(image);
+    cache_->DrawWithImageFinished(image, decoded_image);
     timer_.NextLap();
   } while (!timer_.HasTimeLimitExpired());
 
-  perf_test::PrintResult("gpu_image_decode_cache_acquire_existing_images",
-                         ParamName(), "result", timer_.LapsPerSecond(),
-                         "runs/s", true);
+  perf_test::PerfResultReporter reporter =
+      SetUpReporter("_acquire_existing_images");
+  reporter.AddResult("_acquire_existing_images", timer_.LapsPerSecond());
 }
 
 }  // namespace

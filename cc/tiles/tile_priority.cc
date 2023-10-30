@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,6 @@
 #include "cc/base/math_util.h"
 
 namespace cc {
-
-std::string WhichTreeToString(WhichTree tree) {
-  switch (tree) {
-  case ACTIVE_TREE:
-    return "ACTIVE_TREE";
-  case PENDING_TREE:
-    return "PENDING_TREE";
-  default:
-      DCHECK(false) << "Unrecognized WhichTree value " << tree;
-      return "<unknown WhichTree value>";
-  }
-}
 
 std::string TileResolutionToString(TileResolution resolution) {
   switch (resolution) {
@@ -72,6 +60,17 @@ std::string TileMemoryLimitPolicyToString(TileMemoryLimitPolicy policy) {
   }
 }
 
+bool IsTileMemoryLimitPolicyMoreRestictive(TileMemoryLimitPolicy policy1,
+                                           TileMemoryLimitPolicy policy2) {
+  static_assert(
+      ALLOW_NOTHING < ALLOW_ABSOLUTE_MINIMUM &&
+          ALLOW_ABSOLUTE_MINIMUM < ALLOW_PREPAINT_ONLY &&
+          ALLOW_PREPAINT_ONLY < ALLOW_ANYTHING,
+      "TileMemoryLimitPolicy must be ordered from most restrictive to least "
+      "restrictive");
+  return policy1 < policy2;
+}
+
 std::string TreePriorityToString(TreePriority prio) {
   switch (prio) {
   case SAME_PRIORITY_FOR_BOTH_TREES:
@@ -84,6 +83,21 @@ std::string TreePriorityToString(TreePriority prio) {
     DCHECK(false) << "Unrecognized priority value " << prio;
     return "<unknown>";
   }
+}
+
+perfetto::protos::pbzero::ChromeCompositorStateMachine::MinorState::TreePriority
+TreePriorityToProtozeroEnum(TreePriority priority) {
+  using pbzeroMinorState =
+      perfetto::protos::pbzero::ChromeCompositorStateMachine::MinorState;
+  switch (priority) {
+    case TreePriority::SAME_PRIORITY_FOR_BOTH_TREES:
+      return pbzeroMinorState::TREE_PRIORITY_SAME_PRIORITY_FOR_BOTH_TREES;
+    case TreePriority::SMOOTHNESS_TAKES_PRIORITY:
+      return pbzeroMinorState::TREE_PRIORITY_SMOOTHNESS_TAKES_PRIORITY;
+    case TreePriority::NEW_CONTENT_TAKES_PRIORITY:
+      return pbzeroMinorState::TREE_PRIORITY_NEW_CONTENT_TAKES_PRIORITY;
+  }
+  return pbzeroMinorState::TREE_PRIORITY_UNSPECIFIED;
 }
 
 void GlobalStateThatImpactsTilePriority::AsValueInto(

@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+#include <utility>
 #include <vector>
 
-#include "base/strings/stringprintf.h"
+#include "base/containers/cxx20_erase.h"
+#include "base/logging.h"
 #include "cc/trees/layer_tree_frame_sink.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/occlusion.h"
@@ -17,7 +20,6 @@
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "components/viz/common/resources/bitmap_allocation.h"
 #include "components/viz/common/resources/platform_color.h"
-#include "components/viz/common/resources/single_release_callback.h"
 
 namespace cc {
 
@@ -38,7 +40,7 @@ TextureLayerImpl::~TextureLayerImpl() {
 }
 
 std::unique_ptr<LayerImpl> TextureLayerImpl::CreateLayerImpl(
-    LayerTreeImpl* tree_impl) {
+    LayerTreeImpl* tree_impl) const {
   return TextureLayerImpl::Create(tree_impl, id());
 }
 
@@ -53,9 +55,9 @@ void TextureLayerImpl::PushPropertiesTo(LayerImpl* layer) {
   texture_layer->SetFlipped(flipped_);
   texture_layer->SetUVTopLeft(uv_top_left_);
   texture_layer->SetUVBottomRight(uv_bottom_right_);
-  texture_layer->SetVertexOpacity(vertex_opacity_);
   texture_layer->SetPremultipliedAlpha(premultiplied_alpha_);
   texture_layer->SetBlendBackgroundColor(blend_background_color_);
+  texture_layer->SetForceTextureToOpaque(force_texture_to_opaque_);
   texture_layer->SetNearestNeighbor(nearest_neighbor_);
   if (own_resource_) {
     texture_layer->SetTransferableResource(transferable_resource_,
@@ -101,10 +103,10 @@ bool TextureLayerImpl::WillDraw(
     own_resource_ = false;
   }
 
-  return resource_id_;
+  return resource_id_ != viz::kInvalidResourceId;
 }
 
-void TextureLayerImpl::AppendQuads(viz::RenderPass* render_pass,
+void TextureLayerImpl::AppendQuads(viz::CompositorRenderPass* render_pass,
                                    AppendQuadsData* append_quads_data) {
   DCHECK(resource_id_);
 
@@ -120,10 +122,14 @@ void TextureLayerImpl::AppendQuads(viz::RenderPass* render_pass,
       std::make_move_iterator(to_register_bitmaps_.end()));
   to_register_bitmaps_.clear();
 
-  SkColor bg_color =
-      blend_background_color_ ? background_color() : SK_ColorTRANSPARENT;
-  bool are_contents_opaque =
-      contents_opaque() || (SkColorGetA(bg_color) == 0xFF);
+  SkColor4f bg_color =
+      blend_background_color_ ? background_color() : SkColors::kTransparent;
+
+  if (force_texture_to_opaque_) {
+    bg_color = SkColors::kBlack;
+  }
+
+  bool are_contents_opaque = contents_opaque() || bg_color.isOpaque();
 
   viz::SharedQuadState* shared_quad_state =
       render_pass->CreateAndAppendSharedQuadState();
@@ -140,15 +146,12 @@ void TextureLayerImpl::AppendQuads(viz::RenderPass* render_pass,
   if (visible_quad_rect.IsEmpty())
     return;
 
-  if (!vertex_opacity_[0] && !vertex_opacity_[1] && !vertex_opacity_[2] &&
-      !vertex_opacity_[3])
-    return;
-
+  float vertex_opacity[] = {1.0f, 1.0f, 1.0f, 1.0f};
   auto* quad = render_pass->CreateAndAppendDrawQuad<viz::TextureDrawQuad>();
   quad->SetNew(shared_quad_state, quad_rect, visible_quad_rect, needs_blending,
                resource_id_, premultiplied_alpha_, uv_top_left_,
-               uv_bottom_right_, bg_color, vertex_opacity_, flipped_,
-               nearest_neighbor_, /*secure_output_only=*/false,
+               uv_bottom_right_, bg_color, vertex_opacity, flipped_,
+               nearest_neighbor_, /*secure_output=*/false,
                gfx::ProtectedVideoType::kClear);
   quad->set_resource_size_in_pixels(transferable_resource_.size);
   ValidateQuadResources(quad);
@@ -158,7 +161,10 @@ SimpleEnclosedRegion TextureLayerImpl::VisibleOpaqueRegion() const {
   if (contents_opaque())
     return SimpleEnclosedRegion(visible_layer_rect());
 
-  if (blend_background_color_ && (SkColorGetA(background_color()) == 0xFF))
+  if (force_texture_to_opaque_)
+    return SimpleEnclosedRegion(visible_layer_rect());
+
+  if (blend_background_color_ && background_color().isOpaque())
     return SimpleEnclosedRegion(visible_layer_rect());
 
   return SimpleEnclosedRegion();
@@ -191,12 +197,20 @@ void TextureLayerImpl::ReleaseResources() {
   // all) instead.
 }
 
+gfx::ContentColorUsage TextureLayerImpl::GetContentColorUsage() const {
+  return transferable_resource_.color_space.GetContentColorUsage();
+}
+
 void TextureLayerImpl::SetPremultipliedAlpha(bool premultiplied_alpha) {
   premultiplied_alpha_ = premultiplied_alpha;
 }
 
 void TextureLayerImpl::SetBlendBackgroundColor(bool blend) {
   blend_background_color_ = blend;
+}
+
+void TextureLayerImpl::SetForceTextureToOpaque(bool opaque) {
+  force_texture_to_opaque_ = opaque;
 }
 
 void TextureLayerImpl::SetFlipped(bool flipped) {
@@ -215,19 +229,9 @@ void TextureLayerImpl::SetUVBottomRight(const gfx::PointF& bottom_right) {
   uv_bottom_right_ = bottom_right;
 }
 
-// 1--2
-// |  |
-// 0--3
-void TextureLayerImpl::SetVertexOpacity(const float vertex_opacity[4]) {
-  vertex_opacity_[0] = vertex_opacity[0];
-  vertex_opacity_[1] = vertex_opacity[1];
-  vertex_opacity_[2] = vertex_opacity[2];
-  vertex_opacity_[3] = vertex_opacity[3];
-}
-
 void TextureLayerImpl::SetTransferableResource(
     const viz::TransferableResource& resource,
-    std::unique_ptr<viz::SingleReleaseCallback> release_callback) {
+    viz::ReleaseCallback release_callback) {
   DCHECK_EQ(resource.mailbox_holder.mailbox.IsZero(), !release_callback);
   FreeTransferableResource();
   transferable_resource_ = resource;
@@ -276,16 +280,15 @@ void TextureLayerImpl::FreeTransferableResource() {
     if (release_callback_) {
       // We didn't use the resource, but the client might need the SyncToken
       // before it can use the resource with its own GL context.
-      release_callback_->Run(transferable_resource_.mailbox_holder.sync_token,
-                             false);
+      std::move(release_callback_)
+          .Run(transferable_resource_.mailbox_holder.sync_token, false);
     }
     transferable_resource_ = viz::TransferableResource();
-    release_callback_ = nullptr;
   } else if (resource_id_) {
     DCHECK(!own_resource_);
     auto* resource_provider = layer_tree_impl()->resource_provider();
     resource_provider->RemoveImportedResource(resource_id_);
-    resource_id_ = 0;
+    resource_id_ = viz::kInvalidResourceId;
   }
 }
 

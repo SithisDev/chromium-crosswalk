@@ -1,10 +1,8 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 package org.chromium.android.commands.unzip;
-
-import android.util.Log;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -28,7 +26,7 @@ public class Unzip {
         try {
             (new Unzip()).run(args);
         } catch (RuntimeException e) {
-            Log.e(TAG, e.toString());
+            e.printStackTrace();
             System.exit(1);
         }
     }
@@ -73,7 +71,7 @@ public class Unzip {
             }
 
         } catch (IOException e) {
-            throw new RuntimeException("Error while unzipping: " + e.toString());
+            throw new RuntimeException("Error while unzipping", e);
         } finally {
             try {
                 if (zis != null) zis.close();

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,18 @@
 #include <set>
 #include <string>
 
-#include "base/location.h"
-#include "base/trace_event/trace_event.h"
-#include "base/trace_event/traced_value.h"
+#include "base/time/time.h"
 #include "cc/cc_export.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 
-#define BEGINFRAMETRACKER_FROM_HERE FROM_HERE_WITH_EXPLICIT_FUNCTION("")
-
+namespace perfetto {
+class EventContext;
+namespace protos {
+namespace pbzero {
+class BeginImplFrameArgs;
+}
+}  // namespace protos
+}  // namespace perfetto
 namespace cc {
 
 // Microclass to trace and check properties for correct BeginFrameArgs (BFA)
@@ -45,7 +49,7 @@ class CC_EXPORT BeginFrameTracker {
 
   // Start using a new BFA value and check invariant properties.
   // **Must** only be called after finishing with any previous BFA.
-  void Start(viz::BeginFrameArgs new_args);
+  void Start(const viz::BeginFrameArgs& new_args);
   // Finish using the current BFA.
   // **Must** only be called while still using a BFA.
   void Finish();
@@ -68,8 +72,10 @@ class CC_EXPORT BeginFrameTracker {
   // any time.
   base::TimeDelta Interval() const;
 
-  void AsValueInto(base::TimeTicks now,
-                   base::trace_event::TracedValue* dict) const;
+  void AsProtozeroInto(
+      perfetto::EventContext& ctx,
+      base::TimeTicks now,
+      perfetto::protos::pbzero::BeginImplFrameArgs* dict) const;
 
   // The following methods violate principles of how viz::BeginFrameArgs should
   // be used. These methods should only be used when there is no other choice.

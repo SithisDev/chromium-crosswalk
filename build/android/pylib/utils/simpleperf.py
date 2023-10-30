@@ -1,4 +1,4 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,6 +12,7 @@ import tempfile
 from devil import devil_env
 from devil.android import device_signal
 from devil.android.sdk import version_codes
+from pylib import constants
 
 
 def _ProcessType(proc):
@@ -107,6 +108,7 @@ def _ThreadType(thread_name):
     return 'main'
   if thread_name.startswith('RenderThread'):
     return 'render'
+  raise ValueError('got no matching thread_name')
 
 
 def _GetSpecifiedTID(device, pid, thread_specifier):
@@ -215,8 +217,10 @@ def ConvertSimpleperfToPprof(simpleperf_out_path, build_directory,
   report_path = os.path.join(script_dir, 'report.py')
   report_cmd = [sys.executable, report_path, '-i', simpleperf_out_path]
   device_lib_path = None
-  for line in subprocess.check_output(
-      report_cmd, stderr=subprocess.STDOUT).splitlines():
+  output = subprocess.check_output(report_cmd, stderr=subprocess.STDOUT)
+  if isinstance(output, bytes):
+    output = output.decode()
+  for line in output.splitlines():
     fields = line.split()
     if len(fields) < 5:
       continue
@@ -246,13 +250,13 @@ def ConvertSimpleperfToPprof(simpleperf_out_path, build_directory,
 
     # Run the script to annotate symbols and convert from simpleperf format to
     # pprof format.
-    llvm_symbolizer_path = devil_env.config.LocalPath('llvm-symbolizer')
     pprof_converter_script = os.path.join(
         script_dir, 'pprof_proto_generator.py')
-    pprof_converter_cmd = [sys.executable, pprof_converter_script,
-                           '-i', simpleperf_out_path,
-                           '-o', os.path.abspath(pprof_out_path),
-                           '--addr2line', llvm_symbolizer_path]
+    pprof_converter_cmd = [
+        sys.executable, pprof_converter_script, '-i', simpleperf_out_path, '-o',
+        os.path.abspath(pprof_out_path), '--ndk_path',
+        constants.ANDROID_NDK_ROOT
+    ]
     subprocess.check_output(pprof_converter_cmd, stderr=subprocess.STDOUT,
                             cwd=processing_dir)
   finally:

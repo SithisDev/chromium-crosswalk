@@ -1,36 +1,22 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_TEST_LAYER_TREE_PIXEL_RESOURCE_TEST_H_
 #define CC_TEST_LAYER_TREE_PIXEL_RESOURCE_TEST_H_
 
+#include <memory>
+
 #include "base/memory/ref_counted.h"
 #include "cc/test/layer_tree_pixel_test.h"
 
 namespace cc {
 
-enum RasterType {
-  SOFTWARE,
-  GPU,
-  ONE_COPY,
-  ZERO_COPY,
-};
-
-struct PixelResourceTestCase {
-  LayerTreeTest::RendererType renderer_type;
-  RasterType raster_type;
-};
-
 class LayerTreeHostPixelResourceTest : public LayerTreePixelTest {
  public:
-  explicit LayerTreeHostPixelResourceTest(PixelResourceTestCase test_case,
-                                          Layer::LayerMaskType mask_type);
-  LayerTreeHostPixelResourceTest();
+  explicit LayerTreeHostPixelResourceTest(RasterTestConfig test_config);
 
-  RendererType renderer_type() const { return test_case_.renderer_type; }
-
-  RasterType raster_type() const { return test_case_.raster_type; }
+  viz::RendererType renderer_type() const { return test_config_.renderer_type; }
 
   const char* GetRendererSuffix() const;
 
@@ -42,22 +28,15 @@ class LayerTreeHostPixelResourceTest : public LayerTreePixelTest {
   void RunPixelResourceTest(scoped_refptr<Layer> content_root,
                             const SkBitmap& expected_bitmap);
 
-  void RunPixelResourceTestWithLayerList(scoped_refptr<Layer> root_layer,
-                                         base::FilePath file_name,
-                                         PropertyTrees* property_trees);
+  void RunPixelResourceTestWithLayerList(base::FilePath file_name);
 
  protected:
-  PixelResourceTestCase test_case_;
-  Layer::LayerMaskType mask_type_;
-  bool initialized_ = false;
-
-  void InitializeFromTestCase(PixelResourceTestCase test_case);
+  const RasterTestConfig test_config_;
 };
 
 class ParameterizedPixelResourceTest
     : public LayerTreeHostPixelResourceTest,
-      public ::testing::WithParamInterface<
-          ::testing::tuple<PixelResourceTestCase, Layer::LayerMaskType>> {
+      public ::testing::WithParamInterface<RasterTestConfig> {
  public:
   ParameterizedPixelResourceTest();
 };

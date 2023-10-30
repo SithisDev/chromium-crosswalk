@@ -1,5 +1,5 @@
-#!/usr/bin/python
-# Copyright 2018 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -55,4 +55,4 @@ with qemu_target.QemuTarget(tmpdir, 'x64') as target:
 
 
   if __name__ == '__main__':
-      unittest.main()
+    unittest.main()

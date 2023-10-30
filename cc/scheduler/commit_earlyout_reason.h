@@ -1,17 +1,16 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_SCHEDULER_COMMIT_EARLYOUT_REASON_H_
 #define CC_SCHEDULER_COMMIT_EARLYOUT_REASON_H_
 
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "cc/cc_export.h"
 
 namespace cc {
 
 enum class CommitEarlyOutReason {
-  ABORTED_LAYER_TREE_FRAME_SINK_LOST,
   ABORTED_NOT_VISIBLE,
   ABORTED_DEFERRED_MAIN_FRAME_UPDATE,
   ABORTED_DEFERRED_COMMIT,
@@ -20,8 +19,6 @@ enum class CommitEarlyOutReason {
 
 inline const char* CommitEarlyOutReasonToString(CommitEarlyOutReason reason) {
   switch (reason) {
-    case CommitEarlyOutReason::ABORTED_LAYER_TREE_FRAME_SINK_LOST:
-      return "CommitEarlyOutReason::ABORTED_LAYER_TREE_FRAME_SINK_LOST";
     case CommitEarlyOutReason::ABORTED_NOT_VISIBLE:
       return "CommitEarlyOutReason::ABORTED_NOT_VISIBLE";
     case CommitEarlyOutReason::ABORTED_DEFERRED_MAIN_FRAME_UPDATE:
@@ -35,7 +32,7 @@ inline const char* CommitEarlyOutReasonToString(CommitEarlyOutReason reason) {
   return "???";
 }
 
-inline bool CommitEarlyOutHandledCommit(CommitEarlyOutReason reason) {
+inline bool MainFrameAppliedDeltas(CommitEarlyOutReason reason) {
   return reason == CommitEarlyOutReason::FINISHED_NO_UPDATES;
 }
 

@@ -1,19 +1,26 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import logging
 import os
 import platform
+import signal
 import socket
 import subprocess
 import sys
+import time
+import threading
 
 DIR_SOURCE_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+IMAGES_ROOT = os.path.join(
+    DIR_SOURCE_ROOT, 'third_party', 'fuchsia-sdk', 'images')
 SDK_ROOT = os.path.join(DIR_SOURCE_ROOT, 'third_party', 'fuchsia-sdk', 'sdk')
-IMAGES_ROOT = os.path.join(DIR_SOURCE_ROOT, 'third_party', 'fuchsia-sdk',
-                           'images')
+
+# The number of seconds to wait when trying to attach to a target.
+ATTACH_RETRY_SECONDS = 120
+
 
 def EnsurePathExists(path):
   """Checks that the file |path| exists on the filesystem and returns the path
@@ -34,16 +41,26 @@ def GetHostOsFromPlatform():
 
 def GetHostArchFromPlatform():
   host_arch = platform.machine()
-  if host_arch == 'x86_64':
+  # platform.machine() returns AMD64 on 64-bit Windows.
+  if host_arch in ['x86_64', 'AMD64']:
     return 'x64'
   elif host_arch == 'aarch64':
     return 'arm64'
   raise Exception('Unsupported host architecture: %s' % host_arch)
 
-def GetQemuRootForPlatform():
-  return os.path.join(DIR_SOURCE_ROOT, 'third_party',
-                      'qemu-' + GetHostOsFromPlatform() + '-' +
-                       GetHostArchFromPlatform())
+def GetHostToolPathFromPlatform(tool):
+  host_arch = platform.machine()
+  return os.path.join(SDK_ROOT, 'tools', GetHostArchFromPlatform(), tool)
+
+
+# Remove when arm64 emulator is also included in Fuchsia SDK.
+def GetEmuRootForPlatform(emulator):
+  if GetHostArchFromPlatform() == 'x64':
+    return GetHostToolPathFromPlatform('{0}_internal'.format(emulator))
+  return os.path.join(
+      DIR_SOURCE_ROOT, 'third_party', '{0}-{1}-{2}'.format(
+          emulator, GetHostOsFromPlatform(), GetHostArchFromPlatform()))
+
 
 def ConnectPortForwardingTask(target, local_port, remote_port = 0):
   """Establishes a port forwarding SSH task to a localhost TCP endpoint hosted
@@ -86,3 +103,65 @@ def GetAvailableTcpPort():
   port = sock.getsockname()[1]
   sock.close()
   return port
+
+
+def RunGnSdkFunction(script, function):
+  script_path = os.path.join(SDK_ROOT, 'bin', script)
+  function_cmd = ['bash', '-c', '. %s; %s' % (script_path, function)]
+  return SubprocessCallWithTimeout(function_cmd)
+
+
+def SubprocessCallWithTimeout(command, silent=False, timeout_secs=None):
+  """Helper function for running a command.
+
+  Args:
+    command: The command to run.
+    silent: If true, stdout and stderr of the command will not be printed.
+    timeout_secs: Maximum amount of time allowed for the command to finish.
+
+  Returns:
+    A tuple of (return code, stdout, stderr) of the command. Raises
+    an exception if the subprocess times out.
+  """
+
+  if silent:
+    devnull = open(os.devnull, 'w')
+    process = subprocess.Popen(command,
+                               stdout=devnull,
+                               stderr=devnull,
+                               text=True)
+  else:
+    process = subprocess.Popen(command,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE,
+                               text=True)
+  timeout_timer = None
+  if timeout_secs:
+
+    def interrupt_process():
+      process.send_signal(signal.SIGKILL)
+
+    timeout_timer = threading.Timer(timeout_secs, interrupt_process)
+
+    # Ensure that keyboard interrupts are handled properly (crbug/1198113).
+    timeout_timer.daemon = True
+
+    timeout_timer.start()
+
+  out, err = process.communicate()
+  if timeout_timer:
+    timeout_timer.cancel()
+
+  if process.returncode == -9:
+    raise TimeoutError('Timeout when executing \"%s\".' % ' '.join(command))
+
+  return process.returncode, out, err
+
+
+def IsRunningUnattended():
+  """Returns true if running non-interactively.
+
+  When running unattended, confirmation prompts and the like are suppressed.
+  """
+  # Chromium tests only for the presence of the variable, so match that here.
+  return 'CHROME_HEADLESS' in os.environ

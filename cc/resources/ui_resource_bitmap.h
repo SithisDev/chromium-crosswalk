@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,6 @@
 #define CC_RESOURCES_UI_RESOURCE_BITMAP_H_
 
 #include <stdint.h>
-
-#include <memory>
 
 #include "base/memory/ref_counted.h"
 #include "cc/cc_export.h"
@@ -48,14 +46,13 @@ class CC_EXPORT UIResourceBitmap {
   UIResourceBitmap(const UIResourceBitmap& other);
   ~UIResourceBitmap();
 
-  // Returns the memory usage of the bitmap.
-  size_t EstimateMemoryUsage() const {
-    return pixel_ref_ ? pixel_ref_->rowBytes() * info_.height() : 0;
-  }
-
   const uint8_t* GetPixels() const {
     return static_cast<const uint8_t*>(pixel_ref_->pixels());
   }
+  size_t SizeInBytes() const;
+  size_t row_bytes() const { return pixel_ref_ ? pixel_ref_->rowBytes() : 0; }
+
+  bool IsUniquelyOwned() const { return pixel_ref_->unique(); }
 
  private:
   friend class AutoLockUIResourceBitmap;

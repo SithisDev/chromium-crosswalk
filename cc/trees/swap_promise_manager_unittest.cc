@@ -1,10 +1,13 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/trees/swap_promise_manager.h"
 
-#include "cc/trees/swap_promise_monitor.h"
+#include <memory>
+#include <utility>
+
+#include "cc/test/mock_latency_info_swap_promise_monitor.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -12,17 +15,6 @@ using ::testing::StrictMock;
 
 namespace cc {
 namespace {
-
-class MockSwapPromiseMonitor : public SwapPromiseMonitor {
- public:
-  explicit MockSwapPromiseMonitor(SwapPromiseManager* manager)
-      : SwapPromiseMonitor(manager, nullptr) {}
-  ~MockSwapPromiseMonitor() override = default;
-
-  MOCK_METHOD0(OnSetNeedsCommitOnMain, void());
-  void OnSetNeedsRedrawOnImpl() override {}
-  void OnForwardScrollUpdateToMainThreadOnImpl() override {}
-};
 
 class MockSwapPromise : public SwapPromise {
  public:
@@ -36,17 +28,17 @@ class MockSwapPromise : public SwapPromise {
     return DidNotSwapAction::BREAK_PROMISE;
   }
   MOCK_METHOD0(OnCommit, void());
-  int64_t TraceId() const override { return 0; }
+  int64_t GetTraceId() const override { return 0; }
 };
 
 TEST(SwapPromiseManagerTest, SwapPromiseMonitors) {
   SwapPromiseManager manager;
-  StrictMock<MockSwapPromiseMonitor> monitor(&manager);
+  StrictMock<MockLatencyInfoSwapPromiseMonitor> monitor(&manager);
 
   EXPECT_CALL(monitor, OnSetNeedsCommitOnMain()).Times(2);
 
-  manager.NotifySwapPromiseMonitorsOfSetNeedsCommit();
-  manager.NotifySwapPromiseMonitorsOfSetNeedsCommit();
+  manager.NotifyLatencyInfoSwapPromiseMonitors();
+  manager.NotifyLatencyInfoSwapPromiseMonitors();
 }
 
 TEST(SwapPromiseManagerTest, SwapPromises) {

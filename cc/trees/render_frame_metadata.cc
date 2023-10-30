@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,15 +29,24 @@ bool RenderFrameMetadata::operator==(const RenderFrameMetadata& other) const {
          is_scroll_offset_at_top == other.is_scroll_offset_at_top &&
          selection == other.selection &&
          is_mobile_optimized == other.is_mobile_optimized &&
+         delegated_ink_metadata == other.delegated_ink_metadata &&
          device_scale_factor == other.device_scale_factor &&
          viewport_size_in_pixels == other.viewport_size_in_pixels &&
          page_scale_factor == other.page_scale_factor &&
          external_page_scale_factor == other.external_page_scale_factor &&
          top_controls_height == other.top_controls_height &&
          top_controls_shown_ratio == other.top_controls_shown_ratio &&
-#if defined(OS_ANDROID)
+         previous_surfaces_visual_update_duration ==
+             other.previous_surfaces_visual_update_duration &&
+         current_surface_visual_update_duration ==
+             other.current_surface_visual_update_duration &&
+#if BUILDFLAG(IS_ANDROID)
          bottom_controls_height == other.bottom_controls_height &&
          bottom_controls_shown_ratio == other.bottom_controls_shown_ratio &&
+         top_controls_min_height_offset ==
+             other.top_controls_min_height_offset &&
+         bottom_controls_min_height_offset ==
+             other.bottom_controls_min_height_offset &&
          min_page_scale_factor == other.min_page_scale_factor &&
          max_page_scale_factor == other.max_page_scale_factor &&
          root_overflow_y_hidden == other.root_overflow_y_hidden &&
@@ -45,7 +54,8 @@ bool RenderFrameMetadata::operator==(const RenderFrameMetadata& other) const {
          root_layer_size == other.root_layer_size &&
          has_transparent_background == other.has_transparent_background &&
 #endif
-         local_surface_id_allocation == other.local_surface_id_allocation;
+         local_surface_id == other.local_surface_id &&
+         new_vertical_scroll_direction == other.new_vertical_scroll_direction;
 }
 
 bool RenderFrameMetadata::operator!=(const RenderFrameMetadata& other) const {

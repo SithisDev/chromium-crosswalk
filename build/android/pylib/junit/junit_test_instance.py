@@ -1,6 +1,7 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
 
 from pylib.base import test_instance
 from pylib.utils import test_filter
@@ -9,7 +10,7 @@ from pylib.utils import test_filter
 class JunitTestInstance(test_instance.TestInstance):
 
   def __init__(self, args, _):
-    super(JunitTestInstance, self).__init__()
+    super().__init__()
 
     self._coverage_dir = args.coverage_dir
     self._debug_socket = args.debug_socket
@@ -18,6 +19,7 @@ class JunitTestInstance(test_instance.TestInstance):
     self._resource_apk = args.resource_apk
     self._robolectric_runtime_deps_dir = args.robolectric_runtime_deps_dir
     self._runner_filter = args.runner_filter
+    self._shards = args.shards
     self._test_filter = test_filter.InitializeFilterFromArgs(args)
     self._test_suite = args.test_suite
 
@@ -64,6 +66,10 @@ class JunitTestInstance(test_instance.TestInstance):
   @property
   def test_filter(self):
     return self._test_filter
+
+  @property
+  def shards(self):
+    return self._shards
 
   @property
   def suite(self):

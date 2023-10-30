@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 #include "cc/base/rtree.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "testing/perf/perf_test.h"
+#include "testing/perf/perf_result_reporter.h"
 
 namespace cc {
 namespace {
@@ -27,7 +27,7 @@ class RTreePerfTest : public testing::Test {
  public:
   RTreePerfTest()
       : timer_(kWarmupRuns,
-               base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
+               base::Milliseconds(kTimeLimitMillis),
                kTimeCheckInterval) {}
 
   void RunConstructTest(const std::string& test_name, int rect_count) {
@@ -39,8 +39,8 @@ class RTreePerfTest : public testing::Test {
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 
-    perf_test::PrintResult("rtree_construct", "", test_name,
-                           timer_.LapsPerSecond(), "runs/s", true);
+    perf_test::PerfResultReporter reporter = SetUpReporter(test_name);
+    reporter.AddResult("_construct", timer_.LapsPerSecond());
   }
 
   void RunSearchTest(const std::string& test_name, int rect_count) {
@@ -65,8 +65,8 @@ class RTreePerfTest : public testing::Test {
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 
-    perf_test::PrintResult("rtree_search", "", test_name,
-                           timer_.LapsPerSecond(), "runs/s", true);
+    perf_test::PerfResultReporter reporter = SetUpReporter(test_name);
+    reporter.AddResult("_search", timer_.LapsPerSecond());
   }
 
   std::vector<gfx::Rect> BuildRects(int count) {
@@ -85,6 +85,13 @@ class RTreePerfTest : public testing::Test {
   }
 
  protected:
+  perf_test::PerfResultReporter SetUpReporter(const std::string& story_name) {
+    perf_test::PerfResultReporter reporter("rtree", story_name);
+    reporter.RegisterImportantMetric("_construct", "runs/s");
+    reporter.RegisterImportantMetric("_search", "runs/s");
+    return reporter;
+  }
+
   base::LapTimer timer_;
 };
 

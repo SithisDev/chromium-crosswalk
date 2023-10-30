@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,7 @@
 
 #include "base/trace_event/traced_value.h"
 #include "cc/cc_export.h"
-
-namespace base {
-class Value;
-}
+#include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_compositor_scheduler_state.pbzero.h"
 
 namespace cc {
 
@@ -27,9 +24,7 @@ enum WhichTree {
   ACTIVE_TREE = 0,
   PENDING_TREE = 1,
   LAST_TREE = 1
-  // Be sure to update WhichTreeAsValue when adding new fields.
 };
-std::unique_ptr<base::Value> WhichTreeAsValue(WhichTree tree);
 
 enum TileResolution {
   LOW_RESOLUTION = 0 ,
@@ -68,6 +63,8 @@ struct CC_EXPORT TilePriority {
 
 std::string TilePriorityBinToString(TilePriority::PriorityBin bin);
 
+// It is expected the values are ordered from most restrictive to least
+// restrictive. See IsTileMemoryLimitPolicyMoreRestictive().
 enum TileMemoryLimitPolicy {
   // Nothing. This mode is used when visible is set to false.
   ALLOW_NOTHING = 0,  // Decaf.
@@ -83,6 +80,10 @@ enum TileMemoryLimitPolicy {
 };
 std::string TileMemoryLimitPolicyToString(TileMemoryLimitPolicy policy);
 
+// Returns true if `policy1` is more restrictive than `policy2`.
+bool IsTileMemoryLimitPolicyMoreRestictive(TileMemoryLimitPolicy policy1,
+                                           TileMemoryLimitPolicy policy2);
+
 enum TreePriority {
   SAME_PRIORITY_FOR_BOTH_TREES,
   SMOOTHNESS_TAKES_PRIORITY,
@@ -90,7 +91,11 @@ enum TreePriority {
   LAST_TREE_PRIORITY = NEW_CONTENT_TAKES_PRIORITY
   // Be sure to update TreePriorityAsValue when adding new fields.
 };
+// TODO(nuskos): remove TreePriorityToString once we have a utility function to
+// take protozero to strings.
 std::string TreePriorityToString(TreePriority prio);
+perfetto::protos::pbzero::ChromeCompositorStateMachine::MinorState::TreePriority
+TreePriorityToProtozeroEnum(TreePriority priority);
 
 class GlobalStateThatImpactsTilePriority {
  public:

@@ -1,11 +1,12 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/paint/paint_cache.h"
 
+#include "base/check_op.h"
 #include "base/containers/flat_set.h"
-#include "base/no_destructor.h"
+#include "base/notreached.h"
 #include "base/synchronization/lock.h"
 
 namespace cc {
@@ -21,6 +22,8 @@ void EraseFromMap(T* map, size_t n, const volatile PaintCacheId* ids) {
 
 }  // namespace
 
+constexpr size_t ClientPaintCache::kNoCachingBudget;
+
 ClientPaintCache::ClientPaintCache(size_t max_budget_bytes)
     : cache_map_(CacheMap::NO_AUTO_EVICT), max_budget_(max_budget_bytes) {}
 ClientPaintCache::~ClientPaintCache() = default;
@@ -32,6 +35,8 @@ bool ClientPaintCache::Get(PaintCacheDataType type, PaintCacheId id) {
 void ClientPaintCache::Put(PaintCacheDataType type,
                            PaintCacheId id,
                            size_t size) {
+  if (max_budget_ == kNoCachingBudget)
+    return;
   auto key = std::make_pair(type, id);
   DCHECK(cache_map_.Peek(key) == cache_map_.end());
 
@@ -85,31 +90,22 @@ bool ClientPaintCache::PurgeAll() {
 ServicePaintCache::ServicePaintCache() = default;
 ServicePaintCache::~ServicePaintCache() = default;
 
-void ServicePaintCache::PutTextBlob(PaintCacheId id, sk_sp<SkTextBlob> blob) {
-  cached_blobs_.emplace(id, std::move(blob));
-}
-
-sk_sp<SkTextBlob> ServicePaintCache::GetTextBlob(PaintCacheId id) {
-  auto it = cached_blobs_.find(id);
-  return it == cached_blobs_.end() ? nullptr : it->second;
-}
-
 void ServicePaintCache::PutPath(PaintCacheId id, SkPath path) {
   cached_paths_.emplace(id, std::move(path));
 }
 
-SkPath* ServicePaintCache::GetPath(PaintCacheId id) {
+bool ServicePaintCache::GetPath(PaintCacheId id, SkPath* path) const {
   auto it = cached_paths_.find(id);
-  return it == cached_paths_.end() ? nullptr : &it->second;
+  if (it == cached_paths_.end())
+    return false;
+  *path = it->second;
+  return true;
 }
 
 void ServicePaintCache::Purge(PaintCacheDataType type,
                               size_t n,
                               const volatile PaintCacheId* ids) {
   switch (type) {
-    case PaintCacheDataType::kTextBlob:
-      EraseFromMap(&cached_blobs_, n, ids);
-      return;
     case PaintCacheDataType::kPath:
       EraseFromMap(&cached_paths_, n, ids);
       return;
@@ -119,7 +115,6 @@ void ServicePaintCache::Purge(PaintCacheDataType type,
 }
 
 void ServicePaintCache::PurgeAll() {
-  cached_blobs_.clear();
   cached_paths_.clear();
 }
 

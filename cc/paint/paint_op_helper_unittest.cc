@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_op_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkTextBlob.h"
 
 namespace cc {
 namespace {
@@ -19,9 +20,12 @@ TEST(PaintOpHelper, AnnotateToString) {
 }
 
 TEST(PaintOpHelper, ClipPathToString) {
-  ClipPathOp op(SkPath(), SkClipOp::kDifference, true);
+  ClipPathOp op(SkPath(), SkClipOp::kDifference, true,
+                UsePaintCache::kDisabled);
   std::string str = PaintOpHelper::ToString(&op);
-  EXPECT_EQ(str, "ClipPathOp(path=<SkPath>, op=kDifference, antialias=true)");
+  EXPECT_EQ(str,
+            "ClipPathOp(path=<SkPath>, op=kDifference, antialias=true, "
+            "use_cache=false)");
 }
 
 TEST(PaintOpHelper, ClipRectToString) {
@@ -43,17 +47,20 @@ TEST(PaintOpHelper, ClipRRectToString) {
 }
 
 TEST(PaintOpHelper, ConcatToString) {
-  ConcatOp op(SkMatrix::MakeAll(1, 2, 3, 4, 5, 6, 7, 8, 9));
+  ConcatOp op(SkM44(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16));
   std::string str = PaintOpHelper::ToString(&op);
   EXPECT_EQ(str,
-            "ConcatOp(matrix=[  1.0000   2.0000   3.0000][  4.0000   5.0000   "
-            "6.0000][  7.0000   8.0000   9.0000])");
+            "ConcatOp(matrix=[  1.0000   2.0000   3.0000   4.0000][  5.0000   "
+            "6.0000   7.0000   8.0000][  9.0000  10.0000  11.0000  12.0000][ "
+            "13.0000  14.0000  15.0000  16.0000]])");
 }
 
 TEST(PaintOpHelper, DrawColorToString) {
-  DrawColorOp op(SkColorSetARGB(11, 22, 33, 44), SkBlendMode::kSrc);
+  DrawColorOp op({0.1, 0.2, 0.3, 0.4}, SkBlendMode::kSrc);
   std::string str = PaintOpHelper::ToString(&op);
-  EXPECT_EQ(str, "DrawColorOp(color=rgba(22, 33, 44, 11), mode=kSrc)");
+  EXPECT_EQ(str,
+            "DrawColorOp(color=rgba(0.100000, 0.200000, 0.300000, 0.400000), "
+            "mode=kSrc)");
 }
 
 TEST(PaintOpHelper, DrawDRRectToString) {
@@ -76,7 +83,7 @@ TEST(PaintOpHelper, DrawDRRectToString) {
 }
 
 TEST(PaintOpHelper, DrawImageToString) {
-  DrawImageOp op(PaintImage(), 10.5f, 20.3f, nullptr);
+  DrawImageOp op(PaintImage(), 10.5f, 20.3f);
   std::string str = PaintOpHelper::ToString(&op);
   EXPECT_EQ(
       str,
@@ -92,8 +99,8 @@ TEST(PaintOpHelper, DrawImageToString) {
 
 TEST(PaintOpHelper, DrawImageRectToString) {
   DrawImageRectOp op(PaintImage(), SkRect::MakeXYWH(1, 2, 3, 4),
-                     SkRect::MakeXYWH(5, 6, 7, 8), nullptr,
-                     PaintCanvas::kStrict_SrcRectConstraint);
+                     SkRect::MakeXYWH(5, 6, 7, 8),
+                     SkCanvas::kStrict_SrcRectConstraint);
   std::string str = PaintOpHelper::ToString(&op);
   EXPECT_EQ(
       str,
@@ -155,7 +162,7 @@ TEST(PaintOpHelper, DrawOvalToString) {
 
 TEST(PaintOpHelper, DrawPathToString) {
   SkPath path;
-  DrawPathOp op(path, PaintFlags());
+  DrawPathOp op(path, PaintFlags(), UsePaintCache::kDisabled);
   std::string str = PaintOpHelper::ToString(&op);
   EXPECT_EQ(str,
             "DrawPathOp(path=<SkPath>, flags=[color=rgba(0, 0, 0, 255), "
@@ -166,7 +173,7 @@ TEST(PaintOpHelper, DrawPathToString) {
             "shader=(nil), hasShader=false, shaderIsOpaque=false, "
             "pathEffect=(nil), imageFilter=(nil), drawLooper=(nil), "
             "isSimpleOpacity=true, supportsFoldingAlpha=true, isValid=true, "
-            "hasDiscardableImages=false])");
+            "hasDiscardableImages=false], use_cache=false)");
 }
 
 TEST(PaintOpHelper, DrawRecordToString) {
@@ -265,7 +272,7 @@ TEST(PaintOpHelper, SaveLayerToString) {
 
 TEST(PaintOpHelper, SaveLayerAlphaToString) {
   SkRect bounds = SkRect::MakeXYWH(1, 2, 3, 4);
-  SaveLayerAlphaOp op(&bounds, 255);
+  SaveLayerAlphaOp op(&bounds, 1.0f);
   std::string str = PaintOpHelper::ToString(&op);
   EXPECT_EQ(str,
             "SaveLayerAlphaOp(bounds=[1.000,2.000 3.000x4.000], alpha=255)");
@@ -278,11 +285,12 @@ TEST(PaintOpHelper, ScaleToString) {
 }
 
 TEST(PaintOpHelper, SetMatrixToString) {
-  SetMatrixOp op(SkMatrix::MakeAll(-1, 2, -3, 4, -5, 6, -7, 8, -9));
+  SetMatrixOp op(SkM44(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16));
   std::string str = PaintOpHelper::ToString(&op);
   EXPECT_EQ(str,
-            "SetMatrixOp(matrix=[ -1.0000   2.0000  -3.0000][  4.0000  -5.0000 "
-            "  6.0000][ -7.0000   8.0000  -9.0000])");
+            "SetMatrixOp(matrix=[  1.0000   2.0000   3.0000   4.0000][  5.0000 "
+            "  6.0000   7.0000   8.0000][  9.0000  10.0000  11.0000  12.0000][ "
+            "13.0000  14.0000  15.0000  16.0000]])");
 }
 
 TEST(PaintOpHelper, TranslateToString) {

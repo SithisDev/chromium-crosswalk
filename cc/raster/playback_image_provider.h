@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "cc/cc_export.h"
 #include "cc/paint/image_id.h"
 #include "cc/paint/image_provider.h"
+#include "cc/paint/target_color_params.h"
 #include "ui/gfx/color_space.h"
 
 namespace cc {
@@ -18,6 +19,7 @@ class ImageDecodeCache;
 // decoded images for raster from the ImageDecodeCache.
 class CC_EXPORT PlaybackImageProvider : public ImageProvider {
  public:
+  enum class RasterMode { kSoftware, kGpu, kOop };
   struct CC_EXPORT Settings {
     Settings();
     Settings(const Settings&) = delete;
@@ -33,12 +35,15 @@ class CC_EXPORT PlaybackImageProvider : public ImageProvider {
     // The frame index to use for the given image id. If no index is provided,
     // the frame index provided in the PaintImage will be used.
     base::flat_map<PaintImage::Id, size_t> image_to_current_frame_index;
+
+    // Indicates the raster backend that will be consuming the decoded images.
+    RasterMode raster_mode = RasterMode::kSoftware;
   };
 
   // If no settings are provided, all images are skipped during rasterization.
   PlaybackImageProvider(ImageDecodeCache* cache,
-                        const gfx::ColorSpace& target_color_space,
-                        base::Optional<Settings>&& settings);
+                        const TargetColorParams& target_color_params,
+                        absl::optional<Settings>&& settings);
   PlaybackImageProvider(const PlaybackImageProvider&) = delete;
   PlaybackImageProvider(PlaybackImageProvider&& other);
   ~PlaybackImageProvider() override;
@@ -52,8 +57,8 @@ class CC_EXPORT PlaybackImageProvider : public ImageProvider {
 
  private:
   ImageDecodeCache* cache_;
-  gfx::ColorSpace target_color_space_;
-  base::Optional<Settings> settings_;
+  TargetColorParams target_color_params_;
+  absl::optional<Settings> settings_;
 };
 
 }  // namespace cc

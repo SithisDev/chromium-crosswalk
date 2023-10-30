@@ -1,4 +1,4 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
+// Copyright 2011 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,35 +9,44 @@
 
 #include <memory>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
+#include "base/containers/lru_cache.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/shared_memory_mapping.h"
-#include "base/sequenced_task_runner.h"
+#include "base/rand_util.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
-#include "cc/base/synced_property.h"
 #include "cc/benchmarks/micro_benchmark_controller_impl.h"
 #include "cc/cc_export.h"
+#include "cc/input/actively_scrolling_type.h"
 #include "cc/input/browser_controls_offset_manager_client.h"
 #include "cc/input/input_handler.h"
 #include "cc/input/scrollbar_animation_controller.h"
-#include "cc/input/scrollbar_controller.h"
 #include "cc/layers/layer_collections.h"
+#include "cc/metrics/average_lag_tracking_manager.h"
+#include "cc/metrics/dropped_frame_counter.h"
+#include "cc/metrics/event_latency_tracker.h"
+#include "cc/metrics/event_metrics.h"
+#include "cc/metrics/events_metrics_manager.h"
+#include "cc/metrics/frame_sequence_tracker_collection.h"
+#include "cc/metrics/total_frame_counter.h"
 #include "cc/paint/paint_worklet_job.h"
-#include "cc/resources/ui_resource_client.h"
 #include "cc/scheduler/begin_frame_tracker.h"
 #include "cc/scheduler/commit_earlyout_reason.h"
 #include "cc/scheduler/draw_result.h"
 #include "cc/scheduler/scheduler.h"
 #include "cc/scheduler/video_frame_controller.h"
-#include "cc/tiles/decoded_image_tracker.h"
-#include "cc/tiles/image_decode_cache.h"
 #include "cc/tiles/tile_manager.h"
-#include "cc/trees/frame_sequence_tracker.h"
+#include "cc/trees/animated_paint_worklet_tracker.h"
+#include "cc/trees/de_jelly_state.h"
+#include "cc/trees/frame_rate_estimator.h"
 #include "cc/trees/layer_tree_frame_sink_client.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_mutator.h"
@@ -47,35 +56,35 @@
 #include "cc/trees/presentation_time_callback_buffer.h"
 #include "cc/trees/render_frame_metadata.h"
 #include "cc/trees/task_runner_provider.h"
+#include "cc/trees/throttle_decider.h"
 #include "cc/trees/ukm_manager.h"
 #include "components/viz/client/client_resource_provider.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/gpu/context_cache_controller.h"
-#include "components/viz/common/quads/render_pass.h"
+#include "components/viz/common/quads/compositor_render_pass.h"
 #include "components/viz/common/surfaces/child_local_surface_id_allocator.h"
 #include "components/viz/common/surfaces/local_surface_id.h"
+#include "components/viz/common/surfaces/region_capture_bounds.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "components/viz/common/surfaces/surface_range.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/latency/frame_metrics.h"
 
 namespace gfx {
-class ScrollOffset;
-}
-
-namespace viz {
-class CompositorFrame;
-class CompositorFrameMetadata;
+class PointF;
 }
 
 namespace cc {
 
 class BrowserControlsOffsetManager;
 class CompositorFrameReportingController;
+class RasterDarkModeFilter;
 class DebugRectHistory;
 class EvictionTilePriorityQueue;
-class FrameRateCounter;
 class ImageAnimationController;
+class ImageDecodeCache;
+class LCDTextMetricsReporter;
+class LatencyInfoSwapPromiseMonitor;
 class LayerImpl;
 class LayerTreeFrameSink;
 class LayerTreeImpl;
@@ -84,16 +93,13 @@ class MemoryHistory;
 class MutatorEvents;
 class MutatorHost;
 class PageScaleAnimation;
-class PendingTreeDurationHistogramTimer;
-class PendingTreeRasterDurationHistogramTimer;
 class RasterTilePriorityQueue;
 class RasterBufferProvider;
+class RasterQueryQueue;
 class RenderFrameMetadataObserver;
 class RenderingStatsInstrumentation;
 class ResourcePool;
-class ScrollElasticityHelper;
 class SwapPromise;
-class SwapPromiseMonitor;
 class SynchronousTaskGraphRunner;
 class TaskGraphRunner;
 class UIResourceBitmap;
@@ -101,15 +107,8 @@ class Viewport;
 
 enum class GpuRasterizationStatus {
   ON,
-  ON_FORCED,
+  OFF_FORCED,
   OFF_DEVICE,
-  OFF_VIEWPORT,
-  MSAA_CONTENT,
-};
-
-enum class ImplThreadPhase {
-  IDLE,
-  INSIDE_IMPL_FRAME,
 };
 
 // LayerTreeHost->Proxy callback interface.
@@ -120,6 +119,7 @@ class LayerTreeHostImplClient {
   virtual void DidReceiveCompositorFrameAckOnImplThread() = 0;
   virtual void OnCanDrawStateChanged(bool can_draw) = 0;
   virtual void NotifyReadyToActivate() = 0;
+  virtual bool IsReadyToActivate() = 0;
   virtual void NotifyReadyToDraw() = 0;
   // Please call these 2 functions through
   // LayerTreeHostImpl's SetNeedsRedraw() and SetNeedsOneBeginImplFrame().
@@ -128,8 +128,7 @@ class LayerTreeHostImplClient {
   virtual void SetNeedsCommitOnImplThread() = 0;
   virtual void SetNeedsPrepareTilesOnImplThread() = 0;
   virtual void SetVideoNeedsBeginFrames(bool needs_begin_frames) = 0;
-  virtual void PostAnimationEventsToMainThreadOnImplThread(
-      std::unique_ptr<MutatorEvents> events) = 0;
+  virtual void SetDeferBeginMainFrameFromImpl(bool defer_begin_main_frame) = 0;
   virtual bool IsInsideDraw() = 0;
   virtual void RenewTreePriority() = 0;
   virtual void PostDelayedAnimationTaskOnImplThread(base::OnceClosure task,
@@ -150,17 +149,15 @@ class LayerTreeHostImplClient {
   // Called when a requested image decode completes.
   virtual void NotifyImageDecodeRequestFinished() = 0;
 
-  virtual void RequestBeginMainFrameNotExpected(bool new_state) = 0;
+  virtual void NotifyTransitionRequestFinished(uint32_t sequence_id) = 0;
 
   // Called when a presentation time is requested. |frame_token| identifies
-  // the frame that was presented.
+  // the frame that was presented. |callbacks| holds both impl side and main
+  // side callbacks to be called.
   virtual void DidPresentCompositorFrameOnImplThread(
       uint32_t frame_token,
-      std::vector<LayerTreeHost::PresentationTimeCallback> callbacks,
-      const gfx::PresentationFeedback& feedback) = 0;
-
-  // Returns whether the main-thread is expected to receive a BeginMainFrame.
-  virtual bool IsBeginMainFrameExpected() = 0;
+      PresentationTimeCallbackBuffer::PendingCallbacks callbacks,
+      const viz::FrameTimingDetails& details) = 0;
 
   virtual void NotifyAnimationWorkletStateChange(
       AnimationWorkletMutationState state,
@@ -169,20 +166,42 @@ class LayerTreeHostImplClient {
   virtual void NotifyPaintWorkletStateChange(
       Scheduler::PaintWorkletState state) = 0;
 
+  virtual void NotifyThroughputTrackerResults(CustomTrackerResults results) = 0;
+
+  virtual void DidObserveFirstScrollDelay(
+      base::TimeDelta first_scroll_delay,
+      base::TimeTicks first_scroll_timestamp) = 0;
+
+  // Returns true if the client is currently compositing synchronously. This is
+  // only true in tests, but some behavior needs to be synchronized in non-test
+  // code as a result.
+  virtual bool IsInSynchronousComposite() const = 0;
+
+  virtual void FrameSinksToThrottleUpdated(
+      const base::flat_set<viz::FrameSinkId>& ids) = 0;
+
+  virtual void ClearHistory() = 0;
+
+  virtual size_t CommitDurationSampleCountForTesting() const = 0;
+
+  virtual void ReportEventLatency(
+      std::vector<EventLatencyTracker::LatencyData> latencies) = 0;
+
  protected:
-  virtual ~LayerTreeHostImplClient() {}
+  virtual ~LayerTreeHostImplClient() = default;
 };
 
 // LayerTreeHostImpl owns the LayerImpl trees as well as associated rendering
 // state.
-class CC_EXPORT LayerTreeHostImpl : public InputHandler,
-                                    public TileManagerClient,
+class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
                                     public LayerTreeFrameSinkClient,
                                     public BrowserControlsOffsetManagerClient,
                                     public ScrollbarAnimationControllerClient,
                                     public VideoFrameControllerClient,
                                     public MutatorHostClient,
-                                    public ImageAnimationController::Client {
+                                    public ImageAnimationController::Client,
+                                    public CompositorDelegateForInput,
+                                    public EventLatencyTracker {
  public:
   // This structure is used to build all the state required for producing a
   // single CompositorFrame. The |render_passes| list becomes the set of
@@ -195,15 +214,18 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
     FrameData& operator=(const FrameData&) = delete;
     void AsValueInto(base::trace_event::TracedValue* value) const;
+    std::string ToString() const;
 
-    uint32_t frame_token = 0;
     // frame_token is populated by the LayerTreeHostImpl when submitted.
+    uint32_t frame_token = 0;
+
+    bool has_missing_content = false;
 
     std::vector<viz::SurfaceId> activation_dependencies;
-    base::Optional<uint32_t> deadline_in_frames;
+    absl::optional<uint32_t> deadline_in_frames;
     bool use_default_lower_bound_deadline = false;
-    viz::RenderPassList render_passes;
-    const RenderSurfaceList* render_surface_list = nullptr;
+    viz::CompositorRenderPassList render_passes;
+    raw_ptr<const RenderSurfaceList> render_surface_list = nullptr;
     LayerImplList will_draw_layers;
     bool has_no_damage = false;
     bool may_contain_video = false;
@@ -211,10 +233,7 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
     // The original BeginFrameArgs that triggered the latest update from the
     // main thread.
     viz::BeginFrameArgs origin_begin_main_frame_args;
-
-    // Union of visible rects of MirrorLayers in the frame, used to force damage
-    // on the surface.
-    gfx::Rect mirror_rect;
+    bool has_shared_element_resources = false;
   };
 
   // A struct of data for a single UIResource, including the backing
@@ -249,75 +268,47 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
       RenderingStatsInstrumentation* rendering_stats_instrumentation,
       TaskGraphRunner* task_graph_runner,
       std::unique_ptr<MutatorHost> mutator_host,
+      RasterDarkModeFilter* dark_mode_filter,
       int id,
-      scoped_refptr<base::SequencedTaskRunner> image_worker_task_runner);
+      scoped_refptr<base::SequencedTaskRunner> image_worker_task_runner,
+      LayerTreeHostSchedulingClient* scheduling_client);
   LayerTreeHostImpl(const LayerTreeHostImpl&) = delete;
   ~LayerTreeHostImpl() override;
 
   LayerTreeHostImpl& operator=(const LayerTreeHostImpl&) = delete;
 
-  // InputHandler implementation
-  void BindToClient(InputHandlerClient* client) override;
-  InputHandler::ScrollStatus ScrollBegin(
-      ScrollState* scroll_state,
-      InputHandler::ScrollInputType type) override;
-  InputHandler::ScrollStatus RootScrollBegin(
-      ScrollState* scroll_state,
-      InputHandler::ScrollInputType type) override;
-  ScrollStatus ScrollAnimatedBegin(ScrollState* scroll_state) override;
-  InputHandler::ScrollStatus ScrollAnimated(
-      const gfx::Point& viewport_point,
-      const gfx::Vector2dF& scroll_delta,
-      base::TimeDelta delayed_by = base::TimeDelta()) override;
-  void ApplyScroll(ScrollNode* scroll_node, ScrollState* scroll_state);
-  InputHandlerScrollResult ScrollBy(ScrollState* scroll_state) override;
-  void RequestUpdateForSynchronousInputHandler() override;
-  void SetSynchronousInputHandlerRootScrollOffset(
-      const gfx::ScrollOffset& root_content_offset) override;
-  void ScrollEnd(ScrollState* scroll_state, bool should_snap = false) override;
+  // TODO(bokan): This getter is an escape-hatch for code that hasn't yet been
+  // cleaned up to decouple input from graphics. Callers should be cleaned up
+  // to avoid calling it and it should be removed.
+  InputHandler& GetInputHandler();
+  const InputHandler& GetInputHandler() const;
 
-  InputHandlerPointerResult MouseDown(
-      const gfx::PointF& viewport_point) override;
-  InputHandlerPointerResult MouseUp(const gfx::PointF& viewport_point) override;
-  InputHandlerPointerResult MouseMoveAt(
-      const gfx::Point& viewport_point) override;
-  void MouseLeave() override;
-
-  void PinchGestureBegin() override;
-  void PinchGestureUpdate(float magnify_delta,
-                          const gfx::Point& anchor) override;
-  void PinchGestureEnd(const gfx::Point& anchor, bool snap_to_min) override;
-  void StartPageScaleAnimation(const gfx::Vector2d& target_offset,
+  void StartPageScaleAnimation(const gfx::Point& target_offset,
                                bool anchor_point,
                                float page_scale,
                                base::TimeDelta duration);
-  void SetNeedsAnimateInput() override;
-  bool IsCurrentlyScrollingViewport() const override;
-  bool IsCurrentlyScrollingLayerAt(
-      const gfx::Point& viewport_point) const override;
-  EventListenerProperties GetEventListenerProperties(
-      EventListenerClass event_class) const override;
-  InputHandler::TouchStartOrMoveEventListenerType
-  EventListenerTypeForTouchStartOrMoveAt(
-      const gfx::Point& viewport_port,
-      TouchAction* out_touch_action) override;
-  bool HasBlockingWheelEventHandlerAt(
-      const gfx::Point& viewport_point) const override;
-  std::unique_ptr<SwapPromiseMonitor> CreateLatencyInfoSwapPromiseMonitor(
-      ui::LatencyInfo* latency) override;
-  ScrollElasticityHelper* CreateScrollElasticityHelper() override;
-  bool GetScrollOffsetForLayer(ElementId element_id,
-                               gfx::ScrollOffset* offset) override;
-  bool ScrollLayerTo(ElementId element_id,
-                     const gfx::ScrollOffset& offset) override;
-  bool ScrollingShouldSwitchtoMainThread() override;
+  void SetNeedsAnimateInput();
+  std::unique_ptr<LatencyInfoSwapPromiseMonitor>
+  CreateLatencyInfoSwapPromiseMonitor(ui::LatencyInfo* latency);
+  std::unique_ptr<EventsMetricsManager::ScopedMonitor>
+  GetScopedEventMetricsMonitor(
+      EventsMetricsManager::ScopedMonitor::DoneCallback done_callback);
+  void NotifyInputEvent();
 
   // BrowserControlsOffsetManagerClient implementation.
   float TopControlsHeight() const override;
+  float TopControlsMinHeight() const override;
   float BottomControlsHeight() const override;
-  void SetCurrentBrowserControlsShownRatio(float offset) override;
-  float CurrentBrowserControlsShownRatio() const override;
+  float BottomControlsMinHeight() const override;
+  void SetCurrentBrowserControlsShownRatio(float top_ratio,
+                                           float bottom_ratio) override;
+  float CurrentTopControlsShownRatio() const override;
+  float CurrentBottomControlsShownRatio() const override;
+  gfx::PointF ViewportScrollOffset() const override;
   void DidChangeBrowserControlsPosition() override;
+  void DidObserveScrollDelay(base::TimeDelta scroll_delay,
+                             base::TimeTicks scroll_timestamp);
+  bool OnlyExpandTopControlsAtPageTop() const override;
   bool HaveRootScrollNode() const override;
   void SetNeedsCommit() override;
 
@@ -326,8 +317,6 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   void RequestInvalidationForAnimatedImages() override;
 
   base::WeakPtr<LayerTreeHostImpl> AsWeakPtr();
-
-  void UpdateViewportContainerSizes();
 
   void set_resourceless_software_draw_for_testing() {
     resourceless_software_draw_ = true;
@@ -342,11 +331,21 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   virtual void BeginMainFrameAborted(
       CommitEarlyOutReason reason,
       std::vector<std::unique_ptr<SwapPromise>> swap_promises,
-      const viz::BeginFrameArgs& args);
-  virtual void ReadyToCommit() {}  // For tests.
-  virtual void BeginCommit();
+      const viz::BeginFrameArgs& args,
+      bool next_bmf,
+      bool scroll_and_viewport_changes_synced);
+  virtual void ReadyToCommit(
+      const viz::BeginFrameArgs& commit_args,
+      bool scroll_and_viewport_changes_synced,
+      const BeginMainFrameMetrics* begin_main_frame_metrics,
+      bool commit_timeout = false);
+  virtual void BeginCommit(int source_frame_number, uint64_t trace_id);
+  virtual void FinishCommit(CommitState& commit_state,
+                            const ThreadUnsafeCommitState& unsafe_state);
   virtual void CommitComplete();
   virtual void UpdateAnimationState(bool start_ready_animations);
+  void PullLayerTreeHostPropertiesFrom(const CommitState&);
+  void RecordGpuRasterizationHistogram();
   bool Mutate(base::TimeTicks monotonic_time);
   void ActivateAnimations();
   void Animate();
@@ -355,9 +354,57 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   void SetFullViewportDamage();
   void SetViewportDamage(const gfx::Rect& damage_rect);
 
-  // Updates registered ElementIds present in |changed_list|. Call this after
-  // changing the property trees for the |changed_list| trees.
-  void UpdateElements(ElementListType changed_list);
+  // Interface for InputHandler
+  void BindToInputHandler(
+      std::unique_ptr<InputDelegateForCompositor> delegate) override;
+  ScrollTree& GetScrollTree() const override;
+  bool HasAnimatedScrollbars() const override;
+  // Already overridden for BrowserControlsOffsetManagerClient which declares a
+  // method of the same name.
+  // void SetNeedsCommit();
+  void SetNeedsFullViewportRedraw() override;
+  void DidUpdateScrollAnimationCurve() override;
+  void AccumulateScrollDeltaForTracing(const gfx::Vector2dF& delta) override;
+  void DidStartPinchZoom() override;
+  void DidUpdatePinchZoom() override;
+  void DidEndPinchZoom() override;
+  void DidStartScroll() override;
+  void DidEndScroll() override;
+  void DidMouseLeave() override;
+  bool IsInHighLatencyMode() const override;
+  void WillScrollContent(ElementId element_id) override;
+  void DidScrollContent(ElementId element_id, bool animated) override;
+  float DeviceScaleFactor() const override;
+  float PageScaleFactor() const override;
+  gfx::Size VisualDeviceViewportSize() const override;
+  const LayerTreeSettings& GetSettings() const override;
+  LayerTreeHostImpl& GetImplDeprecated() override;
+  const LayerTreeHostImpl& GetImplDeprecated() const override;
+  void SetDeferBeginMainFrame(bool defer_begin_main_frame) const override;
+
+  bool CanInjectJankOnMain() const;
+  FrameSequenceTrackerCollection& frame_trackers() { return frame_trackers_; }
+
+  // VisualDeviceViewportSize is the size of the global viewport across all
+  // compositors that are part of the scene that this compositor contributes to
+  // (i.e. the visual viewport), allowing for that scene to be broken up into
+  // multiple compositors that each contribute to the whole (e.g. cross-origin
+  // iframes are isolated from each other). This is a size instead of a rect
+  // because each compositor doesn't know its position relative to other
+  // compositors. This is specified in device viewport coordinate space.
+  void SetVisualDeviceViewportSize(const gfx::Size&);
+
+  void set_viewport_mobile_optimized(bool viewport_mobile_optimized) {
+    is_viewport_mobile_optimized_ = viewport_mobile_optimized;
+  }
+
+  bool viewport_mobile_optimized() const {
+    return is_viewport_mobile_optimized_;
+  }
+
+  void SetPrefersReducedMotion(bool prefers_reduced_motion);
+
+  void SetMayThrottleIfUndrawnFrames(bool may_throttle_if_undrawn_frames);
 
   // Analogous to a commit, this function is used to create a sync tree and
   // add impl-side invalidations to it.
@@ -367,11 +414,16 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   void SetTreeLayerScrollOffsetMutated(ElementId element_id,
                                        LayerTreeImpl* tree,
-                                       const gfx::ScrollOffset& scroll_offset);
+                                       const gfx::PointF& scroll_offset);
   void SetNeedUpdateGpuRasterizationStatus();
   bool NeedUpdateGpuRasterizationStatusForTesting() const {
     return need_update_gpu_rasterization_status_;
   }
+
+  // ProtectedSequenceSynchronizer implementation.
+  bool IsOwnerThread() const override;
+  bool InProtectedSequence() const override;
+  void WaitForProtectedSequenceCompletion() const override;
 
   // MutatorHostClient implementation.
   bool IsElementInPropertyTrees(ElementId element_id,
@@ -391,35 +443,44 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   void SetElementTransformMutated(ElementId element_id,
                                   ElementListType list_type,
                                   const gfx::Transform& transform) override;
-  void SetElementScrollOffsetMutated(
-      ElementId element_id,
-      ElementListType list_type,
-      const gfx::ScrollOffset& scroll_offset) override;
+  void SetElementScrollOffsetMutated(ElementId element_id,
+                                     ElementListType list_type,
+                                     const gfx::PointF& scroll_offset) override;
   void ElementIsAnimatingChanged(const PropertyToElementIdMap& element_id_map,
                                  ElementListType list_type,
                                  const PropertyAnimationState& mask,
                                  const PropertyAnimationState& state) override;
-  void AnimationScalesChanged(ElementId element_id,
-                              ElementListType list_type,
-                              float maximum_scale,
-                              float starting_scale) override;
+  void MaximumScaleChanged(ElementId element_id,
+                           ElementListType list_type,
+                           float maximum_scale) override;
+  void OnCustomPropertyMutated(
+      PaintWorkletInput::PropertyKey property_key,
+      PaintWorkletInput::PropertyValue property_value) override;
+
+  bool RunsOnCurrentThread() const override;
 
   void ScrollOffsetAnimationFinished() override;
-  gfx::ScrollOffset GetScrollOffsetForAnimation(
-      ElementId element_id) const override;
 
   void NotifyAnimationWorkletStateChange(AnimationWorkletMutationState state,
                                          ElementListType tree_type) override;
 
   virtual bool PrepareTiles();
 
-  // Returns DRAW_SUCCESS unless problems occured preparing the frame, and we
-  // should try to avoid displaying the frame. If PrepareToDraw is called,
-  // DidDrawAllLayers must also be called, regardless of whether DrawLayers is
-  // called between the two.
+  // Returns `DRAW_SUCCESS` unless problems occurred preparing the frame, and we
+  // should try to avoid displaying the frame. If `PrepareToDraw()` is called,
+  // `DidDrawAllLayers()` must also be called, regardless of whether
+  // `DrawLayers()` is called between the two.
   virtual DrawResult PrepareToDraw(FrameData* frame);
-  virtual bool DrawLayers(FrameData* frame);
-  viz::CompositorFrame GenerateCompositorFrame(FrameData* frame);
+
+  // If there is no damage, returns `absl::nullopt`; otherwise, returns
+  // information about the submitted frame including submit time and a set of
+  // `EventMetrics` for the frame.
+  struct SubmitInfo {
+    base::TimeTicks time;
+    EventMetricsSet events_metrics;
+  };
+  virtual absl::optional<SubmitInfo> DrawLayers(FrameData* frame);
+
   // Must be called if and only if PrepareToDraw was called.
   void DidDrawAllLayers(const FrameData& frame);
 
@@ -430,8 +491,11 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   // When blocking, this prevents client_->NotifyReadyToActivate() from being
   // called. When disabled, it calls client_->NotifyReadyToActivate()
-  // immediately if any notifications had been blocked while blocking.
-  virtual void BlockNotifyReadyToActivateForTesting(bool block);
+  // immediately if any notifications had been blocked while blocking and
+  // notify_if_blocked is true.
+  virtual void BlockNotifyReadyToActivateForTesting(
+      bool block,
+      bool notify_if_blocked = true);
 
   // Prevents notifying the |client_| when an impl side invalidation request is
   // made. When unblocked, the disabled request will immediately be called.
@@ -444,7 +508,10 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   void RegisterScrollbarAnimationController(ElementId scroll_element_id,
                                             float initial_opacity);
-  void UnregisterScrollbarAnimationController(ElementId scroll_element_id);
+  void DidRegisterScrollbarLayer(ElementId scroll_element_id,
+                                 ScrollbarOrientation orientation);
+  void DidUnregisterScrollbarLayer(ElementId scroll_element_id,
+                                   ScrollbarOrientation orientation);
   ScrollbarAnimationController* ScrollbarAnimationControllerForElementId(
       ElementId scroll_element_id) const;
   void FlashAllScrollbars(bool did_scroll);
@@ -464,10 +531,17 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   std::unique_ptr<EvictionTilePriorityQueue> BuildEvictionQueue(
       TreePriority tree_priority) override;
   void SetIsLikelyToRequireADraw(bool is_likely_to_require_a_draw) override;
-  const gfx::ColorSpace& GetRasterColorSpace() const override;
+  std::unique_ptr<TilesWithResourceIterator> CreateTilesWithResourceIterator()
+      override;
+  TargetColorParams GetTargetColorParams(
+      gfx::ContentColorUsage content_color_usage) const override;
   void RequestImplSideInvalidationForCheckerImagedTiles() override;
   size_t GetFrameIndexForImage(const PaintImage& paint_image,
                                WhichTree tree) const override;
+  int GetMSAASampleCountForRaster(
+      const scoped_refptr<DisplayItemList>& display_list) override;
+
+  bool HasPendingTree() override;
 
   // ScrollbarAnimationControllerClient implementation.
   void PostDelayedScrollbarAnimationTask(base::OnceClosure task,
@@ -476,6 +550,7 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   void SetNeedsRedrawForScrollbarAnimation() override;
   ScrollbarSet ScrollbarsFor(ElementId scroll_element_id) const override;
   void DidChangeScrollbarVisibility() override;
+  bool IsFluentScrollbar() const override;
 
   // VideoBeginFrameSource implementation.
   void AddVideoFrameController(VideoFrameController* controller) override;
@@ -486,20 +561,25 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   void SetExternalTilePriorityConstraints(
       const gfx::Rect& viewport_rect,
       const gfx::Transform& transform) override;
-  base::Optional<viz::HitTestRegionList> BuildHitTestData() override;
+  absl::optional<viz::HitTestRegionList> BuildHitTestData() override;
   void DidLoseLayerTreeFrameSink() override;
   void DidReceiveCompositorFrameAck() override;
   void DidPresentCompositorFrame(
       uint32_t frame_token,
-      const gfx::PresentationFeedback& feedback) override;
-  void ReclaimResources(
-      const std::vector<viz::ReturnedResource>& resources) override;
+      const viz::FrameTimingDetails& details) override;
+  void ReclaimResources(std::vector<viz::ReturnedResource> resources) override;
   void SetMemoryPolicy(const ManagedMemoryPolicy& policy) override;
   void SetTreeActivationCallback(base::RepeatingClosure callback) override;
   void OnDraw(const gfx::Transform& transform,
               const gfx::Rect& viewport,
               bool resourceless_software_draw,
               bool skip_draw) override;
+  void OnCompositorFrameTransitionDirectiveProcessed(
+      uint32_t sequence_id) override;
+
+  // EventLatencyTracker implementation.
+  void ReportEventLatency(
+      std::vector<EventLatencyTracker::LatencyData> latencies) override;
 
   // Called from LayerTreeImpl.
   void OnCanDrawStateChangedForTree();
@@ -518,16 +598,11 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   virtual bool InitializeFrameSink(LayerTreeFrameSink* layer_tree_frame_sink);
   TileManager* tile_manager() { return &tile_manager_; }
 
-  void SetHasGpuRasterizationTrigger(bool flag);
-  void SetContentHasSlowPaths(bool flag);
-  void SetContentHasNonAAPaint(bool flag);
   void GetGpuRasterizationCapabilities(bool* gpu_rasterization_enabled,
                                        bool* gpu_rasterization_supported,
-                                       int* max_msaa_samples,
+                                       bool* can_use_msaa,
                                        bool* supports_disable_msaa);
   bool use_gpu_rasterization() const { return use_gpu_rasterization_; }
-  bool use_oop_rasterization() const { return use_oop_rasterization_; }
-  bool use_msaa() const { return use_msaa_; }
 
   GpuRasterizationStatus gpu_rasterization_status() const {
     return gpu_rasterization_status_;
@@ -544,10 +619,37 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   uint32_t next_frame_token() const { return *next_frame_token_; }
 
+  // Buffers `callback` until a relevant presentation feedback arrives, at which
+  // point the callback will be posted to run on the main thread. A presentation
+  // feedback is considered relevant if the frame's token is greater than or
+  // equal to `frame_token`.
+  void RegisterMainThreadPresentationTimeCallbackForTesting(
+      uint32_t frame_token,
+      PresentationTimeCallbackBuffer::MainCallback callback);
+
+  // Buffers `callback` until a relevant successful presentation occurs, at
+  // which point the callback will be run on the compositor thread. A successful
+  // presentation is considered relevant if the presented frame's token is
+  // greater than or equal to `frame_token`.
+  void RegisterCompositorPresentationTimeCallback(
+      uint32_t frame_token,
+      PresentationTimeCallbackBuffer::CompositorCallback callback);
+
   virtual bool WillBeginImplFrame(const viz::BeginFrameArgs& args);
-  virtual void DidFinishImplFrame();
-  void DidNotProduceFrame(const viz::BeginFrameAck& ack);
+  virtual void DidFinishImplFrame(const viz::BeginFrameArgs& args);
+  void DidNotProduceFrame(const viz::BeginFrameAck& ack,
+                          FrameSkippedReason reason);
   void DidModifyTilePriorities();
+  // Requests that we do not produce frames until the new viz::LocalSurfaceId
+  // has been activated.
+  void SetTargetLocalSurfaceId(
+      const viz::LocalSurfaceId& target_local_surface_id);
+  const viz::LocalSurfaceId& target_local_surface_id() const {
+    return target_local_surface_id_;
+  }
+  const viz::LocalSurfaceId& last_draw_local_surface_id() const {
+    return last_draw_local_surface_id_;
+  }
 
   LayerTreeImpl* active_tree() { return active_tree_.get(); }
   const LayerTreeImpl* active_tree() const { return active_tree_.get(); }
@@ -563,29 +665,33 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   virtual void ActivateSyncTree();
 
   // Shortcuts to layers/nodes on the active tree.
-  LayerImpl* InnerViewportContainerLayer() const;
-  LayerImpl* InnerViewportScrollLayer() const;
   ScrollNode* InnerViewportScrollNode() const;
-  LayerImpl* OuterViewportContainerLayer() const;
-  LayerImpl* OuterViewportScrollLayer() const;
   ScrollNode* OuterViewportScrollNode() const;
   ScrollNode* CurrentlyScrollingNode();
   const ScrollNode* CurrentlyScrollingNode() const;
 
-  bool scroll_affects_scroll_handler() const {
-    return scroll_affects_scroll_handler_;
-  }
   void QueueSwapPromiseForMainThreadScrollUpdate(
       std::unique_ptr<SwapPromise> swap_promise);
 
-  bool IsActivelyScrolling() const;
+  // TODO(bokan): These input-related methods shouldn't be part of
+  // LayerTreeHostImpl's interface.
+  bool IsPinchGestureActive() const;
+  // See comment in equivalent InputHandler method for what this means.
+  ActivelyScrollingType GetActivelyScrollingType() const;
+  bool ScrollAffectsScrollHandler() const;
+  bool CurrentScrollCheckerboardsDueToNoRecording() const {
+    return current_scroll_did_checkerboard_large_area_;
+  }
+  void SetCurrentScrollCheckerboardsDueToNoRecording() {
+    current_scroll_did_checkerboard_large_area_ = true;
+  }
+  void SetExternalPinchGestureActive(bool active);
+  void set_force_smooth_wheel_scrolling_for_testing(bool enabled) {
+    GetInputHandler().set_force_smooth_wheel_scrolling_for_testing(enabled);
+  }
 
   virtual void SetVisible(bool visible);
   bool visible() const { return visible_; }
-
-  bool is_animating_for_snap_for_testing() const {
-    return is_animating_for_snap_;
-  }
 
   void SetNeedsOneBeginImplFrame();
   void SetNeedsRedraw();
@@ -594,8 +700,14 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   const gfx::Transform& DrawTransform() const;
 
-  std::unique_ptr<ScrollAndScaleSet> ProcessScrollDeltas();
-  FrameRateCounter* fps_counter() { return fps_counter_.get(); }
+  // During commit, processes and returns changes in the compositor since the
+  // last commit.
+  std::unique_ptr<CompositorCommitData> ProcessCompositorDeltas(
+      const MutatorHost* main_thread_mutator_host);
+
+  DroppedFrameCounter* dropped_frame_counter() {
+    return &dropped_frame_counter_;
+  }
   MemoryHistory* memory_history() { return memory_history_.get(); }
   DebugRectHistory* debug_rect_history() { return debug_rect_history_.get(); }
   viz::ClientResourceProvider* resource_provider() {
@@ -617,31 +729,12 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   void SetDebugState(const LayerTreeDebugState& new_debug_state);
   const LayerTreeDebugState& debug_state() const { return debug_state_; }
 
-  gfx::Vector2dF accumulated_root_overscroll() const {
-    return accumulated_root_overscroll_;
-  }
-
-  bool pinch_gesture_active() const {
-    return pinch_gesture_active_ || external_pinch_gesture_active_;
-  }
-  // Used to set the pinch gesture active state when the pinch gesture is
-  // handled on another layer tree. In a page with OOPIFs, only the main
-  // frame's layer tree directly handles pinch events. But layer trees for
-  // sub-frames need to know when pinch gestures are active so they can
-  // throttle the re-rastering. This function allows setting this flag on
-  // OOPIF layer trees using information sent (initially) from the main-frame.
-  void set_external_pinch_gesture_active(bool external_pinch_gesture_active) {
-    external_pinch_gesture_active_ = external_pinch_gesture_active;
-    // Only one of the flags should ever be true at any given time.
-    DCHECK(!pinch_gesture_active_ || !external_pinch_gesture_active_);
-  }
-
   void SetTreePriority(TreePriority priority);
   TreePriority GetTreePriority() const;
 
   // TODO(mithro): Remove this methods which exposes the internal
   // viz::BeginFrameArgs to external callers.
-  virtual viz::BeginFrameArgs CurrentBeginFrameArgs() const;
+  virtual const viz::BeginFrameArgs& CurrentBeginFrameArgs() const;
 
   // Expected time between two begin impl frame calls.
   base::TimeDelta CurrentBeginFrameInterval() const;
@@ -667,20 +760,9 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   virtual bool IsUIResourceOpaque(UIResourceId uid) const;
 
-  // This method gets the scroll offset for a regular scroller, or the combined
-  // visual and layout offsets of the viewport.
-  gfx::ScrollOffset GetVisualScrollOffset(const ScrollNode& scroll_node) const;
-
-  bool GetSnapFlingInfo(const gfx::Vector2dF& natural_displacement_in_viewport,
-                        gfx::Vector2dF* out_initial_position,
-                        gfx::Vector2dF* out_target_position) const override;
-
-  // Returns the amount of delta that can be applied to scroll_node, taking
-  // page scale into account.
-  gfx::Vector2dF ComputeScrollDelta(const ScrollNode& scroll_node,
-                                    const gfx::Vector2dF& delta);
-
   void ScheduleMicroBenchmark(std::unique_ptr<MicroBenchmarkImpl> benchmark);
+
+  viz::RegionCaptureBounds CollectRegionCaptureBounds();
 
   viz::CompositorFrameMetadata MakeCompositorFrameMetadata();
   RenderFrameMetadata MakeRenderFrameMetadata(FrameData* frame);
@@ -693,12 +775,14 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
     return viewport_rect_for_tile_priority_;
   }
 
-  // When a SwapPromiseMonitor is created on the impl thread, it calls
-  // InsertSwapPromiseMonitor() to register itself with LayerTreeHostImpl.
-  // When the monitor is destroyed, it calls RemoveSwapPromiseMonitor()
-  // to unregister itself.
-  void InsertSwapPromiseMonitor(SwapPromiseMonitor* monitor);
-  void RemoveSwapPromiseMonitor(SwapPromiseMonitor* monitor);
+  // When a `LatencyInfoSwapPromiseMonitor` is created on the impl thread, it
+  // calls `InsertLatencyInfoSwapPromiseMonitor()` to register itself with
+  // `LayerTreeHostImpl`. When the monitor is destroyed, it calls
+  // `RemoveLatencyInfoSwapPromiseMonitor()` to unregister itself.
+  void InsertLatencyInfoSwapPromiseMonitor(
+      LatencyInfoSwapPromiseMonitor* monitor);
+  void RemoveLatencyInfoSwapPromiseMonitor(
+      LatencyInfoSwapPromiseMonitor* monitor);
 
   // TODO(weiliangc): Replace RequiresHighResToDraw with scheduler waits for
   // ReadyToDraw. crbug.com/469175
@@ -709,19 +793,12 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   // Only valid for synchronous (non-scheduled) single-threaded case.
   void SynchronouslyInitializeAllTiles();
 
-  bool SupportsImplScrolling() const;
   bool CommitToActiveTree() const;
 
   // Virtual so tests can inject their own.
   virtual std::unique_ptr<RasterBufferProvider> CreateRasterBufferProvider();
 
   bool prepare_tiles_needed() const { return tile_priorities_dirty_; }
-
-  gfx::Vector2dF ScrollSingleNode(ScrollNode* scroll_node,
-                                  const gfx::Vector2dF& delta,
-                                  const gfx::Point& viewport_point,
-                                  bool is_direct_manipulation,
-                                  ScrollTree* scroll_tree);
 
   base::SingleThreadTaskRunner* GetTaskRunner() const {
     DCHECK(task_runner_provider_);
@@ -730,22 +807,13 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
                : task_runner_provider_->MainThreadTaskRunner();
   }
 
-  InputHandler::ScrollStatus TryScroll(const gfx::PointF& screen_space_point,
-                                       const ScrollTree& scroll_tree,
-                                       ScrollNode* scroll_node) const;
-
-  // Return all ScrollNode indices that have an associated layer with a non-fast
-  // region that intersects the point.
-  base::flat_set<int> NonFastScrollableNodes(
-      const gfx::PointF& device_viewport_point) const;
-
   // Returns true if a scroll offset animation is created and false if we scroll
   // by the desired amount without an animation.
-  bool ScrollAnimationCreate(ScrollNode* scroll_node,
+  bool ScrollAnimationCreate(const ScrollNode& scroll_node,
                              const gfx::Vector2dF& scroll_amount,
                              base::TimeDelta delayed_by);
-  bool AutoScrollAnimationCreate(ScrollNode* scroll_node,
-                                 const gfx::Vector2dF& scroll_amount,
+  void AutoScrollAnimationCreate(const ScrollNode& scroll_node,
+                                 const gfx::PointF& target_offset,
                                  float autoscroll_velocity);
 
   void SetLayerTreeMutator(std::unique_ptr<LayerTreeMutator> mutator);
@@ -756,21 +824,14 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
     return paint_worklet_painter_.get();
   }
 
-  // The viewport has two scroll nodes, corresponding to the visual and layout
-  // viewports. However, when we compute the scroll chain we include only one
-  // of these -- we call that the "main" scroll node. When scrolling it, we
-  // scroll using the Viewport class which knows how to distribute scroll
-  // between the two.
-  LayerImpl* ViewportMainScrollLayer();
-  ScrollNode* ViewportMainScrollNode();
-
   void QueueImageDecode(int request_id, const PaintImage& image);
   std::vector<std::pair<int, bool>> TakeCompletedImageDecodeRequests();
+  // Returns mutator events to be handled by BeginMainFrame.
+  std::unique_ptr<MutatorEvents> TakeMutatorEvents();
 
+  void ClearHistory();
+  size_t CommitDurationSampleCountForTesting() const;
   void ClearCaches();
-
-  bool CanConsumeDelta(const ScrollNode& scroll_node,
-                       const ScrollState& scroll_state);
 
   void UpdateImageDecodingHints(
       base::flat_map<PaintImage::Id, PaintImage::DecodingMode>
@@ -779,12 +840,26 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   void InitializeUkm(std::unique_ptr<ukm::UkmRecorder> recorder);
   UkmManager* ukm_manager() { return ukm_manager_.get(); }
 
+  ActiveFrameSequenceTrackers FrameSequenceTrackerActiveTypes() {
+    return frame_trackers_.FrameSequenceTrackerActiveTypes();
+  }
+
   void RenewTreePriorityForTesting() { client_->RenewTreePriority(); }
 
   void SetRenderFrameObserver(
       std::unique_ptr<RenderFrameMetadataObserver> observer);
 
   void SetActiveURL(const GURL& url, ukm::SourceId source_id);
+
+  void SetUkmSmoothnessDestination(
+      base::WritableSharedMemoryMapping ukm_smoothness_data);
+
+  // Notifies FrameTrackers, impl side callbacks that the compsitor frame
+  // was presented.
+  void NotifyDidPresentCompositorFrameOnImplThread(
+      uint32_t frame_token,
+      std::vector<PresentationTimeCallbackBuffer::CompositorCallback> callbacks,
+      const viz::FrameTimingDetails& details);
 
   CompositorFrameReportingController* compositor_frame_reporting_controller()
       const {
@@ -793,6 +868,41 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   void set_pending_tree_fully_painted_for_testing(bool painted) {
     pending_tree_fully_painted_ = painted;
+  }
+  AnimatedPaintWorkletTracker& paint_worklet_tracker() {
+    return paint_worklet_tracker_;
+  }
+
+  bool can_use_msaa() const { return can_use_msaa_; }
+
+  Viewport& viewport() const { return *viewport_.get(); }
+
+  TotalFrameCounter* total_frame_counter_for_testing() {
+    return &total_frame_counter_;
+  }
+  DroppedFrameCounter* dropped_frame_counter_for_testing() {
+    return &dropped_frame_counter_;
+  }
+
+  // Returns true if the client is currently compositing synchronously.
+  bool IsInSynchronousComposite() const {
+    return client_->IsInSynchronousComposite();
+  }
+
+  RasterQueryQueue* GetRasterQueryQueueForTesting() const {
+    return pending_raster_queries_.get();
+  }
+
+  base::flat_set<viz::FrameSinkId> GetFrameSinksToThrottleForTesting() const {
+    return throttle_decider_.ids();
+  }
+
+  bool IsReadyToActivate() const;
+
+  void RequestImplSideInvalidationForRerasterTiling();
+
+  void SetDownsampleMetricsForTesting(bool value) {
+    downsample_metrics_ = value;
   }
 
  protected:
@@ -803,12 +913,15 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
       RenderingStatsInstrumentation* rendering_stats_instrumentation,
       TaskGraphRunner* task_graph_runner,
       std::unique_ptr<MutatorHost> mutator_host,
+      RasterDarkModeFilter* dark_mode_filter,
       int id,
-      scoped_refptr<base::SequencedTaskRunner> image_worker_task_runner);
+      scoped_refptr<base::SequencedTaskRunner> image_worker_task_runner,
+      LayerTreeHostSchedulingClient* scheduling_client);
 
   // Virtual for testing.
   virtual bool AnimateLayers(base::TimeTicks monotonic_time,
                              bool is_active_tree);
+  void ImageDecodeFinished(int request_id, bool decode_succeeded);
 
   bool is_likely_to_require_a_draw() const {
     return is_likely_to_require_a_draw_;
@@ -817,39 +930,17 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   // Removes empty or orphan RenderPasses from the frame.
   static void RemoveRenderPasses(FrameData* frame);
 
-  LayerTreeHostImplClient* const client_;
-  TaskRunnerProvider* const task_runner_provider_;
+  const raw_ptr<LayerTreeHostImplClient> client_;
+  const raw_ptr<LayerTreeHostSchedulingClient> scheduling_client_;
+  const raw_ptr<TaskRunnerProvider> task_runner_provider_;
 
   BeginFrameTracker current_begin_frame_tracker_;
 
-  std::unique_ptr<CompositorFrameReportingController>
-      compositor_frame_reporting_controller_;
-
  private:
-  const gfx::ColorSpace& GetRasterColorSpaceAndId(int* id) const;
+  viz::CompositorFrame GenerateCompositorFrame(FrameData* frame);
 
-  void CollectScrollDeltas(ScrollAndScaleSet* scroll_info) const;
-  void CollectScrollbarUpdates(ScrollAndScaleSet* scroll_info) const;
-
-  // Transforms viewport start point and scroll delta to local start point and
-  // local delta, respectively. If the transformation of either the start or end
-  // point of a scroll is clipped, the function returns false.
-  bool CalculateLocalScrollDeltaAndStartPoint(
-      const ScrollNode& scroll_node,
-      const gfx::PointF& viewport_point,
-      const gfx::Vector2dF& viewport_delta,
-      const ScrollTree& scroll_tree,
-      gfx::Vector2dF* out_local_scroll_delta,
-      gfx::PointF* out_local_start_point = nullptr);
-  gfx::Vector2dF ScrollNodeWithViewportSpaceDelta(
-      ScrollNode* scroll_node,
-      const gfx::PointF& viewport_point,
-      const gfx::Vector2dF& viewport_delta,
-      ScrollTree* scroll_tree);
-  bool ScrollAnimationCreateInternal(ScrollNode* scroll_node,
-                                     const gfx::Vector2dF& delta,
-                                     base::TimeDelta delayed_by,
-                                     base::Optional<float> autoscroll_velocity);
+  void CollectScrollbarUpdatesForCommit(
+      CompositorCommitData* commit_data) const;
 
   void CleanUpTileManagerResources();
   void CreateTileManagerResources();
@@ -866,7 +957,7 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   // Returns a job map for all 'dirty' PaintWorklets, e.g. PaintWorkletInputs
   // that do not map to a PaintRecord.
-  PaintWorkletJobMap GatherDirtyPaintWorklets() const;
+  PaintWorkletJobMap GatherDirtyPaintWorklets(PaintImageIdFlatSet*) const;
 
   // Called when all PaintWorklet results are ready (i.e. have been painted) for
   // the current pending tree.
@@ -879,20 +970,6 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   // Returns true if status changed.
   bool UpdateGpuRasterizationStatus();
   void UpdateTreeResourcesForGpuRasterizationIfNeeded();
-
-  Viewport* viewport() const { return viewport_.get(); }
-
-  InputHandler::ScrollStatus ScrollBeginImpl(
-      ScrollState* scroll_state,
-      ScrollNode* scrolling_node,
-      InputHandler::ScrollInputType type);
-  bool IsTouchDraggingScrollbar(
-      LayerImpl* first_scrolling_layer_or_drawn_scrollbar,
-      InputHandler::ScrollInputType type);
-  bool IsInitialScrollHitTestReliable(
-      LayerImpl* layer,
-      LayerImpl* first_scrolling_layer_or_drawn_scrollbar);
-  void DistributeScrollDelta(ScrollState* scroll_state);
 
   bool AnimatePageScale(base::TimeTicks monotonic_time);
   bool AnimateScrollbars(base::TimeTicks monotonic_time);
@@ -910,15 +987,7 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   // the frame should be drawn.
   DrawResult CalculateRenderPasses(FrameData* frame);
 
-  void ClearCurrentlyScrollingNode();
-
-  ScrollNode* FindScrollNodeForDeviceViewportPoint(
-      const gfx::PointF& device_viewport_point,
-      LayerImpl* layer_hit_by_point,
-      bool* scroll_on_main_thread,
-      uint32_t* main_thread_scrolling_reason) const;
   void StartScrollbarFadeRecursive(LayerImpl* layer);
-  void SetManagedMemoryPolicy(const ManagedMemoryPolicy& policy);
 
   // Once a resource is uploaded or deleted, it is no longer an evicted id, this
   // removes it from the evicted set, and updates if we're able to draw now that
@@ -937,34 +1006,12 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
                             const gpu::SyncToken& sync_token,
                             bool lost);
 
-  void NotifySwapPromiseMonitorsOfSetNeedsRedraw();
-  void NotifySwapPromiseMonitorsOfForwardingToMainThread();
+  void NotifyLatencyInfoSwapPromiseMonitors();
 
-  void UpdateRootLayerStateForSynchronousInputHandler();
-
-  bool ScrollAnimationUpdateTarget(ScrollNode* scroll_node,
-                                   const gfx::Vector2dF& scroll_delta,
-                                   base::TimeDelta delayed_by);
-
-  void ScrollEndImpl(ScrollState* scroll_state);
-
-  // Creates an animation curve and returns true if we need to update the
-  // scroll position to a snap point. Otherwise returns false.
-  bool SnapAtScrollEnd();
-
+ private:
+  void SetMemoryPolicyImpl(const ManagedMemoryPolicy& policy);
   void SetContextVisibility(bool is_visible);
-  void ImageDecodeFinished(int request_id, bool decode_succeeded);
 
-  // This function keeps track of sources of scrolls that are handled in the
-  // compositor side. The information gets shared by the main thread as part of
-  // the begin_main_frame_state. Finally Use counters are updated in the main
-  // thread side to keep track of the frequency of scrolling with different
-  // sources per page load. TODO(crbug.com/691886): Use GRC API to plumb the
-  // scroll source info for Use Counters.
-  void UpdateScrollSourceInfo(InputHandler::ScrollInputType type,
-                              ScrollState* scroll_state);
-
-  bool IsScrolledBy(LayerImpl* child, ScrollNode* ancestor);
   void ShowScrollbarsForImplScroll(ElementId element_id);
 
   // Copy any opacity values already in the active tree to the pending
@@ -982,6 +1029,21 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   void AllocateLocalSurfaceId();
 
+  // Log the AverageLag events from the frame identified by |frame_token| and
+  // the information in |details|.
+  void LogAverageLagEvents(uint32_t frame_token,
+                           const viz::FrameTimingDetails& details);
+
+  // Notifies client about the custom tracker results.
+  void NotifyThroughputTrackerResults(const CustomTrackerResults& results);
+
+  // Wrapper for checking and updating |contains_srgb_cache_|.
+  bool CheckColorSpaceContainsSrgb(const gfx::ColorSpace& color_space) const;
+
+  // Once bound, this instance owns the InputHandler. However, an InputHandler
+  // need not be bound so this should be null-checked before dereferencing.
+  std::unique_ptr<InputDelegateForCompositor> input_delegate_;
+
   const LayerTreeSettings settings_;
 
   // This is set to true only if:
@@ -991,9 +1053,6 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   //    happen explicitly via. synchronous calls to appropriate functions).
   // This is usually turned on only in some tests (e.g. web-tests).
   const bool is_synchronous_single_threaded_;
-
-  const int default_color_space_id_ = gfx::ColorSpace::GetNextId();
-  const gfx::ColorSpace default_color_space_ = gfx::ColorSpace::CreateSRGB();
 
   viz::ClientResourceProvider resource_provider_;
 
@@ -1011,7 +1070,7 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   //
   // A pointer used for communicating with and submitting output to the display
   // compositor.
-  LayerTreeFrameSink* layer_tree_frame_sink_ = nullptr;
+  raw_ptr<LayerTreeFrameSink> layer_tree_frame_sink_ = nullptr;
   // The maximum size (either width or height) that any texture can be. Also
   // holds a reasonable value for software compositing bitmaps.
   int max_texture_size_ = 0;
@@ -1025,17 +1084,16 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   std::unique_ptr<viz::ContextCacheController::ScopedVisibility>
       worker_context_visibility_;
 
+  bool can_use_msaa_ = false;
+  bool supports_disable_msaa_ = false;
+
   bool need_update_gpu_rasterization_status_ = false;
-  bool content_has_slow_paths_ = false;
-  bool content_has_non_aa_paint_ = false;
-  bool has_gpu_rasterization_trigger_ = false;
   bool use_gpu_rasterization_ = false;
-  bool use_oop_rasterization_ = false;
-  bool use_msaa_ = false;
   GpuRasterizationStatus gpu_rasterization_status_ =
       GpuRasterizationStatus::OFF_DEVICE;
   std::unique_ptr<RasterBufferProvider> raster_buffer_provider_;
   std::unique_ptr<ResourcePool> resource_pool_;
+  std::unique_ptr<RasterQueryQueue> pending_raster_queries_;
   std::unique_ptr<ImageDecodeCache> image_decode_cache_;
 
   GlobalStateThatImpactsTilePriority global_tile_state_;
@@ -1051,25 +1109,13 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   // by the next sync from the main thread.
   std::unique_ptr<LayerTreeImpl> recycle_tree_;
 
-  InputHandlerClient* input_handler_client_ = nullptr;
-  bool did_lock_scrolling_layer_ = false;
-  bool touch_scrolling_ = false;
-  bool wheel_scrolling_ = false;
-  bool scroll_affects_scroll_handler_ = false;
-  ElementId scroll_element_id_mouse_currently_over_;
-  ElementId scroll_element_id_mouse_currently_captured_;
-
   // Tracks, for debugging purposes, the amount of scroll received (not
   // necessarily applied) in this compositor frame. This will be reset each
   // time a CompositorFrame is generated.
-  gfx::ScrollOffset scroll_accumulated_this_frame_;
+  gfx::Vector2dF scroll_accumulated_this_frame_;
 
   std::vector<std::unique_ptr<SwapPromise>>
       swap_promises_for_main_thread_scroll_update_;
-
-  // An object to implement the ScrollElasticityHelper interface and
-  // hold all state related to elasticity. May be NULL if never requested.
-  std::unique_ptr<ScrollElasticityHelper> scroll_elasticity_helper_;
 
   bool tile_priorities_dirty_ = false;
 
@@ -1079,36 +1125,18 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   TileManager tile_manager_;
 
-  gfx::Vector2dF accumulated_root_overscroll_;
-
-  // Unconsumed scroll delta sent to the main thread for firing overscroll DOM
-  // events. Resets after each commit.
-  gfx::Vector2dF overscroll_delta_for_main_thread_;
-
-  // True iff some of the delta has been consumed for the current scroll
-  // sequence on the specific axis.
-  bool did_scroll_x_for_scroll_gesture_;
-  bool did_scroll_y_for_scroll_gesture_;
-
-  // This value is used to allow the compositor to throttle re-rastering during
-  // pinch gestures, when the page scale factor may be changing frequently. It
-  // is set in one of two ways:
-  // i) In a layer tree serving the root of the frame/compositor tree, it is
-  // directly set during processing of GesturePinch events on the impl thread
-  // (only the root layer tree has access to these).
-  // ii) In a layer tree serving a sub-frame in the frame/compositor tree, it
-  // is set from the main thread during the commit process, using information
-  // sent from the root layer tree via IPC messaging.
-  bool pinch_gesture_active_ = false;
-  bool external_pinch_gesture_active_ = false;
-  bool pinch_gesture_end_should_clear_scrolling_node_ = false;
-
   std::unique_ptr<BrowserControlsOffsetManager>
       browser_controls_offset_manager_;
 
   std::unique_ptr<PageScaleAnimation> page_scale_animation_;
 
-  std::unique_ptr<FrameRateCounter> fps_counter_;
+  base::WritableSharedMemoryMapping ukm_smoothness_mapping_;
+
+  TotalFrameCounter total_frame_counter_;
+  // `dropped_frame_counter_` holds a pointer `to ukm_smoothness_mapping_` so
+  // it must be declared last and deleted first;
+  DroppedFrameCounter dropped_frame_counter_;
+
   std::unique_ptr<MemoryHistory> memory_history_;
   std::unique_ptr<DebugRectHistory> debug_rect_history_;
 
@@ -1130,7 +1158,9 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   gfx::Rect viewport_damage_rect_;
 
   std::unique_ptr<MutatorHost> mutator_host_;
+  std::unique_ptr<MutatorEvents> mutator_events_;
   std::set<VideoFrameController*> video_frame_controllers_;
+  const raw_ptr<RasterDarkModeFilter> dark_mode_filter_;
 
   // Map from scroll element ID to scrollbar animation controller.
   // There is one animation controller per pair of overlay scrollbars.
@@ -1139,7 +1169,7 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
                      ElementIdHash>
       scrollbar_animation_controllers_;
 
-  RenderingStatsInstrumentation* rendering_stats_instrumentation_;
+  raw_ptr<RenderingStatsInstrumentation> rendering_stats_instrumentation_;
   MicroBenchmarkControllerImpl micro_benchmark_controller_;
   std::unique_ptr<SynchronousTaskGraphRunner>
       single_thread_synchronous_task_graph_runner_;
@@ -1147,10 +1177,10 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   // Optional callback to notify of new tree activations.
   base::RepeatingClosure tree_activation_callback_;
 
-  TaskGraphRunner* task_graph_runner_;
+  raw_ptr<TaskGraphRunner> task_graph_runner_;
   int id_;
 
-  std::set<SwapPromiseMonitor*> swap_promise_monitor_;
+  std::set<LatencyInfoSwapPromiseMonitor*> latency_info_swap_promise_monitor_;
 
   bool requires_high_res_to_draw_ = false;
   bool is_likely_to_require_a_draw_ = false;
@@ -1167,50 +1197,27 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   std::unique_ptr<Viewport> viewport_;
 
-  std::unique_ptr<PendingTreeDurationHistogramTimer>
-      pending_tree_duration_timer_;
-  std::unique_ptr<PendingTreeRasterDurationHistogramTimer>
-      pending_tree_raster_duration_timer_;
+  gfx::Size visual_device_viewport_size_;
+  // Set to true if viewport is mobile optimized by using meta tag
+  // <meta name="viewport" content="width=device-width">
+  // or
+  // <meta name="viewport" content="initial-scale=1.0">
+  bool is_viewport_mobile_optimized_ = false;
 
-  // The element id of the scroll node to which scroll animations must latch.
-  // This gets reset at ScrollAnimatedBegin, and updated the first time that a
-  // scroll animation is created in ScrollAnimated. We need to use element ids
-  // instead of node ids since they are stable across the property tree update
-  // in SetPropertyTrees.
-  ElementId scroll_animating_latched_element_id_;
+  bool prefers_reduced_motion_ = false;
 
-  // In scroll animation path CurrentlyScrollingNode does not exist when there
-  // is no ongoing scroll animation (e.g. during overscrolling). In this case we
-  // need to explicitly store the element id of the overscroll event target. The
-  // overscroll event target is either the element that scroll animation is
-  // latched to (scroll_animating_latched_element_id_) when any scrolling has
-  // happened during the current scroll sequence or the last element in the
-  // scroll chain when no scrolling has happened during the current scroll
-  // sequence. TODO(input-dev): Decouple CurrentlyScrollingNode life cycle from
-  // scroll animation life cycle to use CurrentlyScrollingNode instead of both
-  // scroll_animating_latched_element_id_ and
-  // scroll_animating_overscroll_target_element_id_. https://crbug.com/940508
-  ElementId scroll_animating_overscroll_target_element_id_;
+  bool may_throttle_if_undrawn_frames_ = true;
 
   // These completion states to be transfered to the main thread when we
   // begin main frame. The pair represents a request id and the completion (ie
   // success) state.
   std::vector<std::pair<int, bool>> completed_image_decode_requests_;
 
-  // These are used to transfer usage of different types of scrolling to the
-  // main thread.
-  bool has_scrolled_by_wheel_ = false;
-  bool has_scrolled_by_touch_ = false;
-  bool has_scrolled_by_precisiontouchpad_ = false;
-  bool has_pinch_zoomed_ = false;
-
+  enum class ImplThreadPhase {
+    IDLE,
+    INSIDE_IMPL_FRAME,
+  };
   ImplThreadPhase impl_thread_phase_ = ImplThreadPhase::IDLE;
-
-  // Tracks whether a BeginMainFrame is expected to be dispatched during an
-  // 'impl frame' (i.e. between WillBeginImplFrame() and DidFinishImplFrame()),
-  // and whether it was actually dispatched during the impl frame.
-  bool begin_main_frame_expected_during_impl_ = false;
-  bool begin_main_frame_sent_during_impl_ = false;
 
   ImageAnimationController image_animation_controller_;
 
@@ -1222,44 +1229,28 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
 
   viz::FrameTokenGenerator next_frame_token_;
 
-  viz::LocalSurfaceIdAllocation last_draw_local_surface_id_allocation_;
+  viz::LocalSurfaceId last_draw_local_surface_id_;
   base::flat_set<viz::SurfaceRange> last_draw_referenced_surfaces_;
-  base::Optional<RenderFrameMetadata> last_draw_render_frame_metadata_;
+  absl::optional<RenderFrameMetadata> last_draw_render_frame_metadata_;
+  // The viz::LocalSurfaceId to unthrottle drawing for.
+  viz::LocalSurfaceId target_local_surface_id_;
   viz::ChildLocalSurfaceIdAllocator child_local_surface_id_allocator_;
+
+  // Indicates the direction of the last vertical scroll of the root layer.
+  // Until the first vertical scroll occurs, this value is |kNull|. Note that
+  // once this value is updated, it will never return to |kNull|.
+  viz::VerticalScrollDirection last_vertical_scroll_direction_ =
+      viz::VerticalScrollDirection::kNull;
 
   std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
 
   PresentationTimeCallbackBuffer presentation_time_callbacks_;
-  ui::FrameMetrics frame_metrics_;
-  ui::SkippedFrameTracker skipped_frame_tracker_;
-  bool is_animating_for_snap_;
 
-  const PaintImage::GeneratorClientId paint_image_generator_client_id_;
-
-  // Manages composited scrollbar hit testing.
-  std::unique_ptr<ScrollbarController> scrollbar_controller_;
-
+  // `compositor_frame_reporting_controller_` has a dependency on
+  // `dropped_frame_counter_` so it must be declared last and deleted first;
+  std::unique_ptr<CompositorFrameReportingController>
+      compositor_frame_reporting_controller_;
   FrameSequenceTrackerCollection frame_trackers_;
-  std::unique_ptr<FrameSequenceTracker> pinch_frame_tracker_;
-  std::unique_ptr<FrameSequenceTracker> scroll_frame_tracker_;
-  std::unique_ptr<FrameSequenceTracker> compositor_animation_frame_tracker_;
-  std::unique_ptr<FrameSequenceTracker> request_animation_frame_tracker_;
-  std::unique_ptr<FrameSequenceTracker> main_thread_animation_frame_tracker_;
-
-  // Set to true when a scroll gesture being handled on the compositor has
-  // ended. i.e. When a GSE has arrived and any ongoing scroll animation has
-  // ended.
-  bool scroll_gesture_did_end_;
-
-  // Set in ScrollEnd before clearing the currently scrolling node. This is
-  // used to send the scrollend DOM event when scrolling has happened on CC.
-  ElementId last_scroller_element_id_;
-
-  // Scroll animation can finish either before or after GSE arrival.
-  // deferred_scroll_end_state_ is set when the GSE has arrvied before scroll
-  // animation completion. ScrollEnd will get called with this deferred state
-  // once the animation is over.
-  base::Optional<ScrollState> deferred_scroll_end_state_;
 
   // PaintWorklet painting is controlled from the LayerTreeHostImpl, dispatched
   // to the worklet thread via |paint_worklet_painter_|.
@@ -1269,6 +1260,58 @@ class CC_EXPORT LayerTreeHostImpl : public InputHandler,
   // painted and cannot be rastered or activated. This boolean tracks whether or
   // not we are in that state.
   bool pending_tree_fully_painted_ = false;
+
+#if DCHECK_IS_ON()
+  // Use to track when doing a synchronous draw.
+  bool doing_sync_draw_ = false;
+#endif
+
+  // This is used to tell the scheduler there are active scroll handlers on the
+  // page so we should prioritize latency during a scroll to try to keep
+  // scroll-linked effects up to data.
+  // TODO(bokan): This is quite old and scheduling has become much more
+  // sophisticated since so it's not clear how much value it's still providing.
+  bool scroll_affects_scroll_handler_ = false;
+
+  // Whether at least 30% of the viewport at the time of draw was
+  // checkerboarded during a scroll. This bit can get set during a scroll and
+  // is sticky for the duration of the scroll.
+  bool current_scroll_did_checkerboard_large_area_ = false;
+
+  // Provides support for PaintWorklets which depend on input properties that
+  // are being animated by the compositor (aka 'animated' PaintWorklets).
+  // Responsible for storing animated custom property values and for
+  // invalidating PaintWorklets as the property values change.
+  AnimatedPaintWorkletTracker paint_worklet_tracker_;
+
+  AverageLagTrackingManager lag_tracking_manager_;
+
+  // Helper for de-jelly logic.
+  DeJellyState de_jelly_state_;
+
+  EventsMetricsManager events_metrics_manager_;
+
+  std::unique_ptr<LCDTextMetricsReporter> lcd_text_metrics_reporter_;
+
+  FrameRateEstimator frame_rate_estimator_;
+  bool has_observed_first_scroll_delay_ = false;
+
+  // True if we are measuring smoothness in TotalFrameCounter and
+  // DroppedFrameCounter. Currently true when first contentful paint is done.
+  bool is_measuring_smoothness_ = false;
+
+  // Cache for the results of calls to gfx::ColorSpace::Contains() on sRGB. This
+  // computation is deterministic for a given color space, can be called
+  // multiple times per frame, and incurs a non-trivial cost.
+  // mutable because |contains_srgb_cache_| is accessed in a const method.
+  mutable base::LRUCache<gfx::ColorSpace, bool> contains_srgb_cache_;
+
+  // When enabled, calculates which frame sinks can be throttled based on
+  // some pre-defined criteria.
+  ThrottleDecider throttle_decider_;
+
+  bool downsample_metrics_ = true;
+  base::MetricsSubSampler metrics_subsampler_;
 
   // Must be the last member to ensure this is destroyed first in the
   // destruction order and invalidates all weak pointers.

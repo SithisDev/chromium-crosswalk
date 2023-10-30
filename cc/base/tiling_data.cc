@@ -1,4 +1,4 @@
-// Copyright 2010 The Chromium Authors. All rights reserved.
+// Copyright 2010 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,9 @@
 
 #include <algorithm>
 
+#include "base/check_op.h"
+#include "base/cxx17_backports.h"
+#include "base/notreached.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/geometry/vector2d.h"
@@ -79,7 +82,7 @@ int TilingData::TileXIndexFromSrcCoord(int src_position) const {
   DCHECK_GT(max_texture_size_.width() - 2 * border_texels_, 0);
   int x = (src_position - border_texels_) /
       (max_texture_size_.width() - 2 * border_texels_);
-  return std::min(std::max(x, 0), num_tiles_x_ - 1);
+  return base::clamp(x, 0, num_tiles_x_ - 1);
 }
 
 int TilingData::TileYIndexFromSrcCoord(int src_position) const {
@@ -89,7 +92,7 @@ int TilingData::TileYIndexFromSrcCoord(int src_position) const {
   DCHECK_GT(max_texture_size_.height() - 2 * border_texels_, 0);
   int y = (src_position - border_texels_) /
       (max_texture_size_.height() - 2 * border_texels_);
-  return std::min(std::max(y, 0), num_tiles_y_ - 1);
+  return base::clamp(y, 0, num_tiles_y_ - 1);
 }
 
 int TilingData::FirstBorderTileXIndexFromSrcCoord(int src_position) const {
@@ -99,7 +102,7 @@ int TilingData::FirstBorderTileXIndexFromSrcCoord(int src_position) const {
   DCHECK_GT(max_texture_size_.width() - 2 * border_texels_, 0);
   int inner_tile_size = max_texture_size_.width() - 2 * border_texels_;
   int x = (src_position - 2 * border_texels_) / inner_tile_size;
-  return std::min(std::max(x, 0), num_tiles_x_ - 1);
+  return base::clamp(x, 0, num_tiles_x_ - 1);
 }
 
 int TilingData::FirstBorderTileYIndexFromSrcCoord(int src_position) const {
@@ -109,7 +112,7 @@ int TilingData::FirstBorderTileYIndexFromSrcCoord(int src_position) const {
   DCHECK_GT(max_texture_size_.height() - 2 * border_texels_, 0);
   int inner_tile_size = max_texture_size_.height() - 2 * border_texels_;
   int y = (src_position - 2 * border_texels_) / inner_tile_size;
-  return std::min(std::max(y, 0), num_tiles_y_ - 1);
+  return base::clamp(y, 0, num_tiles_y_ - 1);
 }
 
 int TilingData::LastBorderTileXIndexFromSrcCoord(int src_position) const {
@@ -119,7 +122,7 @@ int TilingData::LastBorderTileXIndexFromSrcCoord(int src_position) const {
   DCHECK_GT(max_texture_size_.width() - 2 * border_texels_, 0);
   int inner_tile_size = max_texture_size_.width() - 2 * border_texels_;
   int x = src_position / inner_tile_size;
-  return std::min(std::max(x, 0), num_tiles_x_ - 1);
+  return base::clamp(x, 0, num_tiles_x_ - 1);
 }
 
 int TilingData::LastBorderTileYIndexFromSrcCoord(int src_position) const {
@@ -129,7 +132,7 @@ int TilingData::LastBorderTileYIndexFromSrcCoord(int src_position) const {
   DCHECK_GT(max_texture_size_.height() - 2 * border_texels_, 0);
   int inner_tile_size = max_texture_size_.height() - 2 * border_texels_;
   int y = src_position / inner_tile_size;
-  return std::min(std::max(y, 0), num_tiles_y_ - 1);
+  return base::clamp(y, 0, num_tiles_y_ - 1);
 }
 
 IndexRect TilingData::TileAroundIndexRect(const gfx::Rect& center_rect) const {
@@ -331,7 +334,7 @@ int TilingData::TileSizeY(int y_index) const {
 
 gfx::RectF TilingData::TexelExtent(int i, int j) const {
   gfx::RectF result(TileBoundsWithBorder(i, j));
-  result.Inset(0.5f, 0.5f);
+  result.Inset(0.5f);
   return result;
 }
 

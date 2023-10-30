@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,7 @@
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "third_party/skia/include/core/SkSize.h"
-#include "third_party/skia/include/core/SkYUVAIndex.h"
-#include "third_party/skia/include/core/SkYUVASizeInfo.h"
+#include "third_party/skia/include/core/SkYUVAPixmaps.h"
 
 namespace cc {
 
@@ -28,14 +27,6 @@ class CC_PAINT_EXPORT PaintImageGenerator : public SkRefCnt {
   ~PaintImageGenerator() override;
 
   PaintImageGenerator& operator=(const PaintImageGenerator&) = delete;
-
-  // Returns true if we can guarantee that the software decoder hasn't done work
-  // on the image, so it's appropriate to send the encoded image to a hardware
-  // accelerator. False if we can't guarantee this or if not applicable. For
-  // example, if the encoded data comes incrementally, and the software decoder
-  // starts working with partial data, the image shouldn't later be sent to a
-  // hardware decoder.
-  virtual bool IsEligibleForAcceleratedDecoding() const = 0;
 
   // Returns a reference to the encoded content of this image.
   virtual sk_sp<SkData> GetEncodedData() const = 0;
@@ -53,27 +44,25 @@ class CC_PAINT_EXPORT PaintImageGenerator : public SkRefCnt {
                          PaintImage::GeneratorClientId client_id,
                          uint32_t lazy_pixel_ref) = 0;
 
-  // Returns true if the generator supports YUV decoding, providing the output
-  // information in |info| and |color_space|.
-  virtual bool QueryYUVA8(SkYUVASizeInfo* info,
-                          SkYUVAIndex indices[SkYUVAIndex::kIndexCount],
-                          SkYUVColorSpace* color_space) const = 0;
+  // Returns true if the generator supports YUV decoding, providing the details
+  // about planar configuration and conversion to RGB in |info|.
+  // |supported_data_types| indicates the allowed bit depth and types allowed
+  // for Y, U, V, and A values.
+  virtual bool QueryYUVA(
+      const SkYUVAPixmapInfo::SupportedDataTypes& supported_data_types,
+      SkYUVAPixmapInfo* info) const = 0;
 
-  // Decodes to YUV into the provided |planes| for each of the Y, U, and V
-  // planes, and returns true on success. The method should only be used if
-  // QueryYUVA8 returns true.
-  // |info| and |indices| need to exactly match the values returned by the
-  // query, except the info.fWidthBytes may be larger than the recommendation
-  // (but not smaller).
+  // Decodes to YUV, storing planar data in the SkPixmaps in the provided
+  // |pixmaps|. The method should only be used if QueryYUVA returns true.
+  // SkPixmaps owned by |pixmaps| have been configured as indicated by
+  // QueryYUVA.
   //
   // TODO(khushalsagar): |lazy_pixel_ref| is only present for
   // DecodingImageGenerator tracing needs. Remove it.
-  virtual bool GetYUVA8Planes(
-      const SkYUVASizeInfo& info,
-      const SkYUVAIndex indices[SkYUVAIndex::kIndexCount],
-      void* planes[3],
-      size_t frame_index,
-      uint32_t lazy_pixel_ref) = 0;
+  virtual bool GetYUVAPlanes(const SkYUVAPixmaps& pixmaps,
+                             size_t frame_index,
+                             uint32_t lazy_pixel_ref,
+                             PaintImage::GeneratorClientId client_id) = 0;
 
   // Returns the smallest size that is at least as big as the requested size,
   // such that we can decode to exactly that scale.
@@ -87,6 +76,10 @@ class CC_PAINT_EXPORT PaintImageGenerator : public SkRefCnt {
 
   const SkImageInfo& GetSkImageInfo() const { return info_; }
   const std::vector<FrameMetadata>& GetFrameMetadata() const { return frames_; }
+
+  // Returns the information required to decide whether or not hardware
+  // acceleration can be used to decode this image.
+  virtual const ImageHeaderMetadata* GetMetadataForDecodeAcceleration() const;
 
  protected:
   // |info| is the info for this paint image generator.

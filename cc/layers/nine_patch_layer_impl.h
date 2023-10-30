@@ -1,10 +1,11 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_LAYERS_NINE_PATCH_LAYER_IMPL_H_
 #define CC_LAYERS_NINE_PATCH_LAYER_IMPL_H_
 
+#include <memory>
 #include <string>
 
 #include "base/memory/ptr_util.h"
@@ -15,10 +16,6 @@
 #include "cc/resources/ui_resource_client.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
-
-namespace base {
-class DictionaryValue;
-}
 
 namespace cc {
 
@@ -40,13 +37,14 @@ class CC_EXPORT NinePatchLayerImpl : public UIResourceLayerImpl {
                  bool fill_center,
                  bool nearest_neighbor);
 
-  std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
+  std::unique_ptr<LayerImpl> CreateLayerImpl(
+      LayerTreeImpl* tree_impl) const override;
   void PushPropertiesTo(LayerImpl* layer) override;
 
-  void AppendQuads(viz::RenderPass* render_pass,
+  void AppendQuads(viz::CompositorRenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override;
 
-  std::unique_ptr<base::DictionaryValue> LayerAsJson() const override;
+  void AsValueInto(base::trace_event::TracedValue* state) const override;
 
  protected:
   NinePatchLayerImpl(LayerTreeImpl* tree_impl, int id);

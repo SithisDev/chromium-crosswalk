@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
 #include "cc/layers/layer_impl.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
@@ -21,6 +22,15 @@ struct ScrollNode;
 // outer viewport (layout) scroll layers. These layers have different scroll
 // bubbling behavior from the rest of the layer tree which is encoded in this
 // class.
+//
+// When performing any kind of scroll operations on either the inner or outer
+// scroll node, they must be done using this class. Typically, the outer
+// viewport's scroll node will be used in the scroll chain to represent a full
+// viewport scroll (i.e. one that will use this class to scroll both inner and
+// outer viewports, as appropriate). However, in some situations (see comments
+// in LayerTreeHostImpl::GetNodeToScroll) we may wish to scroll only the inner
+// viewport. In that case, the inner viewport is used in the scroll chain, but
+// we should still scroll using this class.
 class CC_EXPORT Viewport {
  public:
   // If the pinch zoom anchor on the first PinchUpdate is within this length
@@ -55,29 +65,45 @@ class CC_EXPORT Viewport {
                         bool affect_browser_controls,
                         bool scroll_outer_viewport);
 
-  bool CanScroll(const ScrollState& scroll_state) const;
-
   // TODO(bokan): Callers can now be replaced by ScrollBy.
   void ScrollByInnerFirst(const gfx::Vector2dF& delta);
 
   // Scrolls the viewport, bubbling the delta between the inner and outer
-  // viewport. Only animates either of the two viewports.
+  // viewport. Only animates either of the two viewports. Returns the amount of
+  // delta that was consumed.
   gfx::Vector2dF ScrollAnimated(const gfx::Vector2dF& delta,
                                 base::TimeDelta delayed_by);
 
-  gfx::ScrollOffset TotalScrollOffset() const;
+  gfx::PointF TotalScrollOffset() const;
 
   void PinchUpdate(float magnify_delta, const gfx::Point& anchor);
   void PinchEnd(const gfx::Point& anchor, bool snap_to_min);
 
   // Returns true if the given scroll node should be scrolled via this class,
-  // false if it should be scrolled directly.
-  bool ShouldScroll(const ScrollNode& scroll_node);
+  // false if it should be scrolled directly. Scrolling either the inner or
+  // outer viewport nodes must be done using this class.
+  bool ShouldScroll(const ScrollNode& scroll_node) const;
 
-  // Returns the "representative" viewport layer/node. That is, the one that's
-  // set as the currently scrolling layer/node when the viewport scrolls.
-  LayerImpl* MainScrollLayer() const;
-  ScrollNode* MainScrollNode() const;
+  // Returns true if the viewport can consume any of the delta for the given
+  // the |scroll_state|. This method takes a ScrollNode because viewport
+  // scrolling can occur for either the inner or outer scroll nodes. If it
+  // outer is used, we do a combined scroll that distributes the scroll among
+  // the inner and outer viewports. If the inner is used, only the inner
+  // viewport is scrolled. It is an error to pass any other node to this
+  // method.
+  bool CanScroll(const ScrollNode& node, const ScrollState& scroll_state) const;
+
+  // Takes |scroll_delta| and returns a clamped delta based on distributing
+  // |scroll_delta| first to the inner viewport, then the outer viewport.
+  // The passed delta must be scaled by the page scale factor and the returned
+  // delta will also be scaled.
+  gfx::Vector2dF ComputeClampedDelta(const gfx::Vector2dF& scroll_delta) const;
+
+  // Returns the innert viewport size, excluding scrollbars. This is not the
+  // same as the inner viewport container_bounds size, which does not account
+  // for scrollbars. This method can be useful for calculating the area of the
+  // inner viewport where content is visible.
+  gfx::SizeF GetInnerViewportSizeExcludingScrollbars() const;
 
  private:
   explicit Viewport(LayerTreeHostImpl* host_impl);
@@ -92,7 +118,7 @@ class CC_EXPORT Viewport {
   // Sends the delta to the browser controls, returns the amount applied.
   gfx::Vector2dF ScrollBrowserControls(const gfx::Vector2dF& delta);
 
-  gfx::ScrollOffset MaxTotalScrollOffset() const;
+  float MaxUserReachableTotalScrollOffsetY() const;
 
   ScrollNode* InnerScrollNode() const;
   ScrollNode* OuterScrollNode() const;
@@ -100,7 +126,7 @@ class CC_EXPORT Viewport {
 
   void SnapPinchAnchorIfWithinMargin(const gfx::Point& anchor);
 
-  LayerTreeHostImpl* host_impl_;
+  raw_ptr<LayerTreeHostImpl> host_impl_;
 
   bool pinch_zoom_active_;
 

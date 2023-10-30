@@ -1,11 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Archives a set of files."""
 
 import argparse
+import json
 import os
 import sys
 import zipfile
@@ -33,6 +34,11 @@ def main(args):
       action='store_false',
       dest='compress',
       help='Do not compress entries')
+  parser.add_argument('--comment-json',
+                      action='append',
+                      metavar='KEY=VALUE',
+                      type=lambda x: x.split('=', 1),
+                      help='Entry to store in JSON-encoded archive comment.')
   build_utils.AddDepfileOption(parser)
   options = parser.parse_args(args)
 
@@ -61,10 +67,15 @@ def main(args):
             path_transform=path_transform,
             compress=options.compress)
 
+      if options.comment_json:
+        out_zip.comment = json.dumps(dict(options.comment_json),
+                                     sort_keys=True).encode('utf-8')
+
   # Depfile used only by dist_jar().
   if options.depfile:
-    build_utils.WriteDepfile(
-        options.depfile, options.output, inputs=depfile_deps, add_pydeps=False)
+    build_utils.WriteDepfile(options.depfile,
+                             options.output,
+                             inputs=depfile_deps)
 
 
 if __name__ == '__main__':

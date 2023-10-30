@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,10 @@
 
 #include "cc/cc_export.h"
 #include "cc/paint/element_id.h"
+#include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/point_f.h"
-#include "ui/gfx/geometry/scroll_offset.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace base {
 namespace trace_event {
@@ -22,33 +23,27 @@ namespace cc {
 struct CC_EXPORT TransformNode {
   TransformNode();
   TransformNode(const TransformNode&);
+  TransformNode& operator=(const TransformNode&);
 
   // The node index of this node in the transform tree node vector.
   int id;
   // The node index of the parent node in the transform tree node vector.
   int parent_id;
+  // The node index of the nearest parent frame node in the transform tree node
+  // vector.
+  int parent_frame_id;
 
   ElementId element_id;
 
   // The local transform information is combined to form to_parent (ignoring
   // snapping) as follows:
-  //
-  //   to_parent = M_post_local * T_scroll * M_local * M_pre_local.
-  //
-  // The pre/post may seem odd when read LTR, but we multiply our points from
-  // the right, so the pre_local matrix affects the result "first". This lines
-  // up with the notions of pre/post used in skia and gfx::Transform.
-  //
-  // TODO(vollick): The values labeled with "will be moved..." take up a lot of
-  // space, but are only necessary for animated or scrolled nodes (otherwise
-  // we'll just use the baked to_parent). These values will be ultimately stored
-  // directly on the transform/scroll display list items when that's possible,
-  // or potentially in a scroll tree.
-  //
-  // TODO(vollick): will be moved when accelerated effects are implemented.
-  gfx::Transform pre_local;
+  //   to_parent =
+  //       T_post_translation * T_origin * T_scroll * M_local * -T_origin.
   gfx::Transform local;
-  gfx::Transform post_local;
+  gfx::Point3F origin;
+  // For layer tree mode only. In layer list mode, when the translation is
+  // needed, blink creates paint offset translation node above this node.
+  gfx::Vector2dF post_translation;
 
   gfx::Transform to_parent;
 
@@ -56,11 +51,9 @@ struct CC_EXPORT TransformNode {
   // transform node. -1 indicates there are no sticky position constraints.
   int sticky_position_constraint_id;
 
-  // This is the node with respect to which source_offset is defined. This will
-  // not be needed once layerization moves to cc, but is needed in order to
-  // efficiently update the transform tree for changes to position in the layer
-  // tree.
-  int source_node_id;
+  // This is the data of the scroll container of the anchor node specified by
+  // the `anchor-scroll` property. -1 indicates there is no such node.
+  int anchor_scroll_containers_data_id;
 
   // This id determines which 3d rendering context the node is in. 0 is a
   // special value and indicates that the node is not in any 3d rendering
@@ -68,7 +61,7 @@ struct CC_EXPORT TransformNode {
   int sorting_context_id;
 
   // True if |TransformTree::UpdateLocalTransform| needs to be called which
-  // will update |to_parent| and |source_to_parent| (if possible).
+  // will update |to_parent|.
   bool needs_local_transform_update : 1;
 
   // Whether this node or any ancestor has a potentially running
@@ -92,27 +85,22 @@ struct CC_EXPORT TransformNode {
   bool to_screen_is_potentially_animated : 1;
 
   // Flattening, when needed, is only applied to a node's inherited transform,
-  // never to its local transform.
+  // never to its local transform. It's true by default.
   bool flattens_inherited_transform : 1;
 
   // This is true if the to_parent transform at every node on the path to the
   // root is flat.
   bool node_and_ancestors_are_flat : 1;
 
-  // This is needed to know if a layer can use lcd text.
-  bool node_and_ancestors_have_only_integer_translation : 1;
-
   bool scrolls : 1;
+
+  bool should_undo_overscroll : 1;
 
   bool should_be_snapped : 1;
 
-  // These are used by the compositor to determine which layers need to be
-  // repositioned by the compositor as a result of browser controls
-  // expanding/contracting the outer viewport size before Blink repositions the
-  // fixed layers.
-  // TODO(bokan): Note: we never change bounds_delta in the x direction so we
-  // can remove this variable.
-  bool moved_by_outer_viewport_bounds_delta_x : 1;
+  // Used by the compositor to determine which layers need to be repositioned by
+  // the compositor as a result of browser controls expanding/contracting the
+  // outer viewport size before Blink repositions the fixed layers.
   bool moved_by_outer_viewport_bounds_delta_y : 1;
 
   // Layer scale factor is used as a fallback when we either cannot adjust
@@ -124,37 +112,41 @@ struct CC_EXPORT TransformNode {
   // We need to track changes to to_screen transform to compute the damage rect.
   bool transform_changed : 1;
 
-  // TODO(vollick): will be moved when accelerated effects are implemented.
-  float post_local_scale_factor;
+  // Whether the parent transform node should be used for checking backface
+  // visibility, not this transform one.
+  bool delegates_to_parent_for_backface : 1;
 
-  // TODO(vollick): will be moved when accelerated effects are implemented.
-  gfx::ScrollOffset scroll_offset;
+  // Set to true, if the compositing reason is will-change:transform, scale,
+  // rotate, or translate (for the CSS property that created this node).
+  bool will_change_transform : 1;
+
+  // Set to true, if the node or it's parent |will_change_transform| is true.
+  bool node_or_ancestors_will_change_transform : 1;
+
+  gfx::PointF scroll_offset;
 
   // This value stores the snapped amount whenever we snap. If the snap is due
   // to a scroll, we need it to calculate fixed-pos elements adjustment, even
   // otherwise we may need it to undo the snapping next frame.
   gfx::Vector2dF snap_amount;
 
-  // TODO(vollick): will be moved when accelerated effects are implemented.
-  gfx::Vector2dF source_offset;
-  gfx::Vector2dF source_to_parent;
-
-  // See MutatorHost::GetAnimationScales() for their meanings. Updated by
-  // PropertyTrees::AnimationScalesChanged().
+  // From MutatorHost::GetMaximuimAnimationScale(). Updated by
+  // PropertyTrees::MaximumAnimationScaleChanged() and
+  // LayerTreeImpl::UpdateTransformAnimation().
   float maximum_animation_scale;
-  float starting_animation_scale;
 
+  // Set to the element ID of containing document if this transform node is the
+  // root of a visible frame subtree.
+  ElementId visible_frame_element_id;
+
+#if DCHECK_IS_ON()
   bool operator==(const TransformNode& other) const;
+#endif
 
   void set_to_parent(const gfx::Transform& transform) {
     to_parent = transform;
     is_invertible = to_parent.IsInvertible();
   }
-
-  void update_pre_local_transform(const gfx::Point3F& transform_origin);
-
-  void update_post_local_transform(const gfx::PointF& position,
-                                   const gfx::Point3F& transform_origin);
 
   void AsValueInto(base::trace_event::TracedValue* value) const;
 };

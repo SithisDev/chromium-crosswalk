@@ -1,9 +1,11 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_LAYERS_PAINTED_OVERLAY_SCROLLBAR_LAYER_IMPL_H_
 #define CC_LAYERS_PAINTED_OVERLAY_SCROLLBAR_LAYER_IMPL_H_
+
+#include <memory>
 
 #include "cc/cc_export.h"
 #include "cc/input/scrollbar.h"
@@ -30,12 +32,13 @@ class CC_EXPORT PaintedOverlayScrollbarLayerImpl
   ~PaintedOverlayScrollbarLayerImpl() override;
 
   // LayerImpl implementation.
-  std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
+  std::unique_ptr<LayerImpl> CreateLayerImpl(
+      LayerTreeImpl* tree_impl) const override;
   void PushPropertiesTo(LayerImpl* layer) override;
 
   bool WillDraw(DrawMode draw_mode,
                 viz::ClientResourceProvider* resource_provider) override;
-  void AppendQuads(viz::RenderPass* render_pass,
+  void AppendQuads(viz::CompositorRenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override;
 
   void SetThumbThickness(int thumb_thickness);
@@ -72,11 +75,11 @@ class CC_EXPORT PaintedOverlayScrollbarLayerImpl
  private:
   const char* LayerTypeAsString() const override;
 
-  void AppendThumbQuads(viz::RenderPass* render_pass,
+  void AppendThumbQuads(viz::CompositorRenderPass* render_pass,
                         AppendQuadsData* append_quads_data,
                         viz::SharedQuadState* shared_quad_state);
 
-  void AppendTrackQuads(viz::RenderPass* render_pass,
+  void AppendTrackQuads(viz::CompositorRenderPass* render_pass,
                         AppendQuadsData* append_quads_data,
                         viz::SharedQuadState* shared_quad_state);
 

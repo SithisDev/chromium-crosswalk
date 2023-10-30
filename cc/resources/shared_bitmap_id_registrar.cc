@@ -1,4 +1,4 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,10 +21,10 @@ SharedBitmapIdRegistration::~SharedBitmapIdRegistration() {
 }
 
 SharedBitmapIdRegistration::SharedBitmapIdRegistration(
-    SharedBitmapIdRegistration&&) = default;
+    SharedBitmapIdRegistration&&) noexcept = default;
 
 SharedBitmapIdRegistration& SharedBitmapIdRegistration::operator=(
-    SharedBitmapIdRegistration&& other) {
+    SharedBitmapIdRegistration&& other) noexcept {
   if (layer_ptr_)
     layer_ptr_->UnregisterSharedBitmapId(id_);
   layer_ptr_ = std::move(other.layer_ptr_);

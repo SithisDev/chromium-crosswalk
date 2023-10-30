@@ -1,15 +1,18 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/animation/scroll_timeline.h"
 
+#include <memory>
+#include <vector>
+
+#include "cc/animation/animation_id_provider.h"
+#include "cc/animation/worklet_animation.h"
 #include "cc/trees/property_tree.h"
 #include "cc/trees/scroll_node.h"
-#include "ui/gfx/geometry/scroll_offset.h"
+#include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/size.h"
-
-#include <memory>
 
 namespace cc {
 
@@ -23,32 +26,41 @@ bool IsReverse(ScrollTimeline::ScrollDirection direction) {
   return direction == ScrollTimeline::ScrollUp ||
          direction == ScrollTimeline::ScrollLeft;
 }
+
 }  // namespace
 
-ScrollTimeline::ScrollTimeline(base::Optional<ElementId> scroller_id,
+ScrollTimeline::ScrollTimeline(absl::optional<ElementId> scroller_id,
                                ScrollDirection direction,
-                               base::Optional<double> start_scroll_offset,
-                               base::Optional<double> end_scroll_offset,
-                               double time_range,
-                               KeyframeModel::FillMode fill)
-    : active_id_(),
+                               absl::optional<ScrollOffsets> scroll_offsets,
+                               int animation_timeline_id)
+    : AnimationTimeline(animation_timeline_id),
       pending_id_(scroller_id),
       direction_(direction),
-      start_scroll_offset_(start_scroll_offset),
-      end_scroll_offset_(end_scroll_offset),
-      time_range_(time_range),
-      fill_(fill) {}
+      pending_offsets_(scroll_offsets) {}
 
-ScrollTimeline::~ScrollTimeline() {}
+ScrollTimeline::~ScrollTimeline() = default;
 
-std::unique_ptr<ScrollTimeline> ScrollTimeline::CreateImplInstance() const {
-  return std::make_unique<ScrollTimeline>(
-      pending_id_, direction_, start_scroll_offset_, end_scroll_offset_,
-      time_range_, fill_);
+scoped_refptr<ScrollTimeline> ScrollTimeline::Create(
+    absl::optional<ElementId> scroller_id,
+    ScrollTimeline::ScrollDirection direction,
+    absl::optional<ScrollOffsets> scroll_offsets) {
+  return base::WrapRefCounted(
+      new ScrollTimeline(scroller_id, direction, scroll_offsets,
+                         AnimationIdProvider::NextTimelineId()));
+}
+
+scoped_refptr<AnimationTimeline> ScrollTimeline::CreateImplInstance() const {
+  return base::WrapRefCounted(
+      new ScrollTimeline(pending_id_, direction_, pending_offsets_, id()));
 }
 
 bool ScrollTimeline::IsActive(const ScrollTree& scroll_tree,
                               bool is_active_tree) const {
+  // Blink passes empty scroll offsets when the timeline is inactive.
+  if ((is_active_tree && !active_offsets_) ||
+      (!is_active_tree && !pending_offsets_))
+    return false;
+
   // If pending tree with our scroller hasn't been activated, or the scroller
   // has been removed (e.g. if it is no longer composited).
   if ((is_active_tree && !active_id_) || (!is_active_tree && !pending_id_))
@@ -61,27 +73,26 @@ bool ScrollTimeline::IsActive(const ScrollTree& scroll_tree,
   return scroll_tree.FindNodeFromElementId(scroller_id);
 }
 
-base::Optional<base::TimeTicks> ScrollTimeline::CurrentTime(
+// https://drafts.csswg.org/scroll-animations-1/#current-time-algorithm
+absl::optional<base::TimeTicks> ScrollTimeline::CurrentTime(
     const ScrollTree& scroll_tree,
     bool is_active_tree) const {
   // If the timeline is not active return unresolved value by the spec.
   // https://github.com/WICG/scroll-animations/issues/31
   // https://wicg.github.io/scroll-animations/#current-time-algorithm
   if (!IsActive(scroll_tree, is_active_tree))
-    return base::nullopt;
+    return absl::nullopt;
 
   ElementId scroller_id =
       is_active_tree ? active_id_.value() : pending_id_.value();
   const ScrollNode* scroll_node =
       scroll_tree.FindNodeFromElementId(scroller_id);
 
-  gfx::ScrollOffset offset =
-      scroll_tree.GetPixelSnappedScrollOffset(scroll_node->id);
+  gfx::PointF offset = scroll_tree.GetPixelSnappedScrollOffset(scroll_node->id);
   DCHECK_GE(offset.x(), 0);
   DCHECK_GE(offset.y(), 0);
 
-  gfx::ScrollOffset scroll_dimensions =
-      scroll_tree.MaxScrollOffset(scroll_node->id);
+  gfx::PointF scroll_dimensions = scroll_tree.MaxScrollOffset(scroll_node->id);
 
   double max_offset =
       IsVertical(direction_) ? scroll_dimensions.y() : scroll_dimensions.x();
@@ -93,80 +104,95 @@ base::Optional<base::TimeTicks> ScrollTimeline::CurrentTime(
   DCHECK_GE(max_offset, 0);
   DCHECK_GE(current_offset, 0);
 
-  double resolved_start_scroll_offset = start_scroll_offset_.value_or(0);
-  double resolved_end_scroll_offset = end_scroll_offset_.value_or(max_offset);
-
-  // 3. If current scroll offset is less than startScrollOffset:
-  if (current_offset < resolved_start_scroll_offset) {
-    // Return an unresolved time value if fill is none or forwards.
-    if (fill_ == KeyframeModel::FillMode::NONE ||
-        fill_ == KeyframeModel::FillMode::FORWARDS) {
-      return base::nullopt;
-    }
-
-    // Otherwise, return 0.
-    return base::TimeTicks();
+  double start_offset = 0;
+  double end_offset = 0;
+  if (is_active_tree) {
+    DCHECK(active_offsets_);
+    start_offset = active_offsets_->start;
+    end_offset = active_offsets_->end;
+  } else {
+    DCHECK(pending_offsets_);
+    start_offset = pending_offsets_->start;
+    end_offset = pending_offsets_->end;
   }
 
-  // 4. If current scroll offset is greater than or equal to endScrollOffset:
-  if (current_offset >= resolved_end_scroll_offset) {
-    // If endScrollOffset is less than the maximum scroll offset of scrollSource
-    // in orientation and fill is none or backwards, return an unresolved time
-    // value.
-    if (resolved_end_scroll_offset < max_offset &&
-        (fill_ == KeyframeModel::FillMode::NONE ||
-         fill_ == KeyframeModel::FillMode::BACKWARDS)) {
-      return base::nullopt;
-    }
-
-    // Otherwise, return the effective time range.
-    return base::TimeTicks() + base::TimeDelta::FromMillisecondsD(time_range_);
-  }
-
-  // This is not by the spec, but avoids a negative current time.
-  // See https://github.com/WICG/scroll-animations/issues/20
-  if (resolved_start_scroll_offset >= resolved_end_scroll_offset) {
-    return base::nullopt;
-  }
-
-  // 5. Return the result of evaluating the following expression:
-  //   ((current scroll offset - startScrollOffset) /
-  //      (endScrollOffset - startScrollOffset)) * effective time range
+  // TODO(crbug.com/1338167): Update once
+  // github.com/w3c/csswg-drafts/issues/7401 is resolved.
+  double progress =
+      end_offset == start_offset
+          ? 1
+          : (current_offset - start_offset) / (end_offset - start_offset);
   return base::TimeTicks() +
-         base::TimeDelta::FromMillisecondsD(
-             ((current_offset - resolved_start_scroll_offset) /
-              (resolved_end_scroll_offset - resolved_start_scroll_offset)) *
-             time_range_);
+         base::Milliseconds(progress * kScrollTimelineDurationMs);
 }
 
-void ScrollTimeline::PushPropertiesTo(ScrollTimeline* impl_timeline) {
+void ScrollTimeline::PushPropertiesTo(AnimationTimeline* impl_timeline) {
+  AnimationTimeline::PushPropertiesTo(impl_timeline);
   DCHECK(impl_timeline);
-  impl_timeline->pending_id_ = pending_id_;
-  // TODO(smcgruer): This leads to incorrect behavior in the current design,
-  // because we end up using the pending start/end scroll offset for the active
-  // tree too. Instead we need to either split these (like pending_id_ and
-  // active_id_) or have a ScrollTimeline per tree.
-  impl_timeline->start_scroll_offset_ = start_scroll_offset_;
-  impl_timeline->end_scroll_offset_ = end_scroll_offset_;
+  ScrollTimeline* scroll_timeline = ToScrollTimeline(impl_timeline);
+  scroll_timeline->pending_id_ = pending_id_;
+  scroll_timeline->pending_offsets_ = pending_offsets_;
 }
 
-void ScrollTimeline::PromoteScrollTimelinePendingToActive() {
+void ScrollTimeline::ActivateTimeline() {
   active_id_ = pending_id_;
+  active_offsets_ = pending_offsets_;
+  for (auto& kv : id_to_animation_map_) {
+    auto& animation = kv.second;
+    if (animation->IsWorkletAnimation())
+      ToWorkletAnimation(animation.get())->ReleasePendingTreeLock();
+  }
 }
 
-void ScrollTimeline::UpdateStartAndEndScrollOffsets(
-    base::Optional<double> start_scroll_offset,
-    base::Optional<double> end_scroll_offset) {
-  start_scroll_offset_ = start_scroll_offset;
-  end_scroll_offset_ = end_scroll_offset;
+bool ScrollTimeline::TickScrollLinkedAnimations(
+    const std::vector<scoped_refptr<Animation>>& ticking_animations,
+    const ScrollTree& scroll_tree,
+    bool is_active_tree) {
+  absl::optional<base::TimeTicks> tick_time =
+      CurrentTime(scroll_tree, is_active_tree);
+  if (!tick_time)
+    return false;
+
+  bool animated = false;
+  // This potentially iterates over all ticking animations multiple
+  // times (# of ScrollTimeline * # of ticking_animations_).
+  // The alternative we have considered here was to maintain a
+  // ticking_animations_ list for each timeline but at the moment we
+  // have opted to avoid this complexity in favor of simpler but less
+  // efficient solution.
+  for (auto& animation : ticking_animations) {
+    if (animation->animation_timeline() != this)
+      continue;
+    // Worklet animations are ticked at a later stage.
+    if (animation->IsWorkletAnimation())
+      continue;
+
+    if (!animation->IsScrollLinkedAnimation())
+      continue;
+
+    animation->Tick(tick_time.value());
+    animated = true;
+  }
+  return animated;
 }
 
-void ScrollTimeline::SetScrollerId(base::Optional<ElementId> pending_id) {
+void ScrollTimeline::UpdateScrollerIdAndScrollOffsets(
+    absl::optional<ElementId> pending_id,
+    absl::optional<ScrollOffsets> pending_offsets) {
+  if (pending_id_ == pending_id && pending_offsets_ == pending_offsets)
+    return;
+
   // When the scroller id changes it will first be modified in the pending tree.
   // Then later (when the pending tree is promoted to active)
-  // |PromoteScrollTimelinePendingToActive| will be called and will set the
-  // |active_id_|.
+  // |ActivateTimeline| will be called and will set the |active_id_|.
   pending_id_ = pending_id;
+  pending_offsets_ = pending_offsets;
+
+  SetNeedsPushProperties();
+}
+
+bool ScrollTimeline::IsScrollTimeline() const {
+  return true;
 }
 
 }  // namespace cc

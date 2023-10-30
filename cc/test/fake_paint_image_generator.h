@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/containers/flat_map.h"
 #include "cc/paint/paint_image_generator.h"
+#include "third_party/skia/include/core/SkYUVAPixmaps.h"
 
 namespace cc {
 
@@ -23,7 +24,7 @@ class FakePaintImageGenerator : public PaintImageGenerator {
   // YUV decoding mode constructor.
   explicit FakePaintImageGenerator(
       const SkImageInfo& info,
-      const SkYUVASizeInfo& yuva_size_info,
+      const SkYUVAPixmapInfo& yuva_pixmap_info,
       std::vector<FrameMetadata> frames = {FrameMetadata()},
       bool allocate_discardable_memory = true,
       std::vector<SkISize> supported_sizes = {});
@@ -33,7 +34,6 @@ class FakePaintImageGenerator : public PaintImageGenerator {
   FakePaintImageGenerator& operator=(const FakePaintImageGenerator&) = delete;
 
   // PaintImageGenerator implementation.
-  bool IsEligibleForAcceleratedDecoding() const override;
   sk_sp<SkData> GetEncodedData() const override;
   bool GetPixels(const SkImageInfo& info,
                  void* pixels,
@@ -41,15 +41,15 @@ class FakePaintImageGenerator : public PaintImageGenerator {
                  size_t frame_index,
                  PaintImage::GeneratorClientId client_id,
                  uint32_t lazy_pixel_ref) override;
-  bool QueryYUVA8(SkYUVASizeInfo* info,
-                  SkYUVAIndex indices[],
-                  SkYUVColorSpace* color_space) const override;
-  bool GetYUVA8Planes(const SkYUVASizeInfo& info,
-                      const SkYUVAIndex indices[],
-                      void* planes[4],
-                      size_t frame_index,
-                      uint32_t lazy_pixel_ref) override;
+  bool QueryYUVA(
+      const SkYUVAPixmapInfo::SupportedDataTypes& supported_data_types,
+      SkYUVAPixmapInfo* yuva_pixmap_info) const override;
+  bool GetYUVAPlanes(const SkYUVAPixmaps& pixmaps,
+                     size_t frame_index,
+                     uint32_t lazy_pixel_ref,
+                     PaintImage::GeneratorClientId client_id) override;
   SkISize GetSupportedDecodeSize(const SkISize& requested_size) const override;
+  const ImageHeaderMetadata* GetMetadataForDecodeAcceleration() const override;
 
   const base::flat_map<size_t, int>& frames_decoded() const {
     return frames_decoded_count_;
@@ -60,8 +60,8 @@ class FakePaintImageGenerator : public PaintImageGenerator {
   }
   void reset_frames_decoded() { frames_decoded_count_.clear(); }
   void SetExpectFallbackToRGB() { expect_fallback_to_rgb_ = true; }
-  void SetEligibleForAcceleratedDecoding() {
-    is_eligible_for_accelerated_decode_ = true;
+  void SetImageHeaderMetadata(const ImageHeaderMetadata& image_metadata) {
+    image_metadata_ = image_metadata;
   }
 
  private:
@@ -71,12 +71,12 @@ class FakePaintImageGenerator : public PaintImageGenerator {
   std::vector<SkISize> supported_sizes_;
   std::vector<SkImageInfo> decode_infos_;
   bool is_yuv_ = false;
-  SkYUVASizeInfo yuva_size_info_;
+  SkYUVAPixmapInfo yuva_pixmap_info_;
   // TODO(skbug.com/8564): After Skia supports rendering from software YUV
   // planes and after Chrome implements it, we should no longer expect RGB
   // fallback.
   bool expect_fallback_to_rgb_ = false;
-  bool is_eligible_for_accelerated_decode_ = false;
+  ImageHeaderMetadata image_metadata_;
 };
 
 }  // namespace cc

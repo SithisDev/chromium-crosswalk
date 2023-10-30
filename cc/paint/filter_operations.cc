@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 
 #include <cmath>
 #include <numeric>
+#include <utility>
 
+#include "base/containers/contains.h"
 #include "base/trace_event/traced_value.h"
 #include "base/values.h"
 #include "cc/paint/filter_operation.h"
@@ -82,6 +84,7 @@ bool FilterOperations::HasFilterThatMovesPixels() const {
       case FilterOperation::BLUR:
       case FilterOperation::DROP_SHADOW:
       case FilterOperation::ZOOM:
+      case FilterOperation::STRETCH:
         return true;
       case FilterOperation::REFERENCE:
         // TODO(hendrikw): SkImageFilter needs a function that tells us if the
@@ -104,6 +107,51 @@ bool FilterOperations::HasFilterThatMovesPixels() const {
   return false;
 }
 
+float FilterOperations::MaximumPixelMovement() const {
+  float max_movement = 0.;
+  for (size_t i = 0; i < operations_.size(); ++i) {
+    const FilterOperation& op = operations_[i];
+    switch (op.type()) {
+      case FilterOperation::BLUR:
+        // |op.amount| here is the blur radius.
+        max_movement = fmax(max_movement, op.amount() * 3.f);
+        continue;
+      case FilterOperation::DROP_SHADOW:
+        // |op.amount| here is the blur radius.
+        max_movement =
+            fmax(max_movement, fmax(std::abs(op.drop_shadow_offset().x()),
+                                    std::abs(op.drop_shadow_offset().y())) +
+                                   op.amount() * 3.f);
+        continue;
+      case FilterOperation::ZOOM:
+        max_movement = fmax(max_movement, op.zoom_inset());
+        continue;
+      case FilterOperation::REFERENCE:
+        // TODO(hendrikw): SkImageFilter needs a function that tells us how far
+        // the filter can move pixels. See crbug.com/523538 (sort of).
+        max_movement = fmax(max_movement, 100);
+        continue;
+      case FilterOperation::STRETCH:
+        max_movement =
+            fmax(max_movement, fmax(op.amount(), op.outer_threshold()));
+        continue;
+      case FilterOperation::OPACITY:
+      case FilterOperation::COLOR_MATRIX:
+      case FilterOperation::GRAYSCALE:
+      case FilterOperation::SEPIA:
+      case FilterOperation::SATURATE:
+      case FilterOperation::HUE_ROTATE:
+      case FilterOperation::INVERT:
+      case FilterOperation::BRIGHTNESS:
+      case FilterOperation::CONTRAST:
+      case FilterOperation::SATURATING_BRIGHTNESS:
+      case FilterOperation::ALPHA_THRESHOLD:
+        continue;
+    }
+  }
+  return max_movement;
+}
+
 bool FilterOperations::HasFilterThatAffectsOpacity() const {
   for (size_t i = 0; i < operations_.size(); ++i) {
     const FilterOperation& op = operations_[i];
@@ -118,7 +166,7 @@ bool FilterOperations::HasFilterThatAffectsOpacity() const {
       case FilterOperation::ALPHA_THRESHOLD:
         return true;
       case FilterOperation::COLOR_MATRIX: {
-        const SkScalar* matrix = op.matrix();
+        auto& matrix = op.matrix();
         if (matrix[15] || matrix[16] || matrix[17] || matrix[18] != 1 ||
             matrix[19])
           return true;
@@ -132,6 +180,7 @@ bool FilterOperations::HasFilterThatAffectsOpacity() const {
       case FilterOperation::BRIGHTNESS:
       case FilterOperation::CONTRAST:
       case FilterOperation::SATURATING_BRIGHTNESS:
+      case FilterOperation::STRETCH:
         break;
     }
   }
@@ -139,11 +188,11 @@ bool FilterOperations::HasFilterThatAffectsOpacity() const {
 }
 
 bool FilterOperations::HasReferenceFilter() const {
-  for (size_t i = 0; i < operations_.size(); ++i) {
-    if (operations_[i].type() == FilterOperation::REFERENCE)
-      return true;
-  }
-  return false;
+  return HasFilterOfType(FilterOperation::REFERENCE);
+}
+
+bool FilterOperations::HasFilterOfType(FilterOperation::FilterType type) const {
+  return base::Contains(operations_, type, &FilterOperation::type);
 }
 
 FilterOperations FilterOperations::Blend(const FilterOperations& from,
@@ -198,11 +247,11 @@ void FilterOperations::AsValueInto(
 }
 
 std::string FilterOperations::ToString() const {
-  base::trace_event::TracedValue value;
+  base::trace_event::TracedValueJSON value;
   value.BeginArray("FilterOperations");
   AsValueInto(&value);
   value.EndArray();
-  return value.ToString();
+  return value.ToJSON();
 }
 
 }  // namespace cc

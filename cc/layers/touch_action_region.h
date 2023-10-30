@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@ class CC_EXPORT TouchActionRegion {
 
   // Returns the touch actions that we are sure will be allowed at the point
   // by finding the intersection of all touch actions whose regions contain the
-  // given point. If the map is empty, |kTouchActionAuto| is returned since no
+  // given point. If the map is empty, |TouchAction::kAuto| is returned since no
   // touch actions have been explicitly defined and the default touch action
   // is auto.
   TouchAction GetAllowedTouchAction(const gfx::Point&) const;

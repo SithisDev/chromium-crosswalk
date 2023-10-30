@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,9 @@
 
 #include <stdint.h>
 
-#include <list>
-
 #include "cc/cc_export.h"
 #include "cc/trees/property_tree.h"
+#include "ui/events/types/scroll_types.h"
 
 namespace cc {
 
@@ -18,6 +17,7 @@ class CC_EXPORT ScrollStateData {
  public:
   ScrollStateData();
   ScrollStateData(const ScrollStateData& other);
+  ScrollStateData& operator=(const ScrollStateData& other);
 
   // Scroll delta in viewport coordinates (DIP).
   double delta_x;
@@ -46,8 +46,11 @@ class CC_EXPORT ScrollStateData {
   // True if the user interacts directly with the display, e.g., via
   // touch.
   bool is_direct_manipulation;
-  // Minimum amount this input device can scroll.
-  double delta_granularity;
+  // True if the scroll is the result of a scrollbar interaction.
+  bool is_scrollbar_interaction;
+
+  // Granularity units for the scroll delta.
+  ui::ScrollGranularity delta_granularity;
 
   // TODO(tdresser): ScrollState shouldn't need to keep track of whether or not
   // this ScrollState object has caused a scroll. Ideally, any native scroller
@@ -65,21 +68,21 @@ class CC_EXPORT ScrollStateData {
   // resolved. crbug.com/755164.
   bool is_scroll_chain_cut;
 
-  ScrollNode* current_native_scrolling_node() const;
-  void set_current_native_scrolling_node(
-      ScrollNode* current_native_scrolling_node);
   ElementId current_native_scrolling_element() const;
   void set_current_native_scrolling_element(ElementId element_id);
 
- private:
-  // Only one of current_native_scrolling_node_ and
-  // current_native_scrolling_element_ may be non-null at a time. Whenever
-  // possible, we should store the scroll node.
+  // Used in scroll unification to specify that a scroll state has been hit
+  // tested on the main thread. If this is true, the hit test result will be
+  // placed in the current_native_scrolling_element_.
+  bool is_main_thread_hit_tested;
 
-  // The last scroll node to respond to a scroll, or null if none exists.
-  ScrollNode* current_native_scrolling_node_;
+ private:
   // The id of the last native element to respond to a scroll, or 0 if none
   // exists.
+  // TODO(bokan): In the compositor, this is now only used as an override to
+  // scroller targeting. I.e. we'll latch scrolling to the specified
+  // element_id. It will be renamed to a better name (target_element_id?) when
+  // the main thread is also converted.
   ElementId current_native_scrolling_element_;
 };
 

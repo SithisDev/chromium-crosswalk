@@ -1,9 +1,14 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stddef.h>
 
+#include <algorithm>
+#include <memory>
+#include <utility>
+
+#include "base/numerics/safe_conversions.h"
 #include "cc/layers/append_quads_data.h"
 #include "cc/layers/nine_patch_layer_impl.h"
 #include "cc/resources/ui_resource_bitmap.h"
@@ -11,24 +16,21 @@
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_frame_sink.h"
 #include "cc/test/fake_ui_resource_layer_tree_host_impl.h"
-#include "cc/test/geometry_test_utils.h"
-#include "cc/test/layer_test_common.h"
+#include "cc/test/layer_tree_impl_test_base.h"
 #include "cc/trees/single_thread_proxy.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/rect_conversions.h"
-#include "ui/gfx/geometry/safe_integer_conversions.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace cc {
 namespace {
 
 gfx::Rect ToRoundedIntRect(const gfx::RectF& rect_f) {
-  return gfx::Rect(gfx::ToRoundedInt(rect_f.x()),
-                   gfx::ToRoundedInt(rect_f.y()),
-                   gfx::ToRoundedInt(rect_f.width()),
-                   gfx::ToRoundedInt(rect_f.height()));
+  return gfx::Rect(base::ClampRound(rect_f.x()), base::ClampRound(rect_f.y()),
+                   base::ClampRound(rect_f.width()),
+                   base::ClampRound(rect_f.height()));
 }
 
 void NinePatchLayerLayoutTest(const gfx::Size& bitmap_size,
@@ -37,7 +39,7 @@ void NinePatchLayerLayoutTest(const gfx::Size& bitmap_size,
                               const gfx::Rect& border,
                               bool fill_center,
                               size_t expected_quad_size) {
-  std::unique_ptr<viz::RenderPass> render_pass = viz::RenderPass::Create();
+  auto render_pass = viz::CompositorRenderPass::Create();
   gfx::Rect visible_layer_rect(layer_size);
   gfx::Rect expected_remaining(border.x(), border.y(),
                                layer_size.width() - border.width(),
@@ -56,7 +58,7 @@ void NinePatchLayerLayoutTest(const gfx::Size& bitmap_size,
       NinePatchLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
-  layer->test_properties()->force_render_surface = true;
+  SetupRootProperties(layer.get());
 
   UIResourceId uid = 1;
   bool is_opaque = false;
@@ -67,11 +69,10 @@ void NinePatchLayerLayoutTest(const gfx::Size& bitmap_size,
   layer->SetImageBounds(bitmap_size);
   layer->SetLayout(aperture_rect, border, gfx::Rect(), fill_center, false);
   host_impl.active_tree()->SetRootLayerForTesting(std::move(layer));
-  host_impl.active_tree()->BuildPropertyTreesForTesting();
+  UpdateDrawProperties(host_impl.active_tree());
 
   AppendQuadsData data;
-  host_impl.active_tree()->root_layer_for_testing()->AppendQuads(
-      render_pass.get(), &data);
+  host_impl.active_tree()->root_layer()->AppendQuads(render_pass.get(), &data);
 
   // Verify quad rects
   const auto& quads = render_pass->quad_list;
@@ -126,7 +127,7 @@ void NinePatchLayerLayoutTestWithOcclusion(const gfx::Size& bitmap_size,
                                            const gfx::Rect& occlusion,
                                            bool fill_center,
                                            size_t expected_quad_size) {
-  std::unique_ptr<viz::RenderPass> render_pass = viz::RenderPass::Create();
+  auto render_pass = viz::CompositorRenderPass::Create();
   gfx::Rect visible_layer_rect(layer_size);
   int border_left = std::min(border.x(), occlusion.x()),
       border_top = std::min(border.y(), occlusion.y()),
@@ -169,7 +170,7 @@ void NinePatchLayerLayoutTestWithOcclusion(const gfx::Size& bitmap_size,
       NinePatchLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_layer_rect = visible_layer_rect;
   layer->SetBounds(layer_size);
-  layer->test_properties()->force_render_surface = true;
+  SetupRootProperties(layer.get());
 
   UIResourceId uid = 1;
   bool is_opaque = false;
@@ -180,11 +181,10 @@ void NinePatchLayerLayoutTestWithOcclusion(const gfx::Size& bitmap_size,
   layer->SetImageBounds(bitmap_size);
   layer->SetLayout(aperture_rect, border, occlusion, false, false);
   host_impl.active_tree()->SetRootLayerForTesting(std::move(layer));
-  host_impl.active_tree()->BuildPropertyTreesForTesting();
+  UpdateDrawProperties(host_impl.active_tree());
 
   AppendQuadsData data;
-  host_impl.active_tree()->root_layer_for_testing()->AppendQuads(
-      render_pass.get(), &data);
+  host_impl.active_tree()->root_layer()->AppendQuads(render_pass.get(), &data);
 
   // Verify quad rects
   const auto& quads = render_pass->quad_list;
@@ -350,7 +350,7 @@ TEST(NinePatchLayerImplTest, Occlusion) {
   gfx::Size layer_size(1000, 1000);
   gfx::Size viewport_size(1000, 1000);
 
-  LayerTestCommon::LayerImplTest impl;
+  LayerTreeImplTestBase impl;
 
   SkBitmap sk_bitmap;
   sk_bitmap.allocN32Pixels(10, 10);
@@ -360,11 +360,12 @@ TEST(NinePatchLayerImplTest, Occlusion) {
   impl.host_impl()->CreateUIResource(uid, bitmap);
 
   NinePatchLayerImpl* nine_patch_layer_impl =
-      impl.AddChildToRoot<NinePatchLayerImpl>();
+      impl.AddLayer<NinePatchLayerImpl>();
   nine_patch_layer_impl->SetBounds(layer_size);
   nine_patch_layer_impl->SetDrawsContent(true);
   nine_patch_layer_impl->SetUIResourceId(uid);
   nine_patch_layer_impl->SetImageBounds(gfx::Size(10, 10));
+  CopyProperties(impl.root_layer(), nine_patch_layer_impl);
 
   gfx::Rect aperture = gfx::Rect(3, 3, 4, 4);
   gfx::Rect border = gfx::Rect(300, 300, 400, 400);
@@ -377,8 +378,7 @@ TEST(NinePatchLayerImplTest, Occlusion) {
     gfx::Rect occluded;
     impl.AppendQuadsWithOcclusion(nine_patch_layer_impl, occluded);
 
-    LayerTestCommon::VerifyQuadsExactlyCoverRect(impl.quad_list(),
-                                                 gfx::Rect(layer_size));
+    VerifyQuadsExactlyCoverRect(impl.quad_list(), gfx::Rect(layer_size));
     EXPECT_EQ(9u, impl.quad_list().size());
   }
 
@@ -387,7 +387,7 @@ TEST(NinePatchLayerImplTest, Occlusion) {
     gfx::Rect occluded(nine_patch_layer_impl->visible_layer_rect());
     impl.AppendQuadsWithOcclusion(nine_patch_layer_impl, occluded);
 
-    LayerTestCommon::VerifyQuadsExactlyCoverRect(impl.quad_list(), gfx::Rect());
+    VerifyQuadsExactlyCoverRect(impl.quad_list(), gfx::Rect());
     EXPECT_EQ(impl.quad_list().size(), 0u);
   }
 
@@ -397,8 +397,8 @@ TEST(NinePatchLayerImplTest, Occlusion) {
     impl.AppendQuadsWithOcclusion(nine_patch_layer_impl, occluded);
 
     size_t partially_occluded_count = 0;
-    LayerTestCommon::VerifyQuadsAreOccluded(
-        impl.quad_list(), occluded, &partially_occluded_count);
+    VerifyQuadsAreOccluded(impl.quad_list(), occluded,
+                           &partially_occluded_count);
     // The layer outputs nine quads, three of which are partially occluded, and
     // three fully occluded.
     EXPECT_EQ(6u, impl.quad_list().size());
@@ -410,7 +410,7 @@ TEST(NinePatchLayerImplTest, OpaqueRect) {
   gfx::Size layer_size(1000, 1000);
   gfx::Size viewport_size(1000, 1000);
 
-  LayerTestCommon::LayerImplTest impl;
+  LayerTreeImplTestBase impl;
 
   SkBitmap sk_bitmap_opaque;
   sk_bitmap_opaque.allocN32Pixels(10, 10);
@@ -431,10 +431,11 @@ TEST(NinePatchLayerImplTest, OpaqueRect) {
 
   impl.host_impl()->CreateUIResource(uid_alpha, bitmap_alpha);
 
-  NinePatchLayerImpl *nine_patch_layer_impl =
-      impl.AddChildToRoot<NinePatchLayerImpl>();
+  NinePatchLayerImpl* nine_patch_layer_impl =
+      impl.AddLayer<NinePatchLayerImpl>();
   nine_patch_layer_impl->SetBounds(layer_size);
   nine_patch_layer_impl->SetDrawsContent(true);
+  CopyProperties(impl.root_layer(), nine_patch_layer_impl);
 
   impl.CalcDrawProps(viewport_size);
 

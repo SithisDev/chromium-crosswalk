@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-# Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -22,11 +22,13 @@ from util import java_cpp_utils
 #
 # This script can parse .idl files however, at present it ignores special
 # rules such as [cpp_enum_prefix_override="ax_attr"].
-ENUM_FIXED_TYPE_WHITELIST = ['char', 'unsigned char',
-  'short', 'unsigned short',
-  'int', 'int8_t', 'int16_t', 'int32_t', 'uint8_t', 'uint16_t']
+ENUM_FIXED_TYPE_ALLOWLIST = [
+    'char', 'unsigned char', 'short', 'unsigned short', 'int', 'int8_t',
+    'int16_t', 'int32_t', 'uint8_t', 'uint16_t'
+]
 
-class EnumDefinition(object):
+
+class EnumDefinition:
   def __init__(self, original_enum_name=None, class_name_override=None,
                enum_package=None, entries=None, comments=None, fixed_type=None):
     self.original_enum_name = original_enum_name
@@ -61,15 +63,15 @@ class EnumDefinition(object):
     assert self.class_name
     assert self.enum_package
     assert self.entries
-    if self.fixed_type and self.fixed_type not in ENUM_FIXED_TYPE_WHITELIST:
-      raise Exception('Fixed type %s for enum %s not whitelisted.' %
-          (self.fixed_type, self.class_name))
+    if self.fixed_type and self.fixed_type not in ENUM_FIXED_TYPE_ALLOWLIST:
+      raise Exception('Fixed type %s for enum %s not in allowlist.' %
+                      (self.fixed_type, self.class_name))
 
   def _AssignEntryIndices(self):
     # Enums, if given no value, are given the value of the previous enum + 1.
     if not all(self.entries.values()):
       prev_enum_value = -1
-      for key, value in self.entries.iteritems():
+      for key, value in self.entries.items():
         if not value:
           self.entries[key] = prev_enum_value + 1
         elif value in self.entries:
@@ -77,9 +79,9 @@ class EnumDefinition(object):
         else:
           try:
             self.entries[key] = int(value)
-          except ValueError:
+          except ValueError as e:
             raise Exception('Could not interpret integer from enum value "%s" '
-                            'for key %s.' % (value, key))
+                            'for key %s.' % (value, key)) from e
         prev_enum_value = self.entries[key]
 
 
@@ -94,7 +96,7 @@ class EnumDefinition(object):
                   'k' + self.original_enum_name]
 
       for prefix in prefixes:
-        if all([w.startswith(prefix) for w in self.entries.keys()]):
+        if all(w.startswith(prefix) for w in self.entries.keys()):
           prefix_to_strip = prefix
           break
       else:
@@ -102,9 +104,9 @@ class EnumDefinition(object):
 
     def StripEntries(entries):
       ret = collections.OrderedDict()
-      for k, v in entries.iteritems():
+      for k, v in entries.items():
         stripped_key = k.replace(prefix_to_strip, '', 1)
-        if isinstance(v, basestring):
+        if isinstance(v, str):
           stripped_value = v.replace(prefix_to_strip, '')
         else:
           stripped_value = v
@@ -122,19 +124,24 @@ class EnumDefinition(object):
 
 def _TransformKeys(d, func):
   """Normalize keys in |d| and update references to old keys in |d| values."""
-  normal_keys = {k: func(k) for k in d}
+  keys_map = {k: func(k) for k in d}
   ret = collections.OrderedDict()
-  for k, v in d.iteritems():
+  for k, v in d.items():
     # Need to transform values as well when the entry value was explicitly set
     # (since it could contain references to other enum entry values).
-    if isinstance(v, basestring):
-      for normal_key in normal_keys:
-        v = v.replace(normal_key, normal_keys[normal_key])
-    ret[normal_keys[k]] = v
+    if isinstance(v, str):
+      # First check if a full replacement is available. This avoids issues when
+      # one key is a substring of another.
+      if v in d:
+        v = keys_map[v]
+      else:
+        for old_key, new_key in keys_map.items():
+          v = v.replace(old_key, new_key)
+    ret[keys_map[k]] = v
   return ret
 
 
-class DirectiveSet(object):
+class DirectiveSet:
   class_name_override_key = 'CLASS_NAME_OVERRIDE'
   enum_package_key = 'ENUM_PACKAGE'
   prefix_to_strip_key = 'PREFIX_TO_STRIP'
@@ -162,7 +169,7 @@ class DirectiveSet(object):
         DirectiveSet.prefix_to_strip_key)
 
 
-class HeaderParser(object):
+class HeaderParser:
   single_line_comment_re = re.compile(r'\s*//\s*([^\n]*)')
   multi_line_comment_start_re = re.compile(r'\s*/\*')
   enum_line_re = re.compile(r'^\s*(\w+)(\s*\=\s*([^,\n]+))?,?')
@@ -298,7 +305,7 @@ class HeaderParser(object):
                       '. Use () for multi-line directives. E.g.\n' +
                       '// GENERATED_JAVA_ENUM_PACKAGE: (\n' +
                       '//   foo.package)')
-    elif generator_directive:
+    if generator_directive:
       directive_name = generator_directive.groups()[0]
       directive_value = generator_directive.groups()[1]
       self._generator_directives.Update(directive_name, directive_value)
@@ -326,9 +333,8 @@ def DoGenerate(source_paths):
                       '"// GENERATED_JAVA_ENUM_PACKAGE: foo"?' %
                       source_path)
     for enum_definition in enum_definitions:
-      package_path = enum_definition.enum_package.replace('.', os.path.sep)
-      file_name = enum_definition.class_name + '.java'
-      output_path = os.path.join(package_path, file_name)
+      output_path = java_cpp_utils.GetJavaFilePath(enum_definition.enum_package,
+                                                   enum_definition.class_name)
       output = GenerateOutput(source_path, enum_definition)
       yield output_path, output
 
@@ -351,7 +357,7 @@ def GenerateOutput(source_path, enum_definition):
 
 package ${PACKAGE};
 
-import android.support.annotation.IntDef;
+import androidx.annotation.IntDef;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -368,7 +374,7 @@ ${ENUM_ENTRIES}
   enum_template = Template('  int ${NAME} = ${VALUE};')
   enum_entries_string = []
   enum_names = []
-  for enum_name, enum_value in enum_definition.entries.iteritems():
+  for enum_name, enum_value in enum_definition.entries.items():
     values = {
         'NAME': enum_name,
         'VALUE': enum_value,
@@ -410,7 +416,6 @@ ${ENUM_ENTRIES}
 def DoMain(argv):
   usage = 'usage: %prog [options] [output_dir] input_file(s)...'
   parser = optparse.OptionParser(usage=usage)
-  build_utils.AddDepfileOption(parser)
 
   parser.add_option('--srcjar',
                     help='When specified, a .srcjar at the given path is '
@@ -426,9 +431,6 @@ def DoMain(argv):
     with zipfile.ZipFile(f, 'w', zipfile.ZIP_STORED) as srcjar:
       for output_path, data in DoGenerate(input_paths):
         build_utils.AddToZipHermetic(srcjar, output_path, data=data)
-
-  if options.depfile:
-    build_utils.WriteDepfile(options.depfile, options.srcjar, add_pydeps=False)
 
 
 if __name__ == '__main__':

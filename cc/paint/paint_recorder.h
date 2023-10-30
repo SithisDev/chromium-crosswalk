@@ -1,12 +1,13 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_PAINT_PAINT_RECORDER_H_
 #define CC_PAINT_PAINT_RECORDER_H_
 
+#include <memory>
 #include "base/compiler_specific.h"
-#include "base/optional.h"
+#include "cc/paint/display_item_list.h"
 #include "cc/paint/paint_record.h"
 #include "cc/paint/record_paint_canvas.h"
 
@@ -18,7 +19,7 @@ class CC_PAINT_EXPORT PaintRecorder {
  public:
   PaintRecorder();
   PaintRecorder(const PaintRecorder&) = delete;
-  ~PaintRecorder();
+  virtual ~PaintRecorder();
 
   PaintRecorder& operator=(const PaintRecorder&) = delete;
 
@@ -30,16 +31,28 @@ class CC_PAINT_EXPORT PaintRecorder {
     return beginRecording(SkRect::MakeWH(width, height));
   }
 
-  // Only valid between between and finish recording.
+  // Only valid while recording.
   ALWAYS_INLINE RecordPaintCanvas* getRecordingCanvas() {
-    return canvas_.has_value() ? &canvas_.value() : nullptr;
+    return canvas_.get();
   }
 
   sk_sp<PaintRecord> finishRecordingAsPicture();
 
+  bool ListHasDrawOps() const;
+
+  // Ops with nested paint ops are considered as a single op.
+  size_t num_paint_ops() const;
+
+  size_t TotalOpCount() const { return display_item_list_->TotalOpCount(); }
+  size_t OpBytesUsed() const { return display_item_list_->OpBytesUsed(); }
+
+ protected:
+  virtual std::unique_ptr<RecordPaintCanvas> CreateCanvas(DisplayItemList* list,
+                                                          const SkRect& bounds);
+
  private:
   scoped_refptr<DisplayItemList> display_item_list_;
-  base::Optional<RecordPaintCanvas> canvas_;
+  std::unique_ptr<RecordPaintCanvas> canvas_;
 };
 
 }  // namespace cc

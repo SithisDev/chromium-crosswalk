@@ -1,10 +1,11 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_LAYERS_UI_RESOURCE_LAYER_IMPL_H_
 #define CC_LAYERS_UI_RESOURCE_LAYER_IMPL_H_
 
+#include <memory>
 #include <string>
 
 #include "base/memory/ptr_util.h"
@@ -13,10 +14,6 @@
 #include "cc/resources/ui_resource_client.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
-
-namespace base {
-class DictionaryValue;
-}
 
 namespace viz {
 class ClientResourceProvider;
@@ -46,15 +43,16 @@ class CC_EXPORT UIResourceLayerImpl : public LayerImpl {
   // opacity value.
   void SetVertexOpacity(const float vertex_opacity[4]);
 
-  std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
+  std::unique_ptr<LayerImpl> CreateLayerImpl(
+      LayerTreeImpl* tree_impl) const override;
   void PushPropertiesTo(LayerImpl* layer) override;
 
   bool WillDraw(DrawMode draw_mode,
                 viz::ClientResourceProvider* resource_provider) override;
-  void AppendQuads(viz::RenderPass* render_pass,
+  void AppendQuads(viz::CompositorRenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override;
 
-  std::unique_ptr<base::DictionaryValue> LayerAsJson() const override;
+  void AsValueInto(base::trace_event::TracedValue* state) const override;
 
  protected:
   UIResourceLayerImpl(LayerTreeImpl* tree_impl, int id);

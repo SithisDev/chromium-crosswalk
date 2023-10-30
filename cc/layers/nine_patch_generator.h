@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,11 +15,13 @@
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
-class DictionaryValue;
+namespace trace_event {
+class TracedValue;
+}
 }
 
 namespace viz {
-class RenderPass;
+class CompositorRenderPass;
 class SharedQuadState;
 }  // namespace viz
 
@@ -99,11 +101,11 @@ class CC_EXPORT NinePatchGenerator {
 
   void AppendQuads(LayerImpl* layer_impl,
                    UIResourceId ui_resource_id,
-                   viz::RenderPass* render_pass,
+                   viz::CompositorRenderPass* render_pass,
                    viz::SharedQuadState* shared_quad_state,
                    const std::vector<Patch>& patches);
 
-  void AsJson(base::DictionaryValue* dictionary) const;
+  void AsValueInto(base::trace_event::TracedValue* state) const;
   void CheckGeometryLimitations();
 
  private:

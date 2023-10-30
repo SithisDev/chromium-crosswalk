@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,10 @@
 #include "base/test/test_suite.h"
 
 namespace base {
-class MessageLoop;
+namespace test {
+class TaskEnvironment;
 }
+}  // namespace base
 
 namespace cc {
 
@@ -24,13 +26,15 @@ class CCTestSuite : public base::TestSuite {
 
   CCTestSuite& operator=(const CCTestSuite&) = delete;
 
+  static void RunUntilIdle();
+
  protected:
   // Overridden from base::TestSuite:
   void Initialize() override;
   void Shutdown() override;
 
  private:
-  std::unique_ptr<base::MessageLoop> message_loop_;
+  static std::unique_ptr<base::test::TaskEnvironment> task_environment_;
 
   base::TestDiscardableMemoryAllocator discardable_memory_allocator_;
 };

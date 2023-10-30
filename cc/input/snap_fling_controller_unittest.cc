@@ -1,8 +1,10 @@
-// Copyright 2018 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/input/snap_fling_controller.h"
+
+#include <utility>
 
 #include "cc/input/snap_fling_curve.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -14,21 +16,19 @@ namespace {
 
 class MockSnapFlingClient : public SnapFlingClient {
  public:
-  MOCK_CONST_METHOD3(GetSnapFlingInfo,
+  MOCK_CONST_METHOD3(GetSnapFlingInfoAndSetAnimatingSnapTarget,
                      bool(const gfx::Vector2dF& natural_displacement,
-                          gfx::Vector2dF* initial_offset,
-                          gfx::Vector2dF* target_offset));
-  MOCK_METHOD0(ScrollEndForSnapFling, void());
+                          gfx::PointF* initial_offset,
+                          gfx::PointF* target_offset));
+  MOCK_METHOD1(ScrollEndForSnapFling, void(bool));
   MOCK_METHOD0(RequestAnimationForSnapFling, void());
-  MOCK_METHOD1(ScrollByForSnapFling, gfx::Vector2dF(const gfx::Vector2dF&));
+  MOCK_METHOD1(ScrollByForSnapFling, gfx::PointF(const gfx::Vector2dF&));
 };
 
 class MockSnapFlingCurve : public SnapFlingCurve {
  public:
   MockSnapFlingCurve()
-      : SnapFlingCurve(gfx::Vector2dF(),
-                       gfx::Vector2dF(0, 100),
-                       base::TimeTicks()) {}
+      : SnapFlingCurve(gfx::PointF(), gfx::PointF(0, 100), base::TimeTicks()) {}
   MOCK_CONST_METHOD0(IsFinished, bool());
   MOCK_METHOD1(GetScrollDelta, gfx::Vector2dF(base::TimeTicks));
 };
@@ -75,14 +75,30 @@ TEST_F(SnapFlingControllerTest, CreatesAndAnimatesCurveOnFirstInertialGSU) {
   gsu.delta = gfx::Vector2dF(0, -10);
   gsu.is_in_inertial_phase = true;
 
-  EXPECT_CALL(mock_client_,
-              GetSnapFlingInfo(testing::_, testing::_, testing::_))
-      .WillOnce(
-          testing::DoAll(testing::SetArgPointee<1>(gfx::Vector2dF(0, 0)),
-                         testing::SetArgPointee<2>(gfx::Vector2dF(0, 100)),
-                         testing::Return(true)));
+  EXPECT_CALL(mock_client_, GetSnapFlingInfoAndSetAnimatingSnapTarget(
+                                testing::_, testing::_, testing::_))
+      .WillOnce(testing::DoAll(testing::SetArgPointee<1>(gfx::PointF(0, 0)),
+                               testing::SetArgPointee<2>(gfx::PointF(0, 100)),
+                               testing::Return(true)));
   EXPECT_CALL(mock_client_, RequestAnimationForSnapFling()).Times(1);
   EXPECT_CALL(mock_client_, ScrollByForSnapFling(testing::_)).Times(1);
+  EXPECT_TRUE(controller_->HandleGestureScrollUpdate(gsu));
+  testing::Mock::VerifyAndClearExpectations(&mock_client_);
+}
+
+TEST_F(SnapFlingControllerTest, ScrollEndWhenHasEqualOffsetsOnInertialGSU) {
+  SnapFlingController::GestureScrollUpdateInfo gsu;
+  gsu.delta = gfx::Vector2dF(0, -10);
+  gsu.is_in_inertial_phase = true;
+
+  EXPECT_CALL(mock_client_, GetSnapFlingInfoAndSetAnimatingSnapTarget(
+                                testing::_, testing::_, testing::_))
+      .WillOnce(testing::DoAll(testing::SetArgPointee<1>(gfx::PointF(0, 0)),
+                               testing::SetArgPointee<2>(gfx::PointF(0, 0)),
+                               testing::Return(true)));
+  EXPECT_CALL(mock_client_, RequestAnimationForSnapFling()).Times(0);
+  EXPECT_CALL(mock_client_, ScrollByForSnapFling(testing::_)).Times(0);
+  EXPECT_CALL(mock_client_, ScrollEndForSnapFling(true)).Times(1);
   EXPECT_TRUE(controller_->HandleGestureScrollUpdate(gsu));
   testing::Mock::VerifyAndClearExpectations(&mock_client_);
 }
@@ -92,8 +108,8 @@ TEST_F(SnapFlingControllerTest, DoesNotHandleNonInertialGSU) {
   gsu.delta = gfx::Vector2dF(0, -10);
   gsu.is_in_inertial_phase = false;
 
-  EXPECT_CALL(mock_client_,
-              GetSnapFlingInfo(testing::_, testing::_, testing::_))
+  EXPECT_CALL(mock_client_, GetSnapFlingInfoAndSetAnimatingSnapTarget(
+                                testing::_, testing::_, testing::_))
       .Times(0);
   EXPECT_CALL(mock_client_, RequestAnimationForSnapFling()).Times(0);
   EXPECT_CALL(mock_client_, ScrollByForSnapFling(testing::_)).Times(0);
@@ -112,7 +128,7 @@ TEST_F(SnapFlingControllerTest, AnimatesTheCurve) {
       .WillOnce(testing::Return(gfx::Vector2dF(100, 100)));
   EXPECT_CALL(mock_client_, RequestAnimationForSnapFling()).Times(1);
   EXPECT_CALL(mock_client_, ScrollByForSnapFling(gfx::Vector2dF(100, 100)));
-  controller_->Animate(base::TimeTicks() + base::TimeDelta::FromSeconds(1));
+  controller_->Animate(base::TimeTicks() + base::Seconds(1));
   testing::Mock::VerifyAndClearExpectations(&mock_client_);
   testing::Mock::VerifyAndClearExpectations(curve);
 }
@@ -126,16 +142,16 @@ TEST_F(SnapFlingControllerTest, FinishesTheCurve) {
   EXPECT_CALL(*curve, GetScrollDelta(testing::_)).Times(0);
   EXPECT_CALL(mock_client_, RequestAnimationForSnapFling()).Times(0);
   EXPECT_CALL(mock_client_, ScrollByForSnapFling(testing::_)).Times(0);
-  EXPECT_CALL(mock_client_, ScrollEndForSnapFling()).Times(1);
-  controller_->Animate(base::TimeTicks() + base::TimeDelta::FromSeconds(1));
+  EXPECT_CALL(mock_client_, ScrollEndForSnapFling(true)).Times(1);
+  controller_->Animate(base::TimeTicks() + base::Seconds(1));
   testing::Mock::VerifyAndClearExpectations(curve);
   testing::Mock::VerifyAndClearExpectations(&mock_client_);
 
   EXPECT_CALL(*curve, IsFinished()).Times(0);
   EXPECT_CALL(mock_client_, RequestAnimationForSnapFling()).Times(0);
   EXPECT_CALL(mock_client_, ScrollByForSnapFling(testing::_)).Times(0);
-  EXPECT_CALL(mock_client_, ScrollEndForSnapFling()).Times(0);
-  controller_->Animate(base::TimeTicks() + base::TimeDelta::FromSeconds(2));
+  EXPECT_CALL(mock_client_, ScrollEndForSnapFling(true)).Times(0);
+  controller_->Animate(base::TimeTicks() + base::Seconds(2));
   testing::Mock::VerifyAndClearExpectations(curve);
   testing::Mock::VerifyAndClearExpectations(&mock_client_);
 }
@@ -145,7 +161,7 @@ TEST_F(SnapFlingControllerTest, GSBNotFilteredAndResetsStateWhenActive) {
   EXPECT_TRUE(controller_->FilterEventForSnap(
       SnapFlingController::GestureScrollType::kUpdate));
 
-  EXPECT_CALL(mock_client_, ScrollEndForSnapFling()).Times(1);
+  EXPECT_CALL(mock_client_, ScrollEndForSnapFling(false)).Times(1);
   EXPECT_FALSE(controller_->FilterEventForSnap(
       SnapFlingController::GestureScrollType::kBegin));
   testing::Mock::VerifyAndClearExpectations(&mock_client_);

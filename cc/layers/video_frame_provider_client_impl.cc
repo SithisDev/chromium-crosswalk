@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,14 +85,12 @@ VideoFrameProviderClientImpl::AcquireLockAndCurrentFrame() {
 
 void VideoFrameProviderClientImpl::PutCurrentFrame() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  provider_lock_.AssertAcquired();
   provider_->PutCurrentFrame();
   needs_put_current_frame_ = false;
 }
 
 void VideoFrameProviderClientImpl::ReleaseLock() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  provider_lock_.AssertAcquired();
   provider_lock_.Release();
 }
 

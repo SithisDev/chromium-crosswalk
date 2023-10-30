@@ -1,10 +1,12 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/layers/scrollbar_layer_impl_base.h"
 
 #include <algorithm>
+
+#include "base/cxx17_backports.h"
 #include "cc/trees/effect_node.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/scroll_node.h"
@@ -26,9 +28,7 @@ ScrollbarLayerImplBase::ScrollbarLayerImplBase(
       scroll_layer_length_(0.f),
       orientation_(orientation),
       is_left_side_vertical_scrollbar_(is_left_side_vertical_scrollbar),
-      vertical_adjust_(0.f) {
-  set_is_scrollbar(true);
-}
+      vertical_adjust_(0.f) {}
 
 ScrollbarLayerImplBase::~ScrollbarLayerImplBase() {
   layer_tree_impl()->UnregisterScrollbar(this);
@@ -36,13 +36,14 @@ ScrollbarLayerImplBase::~ScrollbarLayerImplBase() {
 
 void ScrollbarLayerImplBase::PushPropertiesTo(LayerImpl* layer) {
   LayerImpl::PushPropertiesTo(layer);
-  DCHECK(layer->ToScrollbarLayer());
-  layer->ToScrollbarLayer()->set_is_overlay_scrollbar(is_overlay_scrollbar_);
-  layer->ToScrollbarLayer()->SetScrollElementId(scroll_element_id());
+  DCHECK(layer->IsScrollbarLayer());
+  ScrollbarLayerImplBase* scrollbar_layer = ToScrollbarLayer(layer);
+  scrollbar_layer->set_is_overlay_scrollbar(is_overlay_scrollbar_);
+  scrollbar_layer->SetScrollElementId(scroll_element_id());
 }
 
-ScrollbarLayerImplBase* ScrollbarLayerImplBase::ToScrollbarLayer() {
-  return this;
+bool ScrollbarLayerImplBase::IsScrollbarLayer() const {
+  return true;
 }
 
 void ScrollbarLayerImplBase::SetScrollElementId(ElementId scroll_element_id) {
@@ -85,7 +86,7 @@ float ScrollbarLayerImplBase::vertical_adjust() const {
 bool ScrollbarLayerImplBase::CanScrollOrientation() const {
   PropertyTrees* property_trees = layer_tree_impl()->property_trees();
   const auto* scroll_node =
-      property_trees->scroll_tree.FindNodeFromElementId(scroll_element_id_);
+      property_trees->scroll_tree().FindNodeFromElementId(scroll_element_id_);
   DCHECK(scroll_node);
   // TODO(bokan): Looks like we sometimes get here without a ScrollNode. It
   // should be safe to just return false here (we don't use scroll_element_id_
@@ -210,10 +211,14 @@ gfx::Rect ScrollbarLayerImplBase::ComputeThumbQuadRectWithThumbThicknessScale(
   float track_length = TrackLength();
   int thumb_length = ThumbLength();
   int thumb_thickness = ThumbThickness();
-  float maximum = scroll_layer_length() - clip_layer_length();
+  // TODO(crbug.com/1239770): This is a speculative fix.
+  float maximum = std::max(scroll_layer_length() - clip_layer_length(), 0.0f);
+  // TODO(crbug.com/1239510): Re-enable the following DCHECK once the
+  // underlying issue is resolved.
+  // DCHECK(scroll_layer_length() >= clip_layer_length());
 
   // With the length known, we can compute the thumb's position.
-  float clamped_current_pos = std::min(std::max(current_pos(), 0.f), maximum);
+  float clamped_current_pos = base::clamp(current_pos(), 0.0f, maximum);
 
   int thumb_offset = TrackStart();
   if (maximum > 0) {
@@ -226,7 +231,7 @@ gfx::Rect ScrollbarLayerImplBase::ComputeThumbQuadRectWithThumbThicknessScale(
       thumb_thickness * (1.f - thumb_thickness_scale_factor);
 
   gfx::RectF thumb_rect;
-  if (orientation_ == HORIZONTAL) {
+  if (orientation_ == ScrollbarOrientation::HORIZONTAL) {
     thumb_rect = gfx::RectF(thumb_offset,
                             vertical_adjust_ + thumb_thickness_adjustment,
                             thumb_length,
@@ -262,14 +267,15 @@ void ScrollbarLayerImplBase::SetOverlayScrollbarLayerOpacityAnimated(
 
   PropertyTrees* property_trees = layer_tree_impl()->property_trees();
 
-  EffectNode* node = property_trees->effect_tree.Node(effect_tree_index());
+  EffectNode* node =
+      property_trees->effect_tree_mutable().Node(effect_tree_index());
   if (node->opacity == opacity)
     return;
 
   node->opacity = opacity;
   node->effect_changed = true;
-  property_trees->changed = true;
-  property_trees->effect_tree.set_needs_update(true);
+  property_trees->set_changed(true);
+  property_trees->effect_tree_mutable().set_needs_update(true);
   layer_tree_impl()->set_needs_update_draw_properties();
 }
 
@@ -280,6 +286,22 @@ ScrollbarLayerImplBase::GetScrollbarAnimator() const {
 
 bool ScrollbarLayerImplBase::HasFindInPageTickmarks() const {
   return false;
+}
+
+float ScrollbarLayerImplBase::OverlayScrollbarOpacity() const {
+  return Opacity();
+}
+
+bool ScrollbarLayerImplBase::SupportsDragSnapBack() const {
+  return false;
+}
+
+bool ScrollbarLayerImplBase::JumpOnTrackClick() const {
+  return false;
+}
+
+bool ScrollbarLayerImplBase::IsFluentScrollbarEnabled() const {
+  return layer_tree_impl()->settings().enable_fluent_scrollbar;
 }
 
 gfx::Rect ScrollbarLayerImplBase::BackButtonRect() const {

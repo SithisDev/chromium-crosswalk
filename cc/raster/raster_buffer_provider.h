@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 #define CC_RASTER_RASTER_BUFFER_PROVIDER_H_
 
 #include <stddef.h>
+#include <memory>
+#include <vector>
 
 #include "cc/raster/raster_buffer.h"
 #include "cc/raster/raster_source.h"
@@ -15,6 +17,10 @@
 #include "components/viz/common/resources/resource_format.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
+
+namespace base {
+class WaitableEvent;
+}
 
 namespace cc {
 class Resource;
@@ -50,7 +56,10 @@ class CC_EXPORT RasterBufferProvider {
   virtual std::unique_ptr<RasterBuffer> AcquireBufferForRaster(
       const ResourcePool::InUsePoolResource& resource,
       uint64_t resource_content_id,
-      uint64_t previous_content_id) = 0;
+      uint64_t previous_content_id,
+      bool depends_on_at_raster_decodes,
+      bool depends_on_hardware_accelerated_jpeg_candidates,
+      bool depends_on_hardware_accelerated_webp_candidates) = 0;
 
   // Flush pending work from writing the content of the RasterBuffer, so that
   // queries to tell if the backing is ready to draw from will get the right
@@ -83,16 +92,14 @@ class CC_EXPORT RasterBufferProvider {
       base::OnceClosure callback,
       uint64_t pending_callback_id) const = 0;
 
+  // Sets an event, guaranteed to live past this object's lifetime, that is
+  // signalled when the TileManger is cancelling tasks. Subclasses can use
+  // this as an argument to GpuMemoryBufferManager::CreateGpuMemoryBuffer to
+  // avoid deadlocks when TileManager is cancelling tasks.
+  virtual void SetShutdownEvent(base::WaitableEvent* shutdown_event) {}
+
   // Shutdown for doing cleanup.
   virtual void Shutdown() = 0;
-
-  // Checks whether GPU side queries issued for previous raster work have been
-  // finished. Note that this will acquire the worker context lock so it can be
-  // used from any thread. But usage from the compositor thread should be
-  // avoided to prevent contention with worker threads.
-  // Returns true if there are pending queries that could not be completed in
-  // this check.
-  virtual bool CheckRasterFinishedQueries() = 0;
 };
 
 }  // namespace cc

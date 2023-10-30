@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CC_TILES_FRAME_VIEWER_INSTRUMENTATION_H_
 
 #include "base/trace_event/trace_event.h"
+#include "cc/cc_export.h"
 #include "cc/tiles/tile_priority.h"
 
 namespace cc {
@@ -42,7 +43,7 @@ class ScopedRasterTask {
   ScopedRasterTask& operator=(const ScopedRasterTask&) = delete;
 };
 
-bool IsTracingLayerTreeSnapshots();
+bool CC_EXPORT IsTracingLayerTreeSnapshots();
 
 }  // namespace frame_viewer_instrumentation
 }  // namespace cc

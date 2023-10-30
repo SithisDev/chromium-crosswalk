@@ -1,11 +1,12 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/layers/ui_resource_layer_impl.h"
 
-#include "base/strings/stringprintf.h"
-#include "base/values.h"
+#include <memory>
+
+#include "base/trace_event/traced_value.h"
 #include "cc/base/math_util.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/occlusion.h"
@@ -28,7 +29,7 @@ UIResourceLayerImpl::UIResourceLayerImpl(LayerTreeImpl* tree_impl, int id)
 UIResourceLayerImpl::~UIResourceLayerImpl() = default;
 
 std::unique_ptr<LayerImpl> UIResourceLayerImpl::CreateLayerImpl(
-    LayerTreeImpl* tree_impl) {
+    LayerTreeImpl* tree_impl) const {
   return UIResourceLayerImpl::Create(tree_impl, id());
 }
 
@@ -92,7 +93,7 @@ bool UIResourceLayerImpl::WillDraw(
   return LayerImpl::WillDraw(draw_mode, resource_provider);
 }
 
-void UIResourceLayerImpl::AppendQuads(viz::RenderPass* render_pass,
+void UIResourceLayerImpl::AppendQuads(viz::CompositorRenderPass* render_pass,
                                       AppendQuadsData* append_quads_data) {
   DCHECK(!bounds().IsEmpty());
 
@@ -102,7 +103,7 @@ void UIResourceLayerImpl::AppendQuads(viz::RenderPass* render_pass,
   viz::ResourceId resource =
       ui_resource_id_
           ? layer_tree_impl()->ResourceIdForUIResource(ui_resource_id_)
-          : 0;
+          : viz::kInvalidResourceId;
   bool are_contents_opaque =
       resource ? (layer_tree_impl()->IsUIResourceOpaque(ui_resource_id_) ||
                   contents_opaque())
@@ -129,7 +130,8 @@ void UIResourceLayerImpl::AppendQuads(viz::RenderPass* render_pass,
   auto* quad = render_pass->CreateAndAppendDrawQuad<viz::TextureDrawQuad>();
   quad->SetNew(shared_quad_state, quad_rect, visible_quad_rect, needs_blending,
                resource, premultiplied_alpha, uv_top_left_, uv_bottom_right_,
-               SK_ColorTRANSPARENT, vertex_opacity_, flipped, nearest_neighbor,
+               SkColors::kTransparent, vertex_opacity_, flipped,
+               nearest_neighbor,
                /*secure_output_only=*/false, gfx::ProtectedVideoType::kClear);
   ValidateQuadResources(quad);
 }
@@ -138,23 +140,21 @@ const char* UIResourceLayerImpl::LayerTypeAsString() const {
   return "cc::UIResourceLayerImpl";
 }
 
-std::unique_ptr<base::DictionaryValue> UIResourceLayerImpl::LayerAsJson()
-    const {
-  std::unique_ptr<base::DictionaryValue> result = LayerImpl::LayerAsJson();
+void UIResourceLayerImpl::AsValueInto(
+    base::trace_event::TracedValue* state) const {
+  LayerImpl::AsValueInto(state);
 
-  result->Set("ImageBounds", MathUtil::AsValue(image_bounds_));
+  MathUtil::AddToTracedValue("ImageBounds", image_bounds_, state);
 
-  auto list = std::make_unique<base::ListValue>();
-  list->AppendDouble(vertex_opacity_[0]);
-  list->AppendDouble(vertex_opacity_[1]);
-  list->AppendDouble(vertex_opacity_[2]);
-  list->AppendDouble(vertex_opacity_[3]);
-  result->Set("VertexOpacity", std::move(list));
+  state->BeginArray("VertexOpacity");
+  state->AppendDouble(vertex_opacity_[0]);
+  state->AppendDouble(vertex_opacity_[1]);
+  state->AppendDouble(vertex_opacity_[2]);
+  state->AppendDouble(vertex_opacity_[3]);
+  state->EndArray();
 
-  result->Set("UVTopLeft", MathUtil::AsValue(uv_top_left_));
-  result->Set("UVBottomRight", MathUtil::AsValue(uv_bottom_right_));
-
-  return result;
+  MathUtil::AddToTracedValue("UVTopLeft", uv_top_left_, state);
+  MathUtil::AddToTracedValue("UVBottomRight", uv_bottom_right_, state);
 }
 
 }  // namespace cc

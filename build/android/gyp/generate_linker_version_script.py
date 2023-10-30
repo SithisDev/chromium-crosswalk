@@ -1,5 +1,5 @@
-#!/usr/bin/env vpython
-# Copyright 2018 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Generate linker version scripts for Chrome on Android shared libraries."""
@@ -35,14 +35,25 @@ def main():
       '--export-java-symbols',
       action='store_true',
       help='Export Java_* JNI methods')
+  parser.add_argument('--export-fortesting-java-symbols',
+                      action='store_true',
+                      help='Export Java_*_ForTesting JNI methods')
   parser.add_argument(
-      '--export-symbol-whitelist-file',
+      '--export-symbol-allowlist-file',
       action='append',
       default=[],
-      dest='whitelists',
-      help='Path to an input file containing a whitelist of extra symbols to '
+      dest='allowlists',
+      help='Path to an input file containing an allowlist of extra symbols to '
       'export, one symbol per line. Multiple files may be specified.')
+  parser.add_argument(
+      '--export-feature-registrations',
+      action='store_true',
+      help='Export JNI_OnLoad_* methods')
   options = parser.parse_args()
+
+  if options.export_fortesting_java_symbols:
+    assert options.export_java_symbols, ('Must export java symbols if exporting'
+                                         'fortesting java symbols.')
 
   # JNI_OnLoad is always exported.
   # CrashpadHandlerMain() is the entry point to the Crashpad handler, required
@@ -50,10 +61,34 @@ def main():
   symbol_list = ['CrashpadHandlerMain', 'JNI_OnLoad']
 
   if options.export_java_symbols:
-    symbol_list.append('Java_*')
+    if options.export_fortesting_java_symbols:
+      symbol_list.append('Java_*')
+    else:
+      # The linker uses unix shell globbing patterns, not regex. So, we have to
+      # include everything that doesn't end in "ForTest(ing)" with this set of
+      # globs.
+      symbol_list.append('Java_*[!F]orTesting')
+      symbol_list.append('Java_*[!o]rTesting')
+      symbol_list.append('Java_*[!r]Testing')
+      symbol_list.append('Java_*[!T]esting')
+      symbol_list.append('Java_*[!e]sting')
+      symbol_list.append('Java_*[!s]ting')
+      symbol_list.append('Java_*[!t]ing')
+      symbol_list.append('Java_*[!i]ng')
+      symbol_list.append('Java_*[!n]g')
+      symbol_list.append('Java_*[!F]orTest')
+      symbol_list.append('Java_*[!o]rTest')
+      symbol_list.append('Java_*[!r]Test')
+      symbol_list.append('Java_*[!T]est')
+      symbol_list.append('Java_*[!e]st')
+      symbol_list.append('Java_*[!s]t')
+      symbol_list.append('Java_*[!gt]')
 
-  for whitelist in options.whitelists:
-    with open(whitelist, 'rt') as f:
+  if options.export_feature_registrations:
+    symbol_list.append('JNI_OnLoad_*')
+
+  for allowlist in options.allowlists:
+    with open(allowlist, 'rt') as f:
       for line in f:
         line = line.strip()
         if not line or line[0] == '#':
@@ -67,7 +102,7 @@ def main():
 
   script = ''.join(script_content)
 
-  with build_utils.AtomicOutput(options.output) as f:
+  with build_utils.AtomicOutput(options.output, mode='w') as f:
     f.write(script)
 
 

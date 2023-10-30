@@ -1,5 +1,5 @@
-#!/usr/bin/env python
-# Copyright (c) 2013 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python3
+# Copyright 2013 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -18,6 +18,10 @@
 # time chrome's build dependencies are changed but should also be updated
 # periodically to include upstream security fixes from Debian.
 
+# This script looks at sysroots.json next to it to find the name of a .tar.xz
+# to download and the location to extract it to. The extracted sysroot could for
+# example be in build/linux/debian_bullseye_amd64-sysroot/.
+
 from __future__ import print_function
 
 import hashlib
@@ -29,7 +33,12 @@ import re
 import shutil
 import subprocess
 import sys
-import urllib2
+try:
+  # For Python 3.0 and later
+  from urllib.request import urlopen
+except ImportError:
+  # Fall back to Python 2's urllib2
+  from urllib2 import urlopen
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -45,7 +54,8 @@ ARCH_TRANSLATIONS = {
     'mips64': 'mips64el',
 }
 
-DEFAULT_TARGET_PLATFORM = 'sid'
+DEFAULT_TARGET_PLATFORM = 'bullseye'
+
 
 class Error(Exception):
   pass
@@ -73,8 +83,6 @@ def main(args):
   parser.add_option('--print-hash',
                     help='Print the hash of the sysroot for the given arch.')
   options, _ = parser.parse_args(args)
-  if not sys.platform.startswith('linux'):
-    return 0
 
   if options.print_hash:
     arch = options.print_hash
@@ -135,11 +143,11 @@ def InstallSysroot(target_platform, target_arch):
   sys.stderr.flush()
   for _ in range(3):
     try:
-      response = urllib2.urlopen(url)
+      response = urlopen(url)
       with open(tarball, "wb") as f:
         f.write(response.read())
       break
-    except:
+    except Exception:  # Ignore exceptions.
       pass
   else:
     raise Error('Failed to download %s' % url)
@@ -147,7 +155,7 @@ def InstallSysroot(target_platform, target_arch):
   if sha1sum != tarball_sha1sum:
     raise Error('Tarball sha1sum is wrong.'
                 'Expected %s, actual: %s' % (tarball_sha1sum, sha1sum))
-  subprocess.check_call(['tar', 'xf', tarball, '-C', sysroot])
+  subprocess.check_call(['tar', 'mxf', tarball, '-C', sysroot])
   os.remove(tarball)
 
   with open(stamp, 'w') as s:

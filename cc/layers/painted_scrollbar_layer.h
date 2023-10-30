@@ -1,63 +1,71 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_LAYERS_PAINTED_SCROLLBAR_LAYER_H_
 #define CC_LAYERS_PAINTED_SCROLLBAR_LAYER_H_
 
+#include <memory>
+
 #include "cc/cc_export.h"
 #include "cc/input/scrollbar.h"
 #include "cc/layers/layer.h"
-#include "cc/layers/scrollbar_layer_interface.h"
-#include "cc/layers/scrollbar_theme_painter.h"
+#include "cc/layers/scrollbar_layer_base.h"
 #include "cc/resources/scoped_ui_resource.h"
 
 namespace cc {
 
-class CC_EXPORT PaintedScrollbarLayer : public ScrollbarLayerInterface,
-                                        public Layer {
+// Generic scrollbar layer for cases not covered by PaintedOverlayScrollbarLayer
+// or SolidColorScrollbarLayer. This is not used for CSS-styled scrollbars. In
+// practice, this is used for overlay and non-overlay scrollbars on MacOS, as
+// well as non-overlay scrollbars on Win/Linux.
+class CC_EXPORT PaintedScrollbarLayer : public ScrollbarLayerBase {
  public:
-  std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
+  std::unique_ptr<LayerImpl> CreateLayerImpl(
+      LayerTreeImpl* tree_impl) const override;
 
+  static scoped_refptr<PaintedScrollbarLayer> CreateOrReuse(
+      scoped_refptr<Scrollbar> scrollbar,
+      PaintedScrollbarLayer* existing_layer);
   static scoped_refptr<PaintedScrollbarLayer> Create(
-      std::unique_ptr<Scrollbar> scrollbar,
-      ElementId element_id = ElementId());
+      scoped_refptr<Scrollbar> scrollbar);
 
   PaintedScrollbarLayer(const PaintedScrollbarLayer&) = delete;
   PaintedScrollbarLayer& operator=(const PaintedScrollbarLayer&) = delete;
 
   bool OpacityCanAnimateOnImplThread() const override;
-
-  // ScrollbarLayerInterface
-  void SetScrollElementId(ElementId element_id) override;
-
-  // Layer interface
   bool Update() override;
   void SetLayerTreeHost(LayerTreeHost* host) override;
-  void PushPropertiesTo(LayerImpl* layer) override;
+  void PushPropertiesTo(LayerImpl* layer,
+                        const CommitState& commit_state,
+                        const ThreadUnsafeCommitState& unsafe_state) override;
 
   const gfx::Size& internal_content_bounds() const {
-    return internal_content_bounds_;
+    return internal_content_bounds_.Read(*this);
   }
 
+  ScrollbarLayerType GetScrollbarLayerType() const override;
+
  protected:
-  PaintedScrollbarLayer(std::unique_ptr<Scrollbar> scrollbar,
-                        ElementId scroll_element_id);
+  explicit PaintedScrollbarLayer(scoped_refptr<Scrollbar> scrollbar);
   ~PaintedScrollbarLayer() override;
 
   // For unit tests
   UIResourceId track_resource_id() {
-    return track_resource_.get() ? track_resource_->id() : 0;
+    if (const auto* track_resource = track_resource_.Read(*this))
+      return track_resource->id();
+    return 0;
   }
   UIResourceId thumb_resource_id() {
-    return thumb_resource_.get() ? thumb_resource_->id() : 0;
+    if (const auto* thumb_resource = thumb_resource_.Read(*this))
+      return thumb_resource->id();
+    return 0;
   }
-  void UpdateInternalContentScale();
-  void UpdateThumbAndTrackGeometry();
+  bool UpdateInternalContentScale();
+  bool UpdateThumbAndTrackGeometry();
 
  private:
-  gfx::Rect ScrollbarLayerRectToContentRect(const gfx::Rect& layer_rect) const;
-  gfx::Rect OriginThumbRect() const;
+  gfx::Size LayerSizeToContentSize(const gfx::Size& layer_size) const;
 
   template <typename T>
   bool UpdateProperty(T value, T* prop) {
@@ -68,31 +76,32 @@ class CC_EXPORT PaintedScrollbarLayer : public ScrollbarLayerInterface,
     return true;
   }
 
-  UIResourceBitmap RasterizeScrollbarPart(const gfx::Rect& layer_rect,
-                                          const gfx::Rect& content_rect,
-                                          ScrollbarPart part);
+  UIResourceBitmap RasterizeScrollbarPart(
+      const gfx::Size& size,
+      const gfx::Size& requested_content_size,
+      ScrollbarPart part);
 
-  std::unique_ptr<Scrollbar> scrollbar_;
-  ElementId scroll_element_id_;
+  ProtectedSequenceForbidden<scoped_refptr<Scrollbar>> scrollbar_;
+  ProtectedSequenceReadable<ElementId> scroll_element_id_;
 
-  float internal_contents_scale_;
-  gfx::Size internal_content_bounds_;
+  ProtectedSequenceReadable<float> internal_contents_scale_;
+  ProtectedSequenceReadable<gfx::Size> internal_content_bounds_;
 
   // Snapshot of properties taken in UpdateThumbAndTrackGeometry and used in
   // PushPropertiesTo.
-  int thumb_thickness_;
-  int thumb_length_;
-  gfx::Point location_;
-  gfx::Rect track_rect_;
-  gfx::Rect back_button_rect_;
-  gfx::Rect forward_button_rect_;
-  bool is_overlay_;
-  bool has_thumb_;
+  ProtectedSequenceReadable<gfx::Size> thumb_size_;
+  ProtectedSequenceReadable<gfx::Rect> track_rect_;
+  ProtectedSequenceReadable<gfx::Rect> back_button_rect_;
+  ProtectedSequenceReadable<gfx::Rect> forward_button_rect_;
+  ProtectedSequenceReadable<float> painted_opacity_;
+  ProtectedSequenceReadable<bool> has_thumb_;
+  ProtectedSequenceReadable<bool> jump_on_track_click_;
 
-  std::unique_ptr<ScopedUIResource> track_resource_;
-  std::unique_ptr<ScopedUIResource> thumb_resource_;
+  const bool supports_drag_snap_back_;
+  const bool is_overlay_;
 
-  float thumb_opacity_;
+  ProtectedSequenceReadable<std::unique_ptr<ScopedUIResource>> track_resource_;
+  ProtectedSequenceReadable<std::unique_ptr<ScopedUIResource>> thumb_resource_;
 };
 
 }  // namespace cc

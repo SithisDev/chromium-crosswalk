@@ -1,4 +1,4 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
+// Copyright 2019 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,24 @@
 #include <utility>
 #include <vector>
 
-#include "base/logging.h"
+#include "base/check_op.h"
+#include "base/containers/contains.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
 #include "cc/paint/image_transfer_cache_entry.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 #include "third_party/skia/include/core/SkPixmap.h"
+#include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
+#include "third_party/skia/include/core/SkYUVAPixmaps.h"
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
-#include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 #include "third_party/skia/include/gpu/GrTypes.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 #include "third_party/skia/include/gpu/gl/GrGLTypes.h"
@@ -31,11 +37,15 @@
 #include "ui/gl/gl_context_egl.h"
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/gl_utils.h"
 #include "ui/gl/init/create_gr_gl_interface.h"
 #include "ui/gl/init/gl_factory.h"
 
 namespace cc {
 namespace {
+
+constexpr SkYUVColorSpace kJpegYUVColorSpace =
+    SkYUVColorSpace::kJPEG_SkYUVColorSpace;
 
 void MarkTextureAsReleased(SkImage::ReleaseContext context) {
   auto* released = static_cast<bool*>(context);
@@ -43,9 +53,10 @@ void MarkTextureAsReleased(SkImage::ReleaseContext context) {
   *released = true;
 }
 
-// Checks if all the pixels in |image| are |expected_color|.
-bool CheckImageIsSolidColor(const sk_sp<SkImage>& image,
-                            SkColor expected_color) {
+// Checks if all the pixels in the |subset| of |image| are |expected_color|.
+bool CheckRectIsSolidColor(const sk_sp<SkImage>& image,
+                           SkColor expected_color,
+                           const SkIRect& subset) {
   DCHECK_GE(image->width(), 1);
   DCHECK_GE(image->height(), 1);
   SkBitmap bitmap;
@@ -56,8 +67,8 @@ bool CheckImageIsSolidColor(const sk_sp<SkImage>& image,
     return false;
   if (!image->readPixels(pixmap, 0 /* srcX */, 0 /* srcY */))
     return false;
-  for (int y = 0; y < image->height(); y++) {
-    for (int x = 0; x < image->width(); x++) {
+  for (int y = subset.fTop; y < subset.fBottom; y++) {
+    for (int x = subset.fLeft; x < subset.fRight; x++) {
       if (bitmap.getColor(x, y) != expected_color)
         return false;
     }
@@ -65,12 +76,20 @@ bool CheckImageIsSolidColor(const sk_sp<SkImage>& image,
   return true;
 }
 
+// Checks if all the pixels in |image| are |expected_color|.
+bool CheckImageIsSolidColor(const sk_sp<SkImage>& image,
+                            SkColor expected_color) {
+  return CheckRectIsSolidColor(
+      image, expected_color, SkIRect::MakeWH(image->width(), image->height()));
+}
+
 class ImageTransferCacheEntryTest
-    : public testing::TestWithParam<YUVDecodeFormat> {
+    : public testing::TestWithParam<SkYUVAInfo::PlaneConfig> {
  public:
   void SetUp() override {
     // Initialize a GL GrContext for Skia.
-    surface_ = gl::init::CreateOffscreenGLSurface(gfx::Size());
+    surface_ = gl::init::CreateOffscreenGLSurface(gl::GetDefaultDisplay(),
+                                                  gfx::Size());
     ASSERT_TRUE(surface_);
     share_group_ = base::MakeRefCounted<gl::GLShareGroup>();
     gl_context_ = base::MakeRefCounted<gl::GLContextEGL>(share_group_.get());
@@ -78,9 +97,9 @@ class ImageTransferCacheEntryTest
     ASSERT_TRUE(
         gl_context_->Initialize(surface_.get(), gl::GLContextAttribs()));
     ASSERT_TRUE(gl_context_->MakeCurrent(surface_.get()));
-    sk_sp<GrGLInterface> interface(gl::init::CreateGrGLInterface(
+    sk_sp<GrGLInterface> gl_interface(gl::init::CreateGrGLInterface(
         *gl_context_->GetVersionInfo(), false /* use_version_es2 */));
-    gr_context_ = GrContext::MakeGL(std::move(interface));
+    gr_context_ = GrDirectContext::MakeGL(std::move(gl_interface));
     ASSERT_TRUE(gr_context_);
   }
 
@@ -97,8 +116,8 @@ class ImageTransferCacheEntryTest
       std::unique_ptr<bool[]>* release_flags) {
     std::vector<sk_sp<SkImage>> plane_images;
     *release_flags = nullptr;
-    if (GetParam() == YUVDecodeFormat::kYUV3 ||
-        GetParam() == YUVDecodeFormat::kYVU3) {
+    if (GetParam() == SkYUVAInfo::PlaneConfig::kY_U_V ||
+        GetParam() == SkYUVAInfo::PlaneConfig::kY_V_U) {
       *release_flags =
           std::unique_ptr<bool[]>(new bool[3]{false, false, false});
       plane_images = {
@@ -108,7 +127,7 @@ class ImageTransferCacheEntryTest
                            release_flags->get() + 1),
           CreateSolidPlane(gr_context(), 32, 32, GL_R8_EXT, SkColors::kWhite,
                            release_flags->get() + 2)};
-    } else if (GetParam() == YUVDecodeFormat::kYUV2) {
+    } else if (GetParam() == SkYUVAInfo::PlaneConfig::kY_UV) {
       *release_flags = std::unique_ptr<bool[]>(new bool[2]{false, false});
       plane_images = {
           CreateSolidPlane(gr_context(), 64, 64, GL_R8_EXT, SkColors::kWhite,
@@ -119,8 +138,7 @@ class ImageTransferCacheEntryTest
       NOTREACHED();
       return {};
     }
-    if (std::all_of(plane_images.cbegin(), plane_images.cend(),
-                    [](sk_sp<SkImage> plane) { return !!plane; })) {
+    if (!base::Contains(plane_images, nullptr)) {
       return plane_images;
     }
     return {};
@@ -132,7 +150,7 @@ class ImageTransferCacheEntryTest
       if (texture.isValid())
         gr_context_->deleteBackendTexture(texture);
     }
-    gr_context_->flush();
+    gr_context_->flushAndSubmit();
     textures_to_free_.clear();
   }
 
@@ -145,13 +163,13 @@ class ImageTransferCacheEntryTest
     share_group_.reset();
   }
 
-  GrContext* gr_context() const { return gr_context_.get(); }
+  GrDirectContext* gr_context() const { return gr_context_.get(); }
 
  private:
   // Uploads a texture corresponding to a single plane in a YUV image. All the
   // samples in the plane are set to |color|. The texture is not owned by Skia:
   // when Skia doesn't need it anymore, MarkTextureAsReleased() will be called.
-  sk_sp<SkImage> CreateSolidPlane(GrContext* gr_context,
+  sk_sp<SkImage> CreateSolidPlane(GrDirectContext* gr_context,
                                   int width,
                                   int height,
                                   GrGLenum texture_format,
@@ -170,19 +188,10 @@ class ImageTransferCacheEntryTest
     DCHECK_EQ(height, allocated_texture.height());
     DCHECK(!allocated_texture.hasMipMaps());
     DCHECK(allocated_texture_info.fTarget == GL_TEXTURE_2D);
-    if (texture_format == GL_RG8_EXT) {
-      // TODO(crbug.com/985458): using GL_RGBA8_EXT is a workaround so that we
-      // can make a SkImage out of a GL_RG8_EXT texture. Revisit this once Skia
-      // supports a corresponding SkColorType.
-      allocated_texture = GrBackendTexture(
-          width, height, GrMipMapped::kNo,
-          GrGLTextureInfo{GL_TEXTURE_2D, allocated_texture_info.fID,
-                          GL_RGBA8_EXT});
-    }
     *released = false;
     return SkImage::MakeFromTexture(
         gr_context, allocated_texture, kTopLeft_GrSurfaceOrigin,
-        texture_format == GL_RG8_EXT ? kRGBA_8888_SkColorType
+        texture_format == GL_RG8_EXT ? kR8G8_unorm_SkColorType
                                      : kAlpha_8_SkColorType,
         kOpaque_SkAlphaType, nullptr /* colorSpace */, MarkTextureAsReleased,
         released);
@@ -192,13 +201,66 @@ class ImageTransferCacheEntryTest
   scoped_refptr<gl::GLSurface> surface_;
   scoped_refptr<gl::GLShareGroup> share_group_;
   scoped_refptr<gl::GLContext> gl_context_;
-  sk_sp<GrContext> gr_context_;
+  sk_sp<GrDirectContext> gr_context_;
+  gl::DisableNullDrawGLBindings enable_pixel_output_;
 };
+
+TEST_P(ImageTransferCacheEntryTest, Deserialize) {
+  // Create a client-side entry from YUV planes. Use a different stride than the
+  // width to test that alignment works correctly.
+  const int image_width = 12;
+  const int image_height = 10;
+  const size_t yuv_strides[] = {16, 8, 8};
+
+  SkYUVAInfo yuva_info({image_width, image_height},
+                       SkYUVAInfo::PlaneConfig::kY_U_V,
+                       SkYUVAInfo::Subsampling::k420, kJpegYUVColorSpace);
+  SkYUVAPixmapInfo yuva_pixmap_info(
+      yuva_info, SkYUVAPixmapInfo::DataType::kUnorm8, yuv_strides);
+  SkYUVAPixmaps yuva_pixmaps = SkYUVAPixmaps::Allocate(yuva_pixmap_info);
+
+  // rgb (255, 121, 255) -> yuv (255, 255, 255)
+  const SkIRect bottom_color_rect =
+      SkIRect::MakeXYWH(0, image_height / 2, image_width, image_height / 2);
+  ASSERT_TRUE(yuva_pixmaps.plane(0).erase(SkColors::kWhite));
+  ASSERT_TRUE(yuva_pixmaps.plane(1).erase(SkColors::kWhite));
+  ASSERT_TRUE(yuva_pixmaps.plane(2).erase(SkColors::kWhite));
+
+  // rgb (178, 0, 225) -> yuv (0, 255, 255)
+  const SkIRect top_color_rect = SkIRect::MakeWH(image_width, image_height / 2);
+  ASSERT_TRUE(yuva_pixmaps.plane(0).erase(SkColors::kBlack, &top_color_rect));
+
+  auto client_entry(std::make_unique<ClientImageTransferCacheEntry>(
+      yuva_pixmaps.planes().data(), yuva_info.planeConfig(),
+      yuva_info.subsampling(), nullptr /* decoded color space*/,
+      yuva_info.yuvColorSpace(), true /* needs_mips */, absl::nullopt));
+  uint32_t size = client_entry->SerializedSize();
+  std::vector<uint8_t> data(size);
+  ASSERT_TRUE(client_entry->Serialize(
+      base::make_span(static_cast<uint8_t*>(data.data()), size)));
+
+  // Create service-side entry from the client-side serialize info
+  auto entry(std::make_unique<ServiceImageTransferCacheEntry>());
+  ASSERT_TRUE(entry->Deserialize(
+      gr_context(), base::make_span(static_cast<uint8_t*>(data.data()), size)));
+  ASSERT_TRUE(entry->is_yuv());
+
+  // Check color of pixels
+  ASSERT_TRUE(CheckRectIsSolidColor(entry->image(), SkColorSetRGB(178, 0, 225),
+                                    top_color_rect));
+  ASSERT_TRUE(CheckRectIsSolidColor(
+      entry->image(), SkColorSetRGB(255, 121, 255), bottom_color_rect));
+
+  client_entry.reset();
+  entry.reset();
+}
 
 TEST_P(ImageTransferCacheEntryTest, HardwareDecodedNoMipsAtCreation) {
   std::unique_ptr<bool[]> release_flags;
   std::vector<sk_sp<SkImage>> plane_images = CreateTestYUVImage(&release_flags);
-  ASSERT_EQ(NumberOfPlanesForYUVDecodeFormat(GetParam()), plane_images.size());
+  const size_t plane_images_size = plane_images.size();
+  ASSERT_EQ(static_cast<size_t>(SkYUVAInfo::NumPlanes(GetParam())),
+            plane_images_size);
 
   // Create a service-side image cache entry backed by these planes and do not
   // request generating mipmap chains. The |buffer_byte_size| is only used for
@@ -206,31 +268,26 @@ TEST_P(ImageTransferCacheEntryTest, HardwareDecodedNoMipsAtCreation) {
   auto entry(std::make_unique<ServiceImageTransferCacheEntry>());
   EXPECT_TRUE(entry->BuildFromHardwareDecodedImage(
       gr_context(), std::move(plane_images),
-      GetParam() /* plane_images_format */, 0u /* buffer_byte_size */,
-      false /* needs_mips */));
+      GetParam() /* plane_images_format */, SkYUVAInfo::Subsampling::k420,
+      kJpegYUVColorSpace, 0u /* buffer_byte_size */, false /* needs_mips */));
 
   // We didn't request generating mipmap chains, so the textures we created
   // above should stay alive until after the cache entry is deleted.
   EXPECT_TRUE(std::none_of(release_flags.get(),
-                           release_flags.get() + plane_images.size(),
+                           release_flags.get() + plane_images_size,
                            [](bool released) { return released; }));
   entry.reset();
   EXPECT_TRUE(std::all_of(release_flags.get(),
-                          release_flags.get() + plane_images.size(),
+                          release_flags.get() + plane_images_size,
                           [](bool released) { return released; }));
 }
 
 TEST_P(ImageTransferCacheEntryTest, HardwareDecodedMipsAtCreation) {
-#if defined(OS_ANDROID)
-  // TODO(crbug.com/985458): this test is failing on Android for NV12 and we
-  // don't understand why yet. Revisit this once Skia supports an RG8
-  // SkColorType.
-  if (GetParam() == YUVDecodeFormat::kYUV2)
-    return;
-#endif
   std::unique_ptr<bool[]> release_flags;
   std::vector<sk_sp<SkImage>> plane_images = CreateTestYUVImage(&release_flags);
-  ASSERT_EQ(NumberOfPlanesForYUVDecodeFormat(GetParam()), plane_images.size());
+  const size_t plane_images_size = plane_images.size();
+  ASSERT_EQ(static_cast<size_t>(SkYUVAInfo::NumPlanes(GetParam())),
+            plane_images_size);
 
   // Create a service-side image cache entry backed by these planes and request
   // generating mipmap chains at creation time. The |buffer_byte_size| is only
@@ -238,13 +295,13 @@ TEST_P(ImageTransferCacheEntryTest, HardwareDecodedMipsAtCreation) {
   auto entry(std::make_unique<ServiceImageTransferCacheEntry>());
   EXPECT_TRUE(entry->BuildFromHardwareDecodedImage(
       gr_context(), std::move(plane_images),
-      GetParam() /* plane_images_format */, 0u /* buffer_byte_size */,
-      true /* needs_mips */));
+      GetParam() /* plane_images_format */, SkYUVAInfo::Subsampling::k420,
+      kJpegYUVColorSpace, 0u /* buffer_byte_size */, true /* needs_mips */));
 
   // We requested generating mipmap chains at creation time, so the textures we
   // created above should be released by now.
   EXPECT_TRUE(std::all_of(release_flags.get(),
-                          release_flags.get() + plane_images.size(),
+                          release_flags.get() + plane_images_size,
                           [](bool released) { return released; }));
   DeletePendingTextures();
 
@@ -258,16 +315,11 @@ TEST_P(ImageTransferCacheEntryTest, HardwareDecodedMipsAtCreation) {
 }
 
 TEST_P(ImageTransferCacheEntryTest, HardwareDecodedMipsAfterCreation) {
-#if defined(OS_ANDROID)
-  // TODO(crbug.com/985458): this test is failing on Android for NV12 and we
-  // don't understand why yet. Revisit this once Skia supports an RG8
-  // SkColorType.
-  if (GetParam() == YUVDecodeFormat::kYUV2)
-    return;
-#endif
   std::unique_ptr<bool[]> release_flags;
   std::vector<sk_sp<SkImage>> plane_images = CreateTestYUVImage(&release_flags);
-  ASSERT_EQ(NumberOfPlanesForYUVDecodeFormat(GetParam()), plane_images.size());
+  const size_t plane_images_size = plane_images.size();
+  ASSERT_EQ(static_cast<size_t>(SkYUVAInfo::NumPlanes(GetParam())),
+            plane_images_size);
 
   // Create a service-side image cache entry backed by these planes and do not
   // request generating mipmap chains at creation time. The |buffer_byte_size|
@@ -275,13 +327,13 @@ TEST_P(ImageTransferCacheEntryTest, HardwareDecodedMipsAfterCreation) {
   auto entry(std::make_unique<ServiceImageTransferCacheEntry>());
   EXPECT_TRUE(entry->BuildFromHardwareDecodedImage(
       gr_context(), std::move(plane_images),
-      GetParam() /* plane_images_format */, 0u /* buffer_byte_size */,
-      false /* needs_mips */));
+      GetParam() /* plane_images_format */, SkYUVAInfo::Subsampling::k420,
+      kJpegYUVColorSpace, 0u /* buffer_byte_size */, false /* needs_mips */));
 
   // We didn't request generating mip chains, so the textures we created above
   // should stay alive for now.
   EXPECT_TRUE(std::none_of(release_flags.get(),
-                           release_flags.get() + plane_images.size(),
+                           release_flags.get() + plane_images_size,
                            [](bool released) { return released; }));
 
   // Now request generating the mip chains.
@@ -289,7 +341,7 @@ TEST_P(ImageTransferCacheEntryTest, HardwareDecodedMipsAfterCreation) {
 
   // Now the original textures should have been released.
   EXPECT_TRUE(std::all_of(release_flags.get(),
-                          release_flags.get() + plane_images.size(),
+                          release_flags.get() + plane_images_size,
                           [](bool released) { return released; }));
   DeletePendingTextures();
 
@@ -303,26 +355,80 @@ TEST_P(ImageTransferCacheEntryTest, HardwareDecodedMipsAfterCreation) {
 }
 
 std::string TestParamToString(
-    const testing::TestParamInfo<YUVDecodeFormat>& param_info) {
+    const testing::TestParamInfo<SkYUVAInfo::PlaneConfig>& param_info) {
   switch (param_info.param) {
-    case YUVDecodeFormat::kYUV3:
-      return "YUV3";
-    case YUVDecodeFormat::kYVU3:
-      return "YVU3";
-    case YUVDecodeFormat::kYUV2:
-      return "YUV2";
+    case SkYUVAInfo::PlaneConfig::kY_U_V:
+      return "Y_U_V";
+    case SkYUVAInfo::PlaneConfig::kY_V_U:
+      return "Y_V_U";
+    case SkYUVAInfo::PlaneConfig::kY_UV:
+      return "Y_UV";
     default:
       NOTREACHED();
       return "";
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(All,
                          ImageTransferCacheEntryTest,
-                         ::testing::Values(YUVDecodeFormat::kYUV3,
-                                           YUVDecodeFormat::kYVU3,
-                                           YUVDecodeFormat::kYUV2),
+                         ::testing::Values(SkYUVAInfo::PlaneConfig::kY_U_V,
+                                           SkYUVAInfo::PlaneConfig::kY_V_U,
+                                           SkYUVAInfo::PlaneConfig::kY_UV),
                          TestParamToString);
+
+TEST(ImageTransferCacheEntryTestNoYUV, CPUImageWithMips) {
+  GrMockOptions options;
+  auto gr_context = GrDirectContext::MakeMock(&options);
+
+  SkBitmap bitmap;
+  bitmap.allocPixels(
+      SkImageInfo::MakeN32Premul(gr_context->maxTextureSize() + 1, 10));
+  ClientImageTransferCacheEntry client_entry(&bitmap.pixmap(), true,
+                                             absl::nullopt);
+  std::vector<uint8_t> storage(client_entry.SerializedSize());
+  client_entry.Serialize(base::make_span(storage.data(), storage.size()));
+
+  ServiceImageTransferCacheEntry service_entry;
+  service_entry.Deserialize(gr_context.get(),
+                            base::make_span(storage.data(), storage.size()));
+  ASSERT_TRUE(service_entry.image());
+  auto pre_mip_image = service_entry.image();
+  EXPECT_FALSE(pre_mip_image->isTextureBacked());
+  EXPECT_TRUE(service_entry.has_mips());
+
+  service_entry.EnsureMips();
+  ASSERT_TRUE(service_entry.image());
+  EXPECT_FALSE(service_entry.image()->isTextureBacked());
+  EXPECT_TRUE(service_entry.has_mips());
+  EXPECT_EQ(pre_mip_image, service_entry.image());
+}
+
+TEST(ImageTransferCacheEntryTestNoYUV, CPUImageAddMipsLater) {
+  GrMockOptions options;
+  auto gr_context = GrDirectContext::MakeMock(&options);
+
+  SkBitmap bitmap;
+  bitmap.allocPixels(
+      SkImageInfo::MakeN32Premul(gr_context->maxTextureSize() + 1, 10));
+  ClientImageTransferCacheEntry client_entry(&bitmap.pixmap(), false,
+                                             absl::nullopt);
+  std::vector<uint8_t> storage(client_entry.SerializedSize());
+  client_entry.Serialize(base::make_span(storage.data(), storage.size()));
+
+  ServiceImageTransferCacheEntry service_entry;
+  service_entry.Deserialize(gr_context.get(),
+                            base::make_span(storage.data(), storage.size()));
+  ASSERT_TRUE(service_entry.image());
+  auto pre_mip_image = service_entry.image();
+  EXPECT_FALSE(pre_mip_image->isTextureBacked());
+  EXPECT_TRUE(service_entry.has_mips());
+
+  service_entry.EnsureMips();
+  ASSERT_TRUE(service_entry.image());
+  EXPECT_FALSE(service_entry.image()->isTextureBacked());
+  EXPECT_TRUE(service_entry.has_mips());
+  EXPECT_EQ(pre_mip_image, service_entry.image());
+}
 
 }  // namespace
 }  // namespace cc

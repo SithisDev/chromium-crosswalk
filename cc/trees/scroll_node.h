@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "cc/input/scroll_snap_data.h"
 #include "cc/paint/element_id.h"
 #include "cc/paint/filter_operations.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
@@ -35,6 +36,9 @@ struct CC_EXPORT ScrollNode {
 
   // Size of the container area that the contents scrolls in, not including
   // non-overlay scrollbars. Overlay scrollbars do not affect these bounds.
+  // Note, use the ScrollTree::container_bounds function for the viewport
+  // scroll nodes to include the current bounds change due to top controls
+  // hiding / showing.
   gfx::Size container_bounds;
 
   // Size of the content that is scrolled within the container bounds.
@@ -47,12 +51,13 @@ struct CC_EXPORT ScrollNode {
   bool max_scroll_offset_affected_by_page_scale : 1;
   bool scrolls_inner_viewport : 1;
   bool scrolls_outer_viewport : 1;
+  bool prevent_viewport_scrolling_from_inner : 1;
   bool should_flatten : 1;
   bool user_scrollable_horizontal : 1;
   bool user_scrollable_vertical : 1;
 
   // This offset is used when |scrollable| is false and there isn't a transform
-  // node already present that covers this offset.
+  // node already present that covers this offset. For layer tree mode only.
   gfx::Vector2dF offset_to_transform_parent;
 
   ElementId element_id;
@@ -60,9 +65,14 @@ struct CC_EXPORT ScrollNode {
 
   OverscrollBehavior overscroll_behavior;
 
-  base::Optional<SnapContainerData> snap_container_data;
+  absl::optional<SnapContainerData> snap_container_data;
 
+  bool is_composited : 1;
+
+#if DCHECK_IS_ON()
   bool operator==(const ScrollNode& other) const;
+#endif
+
   void AsValueInto(base::trace_event::TracedValue* value) const;
 };
 

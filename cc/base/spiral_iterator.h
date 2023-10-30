@@ -1,11 +1,10 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_BASE_SPIRAL_ITERATOR_H_
 #define CC_BASE_SPIRAL_ITERATOR_H_
 
-#include "base/logging.h"
 #include "cc/base/base_export.h"
 #include "cc/base/index_rect.h"
 

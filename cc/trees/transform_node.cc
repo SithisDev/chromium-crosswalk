@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,11 @@
 namespace cc {
 
 TransformNode::TransformNode()
-    : id(TransformTree::kInvalidNodeId),
-      parent_id(TransformTree::kInvalidNodeId),
+    : id(kInvalidPropertyNodeId),
+      parent_id(kInvalidPropertyNodeId),
+      parent_frame_id(kInvalidPropertyNodeId),
       sticky_position_constraint_id(-1),
-      source_node_id(TransformTree::kInvalidNodeId),
+      anchor_scroll_containers_data_id(-1),
       sorting_context_id(0),
       needs_local_transform_update(true),
       node_and_ancestors_are_animated_or_invertible(true),
@@ -25,27 +26,30 @@ TransformNode::TransformNode()
       has_potential_animation(false),
       is_currently_animating(false),
       to_screen_is_potentially_animated(false),
-      flattens_inherited_transform(false),
+      flattens_inherited_transform(true),
       node_and_ancestors_are_flat(true),
-      node_and_ancestors_have_only_integer_translation(true),
       scrolls(false),
+      should_undo_overscroll(false),
       should_be_snapped(false),
-      moved_by_outer_viewport_bounds_delta_x(false),
       moved_by_outer_viewport_bounds_delta_y(false),
       in_subtree_of_page_scale_layer(false),
       transform_changed(false),
-      post_local_scale_factor(1.0f),
-      maximum_animation_scale(kNotScaled),
-      starting_animation_scale(kNotScaled) {}
+      delegates_to_parent_for_backface(false),
+      will_change_transform(false),
+      node_or_ancestors_will_change_transform(false),
+      maximum_animation_scale(kInvalidScale) {}
 
 TransformNode::TransformNode(const TransformNode&) = default;
 
+TransformNode& TransformNode::operator=(const TransformNode&) = default;
+
+#if DCHECK_IS_ON()
 bool TransformNode::operator==(const TransformNode& other) const {
   return id == other.id && parent_id == other.parent_id &&
-         element_id == other.element_id && pre_local == other.pre_local &&
-         local == other.local && post_local == other.post_local &&
+         parent_frame_id == other.parent_frame_id &&
+         element_id == other.element_id && local == other.local &&
+         origin == other.origin && post_translation == other.post_translation &&
          to_parent == other.to_parent &&
-         source_node_id == other.source_node_id &&
          sorting_context_id == other.sorting_context_id &&
          needs_local_transform_update == other.needs_local_transform_update &&
          node_and_ancestors_are_animated_or_invertible ==
@@ -58,55 +62,37 @@ bool TransformNode::operator==(const TransformNode& other) const {
              other.to_screen_is_potentially_animated &&
          flattens_inherited_transform == other.flattens_inherited_transform &&
          node_and_ancestors_are_flat == other.node_and_ancestors_are_flat &&
-         node_and_ancestors_have_only_integer_translation ==
-             other.node_and_ancestors_have_only_integer_translation &&
          scrolls == other.scrolls &&
+         should_undo_overscroll == other.should_undo_overscroll &&
          should_be_snapped == other.should_be_snapped &&
-         moved_by_outer_viewport_bounds_delta_x ==
-             other.moved_by_outer_viewport_bounds_delta_x &&
          moved_by_outer_viewport_bounds_delta_y ==
              other.moved_by_outer_viewport_bounds_delta_y &&
          in_subtree_of_page_scale_layer ==
              other.in_subtree_of_page_scale_layer &&
+         delegates_to_parent_for_backface ==
+             other.delegates_to_parent_for_backface &&
+         will_change_transform == other.will_change_transform &&
+         node_or_ancestors_will_change_transform ==
+             other.node_or_ancestors_will_change_transform &&
          transform_changed == other.transform_changed &&
-         post_local_scale_factor == other.post_local_scale_factor &&
          scroll_offset == other.scroll_offset &&
          snap_amount == other.snap_amount &&
-         source_offset == other.source_offset &&
-         source_to_parent == other.source_to_parent &&
          maximum_animation_scale == other.maximum_animation_scale &&
-         starting_animation_scale == other.starting_animation_scale;
+         visible_frame_element_id == other.visible_frame_element_id;
 }
-
-void TransformNode::update_pre_local_transform(
-    const gfx::Point3F& transform_origin) {
-  pre_local.MakeIdentity();
-  pre_local.Translate3d(-transform_origin.x(), -transform_origin.y(),
-                        -transform_origin.z());
-}
-
-void TransformNode::update_post_local_transform(
-    const gfx::PointF& position,
-    const gfx::Point3F& transform_origin) {
-  post_local.MakeIdentity();
-  post_local.Scale(post_local_scale_factor, post_local_scale_factor);
-  post_local.Translate3d(
-      position.x() + source_offset.x() + transform_origin.x(),
-      position.y() + source_offset.y() + transform_origin.y(),
-      transform_origin.z());
-}
+#endif  // DCHECK_IS_ON()
 
 void TransformNode::AsValueInto(base::trace_event::TracedValue* value) const {
   value->SetInteger("id", id);
   value->SetInteger("parent_id", parent_id);
   element_id.AddToTracedValue(value);
-  MathUtil::AddToTracedValue("pre_local", pre_local, value);
   MathUtil::AddToTracedValue("local", local, value);
-  MathUtil::AddToTracedValue("post_local", post_local, value);
-  value->SetInteger("source_node_id", source_node_id);
+  MathUtil::AddToTracedValue("origin", origin, value);
+  MathUtil::AddToTracedValue("post_translation", post_translation, value);
   value->SetInteger("sorting_context_id", sorting_context_id);
-  value->SetInteger("flattens_inherited_transform",
+  value->SetBoolean("flattens_inherited_transform",
                     flattens_inherited_transform);
+  value->SetBoolean("will_change_transform", will_change_transform);
   MathUtil::AddToTracedValue("scroll_offset", scroll_offset, value);
   MathUtil::AddToTracedValue("snap_amount", snap_amount, value);
 }

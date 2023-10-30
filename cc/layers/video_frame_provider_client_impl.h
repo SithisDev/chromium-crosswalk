@@ -1,24 +1,25 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CC_LAYERS_VIDEO_FRAME_PROVIDER_CLIENT_IMPL_H_
 #define CC_LAYERS_VIDEO_FRAME_PROVIDER_CLIENT_IMPL_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "cc/cc_export.h"
 #include "cc/layers/video_frame_provider.h"
 #include "cc/scheduler/video_frame_controller.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace media { class VideoFrame; }
 
 namespace cc {
 class VideoLayerImpl;
 
-// VideoFrameProviderClientImpl liasons with the VideoFrameProvider and the
+// VideoFrameProviderClientImpl liaisons with the VideoFrameProvider and the
 // VideoLayer. It receives updates from the provider and updates the layer as a
 // result. It also allows the layer to access the video frame that the provider
 // has.
@@ -43,9 +44,13 @@ class CC_EXPORT VideoFrameProviderClientImpl
   // Must be called on the impl thread while the main thread is blocked.
   void Stop();
 
-  scoped_refptr<media::VideoFrame> AcquireLockAndCurrentFrame();
-  void PutCurrentFrame();
-  void ReleaseLock();
+  scoped_refptr<media::VideoFrame> AcquireLockAndCurrentFrame()
+      EXCLUSIVE_LOCK_FUNCTION(provider_lock_);
+  void PutCurrentFrame() EXCLUSIVE_LOCKS_REQUIRED(provider_lock_);
+  void ReleaseLock() UNLOCK_FUNCTION(provider_lock_);
+  void AssertLocked() const ASSERT_EXCLUSIVE_LOCK(provider_lock_) {
+    provider_lock_.AssertAcquired();
+  }
   bool HasCurrentFrame();
 
   // VideoFrameController implementation.
@@ -72,9 +77,9 @@ class CC_EXPORT VideoFrameProviderClientImpl
                                VideoFrameControllerClient* client);
   ~VideoFrameProviderClientImpl() override;
 
-  VideoFrameProvider* provider_;
-  VideoFrameControllerClient* client_;
-  VideoLayerImpl* active_video_layer_;
+  raw_ptr<VideoFrameProvider> provider_;
+  raw_ptr<VideoFrameControllerClient> client_;
+  raw_ptr<VideoLayerImpl> active_video_layer_;
   bool stopped_;
   bool rendering_;
   bool needs_put_current_frame_;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright 2012 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -96,7 +96,7 @@ def DoMain(argv):
 def main(argv):
   try:
     result = DoMain(argv[1:])
-  except WrongNumberOfArgumentsException, e:
+  except WrongNumberOfArgumentsException as e:
     print(e, file=sys.stderr)
     return 1
   if result:

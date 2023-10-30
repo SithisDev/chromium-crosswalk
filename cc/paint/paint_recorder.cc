@@ -1,11 +1,11 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/paint/paint_recorder.h"
 
 #include "cc/paint/display_item_list.h"
-#include "ui/gfx/skia_util.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 
 namespace cc {
 
@@ -17,7 +17,7 @@ PaintRecorder::~PaintRecorder() = default;
 
 PaintCanvas* PaintRecorder::beginRecording(const SkRect& bounds) {
   display_item_list_->StartPaint();
-  canvas_.emplace(display_item_list_.get(), bounds);
+  canvas_ = CreateCanvas(display_item_list_.get(), bounds);
   return getRecordingCanvas();
 }
 
@@ -39,6 +39,20 @@ sk_sp<PaintRecord> PaintRecorder::finishRecordingAsPicture() {
   display_item_list_->EndPaintOfUnpaired(gfx::Rect());
   display_item_list_->Finalize();
   return display_item_list_->ReleaseAsRecord();
+}
+
+std::unique_ptr<RecordPaintCanvas> PaintRecorder::CreateCanvas(
+    DisplayItemList* list,
+    const SkRect& bounds) {
+  return std::make_unique<RecordPaintCanvas>(list, bounds);
+}
+
+bool PaintRecorder::ListHasDrawOps() const {
+  return display_item_list_->has_draw_ops();
+}
+
+size_t PaintRecorder::num_paint_ops() const {
+  return display_item_list_->num_paint_ops();
 }
 
 }  // namespace cc

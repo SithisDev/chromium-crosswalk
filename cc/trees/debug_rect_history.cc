@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,8 @@
 #include "cc/layers/render_surface_impl.h"
 #include "cc/trees/damage_tracker.h"
 #include "cc/trees/layer_tree_host.h"
-#include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_impl.h"
+#include "cc/trees/scroll_node.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
 namespace cc {
@@ -50,6 +50,9 @@ void DebugRectHistory::SaveDebugRectsForCurrentFrame(
   if (debug_state.show_non_fast_scrollable_rects)
     SaveNonFastScrollableRects(tree_impl);
 
+  if (debug_state.show_main_thread_scrolling_reason_rects)
+    SaveMainThreadScrollingReasonRects(tree_impl);
+
   if (debug_state.show_layout_shift_regions)
     SaveLayoutShiftRects(hud_layer);
 
@@ -67,11 +70,17 @@ void DebugRectHistory::SaveDebugRectsForCurrentFrame(
 }
 
 void DebugRectHistory::SaveLayoutShiftRects(HeadsUpDisplayLayerImpl* hud) {
+  // We store the layout shift rects on the hud layer. If we don't have the hud
+  // layer, then there is nothing to store.
+  if (!hud)
+    return;
+
   for (gfx::Rect rect : hud->LayoutShiftRects()) {
     debug_rects_.push_back(DebugRect(
         LAYOUT_SHIFT_RECT_TYPE,
         MathUtil::MapEnclosingClippedRect(hud->ScreenSpaceTransform(), rect)));
   }
+  hud->ClearLayoutShiftRects();
 }
 
 void DebugRectHistory::SavePaintRects(LayerTreeImpl* tree_impl) {
@@ -81,7 +90,7 @@ void DebugRectHistory::SavePaintRects(LayerTreeImpl* tree_impl) {
   // list.
   for (auto* layer : *tree_impl) {
     Region invalidation_region = layer->GetInvalidationRegionForDebugging();
-    if (invalidation_region.IsEmpty() || !layer->DrawsContent())
+    if (invalidation_region.IsEmpty() || !layer->draws_content())
       continue;
 
     for (gfx::Rect rect : invalidation_region) {
@@ -137,15 +146,15 @@ void DebugRectHistory::SaveScreenSpaceRects(
 }
 
 void DebugRectHistory::SaveTouchEventHandlerRects(LayerTreeImpl* tree_impl) {
-  LayerTreeHostCommon::CallFunctionForEveryLayer(
-      tree_impl,
-      [this](LayerImpl* layer) { SaveTouchEventHandlerRectsCallback(layer); });
+  for (auto* layer : *tree_impl)
+    SaveTouchEventHandlerRectsCallback(layer);
 }
 
 void DebugRectHistory::SaveTouchEventHandlerRectsCallback(LayerImpl* layer) {
   const TouchActionRegion& touch_action_region = layer->touch_action_region();
-  for (int touch_action_index = kTouchActionNone;
-       touch_action_index != kTouchActionMax; ++touch_action_index) {
+  for (int touch_action_index = static_cast<int>(TouchAction::kNone);
+       touch_action_index != static_cast<int>(TouchAction::kMax);
+       ++touch_action_index) {
     auto touch_action = static_cast<TouchAction>(touch_action_index);
     Region region = touch_action_region.GetRegionForTouchAction(touch_action);
     for (gfx::Rect rect : region) {
@@ -158,28 +167,23 @@ void DebugRectHistory::SaveTouchEventHandlerRectsCallback(LayerImpl* layer) {
 }
 
 void DebugRectHistory::SaveWheelEventHandlerRects(LayerTreeImpl* tree_impl) {
-  EventListenerProperties event_properties =
-      tree_impl->event_listener_properties(EventListenerClass::kMouseWheel);
-  if (event_properties == EventListenerProperties::kNone ||
-      event_properties == EventListenerProperties::kPassive) {
-    return;
+  // TODO(https://crbug.com/1136591): Need behavior confirmation.
+  // TODO(https://crbug.com/1136591): Need to check results in dev tools layer
+  // view.
+  for (auto* layer : *tree_impl) {
+    const Region& region = layer->wheel_event_handler_region();
+    for (gfx::Rect rect : region) {
+      debug_rects_.emplace_back(
+          DebugRect(WHEEL_EVENT_HANDLER_RECT_TYPE,
+                    MathUtil::MapEnclosingClippedRect(
+                        layer->ScreenSpaceTransform(), rect)));
+    }
   }
-
-  // Since the wheel event handlers property is on the entire layer tree just
-  // mark inner viewport if have listeners.
-  LayerImpl* inner_viewport = tree_impl->InnerViewportScrollLayer();
-  if (!inner_viewport)
-    return;
-  debug_rects_.push_back(DebugRect(
-      WHEEL_EVENT_HANDLER_RECT_TYPE,
-      MathUtil::MapEnclosingClippedRect(inner_viewport->ScreenSpaceTransform(),
-                                        gfx::Rect(inner_viewport->bounds()))));
 }
 
 void DebugRectHistory::SaveScrollEventHandlerRects(LayerTreeImpl* tree_impl) {
-  LayerTreeHostCommon::CallFunctionForEveryLayer(
-      tree_impl,
-      [this](LayerImpl* layer) { SaveScrollEventHandlerRectsCallback(layer); });
+  for (auto* layer : *tree_impl)
+    SaveScrollEventHandlerRectsCallback(layer);
 }
 
 void DebugRectHistory::SaveScrollEventHandlerRectsCallback(LayerImpl* layer) {
@@ -193,9 +197,8 @@ void DebugRectHistory::SaveScrollEventHandlerRectsCallback(LayerImpl* layer) {
 }
 
 void DebugRectHistory::SaveNonFastScrollableRects(LayerTreeImpl* tree_impl) {
-  LayerTreeHostCommon::CallFunctionForEveryLayer(
-      tree_impl,
-      [this](LayerImpl* layer) { SaveNonFastScrollableRectsCallback(layer); });
+  for (auto* layer : *tree_impl)
+    SaveNonFastScrollableRectsCallback(layer);
 }
 
 void DebugRectHistory::SaveNonFastScrollableRectsCallback(LayerImpl* layer) {
@@ -203,6 +206,23 @@ void DebugRectHistory::SaveNonFastScrollableRectsCallback(LayerImpl* layer) {
     debug_rects_.push_back(DebugRect(NON_FAST_SCROLLABLE_RECT_TYPE,
                                      MathUtil::MapEnclosingClippedRect(
                                          layer->ScreenSpaceTransform(), rect)));
+  }
+}
+
+void DebugRectHistory::SaveMainThreadScrollingReasonRects(
+    LayerTreeImpl* tree_impl) {
+  const auto& scroll_tree = tree_impl->property_trees()->scroll_tree();
+  for (auto* layer : *tree_impl) {
+    if (const auto* scroll_node =
+            scroll_tree.FindNodeFromElementId(layer->element_id())) {
+      if (auto reasons = scroll_node->main_thread_scrolling_reasons) {
+        debug_rects_.push_back(DebugRect(
+            MAIN_THREAD_SCROLLING_REASON_RECT_TYPE,
+            MathUtil::MapEnclosingClippedRect(layer->ScreenSpaceTransform(),
+                                              gfx::Rect(layer->bounds())),
+            TouchAction::kNone, reasons));
+      }
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,12 @@ class CC_EXPORT RasterBuffer {
                         const gfx::AxisTransform2d& transform,
                         const RasterSource::PlaybackSettings& playback_settings,
                         const GURL& url) = 0;
+
+  // Returns true if Playback() can be invoked at background thread priority. To
+  // avoid priority inversions, this should return false if Playback() acquires
+  // resources that are also acquired at normal thread priority.
+  // https://crbug.com/1072756.
+  virtual bool SupportsBackgroundThreadPriority() const = 0;
 };
 
 }  // namespace cc

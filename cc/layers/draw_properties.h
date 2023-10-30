@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,10 @@
 
 #include <stddef.h>
 
-#include <memory>
-
 #include "cc/trees/occlusion.h"
+#include "ui/gfx/geometry/mask_filter_info.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/rrect_f.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace cc {
 
@@ -53,17 +51,17 @@ struct CC_EXPORT DrawProperties {
   // the layer's coordinate space.
   gfx::Rect visible_layer_rect;
 
-  // In target surface space, the rect that encloses the clipped, drawable
-  // content of the layer.
-  gfx::Rect drawable_content_rect;
+  // In target surface space, the rect that encloses the clipped, visible,
+  // and drawable content of the layer.
+  gfx::Rect visible_drawable_content_rect;
 
   // In target surface space, the original rect that clipped this layer. This
   // value is used to avoid unnecessarily changing GL scissor state.
   gfx::Rect clip_rect;
 
-  // Contains a rounded corner rect to clip this layer when drawing. This rrect
-  // is in the target space of the layer.
-  gfx::RRectF rounded_corner_bounds;
+  // Contains a mask information applied to the layer. The coordinates is in the
+  // target space of the layer.
+  gfx::MaskFilterInfo mask_filter_info;
 };
 
 }  // namespace cc

@@ -1,4 +1,4 @@
-# Copyright 2016 The Chromium Authors. All rights reserved.
+# Copyright 2016 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -23,7 +23,7 @@ def Main():
   # Foo.framework/Versions/Current symlink to it.
   if args.version:
     try:
-      os.makedirs(os.path.join(args.framework, VERSIONS, args.version), 0755)
+      os.makedirs(os.path.join(args.framework, VERSIONS, args.version), 0o755)
     except OSError as e:
       if e.errno != errno.EEXIST:
         raise e

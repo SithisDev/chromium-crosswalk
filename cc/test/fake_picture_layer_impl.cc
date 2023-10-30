@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2013 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/memory/ptr_util.h"
+#include "cc/test/fake_raster_source.h"
 #include "cc/tiles/tile.h"
 #include "cc/trees/layer_tree_impl.h"
 
@@ -17,33 +18,20 @@ namespace cc {
 FakePictureLayerImpl::FakePictureLayerImpl(
     LayerTreeImpl* tree_impl,
     int id,
-    scoped_refptr<RasterSource> raster_source,
-    Layer::LayerMaskType mask_type)
-    : PictureLayerImpl(tree_impl, id, mask_type) {
-  SetBounds(raster_source->GetSize());
-  SetRasterSourceOnPending(raster_source, Region());
+    scoped_refptr<RasterSource> raster_source)
+    : PictureLayerImpl(tree_impl, id) {
+  if (raster_source) {
+    SetBounds(raster_source->GetSize());
+    SetRasterSource(raster_source, Region());
+  } else {
+    // Just to avoid crash on null RasterSource when updating tilings.
+    SetRasterSource(FakeRasterSource::CreateEmpty(gfx::Size()), Region());
+  }
 }
-
-FakePictureLayerImpl::FakePictureLayerImpl(
-    LayerTreeImpl* tree_impl,
-    int id,
-    scoped_refptr<RasterSource> raster_source,
-    Layer::LayerMaskType mask_type,
-    const gfx::Size& layer_bounds)
-    : PictureLayerImpl(tree_impl, id, mask_type) {
-  SetBounds(layer_bounds);
-  SetRasterSourceOnPending(raster_source, Region());
-}
-
-FakePictureLayerImpl::FakePictureLayerImpl(LayerTreeImpl* tree_impl,
-                                           int id,
-                                           Layer::LayerMaskType mask_type)
-    : PictureLayerImpl(tree_impl, id, mask_type) {}
 
 std::unique_ptr<LayerImpl> FakePictureLayerImpl::CreateLayerImpl(
-    LayerTreeImpl* tree_impl) {
-  return base::WrapUnique(
-      new FakePictureLayerImpl(tree_impl, id(), mask_type_));
+    LayerTreeImpl* tree_impl) const {
+  return base::WrapUnique(new FakePictureLayerImpl(tree_impl, id()));
 }
 
 void FakePictureLayerImpl::PushPropertiesTo(LayerImpl* layer_impl) {
@@ -53,7 +41,7 @@ void FakePictureLayerImpl::PushPropertiesTo(LayerImpl* layer_impl) {
   PictureLayerImpl::PushPropertiesTo(layer_impl);
 }
 
-void FakePictureLayerImpl::AppendQuads(viz::RenderPass* render_pass,
+void FakePictureLayerImpl::AppendQuads(viz::CompositorRenderPass* render_pass,
                                        AppendQuadsData* append_quads_data) {
   PictureLayerImpl::AppendQuads(render_pass, append_quads_data);
   ++append_quads_count_;
@@ -94,10 +82,9 @@ PictureLayerTiling* FakePictureLayerImpl::LowResTiling() const {
   return result;
 }
 
-void FakePictureLayerImpl::SetRasterSourceOnPending(
+void FakePictureLayerImpl::SetRasterSource(
     scoped_refptr<RasterSource> raster_source,
     const Region& invalidation) {
-  DCHECK(layer_tree_impl()->IsPendingTree());
   Region invalidation_temp = invalidation;
   const PictureLayerTilingSet* pending_set = nullptr;
   const PaintWorkletRecordMap* pending_paint_worklet_records = nullptr;
@@ -107,17 +94,16 @@ void FakePictureLayerImpl::SetRasterSourceOnPending(
                      pending_paint_worklet_records);
 }
 
-void FakePictureLayerImpl::SetRasterSourceOnActive(
-    scoped_refptr<RasterSource> raster_source,
-    const Region& invalidation) {
-  DCHECK(layer_tree_impl()->IsActiveTree());
-  Region invalidation_temp = invalidation;
-  const PictureLayerTilingSet* pending_set = nullptr;
-  const PaintWorkletRecordMap* pending_paint_worklet_records = nullptr;
-  set_gpu_raster_max_texture_size(
-      layer_tree_impl()->GetDeviceViewport().size());
-  UpdateRasterSource(raster_source, &invalidation_temp, pending_set,
-                     pending_paint_worklet_records);
+size_t FakePictureLayerImpl::GetNumberOfTilesWithResources() const {
+  size_t count = 0;
+  for (size_t i = 0; i < num_tilings(); ++i) {
+    PictureLayerTiling::TileIterator tile_iterator(tilings_->tiling_at(i));
+    for (; !tile_iterator.AtEnd(); tile_iterator.Next()) {
+      if (tile_iterator.GetCurrent()->draw_info().has_resource())
+        ++count;
+    }
+  }
+  return count;
 }
 
 void FakePictureLayerImpl::CreateAllTiles() {
@@ -144,7 +130,7 @@ void FakePictureLayerImpl::SetAllTilesReadyInTiling(
 
 void FakePictureLayerImpl::SetTileReady(Tile* tile) {
   TileDrawInfo& draw_info = tile->draw_info();
-  draw_info.SetSolidColorForTesting(true);
+  draw_info.SetSolidColorForTesting(SkColors::kRed);
   DCHECK(draw_info.IsReadyToDraw());
 }
 

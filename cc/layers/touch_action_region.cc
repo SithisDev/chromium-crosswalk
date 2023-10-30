@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,7 +38,7 @@ const Region& TouchActionRegion::GetRegionForTouchAction(
 
 TouchAction TouchActionRegion::GetAllowedTouchAction(
     const gfx::Point& point) const {
-  TouchAction allowed_touch_action = kTouchActionAuto;
+  TouchAction allowed_touch_action = TouchAction::kAuto;
   for (const auto& pair : map_) {
     if (!pair.second.Contains(point))
       continue;

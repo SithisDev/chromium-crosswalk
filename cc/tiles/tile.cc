@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "base/numerics/safe_conversions.h"
 #include "base/trace_event/trace_event.h"
@@ -22,10 +23,9 @@ Tile::Tile(TileManager* tile_manager,
            const CreateInfo& info,
            int layer_id,
            int source_frame_number,
-           int flags,
-           bool can_use_lcd_text)
+           int flags)
     : tile_manager_(tile_manager),
-      tiling_(info.tiling),
+      tiling_(info.tiling.get()),
       content_rect_(info.content_rect),
       enclosing_layer_rect_(info.enclosing_layer_rect),
       raster_transform_(info.raster_transform),
@@ -37,10 +37,11 @@ Tile::Tile(TileManager* tile_manager,
       required_for_activation_(false),
       required_for_draw_(false),
       is_solid_color_analysis_performed_(false),
-      can_use_lcd_text_(can_use_lcd_text),
-      id_(tile_manager->GetUniqueTileId()),
-      invalidated_id_(0),
-      scheduled_priority_(0) {}
+      can_use_lcd_text_(info.can_use_lcd_text),
+      raster_task_scheduled_with_checker_images_(false),
+      id_(tile_manager->GetUniqueTileId()) {
+  raster_rects_.emplace_back(info.content_rect, info.raster_transform);
+}
 
 Tile::~Tile() {
   TRACE_EVENT_OBJECT_DELETED_WITH_ID(
@@ -54,11 +55,16 @@ void Tile::AsValueInto(base::trace_event::TracedValue* value) const {
       TRACE_DISABLED_BY_DEFAULT("cc.debug"), value, "cc::Tile", this);
   value->SetDouble("contents_scale", contents_scale_key());
 
-  value->BeginArray("raster_transform");
-  value->AppendDouble(raster_transform_.scale());
+  value->BeginDictionary("raster_transform");
+  value->BeginArray("scale");
+  value->AppendDouble(raster_transform_.scale().x());
+  value->AppendDouble(raster_transform_.scale().y());
+  value->EndArray();
+  value->BeginArray("translation");
   value->AppendDouble(raster_transform_.translation().x());
   value->AppendDouble(raster_transform_.translation().y());
   value->EndArray();
+  value->EndDictionary();
 
   MathUtil::AddToTracedValue("content_rect", content_rect_, value);
 
@@ -75,6 +81,10 @@ void Tile::AsValueInto(base::trace_event::TracedValue* value) const {
   value->SetBoolean("use_picture_analysis", use_picture_analysis());
   value->SetInteger("gpu_memory_usage",
                     base::saturated_cast<int>(GPUMemoryUsageInBytes()));
+}
+
+bool Tile::HasMissingLCPCandidateImages() const {
+  return HasRasterTask() && raster_task_->TaskContainsLCPCandidateImages();
 }
 
 size_t Tile::GPUMemoryUsageInBytes() const {

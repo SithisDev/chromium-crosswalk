@@ -1,8 +1,9 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2016 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/test/push_properties_counting_layer_impl.h"
+#include "base/memory/ptr_util.h"
 
 namespace cc {
 
@@ -28,7 +29,7 @@ void PushPropertiesCountingLayerImpl::PushPropertiesTo(LayerImpl* layer) {
 }
 
 std::unique_ptr<LayerImpl> PushPropertiesCountingLayerImpl::CreateLayerImpl(
-    LayerTreeImpl* tree_impl) {
+    LayerTreeImpl* tree_impl) const {
   return PushPropertiesCountingLayerImpl::Create(tree_impl, LayerImpl::id());
 }
 

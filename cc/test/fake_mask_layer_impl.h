@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,7 @@ class FakeMaskLayerImpl : public PictureLayerImpl {
   static std::unique_ptr<FakeMaskLayerImpl> Create(
       LayerTreeImpl* tree_impl,
       int id,
-      scoped_refptr<RasterSource> raster_source,
-      Layer::LayerMaskType mask_type);
+      scoped_refptr<RasterSource> raster_source);
 
   void GetContentsResourceId(viz::ResourceId* resource_id,
                              gfx::Size* resource_size,
@@ -28,8 +27,7 @@ class FakeMaskLayerImpl : public PictureLayerImpl {
  private:
   FakeMaskLayerImpl(LayerTreeImpl* tree_impl,
                     int id,
-                    scoped_refptr<RasterSource> raster_source,
-                    Layer::LayerMaskType mask_type);
+                    scoped_refptr<RasterSource> raster_source);
 
   gfx::Size resource_size_;
 };

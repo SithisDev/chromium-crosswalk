@@ -1,4 +1,4 @@
-// Copyright 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <map>
 #include <vector>
 
+#include "build/build_config.h"
 #include "cc/test/fake_output_surface_client.h"
 #include "cc/test/fake_picture_layer_tiling_client.h"
 #include "cc/test/fake_raster_source.h"
@@ -246,7 +247,7 @@ class PictureLayerTilingSetTestWithResources : public testing::Test {
     ASSERT_EQ(context_provider->BindToCurrentThread(),
               gpu::ContextResult::kSuccess);
     std::unique_ptr<viz::ClientResourceProvider> resource_provider =
-        std::make_unique<viz::ClientResourceProvider>(true);
+        std::make_unique<viz::ClientResourceProvider>();
 
     FakePictureLayerTilingClient client(resource_provider.get(),
                                         context_provider.get());
@@ -281,8 +282,7 @@ class PictureLayerTilingSetTestWithResources : public testing::Test {
       ASSERT_TRUE(remaining.Contains(geometry_rect));
       remaining.Subtract(geometry_rect);
 
-      float scale = iter.CurrentTiling()->contents_scale_key();
-      EXPECT_EQ(expected_scale, scale);
+      EXPECT_EQ(expected_scale, iter.CurrentTiling()->contents_scale_key());
 
       if (num_tilings)
         EXPECT_TRUE(*iter);
@@ -318,11 +318,23 @@ TEST_F(PictureLayerTilingSetTestWithResources, TwoTilings_Larger) {
   RunTest(2, 2.f, 8.f, 1.f, 2.f);
 }
 
-TEST_F(PictureLayerTilingSetTestWithResources, ManyTilings_Equal) {
+// Test is flaky: https://crbug.com/1056828.
+#if BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)
+#define MAYBE_ManyTilings_Equal DISABLED_ManyTilings_Equal
+#else
+#define MAYBE_ManyTilings_Equal ManyTilings_Equal
+#endif
+TEST_F(PictureLayerTilingSetTestWithResources, MAYBE_ManyTilings_Equal) {
   RunTest(10, 1.f, 1.f, 5.f, 5.f);
 }
 
-TEST_F(PictureLayerTilingSetTestWithResources, ManyTilings_NotEqual) {
+// Test is flaky: https://crbug.com/1056828.
+#if BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)
+#define MAYBE_ManyTilings_NotEqual DISABLED_ManyTilings_NotEqual
+#else
+#define MAYBE_ManyTilings_NotEqual ManyTilings_NotEqual
+#endif
+TEST_F(PictureLayerTilingSetTestWithResources, MAYBE_ManyTilings_NotEqual) {
   RunTest(10, 1.f, 1.f, 4.5f, 5.f);
 }
 
@@ -834,7 +846,6 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
   // We can verify that the content rect (with borders) is one pixel off
   // 41,9 8x8 on all sides.
   EXPECT_EQ(tiling->TileAt(5, 1)->content_rect().ToString(), "40,8 10x10");
-
   TilePriority priority = prioritized_tiles[tiling->TileAt(5, 1)].priority();
   EXPECT_FLOAT_EQ(68.f, priority.distance_to_visible);
 
@@ -876,7 +887,7 @@ TEST(PictureLayerTilingTest, ViewportDistanceWithScale) {
   for (int i = 0; i < 47; ++i) {
     for (int j = 0; j < 47; ++j) {
       Tile* tile = tiling->TileAt(i, j);
-      TilePriority priority = prioritized_tiles[tile].priority();
+      priority = prioritized_tiles[tile].priority();
 
       gfx::Rect tile_rect = tiling->TilingDataForTesting().TileBounds(i, j);
       if (viewport_in_content_space.Intersects(tile_rect)) {
@@ -1106,6 +1117,59 @@ TEST(PictureLayerTilingSetTest, TilingTranslationChanges) {
   ASSERT_EQ(1u, active_set->num_tilings());
   EXPECT_EQ(active_set->tiling_at(0)->raster_transform(), raster_transform2);
   EXPECT_EQ(1u, active_set->tiling_at(0)->AllTilesForTesting().size());
+}
+
+TEST(PictureLayerTilingSetTest, LcdChanges) {
+  gfx::Size tile_size(64, 64);
+  FakePictureLayerTilingClient pending_client;
+  FakePictureLayerTilingClient active_client;
+  pending_client.SetTileSize(tile_size);
+  active_client.SetTileSize(tile_size);
+  std::unique_ptr<PictureLayerTilingSet> pending_set =
+      PictureLayerTilingSet::Create(PENDING_TREE, &pending_client, 0, 1.f, 0,
+                                    0.f);
+  std::unique_ptr<PictureLayerTilingSet> active_set =
+      PictureLayerTilingSet::Create(ACTIVE_TREE, &active_client, 0, 1.f, 0,
+                                    0.f);
+  active_client.set_twin_tiling_set(pending_set.get());
+  pending_client.set_twin_tiling_set(active_set.get());
+
+  gfx::Size layer_bounds(100, 100);
+  scoped_refptr<FakeRasterSource> raster_source =
+      FakeRasterSource::CreateFilled(layer_bounds);
+
+  const bool with_lcd_text = true;
+  const bool without_lcd_text = false;
+
+  gfx::AxisTransform2d raster_transform(1.f, gfx::Vector2dF());
+  pending_set->AddTiling(raster_transform, raster_source, with_lcd_text);
+  pending_set->tiling_at(0)->set_resolution(HIGH_RESOLUTION);
+
+  // Set a priority rect so we get tiles.
+  pending_set->UpdateTilePriorities(gfx::Rect(layer_bounds), 1.f, 1.0,
+                                    Occlusion(), false);
+
+  // Make sure all tiles are generated.
+  EXPECT_EQ(4u, pending_set->tiling_at(0)->AllTilesForTesting().size());
+
+  // Clone from the pending to the active tree.
+  active_set->UpdateTilingsToCurrentRasterSourceForActivation(
+      raster_source.get(), pending_set.get(), Region(), 1.f, 1.f);
+
+  // Verifies active tree cloned the tiling correctly.
+  ASSERT_EQ(1u, active_set->num_tilings());
+  EXPECT_EQ(4u, active_set->tiling_at(0)->AllTilesForTesting().size());
+
+  // Change LCD state on the pending tree
+  pending_set->RemoveAllTilings();
+  pending_set->AddTiling(raster_transform, raster_source, without_lcd_text);
+  pending_set->tiling_at(0)->set_resolution(HIGH_RESOLUTION);
+
+  // Set a priority rect so we get tiles.
+  pending_set->UpdateTilePriorities(gfx::Rect(layer_bounds), 1.f, 1.0,
+                                    Occlusion(), false);
+  // We should have created all tiles because lcd state changed.
+  EXPECT_EQ(4u, pending_set->tiling_at(0)->AllTilesForTesting().size());
 }
 
 }  // namespace

@@ -1,16 +1,17 @@
-# Copyright 2018 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import argparse
 import collections
 import contextlib
+import itertools
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from xml.etree import ElementTree
 
 import util.build_utils as build_utils
@@ -27,6 +28,7 @@ from jinja2 import Template # pylint: disable=F0401
 # //ui/android/java/src/org/chromium/base/LocalizationUtils.java
 _CHROME_TO_ANDROID_LOCALE_MAP = {
     'es-419': 'es-rUS',
+    'sr-Latn': 'b+sr+Latn',
     'fil': 'tl',
     'he': 'iw',
     'id': 'in',
@@ -42,14 +44,28 @@ _ANDROID_TO_CHROMIUM_LANGUAGE_MAP = {
 
 _ALL_RESOURCE_TYPES = {
     'anim', 'animator', 'array', 'attr', 'bool', 'color', 'dimen', 'drawable',
-    'font', 'fraction', 'id', 'integer', 'interpolator', 'layout', 'menu',
-    'mipmap', 'plurals', 'raw', 'string', 'style', 'styleable', 'transition',
-    'xml'
+    'font', 'fraction', 'id', 'integer', 'interpolator', 'layout', 'macro',
+    'menu', 'mipmap', 'plurals', 'raw', 'string', 'style', 'styleable',
+    'transition', 'xml'
 }
+
+AAPT_IGNORE_PATTERN = ':'.join([
+    '*OWNERS',  # Allow OWNERS files within res/
+    'DIR_METADATA', # Allow DIR_METADATA files within res/
+    '*.py',  # PRESUBMIT.py sometimes exist.
+    '*.pyc',
+    '*~',  # Some editors create these as temp files.
+    '.*',  # Never makes sense to include dot(files/dirs).
+    '*.d.stamp',  # Ignore stamp files
+    '*.backup',  # Some tools create temporary backup files.
+])
+
+MULTIPLE_RES_MAGIC_STRING = b'magic'
 
 
 def ToAndroidLocaleName(chromium_locale):
-  """Convert an Chromium locale name into a corresponding Android one."""
+  """Convert a Chromium locale name into a corresponding Android one."""
+  # Should be in sync with build/config/locales.gni.
   # First handle the special cases, these are needed to deal with Android
   # releases *before* 5.0/Lollipop.
   android_locale = _CHROME_TO_ANDROID_LOCALE_MAP.get(chromium_locale)
@@ -78,35 +94,38 @@ def ToAndroidLocaleName(chromium_locale):
 _RE_ANDROID_LOCALE_QUALIFIER_1 = re.compile(r'^([a-z]{2,3})(\-r([A-Z]+))?$')
 
 # Starting with Android 7.0/Nougat, BCP 47 codes are supported but must
-# be prefixed with 'b+', and may include optional tags. e.g. 'b+en+US',
-# 'b+ja+Latn', 'b+ja+JP+Latn'
+# be prefixed with 'b+', and may include optional tags.
+#  e.g. 'b+en+US', 'b+ja+Latn', 'b+ja+Latn+JP'
 _RE_ANDROID_LOCALE_QUALIFIER_2 = re.compile(r'^b\+([a-z]{2,3})(\+.+)?$')
-
-# Matches an all-uppercase region name.
-_RE_ALL_UPPERCASE = re.compile(r'^[A-Z]+$')
 
 
 def ToChromiumLocaleName(android_locale):
   """Convert an Android locale name into a Chromium one."""
   lang = None
   region = None
+  script = None
   m = _RE_ANDROID_LOCALE_QUALIFIER_1.match(android_locale)
   if m:
     lang = m.group(1)
     if m.group(2):
       region = m.group(3)
-  else:
-    m = _RE_ANDROID_LOCALE_QUALIFIER_2.match(android_locale)
-    if m:
-      lang = m.group(1)
-      if m.group(2):
-        tags = m.group(2).split('+')
-        # First all-uppercase tag is a region. This deals with cases where
-        # a special tag is placed before it (e.g. 'cmn+Hant-TW')
-        for tag in tags:
-          if _RE_ALL_UPPERCASE.match(tag):
-            region = tag
-            break
+  elif _RE_ANDROID_LOCALE_QUALIFIER_2.match(android_locale):
+    # Split an Android BCP-47 locale (e.g. b+sr+Latn+RS)
+    tags = android_locale.split('+')
+
+    # The Lang tag is always the first tag.
+    lang = tags[1]
+
+    # The optional region tag is 2ALPHA or 3DIGIT tag in pos 1 or 2.
+    # The optional script tag is 4ALPHA and always in pos 1.
+    optional_tags = iter(tags[2:])
+
+    next_tag = next(optional_tags, None)
+    if next_tag and len(next_tag) == 4:
+      script = next_tag
+      next_tag = next(optional_tags, None)
+    if next_tag and len(next_tag) < 4:
+      region = next_tag
 
   if not lang:
     return None
@@ -116,6 +135,10 @@ def ToChromiumLocaleName(android_locale):
     return 'es-419'
 
   lang = _ANDROID_TO_CHROMIUM_LANGUAGE_MAP.get(lang, lang)
+
+  if script:
+    lang = '%s-%s' % (lang, script)
+
   if not region:
     return lang
 
@@ -156,20 +179,135 @@ _TextSymbolEntry = collections.namedtuple('RTextEntry',
     ('java_type', 'resource_type', 'name', 'value'))
 
 
-def CreateResourceInfoFile(files_to_zip, zip_path):
-  """Given a mapping of archive paths to their source, write an info file.
+def _GenerateGlobs(pattern):
+  # This function processes the aapt ignore assets pattern into a list of globs
+  # to be used to exclude files using build_utils.MatchesGlob. It removes the
+  # '!', which is used by aapt to mean 'not chatty' so it does not output if the
+  # file is ignored (we dont output anyways, so it is not required). This
+  # function does not handle the <dir> and <file> prefixes used by aapt and are
+  # assumed not to be included in the pattern string.
+  return pattern.replace('!', '').split(':')
 
-  The info file contains lines of '{archive_path},{source_path}' for ease of
-  parsing. Assumes that there is no comma in the file names.
 
-  Args:
-    files_to_zip: Dict mapping path in the zip archive to original source.
-    zip_path: Path where the zip file ends up, this is where the info file goes.
-  """
-  info_file_path = zip_path + '.info'
-  with open(info_file_path, 'w') as info_file:
-    for archive_path, source_path in files_to_zip.iteritems():
-      info_file.write('{},{}\n'.format(archive_path, source_path))
+def DeduceResourceDirsFromFileList(resource_files):
+  """Return a list of resource directories from a list of resource files."""
+  # Directory list order is important, cannot use set or other data structures
+  # that change order. This is because resource files of the same name in
+  # multiple res/ directories ellide one another (the last one passed is used).
+  # Thus the order must be maintained to prevent non-deterministic and possibly
+  # flakey builds.
+  resource_dirs = []
+  for resource_path in resource_files:
+    # Resources are always 1 directory deep under res/.
+    res_dir = os.path.dirname(os.path.dirname(resource_path))
+    if res_dir not in resource_dirs:
+      resource_dirs.append(res_dir)
+
+  # Check if any resource_dirs are children of other ones. This indicates that a
+  # file was listed that is not exactly 1 directory deep under res/.
+  # E.g.:
+  # sources = ["java/res/values/foo.xml", "java/res/README.md"]
+  # ^^ This will cause "java" to be detected as resource directory.
+  for a, b in itertools.permutations(resource_dirs, 2):
+    if not os.path.relpath(a, b).startswith('..'):
+      bad_sources = (s for s in resource_files
+                     if os.path.dirname(os.path.dirname(s)) == b)
+      msg = """\
+Resource(s) found that are not in a proper directory structure:
+  {}
+All resource files must follow a structure of "$ROOT/$SUBDIR/$FILE"."""
+      raise Exception(msg.format('\n  '.join(bad_sources)))
+
+  return resource_dirs
+
+
+def IterResourceFilesInDirectories(directories,
+                                   ignore_pattern=AAPT_IGNORE_PATTERN):
+  globs = _GenerateGlobs(ignore_pattern)
+  for d in directories:
+    for root, _, files in os.walk(d):
+      for f in files:
+        archive_path = f
+        parent_dir = os.path.relpath(root, d)
+        if parent_dir != '.':
+          archive_path = os.path.join(parent_dir, f)
+        path = os.path.join(root, f)
+        if build_utils.MatchesGlob(archive_path, globs):
+          continue
+        yield path, archive_path
+
+
+class ResourceInfoFile:
+  """Helper for building up .res.info files."""
+
+  def __init__(self):
+    # Dict of archive_path -> source_path for the current target.
+    self._entries = {}
+    # List of (old_archive_path, new_archive_path) tuples.
+    self._renames = []
+    # We don't currently support using both AddMapping and MergeInfoFile.
+    self._add_mapping_was_called = False
+
+  def AddMapping(self, archive_path, source_path):
+    """Adds a single |archive_path| -> |source_path| entry."""
+    self._add_mapping_was_called = True
+    # "values/" files do not end up in the apk except through resources.arsc.
+    if archive_path.startswith('values'):
+      return
+    source_path = os.path.normpath(source_path)
+    new_value = self._entries.setdefault(archive_path, source_path)
+    if new_value != source_path:
+      raise Exception('Duplicate AddMapping for "{}". old={} new={}'.format(
+          archive_path, new_value, source_path))
+
+  def RegisterRename(self, old_archive_path, new_archive_path):
+    """Records an archive_path rename.
+
+    |old_archive_path| does not need to currently exist in the mappings. Renames
+    are buffered and replayed only when Write() is called.
+    """
+    if not old_archive_path.startswith('values'):
+      self._renames.append((old_archive_path, new_archive_path))
+
+  def MergeInfoFile(self, info_file_path):
+    """Merges the mappings from |info_file_path| into this object.
+
+    Any existing entries are overridden.
+    """
+    assert not self._add_mapping_was_called
+    # Allows clobbering, which is used when overriding resources.
+    with open(info_file_path) as f:
+      self._entries.update(l.rstrip().split('\t') for l in f)
+
+  def _ApplyRenames(self):
+    applied_renames = set()
+    ret = self._entries
+    for rename_tup in self._renames:
+      # Duplicate entries happen for resource overrides.
+      # Use a "seen" set to ensure we still error out if multiple renames
+      # happen for the same old_archive_path with different new_archive_paths.
+      if rename_tup in applied_renames:
+        continue
+      applied_renames.add(rename_tup)
+      old_archive_path, new_archive_path = rename_tup
+      ret[new_archive_path] = ret[old_archive_path]
+      del ret[old_archive_path]
+
+    self._entries = None
+    self._renames = None
+    return ret
+
+  def Write(self, info_file_path):
+    """Applies renames and writes out the file.
+
+    No other methods may be called after this.
+    """
+    entries = self._ApplyRenames()
+    lines = []
+    for archive_path, source_path in entries.items():
+      lines.append('{}\t{}\n'.format(archive_path, source_path))
+    with open(info_file_path, 'w') as info_file:
+      info_file.writelines(sorted(lines))
 
 
 def _ParseTextSymbolsFile(path, fix_package_ids=False):
@@ -201,12 +339,45 @@ def _FixPackageIds(resource_value):
   # Resource IDs for resources belonging to regular APKs have their first byte
   # as 0x7f (package id). However with webview, since it is not a regular apk
   # but used as a shared library, aapt is passed the --shared-resources flag
-  # which changes some of the package ids to 0x00 and 0x02.  This function
-  # normalises these (0x00 and 0x02) package ids to 0x7f, which the generated
-  # code in R.java changes to the correct package id at runtime.
-  # resource_value is a string with either, a single value '0x12345678', or an
-  # array of values like '{ 0xfedcba98, 0x01234567, 0x56789abc }'
-  return re.sub(r'0x(?:00|02)', r'0x7f', resource_value)
+  # which changes some of the package ids to 0x00.  This function normalises
+  # these (0x00) package ids to 0x7f, which the generated code in R.java changes
+  # to the correct package id at runtime.  resource_value is a string with
+  # either, a single value '0x12345678', or an array of values like '{
+  # 0xfedcba98, 0x01234567, 0x56789abc }'
+  return resource_value.replace('0x00', '0x7f')
+
+
+def ResolveStyleableReferences(r_txt_path):
+  # Convert lines like:
+  # int[] styleable ViewBack { 0x010100d4, com.android.webview.R.attr.backTint }
+  # to:
+  # int[] styleable ViewBack { 0x010100d4, 0xREALVALUE }
+  entries = _ParseTextSymbolsFile(r_txt_path)
+  lookup_table = {(e.resource_type, e.name): e.value for e in entries}
+
+  sb = []
+  with open(r_txt_path, encoding='utf8') as f:
+    for l in f:
+      if l.startswith('int[] styleable'):
+        brace_start = l.index('{') + 2
+        brace_end = l.index('}') - 1
+        values = [x for x in l[brace_start:brace_end].split(', ') if x]
+        new_values = []
+        for v in values:
+          try:
+            if not v.startswith('0x'):
+              resource_type, name = v.split('.')[-2:]
+              new_values.append(lookup_table[(resource_type, name)])
+            else:
+              new_values.append(v)
+          except:
+            logging.warning('Failed line: %r %r', l, v)
+            raise
+        l = l[:brace_start] + ', '.join(new_values) + l[brace_end:]
+      sb.append(l)
+
+  with open(r_txt_path, 'w', encoding='utf8') as f:
+    f.writelines(sb)
 
 
 def _GetRTxtResourceNames(r_txt_path):
@@ -223,26 +394,26 @@ def GetRTxtStringResourceNames(r_txt_path):
   })
 
 
-def GenerateStringResourcesWhitelist(module_r_txt_path, whitelist_r_txt_path):
-  """Generate a whitelist of string resource IDs.
+def GenerateStringResourcesAllowList(module_r_txt_path, allowlist_r_txt_path):
+  """Generate a allowlist of string resource IDs.
 
   Args:
     module_r_txt_path: Input base module R.txt path.
-    whitelist_r_txt_path: Input whitelist R.txt path.
+    allowlist_r_txt_path: Input allowlist R.txt path.
   Returns:
     A dictionary mapping numerical resource IDs to the corresponding
     string resource names. The ID values are taken from string resources in
-    |module_r_txt_path| that are also listed by name in |whitelist_r_txt_path|.
+    |module_r_txt_path| that are also listed by name in |allowlist_r_txt_path|.
   """
-  whitelisted_names = {
+  allowlisted_names = {
       entry.name
-      for entry in _ParseTextSymbolsFile(whitelist_r_txt_path)
+      for entry in _ParseTextSymbolsFile(allowlist_r_txt_path)
       if entry.resource_type == 'string'
   }
   return {
       int(entry.value, 0): entry.name
       for entry in _ParseTextSymbolsFile(module_r_txt_path)
-      if entry.resource_type == 'string' and entry.name in whitelisted_names
+      if entry.resource_type == 'string' and entry.name in allowlisted_names
   }
 
 
@@ -259,21 +430,23 @@ class RJavaBuildOptions:
   """
   def __init__(self):
     self.has_constant_ids = True
-    self.resources_whitelist = None
+    self.resources_allowlist = None
     self.has_on_resources_loaded = False
     self.export_const_styleable = False
+    self.final_package_id = None
+    self.fake_on_resources_loaded = False
 
   def ExportNoResources(self):
     """Make all resource IDs final, and don't generate a method."""
     self.has_constant_ids = True
-    self.resources_whitelist = None
+    self.resources_allowlist = None
     self.has_on_resources_loaded = False
     self.export_const_styleable = False
 
   def ExportAllResources(self):
     """Make all resource IDs non-final in the R.java file."""
     self.has_constant_ids = False
-    self.resources_whitelist = None
+    self.resources_allowlist = None
 
   def ExportSomeResources(self, r_txt_file_path):
     """Only select specific resource IDs to be non-final.
@@ -284,7 +457,7 @@ class RJavaBuildOptions:
         will be final.
     """
     self.has_constant_ids = True
-    self.resources_whitelist = _GetRTxtResourceNames(r_txt_file_path)
+    self.resources_allowlist = _GetRTxtResourceNames(r_txt_file_path)
 
   def ExportAllStyleables(self):
     """Make all styleable constants non-final, even non-resources ones.
@@ -295,15 +468,44 @@ class RJavaBuildOptions:
     """
     self.export_const_styleable = True
 
-  def GenerateOnResourcesLoaded(self):
+  def GenerateOnResourcesLoaded(self, fake=False):
     """Generate an onResourcesLoaded() method.
 
     This Java method will be called at runtime by the framework when
     the corresponding library (which includes the R.java source file)
     will be loaded at runtime. This corresponds to the --shared-resources
     or --app-as-shared-lib flags of 'aapt package'.
+
+    if |fake|, then the method will be empty bodied to compile faster. This
+    useful for dummy R.java files that will eventually be replaced by real
+    ones.
     """
     self.has_on_resources_loaded = True
+    self.fake_on_resources_loaded = fake
+
+  def SetFinalPackageId(self, package_id):
+    """Sets a package ID to be used for resources marked final."""
+    self.final_package_id = package_id
+
+  def _MaybeRewriteRTxtPackageIds(self, r_txt_path):
+    """Rewrites package IDs in the R.txt file if necessary.
+
+    If SetFinalPackageId() was called, some of the resource IDs may have had
+    their package ID changed. This function rewrites the R.txt file to match
+    those changes.
+    """
+    if self.final_package_id is None:
+      return
+
+    entries = _ParseTextSymbolsFile(r_txt_path)
+    with open(r_txt_path, 'w') as f:
+      for entry in entries:
+        value = entry.value
+        if self._IsResourceFinal(entry):
+          value = re.sub(r'0x(?:00|7f)',
+                         '0x{:02x}'.format(self.final_package_id), value)
+        f.write('{} {} {} {}\n'.format(entry.java_type, entry.resource_type,
+                                       entry.name, value))
 
   def _IsResourceFinal(self, entry):
     """Determines whether a resource should be final or not.
@@ -316,27 +518,26 @@ class RJavaBuildOptions:
     if entry.resource_type == 'styleable' and entry.java_type != 'int[]':
       # A styleable constant may be exported as non-final after all.
       return not self.export_const_styleable
-    elif not self.has_constant_ids:
+    if not self.has_constant_ids:
       # Every resource is non-final
       return False
-    elif not self.resources_whitelist:
-      # No whitelist means all IDs are non-final.
+    if not self.resources_allowlist:
+      # No allowlist means all IDs are non-final.
       return True
-    else:
-      # Otherwise, only those in the
-      return entry.name not in self.resources_whitelist
+    # Otherwise, only those in the
+    return entry.name not in self.resources_allowlist
 
 
 def CreateRJavaFiles(srcjar_dir,
                      package,
                      main_r_txt_file,
                      extra_res_packages,
-                     extra_r_txt_files,
                      rjava_build_options,
                      srcjar_out,
                      custom_root_package_name=None,
                      grandparent_custom_package_name=None,
-                     extra_main_r_text_files=None):
+                     extra_main_r_text_files=None,
+                     ignore_mismatched_values=False):
   """Create all R.java files for a set of packages and R.txt files.
 
   Args:
@@ -346,9 +547,6 @@ def CreateRJavaFiles(srcjar_dir,
     main_r_txt_file: The main R.txt file containing the valid values
       of _all_ resource IDs.
     extra_res_packages: A list of extra package names.
-    extra_r_txt_files: A list of extra R.txt files. One per item in
-      |extra_res_packages|. Note that all resource IDs in them will be ignored,
-      |and replaced by the values extracted from |main_r_txt_file|.
     rjava_build_options: An RJavaBuildOptions instance that controls how
       exactly the R.java file is generated.
     srcjar_out: Path of desired output srcjar.
@@ -360,20 +558,20 @@ def CreateRJavaFiles(srcjar_dir,
       is identical to custom_root_package_name.
       (eg. for vr grandparent_custom_package_name would be "base")
     extra_main_r_text_files: R.txt files to be added to the root R.java file.
+    ignore_mismatched_values: If True, ignores if a resource appears multiple
+      times with different entry values (useful when all the values are
+      dummy anyways).
   Raises:
     Exception if a package name appears several times in |extra_res_packages|
   """
-  assert len(extra_res_packages) == len(extra_r_txt_files), \
-         'Need one R.txt file per package'
+  rjava_build_options._MaybeRewriteRTxtPackageIds(main_r_txt_file)
 
   packages = list(extra_res_packages)
-  r_txt_files = list(extra_r_txt_files)
 
   if package and package not in packages:
     # Sometimes, an apk target and a resources target share the same
     # AndroidManifest.xml and thus |package| will already be in |packages|.
     packages.append(package)
-    r_txt_files.append(main_r_txt_file)
 
   # Map of (resource_type, name) -> Entry.
   # Contains the correct values for resources.
@@ -387,10 +585,11 @@ def CreateRJavaFiles(srcjar_dir,
     for entry in _ParseTextSymbolsFile(r_txt_file, fix_package_ids=True):
       entry_key = (entry.resource_type, entry.name)
       if entry_key in all_resources:
-        assert entry == all_resources[entry_key], (
-            'Input R.txt %s provided a duplicate resource with a different '
-            'entry value. Got %s, expected %s.' % (r_txt_file, entry,
-                                                   all_resources[entry_key]))
+        if not ignore_mismatched_values:
+          assert entry == all_resources[entry_key], (
+              'Input R.txt %s provided a duplicate resource with a different '
+              'entry value. Got %s, expected %s.' %
+              (r_txt_file, entry, all_resources[entry_key]))
       else:
         all_resources[entry_key] = entry
         all_resources_by_type[entry.resource_type].append(entry)
@@ -415,53 +614,19 @@ def CreateRJavaFiles(srcjar_dir,
   with open(root_r_java_path, 'w') as f:
     f.write(root_java_file_contents)
 
-  # Map of package_name->resource_type->entry
-  resources_by_package = (
-      collections.defaultdict(lambda: collections.defaultdict(list)))
-  # Build the R.java files using each package's R.txt file, but replacing
-  # each entry's placeholder value with correct values from all_resources.
-  for package, r_txt_file in zip(packages, r_txt_files):
-    if package in resources_by_package:
-      raise Exception(('Package name "%s" appeared twice. All '
-                       'android_resources() targets must use unique package '
-                       'names, or no package name at all.') % package)
-    resources_by_type = resources_by_package[package]
-    # The sub-R.txt files have the wrong values at this point. Read them to
-    # figure out which entries belong to them, but use the values from the
-    # main R.txt file.
-    for entry in _ParseTextSymbolsFile(r_txt_file):
-      entry = all_resources.get((entry.resource_type, entry.name))
-      # For most cases missing entry here is an error. It means that some
-      # library claims to have or depend on a resource that isn't included into
-      # the APK. There is one notable exception: Google Play Services (GMS).
-      # GMS is shipped as a bunch of AARs. One of them - basement - contains
-      # R.txt with ids of all resources, but most of the resources are in the
-      # other AARs. However, all other AARs reference their resources via
-      # basement's R.java so the latter must contain all ids that are in its
-      # R.txt. Most targets depend on only a subset of GMS AARs so some
-      # resources are missing, which is okay because the code that references
-      # them is missing too. We can't get an id for a resource that isn't here
-      # so the only solution is to skip the resource entry entirely.
-      #
-      # We can verify that all entries referenced in the code were generated
-      # correctly by running Proguard on the APK: it will report missing
-      # fields.
-      if entry:
-        resources_by_type[entry.resource_type].append(entry)
-
-  for package, resources_by_type in resources_by_package.iteritems():
-    _CreateRJavaSourceFile(srcjar_dir, package, root_r_java_package,
-                           resources_by_type, rjava_build_options)
+  for p in packages:
+    _CreateRJavaSourceFile(srcjar_dir, p, root_r_java_package,
+                           rjava_build_options)
 
 
 def _CreateRJavaSourceFile(srcjar_dir, package, root_r_java_package,
-                           resources_by_type, rjava_build_options):
+                           rjava_build_options):
   """Generates an R.java source file."""
   package_r_java_dir = os.path.join(srcjar_dir, *package.split('.'))
   build_utils.MakeDirectory(package_r_java_dir)
   package_r_java_path = os.path.join(package_r_java_dir, 'R.java')
-  java_file_contents = _RenderRJavaSource(
-      package, root_r_java_package, resources_by_type, rjava_build_options)
+  java_file_contents = _RenderRJavaSource(package, root_r_java_package,
+                                          rjava_build_options)
   with open(package_r_java_path, 'w') as f:
     f.write(java_file_contents)
 
@@ -481,8 +646,7 @@ def _GetNonSystemIndex(entry):
   return len(res_ids)
 
 
-def _RenderRJavaSource(package, root_r_java_package, resources_by_type,
-                       rjava_build_options):
+def _RenderRJavaSource(package, root_r_java_package, rjava_build_options):
   """Generates the contents of a R.java file."""
   template = Template(
       """/* AUTO-GENERATED FILE.  DO NOT MODIFY. */
@@ -506,7 +670,6 @@ public final class R {
 
   return template.render(
       package=package,
-      resources=resources_by_type,
       resource_types=sorted(_ALL_RESOURCE_TYPES),
       root_package=root_r_java_package,
       has_on_resources_loaded=rjava_build_options.has_on_resources_loaded)
@@ -521,7 +684,7 @@ def _RenderRootRJavaSource(package, all_resources_by_type, rjava_build_options,
   """Render an R.java source file. See _CreateRJaveSourceFile for args info."""
   final_resources_by_type = collections.defaultdict(list)
   non_final_resources_by_type = collections.defaultdict(list)
-  for res_type, resources in all_resources_by_type.iteritems():
+  for res_type, resources in all_resources_by_type.items():
     for entry in resources:
       # Entries in stylable that are not int[] are not actually resource ids
       # but constants.
@@ -529,14 +692,6 @@ def _RenderRootRJavaSource(package, all_resources_by_type, rjava_build_options,
         final_resources_by_type[res_type].append(entry)
       else:
         non_final_resources_by_type[res_type].append(entry)
-
-  # Keep these assignments all on one line to make diffing against regular
-  # aapt-generated files easier.
-  create_id = ('{{ e.resource_type }}.{{ e.name }} ^= packageIdTransform;')
-  create_id_arr = ('{{ e.resource_type }}.{{ e.name }}[i] ^='
-                   ' packageIdTransform;')
-  for_loop_condition = ('int i = {{ startIndex(e) }}; i < '
-                        '{{ e.resource_type }}.{{ e.name }}.length; ++i')
 
   # Here we diverge from what aapt does. Because we have so many
   # resources, the onResourcesLoaded method was exceeding the 64KB limit that
@@ -548,8 +703,11 @@ def _RenderRootRJavaSource(package, all_resources_by_type, rjava_build_options,
     extends_string = 'extends {{ parent_path }}.R.{{ resource_type }} '
     dep_path = GetCustomPackagePath(grandparent_custom_package_name)
 
-  template = Template(
-      """/* AUTO-GENERATED FILE.  DO NOT MODIFY. */
+  # Don't actually mark fields as "final" or else R8 complain when aapt2 uses
+  # --proguard-conditional-keep-rules. E.g.:
+  # Rule precondition matches static final fields javac has inlined.
+  # Such rules are unsound as the shrinker cannot infer the inlining precisely.
+  template = Template("""/* AUTO-GENERATED FILE.  DO NOT MODIFY. */
 
 package {{ package }};
 
@@ -557,7 +715,7 @@ public final class R {
     {% for resource_type in resource_types %}
     public static class {{ resource_type }} """ + extends_string + """ {
         {% for e in final_resources[resource_type] %}
-        public static final {{ e.java_type }} {{ e.name }} = {{ e.value }};
+        public static {{ e.java_type }} {{ e.name }} = {{ e.value }};
         {% endfor %}
         {% for e in non_final_resources[resource_type] %}
             {% if e.value != '0' %}
@@ -569,22 +727,41 @@ public final class R {
     }
     {% endfor %}
     {% if has_on_resources_loaded %}
+      {% if fake_on_resources_loaded %}
+    public static void onResourcesLoaded(int packageId) {
+    }
+      {% else %}
     private static boolean sResourcesDidLoad;
+
+    private static void patchArray(
+            int[] arr, int startIndex, int packageIdTransform) {
+        for (int i = startIndex; i < arr.length; ++i) {
+            arr[i] ^= packageIdTransform;
+        }
+    }
+
     public static void onResourcesLoaded(int packageId) {
         if (sResourcesDidLoad) {
             return;
         }
         sResourcesDidLoad = true;
         int packageIdTransform = (packageId ^ 0x7f) << 24;
+        {#  aapt2 makes int[] resources refer to other resources by reference
+            rather than by value. Thus, need to transform the int[] resources
+            first, before the referenced resources are transformed in order to
+            ensure the transform applies exactly once.
+            See https://crbug.com/1237059 for context.
+        #}
         {% for resource_type in resource_types %}
-        onResourcesLoaded{{ resource_type|title }}(packageIdTransform);
         {% for e in non_final_resources[resource_type] %}
         {% if e.java_type == 'int[]' %}
-        for(""" + for_loop_condition + """) {
-            """ + create_id_arr + """
-        }
+        patchArray({{ e.resource_type }}.{{ e.name }}, {{ startIndex(e) }}, \
+packageIdTransform);
         {% endif %}
         {% endfor %}
+        {% endfor %}
+        {% for resource_type in resource_types %}
+        onResourcesLoaded{{ resource_type|title }}(packageIdTransform);
         {% endfor %}
     }
     {% for res_type in resource_types %}
@@ -592,20 +769,22 @@ public final class R {
             int packageIdTransform) {
         {% for e in non_final_resources[res_type] %}
         {% if res_type != 'styleable' and e.java_type != 'int[]' %}
-        """ + create_id + """
+        {{ e.resource_type }}.{{ e.name }} ^= packageIdTransform;
         {% endif %}
         {% endfor %}
     }
     {% endfor %}
+      {% endif %}
     {% endif %}
 }
 """,
-      trim_blocks=True,
-      lstrip_blocks=True)
+                      trim_blocks=True,
+                      lstrip_blocks=True)
   return template.render(
       package=package,
       resource_types=sorted(_ALL_RESOURCE_TYPES),
       has_on_resources_loaded=rjava_build_options.has_on_resources_loaded,
+      fake_on_resources_loaded=rjava_build_options.fake_on_resources_loaded,
       final_resources=final_resources_by_type,
       non_final_resources=non_final_resources_by_type,
       startIndex=_GetNonSystemIndex,
@@ -616,7 +795,7 @@ def ExtractBinaryManifestValues(aapt2_path, apk_path):
   """Returns (version_code, version_name, package_name) for the given apk."""
   output = subprocess.check_output([
       aapt2_path, 'dump', 'xmltree', apk_path, '--file', 'AndroidManifest.xml'
-  ])
+  ]).decode('utf-8')
   version_code = re.search(r'versionCode.*?=(\d*)', output).group(1)
   version_name = re.search(r'versionName.*?="(.*?)"', output).group(1)
   package_name = re.search(r'package.*?="(.*?)"', output).group(1)
@@ -624,11 +803,19 @@ def ExtractBinaryManifestValues(aapt2_path, apk_path):
 
 
 def ExtractArscPackage(aapt2_path, apk_path):
-  """Returns (package_name, package_id) of resources.arsc from apk_path."""
+  """Returns (package_name, package_id) of resources.arsc from apk_path.
+
+  When the apk does not have any entries in its resources file, in recent aapt2
+  versions it will not contain a "Package" line. The package is not even in the
+  actual resources.arsc/resources.pb file (which itself is mostly empty). Thus
+  return (None, None) when dump succeeds and there are no errors to indicate
+  that the package name does not exist in the resources file.
+  """
   proc = subprocess.Popen([aapt2_path, 'dump', 'resources', apk_path],
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE)
   for line in proc.stdout:
+    line = line.decode('utf-8')
     # Package name=org.chromium.webview_shell id=7f
     if line.startswith('Package'):
       proc.kill()
@@ -639,8 +826,36 @@ def ExtractArscPackage(aapt2_path, apk_path):
 
   # aapt2 currently crashes when dumping webview resources, but not until after
   # it prints the "Package" line (b/130553900).
-  sys.stderr.write(proc.stderr.read())
-  raise Exception('Failed to find arsc package name')
+  stderr_output = proc.stderr.read().decode('utf-8')
+  if stderr_output:
+    sys.stderr.write(stderr_output)
+    raise Exception('Failed to find arsc package name')
+  return None, None
+
+
+def _RenameSubdirsWithPrefix(dir_path, prefix):
+  subdirs = [
+      d for d in os.listdir(dir_path)
+      if os.path.isdir(os.path.join(dir_path, d))
+  ]
+  renamed_subdirs = []
+  for d in subdirs:
+    old_path = os.path.join(dir_path, d)
+    new_path = os.path.join(dir_path, '{}_{}'.format(prefix, d))
+    renamed_subdirs.append(new_path)
+    os.rename(old_path, new_path)
+  return renamed_subdirs
+
+
+def _HasMultipleResDirs(zip_path):
+  """Checks for magic comment set by prepare_resources.py
+
+  Returns: True iff the zipfile has the magic comment that means it contains
+  multiple res/ dirs inside instead of just contents of a single res/ dir
+  (without a wrapping res/).
+  """
+  with zipfile.ZipFile(zip_path) as z:
+    return z.comment == MULTIPLE_RES_MAGIC_STRING
 
 
 def ExtractDeps(dep_zips, deps_dir):
@@ -664,26 +879,36 @@ def ExtractDeps(dep_zips, deps_dir):
     if os.path.exists(subdir):
       raise Exception('Resource zip name conflict: ' + subdirname)
     build_utils.ExtractAll(z, path=subdir)
-    dep_subdirs.append(subdir)
+    if _HasMultipleResDirs(z):
+      # basename of the directory is used to create a zip during resource
+      # compilation, include the path in the basename to help blame errors on
+      # the correct target. For example directory 0_res may be renamed
+      # chrome_android_chrome_app_java_resources_0_res pointing to the name and
+      # path of the android_resources target from whence it came.
+      subdir_subdirs = _RenameSubdirsWithPrefix(subdir, subdirname)
+      dep_subdirs.extend(subdir_subdirs)
+    else:
+      dep_subdirs.append(subdir)
   return dep_subdirs
 
 
-class _ResourceBuildContext(object):
+class _ResourceBuildContext:
   """A temporary directory for packaging and compiling Android resources.
 
   Args:
     temp_dir: Optional root build directory path. If None, a temporary
       directory will be created, and removed in Close().
   """
-  def __init__(self, temp_dir=None):
+
+  def __init__(self, temp_dir=None, keep_files=False):
     """Initialized the context."""
     # The top-level temporary directory.
     if temp_dir:
       self.temp_dir = temp_dir
-      self.remove_on_exit = False
+      os.makedirs(temp_dir)
     else:
       self.temp_dir = tempfile.mkdtemp()
-      self.remove_on_exit = True
+    self.remove_on_exit = not keep_files
 
     # A location to store resources extracted form dependency zip files.
     self.deps_dir = os.path.join(self.temp_dir, 'deps')
@@ -714,84 +939,15 @@ class _ResourceBuildContext(object):
 
 
 @contextlib.contextmanager
-def BuildContext(temp_dir=None):
+def BuildContext(temp_dir=None, keep_files=False):
   """Generator for a _ResourceBuildContext instance."""
+  context = None
   try:
-    context = _ResourceBuildContext(temp_dir)
+    context = _ResourceBuildContext(temp_dir, keep_files)
     yield context
   finally:
-    context.Close()
-
-
-def ResourceArgsParser():
-  """Create an argparse.ArgumentParser instance with common argument groups.
-
-  Returns:
-    A tuple of (parser, in_group, out_group) corresponding to the parser
-    instance, and the input and output argument groups for it, respectively.
-  """
-  parser = argparse.ArgumentParser(description=__doc__)
-
-  input_opts = parser.add_argument_group('Input options')
-  output_opts = parser.add_argument_group('Output options')
-
-  build_utils.AddDepfileOption(output_opts)
-
-  input_opts.add_argument('--include-resources', required=True, action="append",
-                        help='Paths to arsc resource files used to link '
-                             'against. Can be specified multiple times.')
-
-  input_opts.add_argument('--dependencies-res-zips', required=True,
-                    help='Resources zip archives from dependents. Required to '
-                         'resolve @type/foo references into dependent '
-                         'libraries.')
-
-  input_opts.add_argument(
-      '--r-text-in',
-       help='Path to pre-existing R.txt. Its resource IDs override those found '
-            'in the aapt-generated R.txt when generating R.java.')
-
-  input_opts.add_argument(
-      '--extra-res-packages',
-      help='Additional package names to generate R.java files for.')
-
-  input_opts.add_argument(
-      '--extra-r-text-files',
-      help='For each additional package, the R.txt file should contain a '
-           'list of resources to be included in the R.java file in the format '
-           'generated by aapt.')
-
-  return (parser, input_opts, output_opts)
-
-
-def HandleCommonOptions(options):
-  """Handle common command-line options after parsing.
-
-  Args:
-    options: the result of parse_args() on the parser returned by
-        ResourceArgsParser(). This function updates a few common fields.
-  """
-  options.include_resources = [build_utils.ParseGnList(r) for r in
-                               options.include_resources]
-  # Flatten list of include resources list to make it easier to use.
-  options.include_resources = [r for resources in options.include_resources
-                               for r in resources]
-
-  options.dependencies_res_zips = (
-      build_utils.ParseGnList(options.dependencies_res_zips))
-
-  # Don't use [] as default value since some script explicitly pass "".
-  if options.extra_res_packages:
-    options.extra_res_packages = (
-        build_utils.ParseGnList(options.extra_res_packages))
-  else:
-    options.extra_res_packages = []
-
-  if options.extra_r_text_files:
-    options.extra_r_text_files = (
-        build_utils.ParseGnList(options.extra_r_text_files))
-  else:
-    options.extra_r_text_files = []
+    if context:
+      context.Close()
 
 
 def ParseAndroidResourceStringsFromXml(xml_data):
@@ -842,7 +998,7 @@ def ParseAndroidResourceStringsFromXml(xml_data):
       raise Exception('Expected closing string tag: ' + input_data)
     text = input_data[:m2.start()]
     input_data = input_data[m2.end():]
-    if len(text) and text[0] == '"' and text[-1] == '"':
+    if len(text) != 0 and text[0] == '"' and text[-1] == '"':
       text = text[1:-1]
     result[name] = text
 
@@ -863,16 +1019,16 @@ def GenerateAndroidResourceStringsXml(names_to_utf8_text, namespaces=None):
   result = '<?xml version="1.0" encoding="utf-8"?>\n'
   result += '<resources'
   if namespaces:
-    for prefix, url in sorted(namespaces.iteritems()):
+    for prefix, url in sorted(namespaces.items()):
       result += ' xmlns:%s="%s"' % (prefix, url)
   result += '>\n'
   if not names_to_utf8_text:
     result += '<!-- this file intentionally empty -->\n'
   else:
-    for name, utf8_text in sorted(names_to_utf8_text.iteritems()):
+    for name, utf8_text in sorted(names_to_utf8_text.items()):
       result += '<string name="%s">"%s"</string>\n' % (name, utf8_text)
   result += '</resources>\n'
-  return result
+  return result.encode('utf8')
 
 
 def FilterAndroidResourceStringsXml(xml_file_path, string_predicate):
@@ -892,7 +1048,7 @@ def FilterAndroidResourceStringsXml(xml_file_path, string_predicate):
   strings_map, namespaces = ParseAndroidResourceStringsFromXml(xml_data)
 
   string_deletion = False
-  for name in strings_map.keys():
+  for name in list(strings_map.keys()):
     if not string_predicate(name):
       del strings_map[name]
       string_deletion = True

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2017 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,34 @@
 #include <stdint.h>
 
 #include "base/command_line.h"
+#include "base/logging.h"
+#include "base/process/memory.h"
+#include "base/test/test_discardable_memory_allocator.h"
 #include "cc/paint/paint_cache.h"
 #include "cc/paint/paint_op_buffer.h"
+#include "cc/paint/paint_op_writer.h"
 #include "cc/test/transfer_cache_test_helper.h"
 #include "components/viz/test/test_context_provider.h"
 #include "gpu/command_buffer/common/buffer.h"
 #include "gpu/command_buffer/service/service_font_manager.h"
 #include "third_party/skia/include/core/SkSurface.h"
-#include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/GrDirectContext.h"
 
 struct Environment {
   Environment() {
     // Disable noisy logging as per "libFuzzer in Chrome" documentation:
     // testing/libfuzzer/getting_started.md#Disable-noisy-error-message-logging.
     logging::SetMinLogLevel(logging::LOG_FATAL);
+
+    base::EnableTerminationOnOutOfMemory();
+    base::DiscardableMemoryAllocator::SetInstance(
+        &discardable_memory_allocator);
   }
+
+  ~Environment() { base::DiscardableMemoryAllocator::SetInstance(nullptr); }
+
+ private:
+  base::TestDiscardableMemoryAllocator discardable_memory_allocator;
 };
 
 class FontSupport : public gpu::ServiceFontManager::Client {
@@ -67,11 +80,12 @@ void Raster(scoped_refptr<viz::TestContextProvider> context_provider,
       context_provider->GrContext(), SkBudgeted::kYes, image_info);
   SkCanvas* canvas = surface->getCanvas();
 
-  cc::PlaybackParams params(nullptr, canvas->getTotalMatrix());
+  cc::PlaybackParams params(nullptr, canvas->getLocalToDevice());
   cc::TransferCacheTestHelper transfer_cache_helper;
   std::vector<uint8_t> scratch_buffer;
   cc::PaintOp::DeserializeOptions deserialize_options(
-      &transfer_cache_helper, paint_cache, strike_client, &scratch_buffer);
+      &transfer_cache_helper, paint_cache, strike_client, &scratch_buffer,
+      true /* is_privileged */, nullptr /* shared_image_provider */);
 
   // Need 4 bytes to be able to read the type/skip.
   while (size >= 4) {
@@ -108,18 +122,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size <= sizeof(size_t))
     return 0;
 
-  static Environment* env = new Environment();
-  ALLOW_UNUSED_LOCAL(env);
+  [[maybe_unused]] static Environment* env = new Environment();
   base::CommandLine::Init(0, nullptr);
 
   // Partition the data to use some bytes for populating the font cache.
   uint32_t bytes_for_fonts = data[0];
   if (bytes_for_fonts > size)
     bytes_for_fonts = size / 2;
+  // PaintOpBuffer only accepts 4 bytes aligned buffer.
+  bytes_for_fonts = base::bits::AlignDown(
+      bytes_for_fonts,
+      base::checked_cast<uint32_t>(cc::PaintOpWriter::Alignment()));
 
   FontSupport font_support;
   scoped_refptr<gpu::ServiceFontManager> font_manager(
-      new gpu::ServiceFontManager(&font_support));
+      new gpu::ServiceFontManager(&font_support,
+                                  false /* disable_oopr_debug_crash_dump */));
   cc::ServicePaintCache paint_cache;
   std::vector<SkDiscardableHandleId> locked_handles;
   if (bytes_for_fonts > 0u) {

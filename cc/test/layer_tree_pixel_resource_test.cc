@@ -1,10 +1,10 @@
-// Copyright 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "cc/test/layer_tree_pixel_resource_test.h"
 
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "cc/layers/layer.h"
 #include "cc/raster/bitmap_raster_buffer_provider.h"
 #include "cc/raster/gpu_raster_buffer_provider.h"
@@ -18,30 +18,19 @@
 namespace cc {
 
 LayerTreeHostPixelResourceTest::LayerTreeHostPixelResourceTest(
-    PixelResourceTestCase test_case,
-    Layer::LayerMaskType mask_type)
-    : mask_type_(mask_type) {
-  InitializeFromTestCase(test_case);
-}
-
-LayerTreeHostPixelResourceTest::LayerTreeHostPixelResourceTest() = default;
-
-void LayerTreeHostPixelResourceTest::InitializeFromTestCase(
-    PixelResourceTestCase test_case) {
-  DCHECK(!initialized_);
-  test_case_ = test_case;
-  initialized_ = true;
+    RasterTestConfig test_config)
+    : LayerTreePixelTest(test_config.renderer_type), test_config_(test_config) {
+  set_raster_type(test_config_.raster_type);
 }
 
 const char* LayerTreeHostPixelResourceTest::GetRendererSuffix() const {
-  switch (renderer_type()) {
-    case RENDERER_GL:
-      return "gl";
-    case RENDERER_SKIA_GL:
+  switch (renderer_type_) {
+    case viz::RendererType::kSkiaGL:
       return "skia_gl";
-    case RENDERER_SKIA_VK:
+    case viz::RendererType::kSkiaVk:
+    case viz::RendererType::kSkiaDawn:
       return "skia_vk";
-    case RENDERER_SOFTWARE:
+    case viz::RendererType::kSoftware:
       return "sw";
   }
 }
@@ -54,7 +43,6 @@ LayerTreeHostPixelResourceTest::CreateRasterBufferProvider(
           ? task_runner_provider()->ImplThreadTaskRunner()
           : task_runner_provider()->MainThreadTaskRunner();
   DCHECK(task_runner);
-  DCHECK(initialized_);
 
   LayerTreeFrameSink* layer_tree_frame_sink =
       host_impl->layer_tree_frame_sink();
@@ -80,33 +68,32 @@ LayerTreeHostPixelResourceTest::CreateRasterBufferProvider(
     }
   }
   switch (raster_type()) {
-    case SOFTWARE:
+    case TestRasterType::kBitmap:
       EXPECT_FALSE(compositor_context_provider);
-      EXPECT_EQ(RENDERER_SOFTWARE, renderer_type());
+      EXPECT_TRUE(use_software_renderer());
 
       return std::make_unique<BitmapRasterBufferProvider>(
           host_impl->layer_tree_frame_sink());
-    case GPU: {
+    case TestRasterType::kGpu:
       EXPECT_TRUE(compositor_context_provider);
       EXPECT_TRUE(worker_context_provider);
-      EXPECT_NE(RENDERER_SOFTWARE, renderer_type());
-      bool enable_oopr = renderer_type() == RENDERER_SKIA_VK;
+      EXPECT_FALSE(use_software_renderer());
       return std::make_unique<GpuRasterBufferProvider>(
-          compositor_context_provider, worker_context_provider, false, 0,
-          gpu_raster_format, gfx::Size(), true, enable_oopr);
-    }
-    case ZERO_COPY:
+          compositor_context_provider, worker_context_provider, false,
+          gpu_raster_format, gfx::Size(), true,
+          host_impl->GetRasterQueryQueueForTesting());
+    case TestRasterType::kZeroCopy:
       EXPECT_TRUE(compositor_context_provider);
       EXPECT_TRUE(gpu_memory_buffer_manager);
-      EXPECT_NE(RENDERER_SOFTWARE, renderer_type());
+      EXPECT_FALSE(use_software_renderer());
 
       return std::make_unique<ZeroCopyRasterBufferProvider>(
           gpu_memory_buffer_manager, compositor_context_provider,
           sw_raster_format);
-    case ONE_COPY:
+    case TestRasterType::kOneCopy:
       EXPECT_TRUE(compositor_context_provider);
       EXPECT_TRUE(worker_context_provider);
-      EXPECT_NE(RENDERER_SOFTWARE, renderer_type());
+      EXPECT_FALSE(use_software_renderer());
 
       return std::make_unique<OneCopyRasterBufferProvider>(
           task_runner, compositor_context_provider, worker_context_provider,
@@ -118,25 +105,21 @@ LayerTreeHostPixelResourceTest::CreateRasterBufferProvider(
 void LayerTreeHostPixelResourceTest::RunPixelResourceTest(
     scoped_refptr<Layer> content_root,
     base::FilePath file_name) {
-  RunPixelTest(renderer_type(), content_root, file_name);
+  RunPixelTest(content_root, file_name);
 }
 
 void LayerTreeHostPixelResourceTest::RunPixelResourceTest(
     scoped_refptr<Layer> content_root,
     const SkBitmap& expected_bitmap) {
-  RunPixelTest(renderer_type(), content_root, expected_bitmap);
+  RunPixelTest(content_root, expected_bitmap);
 }
 
 void LayerTreeHostPixelResourceTest::RunPixelResourceTestWithLayerList(
-    scoped_refptr<Layer> root_layer,
-    base::FilePath file_name,
-    PropertyTrees* property_trees) {
-  RunPixelTestWithLayerList(renderer_type(), root_layer, file_name,
-                            property_trees);
+    base::FilePath file_name) {
+  RunPixelTestWithLayerList(file_name);
 }
 
 ParameterizedPixelResourceTest::ParameterizedPixelResourceTest()
-    : LayerTreeHostPixelResourceTest(::testing::get<0>(GetParam()),
-                                     ::testing::get<1>(GetParam())) {}
+    : LayerTreeHostPixelResourceTest(GetParam()) {}
 
 }  // namespace cc
