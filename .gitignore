@@ -345,6 +345,7 @@ vs-chromium-project.txt
 
 # Ignore IntelliJ files.
 .idea/
+/bin/
 
 # Ignore cache folder created by clangd
 .cache
