@@ -30,6 +30,7 @@
 #   https://bit.ly/chromium-gclient-conditionals
 # which is a bit incomplete but the best documentation we have at the
 # moment.
+#new depot_tools.git' + '@' + 'ecfab096397df1f8b266cdb380e057dc31dc0952'
 
 gclient_gn_args_file = 'src/build/config/gclient_args.gni'
 gclient_gn_args = [
@@ -40,6 +41,7 @@ gclient_gn_args = [
   'checkout_google_benchmark',
   'checkout_ios_webkit',
   'checkout_nacl',
+  #old 'checkout_oculus_sdk',
   'checkout_openxr',
   'checkout_rts_model',
   'cros_boards',
@@ -49,6 +51,7 @@ gclient_gn_args = [
 
 
 vars = {
+  "buildspec_platforms": "android", #old
   # Variable that can be used to support multiple build scenarios, like having
   # Chromium specific targets in a client project's GN file or sync dependencies
   # conditionally etc.
@@ -111,6 +114,8 @@ vars = {
 
   # Check out and download nacl by default, unless on an arm mac.
   # This can be disabled e.g. with custom_vars.
+
+  #old 'checkout_nacl': True,
   'checkout_nacl': 'not (host_os == "mac" and host_cpu == "arm64")',
 
   # By default, do not check out src-internal. This can be overridden e.g. with
@@ -130,6 +135,8 @@ vars = {
   # process the raw profiles produced by instrumented targets (built with
   # the gn arg 'use_clang_coverage').
   'checkout_clang_coverage_tools': False,
+
+  #old 'checkout_oculus_sdk' : 'checkout_src_internal and checkout_win',
 
   # Fetch the pgo profiles to optimize official builds.
   'checkout_pgo_profiles': False,
@@ -162,6 +169,8 @@ vars = {
   # By default checkout the OpenXR loader library only on Windows. The OpenXR
   # backend for VR in Chromium is currently only supported for Windows, but
   # support for other platforms may be added in the future.
+
+  #old 'checkout_openxr' : False,
   'checkout_openxr' : 'checkout_win',
 
   'checkout_traffic_annotation_tools': 'checkout_configuration != "small"',
@@ -222,9 +231,16 @@ vars = {
 
   # Default to the empty board. Desktop Chrome OS builds don't need cros SDK
   # dependencies. Other Chrome OS builds should always define this explicitly.
+
+  #old 'cros_board': '',
   'cros_boards': Str(''),
   'cros_boards_with_qemu_images': Str(''),
   # Building for CrOS is only supported on linux currently.
+
+  #old 'checkout_simplechrome': '(checkout_chromeos and host_os == "linux") and ("{cros_board}" != "")',
+  #old 'cros_download_vm': '("{cros_board}" == "amd64-generic") or ("{cros_board}" == "betty")',
+  #old 'use_public_cros_config': 'not checkout_src_internal',
+
   'checkout_simplechrome': '"{cros_boards}" != ""',
   'checkout_simplechrome_with_vms': '"{cros_boards_with_qemu_images}" != ""',
 
@@ -247,11 +263,14 @@ vars = {
   # the data may not run on them, so we make it possible for this to be
   # turned off. Note that you also generate the metadata but not include it
   # via a GN build arg (tests_have_location_tags).
+
+  #old'angle_root': 'src/third_party/angle',
   'generate_location_tags': True,
 
   # luci-go CIPD package version.
   # Make sure the revision is uploaded by infra-packagers builder.
   # https://ci.chromium.org/p/infra-internal/g/infra-packagers/console
+  #old'git_revision:7d11fd9e66407c49cb6c8546a2ae45ea993a240c',
   'luci_go': 'git_revision:c93fd3c5ebdc3999eea86a7623dbd1ed4b40bc78',
 
   # This can be overridden, e.g. with custom_vars, to build clang from HEAD
@@ -298,25 +317,33 @@ vars = {
   'skia_git': 'https://skia.googlesource.com',
   'swiftshader_git': 'https://swiftshader.googlesource.com',
   'webrtc_git': 'https://webrtc.googlesource.com',
+  'gitee_git': 'https://gitee.com',
+  
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling Skia
   # and whatever else without interference from each other.
+  #old'sfntly_revision': '48312c98332a4608572459dc71584c2a9dbb1792',
   'skia_revision': '3a8c9bc2f275732b2fd1a566becf421e62fe1f46',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling V8
   # and whatever else without interference from each other.
+  #old'v8_revision': '027689dbfcb2a9bbc8ceec4db2631c558e879633',
   'v8_revision': '0768a17a893bc5e0665b6c2be84dc1f6bdfb6985',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling ANGLE
   # and whatever else without interference from each other.
+  'swarming_revision': '96f125709acfd0b48fc1e5dae7d6ea42291726ac', #old
+  #old'angle_revision': '7cf862c9fcd2068a444eef6d4e8a0c1c2170d7f1',
   'angle_revision': 'bbf57e6db2fab3ee4c4336d6c73786b73aff28b2',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling SwiftShader
   # and whatever else without interference from each other.
+  #old'swiftshader_revision': 'ec3039253ab805b040ac3a5a42eeec7e84d0377b',
   'swiftshader_revision': '9e96423f7ed2c22eea3274e3f4c20dd5ca80a18c',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling PDFium
   # and whatever else without interference from each other.
+  #'pdfium_revision': '7734ba9a7d52f1e4f14fb7a3c84b282684758519',
   'pdfium_revision': '6d0a3d5365d04967d67399617acc16bc7e7efe52',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling BoringSSL
@@ -324,6 +351,7 @@ vars = {
   #
   # Note this revision should be updated with
   # third_party/boringssl/roll_boringssl.py, not roll-dep.
+  #old'boringssl_revision': '4dfd5af70191b068aebe567b8e29ce108cee85ce',
   'boringssl_revision': '19009c51bff0706362e824f66a0b189326a1c27d',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling Fuchsia sdk
@@ -332,6 +360,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling google-toolbox-for-mac
   # and whatever else without interference from each other.
+  #old'google_toolbox_for_mac_revision': 'aa1a3d2d447905999f119efbb70b3786c5eafa13',
   'google_toolbox_for_mac_revision': '42b12f10cd8342f5cb41a1e3e3a2f13fd9943b0d',
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling googletest
@@ -1199,6 +1228,9 @@ deps = {
 
   'src/third_party/depot_tools':
     Var('chromium_git') + '/chromium/tools/depot_tools.git' + '@' + 'ecfab096397df1f8b266cdb380e057dc31dc0952',
+
+  'src/third_party/devtools-node-modules':
+    Var('gitee_git') + '/mirrors_chromium_googlesource/devtools-node-modules.git' + '@' + '300c8063dda8f87348bca1643bc04c603a42453a', #old
 
   'src/third_party/devtools-frontend/src':
     Var('chromium_git') + '/devtools/devtools-frontend' + '@' + Var('devtools_frontend_revision'),
