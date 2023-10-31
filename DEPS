@@ -1232,13 +1232,13 @@ deps = {
   'src/third_party/devtools-node-modules':
     Var('gitee_git') + '/mirrors_chromium_googlesource/devtools-node-modules.git' + '@' + '300c8063dda8f87348bca1643bc04c603a42453a', #old
 
-  'src/third_party/devtools-frontend/src':
-    Var('chromium_git') + '/devtools/devtools-frontend' + '@' + Var('devtools_frontend_revision'),
+  #'src/third_party/devtools-frontend/src':
+  #  Var('chromium_git') + '/devtools/devtools-frontend' + '@' + Var('devtools_frontend_revision'),
 
-  'src/third_party/devtools-frontend-internal': {
-      'url': 'https://chrome-internal.googlesource.com/devtools/devtools-internal.git' + '@' + '9b0f7eda8fe4c0c93b9042bfafd4132970f014f1',
-    'condition': 'checkout_src_internal',
-  },
+  #'src/third_party/devtools-frontend-internal': {
+  #    'url': 'https://chrome-internal.googlesource.com/devtools/devtools-internal.git' + '@' + '9b0f7eda8fe4c0c93b9042bfafd4132970f014f1',
+  #  'condition': 'checkout_src_internal',
+  #},
 
   'src/third_party/dom_distiller_js/dist':
     Var('chromium_git') + '/chromium/dom-distiller/dist.git' + '@' + '199de96b345ada7c6e7e6ba3d2fa7a6911b8767d',
@@ -1341,6 +1341,30 @@ deps = {
       'condition': 'checkout_win',
   },
 
+#old
+  'src/third_party/gson': {
+      'packages': [
+          {
+              'package': 'chromium/third_party/gson',
+              'version': '681931c9778045903a0ed59856ce2dd8dd7bf7ca',
+          },
+      ],
+      'condition': 'checkout_android',
+      'dep_type': 'cipd',
+  },
+
+  'src/third_party/guava': {
+      'packages': [
+          {
+              'package': 'chromium/third_party/guava',
+              'version': 'a6fba501f3a0de88b9be1daa2052632de5b96a46',
+          },
+      ],
+      'condition': 'checkout_android',
+      'dep_type': 'cipd',
+  },
+#old
+
   'src/third_party/gvr-android-sdk/src': {
       'url': Var('chromium_git') + '/external/github.com/googlevr/gvr-android-sdk.git' + '@' + '233e7fe922a543e0bc55382d64cacd047307d0e7',
       'condition': 'checkout_android',
@@ -1390,6 +1414,19 @@ deps = {
       'condition': 'checkout_android',
       'dep_type': 'cipd',
   },
+
+#old
+  'src/third_party/intellij': {
+      'packages': [
+          {
+              'package': 'chromium/third_party/intellij',
+              'version': '77c2721b024b36ee073402c08e6d8428c0295336',
+          },
+      ],
+      'condition': 'checkout_android',
+      'dep_type': 'cipd',
+  },
+#old
 
   'src/third_party/jacoco': {
       'packages': [
