@@ -20,9 +20,9 @@
 #include "content/common/content_export.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job_factory.h"
-#include "services/network/public/mojom/cors_origin_pattern.mojom-forward.h"
+//#include "services/network/public/mojom/cors_origin_pattern.mojom-forward.h"
 #include "services/service_manager/public/mojom/service.mojom-forward.h"
-#include "third_party/blink/public/mojom/blob/blob.mojom-forward.h"
+//#include "third_party/blink/public/mojom/blob/blob.mojom-forward.h"
 #include "third_party/blink/public/mojom/push_messaging/push_messaging_status.mojom-forward.h"
 
 #if !defined(OS_ANDROID)
