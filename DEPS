@@ -1087,9 +1087,9 @@ deps = {
 
   'src/third_party/libprotobuf-mutator/src':
     Var('chromium_git') + '/external/github.com/google/libprotobuf-mutator.git' + '@' +  Var('libprotobuf-mutator'),
-  #chrome 107
+
   'src/third_party/libsrtp':
-    Var('chromium_git') + '/chromium/deps/libsrtp.git' + '@' + '5b7c744eb8310250ccc534f3f86a2015b3887a0a',
+    Var('chromium_git') + '/chromium/deps/libsrtp.git' + '@' + '650611720ecc23e0e6b32b0e3100f8b4df91696c',
 
   # Android Explicit Synchronization.
   'src/third_party/libsync/src': {
@@ -1376,9 +1376,8 @@ deps = {
   'src/third_party/webgl/src':
     Var('chromium_git') + '/external/khronosgroup/webgl.git' + '@' + 'abaae129d9a0c6e1e092067e0b105475df43352e',
 
-  #chrome 107
   'src/third_party/webrtc':
-    Var('webrtc_git') + '/src.git' + '@' + 'b82c45815a7c9fc4722e006219e8fdb58066ddb0',
+    Var('webrtc_git') + '/src.git' + '@' + 'ad73985e75684cb4ac4dadb9d3d86ad0d66612a0',
 
   'src/third_party/xdg-utils': {
       'url': Var('chromium_git') + '/chromium/deps/xdg-utils.git' + '@' + 'd80274d5869b17b8c9067a1022e4416ee7ed5e0d',
